@@ -1,7 +1,7 @@
 //! `reth db migrate-v2` command for migrating v1 storage layout to v2.
 
 use crate::common::CliNodeTypes;
-use alloy_primitives::Address;
+use alloy_primitives::{Address, BlockNumber};
 use clap::Parser;
 use reth_db::{
     mdbx::{self, ffi},
@@ -120,6 +120,21 @@ impl Command {
         Ok(())
     }
 
+    /// The first block whose `segment` history the migration moves to static files: the block
+    /// after the prune checkpoint, and no earlier than the genesis block, which is not block 0 on
+    /// every chain.
+    fn history_start(
+        provider: &impl PruneCheckpointReader,
+        segment: PruneSegment,
+        genesis_block: BlockNumber,
+    ) -> eyre::Result<BlockNumber> {
+        Ok(provider
+            .get_prune_checkpoint(segment)?
+            .and_then(|cp| cp.block_number)
+            .map_or(0, |b| b + 1)
+            .max(genesis_block))
+    }
+
     fn migrate_account_changesets<N: ProviderNodeTypes>(
         factory: &ProviderFactory<N>,
         tip: u64,
@@ -130,10 +145,11 @@ impl Command {
 
         let mut cursor = provider.tx_ref().cursor_read::<tables::AccountChangeSets>()?;
 
-        let first_block = provider
-            .get_prune_checkpoint(PruneSegment::AccountHistory)?
-            .and_then(|cp| cp.block_number)
-            .map_or(0, |b| b + 1);
+        let first_block = Self::history_start(
+            &provider,
+            PruneSegment::AccountHistory,
+            sf_provider.genesis_block_number(),
+        )?;
 
         // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
         // earlier than first_block (e.g. 2603897 from prune checkpoint).
@@ -180,10 +196,11 @@ impl Command {
 
         let mut cursor = provider.tx_ref().cursor_read::<tables::StorageChangeSets>()?;
 
-        let first_block = provider
-            .get_prune_checkpoint(PruneSegment::StorageHistory)?
-            .and_then(|cp| cp.block_number)
-            .map_or(0, |b| b + 1);
+        let first_block = Self::history_start(
+            &provider,
+            PruneSegment::StorageHistory,
+            sf_provider.genesis_block_number(),
+        )?;
 
         // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
         // earlier than first_block (e.g. 2603897 from prune checkpoint).
@@ -454,5 +471,80 @@ impl Command {
 
         info!(target: "reth::cli", "Database compaction swap complete");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{B256, U256};
+    use reth_db::models::{AccountBeforeTx, BlockNumberAddress};
+    use reth_primitives_traits::StorageEntry;
+    use reth_provider::{
+        test_utils::create_test_provider_factory_with_genesis_block_number, ChangeSetReader,
+        StorageChangeSetReader, StorageSettingsCache,
+    };
+
+    /// A genesis at a block that is not the start of a static file range, as on chains that
+    /// start from carried-over state.
+    const UNALIGNED_GENESIS: u64 = 500_010;
+
+    #[test]
+    fn migrates_changesets_of_unaligned_genesis_chain() {
+        let factory = create_test_provider_factory_with_genesis_block_number(UNALIGNED_GENESIS);
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        let tip = UNALIGNED_GENESIS + 3;
+        let address = Address::with_last_byte(7);
+        let key = B256::with_last_byte(3);
+
+        // v1 history in MDBX: one account and one storage change per block, from genesis on.
+        {
+            let provider_rw = factory.provider_rw().unwrap();
+            for block in UNALIGNED_GENESIS..=tip {
+                provider_rw
+                    .tx_ref()
+                    .put::<tables::AccountChangeSets>(
+                        block,
+                        AccountBeforeTx { address, info: None },
+                    )
+                    .unwrap();
+                provider_rw
+                    .tx_ref()
+                    .put::<tables::StorageChangeSets>(
+                        BlockNumberAddress((block, address)),
+                        StorageEntry { key, value: U256::from(block) },
+                    )
+                    .unwrap();
+            }
+            provider_rw.commit().unwrap();
+        }
+
+        Command::migrate_account_changesets(&factory, tip).unwrap();
+        Command::migrate_storage_changesets(&factory, tip).unwrap();
+
+        let static_files = factory.static_file_provider();
+        static_files.initialize_index().unwrap();
+        for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
+        {
+            assert_eq!(static_files.get_highest_static_file_block(segment), Some(tip), "{segment}");
+        }
+        // Changesets are read from static files only with v2 settings.
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let provider = factory.provider().unwrap();
+        for block in UNALIGNED_GENESIS..=tip {
+            assert_eq!(
+                provider.account_block_changeset(block).unwrap(),
+                vec![AccountBeforeTx { address, info: None }],
+                "block {block}"
+            );
+            assert_eq!(
+                provider.storage_changeset(block).unwrap(),
+                vec![(
+                    BlockNumberAddress((block, address)),
+                    StorageEntry { key, value: U256::from(block) }
+                )],
+                "block {block}"
+            );
+        }
     }
 }
