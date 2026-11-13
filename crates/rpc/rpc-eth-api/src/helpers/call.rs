@@ -941,18 +941,6 @@ pub trait Call:
             evm_env.version_mut().tx_gas_limit_cap = u64::MAX;
         }
 
-        // Disable additional fee charges, e.g. opstack operator fee charge
-        // See:
-        // <https://github.com/paradigmxyz/reth/issues/18470>
-        evm_env.version_mut().features.remove(evm2::EvmFeatures::FEE_CHARGE);
-
-        // Calls do not pay upfront fees. Preserve the caller's actual balance so value transfers
-        // still fail during execution when it is insufficient, without topping up the account.
-        evm_env
-            .version_mut()
-            .features
-            .remove(evm2::EvmFeatures::BALANCE_CHECK | evm2::EvmFeatures::BALANCE_TOP_UP);
-
         evm_env.version_mut().memory_limit = self.evm_memory_limit();
 
         // set nonce to None so that the correct nonce is chosen by the EVM
@@ -967,6 +955,12 @@ pub trait Call:
         }
 
         let gas_price = request_gas_price(request.as_ref(), evm_env.block_base_fee());
+        // The blob fee is priced independently of execution. A blob call without a positive blob
+        // fee cap runs at a zero blob base fee and pays no blob fee, as geth's eth_call does.
+        let blob_fee_priced = request.as_ref().max_fee_per_blob_gas.is_some_and(|fee| fee > 0);
+        if request.as_ref().blob_versioned_hashes.is_some() && !blob_fee_priced {
+            evm_env.block_env_mut().blob_basefee = U256::ZERO;
+        }
         // Convert the request once, as sent, and apply every gas limit cap to the prepared env:
         // converting again with a changed gas limit could change the recovered caller or fee payer
         // when the signature commits to the gas limit.
@@ -990,6 +984,18 @@ pub trait Call:
         // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>
         if gas_price == 0 {
             evm_env.block_env_mut().basefee = U256::ZERO;
+            // An unpriced call pays no fees, including additional ones such as the opstack
+            // operator fee: <https://github.com/paradigmxyz/reth/issues/18470>. It keeps the
+            // caller's actual balance, so value transfers still fail during execution when it is
+            // insufficient, without topping up the account. A call pricing its gas or its blobs
+            // is funded and charged like a transaction.
+            if !blob_fee_priced {
+                evm_env.version_mut().features.remove(
+                    evm2::EvmFeatures::FEE_CHARGE |
+                        evm2::EvmFeatures::BALANCE_CHECK |
+                        evm2::EvmFeatures::BALANCE_TOP_UP,
+                );
+            }
         }
 
         if requested_gas.is_none() {
