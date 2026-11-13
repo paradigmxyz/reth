@@ -30,3 +30,57 @@ engine-api:
   - Invalid Missing Ancestor Syncing ReOrg, Transaction Signature, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Paris) (reth)
   - Invalid Missing Ancestor Syncing ReOrg, Transaction Signature, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
   - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=True, Invalid P10 (Paris) (reth)
+
+# Wire sync leaves the result of these invalid-block cases to timing: reth does not always reject
+# the invalid head served by the mock peer within the simulator timeout. consume-enginex still
+# covers them.
+eels/consume-wirex:
+  - tests/frontier/validation/test_transaction.py::test_sender_balance[fork_Amsterdam-blockchain_test_engine_x-balance_diff_-1-expected_exception_TransactionException.INSUFFICIENT_ACCOUNT_FUNDS]-reth-bal_served
+  - tests/frontier/validation/test_transaction.py::test_sender_balance[fork_Amsterdam-blockchain_test_engine_x-balance_diff_-1-expected_exception_TransactionException.INSUFFICIENT_ACCOUNT_FUNDS]-reth-bal_withheld
+  - tests/frontier/validation/test_transaction.py::test_sender_balance[fork_Cancun-blockchain_test_engine_x-balance_diff_-1-expected_exception_TransactionException.INSUFFICIENT_ACCOUNT_FUNDS]-reth
+  - tests/frontier/validation/test_transaction.py::test_sender_balance[fork_Osaka-blockchain_test_engine_x-balance_diff_-1-expected_exception_TransactionException.INSUFFICIENT_ACCOUNT_FUNDS]-reth
+  - tests/frontier/validation/test_transaction.py::test_sender_balance[fork_Paris-blockchain_test_engine_x-balance_diff_-1-expected_exception_TransactionException.INSUFFICIENT_ACCOUNT_FUNDS]-reth
+  - tests/frontier/validation/test_transaction.py::test_sender_balance[fork_Prague-blockchain_test_engine_x-balance_diff_-1-expected_exception_TransactionException.INSUFFICIENT_ACCOUNT_FUNDS]-reth
+  - tests/frontier/validation/test_transaction.py::test_sender_balance[fork_Shanghai-blockchain_test_engine_x-balance_diff_-1-expected_exception_TransactionException.INSUFFICIENT_ACCOUNT_FUNDS]-reth
+  - tests/frontier/validation/test_transaction.py::test_tx_max_nonce[fork_Amsterdam-blockchain_test_engine_x_from_state_test]-reth-bal_served
+  - tests/frontier/validation/test_transaction.py::test_tx_max_nonce[fork_Amsterdam-blockchain_test_engine_x_from_state_test]-reth-bal_withheld
+  - tests/frontier/validation/test_transaction.py::test_tx_max_nonce[fork_Cancun-blockchain_test_engine_x_from_state_test]-reth
+  - tests/frontier/validation/test_transaction.py::test_tx_max_nonce[fork_Osaka-blockchain_test_engine_x_from_state_test]-reth
+  - tests/frontier/validation/test_transaction.py::test_tx_max_nonce[fork_Paris-blockchain_test_engine_x_from_state_test]-reth
+  - tests/frontier/validation/test_transaction.py::test_tx_max_nonce[fork_Prague-blockchain_test_engine_x_from_state_test]-reth
+  - tests/frontier/validation/test_transaction.py::test_tx_max_nonce[fork_Shanghai-blockchain_test_engine_x_from_state_test]-reth
+  - tests/frontier/validation/test_transaction.py::test_tx_nonce[fork_Amsterdam-blockchain_test_engine_x_from_state_test-nonce_diff_-1-expected_exception_TransactionException.NONCE_MISMATCH_TOO_LOW]-reth-bal_served
+  - tests/frontier/validation/test_transaction.py::test_tx_nonce[fork_Amsterdam-blockchain_test_engine_x_from_state_test-nonce_diff_-1-expected_exception_TransactionException.NONCE_MISMATCH_TOO_LOW]-reth-bal_withheld
+  - tests/frontier/validation/test_transaction.py::test_tx_nonce[fork_Amsterdam-blockchain_test_engine_x_from_state_test-nonce_diff_1-expected_exception_TransactionException.NONCE_MISMATCH_TOO_HIGH]-reth-bal_served
+  - tests/frontier/validation/test_transaction.py::test_tx_nonce[fork_Amsterdam-blockchain_test_engine_x_from_state_test-nonce_diff_1-expected_exception_TransactionException.NONCE_MISMATCH_TOO_HIGH]-reth-bal_withheld
+  - tests/frontier/validation/test_transaction.py::test_tx_nonce[fork_Cancun-blockchain_test_engine_x_from_state_test-nonce_diff_-1-expected_exception_TransactionException.NONCE_MISMATCH_TOO_LOW]-reth
+  - tests/frontier/validation/test_transaction.py::test_tx_nonce[fork_Cancun-blockchain_test_engine_x_from_state_test-nonce_diff_1-expected_exception_TransactionException.NONCE_MISMATCH_TOO_HIGH]-reth
+  - tests/frontier/validation/test_transaction.py::test_tx_nonce[fork_Osaka-blockchain_test_engine_x_from_state_test-nonce_diff_-1-expected_exception_TransactionException.NONCE_MISMATCH_TOO_LOW]-reth
+  - tests/frontier/validation/test_transaction.py::test_tx_nonce[fork_Osaka-blockchain_test_engine_x_from_state_test-nonce_diff_1-expected_exception_TransactionException.NONCE_MISMATCH_TOO_HIGH]-reth
+  - tests/frontier/validation/test_transaction.py::test_tx_nonce[fork_Paris-blockchain_test_engine_x_from_state_test-nonce_diff_-1-expected_exception_TransactionException.NONCE_MISMATCH_TOO_LOW]-reth
+  - tests/frontier/validation/test_transaction.py::test_tx_nonce[fork_Paris-blockchain_test_engine_x_from_state_test-nonce_diff_1-expected_exception_TransactionException.NONCE_MISMATCH_TOO_HIGH]-reth
+  - tests/frontier/validation/test_transaction.py::test_tx_nonce[fork_Prague-blockchain_test_engine_x_from_state_test-nonce_diff_-1-expected_exception_TransactionException.NONCE_MISMATCH_TOO_LOW]-reth
+  - tests/frontier/validation/test_transaction.py::test_tx_nonce[fork_Prague-blockchain_test_engine_x_from_state_test-nonce_diff_1-expected_exception_TransactionException.NONCE_MISMATCH_TOO_HIGH]-reth
+  - tests/frontier/validation/test_transaction.py::test_tx_nonce[fork_Shanghai-blockchain_test_engine_x_from_state_test-nonce_diff_-1-expected_exception_TransactionException.NONCE_MISMATCH_TOO_LOW]-reth
+  - tests/frontier/validation/test_transaction.py::test_tx_nonce[fork_Shanghai-blockchain_test_engine_x_from_state_test-nonce_diff_1-expected_exception_TransactionException.NONCE_MISMATCH_TOO_HIGH]-reth
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Amsterdam-blockchain_test_engine_x_from_state_test-eip1559]-reth-bal_served
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Amsterdam-blockchain_test_engine_x_from_state_test-eip1559]-reth-bal_withheld
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Amsterdam-blockchain_test_engine_x_from_state_test-eip2930]-reth-bal_served
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Amsterdam-blockchain_test_engine_x_from_state_test-eip2930]-reth-bal_withheld
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Amsterdam-blockchain_test_engine_x_from_state_test-legacy]-reth-bal_served
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Amsterdam-blockchain_test_engine_x_from_state_test-legacy]-reth-bal_withheld
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Cancun-blockchain_test_engine_x_from_state_test-eip1559]-reth
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Cancun-blockchain_test_engine_x_from_state_test-eip2930]-reth
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Cancun-blockchain_test_engine_x_from_state_test-legacy]-reth
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Osaka-blockchain_test_engine_x_from_state_test-eip1559]-reth
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Osaka-blockchain_test_engine_x_from_state_test-eip2930]-reth
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Osaka-blockchain_test_engine_x_from_state_test-legacy]-reth
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Paris-blockchain_test_engine_x_from_state_test-eip1559]-reth
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Paris-blockchain_test_engine_x_from_state_test-eip2930]-reth
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Paris-blockchain_test_engine_x_from_state_test-legacy]-reth
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Prague-blockchain_test_engine_x_from_state_test-eip1559]-reth
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Prague-blockchain_test_engine_x_from_state_test-eip2930]-reth
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Prague-blockchain_test_engine_x_from_state_test-legacy]-reth
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Shanghai-blockchain_test_engine_x_from_state_test-eip1559]-reth
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Shanghai-blockchain_test_engine_x_from_state_test-eip2930]-reth
+  - tests/frontier/validation/test_transaction.py::test_unrecoverable_signature[fork_Shanghai-blockchain_test_engine_x_from_state_test-legacy]-reth

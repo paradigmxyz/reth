@@ -14,10 +14,18 @@ args = parser.parse_args()
 with open(args.report_json, 'r') as file:
     report = json.load(file)
 
+def flatten(entries):
+    """Yields test names from a list that may nest lists shared through YAML aliases."""
+    for entry in entries:
+        if isinstance(entry, list):
+            yield from flatten(entry)
+        else:
+            yield entry
+
 # Load exclusion YAML
 with open(args.exclusion, 'r') as file:
     exclusion_data = yaml.safe_load(file)
-    exclusions = exclusion_data.get(report['name'], [])
+    exclusions = set(flatten(exclusion_data.get(report['name'], [])))
 
 # Load ignored tests YAML
 with open(args.ignored, 'r') as file:
