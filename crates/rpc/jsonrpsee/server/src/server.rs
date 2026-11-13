@@ -52,7 +52,10 @@ use hyper_util::{
 use jsonrpsee_core::{
     id_providers::RandomIntegerIdProvider,
     middleware::{Batch, BatchEntry, BatchEntryErr, RpcServiceBuilder, RpcServiceT},
-    server::{BoundedSubscriptions, ConnectionId, MethodResponse, MethodSink, Methods},
+    server::{
+        helpers::prepare_error, BoundedSubscriptions, ConnectionId, MethodResponse, MethodSink,
+        Methods,
+    },
     traits::IdProvider,
     BoxError, JsonRawValue, TEN_MB_SIZE_BYTES,
 };
@@ -999,7 +1002,7 @@ fn parse_batch(body: &[u8], max_len: usize) -> Result<Batch<'_>, MethodResponse>
 
 /// Classifies a raw batch entry as a call, a notification or an invalid request.
 fn parse_batch_entry(call: &JsonRawValue) -> Result<BatchEntry<'_>, BatchEntryErr<'_>> {
-    // `parse_message` reads only objects.
+    // Anything else is an invalid request, which `parse_message` only finds by reading it again.
     if !call.get().starts_with('{') {
         return Err(BatchEntryErr::new(Id::Null, ErrorCode::InvalidRequest.into()));
     }
@@ -1011,24 +1014,20 @@ fn parse_batch_entry(call: &JsonRawValue) -> Result<BatchEntry<'_>, BatchEntryEr
 /// Reads a JSON-RPC message object in one pass and classifies it as a call or a notification, or
 /// returns the id and code of the error response.
 ///
-/// `body` must start with `{`. A member value of the wrong type doesn't stop the read, so an
-/// invalid message costs one pass over `body` like a valid one, and only invalid JSON or a value
-/// that doesn't decode at all takes a second pass. The outcome is the one of decoding `body` as a
-/// [`Request`], then as a [`Notification`] without an `id`, and otherwise recovering the `id` of
-/// the invalid request.
+/// A member value of the wrong type doesn't stop the read, so an invalid message costs one pass
+/// over `body` like a valid one. Only a `body` that isn't a JSON object, or a member name or a
+/// `jsonrpc`, `id` or `method` value that doesn't decode at all, is read again by
+/// [`prepare_error`]. For an object, the outcome is the one of decoding `body` as a [`Request`],
+/// then as a [`Notification`] without an `id`, and otherwise the one of [`prepare_error`].
 fn parse_message(body: &[u8]) -> Result<BatchEntry<'_>, (Id<'_>, ErrorCode)> {
-    let Ok(members) = read_members::<Value<'_>>(body) else {
-        // Either the JSON is invalid or a `jsonrpc`, `id` or `method` value doesn't decode, like a
-        // string with a lone surrogate escape, and both fail a call and a notification. Reading
-        // these values as raw JSON tells an invalid request from invalid JSON.
-        let id = match read_members::<&JsonRawValue>(body) {
-            Ok(members) if std::str::from_utf8(body).is_ok() => match members.id {
-                Member::Once(id) => serde_json::from_str(id.get()).unwrap_or(Id::Null),
-                _ => Id::Null,
-            },
-            _ => return Err((Id::Null, ErrorCode::ParseError)),
-        };
-        return Err((id, ErrorCode::InvalidRequest));
+    let mut deserializer = serde_json::Deserializer::from_slice(body);
+    let read = MessageMembers::deserialize(&mut deserializer)
+        .and_then(|members| deserializer.end().map(|()| members));
+    let Ok(members) = read else {
+        // Either `body` isn't a JSON object, or a member name or a `jsonrpc`, `id` or `method`
+        // value doesn't decode, like a string with a lone surrogate escape. All of these fail a
+        // call and a notification.
+        return Err(prepare_error(body));
     };
 
     let has_id = !matches!(members.id, Member::Missing);
@@ -1063,26 +1062,15 @@ fn parse_message(body: &[u8]) -> Result<BatchEntry<'_>, (Id<'_>, ErrorCode)> {
     Err((id.unwrap_or(Id::Null), ErrorCode::InvalidRequest))
 }
 
-/// Reads the members of the message object in `body`, decoding the `jsonrpc`, `id` and `method`
-/// values as `V`.
-fn read_members<'a, V: Deserialize<'a>>(
-    body: &'a [u8],
-) -> serde_json::Result<MessageMembers<'a, V>> {
-    let mut deserializer = serde_json::Deserializer::from_slice(body);
-    let members = MessageMembers::deserialize(&mut deserializer)?;
-    deserializer.end()?;
-    Ok(members)
-}
-
 /// The members of a JSON-RPC message object, read without rejecting a message for its values.
-struct MessageMembers<'a, V> {
-    jsonrpc: Member<V>,
-    id: Member<V>,
-    method: Member<V>,
+struct MessageMembers<'a> {
+    jsonrpc: Member<Value<'a>>,
+    id: Member<Value<'a>>,
+    method: Member<Value<'a>>,
     params: Member<&'a JsonRawValue>,
 }
 
-impl<'de, V: Deserialize<'de>> Deserialize<'de> for MessageMembers<'de, V> {
+impl<'de> Deserialize<'de> for MessageMembers<'de> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         deserializer.deserialize_map(Self {
             jsonrpc: Member::Missing,
@@ -1093,7 +1081,7 @@ impl<'de, V: Deserialize<'de>> Deserialize<'de> for MessageMembers<'de, V> {
     }
 }
 
-impl<'de, V: Deserialize<'de>> Visitor<'de> for MessageMembers<'de, V> {
+impl<'de> Visitor<'de> for MessageMembers<'de> {
     type Value = Self;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1452,6 +1440,8 @@ mod tests {
     #[test_case(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"x\":\"\xff\"}", "error Null ParseError"; "invalid utf8 in unknown member of an invalid request")]
     #[test_case(br#"{"jsonrpc":"2.0","id":1,"method":"\ud800"}"#, "error Number(1) InvalidRequest"; "method that does not decode")]
     #[test_case(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"\\ud800\",\"x\":\"\xff\"}", "error Null ParseError"; "method that does not decode and invalid utf8")]
+    #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":1,"\ud800":1}"#, "error Null InvalidRequest"; "member name that does not decode")]
+    #[test_case(br#"["2.0",1,"m"]"#, "error Null InvalidRequest"; "array of the request fields")]
     #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":1} x"#, "error Null ParseError"; "trailing characters")]
     fn message_outcome(body: &[u8], outcome: &str) {
         let parsed = match parse_message(body) {
