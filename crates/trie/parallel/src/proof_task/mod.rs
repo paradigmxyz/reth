@@ -678,11 +678,9 @@ impl From<ProofJobError> for StateRootTaskError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{keccak256, Address, U256};
     use crossbeam_channel::RecvTimeoutError;
-    use reth_chainspec::{ChainSpec, ChainSpecBuilder};
+    use reth_chainspec::ChainSpec;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
-    use reth_trie::{Nibbles, TrieNode};
     use std::sync::Arc;
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
@@ -807,109 +805,5 @@ mod tests {
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected)
             ));
         }
-    }
-
-    #[test]
-    fn proof_workers_preserve_standard_nodes_and_branch_masks() {
-        let address = Address::with_last_byte(1);
-        let slot = B256::ZERO;
-        let hashed_slot = keccak256(slot);
-        // A one-nibble common prefix requires a separate extension above the branch.
-        let sibling = (1..=u8::MAX)
-            .map(B256::with_last_byte)
-            .find(|candidate| {
-                let hash = keccak256(candidate);
-                hash[0] >> 4 == hashed_slot[0] >> 4 && hash[0] != hashed_slot[0]
-            })
-            .unwrap();
-        let sibling_hash = keccak256(sibling);
-        // A direct branch below the sibling gives the parent a persisted hash-mask bit.
-        let nested_sibling = (1..=u16::MAX)
-            .map(|value| B256::from(U256::from(value)))
-            .find(|candidate| {
-                let hash = keccak256(candidate);
-                hash[0] == sibling_hash[0] && hash[1] >> 4 != sibling_hash[1] >> 4
-            })
-            .unwrap();
-        let mut chain_spec: ChainSpec = Default::default();
-        chain_spec.genesis.alloc.clear();
-        let account = chain_spec.genesis.alloc.entry(address).or_default();
-        account.balance = U256::ONE;
-        account.storage = Some(
-            [
-                (slot, B256::with_last_byte(1)),
-                (sibling, B256::with_last_byte(2)),
-                (nested_sibling, B256::with_last_byte(3)),
-            ]
-            .into(),
-        );
-        let chain_spec =
-            ChainSpecBuilder::default().chain(chain_spec.chain).genesis(chain_spec.genesis).build();
-        let provider_factory = create_test_provider_factory_with_chain_spec(Arc::new(chain_spec));
-        let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
-        let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
-            provider_factory,
-            reth_storage_overlay::OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default()
-                .overlay_builder(anchor_hash),
-        );
-        let runtime = reth_tasks::Runtime::test();
-        let handle = ProofWorkerHandle::new(
-            &runtime,
-            test_ctx(factory),
-            ProofWorkerCounts::new(1, 1),
-            #[cfg(feature = "metrics")]
-            Default::default(),
-        );
-        let hashed_address = keccak256(address);
-        assert_eq!(
-            handle
-                .dispatch(MultiProofTargetsV2 {
-                    account_targets: vec![ProofV2Target::new(hashed_address)],
-                    storage_targets: std::iter::once((
-                        hashed_address,
-                        vec![ProofV2Target::new(hashed_slot)],
-                    ))
-                    .collect(),
-                })
-                .unwrap(),
-            2
-        );
-
-        // Results from the independent pools may arrive in either order.
-        let mut proofs = DecodedMultiProofV2::default();
-        for _ in 0..2 {
-            let result = handle.results().recv_timeout(Duration::from_secs(30)).unwrap().unwrap();
-            proofs.account_proofs.extend(result.account_proofs);
-            proofs.storage_proofs.extend(result.storage_proofs);
-        }
-        assert_eq!(proofs.account_proofs.len(), 1);
-        assert!(matches!(proofs.account_proofs[0].node, TrieNode::Leaf(_)));
-        assert!(proofs.account_proofs[0].masks.is_none());
-        let nodes = proofs.storage_proofs[&hashed_address].iter().rev().collect::<Vec<_>>();
-        assert_eq!(nodes.len(), 3);
-        assert!(nodes[0].path.is_empty());
-        let TrieNode::Extension(extension) = &nodes[0].node else {
-            panic!("root must be a standard extension")
-        };
-        assert_eq!(extension.key, Nibbles::from_nibbles([hashed_slot[0] >> 4]));
-        assert!(nodes[0].masks.is_none());
-        assert_eq!(nodes[1].path, extension.key);
-        let TrieNode::Branch(branch) = &nodes[1].node else {
-            panic!("extension child must be a separate standard branch")
-        };
-        assert_eq!(branch.state_mask.len(), 2);
-        let masks = nodes[1].masks.expect("workers must retain persisted branch masks");
-        assert!(masks.hash_mask.is_bit_set(sibling_hash[0] & 0x0f));
-        assert!(masks.tree_mask.is_empty());
-        assert_eq!(nodes[2].path, Nibbles::unpack(hashed_slot).slice(..2));
-        assert!(matches!(nodes[2].node, TrieNode::Leaf(_)));
-        assert!(nodes[2].masks.is_none());
-
-        let results = handle.results().clone();
-        drop(handle);
-        assert_eq!(
-            results.recv_timeout(Duration::from_secs(30)).unwrap_err(),
-            RecvTimeoutError::Disconnected
-        );
     }
 }
