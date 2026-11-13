@@ -816,155 +816,174 @@ mod tests {
 
     #[test]
     fn consumers_restore_trie_values_masked_by_deferred_blocks() {
-        let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
-        let factory = create_test_provider_factory();
-        let blocks = TestBlockBuilder::eth().get_executed_blocks(0..11).collect::<Vec<_>>();
-        let provider = factory.provider_rw().unwrap();
-        for block in &blocks {
-            provider.insert_block(block.recovered_block()).unwrap();
-        }
-        provider
-            .save_stage_checkpoint(
-                StageId::Finish,
-                StageCheckpoint::new(10)
-                    .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(5) }),
-            )
-            .unwrap();
-        let path = Nibbles::from_nibbles([1]);
-        let updates = |mask| {
-            Arc::new(TrieUpdatesSorted::new(
-                vec![(path, Some(BranchNodeCompact::new(mask, 0, 0, vec![], None)))],
-                B256Map::default(),
-            ))
-        };
-        let block4 = updates(1);
-        let block9 = updates(2);
-        // Block 9 masks block 4's write, so the persisted trie does not contain the block-5 value.
-        let masked = TrieUpdatesSorted::disjointed_merge_batch(&[&block4], &[&block9]);
-        assert!(masked.is_empty());
-        provider.write_trie_updates_sorted(&masked).unwrap();
-        provider.commit().unwrap();
-        let provider = factory.provider_rw().unwrap();
-        for (start, end, before) in [
-            (4, 4, Arc::new(TrieUpdatesSorted::new(vec![(path, None)], B256Map::default()))),
-            (5, 10, Arc::clone(&block4)),
-            (5, 5, Arc::default()),
-        ] {
-            manager.changeset_cache().inner.write().insert(
-                ChangesetRangeKey::new(start, end, blocks[end as usize].recovered_block().hash()),
-                before,
-            );
-        }
-        let (frontier, finish) = database_state_frontiers(&*provider).unwrap();
-        let overlay = manager
-            .overlay_builder(blocks[4].recovered_block().hash())
-            .build_state_trie_overlay_at_frontiers(&*provider, frontier, finish, true)
-            .unwrap();
-        assert_eq!(overlay.input().nodes, block4);
-        assert_eq!(manager.compute_block_trie_updates(&*provider, 4).unwrap(), *block4);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+            let factory = create_test_provider_factory();
+            let blocks = TestBlockBuilder::eth().get_executed_blocks(0..11).collect::<Vec<_>>();
+            let provider = factory.provider_rw().unwrap();
+            for block in &blocks {
+                provider.insert_block(block.recovered_block()).unwrap();
+            }
+            provider
+                .save_stage_checkpoint(
+                    StageId::Finish,
+                    StageCheckpoint::new(10).with_finish_stage_checkpoint(FinishCheckpoint {
+                        partial_state_trie: Some(5),
+                    }),
+                )
+                .unwrap();
+            let path = Nibbles::from_nibbles([1]);
+            let updates = |mask| {
+                Arc::new(TrieUpdatesSorted::new(
+                    vec![(path, Some(BranchNodeCompact::new(mask, 0, 0, vec![], None)))],
+                    B256Map::default(),
+                ))
+            };
+            let block4 = updates(1);
+            let block9 = updates(2);
+            // Block 9 masks block 4's write, so the persisted trie does not contain the block-5
+            // value.
+            let masked = TrieUpdatesSorted::disjointed_merge_batch(&[&block4], &[&block9]);
+            assert!(masked.is_empty());
+            provider.write_trie_updates_sorted(&masked).unwrap();
+            provider.commit().unwrap();
+            let provider = factory.provider_rw().unwrap();
+            for (start, end, before) in [
+                (4, 4, Arc::new(TrieUpdatesSorted::new(vec![(path, None)], B256Map::default()))),
+                (5, 10, Arc::clone(&block4)),
+                (5, 5, Arc::default()),
+            ] {
+                manager.changeset_cache().inner.write().insert(
+                    ChangesetRangeKey::new(
+                        start,
+                        end,
+                        blocks[end as usize].recovered_block().hash(),
+                    ),
+                    before,
+                );
+            }
+            let (frontier, finish) = database_state_frontiers(&*provider).unwrap();
+            let overlay = manager
+                .overlay_builder(blocks[4].recovered_block().hash())
+                .build_state_trie_overlay_at_frontiers(&*provider, frontier, finish, true)
+                .unwrap();
+            assert_eq!(overlay.input().nodes, block4);
+            assert_eq!(manager.compute_block_trie_updates(&*provider, 4).unwrap(), *block4);
 
-        // With only per-block entries left, the reverts are merged again on every build, and a
-        // builder that opted out keeps the merged range out of the cache.
-        manager.evict_cached_changesets(11);
-        for number in 5..=10 {
-            insert_test_changesets(
-                &mut manager.changeset_cache().inner.write(),
-                blocks[number as usize].recovered_block().hash(),
-                number,
-                Arc::default(),
-            );
-        }
-        let cached = || manager.changeset_cache().inner.read().entries.len();
-        let builder = manager.overlay_builder(blocks[4].recovered_block().hash());
-        builder
-            .clone()
-            .without_trie_revert_caching()
-            .build_state_trie_overlay_at_frontiers(&*provider, frontier, finish, true)
-            .unwrap();
-        assert_eq!(cached(), 6);
-        builder.build_state_trie_overlay_at_frontiers(&*provider, frontier, finish, true).unwrap();
-        assert_eq!(cached(), 7);
+            // With only per-block entries left, the reverts are merged again on every build, and a
+            // builder that opted out keeps the merged range out of the cache.
+            manager.evict_cached_changesets(11);
+            for number in 5..=10 {
+                insert_test_changesets(
+                    &mut manager.changeset_cache().inner.write(),
+                    blocks[number as usize].recovered_block().hash(),
+                    number,
+                    Arc::default(),
+                );
+            }
+            let cached = || manager.changeset_cache().inner.read().entries.len();
+            let builder = manager.overlay_builder(blocks[4].recovered_block().hash());
+            builder
+                .clone()
+                .without_trie_revert_caching()
+                .build_state_trie_overlay_at_frontiers(&*provider, frontier, finish, true)
+                .unwrap();
+            assert_eq!(cached(), 6);
+            builder
+                .build_state_trie_overlay_at_frontiers(&*provider, frontier, finish, true)
+                .unwrap();
+            assert_eq!(cached(), 7);
+        });
     }
 
     #[test]
     fn calculated_reverts_preserve_deletions_across_frontiers() {
-        let factory = create_test_provider_factory();
-        let blocks = TestBlockBuilder::eth().get_executed_blocks(0..4).collect::<Vec<_>>();
-        let address = Address::with_last_byte(1);
-        let hashed_address = keccak256(address);
-        let removed = Nibbles::from_nibbles([1]);
-        let replaced = Nibbles::from_nibbles([2]);
-        let node = BranchNodeCompact::new(0b0001, 0, 0, vec![], None);
-        let storage_updates = |storage_nodes| {
-            TrieUpdatesSorted::new(
-                vec![],
-                B256Map::from_iter([(hashed_address, StorageTrieUpdatesSorted { storage_nodes })]),
-            )
-        };
-        let finish_updates =
-            Arc::new(storage_updates(vec![(removed, None), (replaced, Some(node.clone()))]));
-        let provider_rw = factory.provider_rw().unwrap();
-        for block in &blocks {
-            provider_rw.insert_block(block.recovered_block()).unwrap();
-        }
-        provider_rw
-            .write_trie_updates_sorted(&storage_updates(vec![(removed, Some(node.clone()))]))
-            .unwrap();
-        // Reverting the account's creation deletes every storage node visible at Finish.
-        provider_rw
-            .tx_ref()
-            .put::<tables::AccountChangeSets>(1, AccountBeforeTx { address, info: None })
-            .unwrap();
-        provider_rw
-            .save_stage_checkpoint(
-                StageId::Finish,
-                StageCheckpoint::new(2)
-                    .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(1) }),
-            )
-            .unwrap();
-        provider_rw.commit().unwrap();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let factory = create_test_provider_factory();
+            let blocks = TestBlockBuilder::eth().get_executed_blocks(0..4).collect::<Vec<_>>();
+            let address = Address::with_last_byte(1);
+            let hashed_address = keccak256(address);
+            let removed = Nibbles::from_nibbles([1]);
+            let replaced = Nibbles::from_nibbles([2]);
+            let node = BranchNodeCompact::new(0b0001, 0, 0, vec![], None);
+            let storage_updates = |storage_nodes| {
+                TrieUpdatesSorted::new(
+                    vec![],
+                    B256Map::from_iter([(
+                        hashed_address,
+                        StorageTrieUpdatesSorted { storage_nodes },
+                    )]),
+                )
+            };
+            let finish_updates =
+                Arc::new(storage_updates(vec![(removed, None), (replaced, Some(node.clone()))]));
+            let provider_rw = factory.provider_rw().unwrap();
+            for block in &blocks {
+                provider_rw.insert_block(block.recovered_block()).unwrap();
+            }
+            provider_rw
+                .write_trie_updates_sorted(&storage_updates(vec![(removed, Some(node.clone()))]))
+                .unwrap();
+            // Reverting the account's creation deletes every storage node visible at Finish.
+            provider_rw
+                .tx_ref()
+                .put::<tables::AccountChangeSets>(1, AccountBeforeTx { address, info: None })
+                .unwrap();
+            provider_rw
+                .save_stage_checkpoint(
+                    StageId::Finish,
+                    StageCheckpoint::new(2).with_finish_stage_checkpoint(FinishCheckpoint {
+                        partial_state_trie: Some(1),
+                    }),
+                )
+                .unwrap();
+            provider_rw.commit().unwrap();
 
-        let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
-        for (block, updates) in [
-            (&blocks[1], Arc::new(storage_updates(vec![(removed, Some(node))]))),
-            (&blocks[2], Arc::clone(&finish_updates)),
-            (&blocks[3], Arc::default()),
-        ] {
-            manager.insert_block(ExecutedBlock::new(
-                Arc::clone(&block.recovered_block),
-                Arc::clone(&block.execution_output),
-                SortedTrieData::new(Arc::default(), updates),
-            ));
-        }
-        let before = factory.provider().unwrap();
-        let cache = manager.changeset_cache();
-        let (frontier, finish) = database_state_frontiers(&before).unwrap();
-        let result =
-            cache.get_or_compute_range(&manager, &before, 1..=2, frontier, finish, true).unwrap();
-        assert_eq!(
-            result.storage_tries_ref()[&hashed_address].storage_nodes_ref(),
-            &[(removed, None), (replaced, None)],
-        );
+            let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+            for (block, updates) in [
+                (&blocks[1], Arc::new(storage_updates(vec![(removed, Some(node))]))),
+                (&blocks[2], Arc::clone(&finish_updates)),
+                (&blocks[3], Arc::default()),
+            ] {
+                manager.insert_block(ExecutedBlock::new(
+                    Arc::clone(&block.recovered_block),
+                    Arc::clone(&block.execution_output),
+                    SortedTrieData::new(Arc::default(), updates),
+                ));
+            }
+            let before = factory.provider().unwrap();
+            let cache = manager.changeset_cache();
+            let (frontier, finish) = database_state_frontiers(&before).unwrap();
+            let result = cache
+                .get_or_compute_range(&manager, &before, 1..=2, frontier, finish, true)
+                .unwrap();
+            assert_eq!(
+                result.storage_tries_ref()[&hashed_address].storage_nodes_ref(),
+                &[(removed, None), (replaced, None)],
+            );
 
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.write_trie_updates_sorted(&finish_updates).unwrap();
-        provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
-        provider_rw.commit().unwrap();
-        let after = factory.provider().unwrap();
-        let (frontier, finish) = database_state_frontiers(&after).unwrap();
-        let advanced =
-            cache.get_or_compute_range(&manager, &after, 1..=2, frontier, finish, true).unwrap();
-        assert!(Arc::ptr_eq(&advanced, &result));
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw.write_trie_updates_sorted(&finish_updates).unwrap();
+            provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
+            provider_rw.commit().unwrap();
+            let after = factory.provider().unwrap();
+            let (frontier, finish) = database_state_frontiers(&after).unwrap();
+            let advanced = cache
+                .get_or_compute_range(&manager, &after, 1..=2, frontier, finish, true)
+                .unwrap();
+            assert!(Arc::ptr_eq(&advanced, &result));
 
-        // A cold calculation at the newer frontier must also serve the older reader.
-        cache.evict(2);
-        let advanced =
-            cache.get_or_compute_range(&manager, &after, 1..=2, frontier, finish, true).unwrap();
-        assert_eq!(advanced, result);
+            // A cold calculation at the newer frontier must also serve the older reader.
+            cache.evict(2);
+            let advanced = cache
+                .get_or_compute_range(&manager, &after, 1..=2, frontier, finish, true)
+                .unwrap();
+            assert_eq!(advanced, result);
 
-        // An older reader must still receive the deletion after the frontier advances.
-        let cached = manager.get_or_compute_cached_changesets_range(&before, 1..=2).unwrap();
-        assert!(Arc::ptr_eq(&cached, &advanced));
+            // An older reader must still receive the deletion after the frontier advances.
+            let cached = manager.get_or_compute_cached_changesets_range(&before, 1..=2).unwrap();
+            assert!(Arc::ptr_eq(&cached, &advanced));
+        });
     }
 
     #[test]
