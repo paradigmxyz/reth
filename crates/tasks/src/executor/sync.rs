@@ -139,8 +139,8 @@ mod tests {
     fn native_lazy_lock_is_the_standard_type() {
         let standard = std::sync::LazyLock::new(|| 42);
         let selected: LazyLock<usize, _> = standard;
-        let standard: std::sync::LazyLock<usize, _> = selected;
-        assert_eq!(*std::sync::LazyLock::force(&standard), 42);
+        let round_trip: std::sync::LazyLock<usize, _> = selected;
+        assert_eq!(*std::sync::LazyLock::force(&round_trip), 42);
     }
 
     struct DropCounter(Arc<atomic::AtomicUsize>);
