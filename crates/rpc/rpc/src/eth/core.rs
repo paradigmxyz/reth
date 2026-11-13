@@ -1345,8 +1345,11 @@ mod tests {
         assert_eq!(fee_history.base_fee_per_gas.len(), block_count as usize + 1);
         assert_eq!(fee_history.gas_used_ratio.len(), block_count as usize);
 
-        // A pruned block in the last chunk still fails the whole request.
-        mock_provider.add_receipts(newest_block - block_count + 1, Vec::new());
+        // A block in the last chunk whose receipts were partly pruned still fails the whole
+        // request.
+        let mut receipts = mock_provider.receipts_by_block(newest_block.into()).unwrap().unwrap();
+        receipts.pop();
+        mock_provider.add_receipts(newest_block, receipts);
         let err = eth_api
             .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles))
             .await
