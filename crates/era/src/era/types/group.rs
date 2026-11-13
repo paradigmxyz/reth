@@ -231,6 +231,19 @@ mod tests {
     };
 
     #[test]
+    fn test_slot_index_rejects_overflowing_count() {
+        // 8 offsets are stored, but the declared count is 2^61 + 8: `count * 8` wraps to 64, so
+        // the length check passes. It must be rejected, not allocated.
+        let mut data = Vec::new();
+        data.extend_from_slice(&1000u64.to_le_bytes()); // starting-slot
+        data.extend(core::iter::repeat_n(0u8, 8 * 8)); // 8 offsets
+        data.extend_from_slice(&((1i64 << 61) + 8).to_le_bytes()); // count
+        let entry = Entry::new(SLOT_INDEX, data);
+
+        assert!(SlotIndex::from_entry(&entry).is_err());
+    }
+
+    #[test]
     fn test_slot_index_roundtrip() {
         let starting_slot = 1000;
         let offsets = vec![100, 200, 300, 400, 500];
