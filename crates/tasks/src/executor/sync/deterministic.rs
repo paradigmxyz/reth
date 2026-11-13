@@ -1,12 +1,6 @@
 //! Scheduler-managed synchronization primitives.
 
-use crate::executor::{
-    deterministic::Timer,
-    time::{Duration, Instant},
-};
-use shuttle::thread;
 use shuttle_sync::sync;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A one-time initialized value whose waiting callers remain scheduler-managed.
 #[derive(Debug)]
@@ -85,105 +79,5 @@ impl<T> From<T> for OnceLock<T> {
             initializing: sync::Mutex::new(()),
             ready: sync::Condvar::new(),
         }
-    }
-}
-
-/// A condition variable whose timeout waits use the virtual clock.
-#[derive(Debug)]
-pub struct Condvar(sync::Condvar);
-
-impl Condvar {
-    /// Creates a condition variable.
-    pub const fn new() -> Self {
-        Self(sync::Condvar::new())
-    }
-    /// Wakes one waiting logical thread.
-    pub fn notify_one(&self) {
-        self.0.notify_one();
-    }
-    /// Wakes every waiting logical thread.
-    pub fn notify_all(&self) {
-        self.0.notify_all();
-    }
-    /// Releases the mutex and blocks until notified, then reacquires it.
-    pub fn wait<'a, T>(
-        &self,
-        guard: sync::MutexGuard<'a, T>,
-    ) -> sync::LockResult<sync::MutexGuard<'a, T>> {
-        self.0.wait(guard)
-    }
-    /// Waits for a notification or a virtual timeout, then reacquires the mutex.
-    ///
-    /// Other waiters may wake spuriously when one waiter's timeout fires.
-    pub fn wait_timeout<'a, T>(
-        &self,
-        guard: sync::MutexGuard<'a, T>,
-        duration: Duration,
-    ) -> sync::LockResult<(sync::MutexGuard<'a, T>, WaitTimeoutResult)> {
-        if duration.is_zero() {
-            return Ok((guard, WaitTimeoutResult(true)));
-        }
-        let deadline = Instant::now() + duration;
-        let timed_out = AtomicBool::new(false);
-        let cancelled = AtomicBool::new(false);
-        thread::scope(|scope| {
-            let timer = scope.spawn(|| {
-                let timer = Timer::new(deadline);
-                // Check cancellation before parking: an early unpark must not be lost.
-                while !cancelled.load(Ordering::Acquire) && Instant::now() < deadline {
-                    thread::park();
-                }
-                drop(timer);
-                if !cancelled.load(Ordering::Acquire) {
-                    timed_out.store(true, Ordering::Release);
-                    self.0.notify_all();
-                }
-            });
-            let result = self.0.wait(guard);
-            cancelled.store(true, Ordering::Release);
-            timer.thread().unpark();
-            timer.join().expect("condition-variable timeout notifier panicked");
-            let timeout = WaitTimeoutResult(timed_out.load(Ordering::Acquire));
-            result
-                .map(|guard| (guard, timeout))
-                .map_err(|error| sync::PoisonError::new((error.into_inner(), timeout)))
-        })
-    }
-    /// Waits until `condition` becomes false or the total virtual timeout expires.
-    pub fn wait_timeout_while<'a, T, F>(
-        &self,
-        mut guard: sync::MutexGuard<'a, T>,
-        duration: Duration,
-        mut condition: F,
-    ) -> sync::LockResult<(sync::MutexGuard<'a, T>, WaitTimeoutResult)>
-    where
-        F: FnMut(&mut T) -> bool,
-    {
-        let deadline = Instant::now() + duration;
-        while condition(&mut guard) {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            let (next, timeout) = self.wait_timeout(guard, remaining)?;
-            guard = next;
-            if timeout.timed_out() {
-                return Ok((guard, timeout));
-            }
-        }
-        Ok((guard, WaitTimeoutResult(false)))
-    }
-}
-
-impl Default for Condvar {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Whether a virtual condition-variable wait reached its deadline.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct WaitTimeoutResult(bool);
-impl WaitTimeoutResult {
-    /// Returns `true` when the timeout notification fired.
-    pub const fn timed_out(&self) -> bool {
-        self.0
     }
 }

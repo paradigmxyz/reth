@@ -52,10 +52,6 @@ rayon = ["dep:crossbeam-utils", "pin-project"]
 test-utils = []
 fuzz = ["dep:either", "dep:shuttle", "shuttle-sync/shuttle", "shuttle-parking_lot/shuttle"]
 
-[[example]]
-name = "executor"
-required-features = ["rayon"]
-
 # The all-features udeps job selects fuzz, which replaces the native Rayon backend.
 [package.metadata.cargo-udeps.ignore]
 normal = ["rayon"]

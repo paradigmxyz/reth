@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
-"""Ratchet built-in Clippy primitive lints against explicitly recorded native uses.
+"""Reject native primitive uses reported by built-in Clippy lints.
 
 Run both the default fuzz profile and --all-features on CI's pinned toolchain.
 Normal/native Clippy never loads this separate policy. Tokio is deliberately
 not forbidden; shared native I/O and metadata boundaries are not simulation.
-
-baseline.json is an inventory, not a determinism claim: each permission records
-an exact path, source fragment, resolved diagnostic and multiplicity with a
-reason. New/excess diagnostics fail, and removals require deleting stale debt.
-There is no automatic acceptance mode. Review reasons and both feature profiles
-when reducing debt or deliberately adding a native boundary.
 
 Clippy sees resolved local references and macro expansions, not operations
 hidden inside dependencies or backend-specialized methods on generic lock_api
@@ -38,32 +32,6 @@ def workspace_path(name, root):
         return (root / path).resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
         return None
-
-
-def read_baseline(path, profile):
-    data = json.loads(path.read_text())
-    if not isinstance(data, dict) or type(data.get("schema_version")) is not int or data["schema_version"] != 1:
-        raise ValueError("baseline requires schema_version: 1")
-    profiles = data.get("profiles")
-    if not isinstance(profiles, dict) or set(profiles) - {"fuzz", "all-features"} or not isinstance(profiles.get(profile), list):
-        raise ValueError(f"baseline requires profiles with a {profile!r} entries list")
-    counts = Counter()
-    reasons = {}
-    for entry in profiles[profile]:
-        if not isinstance(entry, dict) or set(entry) != {*FIELDS, "count", "reason"}:
-            raise ValueError("baseline entries require path, lint, source, message, count, reason")
-        if any(not isinstance(entry[key], str) or not entry[key].strip() for key in (*FIELDS, "reason")):
-            raise ValueError("baseline strings and review reasons must be nonempty")
-        path = Path(entry["path"])
-        if path.is_absolute() or ".." in path.parts or path.as_posix() != entry["path"] or entry["lint"] not in LINTS:
-            raise ValueError("baseline requires normalized workspace paths and supported lints")
-        if type(entry["count"]) is not int or entry["count"] <= 0:
-            raise ValueError("baseline counts must be positive integers")
-        key = tuple(entry[field] for field in FIELDS)
-        if key in counts:
-            raise ValueError("duplicate baseline fingerprint")
-        counts[key], reasons[key] = entry["count"], entry["reason"]
-    return counts, reasons
 
 
 def read_diagnostics(lines, root):
@@ -149,12 +117,10 @@ def read_diagnostics(lines, root):
     return counts, sorted(errors), finished
 
 
-def entries(counts, reasons=None):
+def entries(counts):
     result = []
     for key, count in sorted(counts.items()):
         entry = dict(zip(FIELDS, key), count=count)
-        if reasons and key in reasons:
-            entry["reason"] = reasons[key]
         result.append(entry)
     return result
 
@@ -162,15 +128,13 @@ def entries(counts, reasons=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--all-features", action="store_true", help="scan all features instead of default features plus fuzz")
-    parser.add_argument("--baseline", type=Path, default=ROOT / ".config/fuzz-primitives/baseline.json")
     parser.add_argument("--config-dir", type=Path, default=ROOT / ".config/fuzz-primitives")
     parser.add_argument("--toolchain", help="optional Rust toolchain, e.g. nightly")
-    parser.add_argument("--report", type=Path, help="write diagnostic counts and ratchet result as JSON")
+    parser.add_argument("--report", type=Path, help="write diagnostic counts and check result as JSON")
     parser.add_argument("--check-report", type=Path, help="check Cargo JSON-lines output without running Cargo")
     args = parser.parse_args(argv)
     profile = "all-features" if args.all_features else "fuzz"
     try:
-        baseline, reasons = read_baseline(args.baseline, profile)
         returncode = 0
         if args.check_report:
             with args.check_report.open() as report:
@@ -190,7 +154,6 @@ def main(argv=None):
             completed = subprocess.run(command, cwd=ROOT, env={**os.environ, "CLIPPY_CONF_DIR": str(config)}, stdout=subprocess.PIPE, text=True)
             returncode = completed.returncode
             counts, errors, success = read_diagnostics(io.StringIO(completed.stdout), ROOT)
-        new, stale = counts - baseline, baseline - counts
         totals = Counter()
         for (_, lint, _, _), count in counts.items():
             totals[lint] += count
@@ -198,16 +161,13 @@ def main(argv=None):
         for lint in LINTS:
             print(f"{lint}: {totals[lint]} remaining")
         for entry in entries(counts):
-            key = tuple(entry[field] for field in FIELDS)
-            print(f"{entry['path']}: {entry['lint']} x{entry['count']}: {entry['source']!r}: {entry['message']}" + (f" [NEW +{new[key]}]" if new[key] else ""))
-        for entry in entries(stale):
-            print(f"STALE baseline x{entry['count']}: {entry['path']}: {entry['lint']}: {entry['source']!r}; reduce/remove the reviewed permission")
+            print(f"{entry['path']}: {entry['lint']} x{entry['count']}: {entry['source']!r}: {entry['message']}")
         for error in errors:
             print(f"compiler error: {error}", file=sys.stderr)
-        passed = success and not errors and not returncode and not new and not stale
+        passed = success and not errors and not returncode and not counts
         if args.report:
-            args.report.write_text(json.dumps({"schema_version": 1, "profile": profile, "entries": entries(counts, reasons), "new": entries(new), "stale": entries(stale, reasons), "compiler_errors": errors, "build_success": success, "cargo_returncode": returncode, "passed": passed}, indent=2) + "\n")
-        print(f"{sum(new.values())} new/excess violations; {sum(stale.values())} stale baseline permissions; build {'succeeded' if success and not returncode and not errors else 'failed'}")
+            args.report.write_text(json.dumps({"schema_version": 1, "profile": profile, "entries": entries(counts), "compiler_errors": errors, "build_success": success, "cargo_returncode": returncode, "passed": passed}, indent=2) + "\n")
+        print(f"{sum(counts.values())} violations; build {'succeeded' if success and not returncode and not errors else 'failed'}")
         return 0 if passed else 1
     except (OSError, ValueError) as error:
         print(f"fuzz primitive guard: {error}", file=sys.stderr)

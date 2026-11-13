@@ -38,65 +38,46 @@ class GuardTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
-        self.baseline = self.root / "baseline.json"
         self.input = self.root / "cargo.jsonl"
         self.output = self.root / "report.json"
-        self.write_baseline([])
-
-    def write_baseline(self, entries):
-        self.baseline.write_text(json.dumps({"schema_version": 1, "profiles": {"fuzz": entries, "all-features": []}}))
 
     def check(self, messages, all_features=False):
         self.input.write_text("".join(messages))
         with patch.object(guard, "ROOT", self.root), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            return guard.main(["--baseline", str(self.baseline), "--check-report", str(self.input), "--report", str(self.output)] + (["--all-features"] if all_features else []))
+            return guard.main(["--check-report", str(self.input), "--report", str(self.output)] + (["--all-features"] if all_features else []))
 
-    def reviewed(self, *messages, count=None):
-        counts, _, _ = guard.read_diagnostics(lines(*messages), self.root)
-        entries = guard.entries(counts)
-        for entry in entries:
-            entry["reason"] = "Native FFI boundary: bridge to an OS worker."
-            if count is not None:
-                entry["count"] = count
-        self.write_baseline(entries)
-
-    def test_unexpected_diagnostic_fails_and_reports(self):
-        self.assertEqual(self.check(lines(diagnostic())), 1)
-        report = json.loads(self.output.read_text())
-        self.assertEqual(report["new"][0]["count"], 1)
-        self.assertFalse(report["passed"])
+    def test_existing_diagnostic_fails_and_reports(self):
+        for _ in range(2):
+            self.assertEqual(self.check(lines(diagnostic())), 1)
+            report = json.loads(self.output.read_text())
+            self.assertEqual(report["entries"], [{
+                "path": "crates/demo/src/lib.rs", "lint": guard.LINTS[0],
+                "source": "NativeMutex",
+                "message": "use of a disallowed type `std::sync::Mutex`", "count": 1,
+            }])
+            self.assertFalse(report["passed"])
+            self.assertNotIn("new", report)
+            self.assertNotIn("stale", report)
 
     def test_duplicate_library_and_test_messages_count_once(self):
         item = diagnostic()
-        self.reviewed(item)
-        self.assertEqual(self.check(lines(item, item)), 0)
+        self.assertEqual(self.check(lines(item, item)), 1)
         self.assertEqual(json.loads(self.output.read_text())["entries"][0]["count"], 1)
 
-    def test_identical_new_use_exceeds_multiplicity(self):
-        self.reviewed(diagnostic())
+    def test_identical_uses_report_full_multiplicity(self):
         self.assertEqual(self.check(lines(diagnostic(), diagnostic(start=50))), 1)
-        report = json.loads(self.output.read_text())
-        self.assertEqual(report["entries"][0]["count"], 2)
-        self.assertEqual(report["new"][0]["count"], 1)
+        self.assertEqual(json.loads(self.output.read_text())["entries"][0]["count"], 2)
 
-    def test_line_movement_is_allowed(self):
-        self.reviewed(diagnostic())
-        self.assertEqual(self.check(lines(diagnostic(start=100))), 0)
+    def test_line_movement_still_fails(self):
+        self.assertEqual(self.check(lines(diagnostic(start=100))), 1)
 
-    def test_deletion_requires_removing_stale_permissions(self):
-        self.reviewed(diagnostic(), count=2)
+    def test_deletion_clears_failure_without_permissions(self):
+        self.assertEqual(self.check(lines(diagnostic(), diagnostic(start=50))), 1)
         self.assertEqual(self.check(lines(diagnostic())), 1)
-        self.assertEqual(json.loads(self.output.read_text())["stale"][0]["count"], 1)
-        self.assertEqual(self.check(lines(artifact(self.root))), 1)
-        self.assertEqual(json.loads(self.output.read_text())["stale"][0]["count"], 2)
-        self.write_baseline([])
         self.assertEqual(self.check(lines(artifact(self.root))), 0)
-
-    def test_changed_alias_source_or_message_is_new(self):
-        self.reviewed(diagnostic())
-        for item in (diagnostic(source="OtherAlias"), diagnostic(message="different resolved native type")):
-            with self.subTest(item=item):
-                self.assertEqual(self.check(lines(item)), 1)
+        report = json.loads(self.output.read_text())
+        self.assertEqual(report["entries"], [])
+        self.assertTrue(report["passed"])
 
     def test_alias_highlights_and_multiline_source(self):
         item = diagnostic()
@@ -112,7 +93,7 @@ class GuardTests(unittest.TestCase):
             with self.subTest(lint=lint):
                 self.assertEqual(self.check(lines(diagnostic(lint=lint))), 1)
 
-    def test_external_dependencies_are_not_baseline_debt(self):
+    def test_external_dependencies_are_not_workspace_violations(self):
         item = diagnostic(path=str(self.root.parent / "registry/lib.rs"))
         self.assertEqual(self.check(lines(item, artifact(self.root))), 0)
         self.assertEqual(json.loads(self.output.read_text())["entries"], [])
@@ -170,42 +151,24 @@ class GuardTests(unittest.TestCase):
                 self.assertFalse(report["passed"])
                 self.assertIn("error", report)
 
-    def test_invalid_baseline_rejected(self):
-        self.reviewed(diagnostic())
-        good = json.loads(self.baseline.read_text())
-        for key, value in (("reason", ""), ("count", True), ("count", 0), ("path", "../escape.rs"), ("lint", "other")):
-            with self.subTest(key=key, value=value):
-                entry = dict(good["profiles"]["fuzz"][0], **{key: value})
-                self.write_baseline([entry])
-                self.assertEqual(self.check(lines(diagnostic())), 1)
-        self.write_baseline(good["profiles"]["fuzz"] * 2)
-        self.assertEqual(self.check(lines(diagnostic())), 1)
-
     def test_executes_builtin_clippy_with_absolute_config(self):
         config = self.root / "config"
         config.mkdir()
         (config / "clippy.toml").write_text("")
         completed = type("Completed", (), {"returncode": 0, "stdout": "".join(lines(artifact(self.root)))})()
         with patch.object(guard, "ROOT", self.root), patch.dict(os.environ, {"CARGO": "/custom/cargo"}), patch.object(guard.subprocess, "run", return_value=completed) as run, contextlib.redirect_stdout(io.StringIO()):
-            result = guard.main(["--baseline", str(self.baseline), "--config-dir", str(config), "--toolchain", "+nightly"])
+            result = guard.main(["--config-dir", str(config), "--toolchain", "+nightly"])
         self.assertEqual(result, 0)
         self.assertEqual(run.call_args.args[0], ["/custom/cargo", "+nightly", "clippy", "--workspace", "--all-targets", "--features", "fuzz", "--locked", "--message-format=json", "--", "--force-warn", guard.LINTS[0], "--force-warn", guard.LINTS[1], "--force-warn", guard.LINTS[2]])
         self.assertEqual(run.call_args.kwargs["env"]["CLIPPY_CONF_DIR"], str(config.resolve()))
         self.assertEqual(run.call_args.kwargs["cwd"], self.root)
 
-    def test_profiles_have_independent_permissions(self):
-        self.reviewed(diagnostic())
-        self.assertEqual(self.check(lines(diagnostic())), 0)
-        self.assertEqual(self.check(lines(diagnostic()), all_features=True), 1)
-        baseline = json.loads(self.baseline.read_text())
-        baseline["profiles"]["all-features"] = baseline["profiles"]["fuzz"]
-        self.baseline.write_text(json.dumps(baseline))
-        self.assertEqual(self.check(lines(diagnostic()), all_features=True), 0)
-        self.assertEqual(json.loads(self.output.read_text())["profile"], "all-features")
-
-    def test_missing_profile_does_not_imply_empty_baseline(self):
-        self.baseline.write_text('{"schema_version":1,"profiles":{"fuzz":[]}}')
-        self.assertEqual(self.check(lines(artifact(self.root)), all_features=True), 1)
+    def test_each_profile_fails_on_existing_diagnostics(self):
+        for all_features, profile in ((False, "fuzz"), (True, "all-features")):
+            with self.subTest(profile=profile):
+                self.assertEqual(self.check(lines(diagnostic()), all_features=all_features), 1)
+                self.assertEqual(json.loads(self.output.read_text())["profile"], profile)
+                self.assertEqual(self.check(lines(artifact(self.root)), all_features=all_features), 0)
 
     def test_all_features_uses_its_own_cargo_switch(self):
         config = self.root / "config"
@@ -213,7 +176,7 @@ class GuardTests(unittest.TestCase):
         (config / "clippy.toml").write_text("")
         completed = type("Completed", (), {"returncode": 0, "stdout": "".join(lines(artifact(self.root)))})()
         with patch.object(guard, "ROOT", self.root), patch.object(guard.subprocess, "run", return_value=completed) as run, contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(guard.main(["--baseline", str(self.baseline), "--config-dir", str(config), "--all-features"]), 0)
+            self.assertEqual(guard.main(["--config-dir", str(config), "--all-features"]), 0)
         command = run.call_args.args[0]
         self.assertEqual(command[1:8], ["clippy", "--workspace", "--all-targets", "--all-features", "--locked", "--message-format=json", "--"])
         self.assertNotIn("--features", command)
@@ -224,7 +187,7 @@ class GuardTests(unittest.TestCase):
         (config / "clippy.toml").write_text("")
         completed = type("Completed", (), {"returncode": 101, "stdout": "".join(lines(artifact(self.root)))})()
         with patch.object(guard, "ROOT", self.root), patch.object(guard.subprocess, "run", return_value=completed), contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(guard.main(["--baseline", str(self.baseline), "--config-dir", str(config)]), 1)
+            self.assertEqual(guard.main(["--config-dir", str(config)]), 1)
 
 
 if __name__ == "__main__":

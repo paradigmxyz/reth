@@ -5,7 +5,7 @@ pub use shuttle_sync::sync::*;
 #[cfg(feature = "fuzz")]
 mod deterministic;
 #[cfg(feature = "fuzz")]
-pub use deterministic::{Condvar, OnceLock, WaitTimeoutResult};
+pub use deterministic::OnceLock;
 
 /// Non-poisoning locks selected by the official Shuttle wrapper.
 pub mod parking_lot {
