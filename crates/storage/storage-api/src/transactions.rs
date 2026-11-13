@@ -49,6 +49,19 @@ pub trait TransactionsProvider: BlockNumReader {
         hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>>;
 
+    /// Same as [`TransactionsProvider::transaction_by_hash_with_meta`], but also returns the
+    /// transaction sender if it is stored.
+    ///
+    /// The sender is `None` if senders are pruned or not stored by this provider, in which case it
+    /// must be recovered from the signature.
+    #[expect(clippy::type_complexity)]
+    fn transaction_by_hash_with_meta_and_sender(
+        &self,
+        hash: TxHash,
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta, Option<Address>)>> {
+        Ok(self.transaction_by_hash_with_meta(hash)?.map(|(tx, meta)| (tx, meta, None)))
+    }
+
     /// Get transactions by block id.
     fn transactions_by_block(
         &self,
