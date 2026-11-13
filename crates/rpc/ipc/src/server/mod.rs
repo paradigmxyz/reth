@@ -212,7 +212,7 @@ where
 
                     process_connection(ProcessConnection {
                         rpc_middleware: self.rpc_middleware.clone(),
-                        conn_permit: Arc::new(conn_permit),
+                        conn_permit,
                         conn_id: ConnectionId::next_unique().0,
                         server_cfg: self.cfg.clone(),
                         stop_handle: stop_handle.clone(),
@@ -289,37 +289,27 @@ pub struct IpcServerStartError {
 }
 
 /// Data required by the server to handle requests received via an IPC connection
-#[derive(Debug, Clone)]
-struct ServiceData {
-    /// Registered server methods.
-    methods: Methods,
-    /// Subscription ID provider.
-    id_provider: Arc<dyn IdProvider>,
-    /// Connection ID
-    conn_id: usize,
+#[derive(Debug)]
+struct ServiceData<S> {
+    /// RPC service of the connection.
+    rpc_service: S,
     /// Connection Permit.
-    conn_permit: Arc<ConnectionPermit>,
-    /// Limits the number of subscriptions for this connection
-    bounded_subscriptions: BoundedSubscriptions,
-    /// Sink that is used to send back responses to the connection.
-    ///
-    /// This is used for subscriptions.
-    method_sink: MethodSink,
-    /// `ServerConfig`
-    server_cfg: Settings,
+    _conn_permit: ConnectionPermit,
+    /// Maximum size in bytes of a request.
+    max_request_body_size: u32,
 }
 
 /// Turns raw IPC messages into serialized JSON-RPC responses.
-#[derive(Debug, Clone)]
-struct TowerServiceNoHttp<L> {
-    inner: ServiceData,
-    rpc_middleware: RpcServiceBuilder<L>,
+///
+/// Every call runs in its own task, so the connection's state is shared behind an [`Arc`].
+#[derive(Debug)]
+struct TowerServiceNoHttp<S> {
+    inner: Arc<ServiceData<S>>,
 }
 
-impl<RpcMiddleware> Service<String> for TowerServiceNoHttp<RpcMiddleware>
+impl<S> Service<String> for TowerServiceNoHttp<S>
 where
-    RpcMiddleware: Layer<RpcService>,
-    RpcMiddleware::Service: RpcServiceT + Send + Sync + 'static,
+    S: RpcServiceT + Send + Sync + 'static,
 {
     /// The response of a handled RPC call
     ///
@@ -340,16 +330,8 @@ where
     fn call(&mut self, request: String) -> Self::Future {
         trace!(request_bytes = request.len(), "Received IPC request");
 
-        let max_request_body_size = self.inner.server_cfg.max_request_body_size;
-        let conn = self.inner.conn_permit.clone();
-        let rpc_service = self.rpc_middleware.service(RpcService::new(
-            self.inner.methods.clone(),
-            self.inner.server_cfg.max_response_body_size as usize,
-            self.inner.conn_id.into(),
-            self.inner.bounded_subscriptions.clone(),
-            self.inner.method_sink.clone(),
-            self.inner.id_provider.clone(),
-        ));
+        let max_request_body_size = self.inner.max_request_body_size;
+        let conn = self.inner.clone();
         // an ipc connection needs to handle read+write concurrently
         // even if the underlying rpc handler spawns the actual work or is does a lot of async any
         // additional overhead performed by `handle_request` can result in I/O latencies, for
@@ -372,7 +354,7 @@ where
                     request.as_bytes(),
                     is_single.unwrap_or(true),
                     BatchRequestConfig::Unlimited,
-                    &rpc_service,
+                    &conn.rpc_service,
                 )
                 .await
             };
@@ -395,7 +377,7 @@ where
 
 struct ProcessConnection<RpcMiddleware> {
     rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
-    conn_permit: Arc<ConnectionPermit>,
+    conn_permit: ConnectionPermit,
     conn_id: usize,
     server_cfg: Settings,
     stop_handle: StopHandle,
@@ -430,19 +412,20 @@ where
 
     let (tx, rx) = mpsc::channel::<String>(MESSAGE_BUFFER_CAPACITY);
     let method_sink = MethodSink::new_with_limit(tx, server_cfg.max_response_body_size);
+    let rpc_service = rpc_middleware.service(RpcService::new(
+        methods,
+        server_cfg.max_response_body_size as usize,
+        conn_id.into(),
+        BoundedSubscriptions::new(server_cfg.max_subscriptions_per_connection),
+        method_sink,
+        id_provider,
+    ));
     let service = TowerServiceNoHttp {
-        inner: ServiceData {
-            methods,
-            id_provider,
-            conn_id,
-            conn_permit,
-            bounded_subscriptions: BoundedSubscriptions::new(
-                server_cfg.max_subscriptions_per_connection,
-            ),
-            method_sink,
-            server_cfg,
-        },
-        rpc_middleware,
+        inner: Arc::new(ServiceData {
+            rpc_service,
+            _conn_permit: conn_permit,
+            max_request_body_size: server_cfg.max_request_body_size,
+        }),
     };
 
     tokio::spawn(async {
