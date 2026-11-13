@@ -129,7 +129,7 @@ pub mod response {
 
     /// Create a response from a method response.
     ///
-    /// A [streamed](MethodResponse::is_stream) response is sent in parts as they are produced.
+    /// A streamed response is sent in parts as they are produced.
     /// If it fails after it started, the body ends with an error, so hyper aborts the response
     /// instead of completing it with truncated JSON.
     pub fn from_method_response(rp: MethodResponse) -> HttpResponse {

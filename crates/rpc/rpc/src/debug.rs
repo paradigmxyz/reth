@@ -15,9 +15,7 @@ use alloy_rpc_types_trace::geth::{
 use evm2::evm::StateChangeSource;
 use evm2_inspectors::tracing::{DebugInspector, TransactionContext};
 use futures::Stream;
-use jsonrpsee::{
-    core::RpcResult, PendingSubscriptionSink, ResponseClosed, ResponseStream, SubscriptionMessage,
-};
+use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, ResponseStream, SubscriptionMessage};
 use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
@@ -383,23 +381,24 @@ where
         let permit = self.acquire_trace_permit().await.ok();
         let (block, evm_env) = self.block_to_trace(block_id).await?;
         let this = self.clone();
-        Ok(ResponseStream::new(move |sink| async move {
-            if block.body().transactions().is_empty() {
-                return sink
-                    .send(Bytes::from_static(b"[]").into())
-                    .await
-                    .map_err(response_closed::<Eth::Error>)
-            }
-            let tail = sink.clone();
-            this.trace_block_with(block, evm_env, opts, permit, true, move |first, result| {
-                let mut part = vec![if std::mem::take(first) { b'[' } else { b',' }];
-                serde_json::to_writer(&mut part, &result).map_err(|err| {
-                    Eth::Error::from_eth_err(EthApiError::Internal(RethError::other(err)))
-                })?;
-                sink.blocking_send(part.into()).map_err(response_closed)
-            })
-            .await?;
-            tail.send(Bytes::from_static(b"]").into()).await.map_err(response_closed)
+        Ok(ResponseStream::new(move |tx| async move {
+            let parts = tx.clone();
+            let first = this
+                .trace_block_with(block, evm_env, opts, permit, true, move |first, result| {
+                    let mut part = vec![if std::mem::take(first) { b'[' } else { b',' }];
+                    serde_json::to_writer(&mut part, &result).map_err(|err| {
+                        Eth::Error::from_eth_err(EthApiError::Internal(RethError::other(err)))
+                    })?;
+                    // A dropped response stops the replay, so nobody receives this error.
+                    parts
+                        .blocking_send(part.into())
+                        .map_err(|_| Eth::Error::from_eth_err(EthApiError::InternalEthError))
+                })
+                .await?;
+            let end: &'static [u8] = if first { b"[]" } else { b"]" };
+            tx.send(end.into())
+                .await
+                .map_err(|_| Eth::Error::from_eth_err(EthApiError::InternalEthError))
         }))
     }
 
@@ -1640,11 +1639,6 @@ const RAW_BLOCK_TRACE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Default timeout of a JS tracer, matching geth.
 #[cfg(feature = "js-tracer")]
 const DEFAULT_JS_TRACER_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Stops a streamed trace whose response was dropped, so nobody receives this error.
-fn response_closed<E: FromEthApiError>(_: ResponseClosed) -> E {
-    E::from_eth_err(EthApiError::InternalEthError)
-}
 
 /// Returns whether `tracer` is a JS tracer or a mux tracer that holds one, at any depth.
 #[cfg(feature = "js-tracer")]

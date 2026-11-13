@@ -512,14 +512,13 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
     /// The response size limit applies to the whole result. A result that fails or exceeds the
     /// limit before its first part is answered with a JSON-RPC error. Once HTTP has sent a part,
     /// it aborts the response instead.
-    pub fn register_streaming_method<E, Fun, Fut>(
+    pub fn register_streaming_method<Fun, Fut>(
         &mut self,
         method_name: &'static str,
         callback: Fun,
     ) -> Result<&mut MethodCallback, RegisterMethodError>
     where
-        E: Into<ErrorObjectOwned>,
-        Fut: Future<Output = Result<ResponseStream, E>> + Send,
+        Fut: Future<Output = Result<ResponseStream, ErrorObjectOwned>> + Send,
         Fun: (Fn(Params<'static>, Arc<Context>) -> Fut) + Clone + Send + Sync + 'static,
     {
         let ctx = self.ctx.clone();
@@ -531,7 +530,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
                 let params = params.into_owned();
 
                 let future = async move {
-                    match callback(params, ctx).await.map_err(Into::into) {
+                    match callback(params, ctx).await {
                         Ok(stream) => MethodResponse::stream(id, stream, max_response_size).await,
                         Err(err) => MethodResponse::error(id, err),
                     }

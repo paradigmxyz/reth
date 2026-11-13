@@ -135,9 +135,7 @@ impl RpcDescription {
                 // doesn't need its own copy of them, unless an argument may borrow from them.
                 let decode_before_future = method.signature.sig.asyncness.is_some() &&
                     !method.params.iter().any(|arg| may_borrow(&arg.ty));
-                let error_ret = if method.streaming {
-                    quote! { return ::core::result::Result::Err(::core::convert::Into::into(e)); }
-                } else if decode_before_future {
+                let error_ret = if method.streaming || decode_before_future {
                     quote! { return Err(e); }
                 } else {
                     let response_payload = self.jrps_server_item(quote! { ResponsePayload });

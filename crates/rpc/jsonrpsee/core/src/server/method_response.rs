@@ -39,10 +39,7 @@ use std::{
 use bytes::Bytes;
 use futures_util::{future::BoxFuture, FutureExt, Stream, StreamExt};
 use jsonrpsee_types::{
-    error::{
-        reject_too_big_batch_response, ErrorCode, ErrorObject, OVERSIZED_RESPONSE_CODE,
-        OVERSIZED_RESPONSE_MSG,
-    },
+    error::{reject_too_big_batch_response, reject_too_big_response, ErrorCode, ErrorObject},
     ErrorObjectOwned, Id, Response,
 };
 use serde::Serialize;
@@ -110,14 +107,6 @@ impl MethodResponse {
         matches!(self.kind, ResponseKind::MethodCall | ResponseKind::Stream(_))
     }
 
-    /// Returns whether the response is a method response whose result is still being produced.
-    ///
-    /// Use [`MethodResponse::into_body`] to send it in parts, or [`MethodResponse::buffer`] to wait
-    /// for the whole response.
-    pub fn is_stream(&self) -> bool {
-        matches!(self.kind, ResponseKind::Stream(_))
-    }
-
     /// Returns whether the response is a batch response.
     pub fn is_batch(&self) -> bool {
         matches!(self.kind, ResponseKind::Batch)
@@ -127,10 +116,12 @@ impl MethodResponse {
     ///
     /// # Panics
     ///
-    /// If the response [is a stream](MethodResponse::is_stream), which must be
-    /// [buffered](MethodResponse::buffer) first.
+    /// If the response is a stream, which must be [buffered](MethodResponse::buffer) first.
     pub fn into_json(self) -> String {
-        assert!(!self.is_stream(), "a streamed response must be buffered first");
+        assert!(
+            !matches!(self.kind, ResponseKind::Stream(_)),
+            "a streamed response must be buffered first"
+        );
         self.json
     }
 
@@ -142,8 +133,8 @@ impl MethodResponse {
         }
     }
 
-    /// Waits for the rest of a [streamed](MethodResponse::is_stream) response and returns it as a
-    /// whole. Other responses are returned unchanged.
+    /// Waits for the rest of a streamed response and returns it as a whole. Other responses are
+    /// returned unchanged.
     ///
     /// If the result fails or exceeds the response size limit after it started, the response is
     /// replaced with that error, because none of it was sent yet.
@@ -261,7 +252,7 @@ impl MethodResponse {
                 tracing::error!(target: LOG_TARGET, "Error serializing response: {:?}", err);
 
                 if err.is_io() {
-                    Self::error(id, oversized_response(max_response_size))
+                    Self::error(id, reject_too_big_response(max_response_size))
                 } else {
                     let err = ErrorCode::InternalError;
                     let payload = ResponsePayload::<()>::error(err);
@@ -320,7 +311,7 @@ impl MethodResponse {
         json.push_str(r#","result":"#);
 
         let Some(remaining) = max_response_size.checked_sub(json.len()) else {
-            return Self::error(id, oversized_response(max_response_size))
+            return Self::error(id, reject_too_big_response(max_response_size))
         };
         let ResponseStream { parts, producer } = stream;
         let mut stream = StreamedJson {
@@ -381,11 +372,7 @@ pub struct StreamedJson {
 
 impl std::fmt::Debug for StreamedJson {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StreamedJson")
-            .field("id", &self.id)
-            .field("remaining", &self.remaining)
-            .field("done", &self.done)
-            .finish_non_exhaustive()
+        f.debug_struct("StreamedJson").field("id", &self.id).finish_non_exhaustive()
     }
 }
 
@@ -419,7 +406,7 @@ impl Stream for StreamedJson {
                 this.remaining = remaining;
                 Ok(part)
             }
-            None => Err(oversized_response(this.max_response_size)),
+            None => Err(reject_too_big_response(this.max_response_size)),
         });
         if part.is_err() {
             this.done = true;
@@ -438,20 +425,21 @@ pub struct ResponseStream {
 }
 
 impl ResponseStream {
-    /// Creates a result that `producer` sends in parts through the given [`ResultSink`].
+    /// Creates a result that `producer` sends in parts through the given sender.
     ///
     /// The parts are concatenated as they are, so together they must form the result as one JSON
-    /// value. The transport polls the future while it sends the response and drops it if the
-    /// response is dropped. The result is complete once the future returns `Ok` and fails with
-    /// the error it returns otherwise.
+    /// value. Sending waits while the transport has not taken the previous parts yet, and fails
+    /// once the response was dropped, so the producer can stop. The transport polls the future
+    /// while it sends the response and drops it with the response. The result is complete once
+    /// the future returns `Ok` and fails with the error it returns otherwise.
     pub fn new<F, Fut, E>(producer: F) -> Self
     where
-        F: FnOnce(ResultSink) -> Fut,
+        F: FnOnce(mpsc::Sender<Bytes>) -> Fut,
         Fut: Future<Output = Result<(), E>> + Send + 'static,
         E: Into<ErrorObjectOwned>,
     {
         let (tx, parts) = mpsc::channel(RESPONSE_STREAM_CAPACITY);
-        let producer = producer(ResultSink(tx));
+        let producer = producer(tx);
         Self { parts, producer: async move { producer.await.map_err(Into::into) }.boxed() }
     }
 }
@@ -461,34 +449,6 @@ impl std::fmt::Debug for ResponseStream {
         f.debug_struct("ResponseStream").finish_non_exhaustive()
     }
 }
-
-/// Sends the parts of a [`ResponseStream`].
-#[derive(Debug, Clone)]
-pub struct ResultSink(mpsc::Sender<Bytes>);
-
-impl ResultSink {
-    /// Sends the next part of the result.
-    ///
-    /// Waits while the transport has not taken the previous parts yet. Fails once the response
-    /// was dropped, for example because the client disconnected, so the producer can stop.
-    pub async fn send(&self, part: Bytes) -> Result<(), ResponseClosed> {
-        self.0.send(part).await.map_err(|_| ResponseClosed)
-    }
-
-    /// Same as [`ResultSink::send`], but blocks the current thread.
-    ///
-    /// # Panics
-    ///
-    /// If called within an asynchronous execution context.
-    pub fn blocking_send(&self, part: Bytes) -> Result<(), ResponseClosed> {
-        self.0.blocking_send(part).map_err(|_| ResponseClosed)
-    }
-}
-
-/// The response of a [`ResponseStream`] was dropped, see [`ResultSink::send`].
-#[derive(Debug, Clone, Copy, thiserror::Error)]
-#[error("The response was dropped")]
-pub struct ResponseClosed;
 
 /// Represent the outcome of a method call success or failed.
 #[derive(Debug, Copy, Clone)]
@@ -671,15 +631,6 @@ impl io::Write for &mut BoundedWriter {
     }
 }
 
-/// Error for a response that exceeds `max_response_size`.
-fn oversized_response(max_response_size: usize) -> ErrorObjectOwned {
-    ErrorObject::owned(
-        OVERSIZED_RESPONSE_CODE,
-        OVERSIZED_RESPONSE_MSG,
-        Some(format!("Exceeded max limit of {max_response_size}")),
-    )
-}
-
 #[cold]
 fn limit_exceeded() -> io::Error {
     io::Error::new(io::ErrorKind::OutOfMemory, "Memory capacity exceeded")
@@ -688,103 +639,66 @@ fn limit_exceeded() -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jsonrpsee_types::error::OVERSIZED_RESPONSE_CODE;
 
-    /// A result that sends `parts` and then finishes with `outcome`.
-    fn parts(
+    /// Streams `parts`, which then finish with `outcome`, as the result of a call with id 1.
+    async fn stream(
         parts: &'static [&'static str],
         outcome: Result<(), ErrorObjectOwned>,
-    ) -> ResponseStream {
-        ResponseStream::new(move |sink| async move {
+        max_response_size: usize,
+    ) -> MethodResponse {
+        let stream = ResponseStream::new(move |tx| async move {
             for part in parts {
-                sink.send(Bytes::from_static(part.as_bytes())).await.unwrap();
+                tx.send(Bytes::from_static(part.as_bytes())).await.unwrap();
             }
             outcome
-        })
-    }
-
-    async fn stream(stream: ResponseStream, max_response_size: usize) -> MethodResponse {
+        });
         MethodResponse::stream(Id::Number(1), stream, max_response_size).await
     }
 
-    fn custom_error() -> ErrorObjectOwned {
-        ErrorObject::owned(1, "custom", None::<()>)
-    }
-
     #[tokio::test]
-    async fn stream_buffers_parts() {
-        let rp = stream(parts(&["[1", ",2", "]"], Ok(())), usize::MAX).await;
-        assert!(rp.is_stream() && rp.is_method_call());
-        assert_eq!(rp.buffer().await.into_json(), r#"{"jsonrpc":"2.0","id":1,"result":[1,2]}"#);
-    }
+    async fn stream_buffers_parts_and_errors() {
+        let ok = r#"{"jsonrpc":"2.0","id":1,"result":[1,2]}"#;
+        let custom = ErrorObject::owned(1, "custom", None::<()>);
+        let failed = r#"{"jsonrpc":"2.0","id":1,"error":{"code":1,"message":"custom"}}"#;
 
-    #[tokio::test]
-    async fn stream_fails_before_first_part() {
-        let rp = stream(parts(&[], Err(custom_error())), usize::MAX).await;
-        assert!(!rp.is_stream());
-        assert_eq!(
-            rp.into_json(),
-            r#"{"jsonrpc":"2.0","id":1,"error":{"code":1,"message":"custom"}}"#
-        );
+        let rp = stream(&["[1", ",2", "]"], Ok(()), usize::MAX).await;
+        assert_eq!(rp.buffer().await.into_json(), ok);
+        // Fails before the first part, after it, and without any part.
+        let rp = stream(&[], Err(custom.clone()), usize::MAX).await;
+        assert_eq!(rp.into_json(), failed);
+        let rp = stream(&["[1"], Err(custom.clone()), usize::MAX).await;
+        assert_eq!(rp.buffer().await.into_json(), failed);
+        let rp = stream(&[], Ok(()), usize::MAX).await;
+        assert_eq!(rp.as_error_code(), Some(ErrorCode::InternalError.code()));
 
-        // A result needs at least one part.
-        let rp = stream(parts(&[], Ok(())), usize::MAX).await;
-        assert_eq!(
-            rp.into_json(),
-            MethodResponse::error(Id::Number(1), ErrorCode::InternalError).into_json()
-        );
-    }
-
-    #[tokio::test]
-    async fn stream_fails_after_first_part() {
-        let rp = stream(parts(&["[1"], Err(custom_error())), usize::MAX).await;
+        // Sent in parts, a failure after the first part ends the stream with the error.
+        let rp = stream(&["[1"], Err(custom.clone()), usize::MAX).await;
         let ResponseBody::Stream(mut body) = rp.into_body() else { panic!("not a stream") };
         assert_eq!(body.next().await.unwrap().unwrap(), r#"{"jsonrpc":"2.0","id":1,"result":[1"#);
-        assert_eq!(body.next().await.unwrap().unwrap_err(), custom_error());
+        assert_eq!(body.next().await.unwrap().unwrap_err(), custom);
         assert!(body.next().await.is_none());
 
-        // Nothing was sent yet, so a buffered response is replaced with the error.
-        let rp = stream(parts(&["[1"], Err(custom_error())), usize::MAX).await;
-        assert_eq!(
-            rp.buffer().await.into_json(),
-            r#"{"jsonrpc":"2.0","id":1,"error":{"code":1,"message":"custom"}}"#
-        );
-    }
-
-    #[tokio::test]
-    async fn stream_enforces_size_limit() {
-        let whole = r#"{"jsonrpc":"2.0","id":1,"result":[1,2]}"#.len();
-        let oversized = |limit: usize| {
-            format!(
-                r#"{{"jsonrpc":"2.0","id":1,"error":{{"code":-32008,"message":"Response is too big","data":"Exceeded max limit of {limit}"}}}}"#
-            )
-        };
-
-        let rp = stream(parts(&["[1", ",2", "]"], Ok(())), whole).await;
-        assert_eq!(rp.buffer().await.into_json(), r#"{"jsonrpc":"2.0","id":1,"result":[1,2]}"#);
-
         // The closing brace, a later part, and the first part each exceed the limit.
-        for limit in [whole - 1, whole - 2, whole - 4] {
-            let rp = stream(parts(&["[1", ",2", "]"], Ok(())), limit).await;
-            assert_eq!(rp.buffer().await.into_json(), oversized(limit));
+        let rp = stream(&["[1", ",2", "]"], Ok(()), ok.len()).await;
+        assert_eq!(rp.buffer().await.into_json(), ok);
+        for limit in [ok.len() - 1, ok.len() - 2, ok.len() - 4] {
+            let rp = stream(&["[1", ",2", "]"], Ok(()), limit).await;
+            assert_eq!(rp.buffer().await.as_error_code(), Some(OVERSIZED_RESPONSE_CODE));
         }
     }
 
     #[tokio::test]
-    async fn dropped_stream_closes_sink() {
+    async fn dropped_stream_closes_sender() {
         let (closed_tx, closed_rx) = std::sync::mpsc::channel();
-        let rp = stream(
-            ResponseStream::new(move |sink| {
-                std::thread::spawn(move || {
-                    while sink.blocking_send(Bytes::from_static(b"0")).is_ok() {}
-                    closed_tx.send(()).unwrap();
-                });
-                std::future::pending::<Result<(), ErrorObjectOwned>>()
-            }),
-            usize::MAX,
-        )
-        .await;
-        assert!(rp.is_stream());
-        drop(rp);
+        let stream = ResponseStream::new(move |tx| {
+            std::thread::spawn(move || {
+                while tx.blocking_send(Bytes::from_static(b"0")).is_ok() {}
+                closed_tx.send(()).unwrap();
+            });
+            std::future::pending::<Result<(), ErrorObjectOwned>>()
+        });
+        drop(MethodResponse::stream(Id::Number(1), stream, usize::MAX).await);
         closed_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
     }
 

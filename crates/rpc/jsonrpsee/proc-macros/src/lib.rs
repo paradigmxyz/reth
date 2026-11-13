@@ -146,7 +146,7 @@ pub(crate) mod visitor;
 /// - `blocking`: when set method execution will always spawn on a dedicated thread. Only usable
 ///   with non-`async` methods.
 /// - `streaming`: when set the result is sent in parts while it is produced. Only usable with
-///   `async` methods that return `Result<ResponseStream, E>`, see
+///   `async` methods that return `RpcResult<ResponseStream>`, see
 ///   `RpcModule::register_streaming_method`.
 ///
 /// **Method requirements:**
