@@ -1,3 +1,8 @@
+//! Serves JSON-RPC over a WebSocket by adapting a `soketto` connection to the stream driver.
+//!
+//! Reads end after two ping intervals without a message or a pong, and writes after the write
+//! timeout.
+
 use crate::{
     server::{ConnectionState, ServerConfig},
     transport::stream::{serve_stream, MessageWriter, StreamConnection, TooLarge},
