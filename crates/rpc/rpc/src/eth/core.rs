@@ -1354,52 +1354,67 @@ mod tests {
         assert_eq!(err.message(), EthApiError::InvalidBlockRange.to_string());
     }
 
-    /// Rewards of canonical blocks that are not persisted yet use their in-memory receipts.
+    /// Rewards of canonical blocks that are not persisted yet use their in-memory receipts, also
+    /// when storage still holds reorged-out blocks at the same heights.
     #[tokio::test]
     async fn test_fee_history_rewards_in_memory_blocks() {
         let mut rng = generators::rng();
         let factory = create_test_provider_factory_with_chain_spec(Arc::new(
             ChainSpecBuilder::mainnet().cancun_activated().build(),
         ));
-        let mut parent = init_genesis(&factory).unwrap();
-        let mut blocks = Vec::new();
-        let mut receipts = Vec::new();
-        for number in 1..=6 {
+        let mut random_block_with_receipts = |number, parent| {
             let params =
                 BlockParams { parent: Some(parent), tx_count: Some(3), ..Default::default() };
             let mut block = random_block(&mut rng, number, params).into_block();
             // Legacy transactions only pay a tip above a low base fee.
             block.header.base_fee_per_gas = Some(1_000);
             let block = SealedBlock::seal_slow(block).try_recover().unwrap();
-            parent = block.hash();
 
             let mut cumulative_gas_used = 0;
-            receipts.push(
-                block
-                    .body()
-                    .transactions
-                    .iter()
-                    .map(|tx| {
-                        cumulative_gas_used += rng.random::<u16>() as u64;
-                        reth_ethereum_primitives::Receipt {
-                            tx_type: tx.tx_type(),
-                            success: true,
-                            cumulative_gas_used,
-                            logs: Vec::new(),
-                        }
-                    })
-                    .collect::<Vec<_>>(),
-            );
+            let receipts = block
+                .body()
+                .transactions
+                .iter()
+                .map(|tx| {
+                    cumulative_gas_used += rng.random::<u16>() as u64;
+                    reth_ethereum_primitives::Receipt {
+                        tx_type: tx.tx_type(),
+                        success: true,
+                        cumulative_gas_used,
+                        logs: Vec::new(),
+                    }
+                })
+                .collect::<Vec<_>>();
+            (block, receipts)
+        };
+        let mut parent = init_genesis(&factory).unwrap();
+        let mut blocks = Vec::new();
+        let mut receipts = Vec::new();
+        for number in 1..=6 {
+            let (block, block_receipts) = random_block_with_receipts(number, parent);
+            parent = block.hash();
             blocks.push(block);
+            receipts.push(block_receipts);
+        }
+        // A fork of blocks 4 and 5 that storage still holds after the in-memory chain reorged it
+        // out.
+        let mut stale_blocks = Vec::new();
+        let mut stale_receipts = Vec::new();
+        parent = blocks[2].hash();
+        for number in 4..=5 {
+            let (block, block_receipts) = random_block_with_receipts(number, parent);
+            parent = block.hash();
+            stale_blocks.push(block);
+            stale_receipts.push(block_receipts);
         }
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
             .append_blocks_with_state(
-                blocks[..3].to_vec(),
+                blocks[..3].iter().chain(&stale_blocks).cloned().collect(),
                 &ExecutionOutcome {
                     first_block: 1,
-                    receipts: receipts[..3].to_vec(),
+                    receipts: receipts[..3].iter().chain(&stale_receipts).cloned().collect(),
                     ..Default::default()
                 },
                 Default::default(),
