@@ -16,6 +16,9 @@ workspace = true
 metrics.workspace = true
 metrics-derive.workspace = true
 
+# fuzz
+reth-metrics-derive = { path = "derive", optional = true }
+
 # reth
 reth-primitives-traits = { workspace = true, optional = true }
 
@@ -28,4 +31,5 @@ tokio-util = { workspace = true, optional = true }
 libc.workspace = true
 
 [features]
+fuzz = ["dep:reth-metrics-derive"]
 common = ["tokio", "futures", "tokio-util", "reth-primitives-traits"]

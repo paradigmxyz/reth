@@ -32,6 +32,7 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 
 [features]
 fuzz = [
+    "reth-metrics/fuzz",
     "reth-tasks/fuzz",
     "reth-evm/fuzz",
     "reth-provider/fuzz",

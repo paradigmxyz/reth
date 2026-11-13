@@ -86,6 +86,7 @@ tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 [features]
 fuzz = [
+    "reth-metrics/fuzz",
     "reth-trie/fuzz",
     "reth-chain-state/fuzz",
     "reth-tasks/fuzz",

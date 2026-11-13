@@ -55,7 +55,7 @@ rand.workspace = true
 evm2.workspace = true
 
 [features]
-fuzz = ["reth-trie/fuzz", "reth-tasks/fuzz", "reth-trie-sparse/fuzz"]
+fuzz = ["reth-metrics/fuzz", "reth-trie/fuzz", "reth-tasks/fuzz", "reth-trie-sparse/fuzz"]
 serde = [
     "dep:serde",
     "alloy-consensus/serde",

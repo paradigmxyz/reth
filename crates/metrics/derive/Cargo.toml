@@ -1,0 +1,19 @@
+[package]
+name = "reth-metrics-derive"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "No-op Metrics derive for reth fuzz builds"
+
+[lints]
+workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = { version = "1", default-features = false, features = ["proc-macro"] }
+syn = { version = "2", default-features = false, features = ["derive", "full", "parsing", "printing", "proc-macro"] }

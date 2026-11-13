@@ -107,6 +107,7 @@ secp256k1 = { workspace = true, features = ["rand"] }
 
 [features]
 fuzz = [
+    "reth-metrics/fuzz",
     "reth-tasks/fuzz",
     "reth-evm-ethereum?/fuzz",
     "reth-evm/fuzz",

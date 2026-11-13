@@ -46,6 +46,7 @@ rand.workspace = true
 
 [features]
 fuzz = [
+    "reth-metrics?/fuzz",
     "reth-tasks?/fuzz",
     "reth-trie-common/fuzz",
     "reth-trie/fuzz",

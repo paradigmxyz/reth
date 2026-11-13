@@ -9401,9 +9401,18 @@ dependencies = [
  "libc",
  "metrics",
  "metrics-derive",
+ "reth-metrics-derive",
  "reth-primitives-traits",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "reth-metrics-derive"
+version = "2.11.0"
+dependencies = [
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

@@ -44,6 +44,7 @@ alloy-genesis.workspace = true
 
 [features]
 fuzz = [
+    "reth-metrics?/fuzz",
     "reth-tasks?/fuzz",
     "reth-evm/fuzz",
     "reth-trie-common/fuzz",

@@ -52,6 +52,7 @@ members = [
     "crates/exex/types/",
     "crates/lru/",
     "crates/metrics/",
+    "crates/metrics/derive/",
     "crates/net/banlist/",
     "crates/net/discv4/",
     "crates/net/discv5/",

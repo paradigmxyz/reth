@@ -757,7 +757,8 @@ mod tests {
     use evm2::evm::AccountInfo;
     use proptest::{
         prelude::any,
-        test_runner::{Config, TestRunner},
+        strategy::{Strategy, ValueTree},
+        test_runner::{Config, RngAlgorithm, TestRng, TestRunner},
     };
     use reth_chainspec::ChainSpec;
     use reth_evm_ethereum::EthEvmConfig;
@@ -1287,13 +1288,16 @@ mod tests {
                     assert_conversion_spans(&processor, count, bal, level);
                 }
             }
-            TestRunner::new(Config::with_cases(32))
-                .run(&(0..200usize, any::<bool>()), |(count, bal)| {
-                    assert_conversion_spans(&processor, count, bal, level);
-                    Ok(())
-                })
-                .unwrap();
         });
+        TestRunner::new(Config::with_cases(32))
+            .run(&(0..200usize, any::<bool>()), |(count, bal)| {
+                reth_tasks::executor::Runtime::new().run(move || {
+                    let processor = test_processor();
+                    assert_conversion_spans(&processor, count, bal, level);
+                });
+                Ok(())
+            })
+            .unwrap();
     }
 
     fn assert_conversion_spans(
@@ -1363,5 +1367,60 @@ mod tests {
             }
             assert_eq!(scope.iter().map(|(_, name)| *name).collect::<Vec<_>>(), expected);
         }
+    }
+
+    #[test]
+    fn transaction_conversion_replays_pregenerated_inputs() {
+        let generate = || {
+            let config = Config::default();
+            let rng = TestRng::from_seed(RngAlgorithm::ChaCha, &[42; 32]);
+            let mut runner = TestRunner::new_with_rng(config, rng);
+            proptest::collection::vec(any::<u8>(), 200).new_tree(&mut runner).unwrap().current()
+        };
+        let inputs = generate();
+        assert_eq!(inputs, generate());
+
+        let run = |inputs: Vec<u8>| {
+            reth_tasks::executor::Runtime::new().run(move || {
+                let processor = test_processor();
+                let expected = inputs
+                    .iter()
+                    .copied()
+                    .map(Address::with_last_byte)
+                    .enumerate()
+                    .collect::<Vec<_>>();
+                let mut outputs = Vec::new();
+                for (count, bal) in [(10, false), (200, false), (200, true)] {
+                    let (_, receiver) = processor.spawn_tx_iterator(
+                        (inputs[..count].to_vec(), |value| {
+                            let tx = converted_tx().tx.as_ref().clone().into_inner();
+                            Ok::<_, std::io::Error>(TestTx::new(
+                                reth_primitives_traits::Recovered::new_unchecked(
+                                    tx,
+                                    Address::with_last_byte(value),
+                                ),
+                            ))
+                        }),
+                        count,
+                        bal,
+                        false,
+                    );
+                    let mut converted = Vec::new();
+                    loop {
+                        match receiver.recv_timeout(std::time::Duration::from_secs(10)) {
+                            Ok((idx, tx)) => converted.push((idx, tx.unwrap().tx.signer())),
+                            Err(RecvTimeoutError::Disconnected) => break,
+                            Err(err) => panic!("conversion did not terminate: {err}"),
+                        }
+                    }
+                    converted.sort_unstable_by_key(|(idx, _)| *idx);
+                    assert_eq!(converted, expected[..count]);
+                    outputs.push(converted);
+                }
+                outputs
+            })
+        };
+        let first = run(inputs.clone());
+        assert_eq!(first, run(inputs));
     }
 }

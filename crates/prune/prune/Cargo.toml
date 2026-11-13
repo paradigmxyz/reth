@@ -51,6 +51,7 @@ assert_matches.workspace = true
 
 [features]
 fuzz = [
+    "reth-metrics/fuzz",
     "reth-tasks/fuzz",
     "reth-provider/fuzz",
     "reth-stages/fuzz",

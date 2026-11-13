@@ -75,6 +75,7 @@ tokio = { workspace = true, features = ["test-util"] }
 
 [features]
 fuzz = [
+    "reth-metrics/fuzz",
     "reth-tasks/fuzz",
     "reth-chain-state/fuzz",
     "reth-evm/fuzz",

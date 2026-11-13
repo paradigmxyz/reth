@@ -42,7 +42,7 @@ fixed-cache.workspace = true
 reth-ethereum-primitives.workspace = true
 
 [features]
-fuzz = ["reth-tasks?/fuzz", "reth-trie-common/fuzz"]
+fuzz = ["reth-metrics?/fuzz", "reth-tasks?/fuzz", "reth-trie-common/fuzz"]
 account-ext = [
     "evm2/account-ext",
     "reth-execution-types/account-ext",

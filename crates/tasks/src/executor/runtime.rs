@@ -18,6 +18,10 @@ impl Runtime {
 
     /// Runs `work` and returns its result. Callers must join or finish spawned work.
     ///
+    /// Generate Arbitrary and property-test inputs before calling `run`, then move
+    /// owned inputs into `work`. Derived Arbitrary implementations can use native
+    /// recursion-count thread-local state, which is not simulated.
+    ///
     /// Simulated primitives must be created inside `work`, not captured from a
     /// previous execution or returned from it. Runs may not be nested. Panics
     /// propagate to the caller. Simulation rejects a workload that returns with

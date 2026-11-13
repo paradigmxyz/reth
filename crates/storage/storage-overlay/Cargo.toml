@@ -54,6 +54,7 @@ alloy-consensus.workspace = true
 
 [features]
 fuzz = [
+    "reth-metrics/fuzz",
     "reth-trie/fuzz",
     "reth-chain-state/fuzz",
     "dep:reth-tasks",
