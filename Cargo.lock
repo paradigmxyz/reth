@@ -9500,6 +9500,7 @@ dependencies = [
  "futures",
  "parking_lot",
  "reth-consensus",
+ "reth-consensus-common",
  "reth-eth-wire-types",
  "reth-ethereum-primitives",
  "reth-network-peers",
