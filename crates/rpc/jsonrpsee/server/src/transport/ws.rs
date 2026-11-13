@@ -9,7 +9,7 @@ use hyper::upgrade::Upgraded;
 use hyper_util::rt::TokioIo;
 use jsonrpsee_core::{middleware::RpcServiceT, server::MethodSink};
 use soketto::{connection::Error as SokettoError, data::ByteSlice125};
-use std::io;
+use std::{future::Future, io, time::Duration};
 use tokio::{sync::mpsc, time::timeout};
 use tokio_util::compat::Compat;
 
@@ -79,7 +79,7 @@ where
 
     serve_stream(StreamConnection {
         incoming,
-        outgoing: WsWriter(ws_sender),
+        outgoing: WsWriter { sender: ws_sender, write_timeout, timed_out: false },
         rpc_service,
         sink,
         rx,
@@ -87,7 +87,6 @@ where
         batch_requests_config,
         max_request_body_size,
         max_concurrent_calls: message_buffer_capacity as usize,
-        write_timeout: Some(write_timeout),
         ping_interval: Some(ping_interval),
     })
     .await;
@@ -95,26 +94,54 @@ where
     drop(conn);
 }
 
-/// Writes text messages to a WebSocket.
-struct WsWriter(Sender);
+/// Writes text messages and pings to a WebSocket.
+struct WsWriter {
+    sender: Sender,
+    /// How long a single write, a flush or the close may take.
+    write_timeout: Duration,
+    /// Set once a write timed out: the client isn't reading, so nothing more is written.
+    timed_out: bool,
+}
+
+impl WsWriter {
+    /// Runs a write for at most the write timeout.
+    async fn bounded(
+        write_timeout: Duration,
+        timed_out: &mut bool,
+        write: impl Future<Output = Result<(), SokettoError>>,
+    ) -> Result<(), SokettoError> {
+        timeout(write_timeout, write).await.unwrap_or_else(|_| {
+            *timed_out = true;
+            Err(SokettoError::Io(io::ErrorKind::TimedOut.into()))
+        })
+    }
+}
 
 impl MessageWriter for WsWriter {
     type Error = SokettoError;
 
     async fn write(&mut self, message: String) -> Result<(), Self::Error> {
-        self.0.send_text_owned(message).await
+        let write = self.sender.send_text_owned(message);
+        Self::bounded(self.write_timeout, &mut self.timed_out, write).await
     }
 
     async fn ping(&mut self) -> Result<(), Self::Error> {
         let payload = ByteSlice125::try_from(&[][..]).expect("empty ping payload fits");
-        self.0.send_ping(payload).await
+        let write = self.sender.send_ping(payload);
+        Self::bounded(self.write_timeout, &mut self.timed_out, write).await
     }
 
     async fn flush(&mut self) -> Result<(), Self::Error> {
-        self.0.flush().await
+        let write = self.sender.flush();
+        Self::bounded(self.write_timeout, &mut self.timed_out, write).await
     }
 
     async fn close(&mut self) -> Result<(), Self::Error> {
-        self.0.close().await
+        // The close frame would block on the same full socket as the write that timed out.
+        if self.timed_out {
+            return Ok(());
+        }
+        let write = self.sender.close();
+        Self::bounded(self.write_timeout, &mut self.timed_out, write).await
     }
 }

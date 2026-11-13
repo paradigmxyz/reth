@@ -355,7 +355,6 @@ where
         batch_requests_config: BatchRequestConfig::Unlimited,
         max_request_body_size,
         max_concurrent_calls: MESSAGE_BUFFER_CAPACITY,
-        write_timeout: None,
         ping_interval: None,
     };
 

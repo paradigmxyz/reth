@@ -55,7 +55,8 @@ pub trait MessageWriter: Send {
     /// Sends the buffered messages.
     fn flush(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
-    /// Closes the connection for writing.
+    /// Closes the connection for writing. Also called after a failed write, so a writer whose
+    /// write timed out must not block here.
     fn close(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
@@ -102,8 +103,6 @@ pub struct StreamConnection<R, W, S, F> {
     pub max_request_body_size: u32,
     /// Calls the connection runs at once. Further messages are not read while that many run.
     pub max_concurrent_calls: usize,
-    /// How long writing a single message, or a flush, may take before the connection is closed.
-    pub write_timeout: Option<Duration>,
     /// Interval at which the client is pinged with [`MessageWriter::ping`], if at all.
     pub ping_interval: Option<Duration>,
 }
@@ -130,7 +129,6 @@ where
         batch_requests_config,
         max_request_body_size,
         max_concurrent_calls,
-        write_timeout,
         ping_interval,
     } = conn;
 
@@ -140,7 +138,7 @@ where
 
     // The responses are written by this task too, so that a response doesn't have to wake another
     // task to reach the socket.
-    let send = send_loop(rx, outgoing, write_timeout, ping_interval, conn_rx);
+    let send = send_loop(rx, outgoing, ping_interval, conn_rx);
 
     let receive = async move {
         let rpc_service = Arc::new(rpc_service);
@@ -258,11 +256,9 @@ where
 async fn send_loop<W: MessageWriter>(
     mut rx: mpsc::Receiver<String>,
     mut outgoing: W,
-    write_timeout: Option<Duration>,
     ping_interval: Option<Duration>,
     mut stop: oneshot::Receiver<()>,
 ) {
-    let mut write_timed_out = false;
     let mut ping_timer =
         ping_interval.map(|interval| interval_at(Instant::now() + interval, interval));
 
@@ -281,36 +277,28 @@ async fn send_loop<W: MessageWriter>(
             }
             // Pings go before queued messages, so that a subscription that keeps the queue full
             // can't hold them back until the read timeout closes the connection.
-            _ = ping_due(&mut ping_timer) => within(write_timeout, outgoing.ping()).await,
+            _ = ping_due(&mut ping_timer) => outgoing.ping().await,
             response = rx.recv() => {
                 // Nothing else to receive.
                 let Some(response) = response else { break };
-                within(write_timeout, outgoing.write(response)).await
+                outgoing.write(response).await
             }
         };
         // Write the messages that are already queued too, and flush them together.
         let mut written = 1;
-        while matches!(result, Ok(Ok(()))) && written < MAX_MESSAGES_PER_FLUSH {
+        while result.is_ok() && written < MAX_MESSAGES_PER_FLUSH {
             let Ok(response) = rx.try_recv() else { break };
-            result = within(write_timeout, outgoing.write(response)).await;
+            result = outgoing.write(response).await;
             written += 1;
         }
-        if matches!(result, Ok(Ok(()))) {
-            result = within(write_timeout, outgoing.flush()).await;
+        if result.is_ok() {
+            result = outgoing.flush().await;
         }
 
         // If a message can't be sent then terminate the connection.
-        match result {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => {
-                tracing::debug!(target: LOG_TARGET, "Send error: {}", err);
-                break;
-            }
-            Err(WriteTimedOut) => {
-                tracing::debug!(target: LOG_TARGET, "Send timed out after {write_timeout:?}");
-                write_timed_out = true;
-                break;
-            }
+        if let Err(err) = result {
+            tracing::debug!(target: LOG_TARGET, "Send error: {}", err);
+            break;
         }
     }
 
@@ -318,12 +306,8 @@ async fn send_loop<W: MessageWriter>(
     // and subscriptions of this connection. Messages still queued are dropped with it.
     rx.close();
 
-    // Close the connection, unless a write already timed out: the client isn't reading, so the
-    // close would block on the same full socket. The receive half is dropped by the receive loop,
-    // which closes the socket.
-    if !write_timed_out {
-        let _ = within(write_timeout, outgoing.close()).await;
-    }
+    // The receive half is dropped by the receive loop, which closes the socket.
+    let _ = outgoing.close().await;
 }
 
 /// Waits until the next ping is due, forever if the connection is not pinged.
@@ -333,20 +317,6 @@ async fn ping_due(ping_timer: &mut Option<Interval>) {
             ping_timer.tick().await;
         }
         None => future::pending().await,
-    }
-}
-
-/// A write took longer than the write timeout.
-struct WriteTimedOut;
-
-/// Runs `fut`, for at most `limit` if there is one.
-async fn within<T>(
-    limit: Option<Duration>,
-    fut: impl Future<Output = T>,
-) -> Result<T, WriteTimedOut> {
-    match limit {
-        Some(limit) => tokio::time::timeout(limit, fut).await.map_err(|_| WriteTimedOut),
-        None => Ok(fut.await),
     }
 }
 
@@ -446,7 +416,6 @@ mod tests {
             batch_requests_config: BatchRequestConfig::Unlimited,
             max_request_body_size: u32::MAX,
             max_concurrent_calls: Semaphore::MAX_PERMITS,
-            write_timeout: None,
             ping_interval: None,
         }
     }
