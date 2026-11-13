@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{io, sync::Arc, time::Duration};
 
 use crate::{
     server::{handle_rpc_call, ConnectionState, ServerConfig},
@@ -17,10 +17,10 @@ use jsonrpsee_types::{
     error::{reject_too_big_request, ErrorCode},
     Id,
 };
-use soketto::connection::Error as SokettoError;
+use soketto::{connection::Error as SokettoError, data::ByteSlice125};
 use tokio::{
     sync::{mpsc, oneshot, Semaphore},
-    time::timeout,
+    time::{interval_at, timeout, Instant},
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::compat::Compat;
@@ -67,25 +67,34 @@ where
         max_request_body_size,
         write_timeout,
         message_buffer_capacity,
+        ping_interval,
         ..
     } = server_cfg;
 
     let (conn_tx, conn_rx) = oneshot::channel();
 
     // Spawn another task that sends out the responses on the Websocket.
-    let send_task_handle = tokio::spawn(send_task(rx, ws_sender, write_timeout, conn_rx));
+    let send_task_handle =
+        tokio::spawn(send_task(rx, ws_sender, write_timeout, ping_interval, conn_rx));
 
     let stopped = conn.stop_handle.clone().shutdown();
     let rpc_service = Arc::new(rpc_service);
 
     tokio::pin!(stopped);
 
-    let ws_stream = futures_util::stream::unfold(ws_receiver, |mut receiver| async {
+    // `soketto` allocates a frame's announced length before reading its payload, so a frame that
+    // never completes would hold that buffer for good. A pong can't arrive inside a frame, so a
+    // read that yields neither a message nor a pong to the pings within two intervals is stuck.
+    let read_timeout = ping_interval * 2;
+    let ws_stream = futures_util::stream::unfold(ws_receiver, move |mut receiver| async move {
         let mut data = Vec::new();
         loop {
-            match receiver.receive(&mut data).await {
+            let Ok(received) = timeout(read_timeout, receiver.receive(&mut data)).await else {
+                return Some((Err(SokettoError::Io(io::ErrorKind::TimedOut.into())), receiver));
+            };
+            match received {
                 Ok(soketto::Incoming::Data(_)) => return Some((Ok(data), receiver)),
-                // The server sends no pings, so pongs are unsolicited and ignored.
+                // Pongs only answer the server's pings, which restarts the read timeout.
                 Ok(soketto::Incoming::Pong(_)) => data.clear(),
                 Ok(soketto::Incoming::Closed(_)) | Err(SokettoError::Closed) => return None,
                 // The closing reason is already logged by `soketto` trace log level.
@@ -201,17 +210,20 @@ where
     drop(conn);
 }
 
-/// A task that waits for new messages via the `rx channel` and sends them out on the `WebSocket`.
+/// A task that waits for new messages via the `rx channel` and sends them out on the `WebSocket`,
+/// and pings the client every `ping_interval`.
 async fn send_task(
     mut rx: mpsc::Receiver<String>,
     mut ws_sender: Sender,
     write_timeout: Duration,
+    ping_interval: Duration,
     mut stop: oneshot::Receiver<()>,
 ) {
     let mut write_timed_out = false;
+    let mut ping_timer = interval_at(Instant::now() + ping_interval, ping_interval);
 
     loop {
-        let response = tokio::select! {
+        let mut result = tokio::select! {
             // Stop is polled first: a subscription that queues messages faster than the client
             // reads them keeps `rx.recv()` ready, which would never let a stopped server end the
             // session.
@@ -223,12 +235,18 @@ async fn send_task(
                 rx.close();
                 continue;
             }
-            response = rx.recv() => response,
+            // Pings go before queued messages, so that a subscription that keeps the queue full
+            // can't hold them back until the read timeout closes the connection.
+            _ = ping_timer.tick() => {
+                let payload = ByteSlice125::try_from(&[][..]).expect("empty ping payload fits");
+                timeout(write_timeout, ws_sender.send_ping(payload)).await
+            }
+            response = rx.recv() => {
+                // Nothing else to receive.
+                let Some(response) = response else { break };
+                timeout(write_timeout, ws_sender.send_text_owned(response)).await
+            }
         };
-        // Nothing else to receive.
-        let Some(response) = response else { break };
-
-        let mut result = timeout(write_timeout, ws_sender.send_text_owned(response)).await;
         // Write the messages that are already queued too, and flush them together.
         let mut written = 1;
         while matches!(result, Ok(Ok(()))) && written < MAX_MESSAGES_PER_FLUSH {

@@ -62,6 +62,9 @@ const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_secs(1);
 /// matching geth.
 pub(crate) const DEFAULT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Default interval at which WebSocket connections are pinged, matching geth.
+pub(crate) const DEFAULT_PING_INTERVAL: Duration = Duration::from_secs(30);
+
 /// Notifies `request_received` whenever hyper passes a request to the service.
 #[derive(Debug, Clone)]
 pub(crate) struct NotifyOnRequest<S> {
