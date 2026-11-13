@@ -34,7 +34,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{ConnectionState, HttpBody};
+use crate::{ConnectionPermit, HttpBody};
 
 use futures_util::{future, ready};
 use hyper::body::{Bytes, Frame};
@@ -216,12 +216,12 @@ pub(crate) struct PermitBody {
     inner: HttpBody,
     /// Rest of the data frame that is being yielded in chunks.
     pending: Bytes,
-    _conn: ConnectionState,
+    _conn_permit: ConnectionPermit,
 }
 
 impl PermitBody {
-    pub(crate) fn new(inner: HttpBody, conn: ConnectionState) -> Self {
-        Self { inner, pending: Bytes::new(), _conn: conn }
+    pub(crate) fn new(inner: HttpBody, conn_permit: ConnectionPermit) -> Self {
+        Self { inner, pending: Bytes::new(), _conn_permit: conn_permit }
     }
 }
 

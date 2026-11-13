@@ -26,7 +26,7 @@ pub async fn call_with_service<S, B>(
     request: HttpRequest<B>,
     batch_config: BatchRequestConfig,
     max_request_size: u32,
-    rpc_service: S,
+    rpc_service: &S,
 ) -> HttpResponse
 where
     B: http_body::Body<Data = Bytes> + Send + 'static,
@@ -49,7 +49,7 @@ where
                 }
             };
 
-            let rp = handle_rpc_call(&body, is_single, batch_config, &rpc_service).await;
+            let rp = handle_rpc_call(&body, is_single, batch_config, rpc_service).await;
 
             // If the response is empty it means that it was a notification or empty batch.
             // For HTTP these are just ACK:ed with a empty body.
