@@ -10,6 +10,7 @@ pub use rayon::{
 
 #[cfg(feature = "fuzz")]
 mod deterministic {
+    use crate::executor::deterministic::with_pool_slots;
     use shuttle::{sync::mpsc, thread, thread_local};
     use std::{
         any::Any,
@@ -19,7 +20,7 @@ mod deterministic {
         panic::{catch_unwind, resume_unwind, AssertUnwindSafe},
         sync::{
             atomic::{AtomicUsize, Ordering},
-            Arc, Mutex, OnceLock,
+            Arc, OnceLock,
         },
     };
 
@@ -39,7 +40,6 @@ mod deterministic {
     pub struct ThreadPool {
         id: usize,
         names: Arc<Vec<Option<String>>>,
-        slots: Arc<Mutex<Slots>>,
         panic_handler: Option<PanicHandler>,
     }
 
@@ -146,29 +146,30 @@ mod deterministic {
         fn acquire(&self, index: Option<usize>) -> usize {
             loop {
                 let current = thread::current();
-                let mut slots = self.slots.lock().expect("logical slot metadata is not poisoned");
-                let available = match index {
-                    Some(index) => (!slots.occupied[index]).then_some(index),
-                    None => slots.occupied.iter().position(|occupied| !occupied),
-                };
+                let available = with_pool_slots(self.id, self.current_num_threads(), |slots| {
+                    let available = match index {
+                        Some(index) => (!slots.occupied[index]).then_some(index),
+                        None => slots.occupied.iter().position(|occupied| !occupied),
+                    };
+                    if let Some(index) = available {
+                        slots.occupied[index] = true;
+                    } else if !slots.waiters.iter().any(|waiter| waiter.id() == current.id()) {
+                        slots.waiters.push(current);
+                    }
+                    available
+                });
                 if let Some(index) = available {
-                    slots.occupied[index] = true;
                     return index;
                 }
-                if !slots.waiters.iter().any(|waiter| waiter.id() == current.id()) {
-                    slots.waiters.push(current);
-                }
-                drop(slots);
                 thread::park();
             }
         }
 
         fn release(&self, index: usize) {
-            let waiters = {
-                let mut slots = self.slots.lock().expect("logical slot metadata is not poisoned");
+            let waiters = with_pool_slots(self.id, self.current_num_threads(), |slots| {
                 slots.occupied[index] = false;
                 mem::take(&mut slots.waiters)
-            };
+            });
             for waiter in waiters {
                 waiter.unpark();
             }
@@ -240,10 +241,6 @@ mod deterministic {
             Ok(ThreadPool {
                 id: NEXT_POOL.fetch_add(1, Ordering::Relaxed),
                 names: Arc::new(names),
-                slots: Arc::new(Mutex::new(Slots {
-                    occupied: vec![false; self.num_threads.max(1)],
-                    waiters: Vec::new(),
-                })),
                 panic_handler: self.panic_handler,
             })
         }
@@ -308,12 +305,6 @@ mod deterministic {
     enum Message<'env> {
         Job(Job<'env>),
         Done(Result<(), Panic>),
-    }
-    // Metadata guards never span a scheduler operation or user callback, so a job panic cannot
-    // poison this mutex. Contended jobs park only after unlocking.
-    struct Slots {
-        occupied: Vec<bool>,
-        waiters: Vec<thread::Thread>,
     }
     struct Lease {
         pool: ThreadPool,
@@ -470,5 +461,165 @@ mod deterministic {
             b()
         });
         (receiver.recv().expect("join producer completed before scope returned"), b)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::executor::Runtime;
+        use shuttle::sync::Barrier;
+        use std::{sync::Mutex, time::Duration};
+
+        #[test]
+        fn retained_pool_isolated_between_concurrent_executions() {
+            assert_concurrent_executions(ThreadPoolBuilder::new().num_threads(2).build().unwrap());
+        }
+
+        #[test]
+        fn global_pool_isolated_between_concurrent_executions() {
+            assert_concurrent_executions(ThreadPool::global());
+        }
+
+        #[test]
+        fn retained_pool_reusable_between_executions() {
+            let handled = Arc::new(AtomicUsize::new(0));
+            let handler = handled.clone();
+            let pool = ThreadPoolBuilder::new()
+                .num_threads(2)
+                .thread_name(|index| format!("retained-{index}"))
+                .panic_handler(move |panic| {
+                    assert_eq!(panic.downcast_ref::<&str>(), Some(&"retained job panicked"));
+                    handler.fetch_add(1, Ordering::SeqCst);
+                })
+                .build()
+                .unwrap();
+            let id = pool.id();
+            for expected in 1..=3 {
+                let pool = pool.clone();
+                let handled = handled.clone();
+                Runtime::new().run(move || {
+                    assert_eq!(pool.id(), id);
+                    assert_eq!(pool.broadcast(|context| context.index()), [0, 1]);
+                    let (sender, receiver) = mpsc::channel();
+                    pool.spawn(move || {
+                        sender.send(thread::current().name().map(str::to_owned)).unwrap();
+                    });
+                    assert_eq!(receiver.recv().unwrap().as_deref(), Some("retained-0"));
+                    pool.spawn(|| panic!("retained job panicked"));
+                    for _ in 0..10 {
+                        if handled.load(Ordering::SeqCst) == expected {
+                            break;
+                        }
+                        thread::yield_now();
+                    }
+                    assert_eq!(handled.load(Ordering::SeqCst), expected);
+                });
+            }
+        }
+
+        #[test]
+        fn pool_capacity_shared_and_released_on_unwind() {
+            let pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+            Runtime::new().run(move || {
+                let mut waiter = None;
+                let panic = catch_unwind(AssertUnwindSafe(|| {
+                    pool.install(|| {
+                        let contender = pool.clone();
+                        waiter = Some(thread::spawn(move || {
+                            contender.install(|| contender.current_thread_index())
+                        }));
+                        wait_for_slot_waiter(&pool);
+                        panic!("slot owner panicked");
+                    });
+                }))
+                .unwrap_err();
+                assert_eq!(panic.downcast_ref::<&str>(), Some(&"slot owner panicked"));
+                assert_eq!(waiter.unwrap().join().unwrap(), Some(0));
+                with_pool_slots(pool.id(), 1, |slots| {
+                    assert_eq!(slots.occupied, [false]);
+                    assert!(slots.waiters.is_empty());
+                });
+            });
+        }
+
+        #[test]
+        fn retained_pool_reusable_after_execution_panic() {
+            let pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+            let failed_pool = pool.clone();
+            let panic = catch_unwind(AssertUnwindSafe(|| {
+                Runtime::new().run(move || {
+                    let (sender, receiver) = mpsc::channel();
+                    failed_pool.spawn(move || {
+                        sender.send(()).unwrap();
+                        thread::park();
+                    });
+                    receiver.recv().unwrap();
+                    failed_pool.spawn(|| {});
+                    wait_for_slot_waiter(&failed_pool);
+                    panic!("runtime workload panicked");
+                });
+            }))
+            .unwrap_err();
+            assert_eq!(panic.downcast_ref::<&str>(), Some(&"runtime workload panicked"));
+            Runtime::new().run(move || {
+                with_pool_slots(pool.id(), 1, |slots| {
+                    assert_eq!(slots.occupied, [false]);
+                    assert!(slots.waiters.is_empty());
+                });
+                assert_eq!(pool.broadcast(|context| context.index()), [0]);
+            });
+        }
+
+        fn assert_concurrent_executions(pool: ThreadPool) {
+            let threads = pool.current_num_threads();
+            let first_pool = pool.clone();
+            let (entered, entering) = std::sync::mpsc::channel();
+            let (release, releasing) = std::sync::mpsc::channel();
+            let first = std::thread::spawn(move || {
+                Runtime::new().run(move || {
+                    let occupied = Barrier::new(threads);
+                    let finished = Barrier::new(threads);
+                    let releasing = Mutex::new(releasing);
+                    first_pool.broadcast(|context| {
+                        occupied.wait();
+                        if context.index() == 0 {
+                            // Keep every slot leased while the other host runs its simulation.
+                            entered.send(()).unwrap();
+                            releasing
+                                .lock()
+                                .unwrap()
+                                .recv_timeout(Duration::from_secs(10))
+                                .unwrap();
+                        }
+                        finished.wait();
+                        context.index()
+                    })
+                })
+            });
+            entering.recv_timeout(Duration::from_secs(10)).unwrap();
+            let second = catch_unwind(AssertUnwindSafe(|| {
+                Runtime::new().run(move || pool.broadcast(|context| context.index()))
+            }));
+            // Always release the first execution, even when the second execution panics.
+            release.send(()).unwrap();
+            let first = first.join();
+            let expected = (0..threads).collect::<Vec<_>>();
+            assert_eq!(second.unwrap(), expected);
+            assert_eq!(first.unwrap(), expected);
+        }
+
+        fn wait_for_slot_waiter(pool: &ThreadPool) {
+            // Round-robin scheduling must let the contender register without releasing the owner.
+            for _ in 0..10 {
+                if with_pool_slots(pool.id(), 1, |slots| !slots.waiters.is_empty()) {
+                    break;
+                }
+                thread::yield_now();
+            }
+            with_pool_slots(pool.id(), 1, |slots| {
+                assert_eq!(slots.occupied, [true]);
+                assert_eq!(slots.waiters.len(), 1);
+            });
+        }
     }
 }

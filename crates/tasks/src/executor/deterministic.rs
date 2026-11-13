@@ -7,6 +7,7 @@ use shuttle::{
 };
 use std::{
     cell::RefCell,
+    collections::HashMap,
     rc::Rc,
     sync::{Arc, Mutex},
     thread_local,
@@ -15,6 +16,8 @@ use std::{
 // Provider and EVM workloads need more than Shuttle's 60 KiB default coroutine stack.
 const DEFAULT_STACK_SIZE: usize = 8 * 1024 * 1024;
 
+// Native TLS is shared by Shuttle's logical tasks but isolated between host threads. ResetClock
+// drops the execution's timers and pool waiters after the runner finishes, including on unwind.
 thread_local! {
     static CLOCK: RefCell<Option<Rc<RefCell<Clock>>>> = const { RefCell::new(None) };
 }
@@ -54,6 +57,14 @@ struct Clock {
     next_timer: u64,
     driver: Option<thread::Thread>,
     stopped: bool,
+    pools: HashMap<usize, Slots>,
+}
+
+// Slot metadata is shared by every logical task in this execution, not by retained pool handles.
+// Borrows never span a scheduler operation or user callback.
+pub(super) struct Slots {
+    pub(super) occupied: Vec<bool>,
+    pub(super) waiters: Vec<thread::Thread>,
 }
 
 struct TimerEntry {
@@ -197,4 +208,14 @@ fn drive_clock() {
             thread::park();
         }
     }
+}
+
+/// Borrows this execution's capacity and waiters for a process-reusable pool identity.
+pub(super) fn with_pool_slots<T>(id: usize, threads: usize, f: impl FnOnce(&mut Slots) -> T) -> T {
+    with_clock(|clock| {
+        f(clock
+            .pools
+            .entry(id)
+            .or_insert_with(|| Slots { occupied: vec![false; threads], waiters: Vec::new() }))
+    })
 }
