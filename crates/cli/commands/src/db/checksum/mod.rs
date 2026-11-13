@@ -6,7 +6,10 @@ use alloy_primitives::map::foldhash::fast::FixedState;
 use clap::Parser;
 use itertools::Itertools;
 use reth_chainspec::EthereumHardforks;
-use reth_db::{static_file::iter_static_files, DatabaseEnv};
+use reth_db::{
+    static_file::{iter_static_files, StaticFileEntry},
+    DatabaseEnv,
+};
 use reth_db_api::{
     cursor::DbCursorRO,
     table::{Decode, Table},
@@ -150,7 +153,9 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
     );
 
     let mut reached_limit = false;
-    for (block_range, _header) in ranges.iter().sorted_by_key(|(range, _)| range.start()) {
+    for StaticFileEntry { block_range, .. } in
+        ranges.iter().sorted_by_key(|entry| entry.block_range.start())
+    {
         if block_range.end() < start_block || block_range.start() > end_block {
             continue;
         }

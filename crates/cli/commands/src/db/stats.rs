@@ -5,7 +5,11 @@ use eyre::WrapErr;
 use human_bytes::human_bytes;
 use itertools::Itertools;
 use reth_chainspec::EthereumHardforks;
-use reth_db::{mdbx, static_file::iter_static_files, DatabaseEnv};
+use reth_db::{
+    mdbx,
+    static_file::{iter_static_files, StaticFileEntry},
+    DatabaseEnv,
+};
 use reth_db_api::{database::Database, TableViewer, Tables};
 use reth_db_common::DbTool;
 use reth_fs_util as fs;
@@ -267,7 +271,7 @@ impl Command {
                 mut segment_config_size,
             ) = (0, 0, 0, 0, 0, 0);
 
-            for (block_range, header) in &ranges {
+            for StaticFileEntry { block_range, header, .. } in &ranges {
                 let fixed_block_range =
                     static_file_provider.find_fixed_range(segment, block_range.start());
                 let jar_provider = static_file_provider
@@ -339,20 +343,22 @@ impl Command {
                 let first_ranges = ranges.first().expect("not empty list of ranges");
                 let last_ranges = ranges.last().expect("not empty list of ranges");
 
-                let block_range =
-                    SegmentRangeInclusive::new(first_ranges.0.start(), last_ranges.0.end());
+                let block_range = SegmentRangeInclusive::new(
+                    first_ranges.block_range.start(),
+                    last_ranges.block_range.end(),
+                );
 
                 // Transaction ranges can be empty, so we need to find the first and last which are
                 // not.
                 let tx_range = {
                     let start = ranges
                         .iter()
-                        .find_map(|(_, header)| header.tx_range().map(|range| range.start()))
+                        .find_map(|entry| entry.header.tx_range().map(|range| range.start()))
                         .unwrap_or_default();
                     let end = ranges
                         .iter()
                         .rev()
-                        .find_map(|(_, header)| header.tx_range().map(|range| range.end()));
+                        .find_map(|entry| entry.header.tx_range().map(|range| range.end()));
                     end.map(|end| SegmentRangeInclusive::new(start, end))
                 };
 
