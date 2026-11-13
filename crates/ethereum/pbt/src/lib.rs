@@ -48,6 +48,9 @@ use tracing::Span;
 mod backfill;
 pub use backfill::PbtBackfill;
 
+#[cfg(feature = "cli")]
+pub mod cli;
+
 mod config;
 pub use config::PbtConfig;
 pub use reth_trie_pbt::migration::DecodeLimits;

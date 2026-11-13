@@ -17,9 +17,10 @@ use reth_node_ethereum::{snap::EthereumBackfill, EthereumNode};
 use tracing::info;
 
 #[cfg(feature = "pbt")]
-use pbt::{PbtArgs, PbtChainSpecParser};
-#[cfg(feature = "pbt")]
-use reth_node_pbt::PbtNode;
+use reth_node_pbt::{
+    cli::{PbtArgs, PbtChainSpecParser},
+    PbtNode,
+};
 
 #[cfg(not(feature = "pbt"))]
 use reth_chainspec::ChainSpec;
@@ -29,9 +30,6 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 #[cfg(not(feature = "pbt"))]
 use std::sync::Arc;
-
-#[cfg(feature = "pbt")]
-mod pbt;
 
 #[cfg(not(feature = "pbt"))]
 #[derive(Clone, Debug)]

@@ -3,6 +3,10 @@
 Build the optional backend with `cargo build --release --bin reth --features pbt`.
 Default builds do not link the PBT library or enable its engine/storage integration.
 
+Library users can enable `reth-node-pbt/cli` to reuse
+`cli::{PbtArgs, PbtChainSpecParser}`. The executable only parses these options and
+wires the configured PBT node into launch.
+
 ```sh
 reth init --chain /path/to/genesis.json --datadir /path/to/data
 reth node --chain /path/to/genesis.json --datadir /path/to/data --pbt

@@ -1,18 +1,21 @@
-//! Explicit opt-in for the reference PBT devnet backend.
+//! Command-line configuration and chain parsing for the opt-in PBT node.
 
-use alloy_primitives::B256;
-use clap::Args;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_cli::chainspec::ChainSpecParser;
-use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
-use reth_node_pbt::{
+use crate::{
     activation_timestamp, configure_chain, CatchupLimits, DecodeLimits, MigrationFiles,
     MigrationSource, PbtConfig,
 };
+use alloy_primitives::B256;
+use clap::Args;
+use reth_cli::chainspec::ChainSpecParser;
+use reth_ethereum::{
+    chainspec::{ChainSpec, EthereumHardforks},
+    cli::chainspec::EthereumChainSpecParser,
+};
 use std::{num::NonZeroUsize, path::PathBuf, sync::Arc};
 
+/// PBT launch options, migration inputs, and resource limits for a node command.
 #[derive(Debug, Default, Args)]
-pub(crate) struct PbtArgs {
+pub struct PbtArgs {
     /// Enable experimental BLAKE3 PBT state commitments using genesis config.binaryTrieTime.
     #[arg(long, conflicts_with = "snap_v2")]
     pbt: bool,
@@ -62,7 +65,9 @@ pub(crate) struct PbtArgs {
 }
 
 impl PbtArgs {
-    pub(crate) fn activation(&self, chain: &ChainSpec) -> eyre::Result<Option<u64>> {
+    /// Returns the configured activation timestamp, or `None` for a non-PBT chain.
+    /// Rejects a missing opt-in flag, a missing fork timestamp, or an incompatible BAL schedule.
+    pub fn activation(&self, chain: &ChainSpec) -> eyre::Result<Option<u64>> {
         let activation = activation_timestamp(chain)?;
         eyre::ensure!(
             self.pbt || activation.is_none(),
@@ -81,11 +86,13 @@ impl PbtArgs {
         Ok(activation)
     }
 
-    pub(crate) const fn parallel(&self) -> bool {
+    /// Returns whether dense PBT update batches should use parallel hashing.
+    pub const fn parallel(&self) -> bool {
         self.parallel
     }
 
-    pub(crate) fn config(&self) -> eyre::Result<PbtConfig> {
+    /// Builds explicit node configuration and rejects incomplete migration inputs.
+    pub fn config(&self) -> eyre::Result<PbtConfig> {
         let defaults = PbtConfig::default();
         let import = defaults.import_limits;
         let migration = match (&self.migration_preimages, self.migration_anchor) {
@@ -121,8 +128,9 @@ impl PbtArgs {
     }
 }
 
+/// Ethereum chain parser that configures the PBT genesis root and fork schedule.
 #[derive(Clone, Debug)]
-pub(crate) struct PbtChainSpecParser;
+pub struct PbtChainSpecParser;
 
 impl ChainSpecParser for PbtChainSpecParser {
     type ChainSpec = ChainSpec;
@@ -138,7 +146,7 @@ impl ChainSpecParser for PbtChainSpecParser {
 mod tests {
     use super::*;
     use clap::Parser;
-    use reth::cli::Cli;
+    use reth_ethereum::cli::Cli;
 
     #[test]
     fn resource_limits_and_retirement_are_explicit() {

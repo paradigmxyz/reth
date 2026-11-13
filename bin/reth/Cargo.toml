@@ -73,7 +73,7 @@ aquamarine.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 
 # pbt
-reth-node-pbt = { workspace = true, optional = true }
+reth-node-pbt = { workspace = true, optional = true, features = ["cli"] }
 
 [dev-dependencies]
 alloy-node-bindings.workspace = true

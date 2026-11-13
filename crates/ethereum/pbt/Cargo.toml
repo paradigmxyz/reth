@@ -26,6 +26,10 @@ tokio = { workspace = true, features = ["signal"] }
 tracing.workspace = true
 thiserror.workspace = true
 
+# cli
+clap = { workspace = true, optional = true, features = ["derive", "env"] }
+reth-cli = { workspace = true, optional = true }
+
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 tempfile.workspace = true
 reth-ethereum = { workspace = true, features = ["test-utils"] }
@@ -36,3 +40,6 @@ reth-payload-primitives.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+cli = ["dep:clap", "dep:reth-cli", "reth-ethereum/cli"]
