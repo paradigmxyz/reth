@@ -191,7 +191,7 @@ pub(crate) fn config_for_selections(
     let blocks_per_file = |ty: SnapshotComponentType| -> Option<u64> {
         match manifest.component(ty)? {
             ComponentManifest::Chunked(c) => Some(c.blocks_per_file),
-            ComponentManifest::Single(_) => None,
+            ComponentManifest::Single(_) | ComponentManifest::Files(_) => None,
         }
     };
     let static_files = StaticFilesConfig {
