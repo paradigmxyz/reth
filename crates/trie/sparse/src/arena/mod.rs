@@ -34,14 +34,26 @@ const TRACE_TARGET: &str = "trie::arena";
 const UPPER_TRIE_MAX_DEPTH: usize = 2;
 
 /// Reads revealed and leaf masks from live handles, including lower-subtrie roots.
+/// Taken update subtries have not been mutated yet, so their roots retain the observed shape.
 #[cfg(feature = "fuzz")]
-fn coverage_branch_masks(arena: &NodeArena, branch: &ArenaSparseNodeBranch) -> (u16, u16) {
+fn coverage_branch_masks(
+    arena: &NodeArena,
+    branch: &ArenaSparseNodeBranch,
+    taken: &[(Index, Box<ArenaSparseSubtrie>, core::ops::Range<usize>)],
+) -> (u16, u16) {
     let mut revealed = TrieMask::default();
     let mut leaf = TrieMask::default();
     for (nibble, child) in branch.child_iter() {
         if let Some(child_idx) = child.revealed_index() {
             revealed.set_bit(nibble);
             let mut node = &arena[child_idx];
+            if matches!(node, ArenaSparseNode::TakenSubtrie) {
+                let (_, subtrie, _) = taken
+                    .iter()
+                    .find(|(idx, _, _)| *idx == child_idx)
+                    .expect("taken child must have a pending update subtrie");
+                node = &subtrie.arena[subtrie.root];
+            }
             while let ArenaSparseNode::Subtrie(subtrie) = node {
                 node = &subtrie.arena[subtrie.root];
             }
@@ -54,12 +66,18 @@ fn coverage_branch_masks(arena: &NodeArena, branch: &ArenaSparseNodeBranch) -> (
 }
 
 /// Observes a proof target at emission, before any mutation changes its logical parent.
-/// A blinded root has no revealed parent shape.
+/// A blinded root has no revealed parent shape. Collapse proof parents contain only the
+/// current child and its blinded sibling, so they cannot have any taken sibling to resolve.
 #[cfg(feature = "fuzz")]
-fn observe_proof_target(arena: &NodeArena, parent: Option<(Index, usize)>, target_path: &Nibbles) {
+fn observe_proof_target(
+    arena: &NodeArena,
+    parent: Option<(Index, usize)>,
+    target_path: &Nibbles,
+    taken: &[(Index, Box<ArenaSparseSubtrie>, core::ops::Range<usize>)],
+) {
     if let Some((parent_idx, depth)) = parent {
         let branch = branch_data(arena, parent_idx);
-        let (revealed, leaf) = coverage_branch_masks(arena, branch);
+        let (revealed, leaf) = coverage_branch_masks(arena, branch, taken);
         sparse_guidance::observe_proof_target(
             depth,
             true,
@@ -69,8 +87,14 @@ fn observe_proof_target(arena: &NodeArena, parent: Option<(Index, usize)>, targe
             leaf,
         );
     } else {
-        sparse_guidance::observe_proof_target(0, false, 0, 0, 0, 0);
+        observe_blind_root_proof_target();
     }
+}
+
+/// Observes a proof request for a blind root, which has no revealed parent shape.
+#[cfg(feature = "fuzz")]
+pub(crate) fn observe_blind_root_proof_target() {
+    sparse_guidance::observe_proof_target(0, false, 0, 0, 0, 0);
 }
 
 /// Returns the branch data for a branch or extension node.
@@ -467,6 +491,7 @@ impl ArenaSparseSubtrie {
                     &self.arena,
                     self.buffers.cursor.head().map(|entry| (entry.index, logical_len)),
                     full_path,
+                    &[],
                 );
                 self.required_proofs.push((
                     idx,
@@ -1238,7 +1263,7 @@ impl ArenaParallelSparseTrie {
             #[cfg(feature = "fuzz")]
             {
                 let branch = branch_data(arena, head_idx);
-                let (revealed, leaf) = coverage_branch_masks(arena, branch);
+                let (revealed, leaf) = coverage_branch_masks(arena, branch, &[]);
                 let depth = cursor.head_logical_branch_path_len(arena);
                 sparse_guidance::observe_branch_shape(
                     depth,
@@ -1737,6 +1762,7 @@ impl ArenaParallelSparseTrie {
                             arena,
                             Some((parent_idx, sibling_path.len() - 1)),
                             &sibling_path,
+                            &[],
                         );
                         return (
                             RemoveLeafResult::NeedsProof {
@@ -1870,6 +1896,7 @@ impl ArenaParallelSparseTrie {
             arena,
             Some((parent_entry.index, sibling_path.len() - 1)),
             &sibling_path,
+            &[],
         );
         Some(ArenaRequiredProof {
             key: Self::nibbles_to_padded_b256(&sibling_path),
@@ -2888,6 +2915,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         &self.upper_arena,
                         cursor.head().map(|entry| (entry.index, logical_len)),
                         full_path,
+                        &taken,
                     );
                     proof_required_fn(key, parent);
                     updates.insert(key, update.clone());
