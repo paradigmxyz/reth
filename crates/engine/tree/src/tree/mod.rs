@@ -1959,15 +1959,18 @@ where
             self.state.buffer.lowest_ancestor(&sync_target_state.head_block_hash)
         {
             let current_head_num = self.state.tree_state.current_canonical_head.number;
-            let target_head_num = lowest_buffered.number();
+            // The buffered block itself is already available. Only download the gap to its
+            // parent; if that parent is the new tip, connect the buffered blocks below.
+            let missing_parent_num = lowest_buffered.number().saturating_sub(1);
 
-            if let Some(distance) = self.distance_from_local_tip(current_head_num, target_head_num)
+            if let Some(distance) =
+                self.distance_from_local_tip(current_head_num, missing_parent_num)
             {
                 // There are blocks between current head and FCU target, download them
                 debug!(
                     target: "engine::tree",
                     %current_head_num,
-                    %target_head_num,
+                    %missing_parent_num,
                     %distance,
                     "Backfill complete, downloading remaining blocks to reach FCU target"
                 );
