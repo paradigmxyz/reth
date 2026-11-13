@@ -537,6 +537,9 @@ impl SharedFeed {
                     }
                 }
             }
+            // A source that stays ready, like the blocks of one canonical update, never makes the
+            // loop wait, so this lets the subscribers run before a whole burst is broadcast.
+            tokio::task::consume_budget().await;
         }
         debug!(target: "rpc", "shared subscription feed stopped");
     }
@@ -561,6 +564,7 @@ mod tests {
     use super::*;
     use crate::EthApiBuilder;
     use alloy_consensus::Transaction as _;
+    use futures::stream;
     use jsonrpsee::RpcModule;
     use jsonrpsee_types::{SubscriptionId, SubscriptionPayload, SubscriptionResponse};
     use reth_chain_state::CanonStateNotification;
@@ -885,5 +889,25 @@ mod tests {
         }
         unsubscribe(&module, &id).await;
         wait_until_stopped(&producer).await;
+    }
+
+    #[tokio::test]
+    async fn producer_yields_while_its_source_stays_ready() {
+        // More than the feed holds, all ready at once.
+        const ITEMS: usize = 4 * PER_BLOCK_FEED_CAPACITY;
+
+        let feed = Arc::new(SharedFeed::new(PER_BLOCK_FEED_CAPACITY));
+        let (mut results, sender) = feed.subscribe();
+        let sender = sender.unwrap();
+        let producer = feed.clone();
+        tokio::spawn(async move { producer.produce(sender, stream::iter(0..ITEMS).boxed()).await });
+
+        // The subscriber gets to read during the burst, so it skips nothing.
+        for _ in 0..ITEMS {
+            tokio::time::timeout(TIMEOUT, results.recv()).await.unwrap().unwrap();
+        }
+        // The end of the source ends the feed.
+        assert!(matches!(results.recv().await, Err(RecvError::Closed)));
+        assert!(feed.sender.lock().is_none());
     }
 }
