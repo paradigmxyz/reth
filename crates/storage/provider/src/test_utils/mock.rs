@@ -553,6 +553,14 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HistoryReader
     ) -> ProviderResult<HistoryInfo> {
         Ok(HistoryInfo::InPlainState)
     }
+
+    fn lowest_account_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        Ok(None)
+    }
+
+    fn lowest_storage_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        Ok(None)
+    }
 }
 
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DbTxProvider

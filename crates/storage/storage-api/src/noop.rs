@@ -452,6 +452,14 @@ impl<C: Send + Sync, N: NodePrimitives> HistoryReader for NoopProvider<C, N> {
     ) -> ProviderResult<HistoryInfo> {
         Ok(HistoryInfo::NotYetWritten)
     }
+
+    fn lowest_account_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        Ok(None)
+    }
+
+    fn lowest_storage_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        Ok(None)
+    }
 }
 
 #[cfg(feature = "db-api")]
