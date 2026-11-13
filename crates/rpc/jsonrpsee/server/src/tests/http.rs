@@ -1053,12 +1053,12 @@ async fn streaming_server(release: Arc<Notify>) -> (SocketAddr, ServerHandle) {
     (addr, server.start(module))
 }
 
-/// Sends a call to `method` on a raw connection, so the test sees the chunked framing.
-async fn raw_call(addr: SocketAddr, method: &str) -> TcpStream {
+/// Sends a call to `method` with HTTP `version` on a raw connection, so the test sees the framing.
+async fn raw_call(addr: SocketAddr, version: &str, method: &str) -> TcpStream {
     let mut client = TcpStream::connect(addr).with_default_timeout().await.unwrap().unwrap();
     let body = format!(r#"{{"jsonrpc":"2.0","method":"{method}","id":1}}"#);
     let request = format!(
-        "POST / HTTP/1.1\r\nhost: localhost\r\ncontent-type: application/json\r\n\
+        "POST / {version}\r\nhost: localhost\r\ncontent-type: application/json\r\n\
          connection: close\r\ncontent-length: {}\r\n\r\n{body}",
         body.len()
     );
@@ -1082,7 +1082,7 @@ async fn http_streaming_method_sends_parts_as_produced() {
     let release = Arc::new(Notify::new());
     let (addr, handle) = streaming_server(release.clone()).await;
 
-    let mut client = raw_call(addr, "stream_parts").await;
+    let mut client = raw_call(addr, "HTTP/1.1", "stream_parts").await;
     let mut response = Vec::new();
     // The first part arrives while the producer still waits.
     read_until(&mut client, &mut response, br#"{"jsonrpc":"2.0","id":1,"result":[1"#).await;
@@ -1109,13 +1109,21 @@ async fn http_streaming_method_aborts_after_failure() {
     init_logger();
     let (addr, handle) = streaming_server(Arc::new(Notify::new())).await;
 
-    let mut client = raw_call(addr, "stream_fails").await;
+    let mut client = raw_call(addr, "HTTP/1.1", "stream_fails").await;
     let mut response = Vec::new();
     // hyper closes the connection without the empty chunk that ends a complete body. It may not
     // flush the parts before that either, and a reset is a valid way to close it too.
     let _ = client.read_to_end(&mut response).with_default_timeout().await.unwrap();
     let response = String::from_utf8(response).unwrap();
     assert!(!response.ends_with("0\r\n\r\n"), "{response}");
+
+    // HTTP/1.0 can't show the abort, so it gets the error instead.
+    let mut client = raw_call(addr, "HTTP/1.0", "stream_fails").await;
+    let mut response = String::new();
+    client.read_to_string(&mut response).with_default_timeout().await.unwrap().unwrap();
+    let error = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"Internal error"}}"#;
+    let length = format!("content-length: {}\r\n", error.len());
+    assert!(response.contains(&length) && response.ends_with(error), "{response}");
 
     handle.stop().unwrap();
     handle.stopped().with_default_timeout().await.unwrap();

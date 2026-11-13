@@ -49,7 +49,12 @@ where
                 }
             };
 
-            let rp = handle_rpc_call(&body, is_single, batch_config, rpc_service).await;
+            let mut rp = handle_rpc_call(&body, is_single, batch_config, rpc_service).await;
+            // HTTP/1.0 has no chunked encoding, so the client couldn't tell an aborted stream
+            // from a complete response.
+            if parts.version < hyper::Version::HTTP_11 {
+                rp = rp.buffer().await;
+            }
 
             // If the response is empty it means that it was a notification or empty batch.
             // For HTTP these are just ACK:ed with a empty body.

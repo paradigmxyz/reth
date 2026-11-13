@@ -31,8 +31,12 @@ const LOG_TARGET: &str = "jsonrpsee-core";
 use std::{
     future::Future,
     io,
+    panic::AssertUnwindSafe,
     pin::Pin,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     task::{ready, Context, Poll},
 };
 
@@ -310,10 +314,12 @@ impl MethodResponse {
             .expect("JSON serialization infallible; qed");
         json.push_str(r#","result":"#);
 
-        let Some(remaining) = max_response_size.checked_sub(json.len()) else {
+        let ResponseStream { parts, remaining, producer } = stream;
+        // The closing brace needs one byte, so a response that fits leaves `remaining` above zero.
+        let Some(left) = max_response_size.checked_sub(json.len()).filter(|&left| left > 0) else {
             return Self::error(id, reject_too_big_response(max_response_size))
         };
-        let ResponseStream { parts, producer } = stream;
+        remaining.store(left, Ordering::Relaxed);
         let mut stream = StreamedJson {
             id,
             head: Bytes::new(),
@@ -364,8 +370,8 @@ pub struct StreamedJson {
     /// `None` once the producer finished with `outcome`.
     producer: Option<BoxFuture<'static, Result<(), ErrorObjectOwned>>>,
     outcome: Result<(), ErrorObjectOwned>,
-    /// Bytes left before the response exceeds `max_response_size`.
-    remaining: usize,
+    /// See [`ResponseSink::remaining`].
+    remaining: Arc<AtomicUsize>,
     max_response_size: usize,
     done: bool,
 }
@@ -388,30 +394,26 @@ impl Stream for StreamedJson {
             return Poll::Ready(Some(Ok(std::mem::take(&mut this.head))))
         }
 
-        let part = loop {
-            if let Poll::Ready(Some(part)) = this.parts.poll_recv(cx) {
-                break Ok(part)
-            }
+        loop {
             let Some(producer) = &mut this.producer else {
-                // The producer finished and every part it sent before is taken.
+                // Unlike `poll_recv`, `try_recv` doesn't return `Pending` for queued parts once the
+                // task used up its cooperative budget.
+                if let Ok(part) = this.parts.try_recv() {
+                    return Poll::Ready(Some(Ok(part)))
+                }
                 this.done = true;
-                break std::mem::replace(&mut this.outcome, Ok(()))
-                    .map(|()| Bytes::from_static(b"}"))
+                let outcome = std::mem::replace(&mut this.outcome, Ok(()));
+                if this.remaining.load(Ordering::Relaxed) == 0 {
+                    return Poll::Ready(Some(Err(reject_too_big_response(this.max_response_size))))
+                }
+                return Poll::Ready(Some(outcome.map(|()| Bytes::from_static(b"}"))))
             };
+            if let Poll::Ready(Some(part)) = this.parts.poll_recv(cx) {
+                return Poll::Ready(Some(Ok(part)))
+            }
             this.outcome = ready!(producer.as_mut().poll(cx));
             this.producer = None;
-        };
-        let part = part.and_then(|part| match this.remaining.checked_sub(part.len()) {
-            Some(remaining) => {
-                this.remaining = remaining;
-                Ok(part)
-            }
-            None => Err(reject_too_big_response(this.max_response_size)),
-        });
-        if part.is_err() {
-            this.done = true;
         }
-        Poll::Ready(Some(part))
     }
 }
 
@@ -421,33 +423,65 @@ impl Stream for StreamedJson {
 /// [`RpcModule::register_streaming_method`](crate::server::RpcModule::register_streaming_method).
 pub struct ResponseStream {
     parts: mpsc::UnboundedReceiver<Bytes>,
+    remaining: Arc<AtomicUsize>,
     producer: BoxFuture<'static, Result<(), ErrorObjectOwned>>,
 }
 
 impl ResponseStream {
-    /// Creates a result that `producer` sends in parts through the given sender.
+    /// Creates a result that `producer` sends in parts through the given sink.
     ///
     /// The parts are concatenated as they are, so together they must form the result as one JSON
-    /// value. Sending fails once the response was dropped, so the producer can stop. It never
-    /// waits for the client, so a slow client can't hold the producer's resources, and the parts
-    /// it has not read yet stay in memory. The transport polls the future while it sends the
-    /// response and drops it with the response. The result is complete once the future returns
-    /// `Ok` and fails with the error it returns otherwise.
+    /// value. The transport polls the future while it sends the response and drops it with the
+    /// response. The result is complete once the future returns `Ok` and fails with the error it
+    /// returns or when it panics.
     pub fn new<F, Fut, E>(producer: F) -> Self
     where
-        F: FnOnce(mpsc::UnboundedSender<Bytes>) -> Fut,
+        F: FnOnce(ResponseSink) -> Fut,
         Fut: Future<Output = Result<(), E>> + Send + 'static,
         E: Into<ErrorObjectOwned>,
     {
         let (tx, parts) = mpsc::unbounded_channel();
-        let producer = producer(tx);
-        Self { parts, producer: async move { producer.await.map_err(Into::into) }.boxed() }
+        let remaining = Arc::new(AtomicUsize::new(usize::MAX));
+        let producer = producer(ResponseSink { parts: tx, remaining: remaining.clone() });
+        let producer = AssertUnwindSafe(async move { producer.await.map_err(Into::into) })
+            .catch_unwind()
+            .map(|outcome| outcome.unwrap_or_else(|_| Err(ErrorCode::InternalError.into())));
+        Self { parts, remaining, producer: producer.boxed() }
     }
 }
 
 impl std::fmt::Debug for ResponseStream {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ResponseStream").finish_non_exhaustive()
+    }
+}
+
+/// Sends the parts of a [`ResponseStream`].
+///
+/// Sending never waits for the client, so a slow client can't hold the producer's resources. The
+/// parts it has not read yet stay in memory, up to the response size limit.
+#[derive(Debug, Clone)]
+pub struct ResponseSink {
+    parts: mpsc::UnboundedSender<Bytes>,
+    /// Bytes left for the parts and the closing brace of the response, or zero once a part
+    /// exceeded the response size limit.
+    remaining: Arc<AtomicUsize>,
+}
+
+impl ResponseSink {
+    /// Queues the next part of the result.
+    ///
+    /// Fails once the response was dropped or `part` would exceed the response size limit, so the
+    /// producer can stop.
+    pub fn send(&self, part: Bytes) -> Result<(), mpsc::error::SendError<Bytes>> {
+        let fits = self.remaining.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
+            left.checked_sub(part.len()).filter(|&left| left > 0)
+        });
+        if fits.is_err() {
+            self.remaining.store(0, Ordering::Relaxed);
+            return Err(mpsc::error::SendError(part))
+        }
+        self.parts.send(part)
     }
 }
 
@@ -646,7 +680,7 @@ mod tests {
     ) -> MethodResponse {
         let stream = ResponseStream::new(move |tx| async move {
             for part in parts {
-                tx.send(Bytes::from_static(part.as_bytes())).unwrap();
+                let _ = tx.send(Bytes::from_static(part.as_bytes()));
             }
             outcome
         });
@@ -668,6 +702,10 @@ mod tests {
         assert_eq!(rp.buffer().await.into_json(), failed);
         let rp = stream(&[], Ok(()), usize::MAX).await;
         assert_eq!(rp.as_error_code(), Some(ErrorCode::InternalError.code()));
+        // More parts than tokio's cooperative budget lets a task receive in one poll.
+        let parts = Vec::leak([["[0"].as_slice(), &[",0"; 300], &["]"]].concat());
+        let json = stream(parts, Ok(()), usize::MAX).await.buffer().await.into_json();
+        assert_eq!(json, format!(r#"{{"jsonrpc":"2.0","id":1,"result":[0{}]}}"#, ",0".repeat(300)));
 
         // Sent in parts, a failure after the first part ends the stream with the error.
         let rp = stream(&["[1"], Err(custom.clone()), usize::MAX).await;
@@ -683,6 +721,23 @@ mod tests {
             let rp = stream(&["[1", ",2", "]"], Ok(()), limit).await;
             assert_eq!(rp.buffer().await.as_error_code(), Some(OVERSIZED_RESPONSE_CODE));
         }
+        // A part past the limit isn't queued, and the producer learns it.
+        let (sent_tx, sent_rx) = std::sync::mpsc::channel();
+        let stream = ResponseStream::new(move |tx| async move {
+            let sent = ["[1", ",2", "]"].map(|part| tx.send(Bytes::from_static(part.as_bytes())));
+            sent_tx.send(sent.map(|sent| sent.is_ok())).unwrap();
+            Ok::<_, ErrorObjectOwned>(())
+        });
+        let rp = MethodResponse::stream(Id::Number(1), stream, ok.len() - 2).await;
+        assert_eq!(rp.as_error_code(), None);
+        assert_eq!(rp.buffer().await.as_error_code(), Some(OVERSIZED_RESPONSE_CODE));
+        assert_eq!(sent_rx.recv().unwrap(), [true, false, false]);
+
+        // A panicking producer fails the result.
+        let panics = || -> Result<(), ErrorObjectOwned> { panic!("producer panicked") };
+        let stream = ResponseStream::new(move |_| async move { panics() });
+        let rp = MethodResponse::stream(Id::Number(1), stream, usize::MAX).await;
+        assert_eq!(rp.as_error_code(), Some(ErrorCode::InternalError.code()));
     }
 
     #[tokio::test]
