@@ -1036,16 +1036,16 @@ async fn streaming_server(release: Arc<Notify>) -> (SocketAddr, ServerHandle) {
     module
         .register_streaming_method("stream_parts", |_, release| async move {
             RpcResult::Ok(ResponseStream::new(move |sink| async move {
-                sink.send("[1".into()).await.map_err(|_| ErrorCode::InternalError)?;
+                sink.send("[1".into()).map_err(|_| ErrorCode::InternalError)?;
                 release.notified().await;
-                sink.send(",2]".into()).await.map_err(|_| ErrorCode::InternalError)
+                sink.send(",2]".into()).map_err(|_| ErrorCode::InternalError)
             }))
         })
         .unwrap();
     module
         .register_streaming_method("stream_fails", |_, _| async move {
             RpcResult::Ok(ResponseStream::new(move |sink| async move {
-                sink.send("[1".into()).await.map_err(|_| ErrorCode::InternalError)?;
+                sink.send("[1".into()).map_err(|_| ErrorCode::InternalError)?;
                 Err(ErrorCode::InternalError)
             }))
         })

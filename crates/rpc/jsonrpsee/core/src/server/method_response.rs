@@ -360,7 +360,7 @@ pub struct StreamedJson {
     id: Id<'static>,
     /// Envelope and first part of the result, yielded first.
     head: Bytes,
-    parts: mpsc::Receiver<Bytes>,
+    parts: mpsc::UnboundedReceiver<Bytes>,
     /// `None` once the producer finished with `outcome`.
     producer: Option<BoxFuture<'static, Result<(), ErrorObjectOwned>>>,
     outcome: Result<(), ErrorObjectOwned>,
@@ -420,7 +420,7 @@ impl Stream for StreamedJson {
 /// Return it from a method registered with
 /// [`RpcModule::register_streaming_method`](crate::server::RpcModule::register_streaming_method).
 pub struct ResponseStream {
-    parts: mpsc::Receiver<Bytes>,
+    parts: mpsc::UnboundedReceiver<Bytes>,
     producer: BoxFuture<'static, Result<(), ErrorObjectOwned>>,
 }
 
@@ -428,17 +428,18 @@ impl ResponseStream {
     /// Creates a result that `producer` sends in parts through the given sender.
     ///
     /// The parts are concatenated as they are, so together they must form the result as one JSON
-    /// value. Sending waits while the transport has not taken the previous parts yet, and fails
-    /// once the response was dropped, so the producer can stop. The transport polls the future
-    /// while it sends the response and drops it with the response. The result is complete once
-    /// the future returns `Ok` and fails with the error it returns otherwise.
+    /// value. Sending fails once the response was dropped, so the producer can stop. It never
+    /// waits for the client, so a slow client can't hold the producer's resources, and the parts
+    /// it has not read yet stay in memory. The transport polls the future while it sends the
+    /// response and drops it with the response. The result is complete once the future returns
+    /// `Ok` and fails with the error it returns otherwise.
     pub fn new<F, Fut, E>(producer: F) -> Self
     where
-        F: FnOnce(mpsc::Sender<Bytes>) -> Fut,
+        F: FnOnce(mpsc::UnboundedSender<Bytes>) -> Fut,
         Fut: Future<Output = Result<(), E>> + Send + 'static,
         E: Into<ErrorObjectOwned>,
     {
-        let (tx, parts) = mpsc::channel(RESPONSE_STREAM_CAPACITY);
+        let (tx, parts) = mpsc::unbounded_channel();
         let producer = producer(tx);
         Self { parts, producer: async move { producer.await.map_err(Into::into) }.boxed() }
     }
@@ -543,10 +544,6 @@ impl BatchResponseBuilder {
     }
 }
 
-/// Parts of a streamed result that wait for the transport, so a producer runs at most this far
-/// ahead of a slow client while it never has to wait for the transport to take a part.
-const RESPONSE_STREAM_CAPACITY: usize = 4;
-
 /// Expected size of a method's next successful response.
 ///
 /// Responses of the same method tend to have similar sizes, so serializing into a buffer of the
@@ -649,7 +646,7 @@ mod tests {
     ) -> MethodResponse {
         let stream = ResponseStream::new(move |tx| async move {
             for part in parts {
-                tx.send(Bytes::from_static(part.as_bytes())).await.unwrap();
+                tx.send(Bytes::from_static(part.as_bytes())).unwrap();
             }
             outcome
         });
@@ -693,7 +690,9 @@ mod tests {
         let (closed_tx, closed_rx) = std::sync::mpsc::channel();
         let stream = ResponseStream::new(move |tx| {
             std::thread::spawn(move || {
-                while tx.blocking_send(Bytes::from_static(b"0")).is_ok() {}
+                while tx.send(Bytes::from_static(b"0")).is_ok() {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
                 closed_tx.send(()).unwrap();
             });
             std::future::pending::<Result<(), ErrorObjectOwned>>()

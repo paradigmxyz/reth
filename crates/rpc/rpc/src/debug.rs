@@ -372,7 +372,8 @@ where
     /// transaction is traced.
     ///
     /// The tracing permit is acquired before the block is looked up and held until the last
-    /// transaction is traced. Dropping the stream cancels the replay before its next transaction.
+    /// transaction is traced, which doesn't wait for the client to read the parts. Dropping the
+    /// stream cancels the replay before its next transaction.
     pub async fn debug_trace_block_stream(
         &self,
         block_id: BlockId,
@@ -391,14 +392,12 @@ where
                     })?;
                     // A dropped response stops the replay, so nobody receives this error.
                     parts
-                        .blocking_send(part.into())
+                        .send(part.into())
                         .map_err(|_| Eth::Error::from_eth_err(EthApiError::InternalEthError))
                 })
                 .await?;
             let end: &'static [u8] = if first { b"[]" } else { b"]" };
-            tx.send(end.into())
-                .await
-                .map_err(|_| Eth::Error::from_eth_err(EthApiError::InternalEthError))
+            tx.send(end.into()).map_err(|_| Eth::Error::from_eth_err(EthApiError::InternalEthError))
         }))
     }
 

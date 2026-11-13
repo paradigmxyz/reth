@@ -62,10 +62,10 @@ impl ApiServer for Api {
         Ok(ResponseStream::new(move |sink| async move {
             for i in 0..n {
                 let part = if i == 0 { format!("[{i}") } else { format!(",{i}") };
-                sink.send(part.into()).await.map_err(|_| ErrorCode::InternalError)?;
+                sink.send(part.into()).map_err(|_| ErrorCode::InternalError)?;
             }
             let end = if n == 0 { "[]" } else { "]" };
-            sink.send(end.into()).await.map_err(|_| ErrorCode::InternalError)
+            sink.send(end.into()).map_err(|_| ErrorCode::InternalError)
         }))
     }
 }
