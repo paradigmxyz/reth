@@ -582,8 +582,8 @@ mod tests {
     };
     use reth_rpc_server_types::constants::DEFAULT_MAX_CALL_MANY_CALLS;
     use reth_storage_api::{
-        BalProvider, BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ReceiptProvider,
-        StateProviderFactory,
+        BalProvider, BlockHashReader, BlockReader, BlockReaderIdExt, NodePrimitivesProvider,
+        ReceiptProvider, StateProviderFactory,
     };
     use reth_tasks::cancel::{is_cancelled, CancelOnDrop};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
@@ -879,7 +879,6 @@ mod tests {
         let mut parent_hash = B256::default();
 
         for i in (0..block_count).rev() {
-            let hash = rng.random();
             // Note: Generates saner values to avoid invalid overflows later
             let gas_limit = rng.random::<u32>() as u64;
             let base_fee_per_gas: Option<u64> =
@@ -894,6 +893,7 @@ mod tests {
                 parent_hash,
                 ..Default::default()
             };
+            let hash = header.hash_slow();
             last_header = Some(header.clone());
             parent_hash = hash;
 
@@ -1352,6 +1352,42 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.message(), EthApiError::InvalidBlockRange.to_string());
+    }
+
+    /// A range whose chunks don't form one canonical chain, as after a reorg between two chunk
+    /// reads, is rejected instead of mixing forks.
+    #[tokio::test]
+    async fn test_fee_history_rewards_rejects_mixed_forks() {
+        let block_count = 2 * 64;
+        let newest_block = 1337;
+        let first_block = newest_block - block_count + 1;
+        let percentiles = vec![0.0, 50.0, 100.0];
+
+        // The first block of the second chunk doesn't extend the first chunk, or the last block
+        // of the first chunk is no longer the canonical block at its height.
+        for (number, fork) in [
+            (
+                first_block + 64,
+                (|header: &mut Header| header.parent_hash = B256::random()) as fn(&mut Header),
+            ),
+            (first_block + 63, |header: &mut Header| {
+                header.extra_data = Bytes::from_static(b"fork")
+            }),
+        ] {
+            let mock_provider = MockEthProvider::default();
+            let (eth_api, _, _) =
+                prepare_eth_api(newest_block, None, block_count, mock_provider.clone());
+            let hash = mock_provider.block_hash(number).unwrap().unwrap();
+            let mut block = mock_provider.block_by_number(number).unwrap().unwrap();
+            fork(&mut block.header);
+            mock_provider.add_block(hash, block);
+
+            let err = eth_api
+                .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles.clone()))
+                .await
+                .unwrap_err();
+            assert_eq!(err.message(), EthApiError::InvalidBlockRange.to_string());
+        }
     }
 
     /// Rewards of canonical blocks that are not persisted yet use their in-memory receipts, also

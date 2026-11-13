@@ -2,7 +2,7 @@
 
 use super::LoadBlock;
 use crate::FromEthApiError;
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{BlockHeader, Sealable};
 use alloy_eips::{eip7840::BlobParams, BlockId};
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockNumberOrTag, FeeHistory};
@@ -14,8 +14,8 @@ use reth_rpc_eth_types::{
     EthApiError, FeeHistoryCache, FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
 };
 use reth_storage_api::{
-    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, HeaderProvider, ProviderHeader,
-    ReceiptProvider,
+    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, HeaderProvider,
+    ProviderHeader, ReceiptProvider,
 };
 use tracing::debug;
 
@@ -218,6 +218,7 @@ pub trait EthFees:
                         // time, instead of the whole range.
                         let mut headers = Vec::with_capacity(block_count as usize);
                         let mut chunk_start = start_block;
+                        let mut previous_chunk_hash = None;
                         while chunk_start <= end_block {
                             let chunk_end = chunk_start
                                 .saturating_add(FEE_HISTORY_REWARD_CHUNK_SIZE - 1)
@@ -230,6 +231,7 @@ pub trait EthFees:
                                 .map_err(Self::Error::from_eth_err)?;
                             // A missing block or receipt list shortens `headers`, which fails the
                             // length check below.
+                            let chunk_first = headers.len();
                             for (block, receipts) in blocks.into_iter().zip(receipts) {
                                 let (header, body) = block.split();
                                 // The receipt lists of pruned blocks come back short or empty.
@@ -246,6 +248,26 @@ pub trait EthFees:
                                     .unwrap_or_default(),
                                 );
                                 headers.push(header);
+                            }
+                            // Every read resolves block numbers against the canonical chain at
+                            // that time, so a reorg between reads could mix blocks of two forks,
+                            // or blocks with another fork's receipts. A chunk must extend the
+                            // previous one, and its last block must still be canonical after its
+                            // receipts were read, which a reorg at or below it would change.
+                            if let Some(chunk) = headers.get(chunk_first..) &&
+                                let (Some(first), Some(last)) = (chunk.first(), chunk.last())
+                            {
+                                let last_hash = last.hash_slow();
+                                let extends_previous = previous_chunk_hash
+                                    .is_none_or(|hash| first.parent_hash() == hash);
+                                let still_canonical = provider
+                                    .block_hash(last.number())
+                                    .map_err(Self::Error::from_eth_err)? ==
+                                    Some(last_hash);
+                                if !extends_previous || !still_canonical {
+                                    return Err(EthApiError::InvalidBlockRange.into())
+                                }
+                                previous_chunk_hash = Some(last_hash);
                             }
                             if chunk_end == end_block {
                                 break
