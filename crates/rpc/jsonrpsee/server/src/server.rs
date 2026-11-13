@@ -710,7 +710,13 @@ where
         let conn_guard = &self.inner.conn_guard;
         let conn_id = self.inner.conn_id;
 
-        tracing::trace!(target: LOG_TARGET, "{:?}", request);
+        tracing::trace!(
+            target: LOG_TARGET,
+            "{} {} {:?}",
+            request.method(),
+            request.uri(),
+            request.version()
+        );
 
         let Some(conn_permit) = conn_guard.try_acquire() else {
             return async move { Ok(http::response::too_many_requests()) }.boxed();
@@ -789,7 +795,11 @@ where
                 }
                 Err(e) => {
                     tracing::debug!(target: LOG_TARGET, "Could not upgrade connection: {}", e);
-                    HttpResponse::new(HttpBody::from(format!("Could not upgrade connection: {e}")))
+                    let mut response = HttpResponse::new(HttpBody::from(format!(
+                        "Could not upgrade connection: {e}"
+                    )));
+                    *response.status_mut() = hyper::StatusCode::BAD_REQUEST;
+                    response
                 }
             };
 
