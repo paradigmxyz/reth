@@ -10,8 +10,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Build and run the simulator inventory from the same Hive revision.
-  HIVE_REF: 71234e3ffb35525948522a1a25e14bd7afb2e342
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -48,7 +46,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ethereum/hive
-          ref: ${{ env.HIVE_REF }}
+          ref: master
           path: hivetests
           persist-credentials: false
 
@@ -277,7 +275,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ethereum/hive
-          ref: ${{ env.HIVE_REF }}
+          ref: master
           path: hivetests
           persist-credentials: false
 
