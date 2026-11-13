@@ -161,16 +161,16 @@ impl MethodResponse {
     where
         T: Serialize + Clone,
     {
-        let success = matches!(rp, ResponsePayload::Success(_));
         let mut rp = Self::response_with_capacity(id, rp, max_response_size, size_hint.capacity());
-        // Responses are never shrunk later, so a response much smaller than the hint would
-        // otherwise keep the unused capacity until it is sent.
+        // A response much smaller than the hint would otherwise keep the unused capacity until it
+        // is sent.
         let unused = rp.json.capacity() - rp.json.len();
         if unused > rp.json.len() && unused > RESPONSE_SHRINK_THRESHOLD {
             rp.json.shrink_to_fit();
         }
-        // A success that exceeded the limit was replaced with an error, which isn't recorded.
-        if success && rp.is_success() {
+        // Errors aren't recorded, including a success that exceeded the limit and was replaced
+        // with one.
+        if rp.is_success() {
             size_hint.record(rp.json.len());
         }
         rp
@@ -328,8 +328,14 @@ impl BatchResponseBuilder {
                 reject_too_big_batch_response(self.max_response_size),
             ))
         } else {
+            let mut json = response.json;
+            // Entries are kept until the batch is finished, so a buffer that `sized_response`
+            // left mostly unused would stay allocated for the whole batch.
+            if json.capacity() - json.len() > json.len() {
+                json.shrink_to_fit();
+            }
             self.len = len;
-            self.entries.push(response.json);
+            self.entries.push(json);
             Ok(())
         }
     }
@@ -388,7 +394,8 @@ impl ResponseSizeHint {
 
     /// Records the size of a successful response.
     fn record(&self, len: usize) {
-        // Concurrent calls may overwrite each other's update, which only delays the decay.
+        // Concurrent calls may overwrite each other's update. The hint is only an estimate, so a
+        // lost update costs at most one regrown buffer.
         let hint = self.0.load(Ordering::Relaxed);
         let decayed = hint - hint / 8;
         self.0.store(len.max(decayed).min(MAX_RESPONSE_SIZE_HINT), Ordering::Relaxed);
@@ -665,5 +672,19 @@ mod tests {
         let rp = sized_response(success(&"a"), &hint);
         // Most of the buffer is unused, but too little to be worth reallocating.
         assert!(rp.json.capacity() >= reserved);
+    }
+
+    #[test]
+    fn batch_entries_do_not_keep_unused_capacity() {
+        let hint = ResponseSizeHint::new();
+        sized_response(success(&"x".repeat(8 * 1024)), &hint);
+
+        let rp = sized_response(success(&"a"), &hint);
+        let len = rp.json.len();
+        assert!(rp.json.capacity() > 2 * len);
+
+        let mut builder = BatchResponseBuilder::new_with_limit(usize::MAX);
+        builder.append(rp).unwrap();
+        assert_eq!(builder.entries[0].capacity(), len);
     }
 }
