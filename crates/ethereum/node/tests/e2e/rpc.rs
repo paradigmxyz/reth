@@ -1362,11 +1362,8 @@ async fn test_block_response_cache_matches_uncached_responses() -> eyre::Result<
     // The highest number is compared against the head like any other, without overflowing.
     assert_eq!(raw("eth_getBlockByNumber", json!([U256::from(u64::MAX), false])).await?, "null");
 
-    // The reorg removes the replaced head from the cache, so it gets the answer of the handler,
-    // which does not know the block anymore.
-    poll_until("the replaced head to be unknown", || async {
-        Ok((raw("eth_getBlockByHash", json!([head, false])).await? == "null").then_some(()))
-    })
-    .await?;
+    // The replaced head is a side chain block now, which the handlers still serve by hash.
+    let replaced = raw("eth_getBlockByHash", json!([head, false])).await?;
+    assert!(replaced.contains(&format!("{head}")), "replaced head not served: {replaced}");
     Ok(())
 }

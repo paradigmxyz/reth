@@ -71,13 +71,17 @@ fn wrap<Ctx, Eth>(
     let eth_api = eth_api.clone();
     let callback =
         MethodCallback::Async(Arc::new(move |id, params, conn_id, max_response_size| {
+            // Params the cache cannot use go straight to the original handler, which borrows them
+            // only for the call.
+            let Some((block_id, kind)) = request(&params) else {
+                return original(id, params, conn_id, max_response_size);
+            };
+            // The original handler stays the fallback after the lookup awaits, so the params must
+            // outlive this call. They are a block id and a flag, a few dozen bytes.
+            let params = params.into_owned();
             let (eth_api, original) = (eth_api.clone(), original.clone());
             async move {
-                let cached = match request(&params) {
-                    Some((block_id, kind)) => serve(&eth_api, block_id, kind).await,
-                    None => None,
-                };
-                match cached {
+                match serve(&eth_api, block_id, kind).await {
                     Some(result) => respond(id, result, max_response_size),
                     None => original(id, params, conn_id, max_response_size).await,
                 }
