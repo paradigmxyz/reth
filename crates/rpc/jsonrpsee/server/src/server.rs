@@ -1007,30 +1007,43 @@ fn parse_batch_entry(call: &JsonRawValue) -> Result<BatchEntry<'_>, BatchEntryEr
 /// Reads a JSON-RPC message object in one pass and classifies it as a call or a notification, or
 /// returns the id and code of the error response.
 ///
-/// `body` must start with `{`. The members are decoded only once the whole object is read, so an
-/// invalid message costs one pass over `body` like a valid one. The outcome is the one of decoding
-/// `body` as a [`Request`], then as a [`Notification`] without an `id`, and otherwise recovering
-/// the `id` of the invalid request.
+/// `body` must start with `{`. A member value of the wrong type doesn't stop the read, so an
+/// invalid message costs one pass over `body` like a valid one, and only invalid JSON or a value
+/// that doesn't decode at all takes a second pass. The outcome is the one of decoding `body` as a
+/// [`Request`], then as a [`Notification`] without an `id`, and otherwise recovering the `id` of
+/// the invalid request.
 fn parse_message(body: &[u8]) -> Result<BatchEntry<'_>, (Id<'_>, ErrorCode)> {
-    let mut deserializer = serde_json::Deserializer::from_slice(body);
-    let Ok(members) = MessageMembers::deserialize(&mut deserializer)
-        .and_then(|members| deserializer.end().map(|()| members))
-    else {
-        return Err((Id::Null, ErrorCode::ParseError));
+    let Ok(members) = read_members::<Value<'_>>(body) else {
+        // Either the JSON is invalid or a `jsonrpc`, `id` or `method` value doesn't decode, like a
+        // string with a lone surrogate escape, and both fail a call and a notification. Reading
+        // these values as raw JSON tells an invalid request from invalid JSON.
+        let id = match read_members::<&JsonRawValue>(body) {
+            Ok(members) if std::str::from_utf8(body).is_ok() => match members.id {
+                Member::Once(id) => serde_json::from_str(id.get()).unwrap_or(Id::Null),
+                _ => Id::Null,
+            },
+            _ => return Err((Id::Null, ErrorCode::ParseError)),
+        };
+        return Err((id, ErrorCode::InvalidRequest));
     };
 
-    let id = members.id.decode::<Id<'_>>();
+    let has_id = !matches!(members.id, Member::Missing);
+    let id = match members.id {
+        Member::Once(id) => id.into_id(),
+        _ => None,
+    };
     let params = match members.params {
         Member::Missing => Some(None),
         // Decoded as an `Option`, `null` params are absent.
         Member::Once(params) => Some((params.get() != "null").then_some(Cow::Borrowed(params))),
         Member::Repeated => None,
     };
-    if let Some(TwoPointZero) = members.jsonrpc.decode() &&
-        let Some(MethodName(method)) = members.method.decode() &&
+    if let Member::Once(Value::Str(version)) = members.jsonrpc &&
+        version == "2.0" &&
+        let Member::Once(Value::Str(method)) = members.method &&
         let Some(params) = params
     {
-        if let Member::Missing = members.id {
+        if !has_id {
             return Ok(BatchEntry::Notification(Notification::new(method, params)));
         }
         if let Some(id) = id {
@@ -1038,30 +1051,45 @@ fn parse_message(body: &[u8]) -> Result<BatchEntry<'_>, (Id<'_>, ErrorCode)> {
         }
     }
 
-    // Unknown members are skipped without checking that they are UTF-8, so a valid message may
-    // hold invalid UTF-8 but an invalid one is then a parse error.
+    // Arrays, objects and unknown members are skipped without checking that their strings are
+    // UTF-8, so a valid message may hold invalid UTF-8 but an invalid one is then a parse error.
     if std::str::from_utf8(body).is_err() {
         return Err((Id::Null, ErrorCode::ParseError));
     }
     Err((id.unwrap_or(Id::Null), ErrorCode::InvalidRequest))
 }
 
-/// The members of a JSON-RPC message object, read without decoding them.
-#[derive(Default)]
-struct MessageMembers<'a> {
-    jsonrpc: Member<'a>,
-    id: Member<'a>,
-    method: Member<'a>,
-    params: Member<'a>,
+/// Reads the members of the message object in `body`, decoding the `jsonrpc`, `id` and `method`
+/// values as `V`.
+fn read_members<'a, V: Deserialize<'a>>(
+    body: &'a [u8],
+) -> serde_json::Result<MessageMembers<'a, V>> {
+    let mut deserializer = serde_json::Deserializer::from_slice(body);
+    let members = MessageMembers::deserialize(&mut deserializer)?;
+    deserializer.end()?;
+    Ok(members)
 }
 
-impl<'de> Deserialize<'de> for MessageMembers<'de> {
+/// The members of a JSON-RPC message object, read without rejecting a message for its values.
+struct MessageMembers<'a, V> {
+    jsonrpc: Member<V>,
+    id: Member<V>,
+    method: Member<V>,
+    params: Member<&'a JsonRawValue>,
+}
+
+impl<'de, V: Deserialize<'de>> Deserialize<'de> for MessageMembers<'de, V> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_map(Self::default())
+        deserializer.deserialize_map(Self {
+            jsonrpc: Member::Missing,
+            id: Member::Missing,
+            method: Member::Missing,
+            params: Member::Missing,
+        })
     }
 }
 
-impl<'de> Visitor<'de> for MessageMembers<'de> {
+impl<'de, V: Deserialize<'de>> Visitor<'de> for MessageMembers<'de, V> {
     type Value = Self;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1070,41 +1098,35 @@ impl<'de> Visitor<'de> for MessageMembers<'de> {
 
     fn visit_map<A: MapAccess<'de>>(mut self, mut map: A) -> Result<Self::Value, A::Error> {
         while let Some(name) = map.next_key()? {
-            let member = match name {
-                MemberName::Jsonrpc => &mut self.jsonrpc,
-                MemberName::Id => &mut self.id,
-                MemberName::Method => &mut self.method,
-                MemberName::Params => &mut self.params,
+            match name {
+                MemberName::Jsonrpc => self.jsonrpc.set(map.next_value()?),
+                MemberName::Id => self.id.set(map.next_value()?),
+                MemberName::Method => self.method.set(map.next_value()?),
+                MemberName::Params => self.params.set(map.next_value()?),
                 MemberName::Other => {
                     map.next_value::<IgnoredAny>()?;
-                    continue;
                 }
-            };
-            let value = map.next_value()?;
-            *member = match member {
-                Member::Missing => Member::Once(value),
-                Member::Once(_) | Member::Repeated => Member::Repeated,
-            };
+            }
         }
         Ok(self)
     }
 }
 
 /// A member of a [`MessageMembers`] object.
-#[derive(Clone, Copy, Default)]
-enum Member<'a> {
-    #[default]
+enum Member<T> {
     Missing,
-    Once(&'a JsonRawValue),
+    Once(T),
     /// Present more than once, which the derived `Deserialize` impls reject.
     Repeated,
 }
 
-impl<'a> Member<'a> {
-    /// Decodes the member, or returns `None` if it is missing, repeated or invalid.
-    fn decode<T: Deserialize<'a>>(self) -> Option<T> {
-        let Self::Once(value) = self else { return None };
-        serde_json::from_str(value.get()).ok()
+impl<T> Member<T> {
+    /// Records the next occurrence of the member.
+    fn set(&mut self, value: T) {
+        *self = match self {
+            Self::Missing => Self::Once(value),
+            Self::Once(_) | Self::Repeated => Self::Repeated,
+        };
     }
 }
 
@@ -1121,9 +1143,80 @@ enum MemberName {
     Other,
 }
 
-/// A method name, borrowed from the message unless it holds escapes.
-#[derive(Deserialize)]
-struct MethodName<'a>(#[serde(borrow)] Cow<'a, str>);
+/// A member value, decoded only as far as the `jsonrpc`, `id` and `method` members need.
+enum Value<'a> {
+    /// A string, borrowed from the message unless it holds escapes.
+    Str(Cow<'a, str>),
+    U64(u64),
+    Null,
+    /// A negative number, a float, a boolean, an array or an object, which none of these members
+    /// accepts.
+    Other,
+}
+
+impl<'a> Value<'a> {
+    /// Decodes the value like [`Id`]'s `Deserialize` impl, or returns `None` if it is no id.
+    fn into_id(self) -> Option<Id<'a>> {
+        match self {
+            Self::Str(id) => Some(Id::Str(id)),
+            Self::U64(id) => Some(Id::Number(id)),
+            Self::Null => Some(Id::Null),
+            Self::Other => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Value<'de> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(ValueVisitor)
+    }
+}
+
+struct ValueVisitor;
+
+impl<'de> Visitor<'de> for ValueVisitor {
+    type Value = Value<'de>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("any JSON value")
+    }
+
+    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E> {
+        Ok(Value::Str(Cow::Borrowed(v)))
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E> {
+        Ok(Value::Str(Cow::Owned(v.to_owned())))
+    }
+
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E> {
+        Ok(Value::U64(v))
+    }
+
+    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E> {
+        Ok(u64::try_from(v).map_or(Value::Other, Value::U64))
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_f64<E>(self, _: f64) -> Result<Self::Value, E> {
+        Ok(Value::Other)
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<Self::Value, E> {
+        Ok(Value::Other)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
+        IgnoredAny.visit_seq(seq).map(|_| Value::Other)
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+        IgnoredAny.visit_map(map).map(|_| Value::Other)
+    }
+}
 
 /// A valid batch entry: a call if it has an `id`, a notification otherwise.
 ///
@@ -1353,6 +1446,8 @@ mod tests {
     #[test_case(br#"{"jsonrpc":"2.0","method":"m","method":"n","id":5}"#, "error Number(5) InvalidRequest"; "duplicate method")]
     #[test_case(br#"{"jsonrpc":"2.0","method":"m","params":[],"params":[]}"#, "error Null InvalidRequest"; "duplicate params")]
     #[test_case(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"x\":\"\xff\"}", "error Null ParseError"; "invalid utf8 in unknown member of an invalid request")]
+    #[test_case(br#"{"jsonrpc":"2.0","id":1,"method":"\ud800"}"#, "error Number(1) InvalidRequest"; "method that does not decode")]
+    #[test_case(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"\\ud800\",\"x\":\"\xff\"}", "error Null ParseError"; "method that does not decode and invalid utf8")]
     #[test_case(br#"{"jsonrpc":"2.0","method":"m","id":1} x"#, "error Null ParseError"; "trailing characters")]
     fn message_outcome(body: &[u8], outcome: &str) {
         let parsed = match parse_message(body) {
