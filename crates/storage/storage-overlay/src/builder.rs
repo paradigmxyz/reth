@@ -237,7 +237,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
     /// Stops this builder from retaining the trie reverts it accumulates in the changeset cache.
     ///
-    /// Use it for anchors an untrusted peer chooses: cached reverts are keyed by the anchor and
+    /// Use it for anchors a peer or RPC caller chooses: cached reverts are keyed by the anchor and
     /// stay until their start block is evicted, so they would otherwise pile up in the cache the
     /// engine shares.
     pub const fn without_trie_revert_caching(mut self) -> Self {

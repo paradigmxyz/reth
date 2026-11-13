@@ -14,10 +14,18 @@ args = parser.parse_args()
 with open(args.report_json, 'r') as file:
     report = json.load(file)
 
+def flatten(entries):
+    """Yields test names from a list that may nest lists shared through YAML aliases."""
+    for entry in entries:
+        if isinstance(entry, list):
+            yield from flatten(entry)
+        else:
+            yield entry
+
 # Load exclusion YAML
 with open(args.exclusion, 'r') as file:
     exclusion_data = yaml.safe_load(file)
-    exclusions = exclusion_data.get(report['name'], [])
+    exclusions = set(flatten(exclusion_data.get(report['name'], [])))
 
 # Load ignored tests YAML
 with open(args.ignored, 'r') as file:
@@ -42,8 +50,14 @@ for test in report['testCases'].values():
             ignored_results['failed'].append(test_name)
         continue  # Skip this test - don't count it as unexpected
     
+    # Wirex runs Amsterdam fixtures with BALs both withheld and served. Match
+    # their shared expected failure while retaining the full name in diagnostics.
+    exclusion_name = test_name
+    if report['name'] == 'eels/consume-wirex' and test_name.endswith(('-bal_withheld', '-bal_served')):
+        exclusion_name = test_name.rsplit('-', 1)[0]
+
     # Check against expected failures
-    if test_name in exclusions:
+    if exclusion_name in exclusions:
         if test_pass:
             unexpected_passes.append(test_name)
     else:
