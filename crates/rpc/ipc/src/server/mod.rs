@@ -406,7 +406,7 @@ struct ProcessConnection<RpcMiddleware> {
 }
 
 /// Spawns the IPC connection onto a new task
-#[instrument(name = "connection", skip_all, fields(conn_id = %params.conn_id))]
+#[instrument(name = "connection", skip_all, fields(conn_id = %params.conn_id), level = "TRACE")]
 fn process_connection<RpcMiddleware>(params: ProcessConnection<RpcMiddleware>)
 where
     RpcMiddleware: Layer<RpcService> + Send + 'static,
@@ -445,10 +445,14 @@ where
         rpc_middleware,
     };
 
-    tokio::spawn(async {
-        to_ipc_service(ipc, service, stop_handle, rx).in_current_span().await;
-        drop(drop_on_completion)
-    });
+    // `#[instrument]` only spans this function, so the connection span is carried into the task.
+    tokio::spawn(
+        async {
+            to_ipc_service(ipc, service, stop_handle, rx).await;
+            drop(drop_on_completion)
+        }
+        .in_current_span(),
+    );
 }
 
 async fn to_ipc_service<S, T>(
