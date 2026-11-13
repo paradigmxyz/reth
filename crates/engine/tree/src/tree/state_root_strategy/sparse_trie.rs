@@ -380,7 +380,9 @@ where
         // marker means they died without finishing the stream.
         while !self.finished_state_updates {
             let mut t = Instant::now();
+            // Cancellation comes first in both loops, so it wins over queued work.
             crossbeam_channel::select_biased! {
+                recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
                 recv(self.updates) -> message => {
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
@@ -421,7 +423,6 @@ where
                     };
                     self.on_storage_job_message(returned)?;
                 },
-                recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
 
             done = self.make_progress()?;
@@ -435,6 +436,7 @@ where
         while !done {
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
+                recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
                 recv(self.proof_worker_handle.results()) -> message => {
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
@@ -460,7 +462,6 @@ where
                     };
                     self.on_storage_job_message(returned)?;
                 },
-                recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
 
             done = self.make_progress()?;
@@ -2104,6 +2105,31 @@ mod tests {
         assert!(done_tx.send(StorageJobMessage::Done(done)).is_err());
         drop(updates_tx);
         drain_sparse_trie_tasks(&runtime);
+    }
+
+    /// Ensures cancellation wins over queued work while streaming and while draining.
+    #[test]
+    fn run_cancels_before_queued_work() {
+        for finished_state_updates in [false, true] {
+            let runtime = Runtime::test();
+            let trie = SparseStateTrie::default()
+                .with_default_storage_trie(RevealableSparseTrie::revealed_empty());
+            let (mut task, updates_tx, cancel_guard) = test_task(&runtime, trie);
+            let address = B256::repeat_byte(0x22);
+            task.storage_trie_state_mut(address);
+            let work = check_out_storage(&mut task, address);
+            let done = StorageTrieJob { address, work }.run(task.new_epoch, false);
+            task.storage_done_tx.send(StorageJobMessage::Done(done)).unwrap();
+            task.finished_state_updates = finished_state_updates;
+
+            drop(cancel_guard);
+            assert!(matches!(task.run(), Err(StateRootTaskError::Canceled)));
+            assert_eq!(task.storage_done_rx.len(), 1, "the queued storage job must stay queued");
+
+            drop(updates_tx);
+            drop(task);
+            drain_sparse_trie_tasks(&runtime);
+        }
     }
 
     #[test]
