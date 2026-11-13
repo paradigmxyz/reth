@@ -1224,6 +1224,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_rpc_middleware_is_built_once_per_connection() {
+        let endpoint = &dummy_name();
+
+        let built = Arc::new(AtomicUsize::new(0));
+        let rpc_middleware = RpcServiceBuilder::new().layer_fn({
+            let built = built.clone();
+            move |service| {
+                built.fetch_add(1, Ordering::Relaxed);
+                service
+            }
+        });
+        let server = Builder::default().set_rpc_middleware(rpc_middleware).build(endpoint.clone());
+
+        let mut module = RpcModule::new(());
+        module.register_method("say_hello", |_, _| "hello").unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        for connections in 1..=2 {
+            let mut client = TestClient::connect(endpoint).await;
+            for _ in 0..2 {
+                let response = client.call("say_hello", json!([])).await.unwrap();
+                assert_eq!(response["result"], "hello");
+            }
+            assert_eq!(built.load(Ordering::Relaxed), connections);
+        }
+    }
+
+    #[tokio::test]
     #[cfg(unix)]
     async fn invalid_ipc_socket_permissions() {
         for permissions in
