@@ -1,7 +1,10 @@
 //! JSON-RPC IPC server implementation
 
 use crate::stream_codec::StreamCodec;
-use futures_util::{future::Either, StreamExt};
+use futures_util::{
+    future::{self, Either},
+    StreamExt,
+};
 use interprocess::local_socket::{
     tokio::prelude::{LocalSocketListener, LocalSocketStream},
     traits::tokio::{Listener, Stream},
@@ -13,7 +16,7 @@ use jsonrpsee::{
         accept_error_backoff,
         middleware::rpc::RpcServiceT,
         stop_channel,
-        stream::{serve_stream, ReadError, StreamConnection},
+        stream::{serve_stream, StreamConnection, TooLarge},
         BatchRequestConfig, ConnectionGuard, ConnectionPermit, IdProvider, RandomIntegerIdProvider,
         ServerHandle, StopHandle,
     },
@@ -314,17 +317,19 @@ where
     let (recv, send) = local_socket_stream.split();
     // The codec truncates a longer message to one byte more than the limit.
     let codec = StreamCodec::stream_incoming().with_max_length(max_request_body_size as usize);
-    let incoming = FramedRead::new(recv, codec).map(move |request| match request {
-        Ok(request) if request.len() > max_request_body_size as usize => Err(ReadError::TooLarge),
-        Ok(request) => {
-            trace!(request_bytes = request.len(), "Received IPC request");
-            Ok(request)
-        }
-        Err(err) => {
-            // this can happen if the client closes the connection
-            tracing::debug!("IPC request failed: {:?}", err);
-            Err(ReadError::Fatal(err))
-        }
+    let incoming = FramedRead::new(recv, codec).scan((), move |(), request| {
+        future::ready(match request {
+            Ok(request) if request.len() > max_request_body_size as usize => Some(Err(TooLarge)),
+            Ok(request) => {
+                trace!(request_bytes = request.len(), "Received IPC request");
+                Some(Ok(request))
+            }
+            Err(err) => {
+                // this can happen if the client closes the connection
+                tracing::debug!("IPC request failed: {:?}", err);
+                None
+            }
+        })
     });
     let outgoing = FramedWrite::new(send, StreamCodec::stream_incoming());
 

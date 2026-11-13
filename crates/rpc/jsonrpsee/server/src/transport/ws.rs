@@ -1,6 +1,6 @@
 use crate::{
     server::{ConnectionState, ServerConfig},
-    transport::stream::{serve_stream, MessageWriter, ReadError, StreamConnection},
+    transport::stream::{serve_stream, MessageWriter, StreamConnection, TooLarge},
     LOG_TARGET,
 };
 
@@ -66,11 +66,11 @@ where
                         current,
                         maximum
                     );
-                    return Some((Err(ReadError::TooLarge), receiver));
+                    return Some((Err(TooLarge), receiver));
                 }
                 Err(e) => {
                     tracing::debug!(target: LOG_TARGET, "WS error: {}; terminate connection: {}", e, conn_id);
-                    return Some((Err(ReadError::Fatal(e)), receiver));
+                    return None;
                 }
             }
         }

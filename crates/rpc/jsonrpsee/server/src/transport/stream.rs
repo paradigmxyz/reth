@@ -31,24 +31,10 @@ const MAX_MESSAGES_PER_FLUSH: usize = 64;
 /// its own responses.
 const MAX_MESSAGES_PER_TURN: usize = 32;
 
-/// Why a message could not be read from a connection.
-#[derive(Debug)]
-pub enum ReadError<E> {
-    /// The message exceeds the maximum request size. It is answered with an error and the
-    /// connection continues.
-    TooLarge,
-    /// The connection can't be read anymore and is closed.
-    Fatal(E),
-}
-
-impl<E: fmt::Display> fmt::Display for ReadError<E> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::TooLarge => f.write_str("message too large"),
-            Self::Fatal(err) => err.fmt(f),
-        }
-    }
-}
+/// A received message exceeds the maximum request size. It is answered with an error and the
+/// connection continues.
+#[derive(Debug, Clone, Copy)]
+pub struct TooLarge;
 
 /// Writes messages to a connection.
 ///
@@ -96,7 +82,8 @@ where
 /// A connection to serve with [`serve_stream`].
 #[derive(Debug)]
 pub struct StreamConnection<R, W, S, F> {
-    /// The messages received from the client. The stream ends when the client disconnects.
+    /// The messages received from the client. The stream ends when the client disconnects or the
+    /// connection can't be read anymore.
     pub incoming: R,
     /// Writes the messages for the client.
     pub outgoing: W,
@@ -111,7 +98,7 @@ pub struct StreamConnection<R, W, S, F> {
     pub stopped: F,
     /// How batches are handled.
     pub batch_requests_config: BatchRequestConfig,
-    /// The limit named in the answer to a [`ReadError::TooLarge`] message.
+    /// The limit named in the answer to a [`TooLarge`] message.
     pub max_request_body_size: u32,
     /// Calls the connection runs at once. Further messages are not read while that many run.
     pub max_concurrent_calls: usize,
@@ -125,11 +112,10 @@ pub struct StreamConnection<R, W, S, F> {
 ///
 /// Every message runs as its own task and is answered through `conn.sink`, in the order the calls
 /// complete. Messages are read and written by the calling task.
-pub async fn serve_stream<R, M, E, W, S, F>(conn: StreamConnection<R, W, S, F>)
+pub async fn serve_stream<R, M, W, S, F>(conn: StreamConnection<R, W, S, F>)
 where
-    R: Stream<Item = Result<M, ReadError<E>>> + Unpin,
+    R: Stream<Item = Result<M, TooLarge>> + Unpin,
     M: AsRef<[u8]> + Send + 'static,
-    E: fmt::Display,
     W: MessageWriter,
     S: RpcServiceT + Send + Sync + 'static,
     F: Future<Output = ()>,
@@ -192,7 +178,7 @@ where
                 // The connection is closed.
                 None => break Shutdown::ConnectionClosed,
                 Some(Ok(data)) => data,
-                Some(Err(ReadError::TooLarge)) => {
+                Some(Err(TooLarge)) => {
                     if sink
                         .send_error(Id::Null, reject_too_big_request(max_request_body_size))
                         .await
@@ -203,8 +189,6 @@ where
 
                     continue;
                 }
-                // The transport has logged the error.
-                Some(Err(ReadError::Fatal(_))) => break Shutdown::ConnectionClosed,
             };
 
             // A connection runs at most `max_concurrent_calls` calls at once. While waiting for a
@@ -376,31 +360,23 @@ enum Shutdown {
 ///
 /// This will return once the connection has been terminated or all pending calls have been
 /// executed.
-async fn graceful_shutdown<R, M, E>(
+async fn graceful_shutdown<R, M>(
     shutdown: Shutdown,
     mut pending_calls: mpsc::Receiver<()>,
     incoming: &mut R,
     mut conn_tx: oneshot::Sender<()>,
 ) where
-    R: Stream<Item = Result<M, ReadError<E>>> + Unpin,
-    E: fmt::Display,
+    R: Stream<Item = Result<M, TooLarge>> + Unpin,
 {
     if matches!(shutdown, Shutdown::Stopped) {
         let graceful_shutdown = async { while pending_calls.recv().await.is_some() {} };
-        let disconnect = async {
-            while let Some(received) = incoming.next().await {
-                received?;
-            }
-            Ok::<_, ReadError<E>>(())
-        };
+        // The wait also ends when the client disconnects, the connection can't be read anymore,
+        // or a message is too large.
+        let disconnect = async { while let Some(Ok(_)) = incoming.next().await {} };
 
         tokio::select! {
             _ = graceful_shutdown => {}
-            res = disconnect => {
-                if let Err(err) = res {
-                    tracing::warn!(target: LOG_TARGET, "Graceful shutdown terminated because of error: `{err}`");
-                }
-            }
+            _ = disconnect => {}
             _ = conn_tx.closed() => {}
         }
     }
@@ -447,7 +423,7 @@ mod tests {
         }
     }
 
-    type Incoming = Pin<Box<dyn Stream<Item = Result<Vec<u8>, ReadError<io::Error>>> + Send>>;
+    type Incoming = Pin<Box<dyn Stream<Item = Result<Vec<u8>, TooLarge>> + Send>>;
 
     /// A connection of a client that always has another message ready. Like a socket, the stream
     /// gives way once the task has used up its budget.
