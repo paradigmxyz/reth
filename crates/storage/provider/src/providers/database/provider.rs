@@ -2333,10 +2333,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
 
         // fetch all receipts in the transaction range
         let all_receipts = self.receipts_by_tx_range(first_tx..=last_tx)?;
-        let expected_receipts = (last_tx - first_tx + 1) as usize;
 
         let mut result = Vec::with_capacity(block_body_indices.len());
-        if all_receipts.len() == expected_receipts {
+        if all_receipts.len() as u64 == last_tx - first_tx + 1 {
             // No gaps: distribute receipts to their respective blocks.
             let mut receipts_iter = all_receipts.into_iter();
             for indices in &block_body_indices {
@@ -4585,9 +4584,9 @@ mod tests {
         for block in &blocks {
             provider_rw.insert_block(&block.clone().try_recover().unwrap()).unwrap();
         }
-        let body_indices: Vec<_> = (0..blocks.len() as u64)
+        let body_indices = (0..blocks.len() as u64)
             .map(|n| provider_rw.block_body_indices(n).unwrap().unwrap())
-            .collect();
+            .collect::<Vec<_>>();
         for indices in &body_indices {
             for tx_num in indices.tx_num_range() {
                 provider_rw
@@ -4613,7 +4612,7 @@ mod tests {
 
         assert_eq!(result.len(), 4);
         for (block_number, indices) in body_indices.iter().enumerate() {
-            let expected: Vec<_> = if block_number == 0 {
+            let expected = if block_number == 0 {
                 vec![receipt(indices.first_tx_num())]
             } else {
                 indices.tx_num_range().map(receipt).collect()
