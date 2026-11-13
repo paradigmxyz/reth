@@ -5,7 +5,7 @@ use crate::{
     node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcNodeCore,
     RpcReceipt,
 };
-use alloy_consensus::{transaction::TxHashRef, TxReceipt};
+use alloy_consensus::{transaction::TxHashRef, Sealable, TxReceipt};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::BlockId;
 use alloy_rlp::Encodable;
@@ -13,11 +13,14 @@ use alloy_rpc_types_eth::{Block, BlockTransactions, Index};
 use evm2::evm::Bal as EvmBal;
 use futures::Future;
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockBody, RecoveredBlock, SealedHeader, TransactionMeta,
+    AlloyBlockHeader, BlockBody, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock,
+    TransactionMeta,
 };
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
 use reth_rpc_eth_types::block::SharedReceipts;
-use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
+use reth_storage_api::{
+    BlockIdReader, BlockReader, BlockSource, ProviderHeader, ProviderReceipt, ProviderTx,
+};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::sync::Arc;
 
@@ -64,6 +67,24 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
         Self: FullEthApiTypes,
     {
         async move {
+            if !full {
+                let Some(block) = self.sealed_or_recovered_block(block_id).await? else {
+                    return Ok(None)
+                };
+                let body = block.body();
+                let header = self
+                    .converter()
+                    .convert_header(block.clone_sealed_header(), Some(block.rlp_length()))?;
+                return Ok(Some(Block {
+                    header,
+                    uncles: body.ommers().unwrap_or(&[]).iter().map(|h| h.hash_slow()).collect(),
+                    transactions: BlockTransactions::Hashes(
+                        body.transaction_hashes_iter().copied().collect(),
+                    ),
+                    withdrawals: body.withdrawals().cloned(),
+                }))
+            }
+
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
 
             let block = block.clone_into_rpc_block(
@@ -206,7 +227,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     ) -> impl Future<Output = Result<Option<Vec<ProviderHeader<Self::Provider>>>, Self::Error>> + Send
     {
         async move {
-            if let Some(block) = self.recovered_block(block_id).await? {
+            if let Some(block) = self.sealed_or_recovered_block(block_id).await? {
                 Ok(block.body().ommers().map(|o| o.to_vec()))
             } else {
                 Ok(None)
@@ -225,7 +246,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     {
         async move {
             let uncles = self
-                .recovered_block(block_id)
+                .sealed_or_recovered_block(block_id)
                 .await?
                 .map(|block| block.body().ommers().map(|o| o.to_vec()).unwrap_or_default())
                 .unwrap_or_default();
@@ -336,6 +357,49 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
                 .get_recovered_block_and_maybe_bal(block_hash)
                 .await
                 .map_err(Self::Error::from_eth_err)
+        }
+    }
+
+    /// Returns the block for the given block id without recovering its transaction senders.
+    ///
+    /// Uses the pending or cached block if there is one, otherwise reads the sealed block. Unlike
+    /// [`LoadBlock::recovered_block`], this never loads the block into the cache.
+    #[expect(clippy::type_complexity)]
+    fn sealed_or_recovered_block(
+        &self,
+        block_id: BlockId,
+    ) -> impl Future<
+        Output = Result<
+            Option<SealedOrRecoveredBlock<<Self::Provider as BlockReader>::Block>>,
+            Self::Error,
+        >,
+    > + Send {
+        async move {
+            if block_id.is_pending() {
+                return Ok(self
+                    .recovered_block(block_id)
+                    .await?
+                    .map(SealedOrRecoveredBlock::recovered_arc))
+            }
+
+            let Some(block_hash) =
+                self.provider().block_hash_for_id(block_id).map_err(Self::Error::from_eth_err)?
+            else {
+                return Ok(None)
+            };
+
+            if let Some(block) =
+                self.cache().get_maybe_block(block_hash).await.map_err(Self::Error::from_eth_err)?
+            {
+                return Ok(Some(SealedOrRecoveredBlock::recovered_arc(block)))
+            }
+
+            self.spawn_blocking_io(move |this| {
+                this.provider()
+                    .find_sealed_or_recovered_block(block_hash, BlockSource::Canonical)
+                    .map_err(Self::Error::from_eth_err)
+            })
+            .await
         }
     }
 }
