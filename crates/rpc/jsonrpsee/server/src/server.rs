@@ -30,7 +30,7 @@ use std::{
 };
 
 use crate::{
-    future::{ConnectionGuard, ServerHandle, StopHandle},
+    future::{ConnectionGuard, ConnectionPermit, ServerHandle, StopHandle},
     middleware::rpc::{catch_call_panic, RpcService},
     transport::{http, ws, ws::BackgroundTaskParams},
     utils::{
@@ -76,7 +76,7 @@ use serde::{
 use soketto::handshake::http::is_upgrade_request;
 use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
-    sync::{mpsc, watch, Notify, OwnedSemaphorePermit},
+    sync::{mpsc, watch, Notify},
 };
 use tokio_util::compat::TokioAsyncReadCompatExt;
 use tower::{layer::util::Identity, Layer, Service, ServiceExt};
@@ -249,7 +249,7 @@ pub struct ConnectionState {
     /// Connection ID
     pub(crate) conn_id: usize,
     /// Connection guard.
-    pub(crate) _conn_permit: Arc<OwnedSemaphorePermit>,
+    pub(crate) _conn_permit: Arc<ConnectionPermit>,
 }
 
 impl ConnectionState {
@@ -257,7 +257,7 @@ impl ConnectionState {
     pub fn new(
         stop_handle: StopHandle,
         conn_id: usize,
-        conn_permit: OwnedSemaphorePermit,
+        conn_permit: ConnectionPermit,
     ) -> ConnectionState {
         Self { stop_handle, conn_id, _conn_permit: Arc::new(conn_permit) }
     }
