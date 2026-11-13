@@ -25,7 +25,7 @@ use jsonrpsee::{
 use std::{future::Future, io, pin::pin, sync::Arc};
 use tokio::{
     io::AsyncWriteExt,
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, Semaphore},
 };
 use tokio_util::codec::{FramedRead, FramedWrite};
 use tower::{layer::util::Identity, Layer};
@@ -354,7 +354,9 @@ where
         stopped: std::future::pending(),
         batch_requests_config: BatchRequestConfig::Unlimited,
         max_request_body_size,
-        max_concurrent_calls: MESSAGE_BUFFER_CAPACITY,
+        // Calls are not limited, so the connection keeps reading while they run and notices when
+        // the client disconnects, which cancels them.
+        max_concurrent_calls: Semaphore::MAX_PERMITS,
         ping_interval: None,
     };
 
@@ -592,6 +594,36 @@ mod tests {
         }
     }
 
+    /// Counts the calls that started and the ones that were dropped.
+    #[derive(Default)]
+    struct RunningCalls {
+        started: AtomicUsize,
+        dropped: AtomicUsize,
+    }
+
+    impl RunningCalls {
+        /// Waits until `reached` holds, and panics if it doesn't within five seconds.
+        async fn wait_for(&self, reached: impl Fn(&Self) -> bool) {
+            let wait = async {
+                while !reached(self) {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            };
+            tokio::time::timeout(Duration::from_secs(5), wait)
+                .await
+                .expect("condition not reached");
+        }
+    }
+
+    /// Counts a call as dropped when it ends.
+    struct RunningCall(Arc<RunningCalls>);
+
+    impl Drop for RunningCall {
+        fn drop(&mut self) {
+            self.0.dropped.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     /// Returns the error code of a response, or `None` if it succeeded.
     fn error_code(response: &Value) -> Option<i64> {
         response.get("error").map(|err| err["code"].as_i64().unwrap())
@@ -773,6 +805,42 @@ mod tests {
 
         let dropped = tokio::time::timeout(std::time::Duration::from_secs(5), dropped_rx).await;
         assert!(dropped.is_ok(), "call kept running after the connection closed");
+    }
+
+    #[tokio::test]
+    async fn test_pending_calls_aborted_on_disconnect_with_many_running() {
+        // More calls than the connection buffers messages.
+        const CALLS: usize = MESSAGE_BUFFER_CAPACITY + 1;
+
+        let endpoint = &dummy_name();
+        let server = Builder::default().build(endpoint.clone());
+        let running = Arc::new(RunningCalls::default());
+        let mut module = RpcModule::from_arc(running.clone());
+        module
+            .register_async_method("hang", |_, running| async move {
+                running.started.fetch_add(1, Ordering::Relaxed);
+                let _running = RunningCall(running);
+                std::future::pending::<()>().await;
+                "unreachable"
+            })
+            .unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let mut client = TestClient::connect(endpoint).await;
+        for _ in 0..CALLS {
+            let request = client.request("hang", json!([]));
+            client.send(request).await.unwrap();
+        }
+        running.wait_for(|running| running.started.load(Ordering::Relaxed) == CALLS).await;
+        drop(client);
+
+        // Every call that started is dropped once the connection is closed.
+        running
+            .wait_for(|running| {
+                running.dropped.load(Ordering::Relaxed) == running.started.load(Ordering::Relaxed)
+            })
+            .await;
     }
 
     #[tokio::test]
