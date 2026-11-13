@@ -36,10 +36,15 @@ where
         receipt_root_bloom,
         block_access_list_hash,
         false,
+        false,
     )
 }
 
-/// Validate a block with regard to execution results, optionally allowing pre-Amsterdam BAL hashes.
+/// Validate a block with regard to execution results, optionally allowing pre-Amsterdam BAL hashes
+/// and skipping the requests hash comparison.
+///
+/// `skip_requests_hash_check` only skips the comparison of the header requests hash against the
+/// executed requests; all other checks, including the block access list hash, still run.
 pub(crate) fn validate_block_post_execution_with_bal_hashes<B, R, ChainSpec>(
     block: &RecoveredBlock<B>,
     chain_spec: &ChainSpec,
@@ -47,6 +52,7 @@ pub(crate) fn validate_block_post_execution_with_bal_hashes<B, R, ChainSpec>(
     receipt_root_bloom: Option<(B256, Bloom)>,
     block_access_list_hash: Option<B256>,
     allow_bal_hashes: bool,
+    skip_requests_hash_check: bool,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
@@ -98,7 +104,7 @@ where
             return Err(ConsensusError::RequestsHashMissing)
         };
         let requests_hash = result.requests.requests_hash();
-        if requests_hash != header_requests_hash {
+        if !skip_requests_hash_check && requests_hash != header_requests_hash {
             return Err(ConsensusError::BodyRequestsHashDiff(
                 GotExpected::new(requests_hash, header_requests_hash).into(),
             ))
