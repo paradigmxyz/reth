@@ -42,9 +42,6 @@ use tracing::{debug, error};
 /// channel, it lets a subscriber fall 256 blocks behind before it skips the oldest.
 const PER_BLOCK_FEED_CAPACITY: usize = 256;
 
-/// Capacity of the shared logs feed, which holds more items because a block has many logs.
-const LOGS_FEED_CAPACITY: usize = 16 * 1024;
-
 /// `Eth` pubsub RPC implementation.
 ///
 /// This handles `eth_subscribe` RPC calls.
@@ -122,15 +119,6 @@ where
                     }
                     _ => Default::default(),
                 };
-                if filter == Filter::default() {
-                    // The default filter matches every log, so all its subscribers get the same.
-                    let results = self.subscribe_shared(
-                        |feeds| &feeds.logs,
-                        |pubsub| pubsub.log_stream(Filter::default()).boxed(),
-                    );
-                    pipe_from_shared(accepted_sink, results).await;
-                    return Ok(())
-                }
                 pipe_from_stream(accepted_sink, self.log_stream(filter)).await
             }
             SubscriptionKind::NewPendingTransactions => {
@@ -463,8 +451,6 @@ where
 struct SharedFeeds {
     /// `newHeads`.
     new_heads: SharedFeed,
-    /// `logs` with the default filter, which matches every log.
-    logs: SharedFeed,
     /// `newPendingTransactions` with full transaction objects.
     full_pending_transactions: SharedFeed,
     /// `newPendingTransactions` with transaction hashes.
@@ -477,7 +463,6 @@ impl Default for SharedFeeds {
     fn default() -> Self {
         Self {
             new_heads: SharedFeed::new(PER_BLOCK_FEED_CAPACITY),
-            logs: SharedFeed::new(LOGS_FEED_CAPACITY),
             // As many transactions as a subscriber's own pool listener used to buffer.
             full_pending_transactions: SharedFeed::new(NEW_TX_LISTENER_BUFFER_SIZE),
             pending_transaction_hashes: SharedFeed::new(PENDING_TX_LISTENER_BUFFER_SIZE),
@@ -731,11 +716,7 @@ mod tests {
         let module = pubsub.clone().into_rpc().remove_context();
 
         let (heads_id, mut heads) = subscribe(&module, r#"["newHeads"]"#).await;
-        // Both ways of asking for every log or receipt share a feed.
-        let mut logs = Vec::new();
-        for params in [r#"["logs"]"#, r#"["logs", {}]"#] {
-            logs.push(subscribe(&module, params).await);
-        }
+        // Both ways of asking for every receipt share a feed.
         let mut receipts = Vec::new();
         for params in
             [r#"["transactionReceipts"]"#, r#"["transactionReceipts", {"transactionHashes": []}]"#]
@@ -747,7 +728,6 @@ mod tests {
         let feeds = &pubsub.inner.feeds;
         wait_for_producers(&[
             (&feeds.new_heads, 1),
-            (&feeds.logs, 2),
             (&feeds.transaction_receipts, 2),
             (&feeds.pending_transaction_hashes, 1),
             (&feeds.full_pending_transactions, 1),
@@ -756,7 +736,6 @@ mod tests {
 
         // The items subscription tasks used to serialize, from the same sources.
         let mut expected_heads = pubsub.new_headers_stream().boxed();
-        let mut expected_logs = pubsub.log_stream(Filter::default()).boxed();
         let mut expected_receipts =
             pubsub.inner.eth_api.transaction_receipts_stream(Default::default()).boxed();
         let mut expected_hashes = pubsub.pending_transaction_hashes_stream().boxed();
@@ -778,17 +757,6 @@ mod tests {
             );
         }
 
-        // Each of the three transactions has two logs.
-        for _ in 0..6 {
-            let log = expected_logs.next().await.unwrap();
-            for (id, notifications) in &mut logs {
-                assert_eq!(
-                    next_notification(notifications).await,
-                    serialized_notification(id, &log)
-                );
-            }
-        }
-
         pool.add_transaction(TransactionOrigin::External, MockTransaction::eip1559())
             .await
             .unwrap();
@@ -805,8 +773,8 @@ mod tests {
         assert_eq!(next_notification(&mut full).await, serialized_notification(&full_id, &tx));
 
         // Nothing else was sent.
-        let shared = logs.iter_mut().chain(&mut receipts).map(|(_, notifications)| notifications);
-        for notifications in shared.chain([&mut heads, &mut hashes, &mut full]) {
+        let receipts = receipts.iter_mut().map(|(_, notifications)| notifications);
+        for notifications in receipts.chain([&mut heads, &mut hashes, &mut full]) {
             assert!(notifications.try_recv().is_err());
         }
     }
