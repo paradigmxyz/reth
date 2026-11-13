@@ -35,7 +35,7 @@ use crate::{
     transport::{http, ws, ws::BackgroundTaskParams},
     utils::{
         accept_error_backoff, no_request_within, NotifyOnRequest, PermitBody, WriteTimeoutIo,
-        DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_WRITE_TIMEOUT,
+        DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_PING_INTERVAL, DEFAULT_WRITE_TIMEOUT,
     },
     HttpBody, HttpRequest, HttpResponse, LOG_TARGET,
 };
@@ -219,6 +219,9 @@ pub struct ServerConfig {
     /// Timeout for writing a single message to a WebSocket connection and for a stalled HTTP
     /// response write.
     pub(crate) write_timeout: Duration,
+    /// Interval at which WebSocket connections are pinged. A connection that completes neither a
+    /// message nor a pong within twice this interval is closed.
+    pub(crate) ping_interval: Duration,
 }
 
 /// The builder to configure and create a JSON-RPC server configuration.
@@ -288,6 +291,7 @@ impl Default for ServerConfigBuilder {
             id_provider: Arc::new(RandomIntegerIdProvider),
             first_request_timeout: Some(DEFAULT_FIRST_REQUEST_TIMEOUT),
             write_timeout: DEFAULT_WRITE_TIMEOUT,
+            ping_interval: DEFAULT_PING_INTERVAL,
         })
     }
 }
@@ -805,7 +809,7 @@ struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
     methods: Methods,
 }
 
-#[instrument(name = "connection", skip_all, fields(remote_addr = %params.remote_addr, conn_id = %params.conn_id), level = "INFO")]
+#[instrument(name = "connection", target = LOG_TARGET, skip_all, fields(remote_addr = %params.remote_addr, conn_id = %params.conn_id), level = "INFO")]
 fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
     params: ProcessConnection<HttpMiddleware, RpcMiddleware>,
 ) where
