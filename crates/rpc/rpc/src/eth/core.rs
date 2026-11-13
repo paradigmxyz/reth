@@ -1274,6 +1274,28 @@ mod tests {
         );
     }
 
+    /// Rewards of the last `block_count` blocks up to `newest_block`, computed block by block.
+    fn expected_rewards(
+        mock_provider: &MockEthProvider,
+        newest_block: u64,
+        block_count: u64,
+        percentiles: &[f64],
+    ) -> Vec<Vec<u128>> {
+        (newest_block + 1 - block_count..=newest_block)
+            .map(|number| {
+                let block = mock_provider.block_by_number(number).unwrap().unwrap();
+                let receipts = mock_provider.receipts_by_block(number.into()).unwrap().unwrap();
+                calculate_reward_percentiles_for_block(
+                    percentiles,
+                    block.base_fee_per_gas.unwrap_or_default(),
+                    &block.body.transactions,
+                    &receipts,
+                )
+                .unwrap()
+            })
+            .collect()
+    }
+
     /// Rewards of blocks outside of the fee history cache are calculated from the provider data.
     #[tokio::test]
     async fn test_fee_history_rewards() {
@@ -1285,19 +1307,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, None, block_count, mock_provider.clone());
 
-        let rewards = (newest_block + 1 - block_count..=newest_block)
-            .map(|number| {
-                let block = mock_provider.block_by_number(number).unwrap().unwrap();
-                let receipts = mock_provider.receipts_by_block(number.into()).unwrap().unwrap();
-                calculate_reward_percentiles_for_block(
-                    &percentiles,
-                    block.base_fee_per_gas.unwrap_or_default(),
-                    &block.body.transactions,
-                    &receipts,
-                )
-                .unwrap()
-            })
-            .collect();
+        let rewards = expected_rewards(&mock_provider, newest_block, block_count, &percentiles);
         let fee_history = eth_api
             .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles.clone()))
             .await
@@ -1306,6 +1316,37 @@ mod tests {
 
         // A block whose receipts were pruned can't be served.
         mock_provider.add_receipts(newest_block, Vec::new());
+        let err = eth_api
+            .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles))
+            .await
+            .unwrap_err();
+        assert_eq!(err.message(), EthApiError::InvalidBlockRange.to_string());
+    }
+
+    /// Ranges spanning several read chunks return every block's rewards in order.
+    #[tokio::test]
+    async fn test_fee_history_rewards_multiple_chunks() {
+        // Two full chunks plus a partial one, so chunk boundaries and the tail are covered.
+        let block_count = 2 * 64 + 2;
+        let newest_block = 1337;
+        let percentiles = vec![0.0, 10.0, 50.0, 90.0, 100.0];
+        let mock_provider = MockEthProvider::default();
+
+        let (eth_api, _, _) =
+            prepare_eth_api(newest_block, None, block_count, mock_provider.clone());
+
+        let rewards = expected_rewards(&mock_provider, newest_block, block_count, &percentiles);
+        assert_eq!(rewards.len(), block_count as usize);
+        let fee_history = eth_api
+            .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles.clone()))
+            .await
+            .unwrap();
+        assert_eq!(fee_history.reward, Some(rewards));
+        assert_eq!(fee_history.base_fee_per_gas.len(), block_count as usize + 1);
+        assert_eq!(fee_history.gas_used_ratio.len(), block_count as usize);
+
+        // A pruned block in the last chunk still fails the whole request.
+        mock_provider.add_receipts(newest_block - block_count + 1, Vec::new());
         let err = eth_api
             .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles))
             .await

@@ -214,40 +214,52 @@ pub trait EthFees:
                             return Ok((headers, rewards))
                         };
 
-                        let blocks = provider
-                            .block_range(start_block..=end_block)
-                            .map_err(Self::Error::from_eth_err)?;
-                        let receipts = provider
-                            .receipts_by_block_range(start_block..=end_block)
-                            .map_err(Self::Error::from_eth_err)?;
-                        // A missing block or receipt list shortens `headers`, which fails the
-                        // length check below.
-                        let mut headers = Vec::with_capacity(blocks.len());
-                        for (block, mut receipts) in blocks.into_iter().zip(receipts) {
-                            let (header, body) = block.split();
-                            // The range read can return no receipts for blocks that are not
-                            // persisted yet, so these are looked up by hash. Pruned blocks have
-                            // none either way.
-                            if receipts.is_empty() && !body.transactions().is_empty() {
-                                receipts = provider
-                                    .receipts_by_block(header.hash_slow().into())
-                                    .map_err(Self::Error::from_eth_err)?
-                                    .ok_or(EthApiError::InvalidBlockRange)?;
+                        // Read in chunks so only one chunk's blocks and receipts are held at a
+                        // time, instead of the whole range.
+                        let mut headers = Vec::with_capacity(block_count as usize);
+                        let mut chunk_start = start_block;
+                        while chunk_start <= end_block {
+                            let chunk_end = chunk_start
+                                .saturating_add(FEE_HISTORY_REWARD_CHUNK_SIZE - 1)
+                                .min(end_block);
+                            let blocks = provider
+                                .block_range(chunk_start..=chunk_end)
+                                .map_err(Self::Error::from_eth_err)?;
+                            let receipts = provider
+                                .receipts_by_block_range(chunk_start..=chunk_end)
+                                .map_err(Self::Error::from_eth_err)?;
+                            // A missing block or receipt list shortens `headers`, which fails the
+                            // length check below.
+                            for (block, mut receipts) in blocks.into_iter().zip(receipts) {
+                                let (header, body) = block.split();
+                                // The range read can return no receipts for blocks that are not
+                                // persisted yet, so these are looked up by hash. Pruned blocks
+                                // have none either way.
+                                if receipts.is_empty() && !body.transactions().is_empty() {
+                                    receipts = provider
+                                        .receipts_by_block(header.hash_slow().into())
+                                        .map_err(Self::Error::from_eth_err)?
+                                        .ok_or(EthApiError::InvalidBlockRange)?;
+                                }
+                                // The receipt lists of pruned blocks can come back short.
+                                if body.transactions().len() != receipts.len() {
+                                    return Err(EthApiError::InvalidBlockRange.into())
+                                }
+                                rewards.push(
+                                    calculate_reward_percentiles_for_block(
+                                        &percentiles,
+                                        header.base_fee_per_gas().unwrap_or_default(),
+                                        body.transactions(),
+                                        &receipts,
+                                    )
+                                    .unwrap_or_default(),
+                                );
+                                headers.push(header);
                             }
-                            // The receipt lists of pruned blocks can come back short.
-                            if body.transactions().len() != receipts.len() {
-                                return Err(EthApiError::InvalidBlockRange.into())
+                            if chunk_end == end_block {
+                                break
                             }
-                            rewards.push(
-                                calculate_reward_percentiles_for_block(
-                                    &percentiles,
-                                    header.base_fee_per_gas().unwrap_or_default(),
-                                    body.transactions(),
-                                    &receipts,
-                                )
-                                .unwrap_or_default(),
-                            );
-                            headers.push(header);
+                            chunk_start = chunk_end + 1;
                         }
                         Ok((headers, rewards))
                     })
@@ -322,6 +334,14 @@ pub trait EthFees:
         entry.rewards.get(index).copied().unwrap_or_default()
     }
 }
+
+/// Number of blocks whose bodies and receipts `eth_feeHistory` reads at once when it has to
+/// compute reward percentiles on a cache miss.
+///
+/// Reading the whole range (up to 1024 blocks) at once holds hundreds of MB of blocks and
+/// receipts per in-flight request on mainnet. Chunks keep the batched range reads, which make
+/// this much faster than per-block lookups, while bounding the memory held by a request.
+const FEE_HISTORY_REWARD_CHUNK_SIZE: u64 = 64;
 
 /// Loads fee from database.
 ///
