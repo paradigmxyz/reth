@@ -54,6 +54,8 @@ type ReceiptsResponseSender<R> = oneshot::Sender<ProviderResult<Option<Arc<Vec<R
 
 type CachedBlockResponseSender<B> = oneshot::Sender<Option<Arc<RecoveredBlock<B>>>>;
 
+type CachedBlockLookupResponseSender<B> = oneshot::Sender<CachedBlockLookup<B>>;
+
 type CachedBalResponseSender = oneshot::Sender<Option<CachedBal>>;
 
 type CachedBlockAndReceiptsResponseSender<B, R> =
@@ -139,6 +141,12 @@ impl<N: NodePrimitives> EthStateCache<N> {
             rate_limiter: Arc::new(Semaphore::new(max_concurrent_db_requests)),
             pending_fetches: VecDeque::new(),
             tx_hash_index: LruMap::with_hasher(max_cached_tx_hashes, Default::default()),
+            // A block that can't be cached would be reloaded with senders on every repeated miss,
+            // so only track misses if blocks can be cached at all.
+            missed_blocks: LruMap::with_hasher(
+                if max_blocks_bytes == 0 { 0 } else { max_blocks },
+                Default::default(),
+            ),
         };
         let cache = Self { to_service };
         (cache, service)
@@ -175,6 +183,21 @@ impl<N: NodePrimitives> EthStateCache<N> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBlockWithSenders { block_hash, response_tx });
         rx.await.map_err(|_| CacheServiceUnavailable)?
+    }
+
+    /// Looks up the block for the given block hash without loading it, and records a miss.
+    ///
+    /// This lets callers that don't need transaction senders skip loading a block that is only
+    /// requested once, for example during a historical scan. A block that misses a second time is
+    /// reported as [`CachedBlockLookup::RepeatedMiss`], so the caller can load it through
+    /// [`Self::get_recovered_block`] and have later requests hit the cache.
+    pub async fn get_block_or_record_miss(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<CachedBlockLookup<N::Block>> {
+        let (response_tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(CacheAction::GetBlockOrRecordMiss { block_hash, response_tx });
+        rx.await.map_err(|_| CacheServiceUnavailable.into())
     }
 
     /// Requests the block for the given block hash if it is cached.
@@ -302,6 +325,17 @@ impl From<CacheServiceUnavailable> for ProviderError {
     }
 }
 
+/// The result of [`EthStateCache::get_block_or_record_miss`].
+#[derive(Debug)]
+pub enum CachedBlockLookup<B: Block> {
+    /// The block is cached.
+    Cached(Arc<RecoveredBlock<B>>),
+    /// The block is not cached and was not requested recently.
+    FirstMiss,
+    /// The block is not cached, but it was requested recently or is being loaded right now.
+    RepeatedMiss,
+}
+
 /// A task that manages caches for data required by the `eth` rpc implementation.
 ///
 /// It provides a caching layer on top of the given
@@ -354,6 +388,11 @@ where
     pending_fetches: VecDeque<CacheFetch>,
     /// LRU index mapping transaction hashes to their block hash and index within the block.
     tx_hash_index: LruMap<TxHash, (B256, usize), FbBuildHasher<32>>,
+    /// Hashes of blocks that recently missed [`Self::full_block_cache`] without being loaded.
+    ///
+    /// Acts as a doorkeeper for [`CacheAction::GetBlockOrRecordMiss`]: a block is only admitted to
+    /// the cache when it misses a second time, so one-off lookups don't evict hot blocks.
+    missed_blocks: LruMap<B256, (), FbBuildHasher<32>>,
 }
 
 impl<Provider> EthStateCacheService<Provider>
@@ -438,6 +477,30 @@ where
         for tx in block.body().transactions() {
             self.tx_hash_index.remove(tx.tx_hash());
         }
+    }
+
+    /// Resolves a [`CacheAction::GetBlockOrRecordMiss`] lookup.
+    fn lookup_block_or_record_miss(
+        &mut self,
+        block_hash: B256,
+        now: Instant,
+    ) -> CachedBlockLookup<Provider::Block> {
+        if let Some(block) = self.full_block_cache.get_at(&block_hash, now).cloned() {
+            return CachedBlockLookup::Cached(block)
+        }
+
+        // The block is already being loaded, so the caller can join that fetch for free.
+        if self.full_block_cache.is_queued(&block_hash) {
+            self.missed_blocks.remove(&block_hash);
+            return CachedBlockLookup::RepeatedMiss
+        }
+
+        if self.missed_blocks.remove(&block_hash).is_some() {
+            return CachedBlockLookup::RepeatedMiss
+        }
+
+        self.missed_blocks.insert(block_hash, ());
+        CachedBlockLookup::FirstMiss
     }
 
     fn on_new_block(
@@ -596,6 +659,10 @@ where
                             let _ = response_tx
                                 .send(this.full_block_cache.get_at(&block_hash, now).cloned());
                         }
+                        CacheAction::GetBlockOrRecordMiss { block_hash, response_tx } => {
+                            let _ =
+                                response_tx.send(this.lookup_block_or_record_miss(block_hash, now));
+                        }
                         CacheAction::GetCachedBal { block_hash, response_tx } => {
                             let _ =
                                 response_tx.send(this.bal_cache.get_at(&block_hash, now).cloned());
@@ -729,6 +796,10 @@ enum CacheAction<B: Block, R> {
     GetCachedBlock {
         block_hash: B256,
         response_tx: CachedBlockResponseSender<B>,
+    },
+    GetBlockOrRecordMiss {
+        block_hash: B256,
+        response_tx: CachedBlockLookupResponseSender<B>,
     },
     GetCachedBal {
         block_hash: B256,
@@ -1063,6 +1134,70 @@ mod tests {
             },
             vec![Address::ZERO],
         )
+    }
+
+    #[test]
+    fn missed_block_is_admitted_on_second_lookup() {
+        let mut service = test_service();
+        let block = Arc::new(test_block());
+        let hash = block.hash();
+        let now = Instant::now();
+
+        assert!(matches!(
+            service.lookup_block_or_record_miss(hash, now),
+            CachedBlockLookup::FirstMiss
+        ));
+        // Nothing is loaded by recording the miss.
+        assert!(service.full_block_cache.get(&hash).is_none());
+        assert!(matches!(
+            service.lookup_block_or_record_miss(hash, now),
+            CachedBlockLookup::RepeatedMiss
+        ));
+
+        service.on_new_block(hash, Ok(Some(block.clone())), now);
+        let CachedBlockLookup::Cached(cached) = service.lookup_block_or_record_miss(hash, now)
+        else {
+            panic!("block should be cached")
+        };
+        assert!(Arc::ptr_eq(&cached, &block));
+    }
+
+    #[test]
+    fn miss_with_fetch_in_flight_is_repeated() {
+        let mut service = test_service();
+        let hash = test_block().hash();
+        let (response_tx, _response_rx) = oneshot::channel();
+        service.full_block_cache.queue(hash, response_tx);
+
+        // The caller joins the queued fetch instead of reading the block on its own.
+        assert!(matches!(
+            service.lookup_block_or_record_miss(hash, Instant::now()),
+            CachedBlockLookup::RepeatedMiss
+        ));
+        assert!(service.missed_blocks.is_empty());
+    }
+
+    #[test]
+    fn missed_blocks_are_bounded_by_max_blocks() {
+        let mut service = test_service();
+        let now = Instant::now();
+        let hashes = (0..5).map(B256::with_last_byte).collect::<Vec<_>>();
+        for hash in &hashes {
+            assert!(matches!(
+                service.lookup_block_or_record_miss(*hash, now),
+                CachedBlockLookup::FirstMiss
+            ));
+        }
+
+        // The oldest miss was forgotten, so it counts as a first miss again.
+        assert!(matches!(
+            service.lookup_block_or_record_miss(hashes[0], now),
+            CachedBlockLookup::FirstMiss
+        ));
+        assert!(matches!(
+            service.lookup_block_or_record_miss(hashes[4], now),
+            CachedBlockLookup::RepeatedMiss
+        ));
     }
 
     #[tokio::test(start_paused = true)]

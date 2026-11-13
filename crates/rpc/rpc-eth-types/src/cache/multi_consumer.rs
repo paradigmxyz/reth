@@ -77,6 +77,11 @@ impl<K: Hash + Eq, V, S, H: BuildHasher> MultiConsumerLruCache<K, V, S, H> {
         }
     }
 
+    /// Returns whether any consumer is queued for the key, that is, a fetch for it is in flight.
+    pub(crate) fn is_queued(&self, key: &K) -> bool {
+        self.queued.contains_key(key)
+    }
+
     /// Removes consumers for a given key, also removing the key from the cache.
     pub fn remove(&mut self, key: &K) -> Option<Vec<S>> {
         if let Some(entry) = self.cache.remove(key) {
