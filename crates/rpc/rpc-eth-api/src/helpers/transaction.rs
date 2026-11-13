@@ -31,7 +31,7 @@ use reth_rpc_eth_types::{
     EthResult, FillTransaction, SignError, TransactionSource,
 };
 use reth_storage_api::{
-    BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
+    BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx,
     TransactionsProvider,
 };
 use reth_transaction_pool::{
@@ -343,23 +343,42 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 }
             }
 
-            // Full cache miss — fetch both from provider.
-            self.spawn_blocking_io(move |this| {
-                let provider = this.provider();
-                let Some((tx, meta)) = provider
-                    .transaction_by_hash_with_meta(hash)
-                    .map_err(Self::Error::from_eth_err)?
-                else {
-                    return Ok(None);
-                };
+            // Full cache miss — fetch the transaction from provider.
+            let Some((tx, meta)) = self
+                .spawn_blocking_io(move |this| {
+                    let Some((tx, meta)) = this
+                        .provider()
+                        .transaction_by_hash_with_meta(hash)
+                        .map_err(Self::Error::from_eth_err)?
+                    else {
+                        return Ok(None);
+                    };
 
-                let tx = this.recover_mined_transaction(tx).map_err(Self::Error::from_eth_err)?;
+                    let tx =
+                        this.recover_mined_transaction(tx).map_err(Self::Error::from_eth_err)?;
 
-                let receipt = provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)?;
+                    Ok(Some((tx, meta)))
+                })
+                .await?
+            else {
+                return Ok(None);
+            };
 
-                Ok(receipt.map(|receipt| (tx, meta, receipt, None, None)))
-            })
-            .await
+            // Take the receipt from the block's receipts, which `build_transaction_receipt` needs
+            // for gas accounting anyway. They are missing if pruned.
+            let Some(all_receipts) = self
+                .cache()
+                .get_receipts(meta.block_hash)
+                .await
+                .map_err(Self::Error::from_eth_err)?
+            else {
+                return Ok(None);
+            };
+            let Some(receipt) = all_receipts.get(meta.index as usize).cloned() else {
+                return Ok(None);
+            };
+
+            Ok(Some((tx, meta, receipt, Some(all_receipts), None)))
         }
     }
 
