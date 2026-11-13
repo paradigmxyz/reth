@@ -13,8 +13,9 @@ use reth_network::{test_utils::Testnet, NetworkInfo, Peers, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{args::NetworkArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
+use reth_payload_primitives::BuiltPayload;
 use reth_primitives_traits::SealedBlock;
-use reth_provider::test_utils::MockEthProvider;
+use reth_provider::{test_utils::MockEthProvider, BalProvider};
 use reth_tasks::Runtime;
 use std::{net::UdpSocket, sync::Arc, time::Duration};
 
@@ -178,6 +179,72 @@ async fn rejects_downloaded_block_with_invalid_bal_hash() -> eyre::Result<()> {
 
     assert!(error.contains("block access list hash mismatch"), "{error}");
     assert_eq!(node.current_forkchoice_state()?.head_block_hash, genesis_hash);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn stores_bal_of_downloaded_block_without_sidecar() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec(EthereumHardfork::Amsterdam);
+
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec.clone()).build_single().await?;
+
+    // Build a valid Amsterdam block without submitting it to the engine.
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    node.rpc.inject_tx(raw_tx).await?;
+    let payload = node.new_payload().await?;
+    let bal = payload.block_access_list().cloned().unwrap();
+    let block = payload.block().clone();
+    let block_hash = block.hash();
+    let genesis_hash = node.block_hash(0);
+
+    // The peer serves the block but not its BAL, so the node downloads it without a sidecar.
+    let peer_provider = Arc::new(
+        MockEthProvider::<EthPrimitives>::new()
+            .with_chain_spec((*chain_spec).clone())
+            .with_genesis_block(),
+    );
+    peer_provider.add_block(block_hash, block.into_block());
+
+    let testnet = Testnet::create_with(1, peer_provider).await.with_request_handlers().spawn();
+    let [peer] = testnet.peers_array();
+
+    node.inner.network.add_peer(*peer.peer_id(), peer.local_addr());
+    assert_eq!(node.network.next_session_established().await, Some(*peer.peer_id()));
+
+    let mut engine_events = node.inner.add_ons_handle.consensus_engine_events().new_listener();
+    let state = ForkchoiceState {
+        head_block_hash: block_hash,
+        safe_block_hash: genesis_hash,
+        finalized_block_hash: genesis_hash,
+    };
+    let response =
+        node.inner.add_ons_handle.beacon_engine_handle.fork_choice_updated(state, None).await?;
+    assert_eq!(response.payload_status.status, PayloadStatusEnum::Syncing);
+
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while let Some(event) = engine_events.next().await {
+            match event {
+                ConsensusEngineEvent::CanonicalBlockAdded(block, _)
+                    if block.recovered_block().hash() == block_hash =>
+                {
+                    return
+                }
+                ConsensusEngineEvent::InvalidBlock { block, error }
+                    if block.hash() == block_hash =>
+                {
+                    panic!("downloaded block is invalid: {error}")
+                }
+                _ => {}
+            }
+        }
+        panic!("consensus engine event stream ended")
+    })
+    .await?;
+
+    assert_eq!(node.inner.provider.bal_store().get_by_hash(block_hash)?, Some(bal));
 
     Ok(())
 }
