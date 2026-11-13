@@ -41,16 +41,16 @@ use crate::{
     server::{
         helpers::MethodSink,
         subscription::{
-            sub_message_to_json, BoundedSubscriptions, IntoSubscriptionCloseResponse,
-            PendingSubscriptionSink, Subscribers, SubscriptionCloseResponse, SubscriptionKey,
-            SubscriptionPermit, SubscriptionState,
+            notification_prefix, sub_message_to_json, BoundedSubscriptions,
+            IntoSubscriptionCloseResponse, PendingSubscriptionSink, Subscribers,
+            SubscriptionCloseResponse, SubscriptionKey, SubscriptionPermit, SubscriptionState,
         },
         MethodResponse, ResponsePayload, ResponseSizeHint, LOG_TARGET,
     },
 };
 use futures_util::{future::BoxFuture, FutureExt};
 use jsonrpsee_types::{
-    error::{ErrorCode, ErrorObject},
+    error::{ErrorCode, ErrorObject, ErrorObjectOwned},
     Id, Params, Request, SubscriptionId as RpcSubscriptionId,
 };
 use rustc_hash::FxHashMap;
@@ -64,10 +64,13 @@ use super::{sub_err_to_json, IntoResponse};
 /// back to `jsonrpsee`, and the connection ID (useful for the websocket transport).
 pub type SyncMethod = Arc<dyn Send + Sync + Fn(Id, Params, MaxResponseSize) -> MethodResponse>;
 /// Similar to [`SyncMethod`], but represents an asynchronous handler.
+///
+/// The params are only borrowed for the call, so a handler that needs them in its future takes
+/// ownership with [`Params::into_owned`].
 pub type AsyncMethod<'a> = Arc<
     dyn Send
         + Sync
-        + Fn(Id<'a>, Params<'a>, ConnectionId, MaxResponseSize) -> BoxFuture<'a, MethodResponse>,
+        + Fn(Id<'a>, Params<'_>, ConnectionId, MaxResponseSize) -> BoxFuture<'a, MethodResponse>,
 >;
 
 /// Method callback for subscriptions.
@@ -270,7 +273,7 @@ impl Methods {
             None => MethodResponse::error(id, ErrorObject::from(ErrorCode::MethodNotFound)),
             Some(MethodCallback::Sync(cb)) => (cb)(id, params, max_response_size),
             Some(MethodCallback::Async(cb)) => {
-                (cb)(id.into_owned(), params.into_owned(), conn_id, max_response_size).await
+                (cb)(id.into_owned(), params, conn_id, max_response_size).await
             }
             Some(MethodCallback::Subscription(cb)) => {
                 let conn_state = SubscriptionState {
@@ -399,6 +402,9 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
 
     /// Register a new asynchronous RPC method, which computes the response with the given callback.
     ///
+    /// The params are copied for every call, so the callback's future can own them.
+    /// [`register_async_method_raw`](RpcModule::register_async_method_raw) avoids the copy.
+    ///
     /// ## Examples
     ///
     /// ```
@@ -425,9 +431,71 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
                 let ctx = ctx.clone();
                 let callback = callback.clone();
                 let size_hint = size_hint.clone();
+                let params = params.into_owned();
 
                 let future = async move {
                     let rp = callback(params, ctx).await.into_response();
+                    MethodResponse::sized_response(id, rp, max_response_size, &size_hint)
+                };
+                future.boxed()
+            })),
+        )
+    }
+
+    /// Similar to [`RpcModule::register_async_method`], but the callback only borrows the params:
+    /// it decodes them and returns either the error to respond with, or a closure that starts the
+    /// call once the call's future is polled.
+    ///
+    /// This is more efficient as the params are not copied for the call's future.
+    ///
+    /// The callback runs while [`RpcServiceT::call`](crate::middleware::RpcServiceT::call) builds
+    /// the call's future, so middleware that acts when that future is polled does not cover the
+    /// decoding.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use jsonrpsee_core::server::RpcModule;
+    ///
+    /// let mut module = RpcModule::new(());
+    /// module
+    ///     .register_async_method_raw("add_one", |params, _ctx| {
+    ///         let n = params.one::<u64>()?;
+    ///         Ok(move || async move { n + 1 })
+    ///     })
+    ///     .unwrap();
+    /// ```
+    pub fn register_async_method_raw<R, Fun, Call, Fut>(
+        &mut self,
+        method_name: &'static str,
+        callback: Fun,
+    ) -> Result<&mut MethodCallback, RegisterMethodError>
+    where
+        R: IntoResponse + 'static,
+        Fut: Future<Output = R> + Send,
+        Call: FnOnce() -> Fut + Send + 'static,
+        Fun: Fn(Params<'_>, Arc<Context>) -> Result<Call, ErrorObjectOwned> + Send + Sync + 'static,
+    {
+        let ctx = self.ctx.clone();
+        let size_hint = Arc::new(ResponseSizeHint::new());
+        self.methods.verify_and_insert(
+            method_name,
+            MethodCallback::Async(Arc::new(move |id, params, _, max_response_size| {
+                let call = match callback(params, ctx.clone()) {
+                    Ok(call) => call,
+                    Err(err) => {
+                        let rp = ResponsePayload::<()>::error(err);
+                        let rp =
+                            MethodResponse::sized_response(id, rp, max_response_size, &size_hint);
+                        return std::future::ready(rp).boxed();
+                    }
+                };
+                let size_hint = size_hint.clone();
+
+                // The call's future is created inside the boxed future, so it is built in place
+                // instead of being moved into the box.
+                let future = async move {
+                    let rp = call().await.into_response();
                     MethodResponse::sized_response(id, rp, max_response_size, &size_hint)
                 };
                 future.boxed()
@@ -458,6 +526,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
                 let callback = callback.clone();
                 let size_hint = size_hint.clone();
                 let error_id = id.clone();
+                let params = params.into_owned();
 
                 tokio::task::spawn_blocking(move || {
                     let rp = callback(params, ctx).into_response();
@@ -641,7 +710,8 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
 
                         match response {
                             SubscriptionCloseResponse::Notif(msg) => {
-                                let json = sub_message_to_json(msg, &sub_id, method);
+                                let json =
+                                    sub_message_to_json(msg, &notification_prefix(method, &sub_id));
                                 let _ = method_sink.send(json).await;
                             }
                             SubscriptionCloseResponse::NotifErr(err) => {

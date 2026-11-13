@@ -24,10 +24,18 @@
 // IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use crate::{
-    BatchRequestConfig, RegisterMethodError, RpcModule, ServerBuilder, ServerConfig, ServerHandle,
+    middleware::rpc::RpcServiceBuilder, BatchRequestConfig, RegisterMethodError, RpcModule,
+    ServerBuilder, ServerConfig, ServerHandle,
 };
 use jsonrpsee_core::RpcResult;
 use jsonrpsee_test_utils::{
@@ -970,6 +978,50 @@ async fn only_json_whitespace_is_skipped_before_request() {
     assert_eq!(response.status, StatusCode::OK);
     assert_eq!(response.body, r#"{"jsonrpc":"2.0","id":1,"result":0}"#);
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn rpc_middleware_is_built_once_per_connection() {
+    init_logger();
+
+    let built = Arc::new(AtomicUsize::new(0));
+    let rpc_middleware = RpcServiceBuilder::new().layer_fn({
+        let built = built.clone();
+        move |service| {
+            built.fetch_add(1, Ordering::SeqCst);
+            service
+        }
+    });
+    let server = ServerBuilder::default()
+        .set_rpc_middleware(rpc_middleware)
+        .build("127.0.0.1:0")
+        .await
+        .unwrap();
+    let mut module = RpcModule::new(());
+    module.register_method("say_hello", |_, _| "lo").unwrap();
+    let addr = server.local_addr().unwrap();
+    let handle = server.start(module);
+
+    let request = r#"{"jsonrpc":"2.0","method":"say_hello","id":1}"#;
+    let post = |connection: &str| {
+        format!(
+            "POST / HTTP/1.1\r\nhost: localhost\r\ncontent-type: application/json\r\n\
+             connection: {connection}\r\ncontent-length: {}\r\n\r\n{request}",
+            request.len()
+        )
+    };
+    for connections in 1..=2 {
+        let mut client = TcpStream::connect(addr).with_default_timeout().await.unwrap().unwrap();
+        let requests = format!("{}{}", post("keep-alive"), post("close"));
+        client.write_all(requests.as_bytes()).with_default_timeout().await.unwrap().unwrap();
+        let mut responses = String::new();
+        client.read_to_string(&mut responses).with_default_timeout().await.unwrap().unwrap();
+        assert_eq!(responses.matches("HTTP/1.1 200 OK").count(), 2);
+        assert_eq!(built.load(Ordering::SeqCst), connections);
+    }
 
     handle.stop().unwrap();
     handle.stopped().with_default_timeout().await.unwrap();

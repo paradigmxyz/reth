@@ -29,7 +29,7 @@ use std::{
     thread::Builder,
 };
 use tokio::{runtime::Handle, sync::mpsc::UnboundedSender, task::JoinHandle};
-use tracing::{debug, error};
+use tracing::{debug, error, Span};
 use tracing_futures::Instrument;
 
 #[cfg(feature = "rayon")]
@@ -589,6 +589,28 @@ impl Runtime {
         // Erases the closure type so tokio's blocking task machinery is instantiated once per `R`
         // instead of once per closure.
         self.0.handle.spawn_blocking(Box::new(func) as Box<dyn FnOnce() -> R + Send>)
+    }
+
+    /// Spawns a blocking closure onto the runtime.
+    ///
+    /// Unlike [`spawn_blocking_task`](Self::spawn_blocking_task), the closure runs directly on the
+    /// blocking thread instead of being driven as a future, and it also runs if the [Shutdown]
+    /// signal fired before it started. Like [`spawn_blocking_task`](Self::spawn_blocking_task), it
+    /// runs in the caller's span and is counted as a regular blocking task.
+    ///
+    /// See also [`Handle::spawn_blocking`].
+    pub fn spawn_blocking_task_fn<F>(&self, func: F) -> JoinHandle<()>
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        self.0.metrics.inc_regular_blocking_tasks();
+        let finished_counter = self.0.metrics.finished_regular_blocking_tasks_total.clone();
+        let span = Span::current();
+        self.spawn_blocking(move || {
+            let _inc_counter_on_drop = IncCounterOnDrop::new(finished_counter);
+            let _enter = span.enter();
+            func()
+        })
     }
 
     /// Moves the given value to a dedicated background thread for deallocation.

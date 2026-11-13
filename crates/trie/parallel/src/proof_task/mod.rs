@@ -6,7 +6,7 @@
 //! - **Worker Pools**: Pre-spawned workers with dedicated database transactions
 //!   - Storage pool: Handles storage proofs, one account's storage trie per job
 //!   - Account pool: Handles account proofs, calculating storage roots inline
-//! - **Automatic Shutdown**: Workers terminate gracefully when the handle is dropped
+//! - **Automatic Shutdown**: Workers terminate when the handle is dropped, discarding queued jobs
 //!
 //! # Message Flow
 //!
@@ -99,7 +99,8 @@ impl AvailabilitySheet {
 /// Every job queued by [`Self::dispatch`] sends exactly one [`ProofWorkerResult`] to
 /// [`Self::results`]. A worker that fails to open its provider, at start or after a panicking
 /// job, sends an error that belongs to no job instead, and jobs left queued when every worker of a
-/// pool has failed get no result. Workers shut down once the handle is dropped.
+/// pool has failed get no result. Once the handle is dropped, workers finish the jobs they are
+/// running and discard the jobs still queued.
 #[derive(Debug)]
 pub struct ProofWorkerHandle {
     /// Sender shared with the workers, kept so that [`Self::results`] never disconnects while the
@@ -121,6 +122,8 @@ pub struct ProofWorkerHandle {
     storage_worker_count: usize,
     /// Total number of account workers spawned
     account_worker_count: usize,
+    /// Set when the handle is dropped, telling the workers to discard the jobs still queued.
+    handle_dropped: Arc<AtomicBool>,
 }
 
 impl ProofWorkerHandle {
@@ -163,6 +166,7 @@ impl ProofWorkerHandle {
 
         let storage_availability = Arc::new(AvailabilitySheet::new(storage_worker_count));
         let account_availability = Arc::new(AvailabilitySheet::new(account_worker_count));
+        let handle_dropped = Arc::new(AtomicBool::new(false));
 
         debug!(
             target: "trie::proof_task",
@@ -180,6 +184,7 @@ impl ProofWorkerHandle {
                 work_rx: storage_work_rx,
                 result_tx: result_tx.clone(),
                 availability: storage_availability.clone(),
+                handle_dropped: handle_dropped.clone(),
                 #[cfg(feature = "metrics")]
                 metrics: metrics.clone(),
             },
@@ -195,6 +200,7 @@ impl ProofWorkerHandle {
                 work_rx: account_work_rx,
                 result_tx: result_tx.clone(),
                 availability: account_availability.clone(),
+                handle_dropped: handle_dropped.clone(),
                 #[cfg(feature = "metrics")]
                 metrics,
             },
@@ -210,6 +216,7 @@ impl ProofWorkerHandle {
             account_availability,
             storage_worker_count,
             account_worker_count,
+            handle_dropped,
         }
     }
 
@@ -268,6 +275,12 @@ impl ProofWorkerHandle {
         }
 
         Ok(jobs)
+    }
+}
+
+impl Drop for ProofWorkerHandle {
+    fn drop(&mut self) {
+        self.handle_dropped.store(true, Ordering::Relaxed);
     }
 }
 
@@ -436,6 +449,8 @@ struct ProofWorker<Factory, J> {
     result_tx: Sender<ProofWorkerResult>,
     /// Per-worker availability flags
     availability: Arc<AvailabilitySheet>,
+    /// Set when the handle is dropped, after which nobody reads the results of queued jobs.
+    handle_dropped: Arc<AtomicBool>,
     /// Metrics shared by all workers of the handle.
     #[cfg(feature = "metrics")]
     metrics: ProofWorkerIdleMetrics,
@@ -445,6 +460,9 @@ impl<Factory: DatabaseProviderROFactory, J> ProofWorker<Factory, J> {
     /// Runs `process` with `provider` for every job until the handle is dropped and sends each
     /// job's result, advertising the worker as busy while a job runs. Returns the total time spent
     /// waiting for jobs.
+    ///
+    /// Jobs received after the handle is dropped are discarded without running, so a cancelled
+    /// block's backlog does not delay the workers of the next block on the same pools.
     ///
     /// A job that panics sends [`ProofJobError::Panicked`] instead of its result, so the job's
     /// receiver fails instead of waiting for a result that never arrives. The worker then replaces
@@ -463,6 +481,15 @@ impl<Factory: DatabaseProviderROFactory, J> ProofWorker<Factory, J> {
         let mut idle_start = Instant::now();
 
         while let Ok(job) = self.work_rx.recv() {
+            if self.handle_dropped.load(Ordering::Relaxed) {
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    queued_jobs = self.work_rx.len() + 1,
+                    "Proof worker handle dropped, discarding queued jobs"
+                );
+                break
+            }
             total_idle_time += idle_start.elapsed();
             self.availability.mark_busy(worker_id);
 
@@ -682,7 +709,7 @@ mod tests {
     use super::*;
     use reth_chainspec::ChainSpec;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
-    use reth_tasks::executor::channel::RecvTimeoutError;
+    use reth_tasks::executor::channel::{bounded, RecvTimeoutError};
     use std::sync::Arc;
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
@@ -810,6 +837,57 @@ mod tests {
                     Err(RecvTimeoutError::Disconnected)
                 ));
             }
+        });
+    }
+
+    /// Ensures jobs still queued when the handle is dropped are discarded, so a cancelled block's
+    /// backlog does not hold the pools that the next block's workers queue behind.
+    #[test]
+    fn dropped_handle_discards_queued_jobs() {
+        reth_tasks::executor::Runtime::new().run(|| {
+        let provider_factory =
+            create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+        let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
+        let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
+            provider_factory,
+            reth_storage_overlay::OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let runtime = reth_tasks::Runtime::test();
+
+        // Occupy both pools' blocking tasks so the workers start only after the handle is dropped.
+        let (release_tx, release_rx) = bounded::<()>(0);
+        for kind in [ProofWorkerKind::Storage, ProofWorkerKind::Account] {
+            let release_rx = release_rx.clone();
+            runtime.spawn_blocking_named(kind.task_name(), move || {
+                release_rx.recv().unwrap_err();
+            });
+        }
+
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            test_ctx(factory.clone()),
+            ProofWorkerCounts::new(1, 1),
+            #[cfg(feature = "metrics")]
+            Default::default(),
+        );
+        let targets = MultiProofTargetsV2 {
+            account_targets: vec![ProofV2Target::new(B256::ZERO)],
+            storage_targets: (0..8u8)
+                .map(|byte| (B256::repeat_byte(byte), vec![ProofV2Target::new(B256::ZERO)]))
+                .collect(),
+        };
+        assert_eq!(proof_worker_handle.dispatch(targets).unwrap(), 9);
+
+        let results = proof_worker_handle.results().clone();
+        drop(proof_worker_handle);
+        drop(release_tx);
+
+        assert_eq!(
+            results.recv_timeout(Duration::from_secs(30)).unwrap_err(),
+            RecvTimeoutError::Disconnected
+        );
+        drop(factory);
         });
     }
 }
