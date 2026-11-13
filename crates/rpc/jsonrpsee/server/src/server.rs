@@ -808,7 +808,7 @@ struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
     methods: Methods,
 }
 
-#[instrument(name = "connection", skip_all, fields(remote_addr = %params.remote_addr, conn_id = %params.conn_id), level = "INFO")]
+#[instrument(name = "connection", target = LOG_TARGET, skip_all, fields(remote_addr = %params.remote_addr, conn_id = %params.conn_id), level = "INFO")]
 fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
     params: ProcessConnection<HttpMiddleware, RpcMiddleware>,
 ) where
