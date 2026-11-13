@@ -234,7 +234,7 @@ pub fn create_blob_store_with_cache<Node: FullNodeTypes>(
 fn spawn_local_backup_task<Node, Pool>(ctx: &BuilderContext<Node>, pool: Pool) -> eyre::Result<()>
 where
     Node: FullNodeTypes,
-    Pool: TransactionPool + Clone + 'static,
+    Pool: TransactionPool + 'static,
 {
     if !ctx.config().txpool.disable_transactions_backup {
         let data_dir = ctx.config().datadir();
@@ -272,7 +272,7 @@ fn spawn_pool_maintenance_task<Node, Pool>(
 ) -> eyre::Result<()>
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
-    Pool: reth_transaction_pool::TransactionPoolExt<Block = BlockTy<Node::Types>> + Clone + 'static,
+    Pool: reth_transaction_pool::TransactionPoolExt<Block = BlockTy<Node::Types>> + 'static,
     Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
 {
     let chain_events = ctx.provider().canonical_state_stream();
@@ -304,7 +304,7 @@ pub fn spawn_maintenance_tasks<Node, Pool>(
 ) -> eyre::Result<()>
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
-    Pool: reth_transaction_pool::TransactionPoolExt<Block = BlockTy<Node::Types>> + Clone + 'static,
+    Pool: reth_transaction_pool::TransactionPoolExt<Block = BlockTy<Node::Types>> + 'static,
     Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
 {
     spawn_local_backup_task(ctx, pool.clone())?;

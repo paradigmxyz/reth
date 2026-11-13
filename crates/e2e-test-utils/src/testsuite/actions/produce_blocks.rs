@@ -6,14 +6,14 @@ use crate::testsuite::{
 };
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
-    payload::ExecutionPayloadEnvelopeV3, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
+    payload::ExecutionPayloadEnvelopeV3, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes,
+    PayloadStatus, PayloadStatusEnum,
 };
-use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
+use alloy_rpc_types_eth::{Block, Header};
 use eyre::Result;
 use futures_util::future::BoxFuture;
-use reth_ethereum_primitives::TransactionSigned;
 use reth_node_api::{EngineTypes, PayloadKind, PayloadTypes};
-use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
+use serde_json::Value;
 use std::{collections::HashSet, marker::PhantomData, time::Duration};
 use tokio::time::sleep;
 use tracing::debug;
@@ -74,17 +74,12 @@ where
             let engine_client = node_client.engine.http_client();
 
             // get the latest block to use as parent
-            let latest_block = EthApiClient::<
-                TransactionRequest,
-                Transaction,
-                Block,
-                Receipt,
-                Header,
-                TransactionSigned,
-            >::block_by_number(
-                rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
-            )
-            .await?;
+            let latest_block = rpc_client
+                .request::<_, Option<Block>>(
+                    "eth_getBlockByNumber",
+                    (alloy_eips::BlockNumberOrTag::Latest, false),
+                )
+                .await?;
 
             let latest_block = latest_block.ok_or_else(|| eyre::eyre!("Latest block not found"))?;
             let parent_hash = latest_block.header.hash;
@@ -92,19 +87,15 @@ where
             debug!("Latest block hash: {parent_hash}");
 
             // create a simple forkchoice state with the latest block as head
-            let fork_choice_state = ForkchoiceState {
-                head_block_hash: parent_hash,
-                safe_block_hash: parent_hash,
-                finalized_block_hash: parent_hash,
-            };
+            let fork_choice_state = ForkchoiceState::same_hash(parent_hash);
 
             // Try v2 first for backwards compatibility, fall back to v3 on error.
-            match EngineApiClient::<Engine>::fork_choice_updated_v2(
-                &engine_client,
-                fork_choice_state,
-                Some(self.payload_attributes.clone()),
-            )
-            .await
+            match engine_client
+                .request::<_, ForkchoiceUpdated>(
+                    "engine_forkchoiceUpdatedV2",
+                    (fork_choice_state, Some(self.payload_attributes.clone())),
+                )
+                .await
             {
                 Ok(fcu_result) => {
                     debug!(?fcu_result, "FCU v2 result");
@@ -112,11 +103,9 @@ where
                         PayloadStatusEnum::Valid => {
                             if let Some(payload_id) = fcu_result.payload_id {
                                 debug!(id=%payload_id, "Got payload");
-                                let _engine_payload = EngineApiClient::<Engine>::get_payload_v2(
-                                    &engine_client,
-                                    payload_id,
-                                )
-                                .await?;
+                                let _engine_payload = engine_client
+                                    .request::<_, Value>("engine_getPayloadV2", (payload_id,))
+                                    .await?;
                                 Ok(())
                             } else {
                                 Err(eyre::eyre!("No payload ID returned from forkchoiceUpdated"))
@@ -130,23 +119,21 @@ where
                 }
                 Err(_) => {
                     // If v2 fails due to unsupported fork/missing fields, try v3
-                    let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
-                        &engine_client,
-                        fork_choice_state,
-                        Some(self.payload_attributes.clone()),
-                    )
-                    .await?;
+                    let fcu_result = engine_client
+                        .request::<_, ForkchoiceUpdated>(
+                            "engine_forkchoiceUpdatedV3",
+                            (fork_choice_state, Some(self.payload_attributes.clone())),
+                        )
+                        .await?;
 
                     debug!(?fcu_result, "FCU v3 result");
                     match fcu_result.payload_status.status {
                         PayloadStatusEnum::Valid => {
                             if let Some(payload_id) = fcu_result.payload_id {
                                 debug!(id=%payload_id, "Got payload");
-                                let _engine_payload = EngineApiClient::<Engine>::get_payload_v3(
-                                    &engine_client,
-                                    payload_id,
-                                )
-                                .await?;
+                                let _engine_payload = engine_client
+                                    .request::<_, Value>("engine_getPayloadV3", (payload_id,))
+                                    .await?;
                                 Ok(())
                             } else {
                                 Err(eyre::eyre!("No payload ID returned from forkchoiceUpdated"))
@@ -210,7 +197,7 @@ pub struct GeneratePayloadAttributes {}
 
 impl<Engine> Action<Engine> for GeneratePayloadAttributes
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
@@ -246,7 +233,7 @@ pub struct GenerateNextPayload {}
 
 impl<Engine> Action<Engine> for GenerateNextPayload
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
@@ -258,11 +245,7 @@ where
             let parent_hash = latest_block.hash;
             debug!("Latest block hash: {parent_hash}");
 
-            let fork_choice_state = ForkchoiceState {
-                head_block_hash: parent_hash,
-                safe_block_hash: parent_hash,
-                finalized_block_hash: parent_hash,
-            };
+            let fork_choice_state = ForkchoiceState::same_hash(parent_hash);
 
             let payload_attributes = env
                 .active_node_state()?
@@ -274,12 +257,14 @@ where
             let producer_idx =
                 env.last_producer_idx.ok_or_else(|| eyre::eyre!("No block producer selected"))?;
 
-            let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
-                &env.node_clients[producer_idx].engine.http_client(),
-                fork_choice_state,
-                Some(payload_attributes.clone().into()),
-            )
-            .await?;
+            let fcu_result = env.node_clients[producer_idx]
+                .engine
+                .http_client()
+                .request::<_, ForkchoiceUpdated>(
+                    "engine_forkchoiceUpdatedV3",
+                    (fork_choice_state, Some(payload_attributes.clone())),
+                )
+                .await?;
 
             debug!("FCU result: {:?}", fcu_result);
 
@@ -305,12 +290,14 @@ where
                     ..Default::default()
                 };
 
-                let fresh_fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
-                    &env.node_clients[producer_idx].engine.http_client(),
-                    fork_choice_state,
-                    Some(fresh_payload_attributes.clone().into()),
-                )
-                .await?;
+                let fresh_fcu_result = env.node_clients[producer_idx]
+                    .engine
+                    .http_client()
+                    .request::<_, ForkchoiceUpdated>(
+                        "engine_forkchoiceUpdatedV3",
+                        (fork_choice_state, Some(fresh_payload_attributes.clone())),
+                    )
+                    .await?;
 
                 debug!("Fresh FCU result: {:?}", fresh_fcu_result);
 
@@ -343,11 +330,14 @@ where
                 sleep(Duration::from_secs(1)).await;
             }
 
-            let built_payload_envelope = EngineApiClient::<Engine>::get_payload_v3(
-                &env.node_clients[producer_idx].engine.http_client(),
-                payload_id,
-            )
-            .await?;
+            let built_payload_envelope =
+                serde_json::from_value::<Engine::ExecutionPayloadEnvelopeV3>(
+                    env.node_clients[producer_idx]
+                        .engine
+                        .http_client()
+                        .request::<_, Value>("engine_getPayloadV3", (payload_id,))
+                        .await?,
+                )?;
 
             // Store the payload attributes that were used to generate this payload
             let built_payload = payload_attributes.clone();
@@ -368,7 +358,7 @@ pub struct BroadcastLatestForkchoice {}
 
 impl<Engine> Action<Engine> for BroadcastLatestForkchoice
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
     Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {
@@ -394,63 +384,18 @@ where
             } else {
                 // fallback to RPC query
                 let rpc_client = &env.node_clients[0].rpc;
-                let current_head_block = EthApiClient::<
-                    TransactionRequest,
-                    Transaction,
-                    Block,
-                    Receipt,
-                    Header,
-                    TransactionSigned,
-                >::block_by_number(
-                    rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
-                )
-                .await?
-                .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
+                let current_head_block = rpc_client
+                    .request::<_, Option<Block>>(
+                        "eth_getBlockByNumber",
+                        (alloy_eips::BlockNumberOrTag::Latest, false),
+                    )
+                    .await?
+                    .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
                 debug!("Using RPC latest block hash as head: {}", current_head_block.header.hash);
                 current_head_block.header.hash
             };
 
-            let fork_choice_state = ForkchoiceState {
-                head_block_hash: head_hash,
-                safe_block_hash: head_hash,
-                // Making a block canonical does not imply finality: tests advance the finalized
-                // block explicitly via `FinalizeBlock`, and a finalized tip would reject any
-                // later forkchoice update below it as a too deep reorg.
-                finalized_block_hash: B256::ZERO,
-            };
-            debug!(
-                "Broadcasting forkchoice update to {} clients. Head: {:?}",
-                env.node_clients.len(),
-                fork_choice_state.head_block_hash
-            );
-
-            for (idx, client) in env.node_clients.iter().enumerate() {
-                match EngineApiClient::<Engine>::fork_choice_updated_v3(
-                    &client.engine.http_client(),
-                    fork_choice_state,
-                    None,
-                )
-                .await
-                {
-                    Ok(resp) => {
-                        debug!(
-                            "Client {}: Forkchoice update status: {:?}",
-                            idx, resp.payload_status.status
-                        );
-                        // validate that the forkchoice update was accepted
-                        validate_fcu_response(&resp, &format!("Client {idx}"))?;
-                    }
-                    Err(err) => {
-                        return Err(eyre::eyre!(
-                            "Client {}: Failed to broadcast forkchoice: {:?}",
-                            idx,
-                            err
-                        ));
-                    }
-                }
-            }
-            debug!("Forkchoice update broadcasted successfully");
-            Ok(())
+            broadcast_forkchoice(env, head_hash).await
         })
     }
 }
@@ -471,18 +416,13 @@ where
         Box::pin(async move {
             // get the latest block from the first client to update environment state
             let rpc_client = &env.node_clients[0].rpc;
-            let latest_block = EthApiClient::<
-                TransactionRequest,
-                Transaction,
-                Block,
-                Receipt,
-                Header,
-                TransactionSigned,
-            >::block_by_number(
-                rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
-            )
-            .await?
-            .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
+            let latest_block = rpc_client
+                .request::<_, Option<Block>>(
+                    "eth_getBlockByNumber",
+                    (alloy_eips::BlockNumberOrTag::Latest, false),
+                )
+                .await?
+                .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
 
             // update environment with the new block information
             env.set_current_block_info(BlockInfo {
@@ -515,7 +455,7 @@ pub struct UpdateBlockInfoToLatestPayload {}
 
 impl<Engine> Action<Engine> for UpdateBlockInfoToLatestPayload
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
@@ -582,18 +522,13 @@ where
                 let rpc_client = &client.rpc;
 
                 // get the last header by number using latest_head_number
-                let rpc_latest_header = EthApiClient::<
-                    TransactionRequest,
-                    Transaction,
-                    Block,
-                    Receipt,
-                    Header,
-                    TransactionSigned,
-                >::header_by_number(
-                    rpc_client, alloy_eips::BlockNumberOrTag::Latest
-                )
-                .await?
-                .ok_or_else(|| eyre::eyre!("No latest header found from rpc"))?;
+                let rpc_latest_header = rpc_client
+                    .request::<_, Option<Header>>(
+                        "eth_getHeaderByNumber",
+                        (alloy_eips::BlockNumberOrTag::Latest,),
+                    )
+                    .await?
+                    .ok_or_else(|| eyre::eyre!("No latest header found from rpc"))?;
 
                 // perform several checks
                 let next_new_payload = env
@@ -602,13 +537,11 @@ where
                     .as_ref()
                     .ok_or_else(|| eyre::eyre!("No next built payload found"))?;
 
-                let built_payload = EngineApiClient::<Engine>::get_payload_v3(
-                    &client.engine.http_client(),
-                    payload_id,
-                )
-                .await?;
-
-                let execution_payload_envelope: ExecutionPayloadEnvelopeV3 = built_payload.into();
+                let execution_payload_envelope = client
+                    .engine
+                    .http_client()
+                    .request::<_, ExecutionPayloadEnvelopeV3>("engine_getPayloadV3", (payload_id,))
+                    .await?;
                 let new_payload_block_hash = execution_payload_envelope
                     .execution_payload
                     .payload_inner
@@ -623,7 +556,7 @@ where
                     continue;
                 }
 
-                if rpc_latest_header.inner.difficulty != alloy_primitives::U256::ZERO {
+                if !rpc_latest_header.inner.difficulty.is_zero() {
                     debug!(
                         "Client {}: difficulty != 0: {:?}",
                         idx, rpc_latest_header.inner.difficulty
@@ -689,7 +622,7 @@ impl BroadcastNextNewPayload {
 
 impl<Engine> Action<Engine> for BroadcastNextNewPayload
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
     Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {
@@ -721,13 +654,12 @@ where
                 let active_idx = env.active_node_idx;
                 let engine = env.node_clients[active_idx].engine.http_client();
 
-                let result = EngineApiClient::<Engine>::new_payload_v3(
-                    &engine,
-                    execution_payload.clone(),
-                    vec![],
-                    parent_beacon_block_root,
-                )
-                .await?;
+                let result = engine
+                    .request::<_, PayloadStatus>(
+                        "engine_newPayloadV3",
+                        (execution_payload.clone(), Vec::<B256>::new(), parent_beacon_block_root),
+                    )
+                    .await?;
 
                 debug!("Active node {}: new_payload status: {:?}", active_idx, result.status);
 
@@ -753,19 +685,22 @@ where
                     let engine = client.engine.http_client();
 
                     // Broadcast the execution payload
-                    let result = EngineApiClient::<Engine>::new_payload_v3(
-                        &engine,
-                        execution_payload.clone(),
-                        vec![],
-                        parent_beacon_block_root,
-                    )
-                    .await?;
+                    let result = engine
+                        .request::<_, PayloadStatus>(
+                            "engine_newPayloadV3",
+                            (
+                                execution_payload.clone(),
+                                Vec::<B256>::new(),
+                                parent_beacon_block_root,
+                            ),
+                        )
+                        .await?;
 
                     broadcast_results.push((idx, result.status.clone()));
                     debug!("Node {}: new_payload broadcast status: {:?}", idx, result.status);
 
                     // Check if this node accepted the payload
-                    if result.status == PayloadStatusEnum::Valid && !first_valid_seen {
+                    if result.is_valid() && !first_valid_seen {
                         first_valid_seen = true;
                     } else if let PayloadStatusEnum::Invalid { validation_error } = result.status {
                         debug!(
@@ -781,8 +716,7 @@ where
                 }
 
                 // Check if at least one node accepted the payload
-                let any_valid =
-                    broadcast_results.iter().any(|(_, status)| *status == PayloadStatusEnum::Valid);
+                let any_valid = broadcast_results.iter().any(|(_, status)| status.is_valid());
                 if !any_valid {
                     return Err(eyre::eyre!(
                         "Failed to successfully broadcast payload to any client"
@@ -821,7 +755,7 @@ impl<Engine> Default for ProduceBlocks<Engine> {
 
 impl<Engine> Action<Engine> for ProduceBlocks<Engine>
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
     Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {
@@ -875,15 +809,14 @@ where
                 .ok_or_else(|| eyre::eyre!("Block tag '{}' not found in registry", self.tag))?;
 
             let engine_client = env.node_clients[0].engine.http_client();
-            let fcu_state = ForkchoiceState {
-                head_block_hash: target_block.hash,
-                safe_block_hash: target_block.hash,
-                finalized_block_hash: target_block.hash,
-            };
+            let fcu_state = ForkchoiceState::same_hash(target_block.hash);
 
-            let fcu_response =
-                EngineApiClient::<Engine>::fork_choice_updated_v2(&engine_client, fcu_state, None)
-                    .await?;
+            let fcu_response = engine_client
+                .request::<_, ForkchoiceUpdated>(
+                    "engine_forkchoiceUpdatedV2",
+                    (fcu_state, None::<PayloadAttributes>),
+                )
+                .await?;
 
             // validate the response matches expected status
             match (&fcu_response.payload_status.status, &self.expected_status) {
@@ -1016,7 +949,7 @@ impl<Engine> Default for ProduceBlocksLocally<Engine> {
 
 impl<Engine> Action<Engine> for ProduceBlocksLocally<Engine>
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
     Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {
@@ -1073,7 +1006,7 @@ impl<Engine> ProduceInvalidBlocks<Engine> {
 
 impl<Engine> Action<Engine> for ProduceInvalidBlocks<Engine>
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
     Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {
@@ -1113,17 +1046,16 @@ where
                     // send the corrupted payload via newPayload
                     let engine_client = env.node_clients[0].engine.http_client();
                     // for simplicity, we'll use empty versioned hashes for invalid block testing
-                    let versioned_hashes = Vec::new();
+                    let versioned_hashes = Vec::<B256>::new();
                     // use a random parent beacon block root since this is for invalid block testing
                     let parent_beacon_block_root = B256::random();
 
-                    let new_payload_response = EngineApiClient::<Engine>::new_payload_v3(
-                        &engine_client,
-                        corrupted_payload.clone(),
-                        versioned_hashes,
-                        parent_beacon_block_root,
-                    )
-                    .await?;
+                    let new_payload_response = engine_client
+                        .request::<_, PayloadStatus>(
+                            "engine_newPayloadV3",
+                            (corrupted_payload.clone(), versioned_hashes, parent_beacon_block_root),
+                        )
+                        .await?;
 
                     // expect the payload to be rejected as invalid
                     match new_payload_response.status {
@@ -1165,4 +1097,57 @@ where
             Ok(())
         })
     }
+}
+
+/// Broadcasts a forkchoice update to all clients, using `head_hash` as the head and safe block.
+pub(super) async fn broadcast_forkchoice<Engine>(
+    env: &Environment<Engine>,
+    head_hash: B256,
+) -> Result<()>
+where
+    Engine: EngineTypes,
+{
+    let fork_choice_state = ForkchoiceState {
+        head_block_hash: head_hash,
+        safe_block_hash: head_hash,
+        // Making a block canonical does not imply finality: tests advance the finalized block
+        // explicitly via `FinalizeBlock`, and a finalized tip would reject any later forkchoice
+        // update below it as a too deep reorg.
+        finalized_block_hash: B256::ZERO,
+    };
+    debug!(
+        "Broadcasting forkchoice update to {} clients. Head: {:?}",
+        env.node_clients.len(),
+        fork_choice_state.head_block_hash
+    );
+
+    for (idx, client) in env.node_clients.iter().enumerate() {
+        match client
+            .engine
+            .http_client()
+            .request::<_, ForkchoiceUpdated>(
+                "engine_forkchoiceUpdatedV3",
+                (fork_choice_state, None::<PayloadAttributes>),
+            )
+            .await
+        {
+            Ok(resp) => {
+                debug!(
+                    "Client {}: Forkchoice update status: {:?}",
+                    idx, resp.payload_status.status
+                );
+                // validate that the forkchoice update was accepted
+                validate_fcu_response(&resp, &format!("Client {idx}"))?;
+            }
+            Err(err) => {
+                return Err(eyre::eyre!(
+                    "Client {}: Failed to broadcast forkchoice: {:?}",
+                    idx,
+                    err
+                ));
+            }
+        }
+    }
+    debug!("Forkchoice update broadcasted successfully");
+    Ok(())
 }

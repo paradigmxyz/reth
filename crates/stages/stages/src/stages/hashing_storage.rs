@@ -175,7 +175,7 @@ where
                     ..Default::default()
                 });
 
-            Ok(ExecOutput { checkpoint, done: true })
+            Ok(ExecOutput::done(checkpoint))
         } else {
             // Stream changesets entry-by-entry, bounded by both block count
             // (commit_threshold) and entry count (commit_entries), whichever comes first.
@@ -557,7 +557,7 @@ mod tests {
                             .expect("failed to delete entry");
                         e
                     }
-                    _ => StorageEntry { key: entry.key, value: U256::from(0) },
+                    _ => StorageEntry { key: entry.key, value: U256::ZERO },
                 };
             tx.put::<tables::PlainStorageState>(bn_address.address(), entry)?;
 

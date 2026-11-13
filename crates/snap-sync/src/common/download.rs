@@ -6,7 +6,6 @@
 use crate::SnapSyncError;
 use alloy_primitives::B256;
 use reth_storage_api::{DBProvider, DatabaseProviderFactory};
-use reth_storage_errors::provider::ProviderError;
 use reth_tasks::Runtime;
 use std::fmt;
 
@@ -14,7 +13,7 @@ use std::fmt;
 pub const DEFAULT_RESPONSE_BYTES: u64 = 512 * 1024;
 
 /// Inclusive upper bound covering the full trie keyspace.
-pub const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
+pub const MAX_HASH: B256 = B256::repeat_byte(0xff);
 
 /// Client, database and request settings a domain download sends and commits through.
 pub(crate) struct DownloadContext<C, F> {
@@ -73,7 +72,7 @@ where
         self.runtime
             .spawn_blocking(move || read(&factory.database_provider_ro()?))
             .await
-            .map_err(|error| SnapSyncError::Provider(ProviderError::other(error)))?
+            .map_err(SnapSyncError::blocking_task)?
     }
 
     /// Runs `write` in one transaction on the blocking pool, committing only if it succeeds.
@@ -90,7 +89,7 @@ where
                 Ok(output)
             })
             .await
-            .map_err(|error| SnapSyncError::Provider(ProviderError::other(error)))?
+            .map_err(SnapSyncError::blocking_task)?
     }
 }
 

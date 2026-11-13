@@ -2,13 +2,11 @@
 
 use crate::testsuite::{Action, Environment};
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::{ExecutionPayloadV3, PayloadStatusEnum};
-use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
+use alloy_rpc_types_engine::{ExecutionPayloadV3, PayloadStatus, PayloadStatusEnum};
+use alloy_rpc_types_eth::Block;
 use eyre::Result;
 use futures_util::future::BoxFuture;
-use reth_ethereum_primitives::TransactionSigned;
-use reth_node_api::{EngineTypes, PayloadTypes};
-use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
+use reth_node_api::EngineTypes;
 use std::marker::PhantomData;
 use tracing::debug;
 
@@ -63,7 +61,7 @@ where
 
 impl<Engine> Action<Engine> for SendNewPayload<Engine>
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -84,19 +82,15 @@ where
             const MAX_RETRIES: u32 = 5;
 
             while retries < MAX_RETRIES {
-                match EthApiClient::<
-                    TransactionRequest,
-                    Transaction,
-                    Block,
-                    Receipt,
-                    Header,
-                    TransactionSigned,
-                >::block_by_number(
-                    source_rpc,
-                    alloy_eips::BlockNumberOrTag::Number(self.block_number),
-                    true, // include transactions
-                )
-                .await
+                match source_rpc
+                    .request::<_, Option<Block>>(
+                        "eth_getBlockByNumber",
+                        (
+                            alloy_eips::BlockNumberOrTag::Number(self.block_number),
+                            true, // include transactions
+                        ),
+                    )
+                    .await
                 {
                     Ok(Some(b)) => {
                         block = Some(b);
@@ -136,13 +130,16 @@ where
 
             // Send the payload to the target node
             let target_engine = env.node_clients[self.node_idx].engine.http_client();
-            let result = EngineApiClient::<Engine>::new_payload_v3(
-                &target_engine,
-                payload,
-                vec![],
-                B256::ZERO, // parent_beacon_block_root
-            )
-            .await?;
+            let result = target_engine
+                .request::<_, PayloadStatus>(
+                    "engine_newPayloadV3",
+                    (
+                        payload,
+                        Vec::<B256>::new(),
+                        B256::ZERO, // parent_beacon_block_root
+                    ),
+                )
+                .await?;
 
             debug!(
                 "Node {}: new_payload for block {} response - status: {:?}, latest_valid_hash: {:?}",
@@ -276,7 +273,7 @@ where
 
 impl<Engine> Action<Engine> for SendNewPayloads<Engine>
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {

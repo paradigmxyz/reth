@@ -38,11 +38,11 @@ impl EraBlockWriter for Ere {
         // Total difficulty and the accumulator are pre-merge only: post-merge blocks have zero
         // difficulty and the accumulator is frozen at the merge. Difficulty drops to zero
         // monotonically, so the first block decides whether the file carries them at all.
-        let pre_merge = !blocks[0].header.difficulty().is_zero();
+        let pre_merge = !blocks[0].header.is_zero_difficulty();
         // Post-merge blocks are not part of any epoch accumulator, so a merge-spanning file builds
         // its accumulator from the pre-merge prefix only, while total difficulty is kept for every
         // block.
-        let pre_merge_count = blocks.partition_point(|b| !b.header.difficulty().is_zero());
+        let pre_merge_count = blocks.partition_point(|b| !b.header.is_zero_difficulty());
 
         let tuples = blocks
             .iter()
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn pre_merge_file_carries_total_difficulty_and_accumulator() {
-        let file = write_and_read(&export_blocks(3, U256::from(1)));
+        let file = write_and_read(&export_blocks(3, U256::ONE));
 
         assert!(file.group.accumulator.is_some());
         assert_eq!(file.group.index.component_count(), 4);
@@ -253,9 +253,8 @@ mod tests {
     #[test]
     fn merge_spanning_file_excludes_post_merge_blocks_from_accumulator() {
         // Blocks 0-1 pre-merge (non-zero difficulty), blocks 2-3 post-merge (zero difficulty).
-        let blocks: Vec<_> = (0..4)
-            .map(|n| export_block(n, if n < 2 { U256::from(1) } else { U256::ZERO }))
-            .collect();
+        let blocks: Vec<_> =
+            (0..4).map(|n| export_block(n, if n < 2 { U256::ONE } else { U256::ZERO })).collect();
         let file = write_and_read(&blocks);
 
         // Total difficulty is kept for every block, so the component count stays at 4.

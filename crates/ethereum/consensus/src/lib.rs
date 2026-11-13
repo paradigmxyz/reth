@@ -112,7 +112,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
 
 impl<ChainSpec, N> FullConsensus<N> for EthBeaconConsensus<ChainSpec>
 where
-    ChainSpec: Send + Sync + EthChainSpec<Header = N::BlockHeader> + EthereumHardforks + Debug,
+    ChainSpec: Send + EthChainSpec<Header = N::BlockHeader> + EthereumHardforks,
     N: NodePrimitives,
 {
     fn validate_block_post_execution(
@@ -144,7 +144,7 @@ where
 impl<B, ChainSpec> Consensus<B> for EthBeaconConsensus<ChainSpec>
 where
     B: Block,
-    ChainSpec: EthChainSpec<Header = B::Header> + EthereumHardforks + Debug + Send + Sync,
+    ChainSpec: EthChainSpec<Header = B::Header> + EthereumHardforks,
 {
     fn validate_body_against_header(
         &self,
@@ -170,7 +170,7 @@ where
 impl<H, ChainSpec> HeaderValidator<H> for EthBeaconConsensus<ChainSpec>
 where
     H: BlockHeader,
-    ChainSpec: EthChainSpec<Header = H> + EthereumHardforks + Debug + Send + Sync,
+    ChainSpec: EthChainSpec<Header = H> + EthereumHardforks,
 {
     fn validate_header(&self, header: &SealedHeader<H>) -> Result<(), ConsensusError> {
         let header = header.header();

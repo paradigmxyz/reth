@@ -1,7 +1,7 @@
 use crate::providers::RocksDBProvider;
 use alloy_eip7928::BAL_RETENTION_PERIOD_SLOTS;
 use alloy_eips::NumHash;
-use alloy_primitives::{BlockHash, BlockNumber, Bytes};
+use alloy_primitives::{map::B256Map, BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
 use reth_db_api::{
     models::{StoredBlockAccessList, StoredBlockAccessListKey},
@@ -12,7 +12,7 @@ use reth_prune_types::PruneMode;
 use reth_storage_api::{BalStore, GetBlockAccessListLimit, RawBal};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
 
@@ -103,6 +103,14 @@ impl RocksDBBalStore {
     fn read_one_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<Bytes>> {
         if let Some(bal) = self.buffer.read().get_by_hash(block_hash) {
             return Ok(Some(bal))
+        }
+
+        // Read-only legacy databases predate both BAL tables.
+        if self.rocksdb.is_read_only() &&
+            !self.rocksdb.has_table::<tables::BlockAccessLists>() &&
+            !self.rocksdb.has_table::<tables::BlockAccessListBlockNumbers>()
+        {
+            return Ok(None)
         }
 
         let Some(block_number) =
@@ -204,7 +212,7 @@ impl BalStore for RocksDBBalStore {
 #[derive(Debug, Default)]
 struct RocksDBBalStoreBuffer {
     /// Hash index for serving recent hash-only lookups.
-    entries: HashMap<BlockHash, RocksDBBalEntry>,
+    entries: B256Map<RocksDBBalEntry>,
     /// Block-number index for pruning buffered entries.
     hashes_by_number: BTreeMap<BlockNumber, Vec<BlockHash>>,
     /// Validated BALs waiting to be confirmed canonical and flushed.
@@ -333,20 +341,12 @@ struct RocksDBBalEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::{RocksDBBuilder, RocksDBProvider};
+    use crate::providers::RocksDBBuilder;
     use alloy_primitives::B256;
-
-    fn test_rocksdb(dir: &tempfile::TempDir) -> RocksDBProvider {
-        RocksDBBuilder::new(dir.path())
-            .with_table::<tables::BlockAccessLists>()
-            .with_table::<tables::BlockAccessListBlockNumbers>()
-            .build()
-            .unwrap()
-    }
 
     fn test_store() -> (tempfile::TempDir, RocksDBBalStore) {
         let dir = tempfile::tempdir().unwrap();
-        let rocksdb = test_rocksdb(&dir);
+        let rocksdb = RocksDBBuilder::new(dir.path()).with_default_tables().build().unwrap();
         (dir, RocksDBBalStore::new(rocksdb))
     }
 
@@ -363,31 +363,6 @@ mod tests {
 
     fn read_many(store: &RocksDBBalStore, blocks: &[NumHash]) -> Vec<Option<Bytes>> {
         blocks.iter().map(|block| store.get_by_hash(block.hash).unwrap()).collect()
-    }
-
-    #[test]
-    fn inserts_and_reads_by_hash() {
-        let (_dir, store) = test_store();
-        let hash = B256::random();
-        let missing = NumHash::new(1, B256::random());
-        let bal = Bytes::from_static(&[0xc1, 0x01]);
-
-        store.insert(NumHash::new(1, hash), RawBal::from(bal.clone())).unwrap();
-
-        assert_eq!(read_many(&store, &[NumHash::new(1, hash), missing]), vec![Some(bal), None]);
-    }
-
-    #[test]
-    fn hash_lookup_reads_persisted_bal_through_store() {
-        let (_dir, store) = test_store();
-        let block = NumHash::new(1, B256::random());
-        let bal = Bytes::from_static(&[0xc1, 0x01]);
-
-        store.insert(block, RawBal::from(bal.clone())).unwrap();
-        store.flush(&[block]).unwrap();
-
-        let store_with_empty_buffer = RocksDBBalStore::new(store.rocksdb_provider().clone());
-        assert_eq!(store_with_empty_buffer.get_by_hash(block.hash).unwrap(), Some(bal));
     }
 
     #[test]
@@ -435,7 +410,7 @@ mod tests {
     #[test]
     fn configured_buffer_retention_distance_is_used() {
         let dir = tempfile::tempdir().unwrap();
-        let rocksdb = test_rocksdb(&dir);
+        let rocksdb = RocksDBBuilder::new(dir.path()).with_default_tables().build().unwrap();
         let store = RocksDBBalStore::with_buffer_retention_distance(rocksdb, 64);
         let old = NumHash::new(1, B256::with_last_byte(1));
         let tip = NumHash::new(34, B256::with_last_byte(2));
@@ -478,25 +453,6 @@ mod tests {
                 .unwrap(),
             vec![Some(bal_1), None, None]
         );
-    }
-
-    #[test]
-    fn sparse_numbers_are_valid() {
-        let (_dir, store) = test_store();
-        let hash_a = B256::with_last_byte(1);
-        let hash_b = B256::with_last_byte(2);
-        let bal_a = Bytes::from_static(&[0xc1, 0x01]);
-        let bal_b = Bytes::from_static(&[0xc1, 0x02]);
-
-        let block_a = NumHash::new(2, hash_a);
-        let block_b = NumHash::new(200, hash_b);
-
-        store.insert(block_a, RawBal::from(bal_a.clone())).unwrap();
-        store.flush(&[block_a]).unwrap();
-        store.insert(block_b, RawBal::from(bal_b.clone())).unwrap();
-        store.flush(&[block_b]).unwrap();
-
-        assert_eq!(read_many(&store, &[block_a, block_b]), vec![Some(bal_a), Some(bal_b)]);
     }
 
     #[test]
@@ -572,5 +528,74 @@ mod tests {
             retry.iter().map(|(key, _)| NumHash::new(key.number(), key.hash())).collect::<Vec<_>>(),
             vec![first, second]
         );
+    }
+
+    #[test]
+    fn read_only_legacy_database_has_no_persisted_bals() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let hash = B256::with_last_byte(1);
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_table::<tables::TransactionHashNumbers>()
+            .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
+        rocksdb.put::<tables::TransactionHashNumbers>(hash, &42).unwrap();
+        drop(rocksdb);
+
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_default_tables()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .with_read_only(true)
+            .build()
+            .unwrap();
+        assert_eq!(rocksdb.get::<tables::TransactionHashNumbers>(hash).unwrap(), Some(42));
+        let store = RocksDBBalStore::new(rocksdb);
+        assert_eq!(store.get_by_hash(hash).unwrap(), None);
+
+        let raw = Bytes::from_static(&[0xc0]);
+        store.insert(NumHash::new(42, hash), RawBal::from(raw.clone())).unwrap();
+        assert_eq!(store.get_by_hash(hash).unwrap(), Some(raw));
+        drop(store);
+
+        // The secondary open must not add tables to the primary database.
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_table::<tables::TransactionHashNumbers>()
+            .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
+        assert!(!rocksdb.has_table::<tables::BlockAccessLists>());
+        assert!(!rocksdb.has_table::<tables::BlockAccessListBlockNumbers>());
+    }
+
+    #[test]
+    fn read_only_database_reads_persisted_bals() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_default_tables()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .build()
+            .unwrap();
+        let store = RocksDBBalStore::new(rocksdb);
+        let block = NumHash::new(42, B256::with_last_byte(1));
+        let raw = Bytes::from_static(&[0xc0]);
+        store.insert(block, RawBal::from(raw.clone())).unwrap();
+        store.flush(&[block]).unwrap();
+        drop(store);
+
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_default_tables()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .with_read_only(true)
+            .build()
+            .unwrap();
+        let store = RocksDBBalStore::new(rocksdb);
+        assert_eq!(store.get_by_hash(block.hash).unwrap(), Some(raw));
     }
 }

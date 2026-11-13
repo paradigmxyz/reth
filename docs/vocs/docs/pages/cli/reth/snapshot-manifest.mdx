@@ -33,6 +33,11 @@ Options:
 
           If omitted, this is inferred from header static file ranges in the source datadir.
 
+      --previous-manifest <PREVIOUS_MANIFEST>
+          Path to the manifest of a previously published snapshot of the same chain.
+
+          Chunks sealed in both snapshots are hashed against it instead of being packaged again, and the new manifest references their published archives. Fails if any sealed chunk's files differ from the previous manifest.
+
   -h, --help
           Print help (see a summary with '-h')
 
@@ -138,9 +143,11 @@ Display:
 
 Tracing:
       --tracing-otlp[=<URL>]
-          Enable `Opentelemetry` tracing export to an OTLP endpoint.
+          Enable `Opentelemetry` tracing export to an OTLP endpoint or local file.
 
           If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/traces` - gRPC: `http://localhost:4317`
+
+          A `file:///absolute/path` endpoint appends length-delimited OTLP protobuf batches without a collector. Use a separate file per process. The network protocol is ignored for files.
 
           Example: --tracing-otlp=http://collector:4318/v1/traces
 

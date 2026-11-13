@@ -14,15 +14,18 @@ pub type EthRpcConverter<ChainSpec> =
 mod tests {
     use super::*;
     use alloy_consensus::{Transaction, TxType};
+    use alloy_primitives::{Address, B256, U256};
     use alloy_rpc_types_eth::TransactionRequest;
+    use evm2::evm::EmptyDB;
     use reth_chainspec::MAINNET;
+    use reth_evm_ethereum::EthEvmEnv;
+    use reth_rpc_convert::RpcConvert;
     use reth_rpc_eth_types::simulate::resolve_transaction;
-    use revm::database::CacheDB;
 
     #[test]
     fn test_resolve_transaction_empty_request() {
         let builder = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
-        let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
+        let mut db = EmptyDB::default();
         let tx = TransactionRequest::default();
         let result = resolve_transaction(tx, 21000, 0, 1, false, &mut db, &builder).unwrap();
 
@@ -35,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_resolve_transaction_legacy() {
-        let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
+        let mut db = EmptyDB::default();
         let builder = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
 
         let tx = TransactionRequest { gas_price: Some(100), ..Default::default() };
@@ -51,7 +54,7 @@ mod tests {
 
     #[test]
     fn test_resolve_transaction_partial_eip1559() {
-        let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
+        let mut db = EmptyDB::default();
         let rpc_converter = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
 
         let tx = TransactionRequest {
@@ -71,7 +74,7 @@ mod tests {
 
     #[test]
     fn test_resolve_transaction_wraps_max_nonce_when_nonce_check_disabled() {
-        let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
+        let mut db = EmptyDB::default();
         let rpc_converter = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
 
         let tx = TransactionRequest { nonce: Some(u64::MAX), ..Default::default() };
@@ -79,5 +82,47 @@ mod tests {
         let result = resolve_transaction(tx, 21000, 0, 1, true, &mut db, &rpc_converter).unwrap();
 
         assert_eq!(result.nonce(), 0);
+    }
+
+    #[test]
+    fn test_typed_request_fee_defaults() {
+        let converter = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
+        // Default blob fee caps must retain values beyond u64 without truncation.
+        for blob_fee in [u128::from(u64::MAX), u128::from(u64::MAX) + 1, u128::MAX] {
+            let mut env = EthEvmEnv::default();
+            env.block.blob_basefee = U256::from(blob_fee);
+            env.block.basefee = U256::from(30);
+            let request = TransactionRequest {
+                to: Some(Address::repeat_byte(0xaa).into()),
+                blob_versioned_hashes: Some(vec![B256::repeat_byte(1)]),
+                gas_price: Some(100),
+                ..Default::default()
+            };
+
+            let tx = converter.tx_env(request.clone(), &env).unwrap();
+
+            assert_eq!(tx.max_fee_per_blob_gas(), Some(blob_fee));
+            // Flat gasPrice must not be reduced to the base fee for a blob request.
+            assert_eq!(tx.effective_gas_price(Some(30)), 100);
+
+            // An authorization list selects EIP-7702, which must preserve the same flat price.
+            let request = TransactionRequest {
+                authorization_list: Some(vec![]),
+                blob_versioned_hashes: None,
+                ..request
+            };
+            let tx = converter.tx_env(request.clone(), &env).unwrap();
+            assert_eq!(tx.effective_gas_price(Some(30)), 100);
+
+            // An explicit zero priority fee still opts into base-fee pricing.
+            let request = TransactionRequest {
+                gas_price: None,
+                max_fee_per_gas: Some(100),
+                max_priority_fee_per_gas: Some(0),
+                ..request
+            };
+            let tx = converter.tx_env(request, &env).unwrap();
+            assert_eq!(tx.effective_gas_price(Some(30)), 30);
+        }
     }
 }

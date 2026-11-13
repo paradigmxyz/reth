@@ -5,7 +5,7 @@ use crate::{
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use alloy_dyn_abi::TypedData;
-use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
+use alloy_eips::{eip2930::AccessListResult, eip7928::BlockAccessList, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
 use alloy_rpc_types_eth::{
@@ -18,9 +18,8 @@ use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
-use reth_rpc_eth_types::{EthApiError, EthCapabilities, FillTransaction};
+use reth_rpc_eth_types::{EthCapabilities, FillTransaction};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
-use serde_json::Value;
 use std::collections::HashMap;
 use tracing::trace;
 
@@ -35,7 +34,6 @@ pub trait FullEthApiServer:
         RpcHeader<Self::NetworkTypes>,
         TxTy<Self::Primitives>,
     > + FullEthApi
-    + Clone
 {
 }
 
@@ -48,13 +46,11 @@ impl<T> FullEthApiServer for T where
             RpcHeader<T::NetworkTypes>,
             TxTy<T::Primitives>,
         > + FullEthApi
-        + Clone
 {
 }
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation>
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
+#[rpc(server, namespace = "eth")]
 pub trait EthApi<
     TxReq: RpcObject,
     T: RpcObject,
@@ -92,7 +88,7 @@ pub trait EthApi<
     ///
     /// See the `eth_capabilities` execution API proposal:
     /// <https://github.com/ethereum/execution-apis/pull/755>.
-    #[method(name = "capabilities")]
+    #[method(name = "capabilities", blocking)]
     fn capabilities(&self) -> RpcResult<EthCapabilities>;
 
     /// Returns information about a block by hash.
@@ -265,8 +261,11 @@ pub trait EthApi<
     #[method(name = "fillTransaction")]
     async fn fill_transaction(&self, request: TxReq) -> RpcResult<FillTransaction<RawTx>>;
 
-    /// Simulate arbitrary number of transactions at an arbitrary blockchain index, with the
-    /// optionality of state overrides
+    /// Simulate transactions at an arbitrary blockchain index, with the optionality of state
+    /// overrides.
+    ///
+    /// The request is bounded by [`CallManyBudget`](reth_rpc_eth_types::utils::CallManyBudget):
+    /// its calls share the RPC gas cap.
     #[method(name = "callMany")]
     async fn call_many(
         &self,
@@ -435,25 +434,27 @@ pub trait EthApi<
 
     /// Returns the EIP-7928 block access list for a block by hash.
     #[method(name = "getBlockAccessListByBlockHash")]
-    async fn block_access_list_by_block_hash(&self, hash: B256) -> RpcResult<Option<Value>>;
+    async fn block_access_list_by_block_hash(
+        &self,
+        hash: B256,
+    ) -> RpcResult<Option<BlockAccessList>>;
 
     /// Returns the EIP-7928 block access list for a block by number.
     #[method(name = "getBlockAccessListByBlockNumber")]
     async fn block_access_list_by_block_number(
         &self,
         number: BlockNumberOrTag,
-    ) -> RpcResult<Option<Value>>;
+    ) -> RpcResult<Option<BlockAccessList>>;
 
     /// Returns the EIP-7928 block access list for a given block id.
     #[method(name = "getBlockAccessList")]
-    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>>;
+    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<BlockAccessList>>;
 
     /// Returns the EIP-7928 block access list bytes for a block by number.
     #[method(name = "getBlockAccessListRaw")]
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
 }
 
-#[async_trait::async_trait]
 impl<T>
     EthApiServer<
         RpcTxReq<T::NetworkTypes>,
@@ -983,39 +984,30 @@ where
     }
 
     /// Handler for: `eth_getBlockAccessListByBlockHash`
-    async fn block_access_list_by_block_hash(&self, block_hash: B256) -> RpcResult<Option<Value>> {
+    async fn block_access_list_by_block_hash(
+        &self,
+        block_hash: B256,
+    ) -> RpcResult<Option<BlockAccessList>> {
         trace!(target: "rpc::eth", ?block_hash, "Serving eth_getBlockAccessListByBlockHash");
 
-        let bal = self.get_block_access_list(block_hash.into()).await?;
-        let json = serde_json::to_value(&bal)
-            .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
-
-        Ok(Some(json))
+        Ok(self.get_block_access_list(block_hash.into()).await?)
     }
 
     /// Handler for: `eth_getBlockAccessListByBlockNumber`
     async fn block_access_list_by_block_number(
         &self,
         number: BlockNumberOrTag,
-    ) -> RpcResult<Option<Value>> {
+    ) -> RpcResult<Option<BlockAccessList>> {
         trace!(target: "rpc::eth", ?number, "Serving eth_getBlockAccessListByBlockNumber");
 
-        let bal = self.get_block_access_list(number.into()).await?;
-        let json = serde_json::to_value(&bal)
-            .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
-
-        Ok(Some(json))
+        Ok(self.get_block_access_list(number.into()).await?)
     }
 
     /// Handler for: `eth_getBlockAccessList`
-    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>> {
+    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<BlockAccessList>> {
         trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockAccessList");
 
-        let bal = self.get_block_access_list(block_id).await?;
-        let json = serde_json::to_value(&bal)
-            .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
-
-        Ok(Some(json))
+        Ok(self.get_block_access_list(block_id).await?)
     }
 
     /// Handler for: `eth_getBlockAccessListRaw`

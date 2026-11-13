@@ -17,7 +17,7 @@
 //! - [`find_leaf`]: Tests for `find_leaf`
 //! - [`lifecycle`]: Integration tests exercising multiple methods together
 
-use alloy_primitives::{map::B256Map, B256, U256};
+use alloy_primitives::{keccak256, map::B256Map, B256, U256};
 use alloy_rlp::{encode_fixed_size, Decodable};
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie::test_utils::TrieTestHarness;
@@ -78,11 +78,8 @@ impl SuiteTestHarness {
         changes
             .iter()
             .map(|(&slot, &value)| {
-                let rlp_value = if value == U256::ZERO {
-                    Vec::new()
-                } else {
-                    encode_fixed_size(&value).to_vec()
-                };
+                let rlp_value =
+                    if value.is_zero() { Vec::new() } else { encode_fixed_size(&value).to_vec() };
                 (slot, LeafUpdate::Changed(rlp_value))
             })
             .collect()
@@ -258,6 +255,7 @@ sparse_trie_tests! {
     test_branch_collapse_multi_empty_subtries_blinded_remaining,
     test_subtrie_collapse_touched_with_blinded_sibling,
     test_subtrie_emptied_by_deletes_with_touched,
+    test_subtrie_removal_onto_blinded_sibling_requests_only_sibling_proof,
 
     // root
     test_root_empty_trie,
@@ -284,6 +282,8 @@ sparse_trie_tests! {
     test_prune_then_update_no_panic,
     test_prune_only_descends_into_branch_root,
     test_prune_handles_small_subtrie_root_nodes,
+    test_prune_extension_roots_and_upper_children,
+    test_prune_rehash_preserves_cached_extension_epoch,
 
     // clear
     test_clear_resets_trie_but_preserves_update_tracking,
@@ -312,4 +312,5 @@ sparse_trie_tests! {
     test_get_leaf_value_for_storage_root_lookup,
     test_find_leaf_before_update_to_check_existence,
     test_prune_then_reuse_for_next_block,
+    test_repeated_prune_and_reveal_with_deep_subtries,
 }

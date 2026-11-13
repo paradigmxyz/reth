@@ -1,0 +1,36 @@
+[package]
+name = "jsonrpsee"
+description = "JSON-RPC server framework"
+version = "0.26.1"
+authors = ["Parity Technologies <admin@parity.io>", "Pierre Krieger <pierre.krieger1708@gmail.com>"]
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+homepage.workspace = true
+repository.workspace = true
+
+[lints.rust]
+rust_2024_compatibility = { level = "warn", priority = -1 }
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+missing_copy_implementations = "warn"
+
+[lints.clippy]
+manual_async_fn = "allow"
+
+[dependencies]
+# No support for namespaced features yet so workspace dependencies are prefixed with `jsonrpsee-`.
+# See https://github.com/rust-lang/cargo/issues/5565 for more details.
+jsonrpsee-server = { workspace = true, optional = true }
+jsonrpsee-proc-macros = { workspace = true, optional = true }
+jsonrpsee-core = { workspace = true, optional = true }
+jsonrpsee-types = { workspace = true, optional = true }
+tracing = { workspace = true, features = ["std"], optional = true }
+tokio = { workspace = true, optional = true }
+
+[features]
+macros = ["jsonrpsee-proc-macros", "jsonrpsee-types", "server-core", "tracing"]
+
+server = ["jsonrpsee-server", "server-core", "jsonrpsee-types", "tokio"]
+server-core = ["jsonrpsee-core/server"]
+full = ["server", "macros"]

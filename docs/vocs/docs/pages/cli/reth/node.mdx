@@ -28,7 +28,7 @@ Options:
 
           Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
 
-          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2 - `IPC_PATH`: default + `-instance`
+          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2 - `IPC_PATH`: default + `-instance` - `AUTH_IPC_PATH`: default + `-instance`, unless `--auth-ipc.path` is set
 
       --with-unused-ports
           Sets all ports to unused, allowing the OS to choose random unused ports when sockets are bound.
@@ -137,6 +137,9 @@ Networking:
           The number of times to carry out boost lookup queries at bootstrap
 
           [default: 200]
+
+      --snap.v2
+          Advertise and serve experimental snap/2. `reth node` also bootstraps a fresh database with it, and uses the staged pipeline while the chain head predates block access lists
 
       --trusted-peers <TRUSTED_PEERS>
           Comma separated enode URLs or ENRs of trusted peers for P2P connections.
@@ -330,7 +333,9 @@ RPC:
           [default: 8545]
 
       --http.disable-compression
-          Disable compression for HTTP responses
+          Disable compression for HTTP responses.
+
+          Servers listening on a loopback address never compress responses.
 
       --http.compression <ALGOS>
           Comma-separated list of allowed compression algorithms for HTTP responses.
@@ -388,7 +393,9 @@ RPC:
       --ipc.permissions <IPC_SOCKET_PERMISSIONS>
           Set the permissions for the IPC socket file, in octal format.
 
-          If not specified, the permissions will be set by the system's umask.
+          Accepts modes up to `0o7777`, with an optional `0o` prefix. If not specified, the permissions will be set by the system's umask.
+
+          Startup fails if the mode is invalid or the platform cannot apply it before binding the socket, which includes macOS.
 
       --authrpc.addr <AUTH_ADDR>
           Auth server address to listen on
@@ -416,9 +423,9 @@ RPC:
           Enable auth engine API over IPC
 
       --auth-ipc.path <AUTH_IPC_PATH>
-          Filename for auth IPC socket/pipe within the datadir
+          Path for the auth IPC socket/pipe. Explicit paths are used unchanged.
 
-          [default: <CACHE_DIR>_engine_api.ipc]
+          If omitted, uses `/tmp/reth_engine_api.ipc`, with `-<instance>` appended when `--instance` is set. Applications can override this default via `DefaultRpcServerArgs`.
 
       --disable-auth-server
           Disable the auth/engine API server.
@@ -486,7 +493,9 @@ RPC:
           [default: 20000]
 
       --rpc.gascap <GAS_CAP>
-          Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods
+          Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
+
+          The calls of an `eth_callMany`, `trace_callMany` or `debug_traceCallMany` request share it.
 
           [default: 50000000]
 
@@ -498,7 +507,7 @@ RPC:
       --rpc.txfeecap <TX_FEE_CAP>
           Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
 
-          [default: 1.0]
+          [default: 1]
 
       --rpc.max-simulate-blocks <BLOCKS_COUNT>
           Maximum number of blocks for `eth_simulateV1` call
@@ -596,7 +605,7 @@ Gas Price Oracle:
       --gpo.ignoreprice <IGNORE_PRICE>
           Gas Price below which gpo will ignore transactions
 
-          [default: 0]
+          [default: 2]
 
       --gpo.maxprice <MAX_PRICE>
           Maximum transaction priority fee(or gasprice before London Fork) to be recommended by gpo
@@ -614,7 +623,7 @@ Gas Price Oracle:
       --rpc.send-raw-transaction-sync-timeout <SECONDS>
           Timeout for `send_raw_transaction_sync` RPC method
 
-          [default: 30s]
+          [default: 30]
 
       --testing.skip-invalid-transactions
           Skip invalid transactions in `testing_buildBlockV1` instead of failing.
@@ -689,7 +698,7 @@ TxPool:
           [default: 7]
 
       --txpool.minimum-priority-fee <MINIMUM_PRIORITY_FEE>
-          Minimum priority fee required for transaction acceptance into the pool. Transactions with priority fee below this value will be rejected
+          Minimum priority fee required for transaction acceptance into the pool. Transactions with priority fee below this value will be rejected. For legacy and EIP-2930 transactions the gas price is used as the priority fee
 
       --txpool.gas-limit <ENFORCED_GAS_LIMIT>
           The default enforced gas limit for transactions entering the pool
@@ -897,6 +906,8 @@ Database:
       --db.sync-mode <SYNC_MODE>
           Controls how aggressively the database synchronizes data to disk
 
+          [env: RETH_DB_SYNC_MODE=]
+
       --db.rocksdb-block-cache-size <ROCKSDB_BLOCK_CACHE_SIZE>
           `RocksDB` block cache size (e.g., 512MB, 4GB).
 
@@ -1047,9 +1058,13 @@ Engine:
           [default: 30]
 
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
-          Configure the target number of blocks to keep in memory.
+          Configure how many of the most recent canonical blocks persistence leaves in memory.
 
-          If omitted, this defaults to the lesser of `--engine.persistence-threshold` and the configured default memory block buffer target.
+          When more than `--engine.persistence-threshold` canonical blocks are held in memory, the engine writes the canonical chain to disk up to `head - memory-block-buffer-target`. The blocks above that height are kept only in memory, so a reorg of them does not unwind the database. With state masking enabled, the `--engine.num-state-masking-blocks` blocks below that height also stay in memory until a later cycle persists their state/trie updates.
+
+          This is also the in-memory buffer that `--engine.persistence-backpressure-threshold` is measured from.
+
+          If omitted, this defaults to the lesser of `--engine.persistence-threshold` and the configured default memory block buffer target. The value must not exceed `--engine.persistence-threshold`, and with state masking enabled, its sum with `--engine.num-state-masking-blocks` must be less than `--engine.persistence-threshold`.
 
       --engine.backfill-threshold <BACKFILL_RUN_THRESHOLD>
           Configure the largest gap, in blocks, between the local head and the forkchoice head that is closed by downloading the missing blocks directly. Larger gaps trigger a full pipeline (backfill) run instead.
@@ -1077,10 +1092,14 @@ Engine:
 
           [env: RETH_ENGINE_TXPOOL_PREWARMING=]
 
-      --engine.sender-recovery-cache
-          Enable caching recovered transaction senders across transaction ingress and payload execution
+      --engine.sender-recovery-cache [<SENDER_RECOVERY_CACHE_ENABLED>]
+          Cache recovered transaction senders across transaction ingress and payload execution.
+
+          Enabled by default, use `--engine.sender-recovery-cache=false` to disable it.
 
           [env: RETH_ENGINE_SENDER_RECOVERY_CACHE=]
+          [default: true]
+          [possible values: true, false]
 
       --engine.state-provider-metrics
           Enable state provider latency metrics. This allows the engine to collect and report stats about how long state provider calls took during execution, but this does introduce slight overhead to state provider calls
@@ -1089,9 +1108,6 @@ Engine:
           Configure the size of cross-block cache in megabytes
 
           [default: 4096]
-
-      --engine.state-root-task-compare-updates
-          Enable comparing trie updates from the state root task to the trie updates from the regular state root calculation
 
       --engine.accept-execution-requests-hash
           Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`
@@ -1105,6 +1121,9 @@ Engine:
           Configure the number of reserved CPU cores for non-reth processes
 
           [default: 1]
+
+      --cpu-cores <COUNT>
+          Override the available CPU count for node thread pools and parallel execution decisions. Does not change CPU affinity. Explicit thread counts take precedence
 
       --engine.disable-precompile-cache
           Disable precompile cache
@@ -1121,10 +1140,10 @@ Engine:
           Allow unwinding canonical header to ancestor during forkchoice updates. See `TreeConfig::unwind_canonical_header` for more details
 
       --engine.storage-worker-count <STORAGE_WORKER_COUNT>
-          Configure the number of storage proof workers in the Tokio blocking pool. If not specified, defaults to 2x available parallelism
+          Configure the number of storage proof workers spawned for each block. If not specified or zero, the count is derived from the block: 2x available parallelism, halved for blocks with few transactions and doubled for blocks at or above 100M gas
 
       --engine.account-worker-count <ACCOUNT_WORKER_COUNT>
-          Configure the number of account proof workers in the Tokio blocking pool. If not specified, defaults to the same count as storage workers
+          Configure the number of account proof workers spawned for each block. If not specified or zero, the count is derived from the block the same way as for storage workers
 
       --engine.prewarming-threads <PREWARMING_THREADS>
           Configure the number of prewarming threads. If not specified, defaults to available parallelism
@@ -1182,6 +1201,11 @@ Engine:
 
       --engine.disable-bal-batch-io
           Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL storage slots are not read into the execution cache
+
+      --engine.prewarm-reuse
+          Reuse transaction prewarming results during block execution instead of executing transactions again when their prewarm reads are still valid
+
+          [env: RETH_ENGINE_PREWARM_REUSE=]
 
 ERA:
       --era.enable
@@ -1370,9 +1394,11 @@ Display:
 
 Tracing:
       --tracing-otlp[=<URL>]
-          Enable `Opentelemetry` tracing export to an OTLP endpoint.
+          Enable `Opentelemetry` tracing export to an OTLP endpoint or local file.
 
           If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/traces` - gRPC: `http://localhost:4317`
+
+          A `file:///absolute/path` endpoint appends length-delimited OTLP protobuf batches without a collector. Use a separate file per process. The network protocol is ignored for files.
 
           Example: --tracing-otlp=http://collector:4318/v1/traces
 

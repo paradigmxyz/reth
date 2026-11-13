@@ -8,7 +8,7 @@ use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
 use reth_db::models::{AccountBeforeTx, StorageBeforeTx};
 use reth_db_api::models::CompactU256;
-use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
+use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter, CONFIG_FILE_EXTENSION};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::FastInstant as Instant;
 use reth_static_file_types::{
@@ -20,6 +20,7 @@ use std::{
     borrow::Borrow,
     cmp::Ordering,
     fmt::Debug,
+    fs::OpenOptions,
     path::{Path, PathBuf},
     sync::{Arc, Weak},
 };
@@ -455,7 +456,6 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
             // Truncate sidecar file if it has invalid blocks
             if actual_sidecar_blocks > correct_blocks {
-                use std::fs::OpenOptions;
                 let file = OpenOptions::new()
                     .write(true)
                     .open(&csoff_path)
@@ -668,7 +668,26 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             self.update_index()?;
         }
 
+        // Pruned rows are cut from the files only now. Both the cached jar `update_index` just
+        // replaced and the one it installed may still map the uncut length: the replaced one waits
+        // for its readers, and the installed one never reads past its row count. Indexing again
+        // caches a jar that maps the cut length.
+        if self.apply_pending_truncation()? {
+            self.update_index()?;
+        }
+
         Ok(())
+    }
+
+    /// Applies the truncation deferred by pruning to the data and changeset offset files.
+    ///
+    /// Returns `false` if no truncation was pending.
+    fn apply_pending_truncation(&mut self) -> ProviderResult<bool> {
+        let mut truncated = self.writer.apply_pending_truncation().map_err(ProviderError::other)?;
+        if let Some(writer) = &mut self.changeset_offsets {
+            truncated |= writer.apply_pending_truncation().map_err(ProviderError::other)?;
+        }
+        Ok(truncated)
     }
 
     /// Commits configuration changes to disk and updates the reader index with the new changes.
@@ -716,9 +735,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         //
         // However if there's no block range (because there's no data), we try to calculate it by
         // subtracting 1 from the expected block start, resulting on the last block of the
-        // previous file — but only if that file actually exists. If the previous file doesn't
-        // exist (e.g. first-ever file for a segment starting past range boundary), there's
-        // nothing to index.
+        // previous file — but only if that file exists and has its config, i.e. it was fully
+        // initialized. If the previous file doesn't exist (e.g. first-ever file for a segment
+        // starting past range boundary) or its creation was interrupted, there's nothing to index.
         let segment_max_block = self
             .writer
             .user_header()
@@ -734,7 +753,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 let prev_block = expected_start - 1;
                 let prev_range = self.reader().find_fixed_range(segment, prev_block);
                 let prev_path = self.reader().directory().join(segment.filename(&prev_range));
-                prev_path.exists().then_some(prev_block)
+                (prev_path.exists() && prev_path.with_extension(CONFIG_FILE_EXTENSION).exists())
+                    .then_some(prev_block)
             });
 
         self.reader().update_index(segment, segment_max_block)
@@ -772,6 +792,32 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             }
         }
 
+        Ok(())
+    }
+
+    /// Anchors an empty non-header segment so the next append starts at `block + 1`.
+    /// Preserves the file's expected range, since reopening derives the file name from it;
+    /// refuses segments containing blocks or rows.
+    pub fn initialize_pruned_anchor(&mut self, block: BlockNumber) -> ProviderResult<()> {
+        let header = self.user_header();
+        if header.segment().is_headers() ||
+            header.block_range().is_some() ||
+            self.writer.rows() != 0
+        {
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "pruned anchor requires a fresh non-header segment",
+            )))
+        }
+        if !header.expected_block_range().contains(block) {
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "pruned anchor is outside the static file range",
+            )))
+        }
+        self.writer.user_header_mut().set_block_range(block, block);
+        if self.user_header().segment().is_change_based() {
+            self.writer.user_header_mut().set_changeset_offsets_len(1);
+            self.current_changeset_offset = Some(ChangesetOffset::new(0, 0));
+        }
         Ok(())
     }
 
@@ -891,6 +937,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             return Ok(())
         }
 
+        self.ensure_above_pruned_anchor(last_block)?;
+
         // Navigate to the correct file if the target block is in a previous file
         let mut expected_block_start = self.writer.user_header().expected_block_start();
         while last_block < expected_block_start && expected_block_start > 0 {
@@ -898,12 +946,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             expected_block_start = self.writer.user_header().expected_block_start();
         }
 
+        // An anchor can start inside the file's fixed range, shifting the sidecar indices.
+        let block_start = self.writer.user_header().block_start().unwrap_or(expected_block_start);
+
         // Find the number of rows to keep (up to and including last_block)
-        let blocks_to_keep = if last_block >= expected_block_start {
-            last_block - expected_block_start + 1
-        } else {
-            0
-        };
+        let blocks_to_keep =
+            if last_block >= block_start { last_block - block_start + 1 } else { 0 };
 
         // Read changeset offsets from sidecar file to find where to truncate
         let csoff_path = self.data_path.with_extension("csoff");
@@ -947,18 +995,20 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             self.writer.user_header_mut().prune(blocks_to_remove);
 
             // Prune the actual rows
-            self.writer.prune_rows(rows_to_delete as usize).map_err(ProviderError::other)?;
+            self.writer
+                .prune_rows_deferred(rows_to_delete as usize)
+                .map_err(ProviderError::other)?;
         }
 
         // Update the block range
-        self.writer.user_header_mut().set_block_range(expected_block_start, last_block);
+        self.writer.user_header_mut().set_block_range(block_start, last_block);
 
         // Sync changeset offsets to match the new block range
         self.writer.user_header_mut().sync_changeset_offsets();
 
         // Truncate the sidecar file to match the new block count
         if let Some(writer) = &mut self.changeset_offsets {
-            writer.truncate(blocks_to_keep).map_err(ProviderError::other)?;
+            writer.truncate_deferred(blocks_to_keep);
         }
 
         // Clear current changeset offset tracking since we've pruned
@@ -978,6 +1028,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// # Note
     /// Commits to the configuration file at the end.
     fn truncate(&mut self, num_rows: u64, last_block: Option<u64>) -> ProviderResult<()> {
+        if let Some(last_block) = last_block {
+            self.ensure_above_pruned_anchor(last_block)?;
+        }
         let mut remaining_rows = num_rows;
         let segment = self.writer.user_header().segment();
         while remaining_rows > 0 {
@@ -1004,7 +1057,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 } else {
                     // Update `SegmentHeader`
                     self.writer.user_header_mut().prune(len);
-                    self.writer.prune_rows(len as usize).map_err(ProviderError::other)?;
+                    self.writer.prune_rows_deferred(len as usize).map_err(ProviderError::other)?;
                     break
                 }
 
@@ -1014,7 +1067,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 self.writer.user_header_mut().prune(remaining_rows);
 
                 // Truncate data
-                self.writer.prune_rows(remaining_rows as usize).map_err(ProviderError::other)?;
+                self.writer
+                    .prune_rows_deferred(remaining_rows as usize)
+                    .map_err(ProviderError::other)?;
                 remaining_rows = 0;
             }
         }
@@ -1023,16 +1078,17 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         if let Some(last_block) = last_block {
             let mut expected_block_start = self.writer.user_header().expected_block_start();
 
-            if num_rows == 0 {
-                // Edge case for when we are unwinding a chain of empty blocks that goes across
-                // files, and therefore, the only reference point to know which file
-                // we are supposed to be at is `last_block`.
-                while last_block < expected_block_start {
-                    self.delete_current_and_open_previous()?;
-                    expected_block_start = self.writer.user_header().expected_block_start();
-                }
+            // Row deletion stops once `num_rows` rows are removed, which can be on a file above
+            // `last_block` when the blocks right above it are empty and span files, so `last_block`
+            // is the only reference point to know which file we are supposed to be at.
+            while last_block < expected_block_start {
+                self.delete_current_and_open_previous()?;
+                expected_block_start = self.writer.user_header().expected_block_start();
             }
-            self.writer.user_header_mut().set_block_range(expected_block_start, last_block);
+            // Preserve the anchor; the fixed file range may start before any retained history.
+            let block_start =
+                self.writer.user_header().block_start().unwrap_or(expected_block_start);
+            self.writer.user_header_mut().set_block_range(block_start, last_block);
         }
 
         // Commits new changes to disk.
@@ -1078,6 +1134,27 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             .map_err(ProviderError::other)?
             .delete()
             .map_err(ProviderError::other)?;
+        Ok(())
+    }
+
+    /// Errors if the segment is anchored above `last_block`, since nothing below the anchor is
+    /// stored and the unwind cannot be applied. Must run before the unwind deletes any file.
+    fn ensure_above_pruned_anchor(&self, last_block: BlockNumber) -> ProviderResult<()> {
+        let header = self.writer.user_header();
+        let lowest = self.reader().get_lowest_range_start(header.segment());
+        // Before the first commit, the current file is the only source of the anchor,
+        // including when it lies on a file boundary.
+        let current = header
+            .block_start()
+            .filter(|start| lowest.is_none() || *start > header.expected_block_start());
+        if let Some(anchor) = current.into_iter().chain(lowest).find(|start| last_block < *start) {
+            return Err(StaticFileWriterError::UnwindBelowPrunedAnchor {
+                segment: header.segment(),
+                target: last_block,
+                anchor,
+            }
+            .into())
+        }
         Ok(())
     }
 
@@ -1541,6 +1618,17 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Adds an instruction to prune elements during commit using the specified strategy.
     fn queue_prune(&mut self, strategy: PruneStrategy) -> ProviderResult<()> {
         self.ensure_no_queued_prune()?;
+        // Unwinds commit MDBX before static files, so reject invalid targets before queuing them.
+        match strategy {
+            PruneStrategy::Transactions { last_block, .. } |
+            PruneStrategy::Receipts { last_block, .. } |
+            PruneStrategy::TransactionSenders { last_block, .. } |
+            PruneStrategy::AccountChangeSets { last_block } |
+            PruneStrategy::StorageChangeSets { last_block } => {
+                self.ensure_above_pruned_anchor(last_block)?;
+            }
+            PruneStrategy::Headers { .. } => {}
+        }
         self.prune_on_commit = Some(strategy);
         Ok(())
     }

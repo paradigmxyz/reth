@@ -11,20 +11,23 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+alloy-json-rpc.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["jwt-aws-lc-rs", "serde"] }
 
 http.workspace = true
 http-body-util.workspace = true
-jsonrpsee-http-client.workspace = true
+jsonrpsee-server.workspace = true
 pin-project.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 tower.workspace = true
-tower-http = { workspace = true, features = ["full"] }
+tower-http = { workspace = true, features = ["compression-br", "compression-deflate", "compression-gzip", "compression-zstd", "decompression-br", "decompression-deflate", "decompression-gzip", "decompression-zstd"] }
 tracing.workspace = true
 
 [dev-dependencies]
+bytes.workspace = true
+http-body = "1"
 reqwest.workspace = true
-tokio = { workspace = true, features = ["macros"] }
+tokio = { workspace = true, features = ["macros", "test-util"] }
 jsonrpsee = { workspace = true, features = ["server"] }
 
 flate2.workspace = true

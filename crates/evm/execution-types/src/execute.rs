@@ -1,9 +1,9 @@
 use alloc::sync::Arc;
 use alloy_primitives::{Address, B256, U256};
 use reth_primitives_traits::{Account, Block, Bytecode, RecoveredBlock};
-use revm::database::{states::BundleState, BundleAccount};
+use reth_trie_common::bundle_state::{BundleAccount, BundleState};
 
-pub use alloy_evm::block::BlockExecutionResult;
+pub use evm2::block::BlockExecutionResult;
 
 /// [`BlockExecutionResult`] combined with state.
 #[derive(
@@ -27,7 +27,18 @@ pub struct BlockExecutionOutput<T> {
     pub state: BundleState,
 }
 
+impl<T> From<evm2::block::BlockExecutionOutput<T>> for BlockExecutionOutput<T> {
+    fn from(output: evm2::block::BlockExecutionOutput<T>) -> Self {
+        Self { result: output.result, state: output.state }
+    }
+}
+
 impl<T> BlockExecutionOutput<T> {
+    /// Combines execution results with their persistent state.
+    pub const fn new(result: BlockExecutionResult<T>, state: BundleState) -> Self {
+        Self { result, state }
+    }
+
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
         self.state.bytecode(code_hash).map(Bytecode)
@@ -47,7 +58,7 @@ impl<T> BlockExecutionOutput<T> {
     ///
     /// This means that depending on status we can potentially return `U256::ZERO`.
     pub fn storage(&self, address: &Address, storage_key: U256) -> Option<U256> {
-        self.state.account(address).and_then(|a| a.storage_slot(storage_key))
+        self.state.storage(address, storage_key)
     }
 }
 

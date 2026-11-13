@@ -7,10 +7,6 @@ use reth_codecs::DecompressError;
 use reth_primitives_traits::{transaction::signed::RecoveryError, GotExpected};
 use reth_prune_types::PruneSegmentError;
 use reth_static_file_types::StaticFileSegment;
-use revm::{
-    database_interface::{bal::EvmDatabaseError, DBErrorMarker},
-    state::bal::BalError,
-};
 
 /// Provider result type.
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
@@ -21,9 +17,6 @@ pub enum ProviderError {
     /// Database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),
-    /// BAL error.
-    #[error("BAL error:{_0}")]
-    Bal(BalError),
     /// Pruning error.
     #[error(transparent)]
     Pruning(#[from] PruneSegmentError),
@@ -200,9 +193,22 @@ pub enum ProviderError {
         /// Version this build writes.
         supported: u32,
     },
+    /// Snap sync was selected on a database that predates the hashed state layout it downloads
+    /// into.
+    #[error("snap sync requires the hashed state layout, which this database predates")]
+    SnapStorageLayoutUnsupported,
     /// State a snap attempt is still downloading was about to be marked complete.
     #[error("snap attempt {attempt} has not verified the downloaded state")]
     UnverifiedSnapState {
+        /// Attempt that owns the unverified state.
+        attempt: u64,
+    },
+    /// The staged pipeline was selected on a database holding state a snap attempt left
+    /// unverified, which only snap can finish or replace.
+    #[error(
+        "snap attempt {attempt} left unverified state, restart with snap sync or wipe the database"
+    )]
+    SnapStateRequiresSnapSync {
         /// Attempt that owns the unverified state.
         attempt: u64,
     },
@@ -240,11 +246,9 @@ impl ProviderError {
     /// Returns true if this type is a [`ProviderError::Other`] of that error
     /// type. Returns false otherwise.
     pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
-        self.as_other().map(|err| err.is::<T>()).unwrap_or(false)
+        self.as_other().is_some_and(|err| err.is::<T>())
     }
 }
-
-impl DBErrorMarker for ProviderError {}
 
 impl From<alloy_rlp::Error> for ProviderError {
     fn from(error: alloy_rlp::Error) -> Self {
@@ -255,12 +259,6 @@ impl From<alloy_rlp::Error> for ProviderError {
 impl From<RecoveryError> for ProviderError {
     fn from(_: RecoveryError) -> Self {
         Self::SenderRecoveryError
-    }
-}
-
-impl From<ProviderError> for EvmDatabaseError<ProviderError> {
-    fn from(error: ProviderError) -> Self {
-        Self::Database(error)
     }
 }
 
@@ -294,6 +292,17 @@ pub enum StaticFileWriterError {
     /// Other error with message.
     #[error("{0}")]
     Other(String),
+    /// An unwind would keep blocks below the block a pruned segment is anchored at, which the
+    /// segment no longer stores.
+    #[error("cannot unwind {segment} to block {target} below the pruned anchor at block {anchor}")]
+    UnwindBelowPrunedAnchor {
+        /// Segment being unwound.
+        segment: StaticFileSegment,
+        /// Highest block the unwind would keep.
+        target: BlockNumber,
+        /// Lowest block the segment stores.
+        anchor: BlockNumber,
+    },
 }
 
 impl StaticFileWriterError {

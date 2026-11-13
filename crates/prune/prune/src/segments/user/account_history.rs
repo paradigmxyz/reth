@@ -6,7 +6,7 @@ use crate::{
     },
     PrunerError,
 };
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{map::HashMap, BlockNumber};
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut};
 use reth_provider::{
     changeset_walker::StaticFileAccountChangesetWalker, DBProvider, EitherWriter,
@@ -17,7 +17,6 @@ use reth_prune_types::{
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, StorageSettingsCache};
-use rustc_hash::FxHashMap;
 use tracing::{instrument, trace};
 
 /// Number of account history tables to prune in one step.
@@ -122,7 +121,7 @@ impl AccountHistory {
         // / 2`, so 8750 entries. Each entry is `160 bit + 64 bit`, so the total
         // size should be up to ~0.25MB + some hashmap overhead. `blocks_since_last_run` is
         // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
-        let mut highest_deleted_accounts = FxHashMap::default();
+        let mut highest_deleted_accounts = HashMap::default();
         let mut last_changeset_pruned_block = None;
         let mut pruned_changesets = 0;
         let mut done = true;
@@ -203,7 +202,7 @@ impl AccountHistory {
         // ~0.25MB + some hashmap overhead. `blocks_since_last_run` is additionally limited by the
         // `max_reorg_depth`, so no OOM is expected here.
         let mut last_changeset_pruned_block = None;
-        let mut highest_deleted_accounts = FxHashMap::default();
+        let mut highest_deleted_accounts = HashMap::default();
         let (pruned_changesets, done) =
             provider.tx_ref().prune_table_with_range::<tables::AccountChangeSets>(
                 range,
@@ -269,7 +268,7 @@ impl AccountHistory {
             ))
         }
 
-        let mut highest_deleted_accounts = FxHashMap::default();
+        let mut highest_deleted_accounts = HashMap::<_, _>::default();
         let mut last_changeset_pruned_block = None;
         let mut changesets_processed = 0usize;
         let mut done = true;
@@ -350,10 +349,17 @@ impl AccountHistory {
 mod tests {
     use super::ACCOUNT_HISTORY_TABLES_TO_PRUNE;
     use crate::segments::{AccountHistory, PruneInput, PruneLimiter, Segment, SegmentOutput};
-    use alloy_primitives::{BlockNumber, B256};
+    use alloy_primitives::{Address, BlockNumber, B256, U256};
     use assert_matches::assert_matches;
-    use reth_db_api::{models::StorageSettings, tables, BlockNumberList};
-    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_db_api::{
+        models::{ShardedKey, StorageSettings},
+        tables, BlockNumberList,
+    };
+    use reth_primitives_traits::Account;
+    use reth_provider::{
+        DBProvider, DatabaseProviderFactory, PruneCheckpointReader, RocksDBProviderFactory,
+        StaticFileProviderFactory,
+    };
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
@@ -361,6 +367,7 @@ mod tests {
     use reth_storage_api::StorageSettingsCache;
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
+        ChangeSet,
     };
     use std::{collections::BTreeMap, ops::AddAssign};
 
@@ -526,9 +533,6 @@ mod tests {
 
     #[test]
     fn prune_rocksdb_path() {
-        use reth_db_api::models::ShardedKey;
-        use reth_provider::{RocksDBProviderFactory, StaticFileProviderFactory};
-
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
@@ -629,11 +633,8 @@ mod tests {
     /// Tests that when a limiter stops mid-block (with multiple changes for the same block),
     /// the checkpoint is set to `block_number - 1` to avoid dangling index entries.
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn prune_partial_progress_mid_block() {
-        use alloy_primitives::{Address, U256};
-        use reth_primitives_traits::Account;
-        use reth_testing_utils::generators::ChangeSet;
-
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
@@ -652,21 +653,21 @@ mod tests {
         let addr4 = Address::with_last_byte(4);
         let addr5 = Address::with_last_byte(5);
 
-        let account = Account { nonce: 1, balance: U256::from(100), bytecode_hash: None };
+        let account = Account { nonce: 1, balance: U256::from(100), ..Default::default() };
 
         // Build changesets: blocks 0-4 have 1 change each, block 5 has 4 changes, block 6 has 1
         let changesets: Vec<ChangeSet> = vec![
-            vec![(addr1, account, vec![])], // block 0
-            vec![(addr1, account, vec![])], // block 1
-            vec![(addr1, account, vec![])], // block 2
-            vec![(addr1, account, vec![])], // block 3
-            vec![(addr1, account, vec![])], // block 4
+            vec![(addr1, account.clone(), vec![])], // block 0
+            vec![(addr1, account.clone(), vec![])], // block 1
+            vec![(addr1, account.clone(), vec![])], // block 2
+            vec![(addr1, account.clone(), vec![])], // block 3
+            vec![(addr1, account.clone(), vec![])], // block 4
             // block 5: 4 different account changes (sorted by address for consistency)
             vec![
-                (addr1, account, vec![]),
-                (addr2, account, vec![]),
-                (addr3, account, vec![]),
-                (addr4, account, vec![]),
+                (addr1, account.clone(), vec![]),
+                (addr2, account.clone(), vec![]),
+                (addr3, account.clone(), vec![]),
+                (addr4, account.clone(), vec![]),
             ],
             vec![(addr5, account, vec![])], // block 6
         ];
@@ -788,9 +789,6 @@ mod tests {
     /// every later run reread it and never advance.
     #[test]
     fn dense_block_advances_rocksdb_checkpoint() {
-        use reth_db_api::models::ShardedKey;
-        use reth_provider::RocksDBProviderFactory;
-
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 

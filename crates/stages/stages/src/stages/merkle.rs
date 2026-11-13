@@ -1,4 +1,4 @@
-use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, Sealable, B256};
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
@@ -203,6 +203,7 @@ where
                 (*rebuild_threshold, *incremental_threshold)
             }
         };
+        let incremental_threshold = incremental_threshold.max(1);
 
         let range = input.next_block_range();
         let (from_block, to_block) = range.clone().into_inner();
@@ -292,21 +293,16 @@ where
                                     .map(StoredSubNode::from)
                                     .collect(),
                                 storage_state.state.hash_builder.into(),
-                                storage_state.account.nonce,
-                                storage_state.account.balance,
-                                storage_state.account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+                                storage_state.account,
                             ));
                     }
                     self.save_execution_checkpoint(provider, Some(checkpoint))?;
 
                     entities_checkpoint.processed += hashed_entries_walked as u64;
 
-                    return Ok(ExecOutput {
-                        checkpoint: input
-                            .checkpoint()
-                            .with_entities_stage_checkpoint(entities_checkpoint),
-                        done: false,
-                    })
+                    return Ok(ExecOutput::in_progress(
+                        input.checkpoint().with_entities_stage_checkpoint(entities_checkpoint),
+                    ))
                 }
                 StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
                     provider.write_trie_updates(updates)?;
@@ -320,7 +316,7 @@ where
             debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie in chunks");
             let mut final_root = None;
             for start_block in range.step_by(incremental_threshold as usize) {
-                let chunk_to = std::cmp::min(start_block + incremental_threshold - 1, to_block);
+                let chunk_to = start_block.saturating_add(incremental_threshold - 1).min(to_block);
                 let chunk_range = start_block..=chunk_to;
                 debug!(
                     target: "sync::stages::merkle::exec",
@@ -366,11 +362,9 @@ where
 
         validate_state_root(trie_root, SealedHeader::seal_slow(target_block), to_block)?;
 
-        Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new(to_block)
-                .with_entities_stage_checkpoint(entities_checkpoint),
-            done: true,
-        })
+        Ok(ExecOutput::done(
+            StageCheckpoint::new(to_block).with_entities_stage_checkpoint(entities_checkpoint),
+        ))
     }
 
     /// Unwind the stage.
@@ -578,9 +572,14 @@ mod tests {
 
     #[tokio::test]
     async fn execute_chunked_merkle() {
+        for incremental_threshold in [0, 10, u64::MAX] {
+            execute_chunked_merkle_with(incremental_threshold).await;
+        }
+    }
+
+    async fn execute_chunked_merkle_with(incremental_threshold: u64) {
         let (previous_stage, stage_progress) = (200, 100);
         let clean_threshold = 100;
-        let incremental_threshold = 10;
 
         // Set up the runner
         let mut runner =
@@ -672,6 +671,7 @@ mod tests {
     impl ExecuteStageTestRunner for MerkleTestRunner {
         type Seed = Vec<SealedBlock<reth_ethereum_primitives::Block>>;
 
+        #[allow(clippy::clone_on_copy)]
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.checkpoint().block_number;
             let start = stage_progress + 1;
@@ -698,7 +698,7 @@ mod tests {
                 .collect::<BTreeMap<_, _>>();
 
             self.db.insert_accounts_and_storages(
-                accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
+                accounts.iter().map(|(addr, acc)| (*addr, (acc.clone(), std::iter::empty()))),
             )?;
 
             let (header, body) = random_block(

@@ -14,6 +14,6 @@ extern crate alloc;
 pub mod trie;
 pub use trie::*;
 
-pub use alloy_evm::block::{
-    BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
+pub use evm2::block::{
+    BlockExecutionError, BlockValidationError, InternalBlockExecutionError, InvalidTxError,
 };

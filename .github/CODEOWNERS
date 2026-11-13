@@ -15,6 +15,7 @@ crates/etl/                 @joshieDo @shekhirin
 crates/evm/                 @mattsse @Rjected @klkvr
 crates/exex/                @shekhirin
 crates/fs-util/             @mattsse
+crates/lru/                 @mattsse
 crates/metrics/             @mattsse @Rjected 
 crates/net/                 @mattsse @Rjected
 crates/net/downloaders/     @Rjected
@@ -24,7 +25,6 @@ crates/primitives-traits/   @Rjected @mattsse @klkvr
 crates/primitives/          @Rjected @mattsse @klkvr
 crates/prune/               @shekhirin @joshieDo
 crates/ress/                @shekhirin @Rjected
-crates/revm/                @mattsse
 crates/rpc/                 @mattsse @Rjected
 crates/stages/              @shekhirin @mediocregopher
 crates/static-file/         @joshieDo @shekhirin

@@ -15,7 +15,7 @@ The RPC compatibility testing framework enables:
 ### Key Components
 
 1. **`RunRpcCompatTests` Action**: Executes RPC test cases from .io files
-2. **`InitializeFromExecutionApis` Action**: Applies forkchoice state from JSON files with automatic retry for syncing nodes
+2. **`InitializeFromExecutionApis` Action**: Applies forkchoice state from JSON files and requires it to be VALID on every node. The import setup waits until the nodes accepted the imported head, so they are no longer syncing at this point
 3. **Test Data Format**: Uses execution-apis .io file format for test cases
 
 ### Test Data Structure

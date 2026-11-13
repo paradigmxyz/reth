@@ -33,7 +33,7 @@ pub async fn new_tx_manager(
 pub async fn new_tx_manager_with_config(
     transactions_manager_config: TransactionsManagerConfig,
 ) -> (TransactionsManager<TestPool, EthNetworkPrimitives>, NetworkManager<EthNetworkPrimitives>) {
-    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+    let secret_key = SecretKey::new(&mut rand::rng());
     let client = NoopProvider::default();
 
     let config = NetworkConfigBuilder::new(secret_key, Runtime::test())

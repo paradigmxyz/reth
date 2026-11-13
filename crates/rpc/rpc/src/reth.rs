@@ -3,7 +3,6 @@ use std::{future::Future, sync::Arc};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256, U64};
-use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
 use reth_chain_state::{
@@ -11,7 +10,7 @@ use reth_chain_state::{
     PersistedBlockSubscriptions,
 };
 use reth_errors::{RethError, RethResult};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_api::{RethApiServer, RethJitAction};
@@ -20,8 +19,9 @@ use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ChangeSetReader, StateProvider, StateProviderFactory,
     TransactionVariant,
 };
-use reth_tasks::{pool::BlockingTaskGuard, Runtime};
+use reth_tasks::{pool::BlockingTaskGuard, CancelOnDrop, Runtime};
 use serde::Serialize;
+use serde_json::value::RawValue;
 use tokio::sync::oneshot;
 
 /// `reth` API implementation.
@@ -79,7 +79,9 @@ where
         rx.await.map_err(|_| EthApiError::InternalEthError)?
     }
 
-    /// Returns a map of addresses to changed account balanced for a particular block.
+    /// Returns post-block balances for accounts whose balance changed in the block.
+    ///
+    /// Missing accounts are treated as having zero balance.
     pub async fn balance_changes_in_block(&self, block_id: BlockId) -> EthResult<AddressMap<U256>> {
         self.on_blocking_task(async move |this| this.try_balance_changes_in_block(block_id)).await
     }
@@ -94,10 +96,12 @@ where
         let hash_map = accounts_before.iter().try_fold(
             AddressMap::default(),
             |mut hash_map, account_before| -> RethResult<_> {
-                let current_balance = state.account_balance(&account_before.address)?;
-                let prev_balance = account_before.info.map(|info| info.balance);
+                let current_balance =
+                    state.account_balance(&account_before.address)?.unwrap_or_default();
+                let prev_balance =
+                    account_before.info.as_ref().map(|info| info.balance).unwrap_or_default();
                 if current_balance != prev_balance {
-                    hash_map.insert(account_before.address, current_balance.unwrap_or_default());
+                    hash_map.insert(account_before.address, current_balance);
                 }
                 Ok(hash_map)
             },
@@ -139,17 +143,23 @@ where
             .acquire_owned()
             .await
             .map_err(|_| EthApiError::InternalEthError)?;
-        self.on_blocking_task(async move |this| {
-            let _permit = permit;
-            this.try_block_execution_outcome(block_id, block_count)
-        })
-        .await
+        let guard = CancelOnDrop::default();
+        let cancel = guard.clone();
+        let outcome = self
+            .on_blocking_task(async move |this| {
+                let _permit = permit;
+                this.try_block_execution_outcome(block_id, block_count, &cancel)
+            })
+            .await;
+        drop(guard);
+        outcome
     }
 
     fn try_block_execution_outcome(
         &self,
         block_id: BlockId,
         block_count: u64,
+        cancel: &CancelOnDrop,
     ) -> EthResult<Option<ExecutionOutcome<N::Receipt>>> {
         let Some(start_block) = self.provider().block_number_for_id(block_id)? else {
             return Ok(None)
@@ -160,9 +170,7 @@ where
         }
 
         let state_provider = self.provider().history_by_block_number(start_block - 1)?;
-        let db = reth_revm::database::StateProviderDatabase::new(
-            (&state_provider).into_evm_state_provider(),
-        );
+        let db = StateProviderDatabase::new((&state_provider).into_evm_state_provider());
 
         let mut blocks = Vec::with_capacity(block_count as usize);
         for block_number in start_block..start_block + block_count {
@@ -178,17 +186,21 @@ where
             blocks.push(block);
         }
 
-        let outcome = self.evm_config().executor(db).execute_batch(&blocks).map_err(
+        // stop between blocks once the request is dropped
+        let blocks = blocks.iter().take_while(|_| !cancel.is_cancelled());
+        let outcome = self.evm_config().executor(db).execute_batch(blocks).map_err(
             |e: reth_evm::execute::BlockExecutionError| {
                 EthApiError::Internal(reth_errors::RethError::Other(e.into()))
             },
         )?;
+        if cancel.is_cancelled() {
+            return Err(EthApiError::InternalEthError)
+        }
 
         Ok(Some(outcome))
     }
 }
 
-#[async_trait]
 impl<Provider, EvmConfig> RethApiServer for RethApi<Provider, EvmConfig>
 where
     Provider: BlockReaderIdExt
@@ -217,14 +229,14 @@ where
         &self,
         block_id: BlockId,
         count: Option<U64>,
-    ) -> RpcResult<Option<serde_json::Value>> {
+    ) -> RpcResult<Option<Box<RawValue>>> {
         let outcome = Self::block_execution_outcome(self, block_id, count).await?;
         match outcome {
             Some(outcome) => {
-                let value = serde_json::to_value(&outcome).map_err(|e| {
+                let raw = serde_json::value::to_raw_value(&outcome).map_err(|e| {
                     EthApiError::Internal(reth_errors::RethError::msg(e.to_string()))
                 })?;
-                Ok(Some(value))
+                Ok(Some(raw))
             }
             None => Ok(None),
         }
@@ -432,4 +444,109 @@ struct RethApiInner<Provider, EvmConfig> {
     blocking_task_guard: BlockingTaskGuard,
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Runtime,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::{Block, Header};
+    use alloy_genesis::{Genesis, GenesisAccount};
+    use alloy_primitives::Address;
+    use evm2::evm::AccountInfo;
+    use reth_chainspec::ChainSpecBuilder;
+    use reth_db_common::init::init_genesis;
+    use reth_primitives_traits::Block as _;
+    use reth_provider::{
+        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+        BlockWriter,
+    };
+    use reth_trie_common::{bundle_state::BundleState, HashedPostState, KeccakKeyHasher};
+
+    #[test]
+    fn balance_changes_ignore_account_existence() {
+        let transitions = [
+            (1, None, Some(0)),      // Zero-balance creation.
+            (2, Some(0), None),      // Zero-balance deletion.
+            (3, None, Some(10)),     // Funded creation.
+            (4, Some(10), None),     // Funded deletion.
+            (5, Some(10), Some(20)), // Balance increase.
+            (6, Some(10), Some(0)),  // Existing account emptied.
+            (7, Some(10), Some(10)), // Nonce-only change.
+        ]
+        .map(|(id, before, after)| {
+            (
+                Address::with_last_byte(id),
+                before.map(|balance| AccountInfo {
+                    balance: U256::from(balance),
+                    nonce: 1,
+                    ..Default::default()
+                }),
+                after.map(|balance| AccountInfo {
+                    balance: U256::from(balance),
+                    nonce: 2,
+                    ..Default::default()
+                }),
+            )
+        });
+        let genesis = Genesis::default().extend_accounts(transitions.iter().filter_map(
+            |(address, before, _)| {
+                before.as_ref().map(|account| {
+                    (
+                        *address,
+                        GenesisAccount::default()
+                            .with_balance(account.balance)
+                            .with_nonce(Some(account.nonce)),
+                    )
+                })
+            },
+        ));
+        let factory = create_test_provider_factory_with_chain_spec(Arc::new(
+            ChainSpecBuilder::mainnet().genesis(genesis).build(),
+        ));
+        let genesis_hash = init_genesis(&factory).unwrap();
+        let block = Block {
+            header: Header { parent_hash: genesis_hash, number: 1, ..Default::default() },
+            body: Default::default(),
+        };
+        let outcome = ExecutionOutcome {
+            bundle: BundleState::new(
+                transitions.iter().map(|(address, before, after)| {
+                    (*address, before.clone(), after.clone(), Default::default())
+                }),
+                [transitions
+                    .iter()
+                    .map(|(address, before, _)| (*address, Some(before.clone()), []))],
+                [],
+            ),
+            first_block: 1,
+            receipts: vec![vec![]],
+            ..Default::default()
+        };
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .append_blocks_with_state(
+                vec![block.seal_slow().try_recover().unwrap()],
+                &outcome,
+                HashedPostState::from_bundle_state::<KeccakKeyHasher>(&outcome.bundle.state)
+                    .into_sorted(),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+        let api = RethApi::new(
+            BlockchainProvider::new(factory).unwrap(),
+            (),
+            BlockingTaskGuard::new(1),
+            Runtime::test(),
+        );
+
+        assert_eq!(
+            api.try_balance_changes_in_block(1.into()).unwrap(),
+            AddressMap::from_iter([
+                (Address::with_last_byte(3), U256::from(10)),
+                (Address::with_last_byte(4), U256::ZERO),
+                (Address::with_last_byte(5), U256::from(20)),
+                (Address::with_last_byte(6), U256::ZERO),
+            ])
+        );
+    }
 }

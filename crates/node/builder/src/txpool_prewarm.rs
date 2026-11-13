@@ -25,12 +25,7 @@ impl<P> Source<P> {
 impl<N, P> PrewarmSource<N> for Source<P>
 where
     N: NodePrimitives,
-    P: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<N>>>
-        + Clone
-        + Send
-        + Sync
-        + Debug
-        + 'static,
+    P: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<N>>> + 'static,
 {
     fn best_transactions(&self, parent_hash: B256) -> Option<Transactions<N>> {
         let block_info = self.0.block_info();

@@ -2,11 +2,12 @@
 
 use crate::testsuite::Environment;
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatusEnum};
+use alloy_rpc_types_engine::{
+    ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatusEnum,
+};
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_node_api::EngineTypes;
-use reth_rpc_api::clients::EngineApiClient;
 use std::future::Future;
 use tracing::debug;
 
@@ -51,7 +52,7 @@ pub struct ActionBox<I>(Box<dyn Action<I>>);
 
 impl<I> ActionBox<I>
 where
-    I: EngineTypes + 'static,
+    I: EngineTypes,
 {
     /// Constructor for [`ActionBox`].
     pub fn new<A: Action<I>>(action: A) -> Self {
@@ -95,7 +96,7 @@ impl<I> Sequence<I> {
 
 impl<I> Action<I> for Sequence<I>
 where
-    I: EngineTypes + Sync + Send + 'static,
+    I: EngineTypes,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -130,7 +131,7 @@ impl MakeCanonical {
 
 impl<Engine> Action<Engine> for MakeCanonical
 where
-    Engine: EngineTypes + reth_node_api::PayloadTypes,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<alloy_rpc_types_engine::PayloadAttributes> + Clone,
     Engine::ExecutionPayloadEnvelopeV3:
         Into<alloy_rpc_types_engine::payload::ExecutionPayloadEnvelopeV3>,
@@ -155,12 +156,12 @@ where
                 let active_idx = env.active_node_idx;
                 let engine = env.node_clients[active_idx].engine.http_client();
 
-                let fcu_response = EngineApiClient::<Engine>::fork_choice_updated_v3(
-                    &engine,
-                    fork_choice_state,
-                    None,
-                )
-                .await?;
+                let fcu_response = engine
+                    .request::<_, ForkchoiceUpdated>(
+                        "engine_forkchoiceUpdatedV3",
+                        (fork_choice_state, None::<PayloadAttributes>),
+                    )
+                    .await?;
 
                 debug!(
                     "Active node {}: Forkchoice update status: {:?}",

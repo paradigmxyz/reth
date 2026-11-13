@@ -5,13 +5,13 @@ bitflags::bitflags! {
     ///
     /// This mirrors [erigon's ephemeral state field](https://github.com/ledgerwatch/erigon/wiki/Transaction-Pool-Design#ordering-function).
     ///
-    /// The [SubPool] the transaction belongs to is derived from its state and determined by the following sequential checks:
+    /// The [`SubPool`] the transaction belongs to is derived from its state and determined by the following sequential checks:
     ///
-    /// - If it satisfies the [TxState::PENDING_POOL_BITS] it belongs in the pending sub-pool: [SubPool::Pending].
-    /// - If it is an EIP-4844 blob transaction it belongs in the blob sub-pool: [SubPool::Blob].
-    /// - If it satisfies the [TxState::BASE_FEE_POOL_BITS] it belongs in the base fee sub-pool: [SubPool::BaseFee].
+    /// - If it satisfies the [`TxState::PENDING_POOL_BITS`] it belongs in the pending sub-pool: [`SubPool::Pending`].
+    /// - If it is an EIP-4844 blob transaction it belongs in the blob sub-pool: [`SubPool::Blob`].
+    /// - If it satisfies the [`TxState::BASE_FEE_POOL_BITS`] it belongs in the base fee sub-pool: [`SubPool::BaseFee`].
     ///
-    /// Otherwise, it belongs in the queued sub-pool: [SubPool::Queued].
+    /// Otherwise, it belongs in the queued sub-pool: [`SubPool::Queued`].
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
     pub(crate) struct TxState: u8 {
         /// Set to `1` if all ancestor transactions are pending.

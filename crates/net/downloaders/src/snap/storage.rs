@@ -26,7 +26,7 @@ use std::{
 use tracing::debug;
 
 // Keeps storage requests inclusive through the full trie keyspace.
-const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
+const MAX_HASH: B256 = B256::repeat_byte(0xff);
 
 /// Downloads storage ranges authenticated by a verified account range.
 #[derive(Debug)]
@@ -58,7 +58,7 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
         }
         // Servers disagree on whether a finite limit applies only to the first account or every
         // account, so the final proof cannot be assigned reliably for this request shape.
-        if request.account_hashes.len() > 1 && origin == B256::ZERO && limit != MAX_HASH {
+        if request.account_hashes.len() > 1 && origin.is_zero() && limit != MAX_HASH {
             return Err(InvalidStorageRangeRequest::LimitedMultipleAccounts {
                 accounts: request.account_hashes.len(),
             })
@@ -452,7 +452,7 @@ mod tests {
         super::{request::MAX_RETRIES, test_utils::TestSnapClient, VerifiedAccountRange},
         *,
     };
-    use alloy_primitives::{Bytes, KECCAK256_EMPTY};
+    use alloy_primitives::Bytes;
     use reth_network_p2p::{error::PeerRequestResult, priority::Priority};
     use reth_network_peers::WithPeerId;
     use reth_trie_common::{
@@ -500,7 +500,7 @@ mod tests {
     }
 
     fn account(storage_root: B256) -> TrieAccount {
-        TrieAccount { nonce: 1, balance: U256::from(2), storage_root, code_hash: KECCAK256_EMPTY }
+        TrieAccount { nonce: 1, balance: U256::from(2), storage_root, ..Default::default() }
     }
 
     fn wire_slots(slots: &[(B256, U256)]) -> Vec<StorageData> {

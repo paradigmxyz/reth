@@ -1,12 +1,14 @@
 use blake3::Hasher;
-use eyre::Result;
+use eyre::{Result, WrapErr};
 use rayon::prelude::*;
 use reqwest::Client;
+use reth_db::static_file::iter_static_files;
+use reth_static_file_types::StaticFileSegment;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     io::Read,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 use tracing::info;
 use url::Url;
@@ -24,7 +26,8 @@ fn is_zero(value: &u64) -> bool {
 /// Archive paths are resolved relative to [`SnapshotManifest::base_url`] via URL joining.
 /// Single archives use [`SingleArchive::file`]; chunked archives default to
 /// `{component}-{start_block}-{end_block}.tar.zst`, or use [`ChunkedArchive::chunk_files`]
-/// when present so publishers can place finalized and tip chunks under different prefixes:
+/// when present so publishers can place finalized and tip chunks under different prefixes, or
+/// reference an earlier snapshot's archives by absolute URL:
 ///
 /// ```text
 /// base_url = https://example.com/mainnet
@@ -101,7 +104,11 @@ pub struct SingleArchive {
 pub struct ChunkedArchive {
     /// Number of blocks per archive file. Matches reth's `blocks_per_file` config.
     pub blocks_per_file: u64,
-    /// Total number of blocks covered by this component.
+    /// Total number of blocks covered by this component, including block zero.
+    ///
+    /// Coverage is contiguous from block zero. The final chunk may be partial; its actual
+    /// last block is `total_blocks - 1`, irrespective of its filename's range end.
+    /// Older manifests may store the declared snapshot block instead of the count.
     pub total_blocks: u64,
     /// Compressed size of each chunk in bytes, ordered from first to last.
     /// Computed during manifest generation. Older manifests may omit this.
@@ -113,17 +120,17 @@ pub struct ChunkedArchive {
     /// `chunk_output_files`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chunk_decompressed_sizes: Vec<u64>,
-    /// Archive path for each chunk, relative to [`SnapshotManifest::base_url`], ordered from
-    /// first to last.
+    /// Archive location for each chunk, ordered from first to last.
     ///
     /// When empty (older manifests), downloaders fall back to the default
     /// `{component}-{start}-{end}.tar.zst` name. When set, the length must equal the chunk
-    /// count and each entry is joined with `base_url` so publishers can place chunks under
-    /// different prefixes (for example `static_files/…` for finalized chunks and
-    /// `{timestamp}/…` for the tip chunk).
+    /// count. Relative paths are joined with [`SnapshotManifest::base_url`] so publishers can
+    /// place chunks under different prefixes (for example `static_files/…` for finalized chunks
+    /// and `{timestamp}/…` for the tip chunk). Absolute URLs, such as archives reused from a
+    /// previous snapshot, are used as-is.
     ///
-    /// Paths must be relative (no leading `/`). A leading slash is treated as host-absolute by
-    /// URL joining and would drop the `base_url` path prefix.
+    /// Relative paths must not start with `/`: URL joining treats a leading slash as
+    /// host-absolute and would drop the `base_url` path prefix.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chunk_files: Vec<String>,
     /// Expected extracted plain files per chunk, ordered from first to last.
@@ -142,6 +149,24 @@ pub struct OutputFileChecksum {
     pub size: u64,
     /// BLAKE3 checksum of the plain file contents.
     pub blake3: String,
+}
+
+impl OutputFileChecksum {
+    /// Returns the path as a relative path that stays below the directory it is joined to.
+    ///
+    /// Only normal components are accepted, plus the `./` prefix tar adds to entry paths.
+    /// Absolute paths and `..` are rejected because the path is joined onto the datadir for
+    /// verification and for removal before retries.
+    pub(crate) fn relative_path(&self) -> Result<&Path> {
+        let path = Path::new(&self.path);
+        eyre::ensure!(
+            path.components().all(|part| matches!(part, Component::Normal(_) | Component::CurDir)) &&
+                path.components().any(|part| matches!(part, Component::Normal(_))),
+            "Invalid manifest output file path `{}`: must be a relative path without `..`",
+            self.path
+        );
+        Ok(path)
+    }
 }
 
 /// A concrete snapshot archive with its download and verification metadata.
@@ -304,7 +329,7 @@ impl SnapshotManifest {
     }
 
     /// Returns archive URLs for a component, limited to chunks covering at least `distance`
-    /// blocks from the tip. Returns all URLs if distance is `None` (All mode).
+    /// blocks ending at [`Self::block`]. Returns all URLs if distance is `None` (All mode).
     pub fn archive_urls_for_distance(
         &self,
         ty: SnapshotComponentType,
@@ -322,12 +347,7 @@ impl SnapshotManifest {
                 let key = ty.key();
                 let num_chunks = chunked.num_chunks();
 
-                // Calculate which chunks to include
-                let start_chunk = match distance {
-                    // Include the tail chunks that cover at least `dist` blocks.
-                    Some(dist) => num_chunks.saturating_sub(chunked.tail_chunks_for_distance(dist)),
-                    None => 0, // All chunks
-                };
+                let start_chunk = self.start_chunk_for_distance(chunked, distance);
 
                 (start_chunk..num_chunks)
                     .map(|i| {
@@ -341,7 +361,8 @@ impl SnapshotManifest {
         }
     }
 
-    /// Returns concrete snapshot archives for a component, optionally limited to distance.
+    /// Returns concrete snapshot archives for a component, optionally limited to a distance
+    /// ending at [`Self::block`].
     pub fn snapshot_archives_for_distance(
         &self,
         ty: SnapshotComponentType,
@@ -365,10 +386,7 @@ impl SnapshotManifest {
                 let key = ty.key();
                 let num_chunks = chunked.num_chunks();
 
-                let start_chunk = match distance {
-                    Some(dist) => num_chunks.saturating_sub(chunked.tail_chunks_for_distance(dist)),
-                    None => 0,
-                };
+                let start_chunk = self.start_chunk_for_distance(chunked, distance);
 
                 (start_chunk..num_chunks)
                     .map(|i| {
@@ -390,7 +408,26 @@ impl SnapshotManifest {
         }
     }
 
-    /// Returns the exact download size for a component given a distance selection.
+    /// Fails if any output file path in the manifest is not a plain relative path.
+    ///
+    /// Output paths come from an untrusted manifest, so this is checked before any archive is
+    /// planned.
+    pub fn validate_output_paths(&self) -> Result<()> {
+        for (key, component) in &self.components {
+            let outputs: Box<dyn Iterator<Item = &OutputFileChecksum>> = match component {
+                ComponentManifest::Single(single) => Box::new(single.output_files.iter()),
+                ComponentManifest::Chunked(chunked) => {
+                    Box::new(chunked.chunk_output_files.iter().flatten())
+                }
+            };
+            for output in outputs {
+                output.relative_path().wrap_err_with(|| format!("In component `{key}`"))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Returns the exact download size for a component given a distance ending at [`Self::block`].
     ///
     /// For single archives, returns the full size. For chunked archives, sums the
     /// sizes of the selected tail chunks from [`ChunkedArchive::chunk_sizes`].
@@ -404,17 +441,14 @@ impl SnapshotManifest {
                 if chunked.chunk_sizes.is_empty() {
                     return 0;
                 }
-                let num_chunks = chunked.chunk_sizes.len() as u64;
-                let start_chunk = match distance {
-                    Some(dist) => num_chunks.saturating_sub(chunked.tail_chunks_for_distance(dist)),
-                    None => 0,
-                };
-                chunked.chunk_sizes[start_chunk as usize..].iter().sum()
+                let start_chunk = self.start_chunk_for_distance(chunked, distance);
+                chunked.chunk_sizes.iter().skip(start_chunk as usize).sum()
             }
         }
     }
 
-    /// Returns the exact extracted plain-output size for a component given a distance selection.
+    /// Returns the exact extracted plain-output size for a component given a distance ending at
+    /// [`Self::block`].
     pub fn output_size_for_distance(
         &self,
         ty: SnapshotComponentType,
@@ -428,10 +462,7 @@ impl SnapshotManifest {
             ComponentManifest::Single(single) => single.output_size(),
             ComponentManifest::Chunked(chunked) => {
                 let num_chunks = chunked.num_chunks();
-                let start_chunk = match distance {
-                    Some(dist) => num_chunks.saturating_sub(chunked.tail_chunks_for_distance(dist)),
-                    None => 0,
-                };
+                let start_chunk = self.start_chunk_for_distance(chunked, distance);
 
                 (start_chunk..num_chunks)
                     .map(|index| chunked.chunk_output_size(index as usize))
@@ -440,15 +471,40 @@ impl SnapshotManifest {
         }
     }
 
-    /// Returns the number of chunks that would be downloaded for a given distance.
+    /// Returns the number of chunks that would be downloaded for a distance ending at
+    /// [`Self::block`].
     pub fn chunks_for_distance(&self, ty: SnapshotComponentType, distance: Option<u64>) -> u64 {
         let Some(ComponentManifest::Chunked(chunked)) = self.component(ty) else {
             return if self.component(ty).is_some() { 1 } else { 0 };
         };
-        match distance {
-            Some(dist) => chunked.tail_chunks_for_distance(dist),
-            None => chunked.num_chunks(),
+        chunked.num_chunks() - self.start_chunk_for_distance(chunked, distance)
+    }
+
+    /// Returns the first chunk needed for a distance measured from the declared snapshot block.
+    fn start_chunk_for_distance(&self, chunked: &ChunkedArchive, distance: Option<u64>) -> u64 {
+        let Some(distance) = distance else { return 0 };
+        // The final archive may extend past the snapshot block. Counting back from its end
+        // would shift the requested history window forward and could skip a required chunk.
+        let first_block = self.block.saturating_sub(distance.saturating_sub(1));
+        // Legacy manifests used an inclusive block height for total_blocks. At equality,
+        // conservatively retain the boundary chunk if it exists.
+        if distance == 0 || first_block > chunked.total_blocks {
+            return chunked.num_chunks();
         }
+        first_block / chunked.blocks_per_file
+    }
+
+    /// Fails if any chunked component declares zero blocks per archive.
+    pub(crate) fn validate_blocks_per_file(&self) -> Result<()> {
+        for (key, component) in &self.components {
+            if let ComponentManifest::Chunked(chunked) = component {
+                eyre::ensure!(
+                    chunked.blocks_per_file > 0,
+                    "Invalid modular manifest: {key} blocks_per_file must be greater than zero"
+                );
+            }
+        }
+        Ok(())
     }
 }
 
@@ -494,7 +550,8 @@ impl ChunkedArchive {
         self.chunk_files.is_empty() || self.chunk_files.len() as u64 == self.num_chunks()
     }
 
-    /// Returns the archive path for chunk `index`, relative to the manifest base URL.
+    /// Returns the archive location for chunk `index`: a path relative to the manifest base URL,
+    /// or an absolute URL for an archive reused from a previous snapshot.
     ///
     /// Uses [`Self::chunk_files`] when it has exactly one entry per chunk; otherwise the
     /// default `{key}-{start}-{end}.tar.zst` name.
@@ -536,8 +593,13 @@ impl ChunkedArchive {
 ///
 /// Ensures directory semantics for `base_url` so the last path segment is not replaced when
 /// joining nested paths like `static_files/headers-0-499999.tar.zst`. Leading slashes on
-/// `relative_path` are stripped so publisher paths stay relative to the base prefix.
+/// `relative_path` are stripped so publisher paths stay relative to the base prefix. An absolute
+/// URL, such as an archive reused from a previous snapshot, is returned unchanged.
 fn resolve_archive_url(base_url: &str, relative_path: &str) -> String {
+    if Url::parse(relative_path).is_ok() {
+        return relative_path.to_string();
+    }
+
     let relative_path = relative_path.trim_start_matches('/');
 
     if base_url.is_empty() {
@@ -573,15 +635,24 @@ impl SingleArchive {
     }
 }
 
-/// Fetch a snapshot manifest from a URL.
+/// Fetches a snapshot manifest from a URL, rejecting zero blocks per archive.
 pub async fn fetch_manifest(manifest_url: &str) -> Result<SnapshotManifest> {
     let client = Client::new();
     let manifest: SnapshotManifest =
         client.get(manifest_url).send().await?.error_for_status()?.json().await?;
+    manifest.validate_blocks_per_file()?;
     Ok(manifest)
 }
 
 /// Package chunk archives from a source datadir and generate a manifest.
+///
+/// `block` selects chunks whose nominal ranges start at or before the snapshot height. Each
+/// selected file is archived in full; component block counts come from its actual stored ranges.
+///
+/// With a `previous` manifest, a chunk that is not the last chunk of its component in either
+/// manifest is not packaged again: its source files are hashed and must match the previous
+/// manifest's `chunk_output_files`, and the new manifest points `chunk_files` at the
+/// previously published archive. A mismatch is an error, since sealed history must not change.
 pub fn generate_manifest(
     source_datadir: &Path,
     output_dir: &Path,
@@ -589,10 +660,31 @@ pub fn generate_manifest(
     block: u64,
     chain_id: u64,
     blocks_per_file: u64,
+    previous: Option<&SnapshotManifest>,
 ) -> Result<SnapshotManifest> {
+    eyre::ensure!(blocks_per_file > 0, "blocks_per_file must be greater than zero");
+    if let Some(previous) = previous {
+        eyre::ensure!(
+            previous.chain_id == chain_id,
+            "Previous manifest is for chain {}, not {chain_id}",
+            previous.chain_id
+        );
+        // Reused archives are referenced by absolute URL, which needs an absolute base URL.
+        eyre::ensure!(
+            previous.base_url.as_deref().is_some_and(|url| Url::parse(url).is_ok()),
+            "Previous manifest has no absolute base_url to locate its archives"
+        );
+    }
+
     std::fs::create_dir_all(output_dir)?;
 
     let mut components = BTreeMap::new();
+    let mut static_files_dir = source_datadir.join("static_files");
+    if !static_files_dir.exists() {
+        static_files_dir = source_datadir.to_path_buf();
+    }
+
+    let static_files = iter_static_files(&static_files_dir)?;
 
     // Package chunked static-file components.
     for ty in &[
@@ -604,10 +696,23 @@ pub fn generate_manifest(
         SnapshotComponentType::StorageChangesets,
     ] {
         let key = ty.key();
-        let num_chunks = block.div_ceil(blocks_per_file);
+        let segment = static_segment(*ty).expect("chunked components have a static file segment");
+        let Some((last_range, _)) = static_files.get(segment).and_then(|ranges| {
+            ranges.iter().rfind(|(_, header)| header.expected_block_range().start() <= block)
+        }) else {
+            continue;
+        };
+
+        // Coverage starts at block zero, and selected files are archived in full, even past
+        // `block`.
+        let total_blocks = last_range
+            .end()
+            .checked_add(1)
+            .ok_or_else(|| eyre::eyre!("Block count overflows for {key}"))?;
+
+        let num_chunks = total_blocks.div_ceil(blocks_per_file);
         let mut planned_chunks = Vec::with_capacity(num_chunks as usize);
         let mut found_any = false;
-
         for i in 0..num_chunks {
             let start = i * blocks_per_file;
             let end = (i + 1) * blocks_per_file - 1;
@@ -629,19 +734,67 @@ pub fn generate_manifest(
         }
 
         if found_any {
+            // Chunk indices only match the previous manifest's positions without leading gaps.
+            let previous_chunks = previous
+                .filter(|_| planned_chunks.len() as u64 == num_chunks)
+                .and_then(|manifest| match manifest.component(*ty)? {
+                    ComponentManifest::Chunked(chunked) => Some((manifest, chunked)),
+                    ComponentManifest::Single(_) => None,
+                })
+                // The width check comes first: the other checks divide by the previous width.
+                .filter(|(_, chunked)| {
+                    chunked.blocks_per_file == blocks_per_file &&
+                        chunked.chunk_files_are_consistent() &&
+                        chunked.chunk_sizes.len() as u64 == chunked.num_chunks() &&
+                        chunked.chunk_output_files.len() as u64 == chunked.num_chunks()
+                });
+
+            // The last chunk of either manifest may be partial, so only earlier chunks are reused.
+            let reusable_chunks = previous_chunks
+                .map_or(0, |(_, chunked)| num_chunks.min(chunked.num_chunks()).saturating_sub(1));
+
             let mut packaged_chunks = planned_chunks
                 .into_par_iter()
                 .map(|planned| -> Result<PackagedChunk> {
+                    let start = planned.chunk_idx * blocks_per_file;
+                    let file_name = chunk_filename(key, start, start + blocks_per_file - 1);
+                    if planned.chunk_idx < reusable_chunks &&
+                        let Some((manifest, chunked)) = previous_chunks
+                    {
+                        let idx = planned.chunk_idx as usize;
+                        let output_files = hash_chunk_files(&planned.source_files)?;
+                        eyre::ensure!(
+                            output_files == chunked.chunk_output_files[idx],
+                            "{file_name} differs from the previous manifest"
+                        );
+
+                        return Ok(PackagedChunk {
+                            chunk_idx: planned.chunk_idx,
+                            size: chunked.chunk_sizes[idx],
+                            output_files,
+                            file: resolve_archive_url(
+                                manifest.base_url_or_empty(),
+                                &chunked.chunk_relative_path(key, planned.chunk_idx),
+                            ),
+                        });
+                    }
+
                     let output_files =
                         write_chunk_archive(&planned.archive_path, &planned.source_files)?;
                     let size = std::fs::metadata(&planned.archive_path)?.len();
-                    Ok(PackagedChunk { chunk_idx: planned.chunk_idx, size, output_files })
+                    Ok(PackagedChunk {
+                        chunk_idx: planned.chunk_idx,
+                        size,
+                        output_files,
+                        file: file_name,
+                    })
                 })
                 .collect::<Vec<_>>()
                 .into_iter()
                 .collect::<Result<Vec<_>>>()?;
 
             packaged_chunks.sort_unstable_by_key(|chunk| chunk.chunk_idx);
+            let chunk_files = packaged_chunks.iter().map(|chunk| chunk.file.clone()).collect();
             let chunk_sizes = packaged_chunks.iter().map(|chunk| chunk.size).collect::<Vec<_>>();
             let chunk_output_files =
                 packaged_chunks.into_iter().map(|chunk| chunk.output_files).collect::<Vec<_>>();
@@ -649,7 +802,7 @@ pub fn generate_manifest(
             info!(target: "reth::cli",
                 component = ty.display_name(),
                 chunks = chunk_sizes.len(),
-                total_blocks = block,
+                total_blocks,
                 size = %super::DownloadProgress::format_size(total_size),
                 "Found chunked component"
             );
@@ -657,13 +810,13 @@ pub fn generate_manifest(
                 key.to_string(),
                 ComponentManifest::Chunked(ChunkedArchive {
                     blocks_per_file,
-                    total_blocks: block,
+                    total_blocks,
                     chunk_sizes,
                     chunk_decompressed_sizes: chunk_output_files
                         .iter()
                         .map(|files| files.iter().map(|file| file.size).sum())
                         .collect(),
-                    chunk_files: vec![],
+                    chunk_files,
                     chunk_output_files,
                 }),
             );
@@ -733,6 +886,8 @@ struct PackagedChunk {
     chunk_idx: u64,
     size: u64,
     output_files: Vec<OutputFileChecksum>,
+    /// Entry for `chunk_files`: the published URL when reused, otherwise the local file name.
+    file: String,
 }
 
 #[derive(Debug)]
@@ -747,14 +902,14 @@ fn source_files_for_chunk(
     start: u64,
     end: u64,
 ) -> Result<Vec<PathBuf>> {
-    let Some(segment_name) = static_segment_name(component) else {
+    let Some(segment) = static_segment(component) else {
         return Ok(Vec::new());
     };
 
     let static_files_dir = source_datadir.join("static_files");
     let static_files_dir =
         if static_files_dir.exists() { static_files_dir } else { source_datadir.to_path_buf() };
-    let prefix = format!("static_file_{segment_name}_{start}_{end}");
+    let prefix = format!("static_file_{}_{start}_{end}", segment.as_str());
 
     let mut files = Vec::new();
     for entry in std::fs::read_dir(&static_files_dir)? {
@@ -771,14 +926,14 @@ fn source_files_for_chunk(
     Ok(files)
 }
 
-fn static_segment_name(component: SnapshotComponentType) -> Option<&'static str> {
+fn static_segment(component: SnapshotComponentType) -> Option<StaticFileSegment> {
     match component {
-        SnapshotComponentType::Headers => Some("headers"),
-        SnapshotComponentType::Transactions => Some("transactions"),
-        SnapshotComponentType::TransactionSenders => Some("transaction-senders"),
-        SnapshotComponentType::Receipts => Some("receipts"),
-        SnapshotComponentType::AccountChangesets => Some("account-change-sets"),
-        SnapshotComponentType::StorageChangesets => Some("storage-change-sets"),
+        SnapshotComponentType::Headers => Some(StaticFileSegment::Headers),
+        SnapshotComponentType::Transactions => Some(StaticFileSegment::Transactions),
+        SnapshotComponentType::TransactionSenders => Some(StaticFileSegment::TransactionSenders),
+        SnapshotComponentType::Receipts => Some(StaticFileSegment::Receipts),
+        SnapshotComponentType::AccountChangesets => Some(StaticFileSegment::AccountChangeSets),
+        SnapshotComponentType::StorageChangesets => Some(StaticFileSegment::StorageChangeSets),
         SnapshotComponentType::State | SnapshotComponentType::RocksdbIndices => None,
     }
 }
@@ -874,20 +1029,38 @@ fn package_single_component(
 }
 
 fn write_chunk_archive(path: &Path, source_files: &[PathBuf]) -> Result<Vec<OutputFileChecksum>> {
-    let planned_files = source_files
+    write_archive_from_planned_files(path, &chunk_planned_files(source_files)?)
+}
+
+/// Computes the output checksums a chunk archive of these files would record, without packaging.
+fn hash_chunk_files(source_files: &[PathBuf]) -> Result<Vec<OutputFileChecksum>> {
+    chunk_planned_files(source_files)?
+        .into_iter()
+        .map(|planned| {
+            let mut reader = HashingReader::new(reth_fs_util::open(&planned.source_path)?);
+            std::io::copy(&mut reader, &mut std::io::sink())?;
+            Ok(OutputFileChecksum {
+                path: planned.relative_path.to_string_lossy().to_string(),
+                size: reader.bytes_read,
+                blake3: reader.finalize(),
+            })
+        })
+        .collect()
+}
+
+fn chunk_planned_files(source_files: &[PathBuf]) -> Result<Vec<PlannedFile>> {
+    source_files
         .iter()
         .map(|source_path| {
             let file_name = source_path.file_name().ok_or_else(|| {
                 eyre::eyre!("Invalid source file path: {}", source_path.display())
             })?;
-            Ok::<_, eyre::Error>(PlannedFile {
+            Ok(PlannedFile {
                 source_path: source_path.clone(),
                 relative_path: PathBuf::from("static_files").join(file_name),
             })
         })
-        .collect::<Result<Vec<_>>>()?;
-
-    write_archive_from_planned_files(path, &planned_files)
+        .collect()
 }
 
 fn write_archive_from_planned_files(
@@ -956,6 +1129,10 @@ impl<R: Read> Read for HashingReader<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::B256;
+    use reth_node_api::NodeTypes;
+    use reth_provider::{test_utils::MockNodeTypes, StaticFileProviderBuilder, StaticFileWriter};
     use tempfile::tempdir;
 
     fn test_manifest() -> SnapshotManifest {
@@ -1002,6 +1179,36 @@ mod tests {
             components,
             extensions: Default::default(),
         }
+    }
+
+    fn snapshot_source() -> tempfile::TempDir {
+        let source = tempdir().unwrap();
+        reth_fs_util::create_dir_all(source.path().join("db")).unwrap();
+        reth_fs_util::write(source.path().join("db/mdbx.dat"), b"state-data").unwrap();
+        source
+    }
+
+    fn write_test_static_files(source: &Path, segment: StaticFileSegment, tip: u64) {
+        let static_files = source.join("static_files");
+        reth_fs_util::create_dir_all(&static_files).unwrap();
+
+        let provider = StaticFileProviderBuilder::read_write(&static_files)
+            .with_blocks_per_file(10)
+            .build::<<MockNodeTypes as NodeTypes>::Primitives>()
+            .unwrap();
+
+        let mut writer = provider.get_writer(0, segment).unwrap();
+        for number in 0..=tip {
+            if segment == StaticFileSegment::Headers {
+                writer
+                    .append_header(&Header { number, ..Default::default() }, &B256::ZERO)
+                    .unwrap();
+            } else {
+                writer.increment_block(number).unwrap();
+            }
+        }
+
+        writer.commit().unwrap();
     }
 
     #[test]
@@ -1259,6 +1466,46 @@ mod tests {
     }
 
     #[test]
+    fn manifest_output_paths_must_stay_relative() {
+        fn output(path: &str) -> OutputFileChecksum {
+            OutputFileChecksum { path: path.into(), size: 0, blake3: String::new() }
+        }
+
+        let mut manifest = test_manifest();
+        let mut with_outputs = |single: &[&str], chunks: &[&str]| {
+            manifest.components.insert(
+                "state".into(),
+                ComponentManifest::Single(SingleArchive {
+                    file: "state.tar.zst".into(),
+                    size: 1,
+                    decompressed_size: 0,
+                    blake3: None,
+                    output_files: single.iter().map(|path| output(path)).collect(),
+                }),
+            );
+            manifest.components.insert(
+                "transactions".into(),
+                ComponentManifest::Chunked(ChunkedArchive {
+                    blocks_per_file: 500_000,
+                    total_blocks: 500_000,
+                    chunk_sizes: vec![1],
+                    chunk_decompressed_sizes: vec![],
+                    chunk_files: vec![],
+                    chunk_output_files: vec![chunks.iter().map(|path| output(path)).collect()],
+                }),
+            );
+            manifest.validate_output_paths()
+        };
+
+        with_outputs(&["db/mdbx.dat", "./static_files/headers"], &["static_files/a/b"]).unwrap();
+        for bad in ["/etc/passwd", "../outside", "db/../../outside", "db/..", ".", "", "./"] {
+            let err = with_outputs(&[bad], &[]).unwrap_err();
+            assert!(format!("{err:#}").contains("Invalid manifest output file path"), "{bad}");
+            assert!(with_outputs(&[], &[bad]).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
     fn output_size_for_distance_uses_manifest_or_output_files() {
         let m = test_manifest();
         assert_eq!(m.output_size_for_distance(SnapshotComponentType::Transactions, None), 0);
@@ -1395,7 +1642,7 @@ mod tests {
         std::fs::write(db_dir.join("mdbx.dat"), b"state-data").unwrap();
 
         let manifest =
-            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000).unwrap();
+            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000, None).unwrap();
 
         let state = manifest.component(SnapshotComponentType::State).unwrap();
         let ComponentManifest::Single(state) = state else {
@@ -1420,7 +1667,7 @@ mod tests {
         std::fs::write(rocksdb_dir.join("CURRENT"), b"MANIFEST-000001").unwrap();
 
         let manifest =
-            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000).unwrap();
+            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000, None).unwrap();
 
         let rocksdb = manifest.component(SnapshotComponentType::RocksdbIndices).unwrap();
         let ComponentManifest::Single(rocksdb) = rocksdb else {
@@ -1550,6 +1797,14 @@ mod tests {
     }
 
     #[test]
+    fn resolve_archive_url_keeps_absolute_urls() {
+        let url = "https://example.com/previous/headers-0-9.tar.zst";
+        for base_url in ["", "https://example.com/mainnet", "not-a-url"] {
+            assert_eq!(resolve_archive_url(base_url, url), url, "base_url {base_url:?}");
+        }
+    }
+
+    #[test]
     fn mismatched_chunk_files_length_falls_back_to_default_names() {
         let mut components = BTreeMap::new();
         components.insert(
@@ -1589,5 +1844,298 @@ mod tests {
             "mismatched chunk_files must not partially apply"
         );
         assert_eq!(urls[1], "https://example.com/mainnet/headers-500000-999999.tar.zst");
+    }
+
+    #[test]
+    fn generate_manifest_uses_actual_component_block_ranges() {
+        let source = snapshot_source();
+        let output = tempdir().unwrap();
+        write_test_static_files(source.path(), StaticFileSegment::Headers, 24);
+        write_test_static_files(source.path(), StaticFileSegment::Transactions, 21);
+
+        // The declared height is beyond both components' actual tips, within the same chunk.
+        let manifest =
+            generate_manifest(source.path(), output.path(), None, 29, 1, 10, None).unwrap();
+        assert_eq!(manifest.block, 29);
+        for (component, expected_blocks) in
+            [(SnapshotComponentType::Headers, 25), (SnapshotComponentType::Transactions, 22)]
+        {
+            let ComponentManifest::Chunked(chunked) = manifest.component(component).unwrap() else {
+                panic!("component should be chunked");
+            };
+
+            assert_eq!(chunked.total_blocks, expected_blocks);
+            assert_eq!(chunked.num_chunks(), 3);
+            assert_eq!(chunked.chunk_sizes.len(), 3);
+            assert_eq!(chunked.chunk_output_files.len(), 3);
+            assert_eq!(chunked.tail_chunks_for_distance(6), 2);
+            for (index, size) in chunked.chunk_sizes.iter().enumerate() {
+                let path =
+                    output.path().join(chunked.chunk_relative_path(component.key(), index as u64));
+                assert_eq!(reth_fs_util::metadata(path).unwrap().len(), *size);
+            }
+        }
+    }
+
+    #[test]
+    fn generate_manifest_includes_genesis_and_chunk_boundary_blocks() {
+        for tip in [0, 9, 10, 19, 20] {
+            let source = snapshot_source();
+            let output = tempdir().unwrap();
+            write_test_static_files(source.path(), StaticFileSegment::Headers, tip);
+
+            let manifest =
+                generate_manifest(source.path(), output.path(), None, tip, 1, 10, None).unwrap();
+            let ComponentManifest::Chunked(chunked) =
+                manifest.component(SnapshotComponentType::Headers).unwrap()
+            else {
+                panic!("headers should be chunked");
+            };
+
+            assert_eq!(chunked.total_blocks, tip + 1);
+            assert_eq!(chunked.num_chunks(), tip / 10 + 1);
+            assert_eq!(chunked.chunk_sizes.len() as u64, chunked.num_chunks());
+        }
+    }
+
+    #[test]
+    fn generate_manifest_counts_whole_selected_chunks() {
+        let source = snapshot_source();
+        write_test_static_files(source.path(), StaticFileSegment::Headers, 24);
+
+        // Selecting a chunk copies its whole file, including blocks beyond the declared height.
+        for (block, expected_blocks) in [(9, 10), (10, 20), (20, 25), (39, 25)] {
+            let output = tempdir().unwrap();
+            let manifest =
+                generate_manifest(source.path(), output.path(), None, block, 1, 10, None).unwrap();
+
+            let ComponentManifest::Chunked(chunked) =
+                manifest.component(SnapshotComponentType::Headers).unwrap()
+            else {
+                panic!("headers should be chunked");
+            };
+
+            assert_eq!(chunked.total_blocks, expected_blocks);
+            assert_eq!(chunked.chunk_sizes.len() as u64, chunked.num_chunks());
+        }
+    }
+
+    #[test]
+    fn generate_manifest_reuses_sealed_chunks_from_previous_manifest() {
+        let previous_source = snapshot_source();
+        let previous_output = tempdir().unwrap();
+        write_test_static_files(previous_source.path(), StaticFileSegment::Headers, 24);
+        let previous = generate_manifest(
+            previous_source.path(),
+            previous_output.path(),
+            Some("https://example.com/previous"),
+            24,
+            1,
+            10,
+            None,
+        )
+        .unwrap();
+
+        let source = snapshot_source();
+        let output = tempdir().unwrap();
+        write_test_static_files(source.path(), StaticFileSegment::Headers, 34);
+        let manifest =
+            generate_manifest(source.path(), output.path(), None, 34, 1, 10, Some(&previous))
+                .unwrap();
+
+        let ComponentManifest::Chunked(previous_headers) =
+            previous.component(SnapshotComponentType::Headers).unwrap()
+        else {
+            panic!("headers should be chunked");
+        };
+
+        let ComponentManifest::Chunked(headers) =
+            manifest.component(SnapshotComponentType::Headers).unwrap()
+        else {
+            panic!("headers should be chunked");
+        };
+
+        // Chunks 0 and 1 were sealed in both snapshots; chunk 2 was the previous tip.
+        assert_eq!(
+            manifest.archive_urls(SnapshotComponentType::Headers),
+            vec![
+                "https://example.com/previous/headers-0-9.tar.zst",
+                "https://example.com/previous/headers-10-19.tar.zst",
+                "headers-20-29.tar.zst",
+                "headers-30-39.tar.zst",
+            ]
+        );
+        assert_eq!(headers.chunk_sizes[..2], previous_headers.chunk_sizes[..2]);
+        assert_eq!(headers.chunk_output_files[..2], previous_headers.chunk_output_files[..2]);
+        assert!(!output.path().join("headers-0-9.tar.zst").exists());
+        assert!(!output.path().join("headers-10-19.tar.zst").exists());
+        for index in 2..4 {
+            let path = output.path().join(headers.chunk_relative_path("headers", index));
+            assert_eq!(
+                reth_fs_util::metadata(path).unwrap().len(),
+                headers.chunk_sizes[index as usize]
+            );
+        }
+
+        // A later snapshot keeps pointing reused chunks at their original archives.
+        let mut manifest = manifest;
+        manifest.base_url = Some("https://example.com/current".to_string());
+        let next_source = snapshot_source();
+        write_test_static_files(next_source.path(), StaticFileSegment::Headers, 44);
+        let next = generate_manifest(
+            next_source.path(),
+            tempdir().unwrap().path(),
+            None,
+            44,
+            1,
+            10,
+            Some(&manifest),
+        )
+        .unwrap();
+        assert_eq!(
+            next.archive_urls(SnapshotComponentType::Headers),
+            vec![
+                "https://example.com/previous/headers-0-9.tar.zst",
+                "https://example.com/previous/headers-10-19.tar.zst",
+                "https://example.com/current/headers-20-29.tar.zst",
+                "headers-30-39.tar.zst",
+                "headers-40-49.tar.zst",
+            ]
+        );
+    }
+
+    #[test]
+    fn generate_manifest_rejects_sealed_chunk_that_differs_from_previous_manifest() {
+        let source = snapshot_source();
+        write_test_static_files(source.path(), StaticFileSegment::Headers, 24);
+        let mut previous = generate_manifest(
+            source.path(),
+            tempdir().unwrap().path(),
+            Some("https://example.com/previous"),
+            24,
+            1,
+            10,
+            None,
+        )
+        .unwrap();
+        let Some(ComponentManifest::Chunked(headers)) =
+            previous.components.get_mut(SnapshotComponentType::Headers.key())
+        else {
+            panic!("headers should be chunked");
+        };
+
+        headers.chunk_output_files[0][0].blake3 = "00".repeat(32);
+
+        let err = generate_manifest(
+            source.path(),
+            tempdir().unwrap().path(),
+            None,
+            24,
+            1,
+            10,
+            Some(&previous),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("differs from the previous manifest"), "{err}");
+    }
+
+    #[test]
+    fn generate_manifest_rejects_previous_manifest_without_absolute_base_url() {
+        let source = snapshot_source();
+        write_test_static_files(source.path(), StaticFileSegment::Headers, 24);
+        let mut previous = generate_manifest(
+            source.path(),
+            tempdir().unwrap().path(),
+            Some("https://example.com/previous"),
+            24,
+            1,
+            10,
+            None,
+        )
+        .unwrap();
+
+        for base_url in [None, Some(""), Some("previous")] {
+            previous.base_url = base_url.map(str::to_owned);
+            let err = generate_manifest(
+                source.path(),
+                tempdir().unwrap().path(),
+                None,
+                24,
+                1,
+                10,
+                Some(&previous),
+            )
+            .unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "Previous manifest has no absolute base_url to locate its archives"
+            );
+        }
+    }
+
+    #[test]
+    fn generate_manifest_packages_chunks_when_previous_chunk_files_are_inconsistent() {
+        let source = snapshot_source();
+        write_test_static_files(source.path(), StaticFileSegment::Headers, 24);
+        let mut previous = generate_manifest(
+            source.path(),
+            tempdir().unwrap().path(),
+            Some("https://example.com/previous"),
+            24,
+            1,
+            10,
+            None,
+        )
+        .unwrap();
+        let Some(ComponentManifest::Chunked(headers)) =
+            previous.components.get_mut(SnapshotComponentType::Headers.key())
+        else {
+            panic!("headers should be chunked");
+        };
+
+        headers.chunk_files.truncate(1);
+
+        let output = tempdir().unwrap();
+        let manifest =
+            generate_manifest(source.path(), output.path(), None, 24, 1, 10, Some(&previous))
+                .unwrap();
+        assert_eq!(
+            manifest.archive_urls(SnapshotComponentType::Headers),
+            vec!["headers-0-9.tar.zst", "headers-10-19.tar.zst", "headers-20-29.tar.zst"]
+        );
+        assert!(output.path().join("headers-0-9.tar.zst").exists());
+    }
+
+    #[test]
+    fn generate_manifest_packages_chunks_when_previous_blocks_per_file_is_zero() {
+        let source = snapshot_source();
+        write_test_static_files(source.path(), StaticFileSegment::Headers, 24);
+        let mut previous = generate_manifest(
+            source.path(),
+            tempdir().unwrap().path(),
+            Some("https://example.com/previous"),
+            24,
+            1,
+            10,
+            None,
+        )
+        .unwrap();
+        let Some(ComponentManifest::Chunked(headers)) =
+            previous.components.get_mut(SnapshotComponentType::Headers.key())
+        else {
+            panic!("headers should be chunked");
+        };
+
+        headers.blocks_per_file = 0;
+
+        let output = tempdir().unwrap();
+        let manifest =
+            generate_manifest(source.path(), output.path(), None, 24, 1, 10, Some(&previous))
+                .unwrap();
+        assert_eq!(
+            manifest.archive_urls(SnapshotComponentType::Headers),
+            vec!["headers-0-9.tar.zst", "headers-10-19.tar.zst", "headers-20-29.tar.zst"]
+        );
+        assert!(output.path().join("headers-0-9.tar.zst").exists());
     }
 }

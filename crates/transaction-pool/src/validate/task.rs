@@ -460,7 +460,7 @@ mod tests {
         tokio::spawn(task.run());
         let tx = MockTransaction::legacy();
         let out = executor.validate_transaction(TransactionOrigin::External, tx).await;
-        assert!(matches!(out, TransactionValidationOutcome::Valid { .. }));
+        assert!(out.is_valid());
     }
 
     #[tokio::test]
@@ -474,14 +474,30 @@ mod tests {
         ];
         let out = executor.validate_transactions(txs).await;
         assert_eq!(out.len(), 2);
-        assert!(out.iter().all(|o| matches!(o, TransactionValidationOutcome::Valid { .. })));
+        assert!(out.iter().all(|o| o.is_valid()));
     }
 
     #[tokio::test]
     async fn cloned_executors_share_bounded_queue() {
         let (executor, task) = TransactionValidationTaskExecutor::new(NoopValidator);
         let mut submissions = tokio::task::JoinSet::new();
-        for index in 0..64 {
+
+        let first_executor = executor.clone();
+        let mut first_submission = Box::pin(async move {
+            first_executor
+                .validate_transaction(TransactionOrigin::Local, MockTransaction::legacy())
+                .await
+        });
+        // Poll once to fill the bounded queue before starting workers.
+        assert!(futures_util::poll!(first_submission.as_mut()).is_pending());
+        assert_eq!(executor.to_validation_task.tx.capacity(), 0);
+
+        submissions.spawn(async move {
+            let outcome = first_submission.await;
+            assert!(outcome.is_valid());
+        });
+
+        for index in 1..64 {
             let executor = executor.clone();
             submissions.spawn(async move {
                 let transaction = MockTransaction::legacy();
@@ -504,15 +520,9 @@ mod tests {
                     }
                 };
                 assert_eq!(outcomes.len(), 1);
-                assert!(matches!(outcomes[0], TransactionValidationOutcome::Valid { .. }));
+                assert!(outcomes[0].is_valid());
             });
         }
-
-        // No worker has started: one job can be queued and the other producers
-        // must remain pending on the same bounded channel.
-        tokio::task::yield_now().await;
-        assert_eq!(executor.to_validation_task.tx.capacity(), 0);
-        assert!(submissions.try_join_next().is_none());
 
         let first_worker = tokio::spawn(task.clone().run());
         let second_worker = tokio::spawn(task.run());
@@ -541,7 +551,7 @@ mod tests {
             )
             .await
             .expect("configured validation workers must process jobs");
-            assert!(matches!(outcome, TransactionValidationOutcome::Valid { .. }));
+            assert!(outcome.is_valid());
         }
     }
 
@@ -572,7 +582,7 @@ mod tests {
                     state_nonce: 0,
                     bytecode_hash: None,
                     transaction: ValidTransaction::Valid(transaction),
-                    propagate: matches!(origin, TransactionOrigin::Local),
+                    propagate: origin.is_local(),
                     authorities: None,
                 })
                 .collect()

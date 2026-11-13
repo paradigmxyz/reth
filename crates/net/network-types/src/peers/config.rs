@@ -93,7 +93,7 @@ impl Default for PeerBackoffDurations {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(default))]
 pub struct ConnectionsConfig {
-    /// Maximum allowed outbound connections.
+    /// Maximum allowed outbound connections. Trusted peers are dialed regardless.
     pub max_outbound: usize,
     /// Maximum allowed inbound connections.
     pub max_inbound: usize,

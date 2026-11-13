@@ -47,7 +47,7 @@ use crate::{
     transactions::config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
     NetworkHandle, TxTypesCounter,
 };
-use alloy_eips::eip2718::Typed2718;
+use alloy_eips::eip2718::{Encodable2718, Typed2718};
 use alloy_primitives::{
     bytes::BufMut,
     map::{hash_map::Entry, B256Map, B256Set, FbBuildHasher, HashMap, HashSet},
@@ -430,12 +430,17 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         // install a listener for new __pending__ transactions that are allowed to be propagated
         // over the network
         let pending = pool.pending_transactions_listener();
-        let pending_pool_imports_info =
-            PendingPoolImportsInfo::new(transactions_manager_config.max_pending_pool_imports);
+        let pending_pool_imports_info = PendingPoolImportsInfo::new(
+            transactions_manager_config.max_pending_pool_imports,
+            transactions_manager_config.max_pending_pool_imports_bytes,
+        );
         let metrics = TransactionsManagerMetrics::default();
         metrics
             .capacity_pending_pool_imports
             .increment(pending_pool_imports_info.max_pending_pool_imports as u64);
+        metrics
+            .capacity_pending_pool_imports_bytes
+            .increment(pending_pool_imports_info.max_pending_pool_imports_bytes as u64);
 
         Self {
             pool,
@@ -474,8 +479,9 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// Returns whether pending pool imports are below the soft limit.
     ///
     /// Fetch responses are admitted in full when capacity remains, so one response can exceed
-    /// the limit by at most 255 transactions (the 256-hash request cap minus one free slot).
-    /// Further responses and requests wait until imports fall below the limit again.
+    /// the limit by at most 255 transactions (the 256-hash request cap minus one free slot), or
+    /// the byte limit by one response message. Further responses and requests wait until imports
+    /// fall below both limits again.
     fn has_capacity_for_pending_pool_imports(&self) -> bool {
         self.remaining_pool_import_capacity() > 0
     }
@@ -483,27 +489,42 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// Returns the remaining capacity below the soft limit for pending pool imports.
     ///
     /// Outstanding requests do not reserve capacity. A fetched response is admitted in full
-    /// if any capacity remains; while imports exceed the limit, this returns zero.
+    /// if any capacity remains; while imports exceed the count or byte limit, this returns zero.
     fn remaining_pool_import_capacity(&self) -> usize {
-        self.pending_pool_imports_info.max_pending_pool_imports.saturating_sub(
-            self.pending_pool_imports_info.pending_pool_imports.load(Ordering::Relaxed),
-        )
+        let info = &self.pending_pool_imports_info;
+        if info.pending_pool_imports_bytes.load(Ordering::Relaxed) >=
+            info.max_pending_pool_imports_bytes
+        {
+            return 0
+        }
+        info.max_pending_pool_imports
+            .saturating_sub(info.pending_pool_imports.load(Ordering::Relaxed))
     }
 
-    /// Returns import capacity available to broadcasts after reserving space for fetched hashes.
-    fn remaining_broadcast_import_capacity(&self) -> usize {
+    /// Returns the transaction count and encoded byte size available to broadcasts, after
+    /// reserving space for fetched hashes.
+    fn remaining_broadcast_import_capacity(&self) -> (usize, usize) {
         let capacity = self.remaining_pool_import_capacity();
+        let info = &self.pending_pool_imports_info;
+        let bytes = info
+            .max_pending_pool_imports_bytes
+            .saturating_sub(info.pending_pool_imports_bytes.load(Ordering::Relaxed));
         if self.transaction_fetcher.num_hashes() == 0 {
-            return capacity
+            return (capacity, bytes)
         }
         // Reserve one batch (or half a small import budget) for fetched transactions.
         // Broadcasts are processed first and must not consume every newly freed slot.
-        let reserved = self
-            .pending_pool_imports_info
+        let reserved = info
             .max_pending_pool_imports
             .div_ceil(2)
             .min(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST);
-        capacity.saturating_sub(reserved)
+        // Likewise reserve one response worth of bytes, so broadcasts can't fill the byte limit
+        // that pauses fetching.
+        let reserved_bytes = info
+            .max_pending_pool_imports_bytes
+            .div_ceil(2)
+            .min(SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE);
+        (capacity.saturating_sub(reserved), bytes.saturating_sub(reserved_bytes))
     }
 
     fn report_peer_bad_transactions(&self, peer_id: PeerId) {
@@ -549,7 +570,6 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// - exceeds gas limit
     /// - gas uint overflow
     /// - exceeds max init code size
-    /// - oversized data
     /// - signer account has bytecode
     /// - chain id mismatch
     /// - old legacy chain id
@@ -802,9 +822,9 @@ impl<Pool, N> TransactionsManager<Pool, N>
 where
     Pool: TransactionPool + Unpin + 'static,
     N: NetworkPrimitives<
-            BroadcastedTransaction: SignedTransaction,
-            PooledTransaction: SignedTransaction,
-        > + Unpin,
+        BroadcastedTransaction: SignedTransaction,
+        PooledTransaction: SignedTransaction,
+    >,
     Pool::Transaction:
         PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled = N::PooledTransaction>,
 {
@@ -1108,6 +1128,12 @@ where
             return
         }
         if let Some(peer) = self.peers.get_mut(&peer_id) {
+            // don't serve pending transactions to peers the policy doesn't propagate to
+            if !self.policies.propagation_policy().can_propagate(peer) {
+                let _ = response.send(Ok(PooledTransactions::default()));
+                return
+            }
+
             let transactions = self.pool.get_pooled_transaction_elements(
                 request.0,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
@@ -1204,6 +1230,11 @@ where
         // transactions in the pool.
         if self.network.is_initially_syncing() || self.network.tx_gossip_disabled() {
             trace!(target: "net::tx", ?peer_id, "Skipping transaction broadcast: node syncing or gossip disabled");
+            return
+        }
+
+        // skip peers we should not propagate to
+        if !self.policies.propagation_policy().can_propagate(peer) {
             return
         }
 
@@ -1342,12 +1373,21 @@ where
         // Fetched batches may exceed the soft limit: their request size is bounded, and the
         // caller stops consuming responses until capacity becomes available again.
         if is_broadcast {
-            let capacity = self.remaining_broadcast_import_capacity();
-            if transactions.len() > capacity {
+            let (capacity, byte_capacity) = self.remaining_broadcast_import_capacity();
+            let mut bytes = 0usize;
+            let admitted = transactions
+                .iter()
+                .take(capacity)
+                .take_while(|tx| {
+                    bytes = bytes.saturating_add(tx.encode_2718_len());
+                    bytes <= byte_capacity
+                })
+                .count();
+            if transactions.len() > admitted {
                 self.metrics
                     .skipped_transactions_pending_pool_imports_at_capacity
-                    .increment((transactions.len() - capacity) as u64);
-                transactions.truncate(capacity);
+                    .increment((transactions.len() - admitted) as u64);
+                transactions.truncate(admitted);
             }
         }
 
@@ -1378,7 +1418,7 @@ where
         // EIP-8070, so their sidecars can never validate. Drop them before touching the pool;
         // geth equivalently diverts these bodies into a buffer that is completed with cells
         // fetched via `GetCells`, which is not implemented yet.
-        if version == EthVersion::Eth72 {
+        if version.is_eth72() {
             let len_before = transactions.len();
             transactions.retain(|tx| !tx.is_eip4844());
             let dropped = len_before - transactions.len();
@@ -1464,6 +1504,10 @@ where
             // update metrics
             let metric_pending_pool_imports = self.metrics.pending_pool_imports.clone();
             metric_pending_pool_imports.increment(new_txs.len() as f64);
+            // includes blob sidecars, which stay in memory until the import completes
+            let bytes = new_txs.iter().map(PoolTransaction::encoded_length).sum::<usize>();
+            let metric_pending_pool_imports_bytes = self.metrics.pending_pool_imports_bytes.clone();
+            metric_pending_pool_imports_bytes.increment(bytes as f64);
 
             // update self-monitoring info
             self.pending_pool_imports_info
@@ -1471,6 +1515,11 @@ where
                 .fetch_add(new_txs.len(), Ordering::Relaxed);
             let tx_manager_info_pending_pool_imports =
                 self.pending_pool_imports_info.pending_pool_imports.clone();
+            self.pending_pool_imports_info
+                .pending_pool_imports_bytes
+                .fetch_add(bytes, Ordering::Relaxed);
+            let tx_manager_info_pending_pool_imports_bytes =
+                self.pending_pool_imports_info.pending_pool_imports_bytes.clone();
 
             trace!(target: "net::tx::propagation", new_txs_len=?new_txs.len(), "Importing new transactions");
             let import = Box::pin(async move {
@@ -1479,8 +1528,10 @@ where
 
                 // update metrics
                 metric_pending_pool_imports.decrement(added as f64);
+                metric_pending_pool_imports_bytes.decrement(bytes as f64);
                 // update self-monitoring info
                 tx_manager_info_pending_pool_imports.fetch_sub(added, Ordering::Relaxed);
+                tx_manager_info_pending_pool_imports_bytes.fetch_sub(bytes, Ordering::Relaxed);
 
                 res
             });
@@ -1548,9 +1599,9 @@ where
 impl<
         Pool: TransactionPool + Unpin + 'static,
         N: NetworkPrimitives<
-                BroadcastedTransaction: SignedTransaction,
-                PooledTransaction: SignedTransaction,
-            > + Unpin,
+            BroadcastedTransaction: SignedTransaction,
+            PooledTransaction: SignedTransaction,
+        >,
     > Future for TransactionsManager<Pool, N>
 where
     Pool::Transaction:
@@ -2272,23 +2323,38 @@ pub struct PendingPoolImportsInfo {
     pending_pool_imports: Arc<AtomicUsize>,
     /// Max number of transactions allowed to be imported concurrently.
     max_pending_pool_imports: usize,
+    /// Encoded byte size of the transactions about to be inserted into the pool.
+    pending_pool_imports_bytes: Arc<AtomicUsize>,
+    /// Max encoded byte size of transactions allowed to be imported concurrently.
+    max_pending_pool_imports_bytes: usize,
 }
 
 impl PendingPoolImportsInfo {
     /// Returns a new [`PendingPoolImportsInfo`].
-    pub fn new(max_pending_pool_imports: usize) -> Self {
-        Self { pending_pool_imports: Arc::new(AtomicUsize::default()), max_pending_pool_imports }
+    pub fn new(max_pending_pool_imports: usize, max_pending_pool_imports_bytes: usize) -> Self {
+        Self {
+            pending_pool_imports: Arc::new(AtomicUsize::default()),
+            max_pending_pool_imports,
+            pending_pool_imports_bytes: Arc::new(AtomicUsize::default()),
+            max_pending_pool_imports_bytes,
+        }
     }
 
-    /// Returns `true` if the number of pool imports is under a given tolerated max.
-    pub fn has_capacity(&self, max_pending_pool_imports: usize) -> bool {
-        self.pending_pool_imports.load(Ordering::Relaxed) < max_pending_pool_imports
+    /// Returns `true` if the number of pool imports and their encoded byte size are both under
+    /// the configured max.
+    pub fn has_capacity(&self) -> bool {
+        self.pending_pool_imports.load(Ordering::Relaxed) < self.max_pending_pool_imports &&
+            self.pending_pool_imports_bytes.load(Ordering::Relaxed) <
+                self.max_pending_pool_imports_bytes
     }
 }
 
 impl Default for PendingPoolImportsInfo {
     fn default() -> Self {
-        Self::new(DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS)
+        Self::new(
+            DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+            DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS,
+        )
     }
 }
 
@@ -2338,7 +2404,7 @@ mod tests {
     };
     use alloy_consensus::{Transaction as _, TxEip1559, TxLegacy};
     use alloy_eips::{eip2718::Encodable2718, eip4844::BlobTransactionValidationError};
-    use alloy_primitives::{hex, Signature, TxKind, B256, U256};
+    use alloy_primitives::{address, hex, Signature, TxKind, B256, U256};
     use alloy_rlp::Decodable;
     use futures::FutureExt;
     use reth_chainspec::MIN_TRANSACTION_GAS;
@@ -2400,7 +2466,7 @@ mod tests {
         let policy = RecordingPolicy::default();
         manager.policies =
             NetworkPolicies::new(TransactionPropagationKind::default(), policy.clone());
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
         let (peer, mut rx) = new_mock_session(peer_id, EthVersion::Eth68);
         manager.peers.insert(peer_id, peer);
         let [pending, accepted, ignored, rejected, later, bad] =
@@ -2436,7 +2502,7 @@ mod tests {
         TransactionsManager<EthTestPool, EthNetworkPrimitives>,
         NetworkManager<EthNetworkPrimitives>,
     ) {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
         let client = NoopProvider::default();
 
         let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
@@ -2492,18 +2558,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ignored_tx_broadcasts_while_initially_syncing() {
         reth_tracing::init_test_tracing();
-        let net = Testnet::create(3).await;
+        let net = Testnet::create(3).await.spawn();
+        let [peer0, peer1, _] = net.peers_array();
 
-        let mut handles = net.handles();
-        let handle0 = handles.next().unwrap();
-        let handle1 = handles.next().unwrap();
-
-        drop(handles);
-        let handle = net.spawn();
-
-        let listener0 = handle0.event_listener();
-        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let listener0 = peer0.event_listener();
+        peer0.add_peer(peer1);
+        let secret_key = SecretKey::new(&mut rand::rng());
 
         let client = NoopProvider::default();
         let pool = testing_pool();
@@ -2547,7 +2607,7 @@ mod tests {
         );
         let signed_tx = TransactionSigned::decode(&mut &input[..]).unwrap();
         transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
-            peer_id: *handle1.peer_id(),
+            peer_id: *peer1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
         });
         poll_fn(|cx| {
@@ -2556,24 +2616,17 @@ mod tests {
         })
         .await;
         assert!(pool.is_empty());
-        handle.terminate().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_tx_broadcasts_through_two_syncs() {
         reth_tracing::init_test_tracing();
-        let net = Testnet::create(3).await;
+        let net = Testnet::create(3).await.spawn();
+        let [peer0, peer1, _] = net.peers_array();
 
-        let mut handles = net.handles();
-        let handle0 = handles.next().unwrap();
-        let handle1 = handles.next().unwrap();
-
-        drop(handles);
-        let handle = net.spawn();
-
-        let listener0 = handle0.event_listener();
-        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let listener0 = peer0.event_listener();
+        peer0.add_peer(peer1);
+        let secret_key = SecretKey::new(&mut rand::rng());
 
         let client = NoopProvider::default();
         let pool = testing_pool();
@@ -2620,7 +2673,7 @@ mod tests {
         );
         let signed_tx = TransactionSigned::decode(&mut &input[..]).unwrap();
         transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
-            peer_id: *handle1.peer_id(),
+            peer_id: *peer1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
         });
         poll_fn(|cx| {
@@ -2631,7 +2684,6 @@ mod tests {
         assert!(!NetworkInfo::is_initially_syncing(&network_handle));
         assert!(NetworkInfo::is_syncing(&network_handle));
         assert!(!pool.is_empty());
-        handle.terminate().await;
     }
 
     // Ensure that the transaction manager correctly handles the `IncomingPooledTransactionHashes`
@@ -2640,7 +2692,7 @@ mod tests {
     async fn test_handle_incoming_transactions_hashes() {
         reth_tracing::init_test_tracing();
 
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
         let client = NoopProvider::default();
 
         let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
@@ -2659,7 +2711,7 @@ mod tests {
             .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
 
-        let peer_id_1 = PeerId::new([1; 64]);
+        let peer_id_1 = PeerId::repeat_byte(1);
         let eth_version = EthVersion::Eth66;
 
         let txs = vec![TransactionSigned::new_unhashed(
@@ -2668,7 +2720,7 @@ mod tests {
                 nonce: 15u64,
                 gas_price: 2200000000,
                 gas_limit: 34811,
-                to: TxKind::Call(hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into()),
+                to: TxKind::Call(address!("cf7f9e66af820a19257a2108375b180b0ec49167")),
                 value: U256::from(1234u64),
                 input: Default::default(),
             }),
@@ -2742,19 +2794,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_handle_incoming_transactions() {
         reth_tracing::init_test_tracing();
-        let net = Testnet::create(3).await;
+        let net = Testnet::create(3).await.spawn();
+        let [peer0, peer1, _] = net.peers_array();
 
-        let mut handles = net.handles();
-        let handle0 = handles.next().unwrap();
-        let handle1 = handles.next().unwrap();
+        let listener0 = peer0.event_listener();
 
-        drop(handles);
-        let handle = net.spawn();
-
-        let listener0 = handle0.event_listener();
-
-        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        peer0.add_peer(peer1);
+        let secret_key = SecretKey::new(&mut rand::rng());
 
         let client = NoopProvider::default();
         let pool = testing_pool();
@@ -2796,14 +2842,14 @@ mod tests {
         );
         let signed_tx = TransactionSigned::decode(&mut &input[..]).unwrap();
         transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
-            peer_id: *handle1.peer_id(),
+            peer_id: *peer1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
         });
         assert!(transactions
             .transactions_by_peers
             .get(signed_tx.tx_hash())
             .unwrap()
-            .contains(handle1.peer_id()));
+            .contains(peer1.peer_id()));
 
         // advance the transaction manager future
         poll_fn(|cx| {
@@ -2814,14 +2860,13 @@ mod tests {
 
         assert!(!pool.is_empty());
         assert!(pool.get(signed_tx.tx_hash()).is_some());
-        handle.terminate().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_session_closed_cleans_transaction_peer_state() {
         let (mut tx_manager, _network) = new_tx_manager().await;
-        let peer_id = PeerId::new([1; 64]);
-        let fallback_peer = PeerId::new([2; 64]);
+        let peer_id = PeerId::repeat_byte(1);
+        let fallback_peer = PeerId::repeat_byte(2);
         let (peer, _) = new_mock_session(peer_id, EthVersion::Eth66);
         let (fallback, _) = new_mock_session(fallback_peer, EthVersion::Eth66);
         let hash_shared = B256::from_slice(&[1; 32]);
@@ -2858,7 +2903,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_bad_blob_sidecar_not_cached_as_bad_import() {
         let (mut tx_manager, _network) = new_tx_manager().await;
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
         let hash = B256::from_slice(&[1; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
@@ -2879,7 +2924,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_missing_blob_sidecar_not_cached_as_bad_import() {
         let (mut tx_manager, _network) = new_tx_manager().await;
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
         let hash = B256::from_slice(&[3; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
@@ -2900,7 +2945,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_non_blob_sidecar_error_still_cached_as_bad_import() {
         let (mut tx_manager, _network) = new_tx_manager().await;
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
         let hash = B256::from_slice(&[2; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
@@ -2919,19 +2964,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_on_get_pooled_transactions_network() {
         reth_tracing::init_test_tracing();
-        let net = Testnet::create(2).await;
+        let net = Testnet::create(2).await.spawn();
+        let [peer0, peer1] = net.peers_array();
 
-        let mut handles = net.handles();
-        let handle0 = handles.next().unwrap();
-        let handle1 = handles.next().unwrap();
+        let listener0 = peer0.event_listener();
 
-        drop(handles);
-        let handle = net.spawn();
-
-        let listener0 = handle0.event_listener();
-
-        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        peer0.add_peer(peer1);
+        let secret_key = SecretKey::new(&mut rand::rng());
 
         let client = NoopProvider::default();
         let pool = testing_pool();
@@ -2966,7 +3005,6 @@ mod tests {
                 }
             }
         }
-        handle.terminate().await;
 
         let tx = MockTransaction::eip1559();
         let _ = transactions
@@ -2980,7 +3018,7 @@ mod tests {
             oneshot::channel::<RequestResult<PooledTransactions<PooledTransactionVariant>>>();
 
         transactions.on_network_tx_event(NetworkTransactionEvent::GetPooledTransactions {
-            peer_id: *handle1.peer_id(),
+            peer_id: *peer1.peer_id(),
             request,
             response: send,
         });
@@ -3005,7 +3043,7 @@ mod tests {
         let mut tx_manager = new_tx_manager().await.0;
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
-        let peer_id_1 = PeerId::new([1; 64]);
+        let peer_id_1 = PeerId::repeat_byte(1);
         let eth_version = EthVersion::Eth66;
 
         let txs = vec![
@@ -3015,7 +3053,7 @@ mod tests {
                     nonce: 15u64,
                     gas_price: 2200000000,
                     gas_limit: 34811,
-                    to: TxKind::Call(hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into()),
+                    to: TxKind::Call(address!("cf7f9e66af820a19257a2108375b180b0ec49167")),
                     value: U256::from(1234u64),
                     input: Default::default(),
                 }),
@@ -3038,7 +3076,7 @@ mod tests {
                     max_priority_fee_per_gas: 1500000000,
                     max_fee_per_gas: 1500000013,
                     gas_limit: MIN_TRANSACTION_GAS,
-                    to: TxKind::Call(hex!("61815774383099e24810ab832a5b2a5425c154d5").into()),
+                    to: TxKind::Call(address!("61815774383099e24810ab832a5b2a5425c154d5")),
                     value: U256::from(3000000000000000000u64),
                     input: Default::default(),
                     access_list: Default::default(),
@@ -3121,8 +3159,8 @@ mod tests {
         let mut tx_manager = new_tx_manager().await.0;
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
-        let peer_id_1 = PeerId::new([1; 64]);
-        let peer_id_2 = PeerId::new([2; 64]);
+        let peer_id_1 = PeerId::repeat_byte(1);
+        let peer_id_2 = PeerId::repeat_byte(2);
         let eth_version = EthVersion::Eth66;
         let seen_hashes = [B256::from_slice(&[1; 32]), B256::from_slice(&[2; 32])];
 
@@ -3458,7 +3496,7 @@ mod tests {
         let policy_bundle = NetworkPolicies::new(propagation_policy, announcement_policy);
 
         let pool = testing_pool();
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
         let client = NoopProvider::default();
 
         let network_config = NetworkConfigBuilder::new(secret_key, Runtime::test())

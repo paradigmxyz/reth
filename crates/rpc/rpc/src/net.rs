@@ -27,7 +27,7 @@ impl<Net, Eth> NetApi<Net, Eth> {
 impl<Net, Eth> NetApiServer for NetApi<Net, Eth>
 where
     Net: PeersInfo + 'static,
-    Eth: EthApiSpec + 'static,
+    Eth: EthApiSpec,
 {
     /// Handler for `net_version`
     fn version(&self) -> Result<String> {

@@ -1,8 +1,7 @@
 //! Interface between node identification on protocol version 5 and 4. Specifically, between types
-//! [`discv5::enr::NodeId`] and [`PeerId`].
+//! [`enr::NodeId`] and [`PeerId`].
 
-use discv5::enr::{CombinedPublicKey, EnrPublicKey, NodeId};
-use enr::Enr;
+use enr::{CombinedPublicKey, Enr, EnrPublicKey, NodeId};
 use reth_network_peers::{id2pk, pk2id, PeerId};
 use secp256k1::{PublicKey, SecretKey};
 
@@ -19,18 +18,18 @@ pub fn enr_to_discv4_id(enr: &discv5::Enr) -> Option<PeerId> {
     Some(pk2id(&pk))
 }
 
-/// Converts a [`PeerId`] to a [`discv5::enr::NodeId`].
+/// Converts a [`PeerId`] to a [`enr::NodeId`].
 pub fn discv4_id_to_discv5_id(peer_id: PeerId) -> Result<NodeId, secp256k1::Error> {
     Ok(id2pk(peer_id)?.into())
 }
 
-/// Converts a [`PeerId`] to a [`discv5::libp2p_identity::PeerId`].
+/// Converts a [`PeerId`] to a [`libp2p_identity::PeerId`].
 pub fn discv4_id_to_multiaddr_id(
     peer_id: PeerId,
-) -> Result<discv5::libp2p_identity::PeerId, secp256k1::Error> {
+) -> Result<libp2p_identity::PeerId, secp256k1::Error> {
     let pk = id2pk(peer_id)?.encode();
-    let pk: discv5::libp2p_identity::PublicKey =
-        discv5::libp2p_identity::secp256k1::PublicKey::try_from_bytes(&pk).unwrap().into();
+    let pk: libp2p_identity::PublicKey =
+        libp2p_identity::secp256k1::PublicKey::try_from_bytes(&pk).unwrap().into();
 
     Ok(pk.to_peer_id())
 }
@@ -39,10 +38,14 @@ pub fn discv4_id_to_multiaddr_id(
 #[derive(Debug, Clone)]
 pub struct EnrCombinedKeyWrapper(pub discv5::Enr);
 
-impl From<Enr<SecretKey>> for EnrCombinedKeyWrapper {
-    fn from(value: Enr<SecretKey>) -> Self {
+impl TryFrom<Enr<SecretKey>> for EnrCombinedKeyWrapper {
+    type Error = alloy_rlp::Error;
+
+    fn try_from(value: Enr<SecretKey>) -> Result<Self, Self::Error> {
+        // The k256 backend of `discv5::Enr` rejects some public key encodings that libsecp256k1
+        // accepts.
         let encoded_enr = alloy_rlp::encode(&value);
-        Self(alloy_rlp::Decodable::decode(&mut &encoded_enr[..]).unwrap())
+        alloy_rlp::Decodable::decode(&mut &encoded_enr[..]).map(Self)
     }
 }
 
@@ -56,8 +59,9 @@ impl From<EnrCombinedKeyWrapper> for Enr<SecretKey> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rlp::Encodable;
-    use discv5::enr::{CombinedKey, EnrKey};
+    use alloy_primitives::keccak256;
+    use alloy_rlp::{Encodable, Header};
+    use enr::{CombinedKey, EnrKey};
     use reth_chainspec::{EthereumHardfork, MAINNET};
     use reth_network_peers::NodeRecord;
 
@@ -106,5 +110,35 @@ mod tests {
             },
             node_record
         )
+    }
+
+    #[test]
+    fn enr_conversion_rejects_hybrid_encoded_key() {
+        let sk = SecretKey::from_secret_bytes([1; 32]).unwrap();
+        // Hybrid encoding: an uncompressed point with the y parity in the prefix byte.
+        let mut pk = sk.public_key().serialize_uncompressed();
+        pk[0] = 0x06 | (pk[64] & 1);
+
+        let rlp_list = |payload: &[u8]| {
+            let mut out = Vec::new();
+            Header { list: true, payload_length: payload.len() }.encode(&mut out);
+            out.extend_from_slice(payload);
+            out
+        };
+        let mut content = Vec::new();
+        1u64.encode(&mut content);
+        for item in [&b"id"[..], b"v4", b"secp256k1", &pk] {
+            item.encode(&mut content);
+        }
+        let msg = secp256k1::Message::from_digest(keccak256(rlp_list(&content)).0);
+        let mut payload = Vec::new();
+        secp256k1::ecdsa::sign(msg, &sk).serialize_compact().as_slice().encode(&mut payload);
+        payload.extend_from_slice(&content);
+
+        let enr = alloy_rlp::decode_exact::<Enr<SecretKey>>(rlp_list(&payload)).unwrap();
+        assert_eq!(
+            EnrCombinedKeyWrapper::try_from(enr).unwrap_err(),
+            alloy_rlp::Error::Custom("Unknown signature")
+        );
     }
 }

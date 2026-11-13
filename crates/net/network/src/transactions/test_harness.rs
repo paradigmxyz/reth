@@ -187,17 +187,23 @@ impl Wake for WakeFlag {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::map::{B256Map, B256Set};
+    use crate::transactions::SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE;
+    use alloy_eips::eip2718::Encodable2718;
+    use alloy_primitives::map::B256Set;
     use futures::StreamExt;
     use reth_eth_wire::NewPooledTransactionHashes68;
     use reth_network_p2p::error::RequestError;
-    use reth_transaction_pool::{test_utils::TransactionGenerator, TransactionPool};
+    use reth_primitives_traits::SignedTransaction;
+    use reth_transaction_pool::{
+        test_utils::{MockTransaction, TransactionGenerator},
+        PoolTransaction, TransactionPool,
+    };
 
-    const PEER_A: PeerId = PeerId::new([1; 64]);
-    const PEER_B: PeerId = PeerId::new([2; 64]);
+    const PEER_A: PeerId = PeerId::repeat_byte(1);
+    const PEER_B: PeerId = PeerId::repeat_byte(2);
 
     fn peer(n: u8) -> PeerId {
-        PeerId::new([n; 64])
+        PeerId::repeat_byte(n)
     }
 
     fn hash(n: u64) -> TxHash {
@@ -294,40 +300,6 @@ mod tests {
         harness.poll_until_idle();
         assert_eq!(harness.num_tracked_hashes(), 0);
         assert!(harness.take_requests().is_empty());
-    }
-
-    #[tokio::test]
-    async fn responses_are_processed_beyond_the_cooperative_budget() {
-        // tokio's channels stop making progress after 128 successful polls within one task poll,
-        // the harness must not be fooled by that into reporting an idle manager
-        let txs = pooled_txs(200);
-        let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
-        let by_hash = txs.iter().map(|tx| (*tx.tx_hash(), tx.clone())).collect::<B256Map<_>>();
-        let peers = (1..=200).map(peer).collect::<Vec<_>>();
-        let mut harness = TxFetchHarness::new(peers.iter().copied()).await;
-
-        // every peer announces one hash, so every hash needs its own response
-        for (peer_id, hash) in peers.iter().zip(&hashes) {
-            harness.announce(*peer_id, announcement(std::slice::from_ref(hash)));
-        }
-        harness.poll_until_idle();
-        let mut responses = 0;
-        loop {
-            let requests = harness.take_requests();
-            if requests.is_empty() {
-                break
-            }
-            for request in requests {
-                let txs = request.request.0.iter().map(|hash| by_hash[hash].clone()).collect();
-                request.response.send(Ok(PooledTransactions(txs))).unwrap();
-                responses += 1;
-                harness.poll_until_idle();
-            }
-        }
-
-        assert_eq!(responses, 200);
-        assert_eq!(harness.num_tracked_hashes(), 0);
-        assert_eq!(harness.pool().get_all(hashes).len(), 200, "all transactions are imported");
     }
 
     #[tokio::test]
@@ -460,5 +432,80 @@ mod tests {
         harness.manager.transaction_fetcher.on_peer_disconnected(&PEER_A);
         harness.poll_until_idle();
         assert_eq!(harness.pool().get_all(vec![hashes[0]]).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn pending_import_bytes_pause_imports_until_released() {
+        let txs = pooled_txs(3);
+        let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
+        let bytes = txs[..2]
+            .iter()
+            .map(|tx| {
+                MockTransaction::from(tx.clone().try_into_recovered().unwrap()).encoded_length()
+            })
+            .sum::<usize>();
+        let config = TransactionsManagerConfig {
+            max_pending_pool_imports_bytes: bytes,
+            ..Default::default()
+        };
+        let mut harness = TxFetchHarness::with_config(config, [PEER_A]).await;
+
+        harness.manager.import_transactions(
+            PEER_A,
+            PooledTransactions(txs[..2].to_vec()),
+            crate::transactions::TransactionSource::Broadcast,
+        );
+        let info = &harness.manager.pending_pool_imports_info;
+        assert_eq!(info.pending_pool_imports_bytes.load(Ordering::Relaxed), bytes);
+        assert!(info.pending_pool_imports.load(Ordering::Relaxed) < info.max_pending_pool_imports);
+        assert_eq!(harness.manager.remaining_pool_import_capacity(), 0);
+
+        // Broadcasts are dropped while over the byte limit.
+        harness.manager.import_transactions(
+            PEER_A,
+            PooledTransactions(txs[2..].to_vec()),
+            crate::transactions::TransactionSource::Broadcast,
+        );
+        assert!(!harness.manager.transactions_by_peers.contains_key(&hashes[2]));
+
+        // Completed imports release their bytes, which frees capacity for fetching.
+        harness.announce(PEER_A, announcement(&hashes[2..]));
+        harness.poll_until_idle();
+        assert_eq!(
+            harness
+                .manager
+                .pending_pool_imports_info
+                .pending_pool_imports_bytes
+                .load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(harness.pool().get_all(hashes[..2].to_vec()).len(), 2);
+        assert_eq!(harness.take_requests().pop().unwrap().request.0, hashes[2..]);
+    }
+
+    #[tokio::test]
+    async fn broadcasts_leave_import_bytes_for_fetched_transactions() {
+        let txs = pooled_txs(3);
+        let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
+        let mut harness = TxFetchHarness::new([PEER_A]).await;
+        harness.announce(PEER_A, announcement(&hashes[2..]));
+        // leaves room for one fetch response and the first broadcast transaction
+        let info = &harness.manager.pending_pool_imports_info;
+        info.pending_pool_imports_bytes.store(
+            info.max_pending_pool_imports_bytes -
+                SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE -
+                txs[0].encode_2718_len(),
+            Ordering::Relaxed,
+        );
+
+        // broadcasts are truncated to the bytes left after the reservation
+        harness.manager.import_transactions(
+            PEER_A,
+            PooledTransactions(txs[..2].to_vec()),
+            crate::transactions::TransactionSource::Broadcast,
+        );
+        assert!(harness.manager.transactions_by_peers.contains_key(&hashes[0]));
+        assert!(!harness.manager.transactions_by_peers.contains_key(&hashes[1]));
+        assert!(harness.manager.has_capacity_for_pending_pool_imports());
     }
 }

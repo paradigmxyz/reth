@@ -28,7 +28,7 @@ use reth_storage_api::{
     StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
-use revm::database::states::PlainStorageRevert;
+use reth_trie::bundle_state::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
@@ -566,7 +566,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         hash: B256,
         source: BlockSource,
     ) -> ProviderResult<Option<Self::Block>> {
-        if matches!(source, BlockSource::Canonical | BlockSource::Any) &&
+        if source.is_canonical() &&
             let Some(block) = self.get_in_memory_or_storage_by_block(
                 hash.into(),
                 |db_provider| db_provider.find_block_by_hash(hash, BlockSource::Canonical),
@@ -576,7 +576,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
             return Ok(Some(block))
         }
 
-        if matches!(source, BlockSource::Pending | BlockSource::Any) {
+        if source.is_pending() {
             return Ok(self
                 .canonical_in_memory_state
                 .pending_block()
@@ -592,7 +592,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         hash: B256,
         source: BlockSource,
     ) -> ProviderResult<Option<SealedOrRecoveredBlock<Self::Block>>> {
-        if matches!(source, BlockSource::Canonical | BlockSource::Any) &&
+        if source.is_canonical() &&
             let Some(block) = self.get_in_memory_or_storage_by_block(
                 hash.into(),
                 |db_provider| {
@@ -608,7 +608,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
             return Ok(Some(block))
         }
 
-        if matches!(source, BlockSource::Pending | BlockSource::Any) &&
+        if source.is_pending() &&
             let Some(block_state) = self.canonical_in_memory_state.pending_state()
         {
             let recovered_block = Arc::clone(&block_state.block_ref().recovered_block);
@@ -1013,6 +1013,12 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for ConsistentProvider<N> {
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
         self.storage_provider.get_prune_checkpoints()
     }
+
+    fn get_prune_checkpoints_for_availability(
+        &self,
+    ) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
+        self.storage_provider.get_prune_checkpoints_for_availability()
+    }
 }
 
 impl<N: ProviderNodeTypes> ChainSpecProvider for ConsistentProvider<N> {
@@ -1121,10 +1127,9 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .flatten()
                 .flat_map(|revert: PlainStorageRevert| {
                     revert.storage_revert.into_iter().map(move |(key, value)| {
-                        let plain_key = B256::from(key.to_be_bytes());
                         (
                             BlockNumberAddress((block_number, revert.address)),
-                            StorageEntry { key: plain_key, value: value.to_previous_value() },
+                            StorageEntry { key: key.into(), value: value.to_previous_value() },
                         )
                     })
                 })
@@ -1177,7 +1182,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                         return None
                     }
                     revert.storage_revert.into_iter().find_map(|(key, value)| {
-                        let plain_key = B256::from(key.to_be_bytes());
+                        let plain_key = B256::from(key);
                         (plain_key == storage_key).then(|| StorageEntry {
                             key: plain_key,
                             value: value.to_previous_value(),
@@ -1226,10 +1231,9 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                     .flatten()
                     .flat_map(|revert: PlainStorageRevert| {
                         revert.storage_revert.into_iter().map(move |(key, value)| {
-                            let plain_key = B256::from(key.to_be_bytes());
                             (
                                 BlockNumberAddress((state.number(), revert.address)),
-                                StorageEntry { key: plain_key, value: value.to_previous_value() },
+                                StorageEntry { key: key.into(), value: value.to_previous_value() },
                             )
                         })
                     });
@@ -1412,26 +1416,35 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
 }
 
 #[cfg(test)]
+#[allow(clippy::clone_on_copy)]
 mod tests {
     use crate::{
         providers::blockchain_provider::BlockchainProvider,
         test_utils::create_test_provider_factory, BlockWriter,
     };
     use alloy_eips::BlockHashOrNumber;
-    use alloy_primitives::B256;
+    use alloy_primitives::{B256, U256};
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
-    use reth_db_api::models::AccountBeforeTx;
+    use reth_db_api::{
+        models::{AccountBeforeTx, StorageSettings},
+        tables,
+        transaction::DbTxMut,
+    };
     use reth_ethereum_primitives::Block;
     use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
-    use reth_primitives_traits::{RecoveredBlock, SealedBlock};
-    use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader, StateReader};
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock, StorageEntry};
+    use reth_storage_api::{
+        BlockReader, BlockSource, ChangeSetReader, StateReader, StorageChangeSetReader,
+        StorageSettingsCache,
+    };
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
     };
-    use revm::database::BundleState;
+    use reth_trie::bundle_state::BundleState;
     use std::{
+        collections::HashMap,
         ops::{Bound, Range, RangeBounds},
         sync::Arc,
     };
@@ -1719,9 +1732,9 @@ mod tests {
         let (in_memory_changesets, in_memory_state) = random_changeset_range(
             &mut rng,
             &in_memory_blocks,
-            database_state
-                .iter()
-                .map(|(address, (account, storage))| (*address, (*account, storage.clone()))),
+            database_state.iter().map(|(address, (account, storage))| {
+                (*address, (account.clone(), storage.clone()))
+            }),
             0..0,
             0..0,
         );
@@ -1741,7 +1754,7 @@ mod tests {
                     }),
                     database_changesets.iter().map(|block_changesets| {
                         block_changesets.iter().map(|(address, account, _)| {
-                            (*address, Some(Some((*account).into())), [])
+                            (*address, Some(Some(account.clone().into())), [])
                         })
                     }),
                     Vec::new(),
@@ -1772,7 +1785,7 @@ mod tests {
                                     (address, None, Some(account.into()), Default::default())
                                 }),
                                 [in_memory_changesets.iter().map(|(address, account, _)| {
-                                    (*address, Some(Some((*account).into())), Vec::new())
+                                    (*address, Some(Some(account.clone().into())), Vec::new())
                                 })],
                                 [],
                             ),
@@ -1816,17 +1829,11 @@ mod tests {
     }
     #[test]
     fn test_get_state_storage_value_plain_state() -> eyre::Result<()> {
-        use alloy_primitives::U256;
-        use reth_db_api::{models::StorageSettings, tables, transaction::DbTxMut};
-        use reth_primitives_traits::StorageEntry;
-        use reth_storage_api::StorageSettingsCache;
-        use std::collections::HashMap;
-
         let address = alloy_primitives::Address::with_last_byte(1);
         let account = reth_primitives_traits::Account {
             nonce: 1,
             balance: U256::from(1000),
-            bytecode_hash: None,
+            ..Default::default()
         };
         let slot = U256::from(0x42);
         let slot_b256 = B256::from(slot);
@@ -1849,14 +1856,18 @@ mod tests {
                 .collect(),
             &ExecutionOutcome {
                 bundle: BundleState::new(
-                    [(address, None, Some(account.into()), {
+                    [(address, None, Some(account.clone().into()), {
                         let mut s = HashMap::default();
                         s.insert(slot, (U256::ZERO, U256::from(100)));
                         s
                     })],
                     [
                         Vec::new(),
-                        vec![(address, Some(Some(account.into())), vec![(slot, U256::ZERO)])],
+                        vec![(
+                            address,
+                            Some(Some(account.clone().into())),
+                            vec![(slot, U256::ZERO)],
+                        )],
                     ],
                     [],
                 ),
@@ -1894,11 +1905,6 @@ mod tests {
 
     #[test]
     fn test_storage_changeset_consistent_keys_plain_state() -> eyre::Result<()> {
-        use alloy_primitives::U256;
-        use reth_db_api::models::StorageSettings;
-        use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
-        use std::collections::HashMap;
-
         let mut rng = generators::rng();
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v1());
@@ -1909,7 +1915,7 @@ mod tests {
         let account = reth_primitives_traits::Account {
             nonce: 1,
             balance: U256::from(1000),
-            bytecode_hash: None,
+            ..Default::default()
         };
         let slot = U256::from(0x42);
 
@@ -1921,12 +1927,12 @@ mod tests {
                 .collect(),
             &ExecutionOutcome {
                 bundle: BundleState::new(
-                    [(address, None, Some(account.into()), {
+                    [(address, None, Some(account.clone().into()), {
                         let mut s = HashMap::default();
                         s.insert(slot, (U256::ZERO, U256::from(100)));
                         s
                     })],
-                    [[(address, Some(Some(account.into())), vec![(slot, U256::ZERO)])]],
+                    [[(address, Some(Some(account.clone().into())), vec![(slot, U256::ZERO)])]],
                     [],
                 ),
                 first_block: 0,
@@ -1948,7 +1954,7 @@ mod tests {
                 )),
                 execution_output: Arc::new(BlockExecutionOutput {
                     state: BundleState::new(
-                        [(address, None, Some(account.into()), {
+                        [(address, None, Some(account.clone().into()), {
                             let mut s = HashMap::default();
                             s.insert(slot, (U256::from(100), U256::from(200)));
                             s
@@ -1993,11 +1999,6 @@ mod tests {
 
     #[test]
     fn test_storage_changesets_range_consistent_keys_plain_state() -> eyre::Result<()> {
-        use alloy_primitives::U256;
-        use reth_db_api::models::StorageSettings;
-        use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
-        use std::collections::HashMap;
-
         let mut rng = generators::rng();
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v1());
@@ -2008,7 +2009,7 @@ mod tests {
         let account = reth_primitives_traits::Account {
             nonce: 1,
             balance: U256::from(1000),
-            bytecode_hash: None,
+            ..Default::default()
         };
         let slot = U256::from(0x42);
 
@@ -2020,13 +2021,17 @@ mod tests {
                 .collect(),
             &ExecutionOutcome {
                 bundle: BundleState::new(
-                    [(address, None, Some(account.into()), {
+                    [(address, None, Some(account.clone().into()), {
                         let mut s = HashMap::default();
                         s.insert(slot, (U256::ZERO, U256::from(100)));
                         s
                     })],
                     vec![
-                        vec![(address, Some(Some(account.into())), vec![(slot, U256::ZERO)])],
+                        vec![(
+                            address,
+                            Some(Some(account.clone().into())),
+                            vec![(slot, U256::ZERO)],
+                        )],
                         vec![],
                     ],
                     [],
@@ -2050,7 +2055,7 @@ mod tests {
                 )),
                 execution_output: Arc::new(BlockExecutionOutput {
                     state: BundleState::new(
-                        [(address, None, Some(account.into()), {
+                        [(address, None, Some(account.clone().into()), {
                             let mut s = HashMap::default();
                             s.insert(slot, (U256::from(100), U256::from(200)));
                             s

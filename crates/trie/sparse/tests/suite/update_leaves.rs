@@ -1,4 +1,5 @@
 use super::*;
+use reth_trie_common::ProofV2TargetParent;
 
 /// Insert a new leaf via `update_leaves` and verify root.
 ///
@@ -11,7 +12,7 @@ pub(super) fn test_update_leaves_insert_new_leaf<T: SparseTrie>(new_trie: fn() -
     let new_key = B256::with_last_byte(0x40);
 
     let base_storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(key1, U256::from(1)), (key2, U256::from(2)), (key3, U256::from(3))]);
+        BTreeMap::from([(key1, U256::ONE), (key2, U256::from(2)), (key3, U256::from(3))]);
 
     let harness = SuiteTestHarness::new(base_storage);
 
@@ -31,7 +32,7 @@ pub(super) fn test_update_leaves_insert_new_leaf<T: SparseTrie>(new_trie: fn() -
 
     // Compute expected root with all 4 leaves.
     let expected_storage = BTreeMap::from([
-        (key1, U256::from(1)),
+        (key1, U256::ONE),
         (key2, U256::from(2)),
         (key3, U256::from(3)),
         (new_key, new_value),
@@ -54,7 +55,7 @@ pub(super) fn test_update_leaves_modify_existing_leaf<T: SparseTrie>(new_trie: f
     let key3 = B256::with_last_byte(0x30);
 
     let base_storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(key1, U256::from(1)), (key2, U256::from(2)), (key3, U256::from(3))]);
+        BTreeMap::from([(key1, U256::ONE), (key2, U256::from(2)), (key3, U256::from(3))]);
 
     let harness = SuiteTestHarness::new(base_storage);
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
@@ -70,7 +71,7 @@ pub(super) fn test_update_leaves_modify_existing_leaf<T: SparseTrie>(new_trie: f
 
     // Compute expected root with the modified value.
     let expected_storage =
-        BTreeMap::from([(key1, U256::from(1)), (key2, new_value), (key3, U256::from(3))]);
+        BTreeMap::from([(key1, U256::ONE), (key2, new_value), (key3, U256::from(3))]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
         root,
@@ -85,7 +86,7 @@ pub(super) fn test_update_leaves_modify_existing_leaf<T: SparseTrie>(new_trie: f
 /// hash matching a reference trie with that single leaf.
 pub(super) fn test_insert_single_leaf_into_empty_trie<T: SparseTrie>(new_trie: fn() -> T) {
     let key = B256::with_last_byte(42);
-    let value = U256::from(1);
+    let value = U256::ONE;
 
     let mut trie = (new_trie)();
     let mut leaf_updates = SuiteTestHarness::leaf_updates(&BTreeMap::from([(key, value)]));
@@ -157,7 +158,7 @@ pub(super) fn test_update_all_leaves_with_new_values<T: SparseTrie>(new_trie: fn
         .map(|b| if b % 2 == 0 { B256::repeat_byte(b) } else { B256::with_last_byte(b) })
         .collect();
 
-    let old_storage: BTreeMap<B256, U256> = keys.iter().map(|&k| (k, U256::from(1))).collect();
+    let old_storage: BTreeMap<B256, U256> = keys.iter().map(|&k| (k, U256::ONE)).collect();
 
     let new_storage: BTreeMap<B256, U256> = keys.iter().map(|&k| (k, U256::from(999))).collect();
 
@@ -201,7 +202,7 @@ pub(super) fn test_two_leaves_at_adjacent_keys_root_correctness<T: SparseTrie>(
     key_50.0[0] = 0x50;
     let mut key_51 = B256::ZERO;
     key_51.0[0] = 0x51;
-    let value = U256::from(1);
+    let value = U256::ONE;
 
     let mut trie = (new_trie)();
     trie.set_updates(true);
@@ -242,7 +243,7 @@ pub(super) fn test_update_leaves_remove_leaf<T: SparseTrie>(new_trie: fn() -> T)
     let key3 = B256::with_last_byte(0x30);
 
     let base_storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(key1, U256::from(1)), (key2, U256::from(2)), (key3, U256::from(3))]);
+        BTreeMap::from([(key1, U256::ONE), (key2, U256::from(2)), (key3, U256::from(3))]);
 
     let harness = SuiteTestHarness::new(base_storage);
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
@@ -256,7 +257,7 @@ pub(super) fn test_update_leaves_remove_leaf<T: SparseTrie>(new_trie: fn() -> T)
     let root = trie.root(epoch(0));
 
     // Expected: reference trie with only key1 and key3.
-    let expected_storage = BTreeMap::from([(key1, U256::from(1)), (key3, U256::from(3))]);
+    let expected_storage = BTreeMap::from([(key1, U256::ONE), (key3, U256::from(3))]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
         root,
@@ -287,7 +288,7 @@ pub(super) fn test_remove_leaf_branch_collapses_to_extension<T: SparseTrie>(new_
     key_537.0[1] = 0x70;
 
     let base_storage: BTreeMap<B256, U256> = BTreeMap::from([
-        (key_50231, U256::from(1)),
+        (key_50231, U256::ONE),
         (key_50233, U256::from(2)),
         (key_537, U256::from(3)),
     ]);
@@ -302,7 +303,7 @@ pub(super) fn test_remove_leaf_branch_collapses_to_extension<T: SparseTrie>(new_
     let root = trie.root(epoch(0));
 
     // Expected: reference trie with only the two remaining leaves.
-    let expected_storage = BTreeMap::from([(key_50231, U256::from(1)), (key_50233, U256::from(2))]);
+    let expected_storage = BTreeMap::from([(key_50231, U256::ONE), (key_50233, U256::from(2))]);
     let expected_harness = SuiteTestHarness::new(expected_storage);
     assert_eq!(
         root,
@@ -360,7 +361,7 @@ pub(super) fn test_remove_leaf_branch_collapses_to_leaf<T: SparseTrie>(new_trie:
 /// `EMPTY_ROOT_HASH`.
 pub(super) fn test_remove_last_leaf_produces_empty_root<T: SparseTrie>(new_trie: fn() -> T) {
     let key = B256::with_last_byte(0x12);
-    let base_storage: BTreeMap<B256, U256> = BTreeMap::from([(key, U256::from(1))]);
+    let base_storage: BTreeMap<B256, U256> = BTreeMap::from([(key, U256::ONE)]);
 
     let harness = SuiteTestHarness::new(base_storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
@@ -396,7 +397,7 @@ pub(super) fn test_insert_then_remove_sequence<T: SparseTrie>(new_trie: fn() -> 
     let k5 = key_from_nibbles(&[0x5, 0x3, 0x3, 0x0, 0x2]);
     let k6 = key_from_nibbles(&[0x5, 0x3, 0x3, 0x2, 0x0]);
 
-    let val = U256::from(1);
+    let val = U256::ONE;
     let all_keys = [k1, k2, k3, k4, k5, k6];
 
     // Insert all 6 leaves into empty trie.
@@ -443,7 +444,7 @@ pub(super) fn test_remove_nonexistent_leaf_preserves_hashes<T: SparseTrie>(new_t
     let key_c = B256::with_last_byte(0x30);
 
     let base_storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2)), (key_c, U256::from(3))]);
+        BTreeMap::from([(key_a, U256::ONE), (key_b, U256::from(2)), (key_c, U256::from(3))]);
 
     let harness = SuiteTestHarness::new(base_storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
@@ -597,7 +598,7 @@ pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie>(ne
         key.0[0] = 0x10;
         key
     };
-    base_storage.insert(revealed_key, U256::from(1));
+    base_storage.insert(revealed_key, U256::ONE);
 
     // 16 keys under first nibble 0x2 (slots 0x20..0x2F) — enough to produce a hash node.
     for i in 0u8..16 {
@@ -659,7 +660,7 @@ pub(super) fn test_update_leaves_removal_branch_collapse_blinded_sibling<T: Spar
         key.0[0] = 0x10;
         key
     };
-    base_storage.insert(revealed_key, U256::from(1));
+    base_storage.insert(revealed_key, U256::ONE);
 
     for i in 0u8..16 {
         let mut key = B256::ZERO;
@@ -726,7 +727,7 @@ pub(super) fn test_update_leaves_subtrie_collapse_requests_proof<T: SparseTrie>(
         key.0[0] = 0x11;
         key
     };
-    base_storage.insert(subtrie_key_a, U256::from(1));
+    base_storage.insert(subtrie_key_a, U256::ONE);
     base_storage.insert(subtrie_key_b, U256::from(2));
 
     // 16 keys under first nibble 0x2 — enough to produce a hash node.
@@ -822,7 +823,7 @@ pub(super) fn test_update_leaves_touched_fully_revealed<T: SparseTrie>(new_trie:
     let key3 = B256::with_last_byte(0x30);
 
     let base_storage: BTreeMap<B256, U256> =
-        [(key1, U256::from(1)), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
+        [(key1, U256::ONE), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
 
     let harness = SuiteTestHarness::new(base_storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
@@ -938,7 +939,7 @@ pub(super) fn test_update_leaves_touched_nonexistent_in_populated_trie<T: Sparse
     let key3 = B256::with_last_byte(0x30);
 
     let base_storage: BTreeMap<B256, U256> =
-        [(key1, U256::from(1)), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
+        [(key1, U256::ONE), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
 
     let harness = SuiteTestHarness::new(base_storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
@@ -1128,7 +1129,7 @@ pub(super) fn test_orphaned_value_update_falls_through_to_full_insertion<T: Spar
     };
 
     let initial_storage: BTreeMap<B256, U256> = [
-        (key_a, U256::from(1)),
+        (key_a, U256::ONE),
         (key_b, U256::from(2)),
         (key_c, U256::from(3)),
         (key_d, U256::from(4)),
@@ -1347,7 +1348,7 @@ pub(super) fn test_branch_collapse_multi_empty_subtries_blinded_remaining<T: Spa
     };
 
     let base_storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(key_d7, U256::from(1)), (key_d8, U256::from(2)), (key_dd, U256::from(3))]);
+        BTreeMap::from([(key_d7, U256::ONE), (key_d8, U256::from(2)), (key_dd, U256::from(3))]);
 
     let harness = SuiteTestHarness::new(base_storage);
 
@@ -1425,7 +1426,7 @@ pub(super) fn test_subtrie_collapse_touched_with_blinded_sibling<T: SparseTrie>(
     key_cd1[0] = 0xCD;
     key_cd1[31] = 0x01;
 
-    let value = U256::from(1u64);
+    let value = U256::ONE;
 
     let base_storage: BTreeMap<B256, U256> =
         [(key_ab1, value), (key_ab2, value), (key_ac1, value), (key_cd1, value)]
@@ -1489,7 +1490,7 @@ pub(super) fn test_subtrie_emptied_by_deletes_with_touched<T: SparseTrie>(new_tr
     key_cd1[0] = 0xCD;
     key_cd1[31] = 0x01;
 
-    let value = U256::from(1u64);
+    let value = U256::ONE;
 
     let base_storage: BTreeMap<B256, U256> =
         [(key_ab1, value), (key_ab2, value), (key_ac1, value), (key_cd1, value)]
@@ -1524,4 +1525,80 @@ pub(super) fn test_subtrie_emptied_by_deletes_with_touched<T: SparseTrie>(new_tr
 
     let actual_root = trie.root(epoch(0));
     assert_eq!(actual_root, expected_harness.original_root(), "post-delete root mismatch");
+}
+
+/// Removing a lower-subtrie leaf only requests its blinded sibling, then retries the removal.
+pub(super) fn test_subtrie_removal_onto_blinded_sibling_requests_only_sibling_proof<
+    T: SparseTrie,
+>(
+    new_trie: fn() -> T,
+) {
+    // Branch [1] has children [1, 0] and [1, 2]; [1, 2] sits at the subtrie depth and holds
+    // a leaf at [1, 2, 0] and a branch at [1, 2, 3]. That branch has one revealed leaf at
+    // nibble 4 and a blinded child at nibble 5, so removing the leaf collapses it onto the
+    // blinded child inside a lower subtrie.
+    let key = |bytes: &[u8]| B256::right_padding_from(bytes);
+    let removed_key = key(&[0x12, 0x34]);
+    let subtrie_key = key(&[0x12, 0x01]);
+    let mut storage = BTreeMap::from([
+        (key(&[0x10]), U256::from(1)),
+        (subtrie_key, U256::from(2)),
+        (removed_key, U256::from(3)),
+    ]);
+    for i in 0u8..16 {
+        storage.insert(key(&[0x12, 0x35, i << 4]), U256::from(100 + i as u64));
+    }
+    let harness = SuiteTestHarness::new(storage);
+
+    let mut trie = harness.init_trie_with_targets(&[removed_key, subtrie_key], true, new_trie);
+
+    let mut leaf_updates: B256Map<LeafUpdate> =
+        BTreeMap::from([(removed_key, LeafUpdate::Changed(Vec::new()))]).into_iter().collect();
+    let mut requested = Vec::new();
+    trie.update_leaves(&mut leaf_updates, |key, parent| requested.push((key, parent)))
+        .expect("update_leaves should succeed");
+
+    let sibling_key = key(&[0x12, 0x35]);
+    assert_eq!(requested, vec![(sibling_key, ProofV2TargetParent::new(3))]);
+    assert!(leaf_updates.contains_key(&removed_key), "removal should wait for the sibling");
+
+    harness.reveal_and_update(&mut trie, &mut leaf_updates);
+    assert!(leaf_updates.is_empty(), "removal should complete after revealing the sibling");
+    let actual_root = trie.root(epoch(0));
+    let mut actual_updates = trie.take_updates();
+    let (expected_root, mut expected_trie_updates) =
+        harness.get_root_with_updates(&BTreeMap::from([(removed_key, U256::ZERO)]));
+    harness.minimize_trie_updates(&mut expected_trie_updates);
+
+    // Minimize sparse updates inline (can't use TrieTestHarness::minimize_sparse_updates
+    // due to the crate's SparseTrieUpdates being a different type than reth-trie's copy).
+    actual_updates
+        .updated_nodes
+        .retain(|path, node| harness.storage_trie_updates().storage_nodes.get(path) != Some(node));
+    actual_updates
+        .removed_nodes
+        .retain(|path| harness.storage_trie_updates().storage_nodes.contains_key(path));
+
+    let mut expected_updated_nodes =
+        expected_trie_updates.storage_nodes.into_iter().collect::<Vec<_>>();
+    let mut actual_updated_nodes = actual_updates.updated_nodes.into_iter().collect::<Vec<_>>();
+    expected_updated_nodes.sort();
+    actual_updated_nodes.sort();
+    pretty_assertions::assert_eq!(
+        expected_updated_nodes,
+        actual_updated_nodes,
+        "updated nodes mismatch"
+    );
+
+    let mut expected_removed_nodes =
+        expected_trie_updates.removed_nodes.into_iter().collect::<Vec<_>>();
+    let mut actual_removed_nodes = actual_updates.removed_nodes.into_iter().collect::<Vec<_>>();
+    expected_removed_nodes.sort();
+    actual_removed_nodes.sort();
+    pretty_assertions::assert_eq!(
+        expected_removed_nodes,
+        actual_removed_nodes,
+        "removed nodes mismatch"
+    );
+    assert_eq!(expected_root, actual_root, "storage root mismatch");
 }

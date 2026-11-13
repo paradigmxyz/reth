@@ -1,0 +1,411 @@
+# Nightly workflow to update evm2 from upstream alloy-rs/evm2 main.
+#
+# Bumps every alloy-rs/evm2 pin (and the DaniPopes/evm2 patch of it) to the latest evm2 main
+# commit, has Amp fix what breaks, and opens or updates a PR from the evm2-auto-bump branch.
+# If evm2-auto-bump already exists, it is rebased onto main first so earlier fixes are kept.
+#
+# The update job, where Amp runs, holds no write credentials. The publish job runs in the
+# evm2-auto-bump environment, the only place .github/sts/update-evm2.sts.yaml lets mint a token
+# to push the branch and open the PR.
+
+name: Update evm2
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: update-evm2
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  BRANCH: evm2-auto-bump
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: full
+
+jobs:
+  update:
+    name: Update evm2 and fix breakage
+    if: github.repository == 'paradigmxyz/reth' && github.ref == 'refs/heads/main'
+    runs-on: depot-ubuntu-latest-16
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      bumped: ${{ steps.update.outputs.bumped }}
+      old_rev: ${{ steps.update.outputs.old_rev }}
+      new_rev: ${{ steps.update.outputs.new_rev }}
+      lease: ${{ steps.branch.outputs.lease }}
+      clippy_passed: ${{ steps.clippy-loop.outputs.passed }}
+      test_passed: ${{ steps.test-loop.outputs.passed }}
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configure git
+        run: |
+          git config user.name "tempo-github-sts[bot]"
+          git config user.email "312736176+tempo-github-sts[bot]@users.noreply.github.com"
+
+      - name: Set up working branch
+        id: branch
+        run: |
+          if git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
+            # The publish job pushes only if the branch is still at this commit.
+            echo "lease=$(git rev-parse "origin/$BRANCH")" >> "$GITHUB_OUTPUT"
+            echo "Continuing on existing $BRANCH, rebasing onto main"
+            git checkout -B "$BRANCH" "origin/$BRANCH"
+            # -X ours (main during a rebase) keeps main's side of each conflicting hunk and our
+            # non-conflicting fixes; the fix loops below re-apply any fix this drops.
+            if ! git rebase -X ours origin/main; then
+              # Whole-file conflicts (such as modify/delete) are left: take main's side of those too.
+              while [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; do
+                for f in $(git diff --name-only --diff-filter=U); do
+                  echo "  Accepting main version of $f"
+                  if git checkout --ours "$f" 2>/dev/null; then git add "$f"; else git rm -q "$f"; fi
+                done
+                GIT_EDITOR=true git rebase --continue || true
+              done
+            fi
+          else
+            echo "lease=" >> "$GITHUB_OUTPUT"
+            echo "Creating $BRANCH from main"
+            git checkout -b "$BRANCH" origin/main
+          fi
+
+      # When already on the latest rev, all later steps are skipped.
+      - name: Update evm2 rev in Cargo.toml
+        id: update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          evm2_rev() {
+            grep -v '^[[:space:]]*#' | grep -m1 'github.com/alloy-rs/evm2", rev = ' | sed 's/.*rev = "\([^"]*\)".*/\1/'
+          }
+          BASE_REV=$(git show origin/main:Cargo.toml | evm2_rev)
+          CURRENT_REV=$(evm2_rev < Cargo.toml)
+          NEW_REV=$(gh api repos/alloy-rs/evm2/commits/main --jq '.sha')
+          echo "evm2 rev on main: $BASE_REV"
+          echo "evm2 rev on $BRANCH: $CURRENT_REV"
+          echo "Latest evm2 main: $NEW_REV"
+
+          for rev in "$BASE_REV" "$CURRENT_REV" "$NEW_REV"; do
+            if ! [[ "$rev" =~ ^[0-9a-f]{7,40}$ ]]; then
+              echo "::error::Could not read evm2 rev: '$rev'"
+              exit 1
+            fi
+          done
+
+          if [[ "$NEW_REV" == "$CURRENT_REV"* ]]; then
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            echo "Already on latest evm2 rev."
+            exit 0
+          fi
+
+          {
+            echo "bumped=true"
+            echo "old_rev=$BASE_REV"
+            echo "new_rev=$NEW_REV"
+          } >> "$GITHUB_OUTPUT"
+
+          # reth patches alloy-rs/evm2 with DaniPopes/evm2 (its pre-transfer URL); keep both on the
+          # same rev.
+          find . -name Cargo.toml -not -path './target/*' -exec sed -i -E \
+            "s#(github\.com/(alloy-rs|DaniPopes)/evm2\", rev = \")[0-9a-f]+\"#\1${NEW_REV}\"#g" {} +
+          echo "Updated evm2 rev: $CURRENT_REV -> $NEW_REV"
+
+      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+        if: steps.update.outputs.bumped == 'true'
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
+        if: steps.update.outputs.bumped == 'true'
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: steps.update.outputs.bumped == 'true'
+        with:
+          # Restore only: this job builds unreviewed evm2 code and Amp edits, so it must not write
+          # the main-branch cache that CI restores.
+          save-if: false
+      - uses: tempoxyz/gh-actions/vendor/taiki-e/install-action@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+        if: steps.update.outputs.bumped == 'true'
+        with:
+          tool: nextest,zepter
+      - name: Install LLVM
+        if: steps.update.outputs.bumped == 'true'
+        run: .github/scripts/install_llvm.sh ubuntu
+
+      - name: Commit evm2 rev bump
+        if: steps.update.outputs.bumped == 'true'
+        env:
+          NEW_REV: ${{ steps.update.outputs.new_rev }}
+        run: |
+          # Re-resolve Cargo.lock for the new evm2 rev only.
+          cargo metadata --format-version 1 > /dev/null
+          git add -A
+          git commit -m "deps: bump evm2 to ${NEW_REV:0:7} ($(date -u +%Y-%m-%d))"
+
+      - name: Install Amp CLI
+        if: steps.update.outputs.bumped == 'true'
+        env:
+          AMP_API_KEY: ${{ secrets.AMP_API_KEY }}
+        run: |
+          if [ -z "$AMP_API_KEY" ]; then
+            echo "::warning::AMP_API_KEY is not set; breakage from the bump will not be fixed automatically"
+            exit 0
+          fi
+          curl -fsSL https://ampcode.com/install.sh | bash
+          mkdir -p "$HOME/.local/bin"
+          install -m 755 .github/scripts/amp-run.sh "$HOME/.local/bin/amp-run"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Fix clippy errors
+        id: clippy-loop
+        if: steps.update.outputs.bumped == 'true'
+        env:
+          AMP_API_KEY: ${{ secrets.AMP_API_KEY }}
+          RUSTFLAGS: -D warnings
+          CHECK: cargo clippy --workspace --lib --examples --tests --benches --all-features
+        run: |
+          PROMPT="This Rust workspace just had its evm2 dependency (alloy-rs/evm2, patched with DaniPopes/evm2) \
+          updated to the latest commit on evm2's main branch, and \`RUSTFLAGS=-D warnings $CHECK\` now fails.
+
+          Run it to see the errors, then fix the Rust source code and repeat until it passes. You may bump \
+          other dependency versions in Cargo.toml files if needed (e.g. alloy), but do NOT modify the evm2 \
+          rev or git source specifications in any Cargo.toml: the workflow already updated them.
+
+          IMPORTANT: Do NOT suppress warnings with #[allow(...)]. Migrate the code to the new APIs instead; \
+          read the upstream evm2 source to see what replaced removed or deprecated items."
+          bash .github/scripts/evm2-fix-loop.sh "$CHECK" "$PROMPT"
+
+      - name: Fix test compilation errors
+        id: test-loop
+        if: steps.update.outputs.bumped == 'true'
+        env:
+          AMP_API_KEY: ${{ secrets.AMP_API_KEY }}
+          CHECK: cargo nextest run --workspace --all-features --no-run
+        run: |
+          PROMPT="This Rust workspace just had its evm2 dependency (alloy-rs/evm2, patched with DaniPopes/evm2) \
+          updated to the latest commit on evm2's main branch, and test compilation (\`$CHECK\`) now fails.
+
+          Run it to see the errors, then fix the Rust source code and repeat until the test binaries compile. \
+          Also run \`cargo check --workspace\` after fixes to catch regressions. You may bump other dependency \
+          versions in Cargo.toml files if needed, but do NOT modify the evm2 rev or git source specifications \
+          in any Cargo.toml: the workflow already updated them.
+
+          IMPORTANT: Do NOT suppress warnings with #[allow(...)]. Migrate the code to the new APIs instead; \
+          read the upstream evm2 source to see what replaced removed or deprecated items."
+          bash .github/scripts/evm2-fix-loop.sh "$CHECK" "$PROMPT"
+
+      - name: Commit source fixes
+        if: steps.update.outputs.bumped == 'true'
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "fix: resolve breaking changes from evm2 update ($(date -u +%Y-%m-%d))"
+          fi
+
+      - name: Fix zepter lint
+        if: steps.update.outputs.bumped == 'true'
+        run: |
+          if ! zepter run check; then
+            zepter
+            if [ -n "$(git status --porcelain)" ]; then
+              git add -A
+              git commit -m "fix: resolve zepter feature propagation from evm2 update ($(date -u +%Y-%m-%d))"
+            fi
+          fi
+
+      - name: Write PR body
+        if: steps.update.outputs.bumped == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AMP_API_KEY: ${{ secrets.AMP_API_KEY }}
+          OLD_REV: ${{ steps.update.outputs.old_rev }}
+          NEW_REV: ${{ steps.update.outputs.new_rev }}
+        run: |
+          {
+            echo "Automated nightly update of evm2 from \`alloy-rs/evm2\` main."
+            echo ""
+            echo "## Upstream evm2 changes"
+            echo ""
+            echo "[\`${OLD_REV:0:7}...${NEW_REV:0:7}\`](https://github.com/alloy-rs/evm2/compare/${OLD_REV}...${NEW_REV})"
+            echo ""
+            LOG=$(gh api "repos/alloy-rs/evm2/compare/${OLD_REV}...${NEW_REV}" \
+              --jq '[.commits[] | "- " + (.commit.message | split("\n")[0])] | join("\n")' 2>/dev/null || true)
+            SUMMARY=""
+            if [ -n "$LOG" ] && command -v amp-run >/dev/null; then
+              SUMMARY=$(echo "$LOG" | amp-run -x "Summarize these upstream evm2 commit messages into a concise \
+                markdown bullet list grouped by area, with bold **Area** headers. Merge related commits into single \
+                bullets and skip CI/doc-only changes unless significant. Reference PRs as full links like \
+                [#123](https://github.com/alloy-rs/evm2/pull/123), never bare #123. No preamble, just the list." || true)
+            fi
+            echo "${SUMMARY:-$LOG}"
+            echo ""
+
+            DIFF=$(git diff origin/main -- '*.rs' '*.toml' ':!Cargo.lock' ':!Cargo.toml' || true)
+            if [ -n "$DIFF" ]; then
+              echo "## Migrations"
+              echo ""
+              MIGRATIONS=""
+              if command -v amp-run >/dev/null; then
+                MIGRATIONS=$(echo "$DIFF" | amp-run -x "Summarize these code changes as a concise markdown bullet \
+                  list: what was migrated and why (e.g. API rename, parameter change, removed method). No preamble, \
+                  just the list." || true)
+              fi
+              echo "${MIGRATIONS:-$(git diff --stat origin/main -- '*.rs' '*.toml' ':!Cargo.lock')}"
+              echo ""
+            fi
+
+            echo "[GitHub Workflow](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+          } > pr-body.md
+          git bundle create evm2-auto-bump.bundle "origin/main..$BRANCH"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.update.outputs.bumped == 'true'
+        with:
+          name: evm2-auto-bump
+          path: |
+            evm2-auto-bump.bundle
+            pr-body.md
+          retention-days: 7
+
+  publish:
+    name: Push branch and open PR
+    needs: update
+    if: needs.update.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    environment: evm2-auto-bump
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: evm2-auto-bump
+          path: ${{ runner.temp }}/evm2-auto-bump
+
+      - name: Fetch GitHub token via STS
+        id: sts
+        uses: tempoxyz/gh-actions/actions/github-sts@68a1e4645c9596fee5398dd1e2ba07f0a4aa6a71 # 2026-10-20T04-40-18Z-68a1e464
+        with:
+          policy: update-evm2
+
+      - name: Push branch and create or update PR
+        env:
+          GH_TOKEN: ${{ steps.sts.outputs.token }}
+          LEASE: ${{ needs.update.outputs.lease }}
+          NEW_REV: ${{ needs.update.outputs.new_rev }}
+          ARTIFACT: ${{ runner.temp }}/evm2-auto-bump
+        run: |
+          git fetch "$ARTIFACT/evm2-auto-bump.bundle" "refs/heads/$BRANCH:refs/heads/$BRANCH"
+          if [ "$(git rev-list --count "origin/main..$BRANCH")" = "0" ]; then
+            echo "No commits ahead of main; nothing to publish"
+            exit 0
+          fi
+
+          # The bump must never change CI: refuse to publish if it touches anything under .github/.
+          CHANGED=$(git diff --name-only "origin/main...$BRANCH" -- .github/)
+          if [ -n "$CHANGED" ]; then
+            echo "::error::Refusing to publish: the bump changes files under .github/:"
+            echo "$CHANGED"
+            exit 1
+          fi
+
+          # Push only if the branch is where the update job found it (absent when LEASE is empty).
+          gh auth setup-git
+          git push --force-with-lease="refs/heads/$BRANCH:$LEASE" origin "$BRANCH:refs/heads/$BRANCH"
+
+          TITLE="deps: update evm2 to ${NEW_REV:0:7} ($(date -u +%Y-%m-%d))"
+          # --head matches fork PRs with the same branch name too; only take this repository's own.
+          PR=$(gh pr list --head "$BRANCH" --base main --state open --json number,isCrossRepository \
+            --jq '[.[] | select(.isCrossRepository | not)][0].number // empty')
+          if [ -n "$PR" ]; then
+            gh pr edit "$PR" --title "$TITLE" --body-file "$ARTIFACT/pr-body.md"
+          else
+            gh pr create --head "$BRANCH" --base main --title "$TITLE" --body-file "$ARTIFACT/pr-body.md"
+          fi
+
+  notify:
+    name: Notify Slack
+    needs: [update, publish]
+    if: >-
+      always() && github.repository == 'paradigmxyz/reth' &&
+      (contains(needs.*.result, 'failure') ||
+       needs.update.outputs.clippy_passed == 'false' || needs.update.outputs.test_passed == 'false')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+
+      - name: Notify eng-reth-alerts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
+          SLACK_CHANNEL: C09KA1JNJ02 # eng-reth-alerts
+          OLD_REV: ${{ needs.update.outputs.old_rev }}
+          NEW_REV: ${{ needs.update.outputs.new_rev }}
+          CLIPPY_PASSED: ${{ needs.update.outputs.clippy_passed }}
+          TEST_PASSED: ${{ needs.update.outputs.test_passed }}
+        run: |
+          if [ -z "${SLACK_BOT_TOKEN:-}" ]; then
+            echo "::warning::SLACK_BOT_TOKEN is not set; skipping Slack notification"
+            exit 0
+          fi
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          DETAILS=""
+          if [ -n "$OLD_REV" ] && [ -n "$NEW_REV" ]; then
+            DETAILS+=$'\n'"• <https://github.com/alloy-rs/evm2/commit/${OLD_REV}|${OLD_REV:0:7}> → <https://github.com/alloy-rs/evm2/commit/${NEW_REV}|${NEW_REV:0:7}> (<https://github.com/alloy-rs/evm2/compare/${OLD_REV}...${NEW_REV}|diff>)"
+          fi
+          if [ "$CLIPPY_PASSED" = "false" ]; then DETAILS+=$'\n'"• ⚠️ Clippy: unresolved errors"; fi
+          if [ "$TEST_PASSED" = "false" ]; then DETAILS+=$'\n'"• ⚠️ Tests: unresolved compilation errors"; fi
+          PR_INFO=$(gh pr list --repo "$GITHUB_REPOSITORY" --head evm2-auto-bump --base main --state open \
+            --json number,url,isCrossRepository \
+            --jq '[.[] | select(.isCrossRepository | not)][0] | select(.) | [.number, .url] | @tsv' 2>/dev/null || true)
+          if [ -n "$PR_INFO" ]; then
+            IFS=$'\t' read -r PR_NUMBER PR_URL <<< "$PR_INFO"
+            DETAILS+=$'\n'"• <${PR_URL}|PR #${PR_NUMBER}>"
+          fi
+          DETAILS+=$'\n'"• <${RUN_URL}|Workflow>"
+
+          PAYLOAD=$(jq -n --arg channel "$SLACK_CHANNEL" --arg details "$DETAILS" '{
+            channel: $channel,
+            text: "evm2 update failed",
+            unfurl_links: false,
+            unfurl_media: false,
+            attachments: [{
+              color: "#e01e5a",
+              blocks: [{
+                type: "section",
+                text: { type: "mrkdwn", text: ("❌ *evm2 update failed*\n<!subteam^S0C0784UDQF|oncall-reth>" + $details) }
+              }]
+            }]
+          }')
+          RESPONSE=$(curl -sf -X POST -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H 'Content-type: application/json' --data "$PAYLOAD" https://slack.com/api/chat.postMessage) || {
+            echo "::warning::Failed to post Slack notification"
+            exit 0
+          }
+          if ! jq -e '.ok == true' <<< "$RESPONSE" > /dev/null; then
+            echo "::warning::Slack rejected notification: $(jq -r '.error // "unknown_error"' <<< "$RESPONSE")"
+          fi

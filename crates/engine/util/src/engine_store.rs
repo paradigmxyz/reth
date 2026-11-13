@@ -62,7 +62,7 @@ impl EngineMessageStore {
         fs::create_dir_all(&self.path)?; // ensure that store path had been created
         let timestamp = received_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
         match msg {
-            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx: _tx } => {
+            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx: _tx, .. } => {
                 let filename = format!("{}-fcu-{}.json", timestamp, state.head_block_hash);
                 fs::write(
                     self.path.join(filename),
@@ -139,7 +139,7 @@ where
         if let Some(msg) = &next &&
             let Err(error) = this.store.on_message(msg, SystemTime::now())
         {
-            error!(target: "engine::stream::store", ?msg, %error, "Error handling Engine API message");
+            error!(target: "engine::stream::store", %msg, %error, "Error handling Engine API message");
         }
         Poll::Ready(next)
     }
