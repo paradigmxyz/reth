@@ -372,6 +372,9 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
     /// Removes blocks from the live block graph and prunes cached overlays that can no longer be
     /// built from the remaining blocks.
+    ///
+    /// Returns the removed blocks, so that the caller can free them off a latency-sensitive
+    /// thread: they may hold the last references to a block's execution output and trie data.
     #[tracing::instrument(
         level = "trace",
         target = "storage::overlay::manager",
@@ -382,17 +385,18 @@ impl<N: NodePrimitives> OverlayManager<N> {
             pruned_overlays = tracing::field::Empty,
         )
     )]
-    pub fn remove_blocks(&self, hashes: impl IntoIterator<Item = B256>) {
+    pub fn remove_blocks(&self, hashes: impl IntoIterator<Item = B256>) -> Vec<ExecutedBlock<N>> {
         let span = tracing::Span::current();
 
         // Remove blocks first, then prune overlays against the remaining block graph.
         let mut block_count = 0usize;
-        let mut removed_blocks = 0usize;
+        let mut removed = Vec::new();
         let mut pruned_overlays = 0usize;
         for hash in hashes {
             block_count += 1;
-            removed_blocks += self.inner.blocks.remove(&hash).is_some() as usize;
+            removed.extend(self.inner.blocks.remove(&hash).map(|(_, block)| block));
         }
+        let removed_blocks = removed.len();
         span.record("block_count", block_count);
         span.record("removed_blocks", removed_blocks);
 
@@ -417,6 +421,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             pruned_overlays,
             "removed blocks from state trie overlay manager"
         );
+        removed
     }
 
     /// Returns the in-memory block with the given hash, canonical or not.
