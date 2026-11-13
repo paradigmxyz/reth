@@ -183,6 +183,28 @@ pub(crate) fn is_option(ty: &syn::Type) -> bool {
     false
 }
 
+/// Checks whether provided type has a reference or a non-`'static` lifetime, so a value of it may
+/// borrow from the params it is decoded from.
+///
+/// Lifetimes elided in paths, like a struct with a hidden lifetime parameter, are not visible here.
+pub(crate) fn may_borrow(ty: &syn::Type) -> bool {
+    struct FindBorrow(bool);
+
+    impl<'ast> Visit<'ast> for FindBorrow {
+        fn visit_type_reference(&mut self, _: &'ast syn::TypeReference) {
+            self.0 = true;
+        }
+
+        fn visit_lifetime(&mut self, lifetime: &'ast syn::Lifetime) {
+            self.0 |= lifetime.ident != "static";
+        }
+    }
+
+    let mut visitor = FindBorrow(false);
+    visitor.visit_type(ty);
+    visitor.0
+}
+
 /// Iterates over all Attribute's and parses only the attributes that are doc comments.
 ///
 /// Note that `doc comments` are expanded into `#[doc = "some comment"]`
@@ -200,7 +222,7 @@ pub(crate) fn extract_doc_comments(attrs: &[syn::Attribute]) -> TokenStream2 {
 
 #[cfg(test)]
 mod tests {
-    use super::is_option;
+    use super::{is_option, may_borrow};
     use syn::parse_quote;
 
     #[test]
@@ -210,5 +232,14 @@ mod tests {
         assert!(is_option(&parse_quote!(Option)));
         assert!(is_option(&parse_quote!(std::option::Option<R>)));
         assert!(!is_option(&parse_quote!(foo::bar::Option::Booyah)));
+    }
+
+    #[test]
+    fn may_borrow_works() {
+        assert!(may_borrow(&parse_quote!(&str)));
+        assert!(may_borrow(&parse_quote!(Option<&'static RawValue>)));
+        assert!(may_borrow(&parse_quote!(Cow<'a, str>)));
+        assert!(!may_borrow(&parse_quote!(Cow<'static, str>)));
+        assert!(!may_borrow(&parse_quote!(Option<Vec<u64>>)));
     }
 }

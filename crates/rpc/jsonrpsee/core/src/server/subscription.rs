@@ -125,6 +125,8 @@ pub enum SubscriptionMessageInner {
     Complete(String),
     /// Need subscription ID and method name.
     NeedsData(Box<RawValue>),
+    /// A result shared with other subscriptions, which needs the subscription ID and method name.
+    Shared(SharedResult),
 }
 
 /// Subscription message.
@@ -154,8 +156,30 @@ impl SubscriptionMessage {
         Ok(Self::from_complete_message(json))
     }
 
+    /// Create a subscription message from a result that was serialized once for many
+    /// subscriptions. Sending it only copies the result into the notification.
+    pub fn from_shared(result: SharedResult) -> Self {
+        Self(SubscriptionMessageInner::Shared(result))
+    }
+
     pub(crate) fn from_complete_message(msg: String) -> Self {
         SubscriptionMessage(SubscriptionMessageInner::Complete(msg))
+    }
+}
+
+/// A subscription result that is serialized once and sent to any number of subscriptions.
+///
+/// It can only be created by serializing a value, so it always holds valid JSON. Clones share the
+/// serialized result.
+#[derive(Debug, Clone)]
+pub struct SharedResult(Arc<str>);
+
+impl SharedResult {
+    /// Serializes `result` for use in [`SubscriptionMessage::from_shared`].
+    ///
+    /// Fails if `result` couldn't be serialized.
+    pub fn new(result: &impl Serialize) -> Result<Self, serde_json::Error> {
+        Ok(Self(serde_json::to_string(result)?.into()))
     }
 }
 
@@ -265,6 +289,7 @@ impl PendingSubscriptionSink {
             inner: self.inner,
             method: self.method,
             subscribers: self.subscribers,
+            notification_prefix: notification_prefix(self.method, &self.uniq_sub.sub_id),
             uniq_sub: self.uniq_sub,
             unsubscribe: IsUnsubscribed(tx),
             _permit: Some(Arc::new(self.permit)),
@@ -332,6 +357,8 @@ pub struct SubscriptionSink {
     method: &'static str,
     /// Shared Mutex of subscriptions for this method.
     subscribers: Subscribers,
+    /// The start of every notification of this subscription, see [`notification_prefix`].
+    notification_prefix: Arc<str>,
     /// Unique subscription.
     uniq_sub: SubscriptionKey,
     /// A future to that fires once the unsubscribe method has been called.
@@ -374,7 +401,7 @@ impl SubscriptionSink {
             return Err(DisconnectError(msg));
         }
 
-        let json = sub_message_to_json(msg, &self.uniq_sub.sub_id, self.method);
+        let json = sub_message_to_json(msg, &self.notification_prefix);
         self.inner.send(json).await
     }
 
@@ -391,7 +418,7 @@ impl SubscriptionSink {
             return Err(SendTimeoutError::Closed(msg));
         }
 
-        let json = sub_message_to_json(msg, &self.uniq_sub.sub_id, self.method);
+        let json = sub_message_to_json(msg, &self.notification_prefix);
         self.inner.send_timeout(json, timeout).await
     }
 
@@ -409,7 +436,7 @@ impl SubscriptionSink {
             return Err(TrySendError::Closed(msg));
         }
 
-        let json = sub_message_to_json(msg, &self.uniq_sub.sub_id, self.method);
+        let json = sub_message_to_json(msg, &self.notification_prefix);
         self.inner.try_send(json)
     }
 
@@ -495,21 +522,41 @@ pub struct SubscriptionState<'a> {
     pub subscription_permit: SubscriptionPermit,
 }
 
-pub(crate) fn sub_message_to_json(
-    msg: SubscriptionMessage,
-    sub_id: &SubscriptionId,
-    method: &str,
-) -> String {
+/// Returns the start of every notification of a subscription, up to its `result` value.
+///
+/// Followed by a result and [`NOTIFICATION_SUFFIX`], it matches what serializing a
+/// [`SubscriptionResponse`] produces byte for byte.
+pub(crate) fn notification_prefix(method: &str, sub_id: &SubscriptionId) -> Arc<str> {
+    let method = serde_json::to_string(method).expect("Serialize infallible; qed");
+    let sub_id = serde_json::to_string(sub_id).expect("Serialize infallible; qed");
+    format!(r#"{{"jsonrpc":"2.0","method":{method},"params":{{"subscription":{sub_id},"result":"#)
+        .into()
+}
+
+/// Closes the objects that [`notification_prefix`] opens.
+const NOTIFICATION_SUFFIX: &str = "}}";
+
+/// Returns the notification JSON for `msg`, given the subscription's [`notification_prefix`].
+pub(crate) fn sub_message_to_json(msg: SubscriptionMessage, notification_prefix: &str) -> String {
     match msg.0 {
         SubscriptionMessageInner::Complete(msg) => msg,
         SubscriptionMessageInner::NeedsData(result) => {
-            serde_json::to_string(&SubscriptionResponse::new(
-                method.into(),
-                SubscriptionPayload { subscription: sub_id.clone(), result },
-            ))
-            .expect("Serialize infallible; qed")
+            splice_notification(notification_prefix, result.get())
+        }
+        SubscriptionMessageInner::Shared(SharedResult(result)) => {
+            splice_notification(notification_prefix, &result)
         }
     }
+}
+
+/// Builds a notification from a [`notification_prefix`] and a result with one allocation.
+fn splice_notification(notification_prefix: &str, result: &str) -> String {
+    let mut json =
+        String::with_capacity(notification_prefix.len() + result.len() + NOTIFICATION_SUFFIX.len());
+    json.push_str(notification_prefix);
+    json.push_str(result);
+    json.push_str(NOTIFICATION_SUFFIX);
+    json
 }
 
 pub(crate) fn sub_err_to_json(
@@ -649,6 +696,61 @@ mod tests {
         assert_eq!(harness.unsubscribe(3, conn_id), r#"{"jsonrpc":"2.0","id":3,"result":true}"#);
         assert!(first.is_closed());
         assert_eq!(harness.unsubscribe(4, conn_id), r#"{"jsonrpc":"2.0","id":4,"result":false}"#);
+    }
+
+    #[test]
+    fn spliced_notifications_match_serialized_notifications() {
+        let results = [
+            serde_json::json!(null),
+            serde_json::json!(42),
+            serde_json::json!("quote \" backslash \\ newline \n emoji \u{1F600}"),
+            serde_json::json!({"nested": [1, "two", {"three": 3.5}], "empty": {}}),
+        ];
+        let ids = [
+            SubscriptionId::Num(7),
+            SubscriptionId::Str(SUB_ID.into()),
+            SubscriptionId::Str("needs \"escaping\"".into()),
+        ];
+
+        for method in ["eth_subscription", "odd \"method\""] {
+            for id in &ids {
+                let prefix = notification_prefix(method, id);
+                for result in &results {
+                    let serialized = SubscriptionMessage::new(method, id.clone(), result).unwrap();
+                    let expected = sub_message_to_json(serialized, &prefix);
+
+                    let shared =
+                        SubscriptionMessage::from_shared(SharedResult::new(result).unwrap());
+                    assert_eq!(sub_message_to_json(shared, &prefix), expected);
+                    let raw = SubscriptionMessage::from(to_raw_value(result).unwrap());
+                    assert_eq!(sub_message_to_json(raw, &prefix), expected);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn shared_result_as_close_notification() {
+        let mut module = RpcModule::new(());
+        module
+            .register_subscription("sub", "notif", "unsub", |_, pending, _| async move {
+                let _sink = pending.accept().await.unwrap();
+                let result = SharedResult::new(&"last").unwrap();
+                SubscriptionCloseResponse::Notif(SubscriptionMessage::from_shared(result))
+            })
+            .unwrap();
+
+        let (response, mut rx) =
+            module.raw_json_request(r#"{"jsonrpc":"2.0","id":1,"method":"sub"}"#, 1).await.unwrap();
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        let sub_id = &response["result"];
+        assert!(sub_id.is_u64(), "{response}");
+        assert_eq!(
+            rx.recv().await.unwrap(),
+            format!(
+                r#"{{"jsonrpc":"2.0","method":"notif","params":{{"subscription":{sub_id},"result":"last"}}}}"#
+            )
+        );
     }
 
     #[tokio::test]

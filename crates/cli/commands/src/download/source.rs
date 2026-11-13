@@ -31,6 +31,18 @@ impl SnapshotApiEntry {
     fn is_modular(&self) -> bool {
         self.metadata_url.ends_with("manifest.json")
     }
+
+    /// Strips control characters from the strings supplied by the API, so they can't inject
+    /// terminal escape sequences when printed or logged.
+    fn strip_control_chars(mut self) -> Self {
+        for s in [Some(&mut self.metadata_url), self.date.as_mut(), self.profile.as_mut()]
+            .into_iter()
+            .flatten()
+        {
+            s.retain(|c| !c.is_control());
+        }
+        self
+    }
 }
 
 /// Discovers the latest snapshot manifest URL for the given chain from the snapshots API.
@@ -97,7 +109,11 @@ pub(crate) async fn fetch_snapshot_api_entries(chain_id: u64) -> Result<Vec<Snap
         .json()
         .await?;
 
-    Ok(entries.into_iter().filter(|entry| entry.chain_id == chain_id).collect())
+    Ok(entries
+        .into_iter()
+        .filter(|entry| entry.chain_id == chain_id)
+        .map(SnapshotApiEntry::strip_control_chars)
+        .collect())
 }
 
 /// Prints a formatted table of available modular snapshots.
@@ -237,4 +253,28 @@ pub(crate) fn resolve_manifest_base_url(
         base.pop();
     }
     Ok(base)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_control_chars_removes_terminal_escapes() {
+        let entry = serde_json::from_str::<SnapshotApiEntry>(
+            r#"{
+                "chainId": "1",
+                "block": 100,
+                "date": "2026-\u009b01-01",
+                "profile": "x\u001b]0;title\u0007y",
+                "metadataUrl": "https://example.com/\u001b[2Jmanifest.json"
+            }"#,
+        )
+        .unwrap()
+        .strip_control_chars();
+
+        assert_eq!(entry.date.as_deref(), Some("2026-01-01"));
+        assert_eq!(entry.profile.as_deref(), Some("x]0;titley"));
+        assert_eq!(entry.metadata_url, "https://example.com/[2Jmanifest.json");
+    }
 }

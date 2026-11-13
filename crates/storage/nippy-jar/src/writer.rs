@@ -147,6 +147,10 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         }
 
         let mut data_file = OpenOptions::new().read(true).write(true).open(data)?;
+        if is_created {
+            // Drop stale data left behind by a previous jar at the same path.
+            data_file.set_len(0)?;
+        }
         data_file.seek(SeekFrom::End(0))?;
 
         if !offsets.exists() {
@@ -170,6 +174,9 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             buf.write_all(&[0; OFFSET_SIZE_BYTES as usize])?;
 
             offsets_file.write_all(&buf)?;
+            // Drop stale offsets left behind by a previous jar at the same path. Truncating after
+            // the header is written never leaves the file empty.
+            offsets_file.set_len(buf.len() as u64)?;
             offsets_file.seek(SeekFrom::End(0))?;
         }
 

@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{io, sync::Arc, time::Duration};
 
 use crate::{
     server::{handle_rpc_call, ConnectionState, ServerConfig},
@@ -12,15 +12,15 @@ use futures_util::{
 };
 use hyper::upgrade::Upgraded;
 use hyper_util::rt::TokioIo;
-use jsonrpsee_core::{middleware::RpcServiceT, server::MethodSink};
+use jsonrpsee_core::{classify_message, middleware::RpcServiceT, server::MethodSink};
 use jsonrpsee_types::{
     error::{reject_too_big_request, ErrorCode},
     Id,
 };
-use soketto::connection::Error as SokettoError;
+use soketto::{connection::Error as SokettoError, data::ByteSlice125};
 use tokio::{
     sync::{mpsc, oneshot, Semaphore},
-    time::timeout,
+    time::{interval_at, timeout, Instant},
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::compat::Compat;
@@ -67,25 +67,34 @@ where
         max_request_body_size,
         write_timeout,
         message_buffer_capacity,
+        ping_interval,
         ..
     } = server_cfg;
 
     let (conn_tx, conn_rx) = oneshot::channel();
 
     // Spawn another task that sends out the responses on the Websocket.
-    let send_task_handle = tokio::spawn(send_task(rx, ws_sender, write_timeout, conn_rx));
+    let send_task_handle =
+        tokio::spawn(send_task(rx, ws_sender, write_timeout, ping_interval, conn_rx));
 
     let stopped = conn.stop_handle.clone().shutdown();
     let rpc_service = Arc::new(rpc_service);
 
     tokio::pin!(stopped);
 
-    let ws_stream = futures_util::stream::unfold(ws_receiver, |mut receiver| async {
+    // `soketto` allocates a frame's announced length before reading its payload, so a frame that
+    // never completes would hold that buffer for good. A pong can't arrive inside a frame, so a
+    // read that yields neither a message nor a pong to the pings within two intervals is stuck.
+    let read_timeout = ping_interval * 2;
+    let ws_stream = futures_util::stream::unfold(ws_receiver, move |mut receiver| async move {
         let mut data = Vec::new();
         loop {
-            match receiver.receive(&mut data).await {
+            let Ok(received) = timeout(read_timeout, receiver.receive(&mut data)).await else {
+                return Some((Err(SokettoError::Io(io::ErrorKind::TimedOut.into())), receiver));
+            };
+            match received {
                 Ok(soketto::Incoming::Data(_)) => return Some((Ok(data), receiver)),
-                // The server sends no pings, so pongs are unsolicited and ignored.
+                // Pongs only answer the server's pings, which restarts the read timeout.
                 Ok(soketto::Incoming::Pong(_)) => data.clear(),
                 Ok(soketto::Incoming::Closed(_)) | Err(SokettoError::Closed) => return None,
                 // The closing reason is already logged by `soketto` trace log level.
@@ -167,27 +176,19 @@ where
         tokio::spawn(async move {
             let _pending_calls = pending_calls;
             let _permit = permit;
-            // Only the four JSON whitespace characters are skipped, not for example form feed.
-            let first_non_whitespace = data
-                .iter()
-                .enumerate()
-                .take(128)
-                .find(|(_, byte)| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r'));
-
-            let (idx, is_single) = match first_non_whitespace {
-                Some((start, b'{')) => (start, true),
-                Some((start, b'[')) => (start, false),
-                _ => {
-                    _ = sink.send_error(Id::Null, ErrorCode::ParseError.into()).await;
-                    return;
-                }
+            let Some((data, is_single)) = classify_message(&data) else {
+                _ = sink.send_error(Id::Null, ErrorCode::ParseError.into()).await;
+                return;
             };
 
             // Calls are not tied to the connection task, so stop them once the connection is closed
             // instead of running them to completion without anyone to send the response to.
             let rp = tokio::select! {
+                // The call is polled first, so one that answers at once doesn't have to register
+                // for the close of the connection.
+                biased;
+                rp = handle_rpc_call(data, is_single, batch_requests_config, &*rpc_service) => rp,
                 _ = sink.closed() => return,
-                rp = handle_rpc_call(&data[idx..], is_single, batch_requests_config, &*rpc_service) => rp,
             };
 
             // Subscriptions are handled by the subscription callback and
@@ -209,26 +210,43 @@ where
     drop(conn);
 }
 
-/// A task that waits for new messages via the `rx channel` and sends them out on the `WebSocket`.
+/// A task that waits for new messages via the `rx channel` and sends them out on the `WebSocket`,
+/// and pings the client every `ping_interval`.
 async fn send_task(
     mut rx: mpsc::Receiver<String>,
     mut ws_sender: Sender,
     write_timeout: Duration,
+    ping_interval: Duration,
     mut stop: oneshot::Receiver<()>,
 ) {
     let mut write_timed_out = false;
+    let mut ping_timer = interval_at(Instant::now() + ping_interval, ping_interval);
 
     loop {
-        let response = tokio::select! {
+        let mut result = tokio::select! {
+            // Stop is polled first: a subscription that queues messages faster than the client
+            // reads them keeps `rx.recv()` ready, which would never let a stopped server end the
+            // session.
             biased;
-            response = rx.recv() => response,
-            // The server has stopped.
-            _ = &mut stop => break,
+            _ = &mut stop, if !rx.is_closed() => {
+                // Take nothing new but write out what is queued: answers to calls this server has
+                // run, which a graceful shutdown owes its clients. `rx.recv()` returns `None` once
+                // the closed queue is drained.
+                rx.close();
+                continue;
+            }
+            // Pings go before queued messages, so that a subscription that keeps the queue full
+            // can't hold them back until the read timeout closes the connection.
+            _ = ping_timer.tick() => {
+                let payload = ByteSlice125::try_from(&[][..]).expect("empty ping payload fits");
+                timeout(write_timeout, ws_sender.send_ping(payload)).await
+            }
+            response = rx.recv() => {
+                // Nothing else to receive.
+                let Some(response) = response else { break };
+                timeout(write_timeout, ws_sender.send_text_owned(response)).await
+            }
         };
-        // Nothing else to receive.
-        let Some(response) = response else { break };
-
-        let mut result = timeout(write_timeout, ws_sender.send_text_owned(response)).await;
         // Write the messages that are already queued too, and flush them together.
         let mut written = 1;
         while matches!(result, Ok(Ok(()))) && written < MAX_MESSAGES_PER_FLUSH {
@@ -280,15 +298,18 @@ where
     S: Future<Output = ()> + Unpin,
     T: StreamExt<Item = Result<Vec<u8>, SokettoError>> + Unpin,
 {
-    match future::select(ws_stream.next(), stopped).await {
-        // The connection is closed.
-        Either::Left((None, _)) => Receive::ConnectionClosed,
-        // The message has been received, we are done
-        Either::Left((Some(Ok(data)), stopped)) => Receive::Ok(data, stopped),
-        // Received an error, terminate the connection.
-        Either::Left((Some(Err(e)), stopped)) => Receive::Err(e, stopped),
+    // `select` polls its first argument first and returns as soon as that one is ready, so the stop
+    // signal has to come first. Polling the stream first starves it: a peer that always has another
+    // message ready never lets the read be pending, and the session would then never stop.
+    match future::select(stopped, ws_stream.next()).await {
         // Server has been stopped.
-        Either::Right(_) => Receive::Stopped,
+        Either::Left(_) => Receive::Stopped,
+        // The connection is closed.
+        Either::Right((None, _)) => Receive::ConnectionClosed,
+        // The message has been received, we are done
+        Either::Right((Some(Ok(data)), stopped)) => Receive::Ok(data, stopped),
+        // Received an error, terminate the connection.
+        Either::Right((Some(Err(e)), stopped)) => Receive::Err(e, stopped),
     }
 }
 
@@ -332,4 +353,19 @@ async fn graceful_shutdown<S>(
     _ = conn_tx.send(());
     // Ensure that send task has been closed.
     _ = send_task_handle.await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures_util::stream;
+
+    #[tokio::test]
+    async fn try_recv_observes_stop_while_input_stays_ready() {
+        // A peer that always has another message ready must not keep the session from stopping.
+        let mut always_ready = stream::repeat_with(|| Ok::<_, SokettoError>(b"{}".to_vec()));
+
+        let received = try_recv(&mut always_ready, future::ready(())).await;
+        assert!(matches!(received, Receive::Stopped));
+    }
 }

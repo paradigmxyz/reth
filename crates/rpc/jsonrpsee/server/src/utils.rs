@@ -34,13 +34,13 @@ use std::{
     time::Duration,
 };
 
-use crate::{ConnectionState, HttpBody, HttpRequest};
+use crate::{ConnectionState, HttpBody};
 
 use futures_util::{future, ready};
 use hyper::body::{Bytes, Frame};
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use jsonrpsee_core::BoxError;
-use jsonrpsee_types::{Notification, TwoPointZero};
+use jsonrpsee_core::{middleware::Notification, BoxError, JsonRawValue};
+use jsonrpsee_types::TwoPointZero;
 use pin_project::pin_project;
 use serde::{Deserialize, Deserializer};
 use tokio::{
@@ -48,7 +48,6 @@ use tokio::{
     sync::Notify,
     time::Sleep,
 };
-use tower::{util::Oneshot, ServiceExt};
 
 /// Largest data frame [`PermitBody`] yields.
 const BODY_CHUNK_SIZE: usize = 64 * 1024;
@@ -63,51 +62,8 @@ const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_secs(1);
 /// matching geth.
 pub(crate) const DEFAULT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[derive(Debug, Copy, Clone)]
-pub(crate) struct TowerToHyperService<S> {
-    service: S,
-}
-
-impl<S> TowerToHyperService<S> {
-    pub(crate) fn new(service: S) -> Self {
-        Self { service }
-    }
-}
-
-impl<S> hyper::service::Service<HttpRequest<hyper::body::Incoming>> for TowerToHyperService<S>
-where
-    S: tower::Service<HttpRequest> + Clone,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = TowerToHyperServiceFuture<S, HttpRequest>;
-
-    fn call(&self, req: HttpRequest<hyper::body::Incoming>) -> Self::Future {
-        let req = req.map(HttpBody::new);
-        TowerToHyperServiceFuture { future: self.service.clone().oneshot(req) }
-    }
-}
-
-#[pin_project]
-pub(crate) struct TowerToHyperServiceFuture<S, R>
-where
-    S: tower::Service<R>,
-{
-    #[pin]
-    future: Oneshot<S, R>,
-}
-
-impl<S, R> std::future::Future for TowerToHyperServiceFuture<S, R>
-where
-    S: tower::Service<R>,
-{
-    type Output = Result<S::Response, S::Error>;
-
-    #[inline]
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.project().future.poll(cx)
-    }
-}
+/// Default interval at which WebSocket connections are pinged, matching geth.
+pub(crate) const DEFAULT_PING_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Notifies `request_received` whenever hyper passes a request to the service.
 #[derive(Debug, Clone)]
@@ -197,23 +153,19 @@ where
 }
 
 /// Deserializes a JSON-RPC notification, rejecting objects that contain an `id` member.
-pub(crate) fn deserialize_notification<'a, T>(
-    data: &'a [u8],
-) -> Result<Notification<'a, T>, serde_json::Error>
-where
-    T: Deserialize<'a>,
-{
-    let notif: NotificationWithoutId<'a, T> = serde_json::from_slice(data)?;
-    Ok(Notification::new(notif.method, notif.params))
+pub(crate) fn deserialize_notification(data: &[u8]) -> Result<Notification<'_>, serde_json::Error> {
+    let notif = serde_json::from_slice::<NotificationWithoutId<'_>>(data)?;
+    Ok(Notification::new(notif.method, notif.params.map(Cow::Borrowed)))
 }
 
 #[derive(Deserialize)]
-struct NotificationWithoutId<'a, T> {
+struct NotificationWithoutId<'a> {
     #[serde(rename = "jsonrpc")]
     _jsonrpc: TwoPointZero,
     #[serde(borrow)]
     method: Cow<'a, str>,
-    params: T,
+    #[serde(borrow)]
+    params: Option<&'a JsonRawValue>,
     #[serde(default, rename = "id", deserialize_with = "reject_notification_id")]
     _id: (),
 }
@@ -399,12 +351,10 @@ fn poll_write_timeout(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::value::RawValue;
     use tokio::time::Instant;
 
     #[test]
     fn notification_id_classification_notification_metadata() {
-        type Params<'a> = Option<Cow<'a, RawValue>>;
         for (raw, expected) in [
             (
                 r#"{"jsonrpc":"2.0","method":"example","params":[1],"extra":{"id":true}}"#,
@@ -412,13 +362,14 @@ mod tests {
             ),
             (r#"{"jsonrpc":"2.0","method":"example"}"#, None),
         ] {
-            let notification = deserialize_notification::<Params>(raw.as_bytes()).unwrap();
+            let notification = deserialize_notification(raw.as_bytes()).unwrap();
             assert_eq!(notification.method_name(), "example");
             assert_eq!(notification.params().as_ref().map(|p| p.get()), expected);
+            assert!(!matches!(notification.params(), Some(Cow::Owned(_))));
         }
         for id in ["true", "false", "{}", "[]", "null", "0", "\"valid\""] {
             let raw = format!(r#"{{"jsonrpc":"2.0","method":"example","id":{id}}}"#);
-            assert!(deserialize_notification::<Params>(raw.as_bytes()).is_err());
+            assert!(deserialize_notification(raw.as_bytes()).is_err());
         }
     }
 

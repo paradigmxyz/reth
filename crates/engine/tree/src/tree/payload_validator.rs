@@ -1914,7 +1914,8 @@ where
         let execution_cache = self
             .config
             .share_execution_cache_with_payload_builder()
-            .then(|| self.payload_processor.cache_for(parent_hash));
+            .then(|| self.payload_processor.cache_for(parent_hash))
+            .flatten();
         let state_root_handle =
             self.payload_state_root_handle_for(parent_hash, parent_header, timestamp, state);
         let mut resources = PayloadBuilderResources::new(execution_cache, state_root_handle)
