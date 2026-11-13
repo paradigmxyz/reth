@@ -840,9 +840,9 @@ where
         let state_root = root_outcome.state_root;
         let trie_output = root_outcome.trie_updates;
 
-        // A fallback path recomputed the hashed post state. Replace the streaming-derived one
-        // and re-run hashed-state validation against it, since a failed state-root task may
-        // have produced an inconsistent byproduct.
+        // The job recomputed the hashed post state, on a fallback path or to zero the storage of
+        // destroyed accounts. Replace the one passed to it and re-run hashed-state validation
+        // against it, since a failed state-root task may have produced an inconsistent byproduct.
         if let Some(refreshed) = root_outcome.hashed_state {
             hashed_state = LazyHandle::ready(refreshed);
             hashed_state_validate_result = debug_span!(
