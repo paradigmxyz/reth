@@ -86,21 +86,32 @@ where
     // never completes would hold that buffer for good. A pong can't arrive inside a frame, so a
     // read that yields neither a message nor a pong to the pings within two intervals is stuck.
     let read_timeout = ping_interval * 2;
-    let ws_stream = futures_util::stream::unfold(ws_receiver, move |mut receiver| async move {
+    let ws_stream = futures_util::stream::unfold(Some(ws_receiver), move |receiver| async move {
+        let mut receiver = receiver?;
         let mut data = Vec::new();
         loop {
             let Ok(received) = timeout(read_timeout, receiver.receive(&mut data)).await else {
-                return Some((Err(SokettoError::Io(io::ErrorKind::TimedOut.into())), receiver));
+                return Some((
+                    Err(SokettoError::Io(io::ErrorKind::TimedOut.into())),
+                    Some(receiver),
+                ));
             };
             match received {
-                Ok(soketto::Incoming::Data(_)) => return Some((Ok(data), receiver)),
+                Ok(soketto::Incoming::Data(_)) => return Some((Ok(data), Some(receiver))),
                 // Pongs only answer the server's pings, which restarts the read timeout.
                 Ok(soketto::Incoming::Pong(_)) => data.clear(),
                 Ok(soketto::Incoming::Closed(_)) | Err(SokettoError::Closed) => return None,
+                // `soketto` skips the length of the whole message once it exceeds the limit,
+                // although the fragments in `data` were already read. That many bytes of the
+                // frames after the message are skipped with it, so the receiver is no longer at a
+                // frame boundary and the stream ends after this error.
+                Err(e @ SokettoError::MessageTooLarge { .. }) if !data.is_empty() => {
+                    return Some((Err(e), None));
+                }
                 // The closing reason is already logged by `soketto` trace log level.
                 // Return the `Closed` error to avoid logging unnecessary warnings on clean
                 // shutdown.
-                Err(e) => return Some((Err(e), receiver)),
+                Err(e) => return Some((Err(e), Some(receiver))),
             }
         }
     })

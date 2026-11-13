@@ -1643,3 +1643,51 @@ async fn server_with_ping_interval(
     let addr = server.local_addr().unwrap();
     (server.start(module), addr)
 }
+
+#[tokio::test]
+async fn ws_fragmented_oversized_message_closes_connection() {
+    init_logger();
+
+    // Rejects all requests larger than 100 bytes.
+    let config = ServerConfig::builder().max_request_body_size(100).build();
+    let server = ServerBuilder::with_config(config).build("127.0.0.1:0").await.unwrap();
+    let mut module = RpcModule::new(());
+    module.register_method("say_hello", |_, _| "hello").unwrap();
+    let addr = server.local_addr().unwrap();
+    let handle = server.start(module);
+
+    let socket = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let mut client =
+        handshake::Client::new(BufReader::new(BufWriter::new(socket.compat())), "test-client", "/");
+    let response = client.handshake().with_default_timeout().await.unwrap().unwrap();
+    assert!(matches!(response, handshake::ServerResponse::Accepted { .. }));
+    let mut stream = client.into_inner();
+
+    // Frames are masked with a zero key, which leaves the payload as it is.
+    let frame = |fin_and_opcode: u8, payload: &[u8]| {
+        [&[fin_and_opcode, 0x80 | payload.len() as u8, 0, 0, 0, 0], payload].concat()
+    };
+    let request = frame(0x81, br#"{"jsonrpc":"2.0","method":"say_hello","id":1}"#);
+
+    // A text message that exceeds the limit with its second fragment. `soketto` then skips the
+    // length of both fragments although it has read the first one, which swallows the request of
+    // that length that follows.
+    stream.write_all(&frame(0x01, &vec![b'a'; request.len()])).await.unwrap();
+    stream.write_all(&frame(0x80, &[b'a'; 60])).await.unwrap();
+    stream.write_all(&request).await.unwrap();
+    stream.flush().await.unwrap();
+
+    // The message is rejected and the connection closed, as the server can't tell where the next
+    // frame starts.
+    let mut received = Vec::new();
+    stream.read_to_end(&mut received).with_default_timeout().await.unwrap().unwrap();
+    let rejection = oversized_request(100);
+    let mut expected = vec![0x81, rejection.len() as u8];
+    expected.extend_from_slice(rejection.as_bytes());
+    // A close frame with status code 1000.
+    expected.extend_from_slice(&[0x88, 0x02, 0x03, 0xe8]);
+    assert_eq!(received, expected);
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
