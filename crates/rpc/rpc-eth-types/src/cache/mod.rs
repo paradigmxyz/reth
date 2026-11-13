@@ -398,6 +398,15 @@ where
                         )
                         .map(|maybe_block| maybe_block.map(Arc::new));
                     drop(permit);
+                    // Transactions read from the database carry no hash, and a block converted
+                    // into a response with full transactions is cloned first, so each response
+                    // would hash every transaction again. Hashing the shared block once lets
+                    // its clones and all other consumers reuse the hashes.
+                    if let Ok(Some(block)) = &block_sender {
+                        for tx in block.body().transactions() {
+                            tx.tx_hash();
+                        }
+                    }
                     action_sender.send_block(block_sender);
                 });
             }
@@ -989,7 +998,7 @@ fn bytecode_heap_size(bytecode: &Bytecode) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{transaction::TransactionMeta, Header};
+    use alloy_consensus::{transaction::TransactionMeta, Header, Signed, TxLegacy};
     use alloy_eip7928::BlockAccessIndex;
     use alloy_eips::{BlockHashOrNumber, NumHash};
     use alloy_primitives::{
@@ -1473,6 +1482,35 @@ mod tests {
             .expect("block exists");
         assert!(bal.is_some());
         assert_eq!(bal_fetches.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn fetched_block_caches_transaction_hashes() {
+        // Like a transaction read from the database, its hash is computed on first use.
+        let tx = TransactionSigned::Legacy(Signed::new_unhashed(
+            TxLegacy::default(),
+            Signature::test_signature(),
+        ));
+        let block = RecoveredBlock::new_unhashed(
+            Block {
+                header: Header { number: 1, ..Default::default() },
+                body: BlockBody { transactions: vec![tx.clone()], ..Default::default() },
+            },
+            vec![Address::ZERO],
+        );
+        let block_hash = block.hash();
+        let provider = TestBalProvider::new(Arc::default()).with_block(block);
+        let cache = EthStateCache::<EthPrimitives>::spawn_with(
+            provider,
+            EthStateCacheConfig { max_blocks: 4, ..Default::default() },
+            Runtime::test(),
+        );
+
+        let block = cache.get_recovered_block(block_hash).await.unwrap().expect("block exists");
+        tx.tx_hash();
+        // The debug output includes the cached hash, so this fails if a clone of the cached
+        // transaction has to hash it again.
+        assert_eq!(format!("{:?}", block.body().transactions[0].clone()), format!("{tx:?}"));
     }
 
     #[tokio::test]
