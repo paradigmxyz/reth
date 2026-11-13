@@ -114,9 +114,11 @@ where
         if let Some((_, call_metrics)) = &call_metrics {
             call_metrics.started_total.increment(1);
         }
+        // Sync methods and the params decoding of async methods run inside `call`.
+        let started_at = Instant::now();
         MeteredRequestFuture {
             fut: self.inner.call(req),
-            started_at: Instant::now(),
+            started_at,
             metrics: self.metrics.clone(),
             method: call_metrics.map(|(method, _)| *method),
         }
