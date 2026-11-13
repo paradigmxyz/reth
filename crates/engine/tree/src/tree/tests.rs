@@ -3515,6 +3515,61 @@ fn test_backfill_threshold_above_header_limit_triggers_backfill() {
     }
 }
 
+/// On Ethereum, a stored finalized block must not leave a gap above the range download limit to
+/// live sync, so backfill targets the head instead.
+#[test]
+fn test_stored_finalized_with_gap_above_header_limit_backfills_to_head() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let finalized = test_harness
+        .block_builder
+        .get_executed_blocks(0..1)
+        .next()
+        .unwrap()
+        .recovered_block()
+        .clone();
+    let finalized_hash = finalized.hash();
+    test_harness.provider.add_block(finalized_hash, finalized.into_block());
+
+    let head_hash = B256::repeat_byte(0xAA);
+    let local_tip = BlockNumHash::new(10, B256::ZERO);
+    let parent_hash = B256::repeat_byte(0xBB);
+    for (head_block_hash, gap, expect_backfill) in [
+        (head_hash, MAX_BACKFILL_RUN_THRESHOLD, false),
+        (head_hash, MAX_BACKFILL_RUN_THRESHOLD + 1, true),
+        // The head is the stored finalized block, so there is nothing left to backfill.
+        (finalized_hash, MAX_BACKFILL_RUN_THRESHOLD + 1, false),
+    ] {
+        test_harness.tree.state.forkchoice_state_tracker.set_latest(
+            ForkchoiceState {
+                head_block_hash,
+                safe_block_hash: B256::ZERO,
+                finalized_block_hash: finalized_hash,
+            },
+            ForkchoiceStatus::Syncing,
+        );
+        let missing_parent = BlockNumHash::new(local_tip.number + gap, parent_hash);
+        let downloaded = BlockNumHash::new(missing_parent.number + 1, B256::repeat_byte(0xCC));
+        let event = test_harness.tree.on_disconnected_downloaded_block(
+            downloaded,
+            missing_parent,
+            local_tip,
+        );
+        if expect_backfill {
+            assert!(matches!(
+                event,
+                Some(TreeEvent::BackfillAction(BackfillAction::Start(target)))
+                    if target.sync_target() == Some(head_hash)
+            ));
+        } else {
+            assert!(matches!(
+                event,
+                Some(TreeEvent::Download(DownloadRequest::BlockRange { hash, count, .. }))
+                    if hash == parent_hash && count == gap
+            ));
+        }
+    }
+}
+
 /// A stale persisted hash must not count as an ancestor after an in-memory reorg.
 #[test]
 fn test_forkchoice_rejects_stale_persisted_prefix_hash() {

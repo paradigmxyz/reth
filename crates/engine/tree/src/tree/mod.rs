@@ -20,7 +20,7 @@ use reth_chain_state::{
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
     BeaconEngineMessage, ConsensusEngineEvent, ExecutionPayload, ForkchoiceStateTracker,
-    NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo,
+    NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo, MAX_BACKFILL_RUN_THRESHOLD,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::{debug_unreachable, ConfigureEvm};
@@ -2779,8 +2779,9 @@ where
     /// Defaults to the finalized block hash. On OP Stack, the CL finalizes in large batches and the
     /// finalized hash can lag the canonical tip by a wide margin, so backfill targets the head.
     ///
-    /// The zero-finalized optimistic-sync fallback for non-OP Stack chains is handled by
-    /// [`Self::backfill_sync_target`].
+    /// The fallbacks to the head for non-OP Stack chains, when the finalized hash is zero or the
+    /// finalized block is stored but the remaining gap exceeds [`MAX_BACKFILL_RUN_THRESHOLD`], are
+    /// handled by [`Self::backfill_sync_target`].
     const fn backfill_target_hash(&self, state: ForkchoiceState) -> B256 {
         if self.engine_kind.is_opstack() {
             state.head_block_hash
@@ -2846,6 +2847,16 @@ where
                 // However, optimism chains will do this. The risk of a reorg is however
                 // low.
                 debug!(target: "engine::tree", hash=?state.head_block_hash, "Setting head hash as an optimistic backfill target.");
+                Some(state.head_block_hash)
+            }
+            // we're synced to the target block, but the remaining gap is larger than a range
+            // download can fetch, so the pipeline has to close it.
+            Ok(Some(_))
+                if target_hash != state.head_block_hash &&
+                    self.distance_from_local_tip(canonical_tip_num, target_block_number)
+                        .is_some_and(|distance| distance > MAX_BACKFILL_RUN_THRESHOLD) =>
+            {
+                debug!(target: "engine::tree", hash=?state.head_block_hash, "Gap exceeds live-sync range, setting head hash as backfill target.");
                 Some(state.head_block_hash)
             }
             // we're fully synced to the target block
