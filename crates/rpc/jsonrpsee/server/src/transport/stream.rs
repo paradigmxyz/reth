@@ -11,10 +11,7 @@ use crate::{
     LOG_TARGET,
 };
 
-use futures_util::{
-    future::{self, Either},
-    Sink, SinkExt, Stream, StreamExt,
-};
+use futures_util::{future, Sink, SinkExt, Stream, StreamExt};
 use jsonrpsee_core::{classify_message, middleware::RpcServiceT, server::MethodSink};
 use jsonrpsee_types::{
     error::{reject_too_big_request, ErrorCode},
@@ -177,22 +174,25 @@ where
                 tokio::task::yield_now().await;
             }
 
-            let receive = tokio::select! {
-                receive = try_recv(&mut incoming, stopped) => receive,
-                // The send loop has ended, e.g. because a write timed out, so nothing can be sent
-                // back to the client anymore.
+            // The send loop has ended, e.g. because a write timed out, so nothing can be sent back
+            // to the client anymore. A client that keeps sending never lets the select below get
+            // to `sink.closed()`, so it is checked here too.
+            if sink.is_closed() {
+                break Shutdown::ConnectionClosed;
+            }
+            let received = tokio::select! {
+                // The stop signal is polled first: a peer that always has another message ready
+                // never lets the read be pending, and the session would then never stop.
+                biased;
+                _ = &mut stopped => break Shutdown::Stopped,
+                received = incoming.next() => received,
                 _ = sink.closed() => break Shutdown::ConnectionClosed,
             };
-            let data = match receive {
-                Receive::ConnectionClosed => break Shutdown::ConnectionClosed,
-                Receive::Stopped => break Shutdown::Stopped,
-                Receive::Ok(data, stop) => {
-                    stopped = stop;
-                    data
-                }
-                Receive::Err(ReadError::TooLarge, stop) => {
-                    stopped = stop;
-
+            let data = match received {
+                // The connection is closed.
+                None => break Shutdown::ConnectionClosed,
+                Some(Ok(data)) => data,
+                Some(Err(ReadError::TooLarge)) => {
                     if sink
                         .send_error(Id::Null, reject_too_big_request(max_request_body_size))
                         .await
@@ -204,7 +204,7 @@ where
                     continue;
                 }
                 // The transport has logged the error.
-                Receive::Err(ReadError::Fatal(_), _) => break Shutdown::ConnectionClosed,
+                Some(Err(ReadError::Fatal(_))) => break Shutdown::ConnectionClosed,
             };
 
             // A connection runs at most `max_concurrent_calls` calls at once. While waiting for a
@@ -366,34 +366,6 @@ async fn within<T>(
     }
 }
 
-enum Receive<M, E, S> {
-    ConnectionClosed,
-    Stopped,
-    Err(ReadError<E>, S),
-    Ok(M, S),
-}
-
-/// Attempts to read a message from the connection, unless the server was stopped.
-async fn try_recv<R, M, E, S>(incoming: &mut R, stopped: S) -> Receive<M, E, S>
-where
-    R: Stream<Item = Result<M, ReadError<E>>> + Unpin,
-    S: Future<Output = ()> + Unpin,
-{
-    // `select` polls its first argument first and returns as soon as that one is ready, so the stop
-    // signal has to come first. Polling the stream first starves it: a peer that always has another
-    // message ready never lets the read be pending, and the session would then never stop.
-    match future::select(stopped, incoming.next()).await {
-        // Server has been stopped.
-        Either::Left(_) => Receive::Stopped,
-        // The connection is closed.
-        Either::Right((None, _)) => Receive::ConnectionClosed,
-        // The message has been received, we are done
-        Either::Right((Some(Ok(data)), stopped)) => Receive::Ok(data, stopped),
-        // Received an error.
-        Either::Right((Some(Err(e)), stopped)) => Receive::Err(e, stopped),
-    }
-}
-
 #[derive(Debug, Copy, Clone)]
 enum Shutdown {
     Stopped,
@@ -443,16 +415,27 @@ mod tests {
     use crate::middleware::rpc::RpcService;
     use futures_util::stream;
     use jsonrpsee_core::server::Methods;
-    use std::io;
+    use std::{
+        io,
+        pin::Pin,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
 
-    /// Fails every write.
-    struct BrokenWriter;
+    /// Counts the messages written to it, or fails every write.
+    struct TestWriter {
+        written: Arc<AtomicUsize>,
+        fail: bool,
+    }
 
-    impl MessageWriter for BrokenWriter {
+    impl MessageWriter for TestWriter {
         type Error = io::Error;
 
         async fn write(&mut self, _: String) -> Result<(), Self::Error> {
-            Err(io::ErrorKind::BrokenPipe.into())
+            if self.fail {
+                return Err(io::ErrorKind::BrokenPipe.into());
+            }
+            self.written.fetch_add(1, Ordering::Relaxed);
+            Ok(())
         }
 
         async fn flush(&mut self) -> Result<(), Self::Error> {
@@ -464,41 +447,57 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn try_recv_observes_stop_while_input_stays_ready() {
-        // A peer that always has another message ready must not keep the session from stopping.
-        let mut always_ready =
-            stream::repeat_with(|| Ok::<_, ReadError<std::io::Error>>(b"{}".to_vec()));
+    type Incoming = Pin<Box<dyn Stream<Item = Result<Vec<u8>, ReadError<io::Error>>> + Send>>;
 
-        let received = try_recv(&mut always_ready, future::ready(())).await;
-        assert!(matches!(received, Receive::Stopped));
-    }
-
-    #[tokio::test]
-    async fn send_loop_runs_while_input_stays_ready() {
-        // A client that always has another message ready. Like a socket, the stream gives way
-        // once the task has used up its budget.
+    /// A connection of a client that always has another message ready. Like a socket, the stream
+    /// gives way once the task has used up its budget.
+    fn flooded<F>(
+        outgoing: TestWriter,
+        stopped: F,
+    ) -> StreamConnection<Incoming, TestWriter, RpcService, F> {
         let always_ready = stream::unfold((), |()| async {
             tokio::task::consume_budget().await;
-            Some((Ok::<_, ReadError<io::Error>>(b"{}".to_vec()), ()))
+            Some((Ok(b"{}".to_vec()), ()))
         });
         let (tx, rx) = mpsc::channel(4);
-
-        // The first response fails to be written, which ends the send loop and with it the
-        // connection. That only happens if the send loop gets to run.
-        let served = serve_stream(StreamConnection {
+        StreamConnection {
             incoming: Box::pin(always_ready),
-            outgoing: BrokenWriter,
+            outgoing,
             rpc_service: RpcService::without_subscriptions(Methods::new(), usize::MAX, 0.into()),
             sink: MethodSink::new(tx),
             rx,
-            stopped: future::pending(),
+            stopped,
             batch_requests_config: BatchRequestConfig::Unlimited,
             max_request_body_size: u32::MAX,
             max_concurrent_calls: Semaphore::MAX_PERMITS,
             write_timeout: None,
             ping_interval: None,
-        });
+        }
+    }
+
+    #[tokio::test]
+    async fn no_message_is_read_once_stopped() {
+        // Repeated, because a message read ahead of the stop signal would still be dropped half
+        // of the time by the wait for a call permit, which observes the stop signal too.
+        for _ in 0..32 {
+            let written = Arc::new(AtomicUsize::new(0));
+            let outgoing = TestWriter { written: written.clone(), fail: false };
+
+            let served = serve_stream(flooded(outgoing, future::ready(())));
+            tokio::time::timeout(Duration::from_secs(5), served).await.unwrap();
+
+            // Every message that is read is answered, with an error since `{}` is no request.
+            assert_eq!(written.load(Ordering::Relaxed), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn send_loop_runs_while_input_stays_ready() {
+        // The first response fails to be written, which ends the send loop and with it the
+        // connection. That only happens if the send loop gets to run.
+        let outgoing = TestWriter { written: Arc::default(), fail: true };
+
+        let served = serve_stream(flooded(outgoing, future::pending()));
         tokio::time::timeout(Duration::from_secs(5), served).await.unwrap();
     }
 }
