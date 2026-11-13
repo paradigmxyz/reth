@@ -72,8 +72,9 @@ where
 
     let (conn_tx, conn_rx) = oneshot::channel();
 
-    // Spawn another task that sends out the responses on the Websocket.
-    let send_task_handle = tokio::spawn(send_task(rx, ws_sender, write_timeout, conn_rx));
+    // The responses are sent out by this task too, so that a response doesn't have to wake another
+    // task to reach the socket.
+    let send = send_loop(rx, ws_sender, write_timeout, conn_rx);
 
     let stopped = conn.stop_handle.clone().shutdown();
     let rpc_service = Arc::new(rpc_service);
@@ -99,110 +100,115 @@ where
 
     tokio::pin!(ws_stream);
 
-    let call_permits = Arc::new(Semaphore::new(message_buffer_capacity as usize));
+    let receive = async {
+        let call_permits = Arc::new(Semaphore::new(message_buffer_capacity as usize));
 
-    let result = loop {
-        let receive = tokio::select! {
-            receive = try_recv(&mut ws_stream, stopped) => receive,
-            // The send task has terminated, e.g. because a write timed out, so nothing can be sent
-            // back to the client anymore.
-            _ = sink.closed() => break Ok(Shutdown::ConnectionClosed),
-        };
-        let data = match receive {
-            Receive::ConnectionClosed => break Ok(Shutdown::ConnectionClosed),
-            Receive::Stopped => break Ok(Shutdown::Stopped),
-            Receive::Ok(data, stop) => {
-                stopped = stop;
-                data
-            }
-            Receive::Err(err, stop) => {
-                stopped = stop;
+        let result = loop {
+            let receive = tokio::select! {
+                receive = try_recv(&mut ws_stream, stopped) => receive,
+                // The send task has terminated, e.g. because a write timed out, so nothing can be sent
+                // back to the client anymore.
+                _ = sink.closed() => break Ok(Shutdown::ConnectionClosed),
+            };
+            let data = match receive {
+                Receive::ConnectionClosed => break Ok(Shutdown::ConnectionClosed),
+                Receive::Stopped => break Ok(Shutdown::Stopped),
+                Receive::Ok(data, stop) => {
+                    stopped = stop;
+                    data
+                }
+                Receive::Err(err, stop) => {
+                    stopped = stop;
 
-                match err {
-                    SokettoError::Closed => {
-                        break Ok(Shutdown::ConnectionClosed);
-                    }
-                    SokettoError::MessageTooLarge { current, maximum } => {
-                        tracing::debug!(
-                            target: LOG_TARGET,
-                            "WS recv error: message too large current={}/max={}",
-                            current,
-                            maximum
-                        );
-                        if sink
-                            .send_error(Id::Null, reject_too_big_request(max_request_body_size))
-                            .await
-                            .is_err()
-                        {
+                    match err {
+                        SokettoError::Closed => {
                             break Ok(Shutdown::ConnectionClosed);
                         }
+                        SokettoError::MessageTooLarge { current, maximum } => {
+                            tracing::debug!(
+                                target: LOG_TARGET,
+                                "WS recv error: message too large current={}/max={}",
+                                current,
+                                maximum
+                            );
+                            if sink
+                                .send_error(Id::Null, reject_too_big_request(max_request_body_size))
+                                .await
+                                .is_err()
+                            {
+                                break Ok(Shutdown::ConnectionClosed);
+                            }
 
-                        continue;
-                    }
-                    err => {
-                        tracing::debug!(target: LOG_TARGET, "WS error: {}; terminate connection: {}", err, conn.conn_id);
-                        break Err(err);
-                    }
+                            continue;
+                        }
+                        err => {
+                            tracing::debug!(target: LOG_TARGET, "WS error: {}; terminate connection: {}", err, conn.conn_id);
+                            break Err(err);
+                        }
+                    };
+                }
+            };
+
+            // A connection runs at most `message_buffer_capacity` calls at once. While waiting for
+            // a permit no further messages are read, which pushes back on the client, and the
+            // message that is waiting is the only one held. The permit is acquired after the read
+            // so that a connection at the limit that sends nothing more is still read and its close
+            // is noticed. Every call ends once the sink is closed, which frees the permits, so this
+            // wait ends when the connection closes.
+            let permit = tokio::select! {
+                permit = call_permits.clone().acquire_owned() => permit,
+                _ = &mut stopped => break Ok(Shutdown::Stopped),
+            };
+            // The semaphore is never closed.
+            let Ok(permit) = permit else { break Ok(Shutdown::ConnectionClosed) };
+
+            let rpc_service = rpc_service.clone();
+            let sink = sink.clone();
+            let pending_calls = pending_calls.clone();
+
+            tokio::spawn(async move {
+                let _pending_calls = pending_calls;
+                let _permit = permit;
+                let Some((data, is_single)) = classify_message(&data) else {
+                    _ = sink.send_error(Id::Null, ErrorCode::ParseError.into()).await;
+                    return;
                 };
-            }
+
+                // Calls are not tied to the connection task, so stop them once the connection is
+                // closed instead of running them to completion without anyone to send the response
+                // to.
+                let rp = tokio::select! {
+                    // The call is polled first, so one that answers at once doesn't have to register
+                    // for the close of the connection.
+                    biased;
+                    rp = handle_rpc_call(data, is_single, batch_requests_config, &*rpc_service) => rp,
+                    _ = sink.closed() => return,
+                };
+
+                // Subscriptions are handled by the subscription callback and
+                // "ordinary notifications" should not be sent back to the client.
+                if rp.is_method_call() || rp.is_batch() {
+                    // An error means the connection is closed, so there is nothing left to do.
+                    let _ = sink.send(rp.into_json()).await;
+                }
+            });
         };
 
-        // A connection runs at most `message_buffer_capacity` calls at once. While waiting for a
-        // permit no further messages are read, which pushes back on the client, and the message
-        // that is waiting is the only one held. The permit is acquired after the read so that a
-        // connection at the limit that sends nothing more is still read and its close is noticed.
-        // Every call ends once the sink is closed, which frees the permits, so this wait ends
-        // when the connection closes.
-        let permit = tokio::select! {
-            permit = call_permits.clone().acquire_owned() => permit,
-            _ = &mut stopped => break Ok(Shutdown::Stopped),
-        };
-        // The semaphore is never closed.
-        let Ok(permit) = permit else { break Ok(Shutdown::ConnectionClosed) };
-
-        let rpc_service = rpc_service.clone();
-        let sink = sink.clone();
-        let pending_calls = pending_calls.clone();
-
-        tokio::spawn(async move {
-            let _pending_calls = pending_calls;
-            let _permit = permit;
-            let Some((data, is_single)) = classify_message(&data) else {
-                _ = sink.send_error(Id::Null, ErrorCode::ParseError.into()).await;
-                return;
-            };
-
-            // Calls are not tied to the connection task, so stop them once the connection is closed
-            // instead of running them to completion without anyone to send the response to.
-            let rp = tokio::select! {
-                // The call is polled first, so one that answers at once doesn't have to register
-                // for the close of the connection.
-                biased;
-                rp = handle_rpc_call(data, is_single, batch_requests_config, &*rpc_service) => rp,
-                _ = sink.closed() => return,
-            };
-
-            // Subscriptions are handled by the subscription callback and
-            // "ordinary notifications" should not be sent back to the client.
-            if rp.is_method_call() || rp.is_batch() {
-                // An error means the connection is closed, so there is nothing left to do.
-                let _ = sink.send(rp.into_json()).await;
-            }
-        });
+        // Drive all running methods to completion.
+        // **NOTE** Do not return early in this function. This `await` needs to run to guarantee
+        // proper drop behaviour.
+        drop(rpc_service);
+        drop(pending_calls);
+        graceful_shutdown(result, pending_calls_completed, ws_stream.as_mut(), conn_tx).await;
     };
 
-    // Drive all running methods to completion.
-    // **NOTE** Do not return early in this function. This `await` needs to run to guarantee
-    // proper drop behaviour.
-    drop(rpc_service);
-    drop(pending_calls);
-    graceful_shutdown(result, pending_calls_completed, ws_stream, conn_tx, send_task_handle).await;
+    future::join(receive, send).await;
 
     drop(conn);
 }
 
-/// A task that waits for new messages via the `rx channel` and sends them out on the `WebSocket`.
-async fn send_task(
+/// Waits for new messages via the `rx channel` and sends them out on the `WebSocket`.
+async fn send_loop(
     mut rx: mpsc::Receiver<String>,
     mut ws_sender: Sender,
     write_timeout: Duration,
@@ -310,7 +316,6 @@ async fn graceful_shutdown<S>(
     pending_calls: mpsc::Receiver<()>,
     ws_stream: S,
     mut conn_tx: oneshot::Sender<()>,
-    send_task_handle: tokio::task::JoinHandle<()>,
 ) where
     S: StreamExt<Item = Result<Vec<u8>, SokettoError>> + Unpin,
 {
@@ -331,10 +336,8 @@ async fn graceful_shutdown<S>(
         }
     }
 
-    // Send a message to close down the "send task".
+    // Tell the send loop to write out what is queued and end.
     _ = conn_tx.send(());
-    // Ensure that send task has been closed.
-    _ = send_task_handle.await;
 }
 
 #[cfg(test)]
