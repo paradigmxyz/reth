@@ -1,6 +1,6 @@
 //! Merkle trie proofs.
 
-use crate::{BranchNodeMasks, BranchNodeMasksMap, Nibbles, ProofTrieNode, TrieAccount};
+use crate::{BranchNodeMasksMap, Nibbles, ProofTrieNode, TrieAccount};
 use alloc::{borrow::Cow, collections::VecDeque, vec::Vec};
 use alloy_primitives::{
     keccak256,
@@ -545,9 +545,8 @@ impl DecodedMultiProofV2 {
         state_root: B256,
         mut node_by_hash: impl FnMut(&B256) -> Result<Option<TrieNode>, alloy_rlp::Error>,
     ) -> Result<Self, alloy_rlp::Error> {
-        let mut account_nodes: Vec<(Nibbles, TrieNode, Option<BranchNodeMasks>)> = Vec::new();
-        let mut storage_nodes: B256Map<Vec<(Nibbles, TrieNode, Option<BranchNodeMasks>)>> =
-            B256Map::default();
+        let mut account_proofs = Vec::new();
+        let mut storage_proofs = B256Map::<Vec<ProofTrieNode>>::default();
 
         let Some(root) = node_by_hash(&state_root)? else { return Ok(Self::default()) };
         let mut queue = VecDeque::from([(root, Nibbles::default(), None)]);
@@ -606,20 +605,17 @@ impl DecodedMultiProofV2 {
                 TrieNode::EmptyRoot => {}
             }
 
+            let node = ProofTrieNode { path, node: trie_node, masks: None };
             if let Some(account) = maybe_account {
-                storage_nodes.entry(account).or_default().push((path, trie_node, None));
+                storage_proofs.entry(account).or_default().push(node);
             } else {
-                account_nodes.push((path, trie_node, None));
+                account_proofs.push(node);
             }
         }
 
-        account_nodes.sort_by(|(a, _, _), (b, _, _)| crate::depth_first_cmp(a, b));
-        let account_proofs = ProofTrieNode::from_sorted_trie_nodes(account_nodes);
-
-        let mut storage_proofs = B256Map::default();
-        for (account, mut nodes) in storage_nodes {
-            nodes.sort_by(|(a, _, _), (b, _, _)| crate::depth_first_cmp(a, b));
-            storage_proofs.insert(account, ProofTrieNode::from_sorted_trie_nodes(nodes));
+        account_proofs.sort_by(|a, b| crate::depth_first_cmp(&a.path, &b.path));
+        for nodes in storage_proofs.values_mut() {
+            nodes.sort_by(|a, b| crate::depth_first_cmp(&a.path, &b.path));
         }
 
         Ok(Self { account_proofs, storage_proofs })
@@ -689,9 +685,10 @@ fn decoded_proof_nodes_to_v2(
 ) -> Vec<ProofTrieNode> {
     let mut sorted: Vec<_> = nodes.into_inner().into_iter().collect();
     sorted.sort_unstable_by(|a, b| crate::depth_first_cmp(&a.0, &b.0));
-    ProofTrieNode::from_sorted_trie_nodes(
-        sorted.into_iter().map(|(path, node)| (path, node, masks.get(&path).copied())),
-    )
+    sorted
+        .into_iter()
+        .map(|(path, node)| ProofTrieNode { path, node, masks: masks.get(&path).copied() })
+        .collect()
 }
 
 /// The merkle multiproof of storage trie.
@@ -1199,6 +1196,7 @@ pub mod triehash {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::BranchNodeMasks;
     use alloy_trie::{
         nodes::{BranchNode, ExtensionNode, LeafNode, RlpNode},
         TrieMask,
