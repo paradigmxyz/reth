@@ -569,7 +569,7 @@ mod tests {
             NoopProvider,
         },
         BlockWriter, ExecutionOutcome, PruneCheckpointReader, StageCheckpointReader,
-        StageCheckpointWriter,
+        StageCheckpointWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     };
     use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
     use reth_rpc_eth_api::{
@@ -581,7 +581,7 @@ mod tests {
     use reth_rpc_server_types::constants::DEFAULT_MAX_CALL_MANY_CALLS;
     use reth_storage_api::{
         BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
-        StorageSettings,
+        StorageSettings, TransactionsProvider,
     };
     use reth_tasks::cancel::{is_cancelled, CancelOnDrop};
     use reth_testing_utils::generators::{self, random_block, random_receipt, BlockParams};
@@ -2070,9 +2070,13 @@ mod tests {
     async fn lookups_by_tx_hash_match_block_lookups() {
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().genesis(Genesis::default()).build());
         let mut rng = generators::rng();
-        for prune_senders in [false, true] {
+        for (settings, prune_senders) in [
+            (StorageSettings::v2(), false),
+            (StorageSettings::v1(), false),
+            (StorageSettings::v1(), true),
+        ] {
             let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
-            let mut parent = init_genesis_with_settings(&factory, StorageSettings::v1()).unwrap();
+            let mut parent = init_genesis_with_settings(&factory, settings).unwrap();
             // Block 2 starts at a non-zero tx number.
             let blocks = (1..=2)
                 .map(|number| {
@@ -2133,6 +2137,12 @@ mod tests {
                         .into_transaction(api.converter())
                         .unwrap();
                     assert_eq!(tx.inner.signer(), *sender);
+                    let (_, _, stored_sender) = api
+                        .provider()
+                        .transaction_by_hash_with_meta_and_sender(*tx.inner.tx_hash())
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(stored_sender, (!prune_senders).then_some(*sender));
                     let receipt = EthTransactions::transaction_receipt(&api, *tx.inner.tx_hash())
                         .await
                         .unwrap()
@@ -2161,6 +2171,29 @@ mod tests {
                 EthTransactions::transaction_receipt(&api, B256::random()).await.unwrap(),
                 None
             );
+
+            // A block that is missing some of its receipts has no receipt for any transaction.
+            let provider = api.provider().clone();
+            let static_files = provider.static_file_provider();
+            let mut receipts_writer =
+                static_files.latest_writer(StaticFileSegment::Receipts).unwrap();
+            receipts_writer.prune_receipts(1, 2).unwrap();
+            receipts_writer.commit().unwrap();
+            drop(receipts_writer);
+            let api = build_test_eth_api(provider);
+            for tx in &blocks[1].body().transactions {
+                assert_eq!(
+                    EthTransactions::transaction_receipt(&api, *tx.tx_hash()).await.unwrap(),
+                    None
+                );
+            }
+            assert!(EthTransactions::transaction_receipt(
+                &api,
+                *blocks[0].body().transactions[0].tx_hash()
+            )
+            .await
+            .unwrap()
+            .is_some());
         }
     }
 }
