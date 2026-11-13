@@ -21,6 +21,7 @@ use tokio::{
     sync::{mpsc, oneshot, Semaphore},
     time::{interval_at, Instant, Interval},
 };
+use tokio_util::task::TaskTracker;
 
 /// Most queued messages written before a flush, which bounds how long written messages wait in
 /// the buffer.
@@ -133,8 +134,8 @@ where
     } = conn;
 
     let (conn_tx, conn_rx) = oneshot::channel();
-    // Held by every running call, so that a graceful shutdown can wait for them.
-    let (pending_calls, pending_calls_completed) = mpsc::channel::<()>(1);
+    // Tracks the running calls, so that a graceful shutdown can wait for them.
+    let calls = TaskTracker::new();
 
     // The responses are written by this task too, so that a response doesn't have to wake another
     // task to reach the socket.
@@ -204,10 +205,8 @@ where
 
             let rpc_service = rpc_service.clone();
             let sink = sink.clone();
-            let pending_calls = pending_calls.clone();
 
-            tokio::spawn(async move {
-                let _pending_calls = pending_calls;
+            calls.spawn(async move {
                 let _permit = permit;
                 let Some((data, is_single)) = classify_message(data.as_ref()) else {
                     _ = sink.send_error(Id::Null, ErrorCode::ParseError.into()).await;
@@ -238,8 +237,8 @@ where
         // **NOTE** Do not return early in this block. This `await` needs to run to guarantee
         // proper drop behaviour.
         drop(rpc_service);
-        drop(pending_calls);
-        graceful_shutdown(shutdown, pending_calls_completed, &mut incoming, conn_tx).await;
+        calls.close();
+        graceful_shutdown(shutdown, &calls, &mut incoming, conn_tx).await;
 
         // Returned so that the connection stays open for reading until the send loop has ended.
         incoming
@@ -332,20 +331,19 @@ enum Shutdown {
 /// executed.
 async fn graceful_shutdown<R, M>(
     shutdown: Shutdown,
-    mut pending_calls: mpsc::Receiver<()>,
+    calls: &TaskTracker,
     incoming: &mut R,
     mut conn_tx: oneshot::Sender<()>,
 ) where
     R: Stream<Item = Result<M, TooLarge>> + Unpin,
 {
     if matches!(shutdown, Shutdown::Stopped) {
-        let graceful_shutdown = async { while pending_calls.recv().await.is_some() {} };
         // The wait also ends when the client disconnects, the connection can't be read anymore,
         // or a message is too large.
         let disconnect = async { while let Some(Ok(_)) = incoming.next().await {} };
 
         tokio::select! {
-            _ = graceful_shutdown => {}
+            _ = calls.wait() => {}
             _ = disconnect => {}
             _ = conn_tx.closed() => {}
         }
