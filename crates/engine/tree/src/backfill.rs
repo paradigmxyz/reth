@@ -262,16 +262,11 @@ mod tests {
     use reth_provider::test_utils::MockNodeTypesWithDB;
     use reth_stages::ExecOutput;
     use reth_stages_api::StageCheckpoint;
-    use reth_tasks::Runtime;
-    use std::{
-        collections::VecDeque,
-        future::poll_fn,
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            Arc,
-        },
-        task::Waker,
+    use reth_tasks::{
+        executor::sync::atomic::{AtomicUsize, Ordering},
+        Runtime,
     };
+    use std::{collections::VecDeque, future::poll_fn, sync::Arc, task::Waker};
 
     type TestBlock = <EthPrimitives as NodePrimitives>::Block;
 
@@ -391,27 +386,32 @@ mod tests {
 
     #[test]
     fn only_a_new_backfill_run_clears_downloads() {
-        let head = B256::repeat_byte(1);
-        let actions = VecDeque::from([
-            BackfillAction::UpdateTarget(head),
-            BackfillAction::Start(PipelineTarget::Sync(head)),
-        ]);
-        let downloader = CountedClears::default();
-        let clears = Arc::clone(&downloader.0);
-        let mut handler =
-            EngineHandler::new(QueuedActions(actions), downloader, futures::stream::empty::<()>());
-        let mut cx = Context::from_waker(Waker::noop());
+        reth_tasks::executor::Runtime::new().run(|| {
+            let head = B256::repeat_byte(1);
+            let actions = VecDeque::from([
+                BackfillAction::UpdateTarget(head),
+                BackfillAction::Start(PipelineTarget::Sync(head)),
+            ]);
+            let downloader = CountedClears::default();
+            let clears = Arc::clone(&downloader.0);
+            let mut handler = EngineHandler::new(
+                QueuedActions(actions),
+                downloader,
+                futures::stream::empty::<()>(),
+            );
+            let mut cx = Context::from_waker(Waker::noop());
 
-        assert!(matches!(
-            ChainHandler::poll(&mut handler, &mut cx),
-            Poll::Ready(HandlerEvent::BackfillAction(BackfillAction::UpdateTarget(_)))
-        ));
-        assert_eq!(clears.load(Ordering::Relaxed), 0);
+            assert!(matches!(
+                ChainHandler::poll(&mut handler, &mut cx),
+                Poll::Ready(HandlerEvent::BackfillAction(BackfillAction::UpdateTarget(_)))
+            ));
+            assert_eq!(clears.load(Ordering::Relaxed), 0);
 
-        assert!(matches!(
-            ChainHandler::poll(&mut handler, &mut cx),
-            Poll::Ready(HandlerEvent::BackfillAction(BackfillAction::Start(_)))
-        ));
-        assert_eq!(clears.load(Ordering::Relaxed), 1);
+            assert!(matches!(
+                ChainHandler::poll(&mut handler, &mut cx),
+                Poll::Ready(HandlerEvent::BackfillAction(BackfillAction::Start(_)))
+            ));
+            assert_eq!(clears.load(Ordering::Relaxed), 1);
+        });
     }
 }

@@ -616,8 +616,10 @@ mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use reth_execution_errors::{SparseStateTrieErrorKind, SparseTrieErrorKind};
     use reth_primitives_traits::Account;
+    use reth_tasks::executor::{channel, thread, time::Duration, Runtime};
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
+        hash_builder::HashBuilderState,
         proof::{ProofNodes, ProofRetainer},
         BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
         TrieAccount, TrieMask, TrieNodeV2,
@@ -643,385 +645,421 @@ mod tests {
 
     #[test]
     fn reveal_account_path_twice() {
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        Runtime::new().run(move || {
+            let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
-        // Full 64-nibble paths
-        let full_path_0 = leaf_key([0x0], 64);
-        let _full_path_1 = leaf_key([0x1], 64);
+            // Full 64-nibble paths
+            let full_path_0 = leaf_key([0x0], 64);
+            let _full_path_1 = leaf_key([0x1], 64);
 
-        let leaf_value = alloy_rlp::encode(TrieAccount::default());
-        // Leaf key is 63 nibbles (suffix after 1-nibble node path)
-        let leaf_1 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
-            leaf_key([], 63),
-            leaf_value.clone(),
-        )));
-        let leaf_2 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
-            leaf_key([], 63),
-            leaf_value.clone(),
-        )));
+            let leaf_value = alloy_rlp::encode(TrieAccount::default());
+            // Leaf key is 63 nibbles (suffix after 1-nibble node path)
+            let leaf_1 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
+                leaf_key([], 63),
+                leaf_value.clone(),
+            )));
+            let leaf_2 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
+                leaf_key([], 63),
+                leaf_value.clone(),
+            )));
 
-        let multiproof = MultiProof {
-            account_subtree: ProofNodes::from_iter([
-                (
-                    Nibbles::default(),
-                    alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2 {
-                        key: Nibbles::default(),
-                        stack: vec![RlpNode::from_rlp(&leaf_1), RlpNode::from_rlp(&leaf_2)],
-                        state_mask: TrieMask::new(0b11),
-                        branch_rlp_node: None,
-                    }))
-                    .into(),
-                ),
-                (Nibbles::from_nibbles([0x0]), leaf_1.clone().into()),
-                (Nibbles::from_nibbles([0x1]), leaf_1.clone().into()),
-            ]),
-            ..Default::default()
-        };
+            let multiproof = MultiProof {
+                account_subtree: ProofNodes::from_iter([
+                    (
+                        Nibbles::default(),
+                        alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2 {
+                            key: Nibbles::default(),
+                            stack: vec![RlpNode::from_rlp(&leaf_1), RlpNode::from_rlp(&leaf_2)],
+                            state_mask: TrieMask::new(0b11),
+                            branch_rlp_node: None,
+                        }))
+                        .into(),
+                    ),
+                    (Nibbles::from_nibbles([0x0]), leaf_1.clone().into()),
+                    (Nibbles::from_nibbles([0x1]), leaf_1.clone().into()),
+                ]),
+                ..Default::default()
+            };
 
-        // Reveal multiproof and check that the state trie contains the leaf node and value
-        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
-        assert!(matches!(
-            sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
-            Ok(LeafLookup::Exists)
-        ));
-        assert_eq!(
-            sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0),
-            Some(&leaf_value)
-        );
+            // Reveal multiproof and check that the state trie contains the leaf node and value
+            sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
+            assert!(matches!(
+                sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
+                Ok(LeafLookup::Exists)
+            ));
+            assert_eq!(
+                sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0),
+                Some(&leaf_value)
+            );
 
-        // Remove the leaf node and check that the state trie does not contain the leaf node and
-        // value
-        apply_account_update(&mut sparse, B256::ZERO, LeafUpdate::Changed(Vec::new()));
-        assert!(matches!(
-            sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
-            Ok(LeafLookup::NonExistent)
-        ));
-        assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
+            // Remove the leaf node and check that the state trie does not contain the leaf node and
+            // value
+            apply_account_update(&mut sparse, B256::ZERO, LeafUpdate::Changed(Vec::new()));
+            assert!(matches!(
+                sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
+                Ok(LeafLookup::NonExistent)
+            ));
+            assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
+        });
     }
 
     #[test]
     fn reveal_storage_path_twice() {
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        Runtime::new().run(move || {
+            let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
-        // Full 64-nibble path
-        let full_path_0 = leaf_key([0x0], 64);
+            // Full 64-nibble path
+            let full_path_0 = leaf_key([0x0], 64);
 
-        let leaf_value = alloy_rlp::encode(TrieAccount::default());
-        let leaf_1 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
-            leaf_key([], 63),
-            leaf_value.clone(),
-        )));
-        let leaf_2 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
-            leaf_key([], 63),
-            leaf_value.clone(),
-        )));
+            let leaf_value = alloy_rlp::encode(TrieAccount::default());
+            let leaf_1 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
+                leaf_key([], 63),
+                leaf_value.clone(),
+            )));
+            let leaf_2 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
+                leaf_key([], 63),
+                leaf_value.clone(),
+            )));
 
-        let multiproof = MultiProof {
-            storages: HashMap::from_iter([(
-                B256::ZERO,
-                StorageMultiProof {
-                    root: B256::ZERO,
-                    subtree: ProofNodes::from_iter([
-                        (
-                            Nibbles::default(),
-                            alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2 {
-                                key: Nibbles::default(),
-                                stack: vec![RlpNode::from_rlp(&leaf_1), RlpNode::from_rlp(&leaf_2)],
-                                state_mask: TrieMask::new(0b11),
-                                branch_rlp_node: None,
-                            }))
-                            .into(),
-                        ),
-                        (Nibbles::from_nibbles([0x0]), leaf_1.clone().into()),
-                        (Nibbles::from_nibbles([0x1]), leaf_1.clone().into()),
-                    ]),
-                    branch_node_masks: Default::default(),
-                },
-            )]),
-            ..Default::default()
-        };
+            let multiproof = MultiProof {
+                storages: HashMap::from_iter([(
+                    B256::ZERO,
+                    StorageMultiProof {
+                        root: B256::ZERO,
+                        subtree: ProofNodes::from_iter([
+                            (
+                                Nibbles::default(),
+                                alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2 {
+                                    key: Nibbles::default(),
+                                    stack: vec![
+                                        RlpNode::from_rlp(&leaf_1),
+                                        RlpNode::from_rlp(&leaf_2),
+                                    ],
+                                    state_mask: TrieMask::new(0b11),
+                                    branch_rlp_node: None,
+                                }))
+                                .into(),
+                            ),
+                            (Nibbles::from_nibbles([0x0]), leaf_1.clone().into()),
+                            (Nibbles::from_nibbles([0x1]), leaf_1.clone().into()),
+                        ]),
+                        branch_node_masks: Default::default(),
+                    },
+                )]),
+                ..Default::default()
+            };
 
-        // Reveal multiproof and check that the storage trie contains the leaf node and value
-        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
-        assert!(matches!(
-            sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
-            Ok(LeafLookup::Exists)
-        ));
-        assert_eq!(
-            sparse.storage_trie_ref(&B256::ZERO).unwrap().get_leaf_value(&full_path_0),
-            Some(&leaf_value)
-        );
+            // Reveal multiproof and check that the storage trie contains the leaf node and value
+            sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
+            assert!(matches!(
+                sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
+                Ok(LeafLookup::Exists)
+            ));
+            assert_eq!(
+                sparse.storage_trie_ref(&B256::ZERO).unwrap().get_leaf_value(&full_path_0),
+                Some(&leaf_value)
+            );
 
-        // Remove the leaf node and check that the storage trie does not contain the leaf node and
-        // value
-        let mut updates = B256Map::from_iter([(B256::ZERO, LeafUpdate::Changed(Vec::new()))]);
-        sparse
-            .storage_trie_mut(&B256::ZERO)
-            .unwrap()
-            .update_leaves(&mut updates, |_, _| {})
-            .unwrap();
-        assert!(updates.is_empty());
-        assert!(matches!(
-            sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
-            Ok(LeafLookup::NonExistent)
-        ));
-        assert!(sparse
-            .storage_trie_ref(&B256::ZERO)
-            .unwrap()
-            .get_leaf_value(&full_path_0)
-            .is_none());
+            // Remove the leaf node and check that the storage trie does not contain the leaf node
+            // and value
+            let mut updates = B256Map::from_iter([(B256::ZERO, LeafUpdate::Changed(Vec::new()))]);
+            sparse
+                .storage_trie_mut(&B256::ZERO)
+                .unwrap()
+                .update_leaves(&mut updates, |_, _| {})
+                .unwrap();
+            assert!(updates.is_empty());
+            assert!(matches!(
+                sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
+                Ok(LeafLookup::NonExistent)
+            ));
+            assert!(sparse
+                .storage_trie_ref(&B256::ZERO)
+                .unwrap()
+                .get_leaf_value(&full_path_0)
+                .is_none());
+        });
     }
 
     #[test]
     fn prune_uses_epochs_for_account_and_storage_tries() {
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        Runtime::new().run(move || {
+            let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
-        let account = B256::ZERO;
-        let old_account =
-            b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
-        let prewarmed_account =
-            b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
-        let slot = B256::ZERO;
-        let account_path = leaf_key([0x0], 64);
-        let old_account_path = leaf_key([0x1], 64);
-        let storage_path = leaf_key([0x0], 64);
+            let account = B256::ZERO;
+            let old_account =
+                b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
+            let prewarmed_account =
+                b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
+            let slot = B256::ZERO;
+            let account_path = leaf_key([0x0], 64);
+            let old_account_path = leaf_key([0x1], 64);
+            let storage_path = leaf_key([0x0], 64);
 
-        let leaf_value = alloy_rlp::encode(TrieAccount::default());
-        let leaf_0 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
-            leaf_key([], 63),
-            leaf_value.clone(),
-        )));
-        let leaf_1 =
-            alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value)));
+            let leaf_value = alloy_rlp::encode(TrieAccount::default());
+            let leaf_0 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
+                leaf_key([], 63),
+                leaf_value.clone(),
+            )));
+            let leaf_1 =
+                alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value)));
 
-        let subtree = || {
-            ProofNodes::from_iter([
-                (
-                    Nibbles::default(),
-                    alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2 {
-                        key: Nibbles::default(),
-                        stack: vec![RlpNode::from_rlp(&leaf_0), RlpNode::from_rlp(&leaf_1)],
-                        state_mask: TrieMask::new(0b11),
-                        branch_rlp_node: None,
-                    }))
-                    .into(),
-                ),
-                (Nibbles::from_nibbles([0x0]), leaf_0.clone().into()),
-                (Nibbles::from_nibbles([0x1]), leaf_1.clone().into()),
-            ])
-        };
+            let subtree = || {
+                ProofNodes::from_iter([
+                    (
+                        Nibbles::default(),
+                        alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2 {
+                            key: Nibbles::default(),
+                            stack: vec![RlpNode::from_rlp(&leaf_0), RlpNode::from_rlp(&leaf_1)],
+                            state_mask: TrieMask::new(0b11),
+                            branch_rlp_node: None,
+                        }))
+                        .into(),
+                    ),
+                    (Nibbles::from_nibbles([0x0]), leaf_0.clone().into()),
+                    (Nibbles::from_nibbles([0x1]), leaf_1.clone().into()),
+                ])
+            };
 
-        let multiproof = MultiProof {
-            account_subtree: subtree(),
-            storages: HashMap::from_iter([
-                (
-                    account,
-                    StorageMultiProof {
-                        root: B256::ZERO,
-                        subtree: subtree(),
-                        branch_node_masks: Default::default(),
-                    },
-                ),
-                (
-                    old_account,
-                    StorageMultiProof {
-                        root: B256::ZERO,
-                        subtree: subtree(),
-                        branch_node_masks: Default::default(),
-                    },
-                ),
-                (
-                    prewarmed_account,
-                    StorageMultiProof {
-                        root: B256::ZERO,
-                        subtree: subtree(),
-                        branch_node_masks: Default::default(),
-                    },
-                ),
-            ]),
-            ..Default::default()
-        };
+            let multiproof = MultiProof {
+                account_subtree: subtree(),
+                storages: HashMap::from_iter([
+                    (
+                        account,
+                        StorageMultiProof {
+                            root: B256::ZERO,
+                            subtree: subtree(),
+                            branch_node_masks: Default::default(),
+                        },
+                    ),
+                    (
+                        old_account,
+                        StorageMultiProof {
+                            root: B256::ZERO,
+                            subtree: subtree(),
+                            branch_node_masks: Default::default(),
+                        },
+                    ),
+                    (
+                        prewarmed_account,
+                        StorageMultiProof {
+                            root: B256::ZERO,
+                            subtree: subtree(),
+                            branch_node_masks: Default::default(),
+                        },
+                    ),
+                ]),
+                ..Default::default()
+            };
 
-        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
+            sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
 
-        sparse.storage_root(&account, epoch(0)).unwrap();
-        sparse.storage_root(&old_account, epoch(0)).unwrap();
-        sparse.root(epoch(0)).unwrap();
-        assert!(!sparse.storage_trie_ref(&prewarmed_account).unwrap().is_root_cached());
+            sparse.storage_root(&account, epoch(0)).unwrap();
+            sparse.storage_root(&old_account, epoch(0)).unwrap();
+            sparse.root(epoch(0)).unwrap();
+            assert!(!sparse.storage_trie_ref(&prewarmed_account).unwrap().is_root_cached());
 
-        let mut storage_updates = B256Map::from_iter([(
-            slot,
-            LeafUpdate::Changed(alloy_rlp::encode_fixed_size(&U256::from(2)).to_vec()),
-        )]);
-        sparse
-            .storage_trie_mut(&account)
-            .unwrap()
-            .update_leaves(&mut storage_updates, |_, _| {
-                panic!("fully revealed storage trie must not request proofs")
-            })
-            .unwrap();
-        assert!(storage_updates.is_empty());
+            let mut storage_updates = B256Map::from_iter([(
+                slot,
+                LeafUpdate::Changed(alloy_rlp::encode_fixed_size(&U256::from(2)).to_vec()),
+            )]);
+            sparse
+                .storage_trie_mut(&account)
+                .unwrap()
+                .update_leaves(&mut storage_updates, |_, _| {
+                    panic!("fully revealed storage trie must not request proofs")
+                })
+                .unwrap();
+            assert!(storage_updates.is_empty());
 
-        let trie_account = TrieAccount {
-            storage_root: sparse.storage_root(&account, epoch(10)).unwrap(),
-            ..Default::default()
-        };
-        apply_account_update(
-            &mut sparse,
-            account,
-            LeafUpdate::Changed(alloy_rlp::encode(trie_account)),
-        );
-        let root_before = sparse.root(epoch(10)).unwrap();
-        sparse.prune(epoch(10));
+            let trie_account = TrieAccount {
+                storage_root: sparse.storage_root(&account, epoch(10)).unwrap(),
+                ..Default::default()
+            };
+            apply_account_update(
+                &mut sparse,
+                account,
+                LeafUpdate::Changed(alloy_rlp::encode(trie_account)),
+            );
+            let root_before = sparse.root(epoch(10)).unwrap();
+            sparse.prune(epoch(10));
 
-        assert!(matches!(
-            sparse.state_trie_ref().unwrap().find_leaf(&account_path, None),
-            Ok(LeafLookup::Exists)
-        ));
-        assert!(matches!(
-            sparse.storage_trie_ref(&account).unwrap().find_leaf(&storage_path, None),
-            Ok(LeafLookup::Exists)
-        ));
-        assert!(matches!(
-            sparse.state_trie_ref().unwrap().find_leaf(&old_account_path, None),
-            Err(crate::LeafLookupError::BlindedNode { .. })
-        ));
-        assert!(sparse.storage_trie_ref(&old_account).is_none());
-        assert!(sparse.storage_trie_ref(&prewarmed_account).is_none());
-        assert_eq!(sparse.root(epoch(10)).unwrap(), root_before);
+            assert!(matches!(
+                sparse.state_trie_ref().unwrap().find_leaf(&account_path, None),
+                Ok(LeafLookup::Exists)
+            ));
+            assert!(matches!(
+                sparse.storage_trie_ref(&account).unwrap().find_leaf(&storage_path, None),
+                Ok(LeafLookup::Exists)
+            ));
+            assert!(matches!(
+                sparse.state_trie_ref().unwrap().find_leaf(&old_account_path, None),
+                Err(crate::LeafLookupError::BlindedNode { .. })
+            ));
+            assert!(sparse.storage_trie_ref(&old_account).is_none());
+            assert!(sparse.storage_trie_ref(&prewarmed_account).is_none());
+            assert_eq!(sparse.root(epoch(10)).unwrap(), root_before);
 
-        // An intermediate storage root does not advance without another change, so the trie
-        // becomes eligible once the cutoff passes its last modification epoch.
-        sparse.prune(epoch(11));
-        assert!(sparse.storage_trie_ref(&account).is_none());
-        assert_eq!(sparse.root(epoch(11)).unwrap(), root_before);
+            // An intermediate storage root does not advance without another change, so the trie
+            // becomes eligible once the cutoff passes its last modification epoch.
+            sparse.prune(epoch(11));
+            assert!(sparse.storage_trie_ref(&account).is_none());
+            assert_eq!(sparse.root(epoch(11)).unwrap(), root_before);
+        });
     }
 
     #[test]
     fn reveal_v2_proof_nodes() {
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        Runtime::new().run(move || {
+            let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
-        // Full 64-nibble path
-        let full_path_0 = leaf_key([0x0], 64);
+            // Full 64-nibble path
+            let full_path_0 = leaf_key([0x0], 64);
 
-        let leaf_value = alloy_rlp::encode(TrieAccount::default());
-        let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.clone()));
-        let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.clone()));
+            let leaf_value = alloy_rlp::encode(TrieAccount::default());
+            let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.clone()));
+            let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value.clone()));
 
-        let branch_node = TrieNodeV2::Branch(BranchNodeV2 {
-            key: Nibbles::default(),
-            stack: vec![
-                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_1_node)),
-                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2_node)),
-            ],
-            state_mask: TrieMask::new(0b11),
-            branch_rlp_node: None,
+            let branch_node = TrieNodeV2::Branch(BranchNodeV2 {
+                key: Nibbles::default(),
+                stack: vec![
+                    RlpNode::from_rlp(&alloy_rlp::encode(&leaf_1_node)),
+                    RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2_node)),
+                ],
+                state_mask: TrieMask::new(0b11),
+                branch_rlp_node: None,
+            });
+
+            // Create V2 proof nodes with masks already included
+            let v2_proof_nodes = vec![
+                ProofTrieNodeV2 {
+                    path: Nibbles::default(),
+                    node: branch_node,
+                    masks: Some(BranchNodeMasks {
+                        hash_mask: TrieMask::default(),
+                        tree_mask: TrieMask::default(),
+                    }),
+                },
+                ProofTrieNodeV2 {
+                    path: Nibbles::from_nibbles([0x0]),
+                    node: leaf_1_node,
+                    masks: None,
+                },
+                ProofTrieNodeV2 {
+                    path: Nibbles::from_nibbles([0x1]),
+                    node: leaf_2_node,
+                    masks: None,
+                },
+            ];
+
+            // Reveal V2 proof nodes
+            sparse
+                .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
+                    account_proofs: v2_proof_nodes,
+                    ..Default::default()
+                })
+                .unwrap();
+
+            // Check that the state trie contains the leaf node and value
+            assert!(matches!(
+                sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
+                Ok(LeafLookup::Exists)
+            ));
+            assert_eq!(
+                sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0),
+                Some(&leaf_value)
+            );
+
+            // Remove the leaf node
+            apply_account_update(&mut sparse, B256::ZERO, LeafUpdate::Changed(Vec::new()));
+            assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
         });
-
-        // Create V2 proof nodes with masks already included
-        let v2_proof_nodes = vec![
-            ProofTrieNodeV2 {
-                path: Nibbles::default(),
-                node: branch_node,
-                masks: Some(BranchNodeMasks {
-                    hash_mask: TrieMask::default(),
-                    tree_mask: TrieMask::default(),
-                }),
-            },
-            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x0]), node: leaf_1_node, masks: None },
-            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x1]), node: leaf_2_node, masks: None },
-        ];
-
-        // Reveal V2 proof nodes
-        sparse
-            .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
-                account_proofs: v2_proof_nodes,
-                ..Default::default()
-            })
-            .unwrap();
-
-        // Check that the state trie contains the leaf node and value
-        assert!(matches!(
-            sparse.state_trie_ref().unwrap().find_leaf(&full_path_0, None),
-            Ok(LeafLookup::Exists)
-        ));
-        assert_eq!(
-            sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0),
-            Some(&leaf_value)
-        );
-
-        // Remove the leaf node
-        apply_account_update(&mut sparse, B256::ZERO, LeafUpdate::Changed(Vec::new()));
-        assert!(sparse.state_trie_ref().unwrap().get_leaf_value(&full_path_0).is_none());
     }
 
     #[test]
     fn reveal_storage_v2_proof_nodes() {
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        Runtime::new().run(move || {
+            let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
-        // Full 64-nibble path
-        let full_path_0 = leaf_key([0x0], 64);
+            // Full 64-nibble path
+            let full_path_0 = leaf_key([0x0], 64);
 
-        let storage_value: Vec<u8> = alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec();
-        let leaf_1_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), storage_value.clone()));
-        let leaf_2_node = TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), storage_value.clone()));
+            let storage_value: Vec<u8> = alloy_rlp::encode_fixed_size(&U256::from(42)).to_vec();
+            let leaf_1_node =
+                TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), storage_value.clone()));
+            let leaf_2_node =
+                TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), storage_value.clone()));
 
-        let branch_node = TrieNodeV2::Branch(BranchNodeV2 {
-            key: Nibbles::default(),
-            stack: vec![
-                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_1_node)),
-                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2_node)),
-            ],
-            state_mask: TrieMask::new(0b11),
-            branch_rlp_node: None,
+            let branch_node = TrieNodeV2::Branch(BranchNodeV2 {
+                key: Nibbles::default(),
+                stack: vec![
+                    RlpNode::from_rlp(&alloy_rlp::encode(&leaf_1_node)),
+                    RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2_node)),
+                ],
+                state_mask: TrieMask::new(0b11),
+                branch_rlp_node: None,
+            });
+
+            let v2_proof_nodes = vec![
+                ProofTrieNodeV2 { path: Nibbles::default(), node: branch_node, masks: None },
+                ProofTrieNodeV2 {
+                    path: Nibbles::from_nibbles([0x0]),
+                    node: leaf_1_node,
+                    masks: None,
+                },
+                ProofTrieNodeV2 {
+                    path: Nibbles::from_nibbles([0x1]),
+                    node: leaf_2_node,
+                    masks: None,
+                },
+            ];
+
+            // Reveal V2 storage proof nodes for account
+            sparse
+                .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
+                    storage_proofs: B256Map::from_iter([(B256::ZERO, v2_proof_nodes)]),
+                    ..Default::default()
+                })
+                .unwrap();
+
+            // Check that the storage trie contains the leaf node and value
+            assert!(matches!(
+                sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
+                Ok(LeafLookup::Exists)
+            ));
+            assert_eq!(
+                sparse.storage_trie_ref(&B256::ZERO).unwrap().get_leaf_value(&full_path_0),
+                Some(&storage_value)
+            );
+
+            // Remove the leaf node
+            let mut updates = B256Map::from_iter([(B256::ZERO, LeafUpdate::Changed(Vec::new()))]);
+            sparse
+                .storage_trie_mut(&B256::ZERO)
+                .unwrap()
+                .update_leaves(&mut updates, |_, _| {})
+                .unwrap();
+            assert!(updates.is_empty());
+            assert!(sparse
+                .storage_trie_ref(&B256::ZERO)
+                .unwrap()
+                .get_leaf_value(&full_path_0)
+                .is_none());
         });
-
-        let v2_proof_nodes = vec![
-            ProofTrieNodeV2 { path: Nibbles::default(), node: branch_node, masks: None },
-            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x0]), node: leaf_1_node, masks: None },
-            ProofTrieNodeV2 { path: Nibbles::from_nibbles([0x1]), node: leaf_2_node, masks: None },
-        ];
-
-        // Reveal V2 storage proof nodes for account
-        sparse
-            .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
-                storage_proofs: B256Map::from_iter([(B256::ZERO, v2_proof_nodes)]),
-                ..Default::default()
-            })
-            .unwrap();
-
-        // Check that the storage trie contains the leaf node and value
-        assert!(matches!(
-            sparse.storage_trie_ref(&B256::ZERO).unwrap().find_leaf(&full_path_0, None),
-            Ok(LeafLookup::Exists)
-        ));
-        assert_eq!(
-            sparse.storage_trie_ref(&B256::ZERO).unwrap().get_leaf_value(&full_path_0),
-            Some(&storage_value)
-        );
-
-        // Remove the leaf node
-        let mut updates = B256Map::from_iter([(B256::ZERO, LeafUpdate::Changed(Vec::new()))]);
-        sparse
-            .storage_trie_mut(&B256::ZERO)
-            .unwrap()
-            .update_leaves(&mut updates, |_, _| {})
-            .unwrap();
-        assert!(updates.is_empty());
-        assert!(sparse
-            .storage_trie_ref(&B256::ZERO)
-            .unwrap()
-            .get_leaf_value(&full_path_0)
-            .is_none());
     }
 
     #[test]
     fn root_on_blind_trie_returns_blind_error() {
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        Runtime::new().run(move || {
+            let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
-        let err = sparse.root(epoch(0)).unwrap_err();
+            let err = sparse.root(epoch(0)).unwrap_err();
 
-        assert!(matches!(err.kind(), SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)));
+            assert!(matches!(
+                err.kind(),
+                SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)
+            ));
+        });
     }
 
     #[test]
@@ -1044,120 +1082,152 @@ mod tests {
         let slot_3 = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
         let value_3 = U256::from(rng.random::<u64>());
 
-        let mut storage_hash_builder = HashBuilder::default()
-            .with_proof_retainer(ProofRetainer::from_iter([slot_path_1, slot_path_2]));
-        storage_hash_builder.add_leaf(slot_path_1, &alloy_rlp::encode_fixed_size(&value_1));
-        storage_hash_builder.add_leaf(slot_path_2, &alloy_rlp::encode_fixed_size(&value_2));
-
-        let storage_root = storage_hash_builder.root();
-        let storage_proof_nodes = storage_hash_builder.take_proof_nodes();
-        let storage_branch_node_masks = BranchNodeMasksMap::from_iter([
-            (
-                Nibbles::default(),
-                BranchNodeMasks { hash_mask: TrieMask::new(0b010), tree_mask: TrieMask::default() },
-            ),
-            (
-                Nibbles::from_nibbles([0x1]),
-                BranchNodeMasks { hash_mask: TrieMask::new(0b11), tree_mask: TrieMask::default() },
-            ),
-        ]);
-
-        let address_1 = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
-        let address_path_1 = Nibbles::unpack(address_1);
         let account_1 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
-        let mut trie_account_1 = account_1.clone().into_trie_account(storage_root);
-        let address_2 = b256!("0x1100000000000000000000000000000000000000000000000000000000000000");
-        let address_path_2 = Nibbles::unpack(address_2);
         let account_2 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
-        let trie_account_2 = account_2.into_trie_account(EMPTY_ROOT_HASH);
 
-        let mut hash_builder = HashBuilder::default()
-            .with_proof_retainer(ProofRetainer::from_iter([address_path_1, address_path_2]));
-        hash_builder.add_leaf(address_path_1, &alloy_rlp::encode(trie_account_1.clone()));
-        hash_builder.add_leaf(address_path_2, &alloy_rlp::encode(trie_account_2));
+        Runtime::new().run(move || {
+            let mut storage_hash_builder = HashBuilder::default()
+                .with_proof_retainer(ProofRetainer::from_iter([slot_path_1, slot_path_2]));
+            storage_hash_builder.add_leaf(slot_path_1, &alloy_rlp::encode_fixed_size(&value_1));
+            storage_hash_builder.add_leaf(slot_path_2, &alloy_rlp::encode_fixed_size(&value_2));
 
-        let root = hash_builder.root();
-        let proof_nodes = hash_builder.take_proof_nodes();
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default().with_updates(true);
-        sparse
-            .reveal_decoded_multiproof(
-                MultiProof {
-                    account_subtree: proof_nodes,
-                    branch_node_masks: BranchNodeMasksMap::from_iter([(
-                        Nibbles::from_nibbles([0x1]),
-                        BranchNodeMasks {
-                            hash_mask: TrieMask::new(0b00),
-                            tree_mask: TrieMask::default(),
-                        },
-                    )]),
-                    storages: HashMap::from_iter([
-                        (
-                            address_1,
-                            StorageMultiProof {
-                                root,
-                                subtree: storage_proof_nodes.clone(),
-                                branch_node_masks: storage_branch_node_masks.clone(),
+            let storage_root = storage_hash_builder.root();
+            let storage_proof_nodes = storage_hash_builder.take_proof_nodes();
+            let storage_branch_node_masks = BranchNodeMasksMap::from_iter([
+                (
+                    Nibbles::default(),
+                    BranchNodeMasks {
+                        hash_mask: TrieMask::new(0b010),
+                        tree_mask: TrieMask::default(),
+                    },
+                ),
+                (
+                    Nibbles::from_nibbles([0x1]),
+                    BranchNodeMasks {
+                        hash_mask: TrieMask::new(0b11),
+                        tree_mask: TrieMask::default(),
+                    },
+                ),
+            ]);
+
+            let address_1 =
+                b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
+            let address_path_1 = Nibbles::unpack(address_1);
+            let mut trie_account_1 = account_1.clone().into_trie_account(storage_root);
+            let address_2 =
+                b256!("0x1100000000000000000000000000000000000000000000000000000000000000");
+            let address_path_2 = Nibbles::unpack(address_2);
+            let trie_account_2 = account_2.into_trie_account(EMPTY_ROOT_HASH);
+
+            let mut hash_builder = HashBuilder::default()
+                .with_proof_retainer(ProofRetainer::from_iter([address_path_1, address_path_2]));
+            hash_builder.add_leaf(address_path_1, &alloy_rlp::encode(trie_account_1.clone()));
+            hash_builder.add_leaf(address_path_2, &alloy_rlp::encode(trie_account_2));
+
+            let root = hash_builder.root();
+            let proof_nodes = hash_builder.take_proof_nodes();
+            let mut sparse =
+                SparseStateTrie::<ArenaParallelSparseTrie>::default().with_updates(true);
+            sparse
+                .reveal_decoded_multiproof(
+                    MultiProof {
+                        account_subtree: proof_nodes,
+                        branch_node_masks: BranchNodeMasksMap::from_iter([(
+                            Nibbles::from_nibbles([0x1]),
+                            BranchNodeMasks {
+                                hash_mask: TrieMask::new(0b00),
+                                tree_mask: TrieMask::default(),
                             },
-                        ),
-                        (
-                            address_2,
-                            StorageMultiProof {
-                                root,
-                                subtree: storage_proof_nodes,
-                                branch_node_masks: storage_branch_node_masks,
-                            },
-                        ),
-                    ]),
-                }
-                .try_into()
-                .unwrap(),
-            )
-            .unwrap();
-
-        assert_eq!(sparse.root(epoch(0)).unwrap(), root);
-
-        let address_3 = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
-        let account_3 = Account { nonce: account_1.nonce + 1, ..account_1 };
-        let trie_account_3 = account_3.into_trie_account(EMPTY_ROOT_HASH);
-
-        apply_account_update(
-            &mut sparse,
-            address_3,
-            LeafUpdate::Changed(alloy_rlp::encode(trie_account_3)),
-        );
-
-        let mut updates =
-            B256Map::from_iter([(slot_3, LeafUpdate::Changed(alloy_rlp::encode(value_3)))]);
-        sparse
-            .storage_trie_mut(&address_1)
-            .unwrap()
-            .update_leaves(&mut updates, |_, _| {})
-            .unwrap();
-        assert!(updates.is_empty());
-        trie_account_1.storage_root = sparse.storage_root(&address_1, epoch(0)).unwrap();
-        apply_account_update(
-            &mut sparse,
-            address_1,
-            LeafUpdate::Changed(alloy_rlp::encode(trie_account_1)),
-        );
-
-        sparse.root(epoch(0)).unwrap();
-
-        let sparse_updates = sparse.take_trie_updates().unwrap();
-        // TODO(alexey): assert against real state root calculation updates
-        pretty_assertions::assert_eq!(
-            sparse_updates,
-            TrieUpdates {
-                account_nodes: HashMap::default(),
-                storage_tries: HashMap::from_iter([(
-                    b256!("0x1000000000000000000000000000000000000000000000000000000000000000"),
-                    StorageTrieUpdates {
-                        storage_nodes: HashMap::default(),
-                        removed_nodes: HashSet::from_iter([Nibbles::from_nibbles([0x1])])
+                        )]),
+                        storages: HashMap::from_iter([
+                            (
+                                address_1,
+                                StorageMultiProof {
+                                    root,
+                                    subtree: storage_proof_nodes.clone(),
+                                    branch_node_masks: storage_branch_node_masks.clone(),
+                                },
+                            ),
+                            (
+                                address_2,
+                                StorageMultiProof {
+                                    root,
+                                    subtree: storage_proof_nodes,
+                                    branch_node_masks: storage_branch_node_masks,
+                                },
+                            ),
+                        ]),
                     }
-                )]),
-                removed_nodes: HashSet::default()
-            }
-        );
+                    .try_into()
+                    .unwrap(),
+                )
+                .unwrap();
+
+            assert_eq!(sparse.root(epoch(0)).unwrap(), root);
+
+            let address_3 =
+                b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
+            let account_3 = Account { nonce: account_1.nonce + 1, ..account_1 };
+            let trie_account_3 = account_3.into_trie_account(EMPTY_ROOT_HASH);
+
+            apply_account_update(
+                &mut sparse,
+                address_3,
+                LeafUpdate::Changed(alloy_rlp::encode(trie_account_3)),
+            );
+
+            let mut updates =
+                B256Map::from_iter([(slot_3, LeafUpdate::Changed(alloy_rlp::encode(value_3)))]);
+            sparse
+                .storage_trie_mut(&address_1)
+                .unwrap()
+                .update_leaves(&mut updates, |_, _| {})
+                .unwrap();
+            assert!(updates.is_empty());
+            trie_account_1.storage_root = sparse.storage_root(&address_1, epoch(0)).unwrap();
+            apply_account_update(
+                &mut sparse,
+                address_1,
+                LeafUpdate::Changed(alloy_rlp::encode(trie_account_1)),
+            );
+
+            sparse.root(epoch(0)).unwrap();
+
+            let sparse_updates = sparse.take_trie_updates().unwrap();
+            // TODO(alexey): assert against real state root calculation updates
+            pretty_assertions::assert_eq!(
+                sparse_updates,
+                TrieUpdates {
+                    account_nodes: HashMap::default(),
+                    storage_tries: HashMap::from_iter([(
+                        b256!("0x1000000000000000000000000000000000000000000000000000000000000000"),
+                        StorageTrieUpdates {
+                            storage_nodes: HashMap::default(),
+                            removed_nodes: HashSet::from_iter([Nibbles::from_nibbles([0x1])])
+                        }
+                    )]),
+                    removed_nodes: HashSet::default()
+                }
+            );
+        });
+    }
+
+    #[test]
+    fn arbitrary_fixture_is_owned_before_executor_worker() {
+        // Derive-generated Arbitrary recursion state belongs to the native caller.
+        let bytes = [0u8; 1024];
+        let fixture =
+            HashBuilderState::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
+        let expected =
+            HashBuilderState::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
+        assert_eq!(fixture, expected);
+
+        Runtime::new().run(move || {
+            let (sender, receiver) = channel::bounded(0);
+            let worker =
+                thread::spawn(move || receiver.recv_timeout(Duration::from_secs(1)).unwrap());
+            sender.send(fixture).unwrap();
+            assert_eq!(worker.join().unwrap(), expected);
+        });
     }
 }

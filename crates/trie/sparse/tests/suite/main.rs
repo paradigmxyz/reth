@@ -152,31 +152,37 @@ impl SuiteTestHarness {
 macro_rules! sparse_trie_tests {
     ( $( $test_fn:ident ),* $(,)? ) => {
         mod arena_parallel_sparse_trie {
+            use reth_tasks::executor::Runtime;
             use reth_trie_sparse::ArenaParallelSparseTrie;
 
             $(
                 #[test]
                 fn $test_fn() {
-                    super::$test_fn(ArenaParallelSparseTrie::default);
+                    Runtime::new().run(|| {
+                        super::$test_fn(ArenaParallelSparseTrie::default);
+                    });
                 }
             )*
         }
 
         mod arena_parallel_sparse_trie_always_parallel {
+            use reth_tasks::executor::Runtime;
             use reth_trie_sparse::{ArenaParallelSparseTrie, ArenaParallelismThresholds};
 
             $(
                 #[test]
                 fn $test_fn() {
-                    super::$test_fn(|| {
-                        ArenaParallelSparseTrie::default().with_parallelism_thresholds(
-                            ArenaParallelismThresholds {
-                                min_dirty_leaves: 1,
-                                min_revealed_nodes: 1,
-                                min_updates: 1,
-                                min_leaves_for_prune: 1,
-                            },
-                        )
+                    Runtime::new().run(|| {
+                        super::$test_fn(|| {
+                            ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+                                ArenaParallelismThresholds {
+                                    min_dirty_leaves: 1,
+                                    min_revealed_nodes: 1,
+                                    min_updates: 1,
+                                    min_leaves_for_prune: 1,
+                                },
+                            )
+                        });
                     });
                 }
             )*

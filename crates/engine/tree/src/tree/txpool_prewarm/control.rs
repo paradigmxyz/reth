@@ -102,52 +102,60 @@ mod tests {
 
     #[test]
     fn snapshot_is_published_for_matching_parent() {
-        let (control, _receiver) = control();
-        let parent_hash = B256::repeat_byte(0x01);
-        *control.publication.write() = Some(snapshot(parent_hash));
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (control, _receiver) = control();
+            let parent_hash = B256::repeat_byte(0x01);
+            *control.publication.write() = Some(snapshot(parent_hash));
 
-        assert_eq!(
-            control.snapshot(parent_hash).map(|snapshot| snapshot.parent_hash()),
-            Some(parent_hash)
-        );
-        assert!(control.snapshot(B256::ZERO).is_none());
+            assert_eq!(
+                control.snapshot(parent_hash).map(|snapshot| snapshot.parent_hash()),
+                Some(parent_hash)
+            );
+            assert!(control.snapshot(B256::ZERO).is_none());
+        });
     }
 
     #[test]
     fn start_sends_job() {
-        let (control, receiver) = control();
-        let parent_hash = B256::repeat_byte(0x01);
-        control.start(parent_hash, 1);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (control, receiver) = control();
+            let parent_hash = B256::repeat_byte(0x01);
+            control.start(parent_hash, 1);
 
-        assert!(matches!(
-            receiver.try_recv(),
-            Ok(Command::Start { parent_hash: received_parent, job: 1 })
-                if received_parent == parent_hash
-        ));
+            assert!(matches!(
+                receiver.try_recv(),
+                Ok(Command::Start { parent_hash: received_parent, job: 1 })
+                    if received_parent == parent_hash
+            ));
+        });
     }
 
     #[test]
     fn pause_guard_does_not_retain_control() {
-        let (control, _receiver) = control();
-        let weak_control = Arc::downgrade(&control);
-        let guard = control.pause();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (control, _receiver) = control();
+            let weak_control = Arc::downgrade(&control);
+            let guard = control.pause();
 
-        drop(control);
-        assert!(weak_control.upgrade().is_none());
-        drop(guard);
+            drop(control);
+            assert!(weak_control.upgrade().is_none());
+            drop(guard);
+        });
     }
 
     #[test]
     fn overlapping_pause_guards_send_matching_resumes() {
-        let (control, receiver) = control();
-        let first = control.pause();
-        let second = control.pause();
-        assert!(matches!(receiver.try_recv(), Ok(Command::Pause)));
-        assert!(matches!(receiver.try_recv(), Ok(Command::Pause)));
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (control, receiver) = control();
+            let first = control.pause();
+            let second = control.pause();
+            assert!(matches!(receiver.try_recv(), Ok(Command::Pause)));
+            assert!(matches!(receiver.try_recv(), Ok(Command::Pause)));
 
-        drop(first);
-        assert!(matches!(receiver.try_recv(), Ok(Command::Resume)));
-        drop(second);
-        assert!(matches!(receiver.try_recv(), Ok(Command::Resume)));
+            drop(first);
+            assert!(matches!(receiver.try_recv(), Ok(Command::Resume)));
+            drop(second);
+            assert!(matches!(receiver.try_recv(), Ok(Command::Resume)));
+        });
     }
 }

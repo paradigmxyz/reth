@@ -1116,7 +1116,7 @@ mod tests {
     }
 
     fn test_blocks() -> Vec<ExecutedBlock<EthPrimitives>> {
-        TestBlockBuilder::eth()
+        TestBlockBuilder::seeded(42)
             .get_executed_blocks(1..4)
             .enumerate()
             .map(|(index, block)| with_unique_state(&block, index as u8 + 1))
@@ -1228,8 +1228,8 @@ mod tests {
     fn computing_sibling_evicts_ready_cached_overlays() {
         reth_tasks::executor::Runtime::new().run(|| {
             let manager = OverlayManager::default();
-            let mut builder = TestBlockBuilder::eth();
-            let anchor_hash = B256::random();
+            let mut builder = TestBlockBuilder::seeded(42);
+            let anchor_hash = B256::with_last_byte(255);
             let parent = builder.get_executed_block_with_number(1, anchor_hash);
             let parent_hash = parent.recovered_block().hash();
             let first = builder.get_executed_block_with_number(2, parent_hash);
@@ -1544,7 +1544,7 @@ mod tests {
                     block.recovered_block().hash()
                 ));
             }
-            assert!(!manager.contains_hash(parent_hash, anchor_hash, B256::random()));
+            assert!(!manager.contains_hash(parent_hash, anchor_hash, B256::with_last_byte(254)));
         });
     }
 
@@ -1577,7 +1577,7 @@ mod tests {
             }
 
             let parent_hash = blocks[2].recovered_block().hash();
-            let anchor_hash = B256::random();
+            let anchor_hash = B256::with_last_byte(255);
 
             assert!(!manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
         });

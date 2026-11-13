@@ -398,29 +398,32 @@ mod tests {
 
     #[test]
     fn test_tree_state_normal_descendant() {
-        let mut tree_state = TreeState::new(
-            BlockNumHash::default(),
-            EngineApiKind::Ethereum,
-            OverlayManager::default(),
-        );
-        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+        let mut block_builder = TestBlockBuilder::seeded(42);
+        reth_tasks::executor::Runtime::new().run(move || {
+            let mut tree_state = TreeState::new(
+                BlockNumHash::default(),
+                EngineApiKind::Ethereum,
+                OverlayManager::default(),
+            );
+            let blocks: Vec<_> = block_builder.get_executed_blocks(1..4).collect();
 
-        tree_state.insert_executed(blocks[0].clone());
-        assert!(tree_state.is_descendant(
-            blocks[0].recovered_block().num_hash(),
-            blocks[1].recovered_block().block_with_parent()
-        ));
+            tree_state.insert_executed(blocks[0].clone());
+            assert!(tree_state.is_descendant(
+                blocks[0].recovered_block().num_hash(),
+                blocks[1].recovered_block().block_with_parent()
+            ));
 
-        tree_state.insert_executed(blocks[1].clone());
+            tree_state.insert_executed(blocks[1].clone());
 
-        assert!(tree_state.is_descendant(
-            blocks[0].recovered_block().num_hash(),
-            blocks[2].recovered_block().block_with_parent()
-        ));
-        assert!(tree_state.is_descendant(
-            blocks[1].recovered_block().num_hash(),
-            blocks[2].recovered_block().block_with_parent()
-        ));
+            assert!(tree_state.is_descendant(
+                blocks[0].recovered_block().num_hash(),
+                blocks[2].recovered_block().block_with_parent()
+            ));
+            assert!(tree_state.is_descendant(
+                blocks[1].recovered_block().num_hash(),
+                blocks[2].recovered_block().block_with_parent()
+            ));
+        });
     }
 
     #[tokio::test]

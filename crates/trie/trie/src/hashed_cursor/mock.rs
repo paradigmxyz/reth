@@ -4,11 +4,16 @@ use crate::mock::{KeyVisit, KeyVisitType};
 
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use alloy_primitives::{map::B256Map, B256, U256};
-use parking_lot::{Mutex, MutexGuard};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::HashedPostState;
 use tracing::instrument;
+
+#[cfg(not(target_family = "wasm"))]
+use reth_tasks::executor::sync::parking_lot::{Mutex, MutexGuard};
+
+#[cfg(target_family = "wasm")]
+use parking_lot::{Mutex, MutexGuard};
 
 /// Mock hashed cursor factory.
 #[derive(Clone, Default, Debug)]

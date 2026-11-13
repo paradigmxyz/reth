@@ -249,8 +249,17 @@ mod simulated {
             state.receivers -= 1;
             let waiters =
                 if state.receivers == 0 { mem::take(&mut state.send_waiters) } else { Vec::new() };
+            // Rendezvous offers can still belong to blocked senders, which recover them on
+            // disconnection. Buffered values have already been sent and must be released now.
+            let abandoned = if state.receivers == 0 && state.capacity != Some(0) {
+                mem::take(&mut state.queue)
+            } else {
+                VecDeque::new()
+            };
             drop(state);
             wake(waiters);
+            // Payload destructors can re-enter this channel or drop another channel's receiver.
+            drop(abandoned);
         }
     }
 
@@ -445,6 +454,28 @@ mod simulated {
             drop(state);
             thread::park();
             drop(cancellation);
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::executor::Runtime;
+
+        #[test]
+        fn receiver_drop_returns_queued_rendezvous_offer_to_sender() {
+            Runtime::new().run(|| {
+                let (producer, receiver) = bounded(0);
+                let sender = producer.clone();
+                let task = thread::spawn(move || sender.send(vec![1, 2, 3]));
+                // Observe the queued offer before disconnecting, not merely the sender starting.
+                while producer.state.lock().unwrap().queue.is_empty() {
+                    thread::yield_now();
+                }
+                drop(receiver);
+                assert_eq!(task.join().unwrap(), Err(SendError(vec![1, 2, 3])));
+                assert!(producer.state.lock().unwrap().queue.is_empty());
+            });
         }
     }
 }

@@ -1132,7 +1132,8 @@ mod tests {
 
     #[test]
     fn on_inserted_executed_block_does_not_mutate_checked_out_parent_cache() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        let polluted_address = Address::random();
+        reth_tasks::executor::Runtime::new().run(move || {
             let payload_processor = PayloadProcessor::new(
                 reth_tasks::Runtime::test(),
                 EthEvmConfig::new(Arc::new(ChainSpec::default())),
@@ -1153,7 +1154,6 @@ mod tests {
                 .get_cache_for(parent_hash)
                 .expect("expected parent cache checkout to succeed");
 
-            let polluted_address = Address::random();
             let bundle_state = BundleState::builder(2..=2)
                 .state_present_account_info(
                     polluted_address,

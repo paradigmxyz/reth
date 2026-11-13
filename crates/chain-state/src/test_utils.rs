@@ -9,7 +9,7 @@ use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use core::marker::PhantomData;
 use evm2::evm::AccountInfo;
-use rand::Rng;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
 use reth_ethereum_primitives::{
     Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
@@ -55,14 +55,25 @@ pub struct TestBlockBuilder<N: NodePrimitives = EthPrimitives> {
     /// When true, generated blocks include proper `BundleState` with account/storage
     /// changes and reverts. When false, blocks use `BundleState::default()`.
     pub with_state: bool,
+    rng: StdRng,
     _prims: PhantomData<N>,
 }
 
 impl<N: NodePrimitives> Default for TestBlockBuilder<N> {
     fn default() -> Self {
+        Self::with_rng(StdRng::from_os_rng())
+    }
+}
+
+impl<N: NodePrimitives> TestBlockBuilder<N> {
+    fn with_rng(mut rng: StdRng) -> Self {
         let initial_account_info =
             AccountInfo::default().with_balance(U256::from(10).pow(U256::from(18)));
-        let signer_pk = PrivateKeySigner::random();
+        let signer_pk = loop {
+            if let Ok(signer) = PrivateKeySigner::from_slice(&rng.random::<[u8; 32]>()) {
+                break signer;
+            }
+        };
         let signer = signer_pk.address();
         Self {
             chain_spec: ChainSpec::default(),
@@ -72,12 +83,11 @@ impl<N: NodePrimitives> Default for TestBlockBuilder<N> {
             signer_build_account_info: initial_account_info,
             post_block_state: B256HashMap::default(),
             with_state: false,
+            rng,
             _prims: PhantomData,
         }
     }
-}
 
-impl<N: NodePrimitives> TestBlockBuilder<N> {
     /// Signer pk setter.
     pub fn with_signer_pk(mut self, signer_pk: PrivateKeySigner) -> Self {
         self.signer = signer_pk.address();
@@ -110,14 +120,15 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         number: BlockNumber,
         parent_hash: B256,
     ) -> SealedBlock<reth_ethereum_primitives::Block> {
-        let mut rng = rand::rng();
+        let rng = &mut self.rng;
+        let num_txs = rng.random_range(0..5);
 
-        let mock_tx = |nonce: u64| -> Recovered<_> {
+        let mut mock_tx = |nonce: u64| -> Recovered<_> {
             let tx = Transaction::Eip1559(TxEip1559 {
                 chain_id: self.chain_spec.chain.id(),
                 nonce,
                 gas_limit: MIN_TRANSACTION_GAS,
-                to: Address::random().into(),
+                to: Address::from(rng.random::<[u8; 20]>()).into(),
                 max_fee_per_gas: INITIAL_BASE_FEE as u128,
                 max_priority_fee_per_gas: 1,
                 ..Default::default()
@@ -128,7 +139,6 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             TransactionSigned::new_unhashed(tx, signature).with_signer(self.signer)
         };
 
-        let num_txs = rng.random_range(0..5);
         let signer_balance_decrease = Self::single_tx_cost() * U256::from(num_txs);
         let transactions: Vec<Recovered<_>> = (0..num_txs)
             .map(|_| {
@@ -159,12 +169,12 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             number,
             parent_hash,
             gas_used: transactions.len() as u64 * MIN_TRANSACTION_GAS,
-            mix_hash: B256::random(),
+            mix_hash: B256::from(rng.random::<[u8; 32]>()),
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             base_fee_per_gas: Some(INITIAL_BASE_FEE),
             transactions_root: calculate_transaction_root(&transactions),
             receipts_root: calculate_receipt_root(&receipts),
-            beneficiary: Address::random(),
+            beneficiary: Address::from(rng.random::<[u8; 20]>()),
             state_root: state_root_unhashed([(
                 self.signer,
                 Account {
@@ -180,7 +190,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             withdrawals_root: Some(calculate_withdrawals_root(&[])),
             blob_gas_used: Some(0),
             excess_blob_gas: Some(0),
-            parent_beacon_block_root: Some(B256::random()),
+            parent_beacon_block_root: Some(B256::from(rng.random::<[u8; 32]>())),
             ..Default::default()
         };
 
@@ -339,7 +349,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         receipts: Vec<Vec<Receipt>>,
         parent_hash: B256,
     ) -> ExecutedBlock {
-        let number = rand::rng().random::<u64>();
+        let number = self.rng.random::<u64>();
         self.get_executed_block(number, receipts, parent_hash)
     }
 
@@ -414,6 +424,13 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 }
 
 impl TestBlockBuilder {
+    /// Creates reproducible block fixtures without accessing native entropy or thread-local RNGs.
+    ///
+    /// The same seed and sequence of builder calls produce the same signer and blocks.
+    pub fn seeded(seed: u64) -> Self {
+        Self::with_rng(StdRng::seed_from_u64(seed))
+    }
+
     /// Creates a `TestBlockBuilder` configured for Ethereum primitives.
     pub fn eth() -> Self {
         Self::default()
@@ -459,27 +476,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn seeded_blocks_replay_across_executions() {
+        let generate = |seed| {
+            reth_tasks::executor::Runtime::new().run(move || {
+                let mut builder = TestBlockBuilder::<EthPrimitives>::seeded(seed);
+                let mut parent = B256::ZERO;
+                let mut hashes = Vec::new();
+                for number in 1..=8 {
+                    let block = builder.generate_random_block(number, parent);
+                    parent = block.hash();
+                    hashes.push(parent);
+                }
+                hashes
+            })
+        };
+        assert_eq!(generate(42), generate(42));
+        assert_ne!(generate(42), generate(43));
+    }
+
+    #[test]
     fn test_revert_after_empty_parent() {
-        let mut builder = TestBlockBuilder::eth().with_state();
-        let parent_hash = B256::repeat_byte(1);
-        let initial_info = AccountInfo::default().with_balance(U256::from(10).pow(U256::from(18)));
+        reth_tasks::executor::Runtime::new().run(|| {
+            let mut builder = TestBlockBuilder::seeded(42).with_state();
+            let parent_hash = B256::repeat_byte(1);
+            let initial_info =
+                AccountInfo::default().with_balance(U256::from(10).pow(U256::from(18)));
 
-        // An empty parent still creates the signer with its initial balance and zero nonce.
-        // Seed that state directly so the test doesn't depend on random transaction counts.
-        builder.post_block_state.insert(parent_hash, (initial_info.clone(), U256::from(2)));
+            // An empty parent still creates the signer with its initial balance and zero nonce.
+            // Seed that state directly so the test doesn't depend on random transaction counts.
+            builder.post_block_state.insert(parent_hash, (initial_info.clone(), U256::from(2)));
 
-        for (parent_hash, expected_account) in
-            [(parent_hash, Some(initial_info)), (B256::repeat_byte(2), None)]
-        {
-            let block = builder.get_executed_block_with_number(2, parent_hash);
-            let mut state = block.execution_outcome().state.clone();
-            state.revert(1);
+            for (parent_hash, expected_account) in
+                [(parent_hash, Some(initial_info)), (B256::repeat_byte(2), None)]
+            {
+                let block = builder.get_executed_block_with_number(2, parent_hash);
+                let mut state = block.execution_outcome().state.clone();
+                state.revert(1);
 
-            assert_eq!(
-                state.state.get(&builder.signer).and_then(|account| account.info.clone()),
-                expected_account,
-                "reverting must restore the signer's existence in the specified parent"
-            );
-        }
+                assert_eq!(
+                    state.state.get(&builder.signer).and_then(|account| account.info.clone()),
+                    expected_account,
+                    "reverting must restore the signer's existence in the specified parent"
+                );
+            }
+        });
     }
 }

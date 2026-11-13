@@ -115,30 +115,34 @@ pub struct SparseTrieWithStorageRoots {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_tasks::executor::channel::mpsc;
+    use reth_tasks::executor::{channel::mpsc, Runtime};
 
     #[test]
     fn pending_trie_exposes_block_hash_before_completion() {
-        let block_hash = B256::with_last_byte(1);
-        let anchor_hash = B256::with_last_byte(2);
-        let (tx, rx) = mpsc::channel();
-        let preserved = PreservedSparseTrie::pending(rx, block_hash, anchor_hash);
+        Runtime::new().run(|| {
+            let block_hash = B256::with_last_byte(1);
+            let anchor_hash = B256::with_last_byte(2);
+            let (tx, rx) = mpsc::channel();
+            let preserved = PreservedSparseTrie::pending(rx, block_hash, anchor_hash);
 
-        assert_eq!(preserved.block_hash(), block_hash);
-        assert_eq!(preserved.anchor_hash(), anchor_hash);
-        tx.send(SparseTrieWithStorageRoots::default()).unwrap();
-        assert!(preserved.into_trie_for(block_hash).unwrap().is_some());
+            assert_eq!(preserved.block_hash(), block_hash);
+            assert_eq!(preserved.anchor_hash(), anchor_hash);
+            tx.send(SparseTrieWithStorageRoots::default()).unwrap();
+            assert!(preserved.into_trie_for(block_hash).unwrap().is_some());
+        });
     }
 
     #[test]
     fn pending_trie_with_mismatched_parent_does_not_wait() {
-        let block_hash = B256::with_last_byte(1);
-        let other_block_hash = B256::with_last_byte(2);
-        let anchor_hash = B256::with_last_byte(3);
-        let (tx, rx) = mpsc::channel();
-        let preserved = PreservedSparseTrie::pending(rx, block_hash, anchor_hash);
+        Runtime::new().run(|| {
+            let block_hash = B256::with_last_byte(1);
+            let other_block_hash = B256::with_last_byte(2);
+            let anchor_hash = B256::with_last_byte(3);
+            let (tx, rx) = mpsc::channel();
+            let preserved = PreservedSparseTrie::pending(rx, block_hash, anchor_hash);
 
-        assert!(preserved.into_trie_for(other_block_hash).unwrap().is_none());
-        assert!(tx.send(SparseTrieWithStorageRoots::default()).is_err());
+            assert!(preserved.into_trie_for(other_block_hash).unwrap().is_none());
+            assert!(tx.send(SparseTrieWithStorageRoots::default()).is_err());
+        });
     }
 }

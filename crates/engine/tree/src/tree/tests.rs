@@ -674,18 +674,20 @@ fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled(
 
 #[test]
 fn payload_build_tracker_notifies_after_last_lease_drops() {
-    let (tracker, finished) = PayloadBuildTracker::new();
-    let first = tracker.acquire();
-    let second = tracker.acquire();
+    reth_tasks::executor::Runtime::new().run(|| {
+        let (tracker, finished) = PayloadBuildTracker::new();
+        let first = tracker.acquire();
+        let second = tracker.acquire();
 
-    assert!(tracker.is_active());
-    drop(first);
-    assert!(tracker.is_active());
-    assert!(finished.try_recv().is_err());
+        assert!(tracker.is_active());
+        drop(first);
+        assert!(tracker.is_active());
+        assert!(finished.try_recv().is_err());
 
-    drop(second);
-    assert!(!tracker.is_active());
-    assert_eq!(finished.try_recv(), Ok(()));
+        drop(second);
+        assert!(!tracker.is_active());
+        assert_eq!(finished.try_recv(), Ok(()));
+    });
 }
 
 #[test]
@@ -3600,7 +3602,8 @@ async fn test_fcu_back_to_reorged_out_head_above_shorter_branch_with_pending_dis
 }
 
 proptest::proptest! {
-    // Each case constructs a full engine harness.
+    // Each case constructs a full engine harness with native Tokio workers. Keep this mixed
+    // boundary outside the synchronous simulation, including the tracing collector below.
     #![proptest_config(proptest::test_runner::Config::with_cases(32))]
 
     #[test]

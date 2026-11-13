@@ -703,7 +703,8 @@ fn block_gas_limit_error() {
 
 #[test]
 fn test_balance_increment_not_duplicated() {
-    Runtime::new().run(|| {
+    let parent_beacon_block_root = B256::random();
+    Runtime::new().run(move || {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
@@ -728,7 +729,7 @@ fn test_balance_increment_not_duplicated() {
             timestamp: 1,
             number: 1,
             excess_blob_gas: Some(0),
-            parent_beacon_block_root: Some(B256::random()),
+            parent_beacon_block_root: Some(parent_beacon_block_root),
             ..Header::default()
         };
 

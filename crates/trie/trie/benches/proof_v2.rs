@@ -15,6 +15,9 @@ use reth_trie::{
 };
 use reth_trie_common::{HashedPostState, HashedStorage};
 
+#[cfg(feature = "fuzz")]
+use reth_tasks::executor::Runtime;
+
 /// Generate test data for benchmarking.
 ///
 /// Returns a tuple of:
@@ -126,12 +129,14 @@ fn bench_proof_algos(c: &mut Criterion) {
                 generate_test_data(dataset_size, num_targets);
 
             // Create mock cursor factories from the hashed post state
+            #[cfg(not(feature = "fuzz"))]
             let (trie_cursor_factory, hashed_cursor_factory) =
                 create_cursor_factories(&hashed_post_state);
 
             let bench_name = format!("dataset_{dataset_size}/targets_{num_targets}");
 
             group.bench_function(BenchmarkId::new("Legacy", &bench_name), |b| {
+                #[cfg(not(feature = "fuzz"))]
                 b.iter_batched(
                     || legacy_targets.clone(),
                     |targets| {
@@ -145,25 +150,76 @@ fn bench_proof_algos(c: &mut Criterion) {
                     },
                     BatchSize::SmallInput,
                 );
+
+                // Simulated mock locks cannot be retained between executions.
+                #[cfg(feature = "fuzz")]
+                b.iter_batched(
+                    || (hashed_post_state.clone(), legacy_targets.clone()),
+                    |(post_state, targets)| {
+                        Runtime::new().run(move || {
+                            let (trie_cursor_factory, hashed_cursor_factory) =
+                                create_cursor_factories(&post_state);
+                            StorageProof::new_hashed(
+                                trie_cursor_factory,
+                                hashed_cursor_factory,
+                                hashed_address,
+                            )
+                            .storage_multiproof(targets)
+                            .expect("Legacy proof generation failed");
+                        });
+                    },
+                    BatchSize::SmallInput,
+                );
             });
 
             group.bench_function(BenchmarkId::new("V2", &bench_name), |b| {
-                let trie_cursor = trie_cursor_factory
-                    .storage_trie_cursor(hashed_address)
-                    .expect("Failed to create trie cursor");
-                let hashed_cursor = hashed_cursor_factory
-                    .hashed_storage_cursor(hashed_address)
-                    .expect("Failed to create hashed cursor");
+                #[cfg(not(feature = "fuzz"))]
+                {
+                    let trie_cursor = trie_cursor_factory
+                        .storage_trie_cursor(hashed_address)
+                        .expect("Failed to create trie cursor");
+                    let hashed_cursor = hashed_cursor_factory
+                        .hashed_storage_cursor(hashed_address)
+                        .expect("Failed to create hashed cursor");
 
-                let mut proof_calculator =
-                    StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
+                    let mut proof_calculator =
+                        StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
+                    b.iter_batched(
+                        || targets.iter().copied().map(Into::into).collect::<Vec<_>>(),
+                        |mut targets| {
+                            proof_calculator
+                                .storage_proof(hashed_address, &mut targets)
+                                .expect("Proof generation failed");
+                        },
+                        BatchSize::SmallInput,
+                    );
+                }
+
+                #[cfg(feature = "fuzz")]
                 b.iter_batched(
-                    || targets.iter().copied().map(Into::into).collect::<Vec<_>>(),
-                    |mut targets| {
-                        proof_calculator
-                            .storage_proof(hashed_address, &mut targets)
-                            .expect("Proof generation failed");
+                    || {
+                        (
+                            hashed_post_state.clone(),
+                            targets.iter().copied().map(Into::into).collect::<Vec<_>>(),
+                        )
+                    },
+                    |(post_state, mut targets)| {
+                        Runtime::new().run(move || {
+                            let (trie_cursor_factory, hashed_cursor_factory) =
+                                create_cursor_factories(&post_state);
+                            let trie_cursor = trie_cursor_factory
+                                .storage_trie_cursor(hashed_address)
+                                .expect("Failed to create trie cursor");
+                            let hashed_cursor = hashed_cursor_factory
+                                .hashed_storage_cursor(hashed_address)
+                                .expect("Failed to create hashed cursor");
+                            let mut proof_calculator =
+                                StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
+                            proof_calculator
+                                .storage_proof(hashed_address, &mut targets)
+                                .expect("Proof generation failed");
+                        });
                     },
                     BatchSize::SmallInput,
                 );

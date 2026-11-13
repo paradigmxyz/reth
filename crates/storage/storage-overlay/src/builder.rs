@@ -904,7 +904,7 @@ mod tests {
     }
 
     fn test_blocks() -> Vec<ExecutedBlock<EthPrimitives>> {
-        TestBlockBuilder::eth()
+        TestBlockBuilder::seeded(42)
             .get_executed_blocks(0..5)
             .enumerate()
             .map(|(index, block)| with_unique_trie_data(&block, index as u8 + 1))
@@ -1177,7 +1177,7 @@ mod tests {
             let provider = factory.provider().unwrap();
             let parent_hash = B256::with_last_byte(100);
             assert_ne!(parent_hash, blocks[1].recovered_block().hash());
-            let block = TestBlockBuilder::eth()
+            let block = TestBlockBuilder::seeded(42)
                 .get_executed_block_with_number(blocks[2].block_number(), parent_hash);
             let builder =
                 OverlayManager::default().overlay_builder(parent_hash).with_appended_block(block);
@@ -1211,7 +1211,7 @@ mod tests {
             provider_rw.commit().unwrap();
 
             // The fork changes keys distinct from those reverted on disk.
-            let fork = TestBlockBuilder::eth()
+            let fork = TestBlockBuilder::seeded(42)
                 .get_executed_block_with_number(2, blocks[1].recovered_block().hash());
             let fork = with_unique_trie_data(&fork, 2);
             let provider = factory.provider().unwrap();
@@ -1358,7 +1358,7 @@ mod tests {
             }
             provider_rw.commit().unwrap();
 
-            let mut side_chain_builder = TestBlockBuilder::eth();
+            let mut side_chain_builder = TestBlockBuilder::seeded(43);
             let side_block_two = side_chain_builder.get_executed_block_with_number(
                 blocks[2].block_number(),
                 blocks[1].recovered_block().hash(),
@@ -1421,28 +1421,30 @@ mod tests {
 
     #[test]
     fn builder_appends_block_to_parent_state() {
-        let manager = OverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
-        }
+        reth_tasks::executor::Runtime::new().run(|| {
+            let manager = OverlayManager::default();
+            let blocks = test_blocks();
+            for block in &blocks[2..=4] {
+                manager.insert_block(block.clone());
+            }
 
-        let block = TestBlockBuilder::eth().get_executed_block_with_number(
-            blocks[4].recovered_block().number() + 1,
-            blocks[4].recovered_block().hash(),
-        );
-        let builder = manager
-            .overlay_builder(block.recovered_block().parent_hash())
-            .with_appended_block(block.clone());
+            let block = TestBlockBuilder::seeded(42).get_executed_block_with_number(
+                blocks[4].recovered_block().number() + 1,
+                blocks[4].recovered_block().hash(),
+            );
+            let builder = manager
+                .overlay_builder(block.recovered_block().parent_hash())
+                .with_appended_block(block.clone());
 
-        assert_eq!(builder.parent_hash, block.recovered_block().hash());
-        assert_eq!(
-            builder.parent_state.unwrap().chain().map(BlockState::hash).collect::<Vec<_>>(),
-            std::iter::once(&block)
-                .chain(blocks[2..=4].iter().rev())
-                .map(|block| block.recovered_block().hash())
-                .collect::<Vec<_>>(),
-        );
+            assert_eq!(builder.parent_hash, block.recovered_block().hash());
+            assert_eq!(
+                builder.parent_state.unwrap().chain().map(BlockState::hash).collect::<Vec<_>>(),
+                std::iter::once(&block)
+                    .chain(blocks[2..=4].iter().rev())
+                    .map(|block| block.recovered_block().hash())
+                    .collect::<Vec<_>>(),
+            );
+        });
     }
 
     #[test]
@@ -1464,54 +1466,60 @@ mod tests {
 
     #[test]
     fn managed_overlay_skips_manager_for_persisted_parent() {
-        let parent_hash = B256::with_last_byte(1);
-        let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let parent_hash = B256::with_last_byte(1);
+            let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
 
-        let (trie, state) = builder.resolve_state_trie_overlays(parent_hash).unwrap();
-        assert!(trie.is_empty());
-        assert!(state.is_empty());
+            let (trie, state) = builder.resolve_state_trie_overlays(parent_hash).unwrap();
+            assert!(trie.is_empty());
+            assert!(state.is_empty());
+        });
     }
 
     #[test]
     fn managed_overlay_errors_if_parent_is_not_persisted_or_managed() {
-        let parent_hash = B256::with_last_byte(1);
-        let anchor_hash = B256::with_last_byte(2);
-        let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let parent_hash = B256::with_last_byte(1);
+            let anchor_hash = B256::with_last_byte(2);
+            let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
 
-        let err = builder.resolve_state_trie_overlays(anchor_hash).unwrap_err();
+            let err = builder.resolve_state_trie_overlays(anchor_hash).unwrap_err();
 
-        assert!(err.to_string().contains("cannot be anchored"));
+            assert!(err.to_string().contains("cannot be anchored"));
+        });
     }
 
     #[test]
     fn managed_overlay_skip_requires_both_frontiers() {
-        let parent_hash = B256::with_last_byte(1);
-        let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
-        assert!(!builder.should_skip_overlay_for_reused_sparse_trie(parent_hash, parent_hash));
+        reth_tasks::executor::Runtime::new().run(|| {
+            let parent_hash = B256::with_last_byte(1);
+            let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
+            assert!(!builder.should_skip_overlay_for_reused_sparse_trie(parent_hash, parent_hash));
 
-        let builder = builder.with_skip_overlay_for_reused_sparse_trie(parent_hash);
-        assert!(builder.should_skip_overlay_for_reused_sparse_trie(parent_hash, parent_hash));
-        assert!(!builder
-            .should_skip_overlay_for_reused_sparse_trie(B256::with_last_byte(3), parent_hash,));
+            let builder = builder.with_skip_overlay_for_reused_sparse_trie(parent_hash);
+            assert!(builder.should_skip_overlay_for_reused_sparse_trie(parent_hash, parent_hash));
+            assert!(!builder
+                .should_skip_overlay_for_reused_sparse_trie(B256::with_last_byte(3), parent_hash,));
 
-        let blocks = test_blocks();
-        let manager = OverlayManager::default();
-        for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
-        }
-        let builder = manager
-            .overlay_builder(blocks[4].recovered_block().hash())
-            .with_skip_overlay_for_reused_sparse_trie(blocks[1].recovered_block().hash());
-        assert!(builder.should_skip_overlay_for_reused_sparse_trie(
-            blocks[1].recovered_block().hash(),
-            blocks[3].recovered_block().hash(),
-        ));
+            let blocks = test_blocks();
+            let manager = OverlayManager::default();
+            for block in &blocks[2..=4] {
+                manager.insert_block(block.clone());
+            }
+            let builder = manager
+                .overlay_builder(blocks[4].recovered_block().hash())
+                .with_skip_overlay_for_reused_sparse_trie(blocks[1].recovered_block().hash());
+            assert!(builder.should_skip_overlay_for_reused_sparse_trie(
+                blocks[1].recovered_block().hash(),
+                blocks[3].recovered_block().hash(),
+            ));
 
-        let builder =
-            builder.with_skip_overlay_for_reused_sparse_trie(blocks[2].recovered_block().hash());
-        assert!(!builder.should_skip_overlay_for_reused_sparse_trie(
-            blocks[1].recovered_block().hash(),
-            blocks[3].recovered_block().hash(),
-        ));
+            let builder = builder
+                .with_skip_overlay_for_reused_sparse_trie(blocks[2].recovered_block().hash());
+            assert!(!builder.should_skip_overlay_for_reused_sparse_trie(
+                blocks[1].recovered_block().hash(),
+                blocks[3].recovered_block().hash(),
+            ));
+        });
     }
 }

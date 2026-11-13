@@ -244,19 +244,19 @@ mod tests {
 
     #[test]
     fn prune_table_with_iterator_early_exit_does_not_overconsume() {
-        reth_tasks::executor::Runtime::new().run(|| {
-            let db = TestStageDB::default();
-            let mut rng = generators::rng();
+        let mut rng = generators::rng();
 
-            let blocks = random_block_range(
-                &mut rng,
-                1..=3,
-                BlockRangeParams {
-                    parent: Some(alloy_primitives::B256::ZERO),
-                    tx_count: 2..3,
-                    ..Default::default()
-                },
-            );
+        let blocks = random_block_range(
+            &mut rng,
+            1..=3,
+            BlockRangeParams {
+                parent: Some(alloy_primitives::B256::ZERO),
+                tx_count: 2..3,
+                ..Default::default()
+            },
+        );
+        reth_tasks::executor::Runtime::new().run(move || {
+            let db = TestStageDB::default();
             db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
             let mut tx_senders = Vec::new();
@@ -300,19 +300,19 @@ mod tests {
 
     #[test]
     fn prune_table_with_iterator_consumes_to_end_reports_done() {
-        reth_tasks::executor::Runtime::new().run(|| {
-            let db = TestStageDB::default();
-            let mut rng = generators::rng();
+        let mut rng = generators::rng();
 
-            let blocks = random_block_range(
-                &mut rng,
-                1..=2,
-                BlockRangeParams {
-                    parent: Some(alloy_primitives::B256::ZERO),
-                    tx_count: 1..2,
-                    ..Default::default()
-                },
-            );
+        let blocks = random_block_range(
+            &mut rng,
+            1..=2,
+            BlockRangeParams {
+                parent: Some(alloy_primitives::B256::ZERO),
+                tx_count: 1..2,
+                ..Default::default()
+            },
+        );
+        reth_tasks::executor::Runtime::new().run(move || {
+            let db = TestStageDB::default();
             db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
             let mut tx_senders = Vec::new();

@@ -1188,7 +1188,7 @@ mod tests {
     }
 
     fn test_blocks() -> Vec<ExecutedBlock<EthPrimitives>> {
-        TestBlockBuilder::eth()
+        TestBlockBuilder::seeded(42)
             .get_executed_blocks(0..5)
             .enumerate()
             .map(|(index, block)| with_unique_trie_data(&block, index as u8 + 1))
