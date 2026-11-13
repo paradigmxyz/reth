@@ -596,6 +596,18 @@ RPC State Cache:
 
           [default: 100000]
 
+      --rpc-cache.max-block-responses <MAX_BLOCK_RESPONSES>
+          Max number of serialized block and receipt responses of recent blocks in cache.
+
+          A block has up to three: with full transactions, with transaction hashes, and its receipts. Zero disables this cache.
+
+          [default: 18]
+
+      --rpc-cache.block-response-depth <BLOCKS>
+          How far below the best block a block may be for its serialized responses to be cached
+
+          [default: 4]
+
 Gas Price Oracle:
       --gpo.blocks <BLOCKS>
           Number of recent blocks to check for gas price

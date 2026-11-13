@@ -66,11 +66,11 @@ rand.workspace = true
 tracing.workspace = true
 itertools.workspace = true
 parking_lot.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 
 [dev-dependencies]
 reth-db-models.workspace = true
 reth-storage-api = { workspace = true, features = ["std"] }
-serde_json.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
 [features]

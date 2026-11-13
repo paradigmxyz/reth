@@ -2,8 +2,10 @@ use super::{database::parse_byte_size, DefaultRpcServerArgs};
 use clap::{builder::Resettable, Args};
 use reth_rpc_server_types::constants::cache::{
     DEFAULT_BAL_CACHE_MAX_BYTES, DEFAULT_BAL_CACHE_MAX_LEN, DEFAULT_BLOCK_CACHE_MAX_BYTES,
-    DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_CACHE_IDLE_TIMEOUT, DEFAULT_CONCURRENT_DB_REQUESTS,
-    DEFAULT_MAX_CACHED_TX_HASHES, DEFAULT_RECEIPT_CACHE_MAX_BYTES, DEFAULT_RECEIPT_CACHE_MAX_LEN,
+    DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_BLOCK_RESPONSE_CACHE_DEPTH,
+    DEFAULT_BLOCK_RESPONSE_CACHE_MAX_LEN, DEFAULT_CACHE_IDLE_TIMEOUT,
+    DEFAULT_CONCURRENT_DB_REQUESTS, DEFAULT_MAX_CACHED_TX_HASHES, DEFAULT_RECEIPT_CACHE_MAX_BYTES,
+    DEFAULT_RECEIPT_CACHE_MAX_LEN,
 };
 use std::time::Duration;
 
@@ -85,6 +87,24 @@ pub struct RpcStateCacheArgs {
         default_value_t = DefaultRpcServerArgs::get_global().rpc_state_cache.max_cached_tx_hashes,
     )]
     pub max_cached_tx_hashes: u32,
+
+    /// Max number of serialized block and receipt responses of recent blocks in cache.
+    ///
+    /// A block has up to three: with full transactions, with transaction hashes, and its
+    /// receipts. Zero disables this cache.
+    #[arg(
+        long = "rpc-cache.max-block-responses",
+        default_value_t = DefaultRpcServerArgs::get_global().rpc_state_cache.max_block_responses,
+    )]
+    pub max_block_responses: u32,
+
+    /// How far below the best block a block may be for its serialized responses to be cached.
+    #[arg(
+        long = "rpc-cache.block-response-depth",
+        value_name = "BLOCKS",
+        default_value_t = DefaultRpcServerArgs::get_global().rpc_state_cache.block_response_depth,
+    )]
+    pub block_response_depth: u64,
 }
 
 impl RpcStateCacheArgs {
@@ -96,6 +116,7 @@ impl RpcStateCacheArgs {
         self.max_blocks_bytes = 0;
         self.max_receipts_bytes = 0;
         self.max_bals_bytes = 0;
+        self.max_block_responses = 0;
         self.idle_timeout = Duration::ZERO;
         self.cache_computed_bals = false;
         self.prewarm_bals = None;
@@ -116,6 +137,8 @@ impl Default for RpcStateCacheArgs {
             prewarm_bals: None,
             max_concurrent_db_requests: DEFAULT_CONCURRENT_DB_REQUESTS,
             max_cached_tx_hashes: DEFAULT_MAX_CACHED_TX_HASHES,
+            max_block_responses: DEFAULT_BLOCK_RESPONSE_CACHE_MAX_LEN,
+            block_response_depth: DEFAULT_BLOCK_RESPONSE_CACHE_DEPTH,
         }
     }
 }
@@ -204,6 +227,7 @@ mod tests {
         assert_eq!(args.max_blocks_bytes, 0);
         assert_eq!(args.max_receipts_bytes, 0);
         assert_eq!(args.max_bals_bytes, 0);
+        assert_eq!(args.max_block_responses, 0);
         assert_eq!(args.idle_timeout, Duration::ZERO);
         assert!(!args.cache_computed_bals);
         assert_eq!(args.prewarm_bals, None);
