@@ -221,30 +221,43 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             return PollAction::NoRequests
         }
 
-        let request = self.queued_requests.pop_front().expect("not empty");
-        let Some(peer_id) = self.next_best_peer(request.best_peer_requirements()) else {
-            // Optional BAL/snap requests can lose their capable peer while queued; complete them
-            // instead of waiting for future peer churn.
-            if self.should_fail_fast(&request) {
-                request.send_err_response(RequestError::UnsupportedCapability);
-            } else {
-                // no peer matches this request's requirements; requeue at the back so other
-                // queued requests get a chance on the next poll instead of head-of-line blocking.
-                self.queued_requests.push_back(request);
-            }
-            return PollAction::NoPeersAvailable
+        // Every queued request is checked once, so a request without a matching idle peer does not
+        // delay the ones behind it. Without any idle peer nothing can be dispatched and only the
+        // front request is checked.
+        let max_checks = if self.peers.values().any(|peer| peer.state.is_idle()) {
+            self.queued_requests.len()
+        } else {
+            1
         };
 
-        let request = self.prepare_block_request(peer_id, request);
+        for _ in 0..max_checks {
+            let request = self.queued_requests.pop_front().expect("not empty");
+            let Some(peer_id) = self.next_best_peer(request.best_peer_requirements()) else {
+                // Optional BAL/snap requests can lose their capable peer while queued; complete
+                // them instead of waiting for future peer churn.
+                if self.should_fail_fast(&request) {
+                    request.send_err_response(RequestError::UnsupportedCapability);
+                } else {
+                    // no peer matches this request's requirements; requeue at the back so other
+                    // queued requests get a chance instead of head-of-line blocking.
+                    self.queued_requests.push_back(request);
+                }
+                continue
+            };
 
-        PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
+            let request = self.prepare_block_request(peer_id, request);
+
+            return PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
+        }
+
+        PollAction::NoPeersAvailable
     }
 
     /// Advance the state the syncer
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<FetchAction> {
         // drain buffered actions first
         loop {
-            let no_peers_available = match self.poll_action() {
+            let mut no_peers_available = match self.poll_action() {
                 PollAction::Ready(action) => return Poll::Ready(action),
                 PollAction::NoRequests => false,
                 PollAction::NoPeersAvailable => true,
@@ -260,6 +273,10 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                             request.send_err_response(RequestError::UnsupportedCapability);
                             continue
                         }
+
+                        // An idle peer may serve this request even if none matched the requests
+                        // that were already queued.
+                        no_peers_available = false;
 
                         match request.get_priority() {
                             Priority::High => {
@@ -2056,6 +2073,51 @@ mod tests {
         assert!(matches!(fetcher.poll(&mut cx), Poll::Pending));
         assert!(fetcher.queued_requests.is_empty());
         assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::UnsupportedCapability);
+    }
+
+    #[test_case(false; "already queued")]
+    #[test_case(true; "received during poll")]
+    #[tokio::test]
+    async fn test_poll_dispatches_request_behind_unmatched_request(incoming: bool) {
+        let (mut fetcher, peer_id) = fetcher_with_peer();
+
+        // The only peer does not support eth/71, so this request stays queued.
+        let (bal_tx, _bal_rx) = oneshot::channel();
+        fetcher.queued_requests.push_back(DownloadRequest::GetBlockAccessLists {
+            request: vec![B256::random()],
+            response: bal_tx,
+            priority: Priority::Normal,
+            requirement: BalRequirement::Mandatory,
+        });
+
+        let (bodies_tx, _bodies_rx) = oneshot::channel();
+        let bodies = DownloadRequest::GetBlockBodies {
+            request: vec![B256::random()],
+            response: bodies_tx,
+            priority: Priority::Normal,
+            range_hint: None,
+        };
+        if incoming {
+            fetcher.download_requests_tx.send(bodies).unwrap();
+        } else {
+            fetcher.queued_requests.push_back(bodies);
+        }
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(matches!(
+            fetcher.poll(&mut cx),
+            Poll::Ready(FetchAction::BlockRequest {
+                peer_id: pid,
+                request: BlockRequest::GetBlockBodies(_)
+            }) if pid == peer_id
+        ));
+        assert_eq!(fetcher.queued_requests.len(), 1);
+        assert!(matches!(
+            fetcher.queued_requests.front(),
+            Some(DownloadRequest::GetBlockAccessLists { .. })
+        ));
     }
 
     #[tokio::test]
