@@ -1090,10 +1090,31 @@ impl<T: TransactionOrdering> TxPool<T> {
         &mut self,
         hashes: Vec<TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let txs =
-            hashes.into_iter().filter_map(|hash| self.remove_transaction_by_hash(&hash)).collect();
+        let mut removed = Vec::with_capacity(hashes.len());
+        // Lowest removed nonce per sender. Parking the remaining descendants once per sender
+        // yields the same state as parking after every single removal, but keeps bulk removal of
+        // one sender's lane linear instead of walking the remaining lane for every removed hash.
+        let mut park_from = FxHashMap::<SenderId, TransactionId>::default();
+        for hash in hashes {
+            let Some((tx, pool)) = self.all_transactions.remove_transaction_by_hash(&hash) else {
+                continue
+            };
+            let id = *tx.id();
+            park_from
+                .entry(id.sender)
+                .and_modify(|lowest| {
+                    if id.nonce < lowest.nonce {
+                        *lowest = id
+                    }
+                })
+                .or_insert(id);
+            removed.extend(self.remove_from_subpool(pool, &id));
+        }
+        for id in park_from.into_values() {
+            self.park_descendants(&id);
+        }
         self.update_size_metrics();
-        txs
+        removed
     }
 
     /// Removes and returns all matching transactions and their descendants from the pool.
@@ -1164,13 +1185,17 @@ impl<T: TransactionOrdering> TxPool<T> {
         tx_hash: &B256,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let (tx, pool) = self.all_transactions.remove_transaction_by_hash(tx_hash)?;
+        self.park_descendants(tx.id());
+        self.remove_from_subpool(pool, tx.id())
+    }
 
-        // After a tx is removed, its descendants must become parked due to the nonce gap
-        let mut updates = self.all_transactions.park_descendant_transactions(tx.id());
+    /// Parks all remaining transactions of the sender that follow the removed `id`, because
+    /// removing it opened a nonce gap.
+    fn park_descendants(&mut self, id: &TransactionId) {
+        let mut updates = self.all_transactions.park_descendant_transactions(id);
         #[expect(clippy::iter_with_drain, reason = "retain the scratch buffer allocation")]
         self.process_updates(updates.drain(..), &mut UpdateOutcome::default());
         self.all_transactions.update_buffer = updates;
-        self.remove_from_subpool(pool, tx.id())
     }
 
     /// This removes the transaction from the pool and advances any descendant state inside the
@@ -4942,6 +4967,39 @@ mod tests {
         let _res = pool.add_transaction(v1, on_chain_balance, on_chain_nonce, None).unwrap();
         assert_eq!(0, pool.queued_transactions().len());
         assert_eq!(4, pool.pending_transactions().len());
+    }
+
+    #[test]
+    fn test_remove_transactions_parks_descendants_of_lowest_removed() {
+        let on_chain_balance = U256::from(10_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let mut tx = MockTransaction::eip1559().set_gas_price(100).inc_limit();
+        let mut txs = Vec::new();
+        for _ in 0..6 {
+            let v = f.validated(tx.clone());
+            pool.add_transaction(v.clone(), on_chain_balance, on_chain_nonce, None).unwrap();
+            txs.push(v);
+            tx = tx.next();
+        }
+        assert_eq!(6, pool.pending_transactions().len());
+
+        // Remove a non-contiguous subset, higher nonce first.
+        let removed = pool.remove_transactions(vec![*txs[4].hash(), *txs[1].hash()]);
+        assert_eq!(2, removed.len());
+
+        let pending = pool.pending_transactions();
+        assert_eq!(1, pending.len());
+        assert_eq!(txs[0].hash(), pending[0].hash());
+        let mut queued = pool.queued_transactions().iter().map(|tx| tx.nonce()).collect::<Vec<_>>();
+        queued.sort_unstable();
+        assert_eq!(vec![2, 3, 5], queued);
+        for nonce in [2, 3, 5] {
+            assert!(pool.all_transactions.txs.get(txs[nonce].id()).unwrap().state.has_nonce_gap());
+        }
+        pool.assert_invariants();
     }
 
     #[test]
