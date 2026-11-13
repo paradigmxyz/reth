@@ -125,8 +125,8 @@ where
 
     /// Processes a block range download request.
     fn download_block_range(&mut self, hash: B256, count: u64, access_lists: bool) {
-        // A range above the peer response limit can never complete, so fetch only the start block
-        // and let the tree derive the remaining gap from its header.
+        // A range above the backfill threshold is too large to download as one batch, so fetch
+        // only the start block and let the tree derive the remaining gap from its header.
         if count == 1 || count > MAX_BACKFILL_RUN_THRESHOLD {
             self.download_full_block(hash, access_lists);
         } else {
