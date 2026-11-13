@@ -1369,15 +1369,14 @@ mod tests {
         let percentiles = vec![0.0, 50.0, 100.0];
 
         // The first block of the second chunk doesn't extend the first chunk, or the last block
-        // of the first chunk is no longer the canonical block at its height.
+        // of the range is no longer the canonical block at its height. No chunk follows the
+        // latter, so only the canonical check can reject it.
         for (number, fork) in [
             (
                 first_block + 16,
                 (|header: &mut Header| header.parent_hash = B256::random()) as fn(&mut Header),
             ),
-            (first_block + 15, |header: &mut Header| {
-                header.extra_data = Bytes::from_static(b"fork")
-            }),
+            (newest_block, |header: &mut Header| header.extra_data = Bytes::from_static(b"fork")),
         ] {
             let mock_provider = MockEthProvider::default();
             let (eth_api, _, _) =
@@ -1403,9 +1402,12 @@ mod tests {
         let factory = create_test_provider_factory_with_chain_spec(Arc::new(
             ChainSpecBuilder::mainnet().cancun_activated().build(),
         ));
-        let mut random_block_with_receipts = |number, parent| {
-            let params =
-                BlockParams { parent: Some(parent), tx_count: Some(3), ..Default::default() };
+        let mut random_block_with_receipts = |number, parent, tx_count| {
+            let params = BlockParams {
+                parent: Some(parent),
+                tx_count: Some(tx_count),
+                ..Default::default()
+            };
             let mut block = random_block(&mut rng, number, params).into_block();
             // Legacy transactions only pay a tip above a low base fee.
             block.header.base_fee_per_gas = Some(1_000);
@@ -1432,18 +1434,19 @@ mod tests {
         let mut blocks = Vec::new();
         let mut receipts = Vec::new();
         for number in 1..=6 {
-            let (block, block_receipts) = random_block_with_receipts(number, parent);
+            let (block, block_receipts) = random_block_with_receipts(number, parent, 3);
             parent = block.hash();
             blocks.push(block);
             receipts.push(block_receipts);
         }
         // A fork of blocks 4 and 5 that storage still holds after the in-memory chain reorged it
-        // out.
+        // out. Its blocks have fewer transactions, so their receipts can't pass for the canonical
+        // ones.
         let mut stale_blocks = Vec::new();
         let mut stale_receipts = Vec::new();
         parent = blocks[2].hash();
         for number in 4..=5 {
-            let (block, block_receipts) = random_block_with_receipts(number, parent);
+            let (block, block_receipts) = random_block_with_receipts(number, parent, 2);
             parent = block.hash();
             stale_blocks.push(block);
             stale_receipts.push(block_receipts);
