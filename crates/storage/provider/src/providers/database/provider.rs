@@ -4554,7 +4554,7 @@ mod tests {
     #[test]
     fn test_receipts_by_block_range_keeps_receipts_aligned_with_missing_rows() {
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v1());
+        factory.set_storage_settings_cache(StorageSettings::v2());
         let mut rng = generators::rng();
 
         let tx_counts = [3usize, 3, 0, 2];
