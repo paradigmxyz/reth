@@ -114,6 +114,12 @@ pub struct EthConfig {
     /// This is disabled by default, allowing blob transactions with EIP-4844 sidecars to be
     /// submitted without automatic conversion.
     pub force_blob_sidecar_upcasting: bool,
+    /// The RPC server's response size limit in bytes. It also bounds the logs a multi-block
+    /// `eth_getLogs` query collects before its response is built.
+    ///
+    /// If `None`, only the log count bounds these queries.
+    #[serde(default)]
+    pub max_response_size: Option<usize>,
 }
 
 impl EthConfig {
@@ -123,6 +129,7 @@ impl EthConfig {
             .max_blocks_per_filter(self.max_blocks_per_filter)
             .max_logs_per_response(self.max_logs_per_response)
             .stale_filter_ttl(self.stale_filter_ttl)
+            .max_response_size(self.max_response_size)
     }
 }
 
@@ -149,6 +156,7 @@ impl Default for EthConfig {
             send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
             rpc_evm_memory_limit: (1 << 32) - 1,
             force_blob_sidecar_upcasting: false,
+            max_response_size: None,
         }
     }
 }
@@ -264,6 +272,12 @@ impl EthConfig {
         self.force_blob_sidecar_upcasting = force;
         self
     }
+
+    /// Configures the RPC server's response size limit in bytes.
+    pub const fn max_response_size(mut self, size: usize) -> Self {
+        self.max_response_size = Some(size);
+        self
+    }
 }
 
 /// Config for the filter
@@ -282,6 +296,10 @@ pub struct EthFilterConfig {
     /// A filter is considered stale if it has not been polled for longer than this duration and
     /// will be removed.
     pub stale_filter_ttl: Duration,
+    /// Maximum JSON size in bytes of the logs a multi-block `eth_getLogs` query collects.
+    ///
+    /// If `None` then no limit is enforced.
+    pub max_response_size: Option<usize>,
 }
 
 impl EthFilterConfig {
@@ -303,6 +321,13 @@ impl EthFilterConfig {
         self.stale_filter_ttl = duration;
         self
     }
+
+    /// Sets the maximum JSON size in bytes of the logs a multi-block `eth_getLogs` query collects,
+    /// or disables the limit with `None`.
+    pub const fn max_response_size(mut self, size: Option<usize>) -> Self {
+        self.max_response_size = size;
+        self
+    }
 }
 
 impl Default for EthFilterConfig {
@@ -312,6 +337,7 @@ impl Default for EthFilterConfig {
             max_logs_per_response: None,
             // 5min
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
+            max_response_size: None,
         }
     }
 }

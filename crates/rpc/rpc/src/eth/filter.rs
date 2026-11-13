@@ -1,6 +1,6 @@
 //! `eth_` `Filter` RPC handler implementation
 
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{BlockHeader, TxReceipt};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Sealable, TxHash};
 use alloy_rpc_types_eth::{
@@ -92,6 +92,10 @@ const DEFAULT_PARALLEL_CONCURRENCY: usize = 4;
 /// Maximum number of blocks whose receipts the parallel fetching holds in memory at once
 const MAX_PARALLEL_BATCH_SIZE: usize = 256;
 
+/// Lower bound on the JSON size in bytes of a log without its topics and data: the field names,
+/// the address and the block and transaction hashes.
+const MIN_LOG_JSON_SIZE: usize = 300;
+
 /// `Eth` filter RPC implementation.
 ///
 /// This type handles `eth_` rpc requests related to filters (`eth_getLogs`).
@@ -141,8 +145,12 @@ where
     /// let filter = EthFilter::new(eth_api, Default::default(), Runtime::test());
     /// ```
     pub fn new(eth_api: Eth, config: EthFilterConfig, task_spawner: Runtime) -> Self {
-        let EthFilterConfig { max_blocks_per_filter, max_logs_per_response, stale_filter_ttl } =
-            config;
+        let EthFilterConfig {
+            max_blocks_per_filter,
+            max_logs_per_response,
+            stale_filter_ttl,
+            max_response_size,
+        } = config;
         let inner = EthFilterInner {
             eth_api,
             active_filters: ActiveFilters::new(),
@@ -150,7 +158,11 @@ where
             max_headers_range: MAX_HEADERS_RANGE,
             task_spawner,
             stale_filter_ttl,
-            query_limits: QueryLimits { max_blocks_per_filter, max_logs_per_response },
+            query_limits: QueryLimits {
+                max_blocks_per_filter,
+                max_logs_per_response,
+                max_response_size,
+            },
         };
 
         let eth_filter = Self { inner: Arc::new(inner) };
@@ -718,6 +730,7 @@ where
         limits: QueryLimits,
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         let mut all_logs = Vec::new();
+        let mut response_size = 0;
 
         // get current chain tip to determine processing mode
         let chain_tip = self.provider().best_block_number()?;
@@ -773,6 +786,32 @@ where
                 range_mode.next().await?
             {
                 let num_hash = header.num_hash();
+
+                // Checked before the block's logs are kept, so that the logs held by a query stay
+                // within the response size limit. Like the count limit, it does not apply to a
+                // single block.
+                if let Some(max_response_size) = limits.max_response_size &&
+                    from_block != to_block
+                {
+                    response_size += matching_logs_json_size(filter, &receipts);
+                    if response_size > max_response_size {
+                        let retry_to_block = num_hash.number.saturating_sub(1).max(from_block);
+                        debug!(
+                            target: "rpc::eth::filter",
+                            response_size,
+                            max_response_size,
+                            from_block,
+                            to_block = retry_to_block,
+                            "Query exceeded max response size"
+                        );
+                        return Err(EthFilterError::QueryExceedsMaxResponseSize {
+                            max_bytes: max_response_size,
+                            from_block,
+                            to_block: retry_to_block,
+                        });
+                    }
+                }
+
                 append_matching_block_logs(
                     &mut all_logs,
                     self.eth_api.converter(),
@@ -817,6 +856,20 @@ where
 
         Ok(all_logs)
     }
+}
+
+/// Returns a lower bound on the JSON size in bytes of the logs in `receipts` that match `filter`.
+fn matching_logs_json_size<R: TxReceipt<Log = alloy_primitives::Log>>(
+    filter: &Filter,
+    receipts: &[R],
+) -> usize {
+    receipts
+        .iter()
+        .flat_map(|receipt| receipt.logs())
+        .filter(|log| filter.matches(log))
+        // Topics and data are hex encoded, a topic as a quoted 0x-prefixed string.
+        .map(|log| MIN_LOG_JSON_SIZE + log.topics().len() * 68 + log.data.data.len() * 2)
+        .sum()
 }
 
 /// All active filters
@@ -1030,6 +1083,18 @@ pub enum EthFilterError {
         /// End block of the suggested retry range (last successfully processed block)
         to_block: u64,
     },
+    /// Query result exceeds the response size limit.
+    #[error(
+        "query exceeds max response size {max_bytes} bytes, retry with the range {from_block}-{to_block}"
+    )]
+    QueryExceedsMaxResponseSize {
+        /// Maximum response size in bytes
+        max_bytes: usize,
+        /// Start block of the suggested retry range
+        from_block: u64,
+        /// End block of the suggested retry range (last block whose logs fit)
+        to_block: u64,
+    },
     /// Error serving request in `eth_` namespace.
     #[error(transparent)]
     EthAPIError(#[from] EthApiError),
@@ -1056,6 +1121,7 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
             err @ (EthFilterError::InvalidBlockRangeParams |
             EthFilterError::QueryExceedsMaxBlocks(_) |
             EthFilterError::QueryExceedsMaxResults { .. } |
+            EthFilterError::QueryExceedsMaxResponseSize { .. } |
             EthFilterError::BlockRangeExceedsHead { .. }) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }
@@ -1920,8 +1986,8 @@ mod tests {
         assert!(result.is_none());
     }
 
-    #[tokio::test]
-    async fn test_log_limit_retry_range_excludes_overflow_block() {
+    /// Returns a provider with blocks 100 to 102, each with one log carrying `data`.
+    fn provider_with_one_log_per_block(data: alloy_primitives::Bytes) -> MockEthProvider {
         let provider = MockEthProvider::default();
 
         use reth_ethereum_primitives::{TransactionSigned, TxType};
@@ -1940,7 +2006,7 @@ mod tests {
 
         let mock_log = alloy_primitives::Log {
             address: alloy_primitives::Address::ZERO,
-            data: alloy_primitives::LogData::new_unchecked(vec![], alloy_primitives::Bytes::new()),
+            data: alloy_primitives::LogData::new_unchecked(vec![], data),
         };
 
         let receipt = reth_ethereum_primitives::Receipt {
@@ -1976,6 +2042,12 @@ mod tests {
             );
         }
 
+        provider
+    }
+
+    #[tokio::test]
+    async fn test_log_limit_retry_range_excludes_overflow_block() {
+        let provider = provider_with_one_log_per_block(alloy_primitives::Bytes::new());
         let eth_api = build_test_eth_api(provider);
         let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let err = eth_filter
@@ -1985,7 +2057,7 @@ mod tests {
                 Filter::default(),
                 100,
                 102,
-                QueryLimits { max_blocks_per_filter: None, max_logs_per_response: Some(2) },
+                QueryLimits { max_logs_per_response: Some(2), ..Default::default() },
             )
             .await
             .expect_err("range should exceed max logs");
@@ -1997,6 +2069,48 @@ mod tests {
         assert_eq!(max_logs, 2);
         assert_eq!(from_block, 100);
         assert_eq!(to_block, 101);
+    }
+
+    #[tokio::test]
+    async fn test_response_size_retry_range_excludes_overflow_block() {
+        // Each log is estimated at 300 + 2 * 1_000 bytes, so two blocks fit and the third does not.
+        let provider = provider_with_one_log_per_block(vec![0u8; 1_000].into());
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+        let limits = QueryLimits { max_response_size: Some(5_000), ..Default::default() };
+
+        let err = eth_filter
+            .inner
+            .clone()
+            .get_logs_in_block_range(Filter::default(), 100, 102, limits)
+            .await
+            .expect_err("range should exceed max response size");
+        let EthFilterError::QueryExceedsMaxResponseSize { max_bytes, from_block, to_block } = err
+        else {
+            panic!("unexpected error: {err:?}");
+        };
+        assert_eq!((max_bytes, from_block, to_block), (5_000, 100, 101));
+
+        // The retry range fits, and a single block is exempt like it is from the log count limit.
+        let logs = eth_filter
+            .inner
+            .clone()
+            .get_logs_in_block_range(Filter::default(), 100, 101, limits)
+            .await
+            .unwrap();
+        assert_eq!(logs.len(), 2);
+        // The estimate must never exceed what the transport serializes.
+        for log in &logs {
+            assert!(serde_json::to_vec(log).unwrap().len() >= MIN_LOG_JSON_SIZE + 2 * 1_000);
+        }
+        let limits = QueryLimits { max_response_size: Some(1), ..Default::default() };
+        let logs = eth_filter
+            .inner
+            .clone()
+            .get_logs_in_block_range(Filter::default(), 102, 102, limits)
+            .await
+            .unwrap();
+        assert_eq!(logs.len(), 1);
     }
 
     #[tokio::test]
@@ -2211,7 +2325,7 @@ mod tests {
                 Filter::default(),
                 0,
                 2_500,
-                QueryLimits { max_blocks_per_filter: None, max_logs_per_response: Some(1) },
+                QueryLimits { max_logs_per_response: Some(1), ..Default::default() },
             )
             .await
             .unwrap_err();

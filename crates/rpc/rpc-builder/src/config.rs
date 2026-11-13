@@ -112,6 +112,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .raw_tx_forwarder(self.rpc_forwarder.clone())
             .rpc_evm_memory_limit(self.rpc_evm_memory_limit)
             .force_blob_sidecar_upcasting(self.rpc_force_blob_sidecar_upcasting)
+            .max_response_size(self.rpc_max_response_size_bytes() as usize)
     }
 
     fn flashbots_config(&self) -> ValidationApiConfig {
