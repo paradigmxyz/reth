@@ -702,11 +702,22 @@ impl PeersManager {
             // ACK, transport, and Hello timeout errors can precede the first authenticated frame.
             // The outer timeout carries no handshake phase, so it is also treated conservatively.
             // Back off the attempt without penalizing that identity or its discovery record.
-            if self.peers.get(peer_id).is_some_and(|peer| peer.state.is_pending_out()) {
+            if let Some(peer) = self.peers.get_mut(peer_id) &&
+                peer.state.is_pending_out()
+            {
+                // Lengthen repeated retries so silent endpoints can't keep winning dial slots over
+                // untried peers of equal rank. Trusted and static peers keep the short retry.
+                let backoff_counter = if peer.is_trusted() || peer.is_static() {
+                    0
+                } else {
+                    let counter = peer.unauthenticated_backoff_counter;
+                    peer.unauthenticated_backoff_counter = counter.saturating_add(1);
+                    counter
+                };
                 self.on_outgoing_pending_session_gracefully_closed(peer_id);
                 self.backoff_peer_until(
                     *peer_id,
-                    self.backoff_durations.backoff_until(BackoffKind::Low, 0),
+                    self.backoff_durations.backoff_until(BackoffKind::Low, backoff_counter),
                 );
                 self.fill_outbound_slots();
             }
@@ -762,6 +773,7 @@ impl PeersManager {
             self.connection_info.inc_out();
             peer.state = PeerConnectionState::Out;
             peer.mark_connected();
+            peer.unauthenticated_backoff_counter = 0;
             if at_capacity &&
                 !peer.is_trusted() &&
                 !peer.is_static() &&
@@ -4586,6 +4598,37 @@ mod tests {
         assert!(until >= before + Duration::from_secs(1));
         assert!(until <= after + Duration::from_secs(1));
         assert_eq!(peers.peers[&peer_id].severe_backoff_counter, 3);
+    }
+
+    #[tokio::test]
+    async fn test_unattributable_backoff_escalates_for_basic_peers() {
+        for kind in [PeerKind::Basic, PeerKind::Static, PeerKind::Trusted] {
+            let mut config = PeersConfig::test();
+            config.backoff_durations.low = Duration::from_secs(30);
+            config.backoff_durations.max = Duration::from_secs(60 * 60);
+            let mut peers = PeersManager::new(config);
+            let peer_id = PeerId::random();
+            let addr = "8.8.8.8:30303".parse::<SocketAddr>().unwrap();
+            for attempt in 1..=3 {
+                peers.add_and_connect_kind(peer_id, kind, PeerAddr::from_tcp(addr), None);
+                let before = std::time::Instant::now();
+                peers.on_outgoing_pending_session_dropped(
+                    &addr,
+                    &peer_id,
+                    &PendingSessionHandshakeError::Timeout,
+                );
+                let after = std::time::Instant::now();
+                let backoff =
+                    Duration::from_secs(if kind == PeerKind::Basic { 30 * attempt } else { 30 });
+                let until = peers.backed_off_peers[&peer_id];
+                assert!(until >= before + backoff);
+                assert!(until <= after + backoff);
+            }
+
+            peers.add_and_connect_kind(peer_id, kind, PeerAddr::from_tcp(addr), None);
+            peers.on_active_outgoing_established(peer_id);
+            assert_eq!(peers.peers[&peer_id].unauthenticated_backoff_counter, 0);
+        }
     }
 
     #[tokio::test]

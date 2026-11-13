@@ -39,6 +39,9 @@ pub struct Peer {
     /// Counts number of times the peer was backed off due to a severe
     /// [`BackoffKind`](crate::BackoffKind).
     pub severe_backoff_counter: u8,
+    /// Counts consecutive outbound dials that failed before the remote authenticated. It only
+    /// lengthens the retry backoff and never bans or removes the peer.
+    pub unauthenticated_backoff_counter: u8,
 }
 
 // === impl Peer ===
@@ -87,6 +90,7 @@ impl Peer {
             kind: Default::default(),
             backed_off: false,
             severe_backoff_counter: 0,
+            unauthenticated_backoff_counter: 0,
         }
     }
 
