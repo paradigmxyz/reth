@@ -161,6 +161,11 @@ impl MethodResponse {
     where
         T: Serialize + Clone,
     {
+        // An error's size says nothing about the method's results, so it neither uses nor updates
+        // the hint.
+        if matches!(rp, ResponsePayload::Error(_)) {
+            return Self::response(id, rp, max_response_size)
+        }
         let mut rp = Self::response_with_capacity(id, rp, max_response_size, size_hint.capacity());
         // A response much smaller than the hint would otherwise keep the unused capacity until it
         // is sent.
@@ -168,8 +173,7 @@ impl MethodResponse {
         if unused > rp.json.len() && unused > RESPONSE_SHRINK_THRESHOLD {
             rp.json.shrink_to_fit();
         }
-        // Errors aren't recorded, including a success that exceeded the limit and was replaced
-        // with one.
+        // A success that exceeded the limit was replaced with an error, which isn't recorded.
         if rp.is_success() {
             size_hint.record(rp.json.len());
         }
@@ -625,6 +629,15 @@ mod tests {
         let rp = sized_response(success(&big), &hint);
         // Growing the buffer would at least double it.
         assert!(rp.json.capacity() < 2 * reserved);
+    }
+
+    #[test]
+    fn errors_do_not_reserve_the_hint() {
+        let hint = ResponseSizeHint::new();
+        sized_response(success(&"x".repeat(8 * 1024)), &hint);
+
+        let rp = sized_response(ResponsePayload::<()>::error(ErrorCode::InternalError), &hint);
+        assert!(rp.json.capacity() < hint.capacity());
     }
 
     #[test]
