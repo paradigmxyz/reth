@@ -204,13 +204,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{rayon::prelude::*, test_utils};
-    use std::{
-        cell::Cell,
-        rc::Rc,
-        sync::atomic::{AtomicUsize, Ordering},
-        thread,
+    use crate::{
+        executor::sync::atomic::{AtomicUsize, Ordering},
+        rayon::prelude::*,
+        test_utils, thread,
     };
+    use std::{cell::Cell, rc::Rc};
 
     #[cfg(not(feature = "fuzz"))]
     use std::sync::Barrier;

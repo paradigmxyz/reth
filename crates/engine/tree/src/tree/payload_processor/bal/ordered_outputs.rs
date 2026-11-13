@@ -149,103 +149,117 @@ mod tests {
 
     #[test]
     fn yields_outputs_in_transaction_order() {
-        let (tx, rx) = channel::unbounded();
-        tx.send(Ok(output(2, 20))).unwrap();
-        tx.send(Ok(output(0, 0))).unwrap();
-        tx.send(Ok(output(1, 10))).unwrap();
-        drop(tx);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (tx, rx) = channel::unbounded();
+            tx.send(Ok(output(2, 20))).unwrap();
+            tx.send(Ok(output(0, 0))).unwrap();
+            tx.send(Ok(output(1, 10))).unwrap();
+            drop(tx);
 
-        let results = ordered_worker_outputs(&rx, 3)
-            .map(|output| output.expect("ordered output").result)
-            .collect::<Vec<_>>();
+            let results = ordered_worker_outputs(&rx, 3)
+                .map(|output| output.expect("ordered output").result)
+                .collect::<Vec<_>>();
 
-        assert_eq!(results, vec![0, 10, 20]);
+            assert_eq!(results, vec![0, 10, 20]);
+        });
     }
 
     #[test]
     fn forwards_worker_errors_and_then_stops() {
-        let (tx, rx) = channel::unbounded();
-        tx.send(Err(BalWorkerError::Setup(BalExecutionError::Execution(
-            reth_evm::BlockExecutionError::msg("worker failed"),
-        ))))
-        .unwrap();
-        drop(tx);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (tx, rx) = channel::unbounded();
+            tx.send(Err(BalWorkerError::Setup(BalExecutionError::Execution(
+                reth_evm::BlockExecutionError::msg("worker failed"),
+            ))))
+            .unwrap();
+            drop(tx);
 
-        let mut outputs = ordered_worker_outputs::<u64>(&rx, 1);
+            let mut outputs = ordered_worker_outputs::<u64>(&rx, 1);
 
-        expect_err_contains(outputs.next().expect("first item"), "worker failed");
-        assert!(outputs.next().is_none());
+            expect_err_contains(outputs.next().expect("first item"), "worker failed");
+            assert!(outputs.next().is_none());
+        });
     }
 
     #[test]
     fn orders_recovery_and_execution_errors_by_transaction_index() {
-        let (tx, rx) = channel::unbounded();
-        tx.send(Err(BalWorkerError::Execution {
-            tx_index: 2,
-            tx_gas_limit: 42,
-            source: reth_evm::BlockExecutionError::msg("bal miss"),
-        }))
-        .unwrap();
-        tx.send(Err(BalWorkerError::Transaction {
-            tx_index: 1,
-            source: evm2::AnyError::new(std::io::Error::other("sig fail")),
-        }))
-        .unwrap();
-        tx.send(Ok(output(0, 0))).unwrap();
-        drop(tx);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (tx, rx) = channel::unbounded();
+            tx.send(Err(BalWorkerError::Execution {
+                tx_index: 2,
+                tx_gas_limit: 42,
+                source: reth_evm::BlockExecutionError::msg("bal miss"),
+            }))
+            .unwrap();
+            tx.send(Err(BalWorkerError::Transaction {
+                tx_index: 1,
+                source: evm2::AnyError::new(std::io::Error::other("sig fail")),
+            }))
+            .unwrap();
+            tx.send(Ok(output(0, 0))).unwrap();
+            drop(tx);
 
-        let mut outputs = ordered_worker_outputs(&rx, 3);
-        assert_eq!(outputs.next().unwrap().unwrap().result, 0);
-        expect_err_contains(outputs.next().unwrap(), "transaction 1: sig fail");
-        expect_err_contains(outputs.next().unwrap(), "transaction 2: bal miss");
-        assert!(outputs.next().is_none());
+            let mut outputs = ordered_worker_outputs(&rx, 3);
+            assert_eq!(outputs.next().unwrap().unwrap().result, 0);
+            expect_err_contains(outputs.next().unwrap(), "transaction 1: sig fail");
+            expect_err_contains(outputs.next().unwrap(), "transaction 2: bal miss");
+            assert!(outputs.next().is_none());
+        });
     }
 
     #[test]
     fn rejects_closed_channel_before_all_outputs_arrive() {
-        let (tx, rx) = channel::unbounded();
-        drop(tx);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (tx, rx) = channel::unbounded();
+            drop(tx);
 
-        let mut outputs = ordered_worker_outputs::<u64>(&rx, 1);
+            let mut outputs = ordered_worker_outputs::<u64>(&rx, 1);
 
-        expect_err_contains(outputs.next().expect("first item"), "waiting for ordered outputs");
-        assert!(outputs.next().is_none());
+            expect_err_contains(outputs.next().expect("first item"), "waiting for ordered outputs");
+            assert!(outputs.next().is_none());
+        });
     }
 
     #[test]
     #[should_panic(expected = "out-of-bounds transaction index")]
     fn panics_on_out_of_bounds_index() {
-        let (tx, rx) = channel::unbounded();
-        tx.send(Ok(output(1, 10))).unwrap();
-        drop(tx);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (tx, rx) = channel::unbounded();
+            tx.send(Ok(output(1, 10))).unwrap();
+            drop(tx);
 
-        let mut outputs = ordered_worker_outputs(&rx, 1);
-        let _ = outputs.next();
+            let mut outputs = ordered_worker_outputs(&rx, 1);
+            let _ = outputs.next();
+        });
     }
 
     #[test]
     #[should_panic(expected = "duplicate transaction index")]
     fn panics_on_duplicate_pending_index() {
-        let (tx, rx) = channel::unbounded();
-        tx.send(Ok(output(1, 10))).unwrap();
-        tx.send(Ok(output(1, 11))).unwrap();
-        drop(tx);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (tx, rx) = channel::unbounded();
+            tx.send(Ok(output(1, 10))).unwrap();
+            tx.send(Ok(output(1, 11))).unwrap();
+            drop(tx);
 
-        let mut outputs = ordered_worker_outputs(&rx, 2);
-        let _ = outputs.next();
+            let mut outputs = ordered_worker_outputs(&rx, 2);
+            let _ = outputs.next();
+        });
     }
 
     #[test]
     #[should_panic(expected = "duplicate transaction index")]
     fn panics_on_duplicate_already_yielded_index() {
-        let (tx, rx) = channel::unbounded();
-        tx.send(Ok(output(0, 0))).unwrap();
-        tx.send(Ok(output(0, 1))).unwrap();
-        drop(tx);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (tx, rx) = channel::unbounded();
+            tx.send(Ok(output(0, 0))).unwrap();
+            tx.send(Ok(output(0, 1))).unwrap();
+            drop(tx);
 
-        let mut outputs = ordered_worker_outputs(&rx, 2);
+            let mut outputs = ordered_worker_outputs(&rx, 2);
 
-        assert_eq!(outputs.next().expect("first item").expect("first output").result, 0);
-        let _ = outputs.next();
+            assert_eq!(outputs.next().expect("first item").expect("first output").result, 0);
+            let _ = outputs.next();
+        });
     }
 }

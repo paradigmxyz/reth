@@ -10099,6 +10099,7 @@ dependencies = [
  "reth-stages-types",
  "reth-static-file-types",
  "reth-storage-api",
+ "reth-tasks",
  "reth-testing-utils",
  "reth-tokio-util",
  "reth-tracing",
@@ -10500,6 +10501,7 @@ dependencies = [
  "jsonrpsee-types",
  "reth-errors",
  "reth-network-api",
+ "reth-tasks",
  "serde",
  "strum 0.27.2",
 ]

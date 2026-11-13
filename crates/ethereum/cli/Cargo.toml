@@ -98,4 +98,5 @@ fuzz = [
     "reth-node-ethereum/fuzz",
     "reth-tasks/fuzz",
     "reth-db/fuzz",
+    "reth-rpc-server-types/fuzz",
 ]

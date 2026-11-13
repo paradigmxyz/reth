@@ -1,6 +1,15 @@
 //! Additional helpers for executing tracing calls
 
-use crate::{channel, metrics::WorkerPoolMetrics, rayon, thread, time::Instant};
+use crate::{
+    channel,
+    executor::sync::{
+        atomic::{AtomicUsize, Ordering},
+        OnceLock,
+    },
+    metrics::WorkerPoolMetrics,
+    rayon, thread,
+    time::Instant,
+};
 use std::{
     any::Any,
     cell::RefCell,
@@ -9,10 +18,7 @@ use std::{
     ops::Deref,
     panic::{catch_unwind, AssertUnwindSafe},
     pin::Pin,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, OnceLock, Weak,
-    },
+    sync::{self, Arc, Weak},
     task::{ready, Context, Poll},
 };
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
@@ -223,7 +229,8 @@ fn with_current_worker<R>(f: impl FnOnce(&RefCell<Worker>) -> R) -> R {
 /// The underlying rayon pool is created lazily on first access.
 #[derive(Debug)]
 pub struct WorkerPool {
-    pool: OnceLock<rayon::ThreadPool>,
+    // Pool configuration and thread counts can be accessed before entering the selected runtime.
+    pool: sync::OnceLock<rayon::ThreadPool>,
     metrics: OnceLock<WorkerPoolMetrics>,
     num_threads: usize,
     thread_name_prefix: &'static str,
@@ -235,7 +242,12 @@ impl WorkerPool {
     /// The underlying rayon pool is not created until the first method that requires it is called.
     /// Thread names follow the pattern `"{prefix}-{index:02}"`.
     pub const fn new(num_threads: usize, thread_name_prefix: &'static str) -> Self {
-        Self { pool: OnceLock::new(), metrics: OnceLock::new(), num_threads, thread_name_prefix }
+        Self {
+            pool: sync::OnceLock::new(),
+            metrics: OnceLock::new(),
+            num_threads,
+            thread_name_prefix,
+        }
     }
 
     /// Returns a reference to the underlying rayon pool, creating it on first access.

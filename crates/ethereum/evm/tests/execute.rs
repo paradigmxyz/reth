@@ -26,8 +26,9 @@ use reth_evm::{
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::{BlockExecutionResult, BundleSource, StateUpdate};
 use reth_primitives_traits::{Block as _, RecoveredBlock};
+use reth_tasks::executor::{channel, Runtime};
 use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 
 fn create_database_with_beacon_root_contract() -> InMemoryDB {
     let mut db = InMemoryDB::default();
@@ -702,71 +703,74 @@ fn block_gas_limit_error() {
 
 #[test]
 fn test_balance_increment_not_duplicated() {
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::from(&*MAINNET)
-            .shanghai_activated()
-            .cancun_activated()
-            .prague_activated()
-            .build(),
-    );
+    Runtime::new().run(|| {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .cancun_activated()
+                .prague_activated()
+                .build(),
+        );
 
-    let withdrawal_recipient = address!("0x1000000000000000000000000000000000000000");
+        let withdrawal_recipient = address!("0x1000000000000000000000000000000000000000");
 
-    let mut db = create_database_with_withdrawal_requests_contract();
-    let initial_balance = 100;
-    db.insert_account_info(
-        &withdrawal_recipient,
-        AccountInfo { balance: U256::from(initial_balance), nonce: 1, ..Default::default() },
-    );
+        let mut db = create_database_with_withdrawal_requests_contract();
+        let initial_balance = 100;
+        db.insert_account_info(
+            &withdrawal_recipient,
+            AccountInfo { balance: U256::from(initial_balance), nonce: 1, ..Default::default() },
+        );
 
-    let withdrawal =
-        Withdrawal { index: 0, validator_index: 0, address: withdrawal_recipient, amount: 1 };
+        let withdrawal =
+            Withdrawal { index: 0, validator_index: 0, address: withdrawal_recipient, amount: 1 };
 
-    let header = Header {
-        timestamp: 1,
-        number: 1,
-        excess_blob_gas: Some(0),
-        parent_beacon_block_root: Some(B256::random()),
-        ..Header::default()
-    };
+        let header = Header {
+            timestamp: 1,
+            number: 1,
+            excess_blob_gas: Some(0),
+            parent_beacon_block_root: Some(B256::random()),
+            ..Header::default()
+        };
 
-    let block = &RecoveredBlock::new_unhashed(
-        Block {
-            header,
-            body: BlockBody {
-                transactions: vec![],
-                ommers: vec![],
-                withdrawals: Some(vec![withdrawal].into()),
+        let block = &RecoveredBlock::new_unhashed(
+            Block {
+                header,
+                body: BlockBody {
+                    transactions: vec![],
+                    ommers: vec![],
+                    withdrawals: Some(vec![withdrawal].into()),
+                },
             },
-        },
-        vec![],
-    );
+            vec![],
+        );
 
-    let provider = EthEvmConfig::new(chain_spec);
-    let executor = provider.batch_executor(db);
+        let provider = EthEvmConfig::new(chain_spec);
+        let executor = provider.batch_executor(db);
 
-    let (tx, rx) = mpsc::channel();
-    let tx_clone = tx.clone();
+        let (tx, rx) = channel::unbounded();
+        let tx_clone = tx.clone();
 
-    let _output = executor
-        .execute_with_state_hook(block, move |state: StateUpdate| {
-            if let Some(info) =
-                state.account(&withdrawal_recipient).and_then(|account| account.current.as_ref())
-            {
-                let _ = tx_clone.send(info.balance);
-            }
-        })
-        .expect("Block execution should succeed");
+        let _output = executor
+            .execute_with_state_hook(block, move |state: StateUpdate| {
+                if let Some(info) = state
+                    .account(&withdrawal_recipient)
+                    .and_then(|account| account.current.as_ref())
+                {
+                    let _ = tx_clone.send(info.balance);
+                }
+            })
+            .expect("Block execution should succeed");
 
-    drop(tx);
-    let balance_changes: Vec<U256> = rx.try_iter().collect();
+        drop(tx);
+        let balance_changes: Vec<U256> = rx.try_iter().collect();
 
-    let expected_final_balance = U256::from(initial_balance) + U256::from(1_000_000_000);
-    assert_eq!(
-        balance_changes,
-        [expected_final_balance],
-        "withdrawal must be streamed exactly once"
-    );
+        let expected_final_balance = U256::from(initial_balance) + U256::from(1_000_000_000);
+        assert_eq!(
+            balance_changes,
+            [expected_final_balance],
+            "withdrawal must be streamed exactly once"
+        );
+    });
 }
 
 #[test]

@@ -184,4 +184,7 @@ fuzz = [
     "reth-stages/fuzz",
     "reth-static-file/fuzz",
     "reth-trie-common/fuzz",
+    "reth-prune/fuzz",
+    "reth-rpc-eth-types/fuzz",
+    "reth-rpc-server-types/fuzz",
 ]

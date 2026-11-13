@@ -5,15 +5,15 @@
 //! named task, like a 1-thread thread pool keyed by name. Under `fuzz`, workers and
 //! their queues belong to the deterministic executor instead of the OS.
 
-use crate::{channel, metrics::WorkerThreadMetrics, thread, time::Instant};
-use dashmap::DashMap;
-use std::{
-    panic::AssertUnwindSafe,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
+use crate::{
+    channel,
+    executor::sync::atomic::{AtomicUsize, Ordering},
+    metrics::WorkerThreadMetrics,
+    thread,
+    time::Instant,
 };
+use dashmap::DashMap;
+use std::{panic::AssertUnwindSafe, sync::Arc};
 
 type BoxedTask = Box<dyn FnOnce() + Send + 'static>;
 

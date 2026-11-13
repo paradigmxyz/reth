@@ -1,6 +1,7 @@
 //! Scheduler-managed synchronization primitives.
 
 use shuttle_sync::sync;
+use std::ops::Deref;
 
 /// A one-time initialized value whose waiting callers remain scheduler-managed.
 #[derive(Debug)]
@@ -79,5 +80,53 @@ impl<T> From<T> for OnceLock<T> {
             initializing: sync::Mutex::new(()),
             ready: sync::Condvar::new(),
         }
+    }
+}
+
+/// A lazily initialized value whose waiting callers remain scheduler-managed.
+///
+/// Initialization and poisoning persist for the lifetime of this value, including across
+/// executions for process statics. Only the waiting state in Shuttle's [`sync::Once`] resets.
+/// Values containing simulated synchronization primitives must not be reused across executions.
+/// Independent runtime executions must not concurrently initialize the same process static.
+#[derive(Debug)]
+pub struct LazyLock<T, F = fn() -> T> {
+    value: std::sync::LazyLock<T, F>,
+    initializing: sync::Once,
+}
+
+impl<T, F: FnOnce() -> T> LazyLock<T, F> {
+    /// Creates a lazy value initialized by `initialize` on first access.
+    pub const fn new(initialize: F) -> Self {
+        Self { value: std::sync::LazyLock::new(initialize), initializing: sync::Once::new() }
+    }
+
+    /// Returns the value, blocking the logical thread if another caller is initializing it.
+    ///
+    /// An initializer panic permanently poisons the value; all later accesses panic, even
+    /// in a subsequent execution. Like other simulated blocking operations, forcing a value
+    /// requires an active [`crate::executor::Runtime::run`].
+    pub fn force(this: &Self) -> &T {
+        // Shuttle's Once keeps its waiting lock in execution-local storage. It serializes all
+        // native-cell access, so no simulated contender can block on the native initializer.
+        // call_once_force lets the native cell retain its poison semantics across executions.
+        this.initializing.call_once_force(|_| {
+            std::sync::LazyLock::force(&this.value);
+        });
+        std::sync::LazyLock::force(&this.value)
+    }
+}
+
+impl<T, F: FnOnce() -> T> Deref for LazyLock<T, F> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        Self::force(self)
+    }
+}
+
+impl<T: Default> Default for LazyLock<T> {
+    fn default() -> Self {
+        Self::new(T::default)
     }
 }

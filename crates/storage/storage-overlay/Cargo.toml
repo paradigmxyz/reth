@@ -43,6 +43,7 @@ parking_lot.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+reth-tasks.workspace = true
 reth-chain-state = { workspace = true, features = ["test-utils"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }

@@ -6,12 +6,10 @@ use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
 use reth_tasks::executor::{
     channel,
     channel::{Receiver, Sender},
+    sync::atomic::{AtomicUsize, Ordering},
     thread::{Builder, JoinHandle},
 };
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use std::sync::Arc;
 
 use tracing::trace;
 

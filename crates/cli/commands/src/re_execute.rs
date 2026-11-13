@@ -22,6 +22,7 @@ use reth_provider::{
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
 use reth_storage_api::{ChangeSetReader, DBProvider, StateProvider, StorageChangeSetReader};
+use reth_tasks::executor::thread;
 use reth_trie::bundle_state::{AccountInfoRevert, BundleState, RevertToSlot};
 use std::{
     collections::HashMap,
@@ -113,7 +114,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         }
 
         let num_tasks = self.num_tasks.unwrap_or_else(|| {
-            std::thread::available_parallelism().map(|n| n.get() as u64).unwrap_or(10)
+            thread::available_parallelism().map(|n| n.get() as u64).unwrap_or(10)
         });
 
         let total_gas = calculate_gas_used_from_headers(

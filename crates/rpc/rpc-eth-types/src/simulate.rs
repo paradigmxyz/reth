@@ -750,11 +750,12 @@ mod tests {
     use reth_evm::BundleState;
     use reth_primitives_traits::SealedHeader;
     use reth_storage_api::HashedPostStateProvider;
-    use reth_trie_common::{HashedPostState, KeccakKeyHasher};
-    use std::{
-        collections::BTreeMap,
+    use reth_tasks::executor::{
         sync::atomic::{AtomicUsize, Ordering},
+        Runtime,
     };
+    use reth_trie_common::{HashedPostState, KeccakKeyHasher};
+    use std::collections::BTreeMap;
 
     fn test_evm() -> Evm<'static, BaseEvmTypes> {
         Evm::new(
@@ -1029,93 +1030,96 @@ mod tests {
     /// again after every block, without reading the parent storage of destroyed accounts again.
     #[test]
     fn simulated_state_reads_parent_storage_once() {
-        let wiped = Address::with_last_byte(1);
-        let emptied = Address::with_last_byte(2);
-        let created = Address::with_last_byte(3);
-        let slot = |n: u64| B256::from(U256::from(n));
-        let slots = |range: std::ops::Range<u64>| {
-            range.map(|n| (slot(n), slot(n + 1000))).collect::<Vec<_>>()
-        };
+        Runtime::new().run(|| {
+            let wiped = Address::with_last_byte(1);
+            let emptied = Address::with_last_byte(2);
+            let created = Address::with_last_byte(3);
+            let slot = |n: u64| B256::from(U256::from(n));
+            let slots = |range: std::ops::Range<u64>| {
+                range.map(|n| (slot(n), slot(n + 1000))).collect::<Vec<_>>()
+            };
 
-        let mut db = InMemoryDB::default();
-        let mut provider = CountingProvider::default();
-        for (address, count) in [(wiped, 100), (emptied, 10)] {
-            db.insert_account_info(
-                &address,
-                AccountInfo { balance: U256::from(5), ..Default::default() },
-            );
-            for (key, value) in slots(0..count) {
-                db.insert_account_storage(
+            let mut db = InMemoryDB::default();
+            let mut provider = CountingProvider::default();
+            for (address, count) in [(wiped, 100), (emptied, 10)] {
+                db.insert_account_info(
                     &address,
-                    &U256::from_be_bytes(key.0),
-                    &U256::from_be_bytes(value.0),
+                    AccountInfo { balance: U256::from(5), ..Default::default() },
                 );
-                provider
-                    .storage
-                    .entry(address)
-                    .or_default()
-                    .insert(keccak256(key), U256::from_be_bytes(value.0));
+                for (key, value) in slots(0..count) {
+                    db.insert_account_storage(
+                        &address,
+                        &U256::from_be_bytes(key.0),
+                        &U256::from_be_bytes(value.0),
+                    );
+                    provider
+                        .storage
+                        .entry(address)
+                        .or_default()
+                        .insert(keccak256(key), U256::from_be_bytes(value.0));
+                }
             }
-        }
-        let mut db = CacheDB::new(db);
+            let mut db = CacheDB::new(db);
 
-        let blocks = [
-            // Full replacement of an existing account's storage, an emptied account, and a new
-            // account.
-            StateOverride::from_iter([
-                (
+            let blocks = [
+                // Full replacement of an existing account's storage, an emptied account, and a new
+                // account.
+                StateOverride::from_iter([
+                    (
+                        wiped,
+                        AccountOverride::default()
+                            .with_state([(slot(1), slot(7)), (slot(500), slot(8))]),
+                    ),
+                    (emptied, AccountOverride::default().with_balance(U256::ZERO)),
+                    (created, AccountOverride::default().with_balance(U256::from(3))),
+                ]),
+                // Later blocks touch the same account without wiping it. The new account has no
+                // parent storage to read when its storage is replaced.
+                StateOverride::from_iter([
+                    (wiped, AccountOverride::default().with_state_diff([(slot(2), slot(9))])),
+                    (created, AccountOverride::default().with_state([(slot(1), slot(4))])),
+                ]),
+                StateOverride::from_iter([(
                     wiped,
-                    AccountOverride::default()
-                        .with_state([(slot(1), slot(7)), (slot(500), slot(8))]),
-                ),
-                (emptied, AccountOverride::default().with_balance(U256::ZERO)),
-                (created, AccountOverride::default().with_balance(U256::from(3))),
-            ]),
-            // Later blocks touch the same account without wiping it. The new account has no
-            // parent storage to read when its storage is replaced.
-            StateOverride::from_iter([
-                (wiped, AccountOverride::default().with_state_diff([(slot(2), slot(9))])),
-                (created, AccountOverride::default().with_state([(slot(1), slot(4))])),
-            ]),
-            StateOverride::from_iter([(
-                wiped,
-                AccountOverride::default().with_balance(U256::from(6)),
-            )]),
-            // A second wipe, recreating a slot of the first.
-            StateOverride::from_iter([(
-                wiped,
-                AccountOverride::default().with_state([(slot(500), slot(10))]),
-            )]),
-            StateOverride::from_iter([(
-                wiped,
-                AccountOverride::default().with_state_diff([(slot(3), slot(11))]),
-            )]),
-        ];
+                    AccountOverride::default().with_balance(U256::from(6)),
+                )]),
+                // A second wipe, recreating a slot of the first.
+                StateOverride::from_iter([(
+                    wiped,
+                    AccountOverride::default().with_state([(slot(500), slot(10))]),
+                )]),
+                StateOverride::from_iter([(
+                    wiped,
+                    AccountOverride::default().with_state_diff([(slot(3), slot(11))]),
+                )]),
+            ];
 
-        let mut simulated = SimulatedState::default();
-        let mut cumulative = BundleState::default();
-        for (index, state_overrides) in blocks.into_iter().enumerate() {
-            let mut changes = BundleState::default();
-            apply_state_overrides_with_state(state_overrides, &mut db, Some(&mut changes)).unwrap();
+            let mut simulated = SimulatedState::default();
+            let mut cumulative = BundleState::default();
+            for (index, state_overrides) in blocks.into_iter().enumerate() {
+                let mut changes = BundleState::default();
+                apply_state_overrides_with_state(state_overrides, &mut db, Some(&mut changes))
+                    .unwrap();
 
-            simulated.extend(&provider, &changes).unwrap();
-            // Parent storage is read only when an account existing in the parent is first
-            // destroyed.
-            let reads = provider.reads.swap(0, Ordering::Relaxed);
-            assert_eq!(reads, [110, 0, 0, 0, 0][index], "block {index}");
-            let scans = provider.scans.swap(0, Ordering::Relaxed);
-            assert_eq!(scans, [2, 0, 0, 0, 0][index], "block {index}");
+                simulated.extend(&provider, &changes).unwrap();
+                // Parent storage is read only when an account existing in the parent is first
+                // destroyed.
+                let reads = provider.reads.swap(0, Ordering::Relaxed);
+                assert_eq!(reads, [110, 0, 0, 0, 0][index], "block {index}");
+                let scans = provider.scans.swap(0, Ordering::Relaxed);
+                assert_eq!(scans, [2, 0, 0, 0, 0][index], "block {index}");
 
-            cumulative.extend(changes);
-            let expected = provider.hashed_post_state(&cumulative).unwrap();
-            provider.reads.store(0, Ordering::Relaxed);
-            provider.scans.store(0, Ordering::Relaxed);
-            assert_eq!(simulated.hashed_state().accounts, expected.accounts, "block {index}");
-            assert_eq!(
-                provider.resulting_storage(simulated.hashed_state()),
-                provider.resulting_storage(&expected),
-                "block {index}"
-            );
-        }
+                cumulative.extend(changes);
+                let expected = provider.hashed_post_state(&cumulative).unwrap();
+                provider.reads.store(0, Ordering::Relaxed);
+                provider.scans.store(0, Ordering::Relaxed);
+                assert_eq!(simulated.hashed_state().accounts, expected.accounts, "block {index}");
+                assert_eq!(
+                    provider.resulting_storage(simulated.hashed_state()),
+                    provider.resulting_storage(&expected),
+                    "block {index}"
+                );
+            }
+        });
     }
 }

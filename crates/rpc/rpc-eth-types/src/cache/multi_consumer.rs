@@ -220,10 +220,11 @@ struct CachedValue<V> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
+    use reth_tasks::executor::{
+        sync::atomic::{AtomicUsize, Ordering},
+        Runtime,
     };
+    use std::sync::Arc;
 
     #[derive(Debug, PartialEq, Eq)]
     struct Weighted(usize);
@@ -312,20 +313,25 @@ mod tests {
 
     #[test]
     fn payloads_are_only_measured_on_enabled_insertions() {
-        for (count, bytes) in [(0, 10), (10, 0), (10, 3)] {
-            let measurements = Arc::new(AtomicUsize::new(0));
-            let mut cache = MultiConsumerLruCache::<u64, _, ()>::new(count, bytes, "test");
-            let enabled = count > 0 && bytes > 0;
-            assert!(cache.queue(0, ()));
-            for key in [0, 1, 1] {
-                assert_eq!(cache.insert(key, Measured(measurements.clone())), enabled);
-                assert_eq!(cache.get(&key).is_some(), enabled);
+        Runtime::new().run(|| {
+            for (count, bytes) in [(0, 10), (10, 0), (10, 3)] {
+                let measurements = Arc::new(AtomicUsize::new(0));
+                let mut cache = MultiConsumerLruCache::<u64, _, ()>::new(count, bytes, "test");
+                let enabled = count > 0 && bytes > 0;
+                assert!(cache.queue(0, ()));
+                for key in [0, 1, 1] {
+                    assert_eq!(cache.insert(key, Measured(measurements.clone())), enabled);
+                    assert_eq!(cache.get(&key).is_some(), enabled);
+                }
+                cache.evict_expired(
+                    Instant::now() + Duration::from_secs(10),
+                    Duration::from_secs(10),
+                );
+                assert_eq!(cache.memory_usage, 0);
+                assert_eq!(measurements.load(Ordering::Relaxed), if enabled { 3 } else { 0 });
+                assert_eq!(cache.remove(&0), Some(vec![()]));
             }
-            cache.evict_expired(Instant::now() + Duration::from_secs(10), Duration::from_secs(10));
-            assert_eq!(cache.memory_usage, 0);
-            assert_eq!(measurements.load(Ordering::Relaxed), if enabled { 3 } else { 0 });
-            assert_eq!(cache.remove(&0), Some(vec![()]));
-        }
+        });
     }
 
     #[test]

@@ -47,19 +47,14 @@ use reth_tasks::{
         channel,
         channel::mpsc::{self, channel, Receiver, Sender},
         rayon::prelude::*,
+        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
         thread,
         time::Instant,
     },
     Runtime, WorkerStatefulPool,
 };
 use reth_trie_common::MultiProofTargetsV2;
-use std::{
-    sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
 /// Maximum number of consecutive rounds that execute stale prewarm results again.

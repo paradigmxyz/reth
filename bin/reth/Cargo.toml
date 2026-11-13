@@ -212,6 +212,8 @@ fuzz = [
     "reth-db/fuzz",
     "reth-network/fuzz",
     "reth-provider/fuzz",
+    "reth-rpc-eth-types/fuzz",
+    "reth-rpc-server-types/fuzz",
 ]
 
 [[bin]]

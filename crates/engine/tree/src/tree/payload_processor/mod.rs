@@ -27,7 +27,10 @@ use reth_tasks::{
         channel,
         channel::{mpsc, Receiver, Sender},
         rayon::prelude::*,
-        sync::OnceLock,
+        sync::{
+            atomic::{AtomicBool, AtomicUsize},
+            OnceLock,
+        },
         time::Instant,
     },
     Runtime,
@@ -41,13 +44,7 @@ pub use reth_trie_parallel::{
         StateRootUpdateStream,
     },
 };
-use std::{
-    ops::Not,
-    sync::{
-        atomic::{AtomicBool, AtomicUsize},
-        Arc,
-    },
-};
+use std::{ops::Not, sync::Arc};
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
 pub mod bal;
@@ -765,12 +762,12 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
-    use reth_tasks::executor::channel::RecvTimeoutError;
+    use reth_tasks::executor::{channel::RecvTimeoutError, sync::Mutex};
     use reth_trie_common::bundle_state::BundleState;
     use std::{
         collections::HashSet,
         process::Command,
-        sync::{atomic::Ordering, Arc, Mutex},
+        sync::{atomic::Ordering, Arc},
     };
     use tracing_subscriber::{
         filter::LevelFilter, layer::SubscriberExt, registry::LookupSpan, Registry,

@@ -111,6 +111,7 @@ fuzz = [
     "reth-node-ethereum/fuzz",
     "reth-stages?/fuzz",
     "reth-static-file?/fuzz",
+    "reth-prune/fuzz",
 ]
 asm-keccak = [
     "reth-evm/asm-keccak",

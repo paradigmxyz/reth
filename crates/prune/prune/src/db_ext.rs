@@ -205,11 +205,9 @@ mod tests {
     use reth_primitives_traits::SignerRecoverable;
     use reth_provider::{DBProvider, DatabaseProviderFactory};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use reth_tasks::executor::sync::atomic::{AtomicUsize, Ordering};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    };
+    use std::sync::Arc;
 
     struct CountingIter {
         data: Vec<u64>,
@@ -246,108 +244,112 @@ mod tests {
 
     #[test]
     fn prune_table_with_iterator_early_exit_does_not_overconsume() {
-        let db = TestStageDB::default();
-        let mut rng = generators::rng();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let db = TestStageDB::default();
+            let mut rng = generators::rng();
 
-        let blocks = random_block_range(
-            &mut rng,
-            1..=3,
-            BlockRangeParams {
-                parent: Some(alloy_primitives::B256::ZERO),
-                tx_count: 2..3,
-                ..Default::default()
-            },
-        );
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+            let blocks = random_block_range(
+                &mut rng,
+                1..=3,
+                BlockRangeParams {
+                    parent: Some(alloy_primitives::B256::ZERO),
+                    tx_count: 2..3,
+                    ..Default::default()
+                },
+            );
+            db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
-        let mut tx_senders = Vec::new();
-        for block in &blocks {
-            tx_senders.reserve_exact(block.transaction_count());
-            for transaction in &block.body().transactions {
-                tx_senders.push((
-                    tx_senders.len() as u64,
-                    transaction.recover_signer().expect("recover signer"),
-                ));
+            let mut tx_senders = Vec::new();
+            for block in &blocks {
+                tx_senders.reserve_exact(block.transaction_count());
+                for transaction in &block.body().transactions {
+                    tx_senders.push((
+                        tx_senders.len() as u64,
+                        transaction.recover_signer().expect("recover signer"),
+                    ));
+                }
             }
-        }
-        let total = tx_senders.len();
-        db.insert_transaction_senders(tx_senders).expect("insert transaction senders");
+            let total = tx_senders.len();
+            db.insert_transaction_senders(tx_senders).expect("insert transaction senders");
 
-        let provider = db.factory.database_provider_rw().unwrap();
+            let provider = db.factory.database_provider_rw().unwrap();
 
-        let calls = Arc::new(AtomicUsize::new(0));
-        let keys: Vec<u64> = (0..total as u64).collect();
-        let counting_iter = CountingIter::new(keys, calls.clone());
+            let calls = Arc::new(AtomicUsize::new(0));
+            let keys: Vec<u64> = (0..total as u64).collect();
+            let counting_iter = CountingIter::new(keys, calls.clone());
 
-        let mut limiter = PruneLimiter::default().set_deleted_entries_limit(2);
+            let mut limiter = PruneLimiter::default().set_deleted_entries_limit(2);
 
-        let (pruned, done) = provider
-            .tx_ref()
-            .prune_table_with_iterator::<tables::TransactionSenders>(
-                counting_iter,
-                &mut limiter,
-                |_| {},
-            )
-            .expect("prune");
+            let (pruned, done) = provider
+                .tx_ref()
+                .prune_table_with_iterator::<tables::TransactionSenders>(
+                    counting_iter,
+                    &mut limiter,
+                    |_| {},
+                )
+                .expect("prune");
 
-        assert_eq!(pruned, 2);
-        assert!(!done);
-        assert_eq!(calls.load(Ordering::SeqCst), pruned + 1);
+            assert_eq!(pruned, 2);
+            assert!(!done);
+            assert_eq!(calls.load(Ordering::SeqCst), pruned + 1);
 
-        provider.commit().expect("commit");
-        assert_eq!(db.table::<tables::TransactionSenders>().unwrap().len(), total - 2);
+            provider.commit().expect("commit");
+            assert_eq!(db.table::<tables::TransactionSenders>().unwrap().len(), total - 2);
+        });
     }
 
     #[test]
     fn prune_table_with_iterator_consumes_to_end_reports_done() {
-        let db = TestStageDB::default();
-        let mut rng = generators::rng();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let db = TestStageDB::default();
+            let mut rng = generators::rng();
 
-        let blocks = random_block_range(
-            &mut rng,
-            1..=2,
-            BlockRangeParams {
-                parent: Some(alloy_primitives::B256::ZERO),
-                tx_count: 1..2,
-                ..Default::default()
-            },
-        );
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+            let blocks = random_block_range(
+                &mut rng,
+                1..=2,
+                BlockRangeParams {
+                    parent: Some(alloy_primitives::B256::ZERO),
+                    tx_count: 1..2,
+                    ..Default::default()
+                },
+            );
+            db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
-        let mut tx_senders = Vec::new();
-        for block in &blocks {
-            for transaction in &block.body().transactions {
-                tx_senders.push((
-                    tx_senders.len() as u64,
-                    transaction.recover_signer().expect("recover signer"),
-                ));
+            let mut tx_senders = Vec::new();
+            for block in &blocks {
+                for transaction in &block.body().transactions {
+                    tx_senders.push((
+                        tx_senders.len() as u64,
+                        transaction.recover_signer().expect("recover signer"),
+                    ));
+                }
             }
-        }
-        let total = tx_senders.len();
-        db.insert_transaction_senders(tx_senders).expect("insert transaction senders");
+            let total = tx_senders.len();
+            db.insert_transaction_senders(tx_senders).expect("insert transaction senders");
 
-        let provider = db.factory.database_provider_rw().unwrap();
+            let provider = db.factory.database_provider_rw().unwrap();
 
-        let calls = Arc::new(AtomicUsize::new(0));
-        let keys: Vec<u64> = (0..total as u64).collect();
-        let counting_iter = CountingIter::new(keys, calls.clone());
+            let calls = Arc::new(AtomicUsize::new(0));
+            let keys: Vec<u64> = (0..total as u64).collect();
+            let counting_iter = CountingIter::new(keys, calls.clone());
 
-        let mut limiter = PruneLimiter::default().set_deleted_entries_limit(usize::MAX);
+            let mut limiter = PruneLimiter::default().set_deleted_entries_limit(usize::MAX);
 
-        let (pruned, done) = provider
-            .tx_ref()
-            .prune_table_with_iterator::<tables::TransactionSenders>(
-                counting_iter,
-                &mut limiter,
-                |_| {},
-            )
-            .expect("prune");
+            let (pruned, done) = provider
+                .tx_ref()
+                .prune_table_with_iterator::<tables::TransactionSenders>(
+                    counting_iter,
+                    &mut limiter,
+                    |_| {},
+                )
+                .expect("prune");
 
-        assert_eq!(pruned, total);
-        assert!(done);
-        assert_eq!(calls.load(Ordering::SeqCst), total + 1);
+            assert_eq!(pruned, total);
+            assert!(done);
+            assert_eq!(calls.load(Ordering::SeqCst), total + 1);
 
-        provider.commit().expect("commit");
-        assert_eq!(db.table::<tables::TransactionSenders>().unwrap().len(), 0);
+            provider.commit().expect("commit");
+            assert_eq!(db.table::<tables::TransactionSenders>().unwrap().len(), 0);
+        });
     }
 }

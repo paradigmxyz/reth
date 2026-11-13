@@ -74,6 +74,7 @@ mod test_utils {
     use crate::executor::Runtime;
     use tokio::runtime::Builder;
 
+    // This lock is acquired before entering the selected runtime and serializes simulations.
     #[cfg(feature = "fuzz")]
     use std::sync::Mutex;
 
@@ -104,6 +105,7 @@ mod test_utils {
     #[cfg(feature = "rayon")]
     pub(crate) fn block_on<F: Future>(future: F) -> F::Output {
         let mut future = pin!(future);
+        // A native watchdog bounds Tokio work even while this runnable poller stalls virtual time.
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             if let Some(result) = future.as_mut().now_or_never() {
