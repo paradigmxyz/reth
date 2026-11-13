@@ -314,12 +314,13 @@ impl MethodResponse {
             .expect("JSON serialization infallible; qed");
         json.push_str(r#","result":"#);
 
-        let ResponseStream { parts, remaining, producer } = stream;
         // The closing brace needs one byte, so a response that fits leaves `remaining` above zero.
         let Some(left) = max_response_size.checked_sub(json.len()).filter(|&left| left > 0) else {
             return Self::error(id, reject_too_big_response(max_response_size))
         };
-        remaining.store(left, Ordering::Relaxed);
+        let (tx, parts) = mpsc::unbounded_channel();
+        let remaining = Arc::new(AtomicUsize::new(left));
+        let producer = (stream.producer)(ResponseSink { parts: tx, remaining: remaining.clone() });
         let mut stream = StreamedJson {
             id,
             head: Bytes::new(),
@@ -368,7 +369,7 @@ pub struct StreamedJson {
     head: Bytes,
     parts: mpsc::UnboundedReceiver<Bytes>,
     /// `None` once the producer finished with `outcome`.
-    producer: Option<BoxFuture<'static, Result<(), ErrorObjectOwned>>>,
+    producer: Option<Producer>,
     outcome: Result<(), ErrorObjectOwned>,
     /// See [`ResponseSink::remaining`].
     remaining: Arc<AtomicUsize>,
@@ -422,10 +423,11 @@ impl Stream for StreamedJson {
 /// Return it from a method registered with
 /// [`RpcModule::register_streaming_method`](crate::server::RpcModule::register_streaming_method).
 pub struct ResponseStream {
-    parts: mpsc::UnboundedReceiver<Bytes>,
-    remaining: Arc<AtomicUsize>,
-    producer: BoxFuture<'static, Result<(), ErrorObjectOwned>>,
+    /// Called once the response size limit is known, so every part counts towards it.
+    producer: Box<dyn FnOnce(ResponseSink) -> Producer + Send>,
 }
+
+type Producer = BoxFuture<'static, Result<(), ErrorObjectOwned>>;
 
 impl ResponseStream {
     /// Creates a result that `producer` sends in parts through the given sink.
@@ -436,17 +438,18 @@ impl ResponseStream {
     /// returns or when it panics.
     pub fn new<F, Fut, E>(producer: F) -> Self
     where
-        F: FnOnce(ResponseSink) -> Fut,
+        F: FnOnce(ResponseSink) -> Fut + Send + 'static,
         Fut: Future<Output = Result<(), E>> + Send + 'static,
         E: Into<ErrorObjectOwned>,
     {
-        let (tx, parts) = mpsc::unbounded_channel();
-        let remaining = Arc::new(AtomicUsize::new(usize::MAX));
-        let producer = producer(ResponseSink { parts: tx, remaining: remaining.clone() });
-        let producer = AssertUnwindSafe(async move { producer.await.map_err(Into::into) })
-            .catch_unwind()
-            .map(|outcome| outcome.unwrap_or_else(|_| Err(ErrorCode::InternalError.into())));
-        Self { parts, remaining, producer: producer.boxed() }
+        let producer = |sink| {
+            let producer = producer(sink);
+            AssertUnwindSafe(async move { producer.await.map_err(Into::into) })
+                .catch_unwind()
+                .map(|outcome| outcome.unwrap_or_else(|_| Err(ErrorCode::InternalError.into())))
+                .boxed()
+        };
+        Self { producer: Box::new(producer) }
     }
 }
 
@@ -732,6 +735,13 @@ mod tests {
         assert_eq!(rp.as_error_code(), None);
         assert_eq!(rp.buffer().await.as_error_code(), Some(OVERSIZED_RESPONSE_CODE));
         assert_eq!(sent_rx.recv().unwrap(), [true, false, false]);
+        // So is a part sent before the producer returns its future.
+        let stream = ResponseStream::new(|tx| {
+            let _ = tx.send(Bytes::from_static(b"[1,2]"));
+            async { Ok::<_, ErrorObjectOwned>(()) }
+        });
+        let rp = MethodResponse::stream(Id::Number(1), stream, ok.len() - 2).await;
+        assert_eq!(rp.as_error_code(), Some(OVERSIZED_RESPONSE_CODE));
 
         // A panicking producer fails the result.
         let panics = || -> Result<(), ErrorObjectOwned> { panic!("producer panicked") };
