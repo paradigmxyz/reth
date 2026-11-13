@@ -7,7 +7,9 @@ use alloy_eip7928::{bal::DecodedBal, BlockAccessIndex};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use evm2::evm::Bal as EvmBal;
-use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
+use evm2_inspectors::tracing::{
+    TraceLimitBehavior, TraceLimits, TracingInspector, TracingInspectorConfig,
+};
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{
@@ -82,8 +84,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         R: Send + 'static,
     {
         self.spawn_with_state_at_block(at, move |this, mut db| {
-            let (inspector, result) =
-                this.inspect(&mut db, evm_env, &tx_env, TracingInspector::new(config))?;
+            let inspector = this.tracing_inspector(config);
+            let (inspector, result) = this.inspect(&mut db, evm_env, &tx_env, inspector)?;
             f(inspector, result, db)
         })
     }
@@ -118,7 +120,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             + 'static,
         R: Send + 'static,
     {
-        self.spawn_trace_transaction_in_block_with_inspector(hash, TracingInspector::new(config), f)
+        self.spawn_trace_transaction_in_block_with_inspector(
+            hash,
+            self.tracing_inspector(config),
+            f,
+        )
     }
 
     /// Retrieves the transaction if it exists and returns its trace.
@@ -305,7 +311,10 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             block_id,
             block,
             highest_index,
-            move || TracingInspector::new(config),
+            {
+                let limits = self.trace_limits();
+                move || TracingInspector::new(config).with_limits(limits)
+            },
             f,
         )
     }
@@ -480,6 +489,22 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         R: Send + 'static,
     {
         self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)
+    }
+
+    /// Returns the limits for the tracers of the trace and debug APIs.
+    ///
+    /// A traced transaction that records more than the configured
+    /// [`max_trace_bytes`](reth_rpc_eth_types::EthApiSettings::max_trace_bytes) halts with an
+    /// error.
+    fn trace_limits(&self) -> TraceLimits {
+        TraceLimits::default()
+            .set_max_recorded_bytes(self.eth_api_settings().max_trace_bytes)
+            .set_behavior(TraceLimitBehavior::Halt)
+    }
+
+    /// Returns a [`TracingInspector`] for the config, bounded by [`Self::trace_limits`].
+    fn tracing_inspector(&self, config: TracingInspectorConfig) -> TracingInspector {
+        TracingInspector::new(config).with_limits(self.trace_limits())
     }
 
     /// Applies chain-specific state transitions required before executing a block.

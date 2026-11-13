@@ -745,8 +745,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_eth_api_settings() {
+        use evm2_inspectors::tracing::{TraceLimitBehavior, TraceLimits};
         use reth_rpc_eth_api::{
-            helpers::{Call, EthState, EthTransactions, LoadPendingBlock},
+            helpers::{Call, EthState, EthTransactions, LoadPendingBlock, Trace},
             EthApiTypes,
         };
         use reth_rpc_eth_types::{builder::config::PendingBlockKind, EthApiSettings};
@@ -763,6 +764,7 @@ mod tests {
             assert_eq!(actual.cache_computed_bals, expected.cache_computed_bals);
             assert_eq!(actual.gas_cap, expected.gas_cap);
             assert_eq!(actual.max_simulate_blocks, expected.max_simulate_blocks);
+            assert_eq!(actual.max_trace_bytes, expected.max_trace_bytes);
             assert_eq!(
                 actual.compute_state_root_for_eth_simulate,
                 expected.compute_state_root_for_eth_simulate
@@ -792,6 +794,7 @@ mod tests {
             cache_computed_bals: true,
             gas_cap: 123_456,
             max_simulate_blocks: 7,
+            max_trace_bytes: Some(4096),
             compute_state_root_for_eth_simulate: true,
             eth_proof_window: 42,
             pending_block_kind: PendingBlockKind::Empty,
@@ -815,6 +818,7 @@ mod tests {
         .max_blocking_io_requests(expected.max_blocking_io_requests)
         .gas_cap(expected.gas_cap.into())
         .max_simulate_blocks(expected.max_simulate_blocks)
+        .max_trace_bytes(expected.max_trace_bytes)
         .compute_state_root_for_eth_simulate(expected.compute_state_root_for_eth_simulate)
         .eth_proof_window(expected.eth_proof_window)
         .pending_block_kind(expected.pending_block_kind)
@@ -830,6 +834,12 @@ mod tests {
         );
         assert_eq!(Call::call_gas_limit(&api), expected.gas_cap);
         assert_eq!(Call::max_simulate_blocks(&api), expected.max_simulate_blocks);
+        assert_eq!(
+            Trace::trace_limits(&api),
+            TraceLimits::default()
+                .set_max_recorded_bytes(expected.max_trace_bytes)
+                .set_behavior(TraceLimitBehavior::Halt)
+        );
         assert_eq!(
             Call::compute_state_root_for_eth_simulate(&api),
             expected.compute_state_root_for_eth_simulate

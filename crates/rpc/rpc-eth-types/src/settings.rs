@@ -29,6 +29,8 @@ pub struct EthApiSettings {
     pub gas_cap: u64,
     /// Maximum number of blocks for `eth_simulateV1`.
     pub max_simulate_blocks: u64,
+    /// Maximum bytes a single traced transaction may record. `None` is unlimited.
+    pub max_trace_bytes: Option<usize>,
     /// Whether to compute state roots for `eth_simulateV1`.
     pub compute_state_root_for_eth_simulate: bool,
     /// Maximum number of blocks into the past for generating state proofs.
@@ -53,6 +55,7 @@ impl Default for EthApiSettings {
             cache_computed_bals: false,
             gas_cap: RPC_DEFAULT_GAS_CAP.into(),
             max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
+            max_trace_bytes: None,
             compute_state_root_for_eth_simulate: false,
             eth_proof_window: DEFAULT_ETH_PROOF_WINDOW,
             pending_block_kind: PendingBlockKind::default(),
