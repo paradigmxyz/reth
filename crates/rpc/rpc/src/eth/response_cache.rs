@@ -3,7 +3,8 @@
 //! `latest` and the few blocks below it are by far the most requested blocks, and every request
 //! converted and serialized the same block again. The cache keeps the serialized result per block
 //! hash, so it never needs invalidating: the response for a hash cannot change, and a reorg only
-//! brings new hashes.
+//! brings new hashes. A result is only served while its block is within a few blocks of the best
+//! block, so a block that was reorged out is not answered by hash for longer than that.
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
@@ -37,7 +38,7 @@ const CAPACITY: usize = 3 * (RECENT_BLOCKS as usize + 2);
 /// Wraps the methods already registered in `module`. Whatever the cache does not serve — params it
 /// cannot parse, `pending` and `earliest`, unknown and older blocks, errors — goes to the original
 /// handler with the original params, so those answers are unchanged. Does nothing for a method that
-/// is not registered.
+/// is not registered or whose handler is not async.
 pub fn cache_block_responses<Ctx, Eth>(module: &mut RpcModule<Ctx>, eth_api: Eth)
 where
     Ctx: Send + Sync + 'static,
@@ -72,7 +73,8 @@ fn wrap<Ctx, Eth>(
     Ctx: Send + Sync + 'static,
     Eth: FullEthApiServer + Clone,
 {
-    let Some(MethodCallback::Async(original)) = module.remove_method(name) else { return };
+    // Looked up before it is removed, so a handler that cannot be wrapped stays registered.
+    let Some(MethodCallback::Async(original)) = module.method(name).cloned() else { return };
     let (eth_api, cache) = (eth_api.clone(), cache.clone());
     let callback =
         MethodCallback::Async(Arc::new(move |id, params, conn_id, max_response_size| {
@@ -89,6 +91,7 @@ fn wrap<Ctx, Eth>(
             }
             .boxed()
         }));
+    module.remove_method(name);
     module.verify_and_insert(name, callback).expect("the method was just removed");
 }
 
@@ -139,10 +142,11 @@ impl Serialize for SharedJson {
     }
 }
 
-/// The serialized results of the most recently requested recent blocks, oldest first.
+/// The serialized results of the most recently requested recent blocks, oldest first, each with
+/// the hash and number of its block.
 #[derive(Debug, Default)]
 struct ResponseCache {
-    entries: Mutex<VecDeque<(B256, Kind, SharedJson)>>,
+    entries: Mutex<VecDeque<(B256, u64, Kind, SharedJson)>>,
 }
 
 impl ResponseCache {
@@ -152,8 +156,9 @@ impl ResponseCache {
     where
         Eth: FullEthApiServer,
     {
-        let hash = recent_block_hash(eth_api, block_id)?;
-        if let Some(result) = self.get(hash, kind) {
+        let best = eth_api.provider().best_block_number().ok()?;
+        let hash = recent_block_hash(eth_api, block_id, best)?;
+        if let Some(result) = self.get(hash, kind, best) {
             return Some(result);
         }
 
@@ -162,8 +167,7 @@ impl ResponseCache {
         // under.
         let by_hash = BlockId::from(hash);
         let block = LoadBlock::recovered_block(eth_api, by_hash).await.ok()??;
-        let best = eth_api.provider().best_block_number().ok()?;
-        if block.number() + RECENT_BLOCKS < best {
+        if !is_recent(block.number(), best) {
             return None;
         }
         let raw = match kind {
@@ -179,38 +183,42 @@ impl ResponseCache {
             }
         };
         let result = SharedJson(Arc::from(raw));
-        self.insert(hash, kind, result.clone());
+        self.insert(hash, block.number(), kind, result.clone());
         Some(result)
     }
 
-    fn get(&self, hash: B256, kind: Kind) -> Option<SharedJson> {
+    /// Returns the cached result unless its block is no longer recent. An entry stays in the ring
+    /// until newer ones push it out, which can take arbitrarily long, so without this check a
+    /// block that was reorged out would be answered by hash for just as long.
+    fn get(&self, hash: B256, kind: Kind, best: u64) -> Option<SharedJson> {
         self.entries
             .lock()
             .iter()
-            .find(|(h, k, _)| *h == hash && *k == kind)
-            .map(|(_, _, r)| r.clone())
+            .find(|(h, number, k, _)| *h == hash && *k == kind && is_recent(*number, best))
+            .map(|(.., r)| r.clone())
     }
 
-    fn insert(&self, hash: B256, kind: Kind, result: SharedJson) {
+    fn insert(&self, hash: B256, number: u64, kind: Kind, result: SharedJson) {
         let mut entries = self.entries.lock();
         // Requests that missed at the same time computed the same result; keep the first.
-        if entries.iter().any(|(h, k, _)| *h == hash && *k == kind) {
+        if entries.iter().any(|(h, _, k, _)| *h == hash && *k == kind) {
             return;
         }
         if entries.len() == CAPACITY {
             entries.pop_front();
         }
-        entries.push_back((hash, kind, result));
+        entries.push_back((hash, number, kind, result));
     }
 }
 
 /// Resolves `block_id` to the hash of a recent block, or `None` if it is not one.
 ///
-/// A hash is returned as is; whether that block is recent is checked once it has been fetched, on a
-/// miss. A hash that must be canonical is left to the original handler, since an entry does not
-/// record whether its block still is. A number is checked against the best block before anything
-/// is looked up, so a request for an old block costs no lookup here.
-fn recent_block_hash<Eth>(eth_api: &Eth, block_id: BlockId) -> Option<B256>
+/// A hash is returned as is; whether that block is recent is checked against its entry on a hit,
+/// and once it has been fetched on a miss. A hash that must be canonical is left to the original
+/// handler, since an entry does not record whether its block still is. A number is checked against
+/// `best`, the best block number, before anything is looked up, so a request for an old block
+/// costs no lookup here.
+fn recent_block_hash<Eth>(eth_api: &Eth, block_id: BlockId, best: u64) -> Option<B256>
 where
     Eth: FullEthApiServer,
 {
@@ -219,14 +227,48 @@ where
         BlockId::Hash(hash) => return Some(hash.block_hash),
         BlockId::Number(number) => number,
     };
-    let provider = eth_api.provider();
     match number {
         BlockNumberOrTag::Pending | BlockNumberOrTag::Earliest => return None,
-        BlockNumberOrTag::Number(n) if n + RECENT_BLOCKS < provider.best_block_number().ok()? => {
-            return None
-        }
+        BlockNumberOrTag::Number(n) if !is_recent(n, best) => return None,
         _ => {}
     }
-    let header = provider.sealed_header_by_number_or_tag(number).ok()??;
+    let header = eth_api.provider().sealed_header_by_number_or_tag(number).ok()??;
     Some(header.hash())
+}
+
+/// Whether block `number` is close enough to the `best` block for its responses to be cached.
+///
+/// Subtracts from `best` instead of adding to `number`, which comes from the request and may be
+/// as high as `u64::MAX`.
+const fn is_recent(number: u64, best: u64) -> bool {
+    number >= best.saturating_sub(RECENT_BLOCKS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::EthApiBuilder;
+    use reth_chainspec::ChainSpecProvider;
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_network_api::noop::NoopNetwork;
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_transaction_pool::test_utils::testing_pool;
+
+    #[tokio::test]
+    async fn keeps_handler_that_is_not_async() {
+        let provider = MockEthProvider::default();
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let mut module = RpcModule::new(());
+        module.register_method("eth_getBlockByHash", |_, _| "sync").unwrap();
+
+        cache_block_responses(&mut module, eth_api);
+
+        assert!(matches!(module.method("eth_getBlockByHash"), Some(MethodCallback::Sync(_))));
+    }
 }

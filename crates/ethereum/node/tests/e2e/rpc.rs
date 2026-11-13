@@ -1358,5 +1358,16 @@ async fn test_block_response_cache_matches_uncached_responses() -> eyre::Result<
         let block = raw("eth_getBlockByNumber", request).await?;
         assert!(block.contains(&format!("{fork}")), "not the fork block: {block}");
     }
+
+    // The highest number is compared against the head like any other, without overflowing.
+    assert_eq!(raw("eth_getBlockByNumber", json!([U256::from(u64::MAX), false])).await?, "null");
+
+    // The replaced head is still cached. Once it is too far below the new head to be served from
+    // the cache, it gets the answer of the handler, which does not know the block anymore.
+    node.advance_blocks(5).await?;
+    poll_until("the replaced head to be unknown", || async {
+        Ok((raw("eth_getBlockByHash", json!([head, false])).await? == "null").then_some(()))
+    })
+    .await?;
     Ok(())
 }
