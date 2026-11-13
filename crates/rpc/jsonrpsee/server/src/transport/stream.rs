@@ -29,6 +29,11 @@ use tokio::{
 /// the buffer.
 const MAX_MESSAGES_PER_FLUSH: usize = 64;
 
+/// Messages the receive loop handles before it lets the send loop write the queued responses.
+/// Both loops share the connection task, so a client that keeps sending would otherwise delay
+/// its own responses.
+const MAX_MESSAGES_PER_TURN: usize = 32;
+
 /// Why a message could not be read from a connection.
 #[derive(Debug)]
 pub enum ReadError<E> {
@@ -160,7 +165,18 @@ where
         let call_permits = Arc::new(Semaphore::new(max_concurrent_calls));
         tokio::pin!(stopped);
 
+        // Messages handled since this loop last yielded to the send loop.
+        let mut handled = 0;
+
         let shutdown = loop {
+            // Nothing is given up while no response is queued, so a quiet connection never yields
+            // here.
+            handled += 1;
+            if handled >= MAX_MESSAGES_PER_TURN && sink.capacity() != sink.max_capacity() {
+                handled = 0;
+                tokio::task::yield_now().await;
+            }
+
             let receive = tokio::select! {
                 receive = try_recv(&mut incoming, stopped) => receive,
                 // The send loop has ended, e.g. because a write timed out, so nothing can be sent
