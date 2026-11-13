@@ -215,6 +215,7 @@ sparse_trie_tests! {
 
     // reveal_nodes
     test_reveal_nodes_empty_slice,
+    test_reveal_nodes_rejects_missing_extension_branch,
     test_reveal_nodes_single_leaf,
     test_reveal_nodes_idempotent,
     test_reveal_nodes_with_branch_masks,

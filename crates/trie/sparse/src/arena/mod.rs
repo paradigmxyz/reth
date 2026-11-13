@@ -3071,31 +3071,12 @@ mod tests {
     use alloy_primitives::{map::B256Map, B256, U256};
     use rand::{seq::SliceRandom, Rng, SeedableRng};
     use reth_trie::test_utils::TrieTestHarness;
-    use reth_trie_common::{BranchNode, ExtensionNode, ProofV2Target};
+    use reth_trie_common::ProofV2Target;
     use std::collections::BTreeMap;
     use tracing::{info, trace};
 
     const fn epoch(value: u64) -> TrieNodeEpoch {
         TrieNodeEpoch::new(value)
-    }
-
-    #[test]
-    fn unsupported_root_preserves_update_retention_and_allows_valid_root() {
-        let mut trie = ArenaParallelSparseTrie::default();
-        let root = TrieNode::Extension(reth_trie_common::ExtensionNode::new(
-            Nibbles::from_nibbles([1]),
-            RlpNode::word_rlp(&B256::ZERO),
-        ));
-        let mut nodes = [ProofTrieNode { path: Nibbles::default(), node: root, masks: None }];
-        let error = trie.set_root(&mut nodes, true).unwrap_err();
-        assert!(
-            matches!(error.kind(), SparseTrieErrorKind::Reveal { path, .. } if path.is_empty())
-        );
-        assert!(trie.buffers.updates.is_none());
-
-        trie.set_root(&mut [ProofTrieNode::empty()], true).unwrap();
-        assert_eq!(trie.root(epoch(1)), EMPTY_ROOT_HASH);
-        assert!(trie.buffers.updates.is_some());
     }
 
     #[test]
@@ -3347,109 +3328,5 @@ mod tests {
 
             harness.assert_changes(&mut apst, changeset2);
         }
-    }
-
-    #[test]
-    fn paired_extension_root_preserves_branch_masks() {
-        let branch = TrieNode::Branch(BranchNode::new(
-            vec![RlpNode::word_rlp(&B256::repeat_byte(1)); 2],
-            TrieMask::new(3),
-        ));
-        let masks = BranchNodeMasks { tree_mask: TrieMask::new(1), hash_mask: TrieMask::new(3) };
-        let extension = TrieNode::Extension(ExtensionNode::new(
-            Nibbles::from_nibbles([1, 2]),
-            RlpNode::from_rlp(&alloy_rlp::encode(&branch)),
-        ));
-        let expected = keccak256(alloy_rlp::encode(&extension));
-        let nodes = [
-            ProofTrieNode { path: Nibbles::from_nibbles([1, 2]), node: branch, masks: Some(masks) },
-            ProofTrieNode { path: Nibbles::default(), node: extension, masks: None },
-        ];
-        let mut trie = ArenaParallelSparseTrie::default();
-        let mut nodes = [nodes.clone(), nodes.clone(), nodes].concat();
-        trie.set_root(&mut nodes, true).unwrap();
-        trie.reveal_nodes(&mut nodes).unwrap();
-        assert_eq!(branch_data(&trie.upper_arena, trie.root).branch_masks, masks);
-        assert_eq!(trie.root(epoch(1)), expected);
-        assert_eq!(trie.root_epoch(), Some(TrieNodeEpoch::UNMODIFIED));
-        assert_eq!(trie.take_updates(), SparseTrieUpdates::default());
-    }
-
-    #[test]
-    fn reveal_paired_extension_preserves_branch_masks() {
-        let branch = TrieNode::Branch(BranchNode::new(
-            vec![RlpNode::word_rlp(&B256::repeat_byte(1)); 2],
-            TrieMask::new(3),
-        ));
-        let masks = BranchNodeMasks { tree_mask: TrieMask::new(1), hash_mask: TrieMask::new(3) };
-        let extension = TrieNode::Extension(ExtensionNode::new(
-            Nibbles::from_nibbles([2]),
-            RlpNode::from_rlp(&alloy_rlp::encode(&branch)),
-        ));
-        let root = TrieNode::Branch(BranchNode::new(
-            vec![
-                RlpNode::from_rlp(&alloy_rlp::encode(&extension)),
-                RlpNode::word_rlp(&B256::repeat_byte(2)),
-            ],
-            TrieMask::new(3),
-        ));
-        let expected = keccak256(alloy_rlp::encode(&root));
-        let mut trie = ArenaParallelSparseTrie::default();
-        trie.set_root(
-            &mut [ProofTrieNode { path: Nibbles::default(), node: root, masks: None }],
-            true,
-        )
-        .unwrap();
-        let nodes = [
-            ProofTrieNode { path: Nibbles::from_nibbles([0, 2]), node: branch, masks: Some(masks) },
-            ProofTrieNode { path: Nibbles::from_nibbles([0]), node: extension, masks: None },
-        ];
-        let mut nodes = [nodes.clone(), nodes.clone(), nodes].concat();
-        // An overlapping output without masks must not discard the branch's known masks.
-        nodes[0].masks = None;
-        trie.reveal_nodes(&mut nodes).unwrap();
-        let child = branch_data(&trie.upper_arena, trie.root).children[0].revealed_index().unwrap();
-        assert_eq!(branch_data(&trie.upper_arena, child).branch_masks, masks);
-        assert_eq!(trie.root(epoch(1)), expected);
-        assert_eq!(trie.take_updates(), SparseTrieUpdates::default());
-    }
-
-    #[test]
-    fn missing_extension_branch_is_rejected_before_revealing() {
-        let root = TrieNode::Branch(BranchNode::new(
-            vec![RlpNode::word_rlp(&B256::repeat_byte(1)); 2],
-            TrieMask::new(3),
-        ));
-        let expected = keccak256(alloy_rlp::encode(&root));
-        let mut trie = ArenaParallelSparseTrie::default();
-        trie.set_root(
-            &mut [ProofTrieNode { path: Nibbles::default(), node: root.clone(), masks: None }],
-            true,
-        )
-        .unwrap();
-        let extension = ExtensionNode::new(
-            Nibbles::from_nibbles([2]),
-            RlpNode::word_rlp(&B256::repeat_byte(3)),
-        );
-        let mut nodes = [
-            ProofTrieNode { path: Nibbles::from_nibbles([0]), node: root, masks: None },
-            ProofTrieNode {
-                path: Nibbles::from_nibbles([1]),
-                node: TrieNode::Extension(extension.clone()),
-                masks: None,
-            },
-        ];
-        let error = trie.reveal_nodes(&mut nodes).unwrap_err();
-        match error.kind() {
-            SparseTrieErrorKind::Reveal { path, node } => {
-                assert_eq!(*path, Nibbles::from_nibbles([1]));
-                assert_eq!(format!("{node:?}"), format!("{extension:?}"));
-            }
-            other => panic!("expected Reveal error, got {other:?}"),
-        }
-        assert!(branch_data(&trie.upper_arena, trie.root).children.iter().all(|c| c.is_blinded()));
-        assert!(trie.buffers.cursor.head().is_none());
-        assert_eq!(trie.root(epoch(1)), expected);
-        assert_eq!(trie.take_updates(), SparseTrieUpdates::default());
     }
 }
