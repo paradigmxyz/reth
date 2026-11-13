@@ -17,7 +17,7 @@ use reth_primitives_traits::{
     TransactionMeta,
 };
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
-use reth_rpc_eth_types::{block::SharedReceipts, CachedBlockLookup};
+use reth_rpc_eth_types::{block::SharedReceipts, CachedBlockLookup, EthApiError};
 use reth_storage_api::{
     BlockIdReader, BlockReader, BlockSource, ProviderHeader, ProviderReceipt, ProviderTx,
 };
@@ -410,7 +410,14 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
                 CachedBlockLookup::FirstMiss => {}
             }
 
+            // The cache's database request limit doesn't cover this read, so it takes a blocking
+            // IO permit to keep concurrent misses bounded.
+            let permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| Self::Error::from_eth_err(EthApiError::InternalEthError))?;
             self.spawn_blocking_io(move |this| {
+                let _permit = permit;
                 this.provider()
                     .find_sealed_or_recovered_block(block_hash, BlockSource::Canonical)
                     .map_err(Self::Error::from_eth_err)
