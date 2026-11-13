@@ -551,15 +551,16 @@ mod tests {
     use evm2::{evm::CacheDB, AccountInfo};
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
-    use reth_chain_state::CanonStateSubscriptions;
+    use reth_chain_state::{CanonStateSubscriptions, ExecutedBlock, NewCanonicalChain};
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthChainSpec};
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{ConfigureEvm, EvmEnvFor, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::{
-        crypto::secp256k1::sign_message, SealedHeader, SignerRecoverable,
+        crypto::secp256k1::sign_message, SealedBlock, SealedHeader, SignerRecoverable,
     };
     use reth_provider::{
         providers::BlockchainProvider,
@@ -567,7 +568,7 @@ mod tests {
             create_test_provider_factory_with_chain_spec, ExtendedAccount, MockEthProvider,
             NoopProvider,
         },
-        PruneCheckpointReader, StageCheckpointReader,
+        BlockWriter, CanonChainTracker, PruneCheckpointReader, StageCheckpointReader,
     };
     use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
     use reth_rpc_eth_api::{
@@ -585,7 +586,7 @@ mod tests {
         StateProviderFactory,
     };
     use reth_tasks::cancel::{is_cancelled, CancelOnDrop};
-    use reth_testing_utils::generators;
+    use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction, TestPool};
     use std::time::{Duration, Instant};
 
@@ -1310,6 +1311,101 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.message(), EthApiError::InvalidBlockRange.to_string());
+    }
+
+    /// Rewards of canonical blocks that are not persisted yet use their in-memory receipts.
+    #[tokio::test]
+    async fn test_fee_history_rewards_in_memory_blocks() {
+        let mut rng = generators::rng();
+        let factory = create_test_provider_factory_with_chain_spec(Arc::new(
+            ChainSpecBuilder::mainnet().cancun_activated().build(),
+        ));
+        let mut parent = init_genesis(&factory).unwrap();
+        let mut blocks = Vec::new();
+        let mut receipts = Vec::new();
+        for number in 1..=6 {
+            let params =
+                BlockParams { parent: Some(parent), tx_count: Some(3), ..Default::default() };
+            let mut block = random_block(&mut rng, number, params).into_block();
+            // Legacy transactions only pay a tip above a low base fee.
+            block.header.base_fee_per_gas = Some(1_000);
+            let block = SealedBlock::seal_slow(block).try_recover().unwrap();
+            parent = block.hash();
+
+            let mut cumulative_gas_used = 0;
+            receipts.push(
+                block
+                    .body()
+                    .transactions
+                    .iter()
+                    .map(|tx| {
+                        cumulative_gas_used += rng.random::<u16>() as u64;
+                        reth_ethereum_primitives::Receipt {
+                            tx_type: tx.tx_type(),
+                            success: true,
+                            cumulative_gas_used,
+                            logs: Vec::new(),
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+            );
+            blocks.push(block);
+        }
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .append_blocks_with_state(
+                blocks[..3].to_vec(),
+                &ExecutionOutcome {
+                    first_block: 1,
+                    receipts: receipts[..3].to_vec(),
+                    ..Default::default()
+                },
+                Default::default(),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+        provider.canonical_in_memory_state().update_chain(NewCanonicalChain::Commit {
+            new: blocks[3..]
+                .iter()
+                .zip(&receipts[3..])
+                .map(|(block, receipts)| ExecutedBlock {
+                    recovered_block: Arc::new(block.clone()),
+                    execution_output: Arc::new(BlockExecutionOutput {
+                        result: BlockExecutionResult {
+                            receipts: receipts.clone(),
+                            requests: Default::default(),
+                            gas_used: 0,
+                            blob_gas_used: 0,
+                        },
+                        state: Default::default(),
+                    }),
+                    ..Default::default()
+                })
+                .collect(),
+        });
+        provider.set_canonical_head(blocks[5].clone_sealed_header());
+
+        let percentiles = vec![0.0, 50.0, 100.0];
+        let rewards = blocks
+            .iter()
+            .zip(&receipts)
+            .map(|(block, receipts)| {
+                calculate_reward_percentiles_for_block(
+                    &percentiles,
+                    1_000,
+                    &block.body().transactions,
+                    receipts,
+                )
+                .unwrap()
+            })
+            .collect();
+        let fee_history = build_test_eth_api(provider)
+            .fee_history(U64::from(6), BlockNumberOrTag::Latest, Some(percentiles))
+            .await
+            .unwrap();
+        assert_eq!(fee_history.reward, Some(rewards));
     }
 
     #[tokio::test]

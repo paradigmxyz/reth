@@ -2,7 +2,7 @@
 
 use super::LoadBlock;
 use crate::FromEthApiError;
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{BlockHeader, Sealable};
 use alloy_eips::{eip7840::BlobParams, BlockId};
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockNumberOrTag, FeeHistory};
@@ -223,9 +223,18 @@ pub trait EthFees:
                         // A missing block or receipt list shortens `headers`, which fails the
                         // length check below.
                         let mut headers = Vec::with_capacity(blocks.len());
-                        for (block, receipts) in blocks.into_iter().zip(receipts) {
+                        for (block, mut receipts) in blocks.into_iter().zip(receipts) {
                             let (header, body) = block.split();
-                            // The receipts of pruned blocks are missing.
+                            // The range read can return no receipts for blocks that are not
+                            // persisted yet, so these are looked up by hash. Pruned blocks have
+                            // none either way.
+                            if receipts.is_empty() && !body.transactions().is_empty() {
+                                receipts = provider
+                                    .receipts_by_block(header.hash_slow().into())
+                                    .map_err(Self::Error::from_eth_err)?
+                                    .ok_or(EthApiError::InvalidBlockRange)?;
+                            }
+                            // The receipt lists of pruned blocks can come back short.
                             if body.transactions().len() != receipts.len() {
                                 return Err(EthApiError::InvalidBlockRange.into())
                             }
