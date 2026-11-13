@@ -34,7 +34,6 @@ use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
-use reth_network_p2p::{full_block::FullBlockClient, test_utils::TestFullBlockClient};
 use reth_payload_builder::PayloadServiceCommand;
 use reth_primitives_traits::Block as _;
 use reth_provider::{
@@ -3717,20 +3716,14 @@ async fn test_downloaded_invalid_ancestor_reports_latest_valid_hash() {
             .payload_status
             .is_syncing());
 
-        let peer = TestFullBlockClient::default();
-        for block in [&parent, &invalid] {
-            peer.insert(block.clone_sealed_header(), block.body().clone());
-        }
-        let client = FullBlockClient::new(peer, harness.tree.consensus.clone());
-        let ancestors = tokio::time::timeout(
-            Duration::from_secs(1),
-            client.get_full_block_range(invalid.hash(), 2),
-        )
-        .await
-        .unwrap();
-        for block in ancestors.into_iter().rev() {
-            harness.tree.on_downloaded_block(block.into()).unwrap();
-        }
+        // This harness has a nonexecuting EVM. Pass the consensus failure through the
+        // same error handler used when inserting a downloaded block fails validation.
+        let status = harness
+            .tree
+            .on_insert_block_error(InsertBlockError::consensus_error(error, invalid))
+            .unwrap();
+        assert!(status.is_invalid());
+        assert_eq!(status.latest_valid_hash, Some(parent.hash()));
 
         let status = harness.tree.on_new_payload(payload).unwrap().outcome;
         assert!(status.is_invalid());
