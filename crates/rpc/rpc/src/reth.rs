@@ -3,7 +3,6 @@ use std::{future::Future, sync::Arc};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256, U64};
-use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
 use reth_chain_state::{
@@ -201,7 +200,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Provider, EvmConfig> RethApiServer for RethApi<Provider, EvmConfig>
 where
     Provider: BlockReaderIdExt

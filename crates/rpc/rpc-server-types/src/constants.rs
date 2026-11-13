@@ -150,9 +150,6 @@ pub mod cache {
     /// Default cache size for the receipts cache: 500 blocks' receipts.
     pub const DEFAULT_RECEIPT_CACHE_MAX_LEN: u32 = 500;
 
-    /// Legacy default for the no-op RPC header cache option.
-    pub const DEFAULT_HEADER_CACHE_MAX_LEN: u32 = 1000;
-
     /// Default cache size for the EVM BAL cache: 1000 block access lists.
     pub const DEFAULT_BAL_CACHE_MAX_LEN: u32 = 1000;
 
