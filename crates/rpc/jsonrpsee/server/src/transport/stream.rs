@@ -32,55 +32,6 @@ const MAX_MESSAGES_PER_FLUSH: usize = 64;
 /// its own responses.
 const MAX_MESSAGES_PER_TURN: usize = 32;
 
-/// A received message exceeds the maximum request size. It is answered with an error and the
-/// connection continues.
-#[derive(Debug, Clone, Copy)]
-pub struct TooLarge;
-
-/// Writes messages to a connection.
-///
-/// Implemented for every [`Sink`] of `String`s.
-pub trait MessageWriter: Send {
-    /// Error of a failed write.
-    type Error: fmt::Display + Send;
-
-    /// Writes a message, which may stay buffered until [`Self::flush`].
-    fn write(&mut self, message: String) -> impl Future<Output = Result<(), Self::Error>> + Send;
-
-    /// Writes a ping, which may stay buffered until [`Self::flush`]. Does nothing by default, for
-    /// connections that are not pinged.
-    fn ping(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async { Ok(()) }
-    }
-
-    /// Sends the buffered messages.
-    fn flush(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
-
-    /// Closes the connection for writing. Also called after a failed write, so a writer whose
-    /// write timed out must not block here.
-    fn close(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
-}
-
-impl<T> MessageWriter for T
-where
-    T: Sink<String> + Unpin + Send,
-    T::Error: fmt::Display + Send,
-{
-    type Error = T::Error;
-
-    fn write(&mut self, message: String) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        self.feed(message)
-    }
-
-    fn flush(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        SinkExt::flush(self)
-    }
-
-    fn close(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        SinkExt::close(self)
-    }
-}
-
 /// A connection to serve with [`serve_stream`].
 #[derive(Debug)]
 pub struct StreamConnection<R, W, S, F> {
@@ -248,6 +199,55 @@ where
     // sending would use it all in the receive loop, and a subscription that keeps the queue full
     // would use it all in the send loop. `tokio::join!` alternates which one it polls first.
     let ((), _incoming) = tokio::join!(send, receive);
+}
+
+/// A received message exceeds the maximum request size. It is answered with an error and the
+/// connection continues.
+#[derive(Debug, Clone, Copy)]
+pub struct TooLarge;
+
+/// Writes messages to a connection.
+///
+/// Implemented for every [`Sink`] of `String`s.
+pub trait MessageWriter: Send {
+    /// Error of a failed write.
+    type Error: fmt::Display + Send;
+
+    /// Writes a message, which may stay buffered until [`Self::flush`].
+    fn write(&mut self, message: String) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// Writes a ping, which may stay buffered until [`Self::flush`]. Does nothing by default, for
+    /// connections that are not pinged.
+    fn ping(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
+    }
+
+    /// Sends the buffered messages.
+    fn flush(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// Closes the connection for writing. Also called after a failed write, so a writer whose
+    /// write timed out must not block here.
+    fn close(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+impl<T> MessageWriter for T
+where
+    T: Sink<String> + Unpin + Send,
+    T::Error: fmt::Display + Send,
+{
+    type Error = T::Error;
+
+    fn write(&mut self, message: String) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        self.feed(message)
+    }
+
+    fn flush(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        SinkExt::flush(self)
+    }
+
+    fn close(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        SinkExt::close(self)
+    }
 }
 
 /// Waits for new messages via the `rx` channel and writes them to the connection, and pings the
