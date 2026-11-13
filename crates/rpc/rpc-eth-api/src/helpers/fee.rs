@@ -218,16 +218,17 @@ pub trait EthFees:
                         // Read in chunks so only one chunk's blocks and receipts are held at a
                         // time, instead of the whole range.
                         let mut headers = Vec::with_capacity(block_count as usize);
-                        let mut chunk_start = start_block;
                         let mut previous_chunk_hash = None;
-                        while chunk_start <= end_block {
+                        for chunk_start in
+                            (start_block..=end_block).step_by(FEE_HISTORY_REWARD_CHUNK_SIZE)
+                        {
                             // Stop reading once the request is dropped, instead of holding a
                             // blocking thread and permit for the rest of the range.
                             if is_cancelled() {
                                 return Err(EthApiError::InternalEthError.into())
                             }
                             let chunk_end = chunk_start
-                                .saturating_add(FEE_HISTORY_REWARD_CHUNK_SIZE - 1)
+                                .saturating_add(FEE_HISTORY_REWARD_CHUNK_SIZE as u64 - 1)
                                 .min(end_block);
                             let blocks = provider
                                 .block_range(chunk_start..=chunk_end)
@@ -275,10 +276,6 @@ pub trait EthFees:
                                 }
                                 previous_chunk_hash = Some(last_hash);
                             }
-                            if chunk_end == end_block {
-                                break
-                            }
-                            chunk_start = chunk_end + 1;
                         }
                         Ok((headers, rewards))
                     })
@@ -360,7 +357,7 @@ pub trait EthFees:
 /// Reading the whole range (up to 1024 blocks) at once holds hundreds of MB of blocks and
 /// receipts per in-flight request on mainnet. Chunks keep the batched range reads, which make
 /// this much faster than per-block lookups, while bounding the memory held by a request.
-const FEE_HISTORY_REWARD_CHUNK_SIZE: u64 = 16;
+const FEE_HISTORY_REWARD_CHUNK_SIZE: usize = 16;
 
 /// Loads fee from database.
 ///
