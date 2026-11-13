@@ -575,10 +575,14 @@ mod tests {
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
-    use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, RpcInvalidTransactionError};
+    use reth_rpc_eth_types::{
+        fee_history::calculate_reward_percentiles_for_block, receipt::EthReceiptConverter,
+        EthConfig, RpcInvalidTransactionError,
+    };
     use reth_rpc_server_types::constants::DEFAULT_MAX_CALL_MANY_CALLS;
     use reth_storage_api::{
-        BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
+        BalProvider, BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ReceiptProvider,
+        StateProviderFactory,
     };
     use reth_tasks::cancel::{is_cancelled, CancelOnDrop};
     use reth_testing_utils::generators;
@@ -920,6 +924,21 @@ mod tests {
                 }
             }
 
+            let mut cumulative_gas_used = 0;
+            let receipts = transactions
+                .iter()
+                .map(|tx| {
+                    cumulative_gas_used += rng.random::<u16>() as u64;
+                    reth_ethereum_primitives::Receipt {
+                        tx_type: tx.tx_type(),
+                        success: true,
+                        cumulative_gas_used,
+                        logs: Vec::new(),
+                    }
+                })
+                .collect();
+            mock_provider.add_receipts(header.number, receipts);
+
             mock_provider.add_block(
                 hash,
                 Block {
@@ -1252,6 +1271,45 @@ mod tests {
             fee_history.reward.is_none(),
             "all: no percentiles were requested, so there should be no rewards result"
         );
+    }
+
+    /// Rewards of blocks outside of the fee history cache are calculated from the provider data.
+    #[tokio::test]
+    async fn test_fee_history_rewards() {
+        let block_count = 10;
+        let newest_block = 1337;
+        let percentiles = vec![0.0, 10.0, 50.0, 90.0, 100.0];
+        let mock_provider = MockEthProvider::default();
+
+        let (eth_api, _, _) =
+            prepare_eth_api(newest_block, None, block_count, mock_provider.clone());
+
+        let rewards = (newest_block + 1 - block_count..=newest_block)
+            .map(|number| {
+                let block = mock_provider.block_by_number(number).unwrap().unwrap();
+                let receipts = mock_provider.receipts_by_block(number.into()).unwrap().unwrap();
+                calculate_reward_percentiles_for_block(
+                    &percentiles,
+                    block.base_fee_per_gas.unwrap_or_default(),
+                    &block.body.transactions,
+                    &receipts,
+                )
+                .unwrap()
+            })
+            .collect();
+        let fee_history = eth_api
+            .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles.clone()))
+            .await
+            .unwrap();
+        assert_eq!(fee_history.reward, Some(rewards));
+
+        // A block whose receipts were pruned can't be served.
+        mock_provider.add_receipts(newest_block, Vec::new());
+        let err = eth_api
+            .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles))
+            .await
+            .unwrap_err();
+        assert_eq!(err.message(), EthApiError::InvalidBlockRange.to_string());
     }
 
     #[tokio::test]

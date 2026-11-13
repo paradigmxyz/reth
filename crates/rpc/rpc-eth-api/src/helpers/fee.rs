@@ -6,15 +6,16 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{eip7840::BlobParams, BlockId};
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockNumberOrTag, FeeHistory};
-use futures::{Future, StreamExt};
+use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
-use reth_primitives_traits::BlockBody;
+use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_eth_types::{
     fee_history::calculate_reward_percentiles_for_block, utils::checked_blob_gas_used_ratio,
     EthApiError, FeeHistoryCache, FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
 };
 use reth_storage_api::{
-    BlockIdReader, BlockNumReader, BlockReaderIdExt, HeaderProvider, ProviderHeader,
+    BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, HeaderProvider, ProviderHeader,
+    ReceiptProvider,
 };
 use tracing::debug;
 
@@ -194,10 +195,54 @@ pub trait EthFees:
 
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
             } else {
-                // read the requested header range
-                let headers = self.provider()
-                    .sealed_headers_range(start_block..=end_block)
-                    .map_err(Self::Error::from_eth_err)?;
+                let permit = self
+                    .acquire_owned_blocking_io()
+                    .await
+                    .map_err(|_| EthApiError::InternalEthError)?;
+                let percentiles = reward_percentiles.as_ref().filter(|p| !p.is_empty()).cloned();
+                // Read the requested header range, and the bodies and receipts if rewards are
+                // requested.
+                let headers;
+                (headers, rewards) = self
+                    .spawn_blocking_io(move |this| {
+                        let _permit = permit;
+                        let provider = this.provider();
+                        let Some(percentiles) = percentiles else {
+                            let headers = provider
+                                .headers_range(start_block..=end_block)
+                                .map_err(Self::Error::from_eth_err)?;
+                            return Ok((headers, rewards))
+                        };
+
+                        let blocks = provider
+                            .block_range(start_block..=end_block)
+                            .map_err(Self::Error::from_eth_err)?;
+                        let receipts = provider
+                            .receipts_by_block_range(start_block..=end_block)
+                            .map_err(Self::Error::from_eth_err)?;
+                        // A missing block or receipt list shortens `headers`, which fails the
+                        // length check below.
+                        let mut headers = Vec::with_capacity(blocks.len());
+                        for (block, receipts) in blocks.into_iter().zip(receipts) {
+                            let (header, body) = block.split();
+                            // The receipts of pruned blocks are missing.
+                            if body.transactions().len() != receipts.len() {
+                                return Err(EthApiError::InvalidBlockRange.into())
+                            }
+                            rewards.push(
+                                calculate_reward_percentiles_for_block(
+                                    &percentiles,
+                                    header.base_fee_per_gas().unwrap_or_default(),
+                                    body.transactions(),
+                                    &receipts,
+                                )
+                                .unwrap_or_default(),
+                            );
+                            headers.push(header);
+                        }
+                        Ok((headers, rewards))
+                    })
+                    .await?;
                 if headers.len() != block_count as usize {
                     return Err(EthApiError::InvalidBlockRange.into())
                 }
@@ -218,31 +263,6 @@ pub trait EthFees:
                     ));
                 }
 
-                if let Some(percentiles) = reward_percentiles.as_ref().filter(|p| !p.is_empty()) {
-                    let hashes: Vec<_> = headers.iter().map(|h| h.hash()).collect();
-                    let mut stream =
-                        futures::stream::iter(hashes)
-                            .map(|hash| self.cache().get_block_and_receipts(hash))
-                            .buffered(4);
-                    let mut header_idx = 0;
-                    while let Some(result) = stream.next().await {
-                        let header = &headers[header_idx];
-                        header_idx += 1;
-                        let (block, receipts) = result
-                            .map_err(Self::Error::from_eth_err)?
-                            .ok_or(EthApiError::InvalidBlockRange)?;
-                        rewards.push(
-                            calculate_reward_percentiles_for_block(
-                                percentiles,
-                                header.base_fee_per_gas().unwrap_or_default(),
-                                block.body().transactions(),
-                                &receipts,
-                            )
-                            .unwrap_or_default(),
-                        );
-                    }
-                }
-
                 // The spec states that `base_fee_per_gas` "[..] includes the next block after the
                 // newest of the returned range, because this value can be derived from the
                 // newest block"
@@ -251,7 +271,7 @@ pub trait EthFees:
                 let last_header = headers.last().expect("is present");
                 base_fee_per_gas.push(
                     chain_spec
-                        .next_block_base_fee(last_header.header(), last_header.timestamp())
+                        .next_block_base_fee(last_header, last_header.timestamp())
                         .unwrap_or_default() as u128,
                 );
                 // Same goes for the `base_fee_per_blob_gas`:
