@@ -5,7 +5,10 @@ use alloy_primitives::{
     Address, Bytes,
 };
 use evm2::{
-    evm::precompile::{PrecompileOutput, PrecompileProvider},
+    evm::{
+        precompile::{PrecompileOutput, PrecompileProvider},
+        PrewarmSet,
+    },
     interpreter::{GasTracker, Message},
     Evm, EvmTypesHost, PrecompileError,
 };
@@ -195,6 +198,10 @@ where
 {
     fn addresses(&self) -> Vec<Address> {
         self.inner.addresses()
+    }
+
+    fn warm_addresses(&self, warm: &mut PrewarmSet) {
+        self.inner.warm_addresses(warm);
     }
 
     fn precompile_ids(&self) -> Vec<(Address, evm2::precompiles::PrecompileId)> {
