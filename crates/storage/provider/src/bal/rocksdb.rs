@@ -27,6 +27,8 @@ const DEFAULT_BAL_BUFFER_RETENTION_DISTANCE: u64 = 32;
 /// read cache until its shorter retention window expires.
 #[derive(Clone)]
 pub struct RocksDBBalStore {
+    /// Number of recent blocks whose persisted BALs are retained.
+    retention_distance: u64,
     /// Number of recent blocks retained in the in-memory buffer.
     buffer_retention_distance: u64,
     /// `RocksDB` provider used for persisted BAL reads and writes.
@@ -46,10 +48,31 @@ impl RocksDBBalStore {
     /// This does not change the EIP-defined retention distance for persisted BALs.
     pub fn with_buffer_retention_distance(rocksdb: RocksDBProvider, blocks: u64) -> Self {
         Self {
+            retention_distance: BAL_RETENTION_PERIOD_SLOTS,
             buffer_retention_distance: blocks,
             rocksdb,
             buffer: Arc::new(RwLock::new(RocksDBBalStoreBuffer::default())),
         }
+    }
+
+    /// Caps the persisted BAL retention at the block bodies prune distance, if it is shorter.
+    ///
+    /// A node that prunes bodies earlier already keeps less history than EIP-7928 requires, so its
+    /// BALs need not outlive the bodies. [`PruneMode::Full`] keeps `minimum_pruning_distance`
+    /// blocks, which is never less than the pruner keeps for bodies.
+    pub fn with_bodies_prune_mode(
+        mut self,
+        mode: Option<PruneMode>,
+        minimum_pruning_distance: u64,
+    ) -> Self {
+        let distance = match mode {
+            Some(PruneMode::Full) => minimum_pruning_distance,
+            Some(PruneMode::Distance(distance)) => distance,
+            // `Before` is a fixed block, not a distance; BALs below it expire with the EIP window.
+            Some(PruneMode::Before(_)) | None => return self,
+        };
+        self.retention_distance = self.retention_distance.min(distance);
+        self
     }
 
     #[cfg(test)]
@@ -58,7 +81,7 @@ impl RocksDBBalStore {
     }
 
     fn keys_to_prune(&self, tip: BlockNumber) -> ProviderResult<Vec<StoredBlockAccessListKey>> {
-        let retention = PruneMode::Distance(BAL_RETENTION_PERIOD_SLOTS);
+        let retention = PruneMode::Distance(self.retention_distance);
         let mut keys = Vec::new();
         let iter = self.rocksdb.raw_key_iter_from::<tables::BlockAccessLists>(
             StoredBlockAccessListKey::first_at_number(0),
@@ -125,6 +148,7 @@ impl RocksDBBalStore {
 impl std::fmt::Debug for RocksDBBalStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RocksDBBalStore")
+            .field("retention_distance", &self.retention_distance)
             .field("buffer_retention_distance", &self.buffer_retention_distance)
             .field("rocksdb", &self.rocksdb)
             .finish_non_exhaustive()
@@ -491,6 +515,31 @@ mod tests {
             read_many(&store, &[NumHash::new(1, old_hash), NumHash::new(2, retained_hash)]),
             vec![None, Some(retained_bal)]
         );
+    }
+
+    #[test]
+    fn prune_caps_retention_at_bodies_distance() {
+        let (_dir, store) = test_store();
+        let store = store.with_bodies_prune_mode(Some(PruneMode::Distance(10)), 100);
+        let old = NumHash::new(1, B256::with_last_byte(1));
+        let retained = NumHash::new(2, B256::with_last_byte(2));
+        let retained_bal = Bytes::from_static(&[0xc1, 0x02]);
+
+        store.insert(old, RawBal::from(Bytes::from_static(&[0xc1, 0x01]))).unwrap();
+        store.insert(retained, RawBal::from(retained_bal.clone())).unwrap();
+        store.flush(&[old, retained]).unwrap();
+
+        assert_eq!(store.prune(12).unwrap(), 1);
+        assert_eq!(disk_bal(&store, old), None);
+        assert_eq!(disk_bal(&store, retained), Some(retained_bal));
+
+        let (_dir, store) = test_store();
+        let store = store.with_bodies_prune_mode(Some(PruneMode::Full), 100);
+        assert_eq!(store.retention_distance, 100);
+
+        let (_dir, store) = test_store();
+        let store = store.with_bodies_prune_mode(Some(PruneMode::Distance(u64::MAX)), 100);
+        assert_eq!(store.retention_distance, BAL_RETENTION_PERIOD_SLOTS);
     }
 
     #[test]
