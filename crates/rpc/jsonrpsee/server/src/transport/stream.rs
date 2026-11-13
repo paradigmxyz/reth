@@ -247,7 +247,10 @@ where
         incoming
     };
 
-    let (_incoming, ()) = future::join(receive, send).await;
+    // The send loop is polled first. Both loops share the task's budget, and a client that keeps
+    // sending lets the receive loop use all of it, so the responses would otherwise only be
+    // written once the receive loop has to wait for a call permit.
+    let ((), _incoming) = future::join(send, receive).await;
 }
 
 /// Waits for new messages via the `rx` channel and writes them to the connection, and pings the
@@ -421,7 +424,29 @@ async fn graceful_shutdown<R, M, E>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::middleware::rpc::RpcService;
     use futures_util::stream;
+    use jsonrpsee_core::server::Methods;
+    use std::io;
+
+    /// Fails every write.
+    struct BrokenWriter;
+
+    impl MessageWriter for BrokenWriter {
+        type Error = io::Error;
+
+        async fn write(&mut self, _: String) -> Result<(), Self::Error> {
+            Err(io::ErrorKind::BrokenPipe.into())
+        }
+
+        async fn flush(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        async fn close(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
 
     #[tokio::test]
     async fn try_recv_observes_stop_while_input_stays_ready() {
@@ -431,5 +456,33 @@ mod tests {
 
         let received = try_recv(&mut always_ready, future::ready(())).await;
         assert!(matches!(received, Receive::Stopped));
+    }
+
+    #[tokio::test]
+    async fn send_loop_runs_while_input_stays_ready() {
+        // A client that always has another message ready. Like a socket, the stream gives way
+        // once the task has used up its budget.
+        let always_ready = stream::unfold((), |()| async {
+            tokio::task::consume_budget().await;
+            Some((Ok::<_, ReadError<io::Error>>(b"{}".to_vec()), ()))
+        });
+        let (tx, rx) = mpsc::channel(4);
+
+        // The first response fails to be written, which ends the send loop and with it the
+        // connection. That only happens if the send loop gets to run.
+        let served = serve_stream(StreamConnection {
+            incoming: Box::pin(always_ready),
+            outgoing: BrokenWriter,
+            rpc_service: RpcService::without_subscriptions(Methods::new(), usize::MAX, 0.into()),
+            sink: MethodSink::new(tx),
+            rx,
+            stopped: future::pending(),
+            batch_requests_config: BatchRequestConfig::Unlimited,
+            max_request_body_size: u32::MAX,
+            max_concurrent_calls: Semaphore::MAX_PERMITS,
+            write_timeout: None,
+            ping_interval: None,
+        });
+        tokio::time::timeout(Duration::from_secs(5), served).await.unwrap();
     }
 }
