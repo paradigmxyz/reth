@@ -495,7 +495,9 @@ where
             return CachedBlockLookup::RepeatedMiss
         }
 
-        if self.missed_blocks.remove(&block_hash).is_some() {
+        // The miss stays recorded until the block is cached, so lookups that arrive before the
+        // caller's load is queued also join that load instead of reading the block on their own.
+        if self.missed_blocks.get(&block_hash).is_some() {
             return CachedBlockLookup::RepeatedMiss
         }
 
@@ -1149,10 +1151,13 @@ mod tests {
         ));
         // Nothing is loaded by recording the miss.
         assert!(service.full_block_cache.get(&hash).is_none());
-        assert!(matches!(
-            service.lookup_block_or_record_miss(hash, now),
-            CachedBlockLookup::RepeatedMiss
-        ));
+        // Lookups before the load is queued keep joining it.
+        for _ in 0..2 {
+            assert!(matches!(
+                service.lookup_block_or_record_miss(hash, now),
+                CachedBlockLookup::RepeatedMiss
+            ));
+        }
 
         service.on_new_block(hash, Ok(Some(block.clone())), now);
         let CachedBlockLookup::Cached(cached) = service.lookup_block_or_record_miss(hash, now)
