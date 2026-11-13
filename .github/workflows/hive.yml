@@ -294,8 +294,7 @@ jobs:
           elif [ -n "$TESTS" ]; then
             FILTER="/$TESTS"
           else
-            # EELS matches from the start of the test ID; "/" selects nothing.
-            FILTER=".*"
+            FILTER="/"
           fi
           echo "filter: $FILTER"
           start_time=$SECONDS
