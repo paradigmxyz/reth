@@ -360,7 +360,7 @@ pub trait EthFees:
 /// Reading the whole range (up to 1024 blocks) at once holds hundreds of MB of blocks and
 /// receipts per in-flight request on mainnet. Chunks keep the batched range reads, which make
 /// this much faster than per-block lookups, while bounding the memory held by a request.
-const FEE_HISTORY_REWARD_CHUNK_SIZE: u64 = 64;
+const FEE_HISTORY_REWARD_CHUNK_SIZE: u64 = 16;
 
 /// Loads fee from database.
 ///

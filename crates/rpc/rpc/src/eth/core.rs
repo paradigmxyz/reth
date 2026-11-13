@@ -1329,7 +1329,7 @@ mod tests {
     #[tokio::test]
     async fn test_fee_history_rewards_multiple_chunks() {
         // Two full chunks plus a partial one, so chunk boundaries and the tail are covered.
-        let block_count = 2 * 64 + 2;
+        let block_count = 2 * 16 + 2;
         let newest_block = 1337;
         let percentiles = vec![0.0, 10.0, 50.0, 90.0, 100.0];
         let mock_provider = MockEthProvider::default();
@@ -1363,7 +1363,7 @@ mod tests {
     /// reads, is rejected instead of mixing forks.
     #[tokio::test]
     async fn test_fee_history_rewards_rejects_mixed_forks() {
-        let block_count = 2 * 64;
+        let block_count = 2 * 16;
         let newest_block = 1337;
         let first_block = newest_block - block_count + 1;
         let percentiles = vec![0.0, 50.0, 100.0];
@@ -1372,10 +1372,10 @@ mod tests {
         // of the first chunk is no longer the canonical block at its height.
         for (number, fork) in [
             (
-                first_block + 64,
+                first_block + 16,
                 (|header: &mut Header| header.parent_hash = B256::random()) as fn(&mut Header),
             ),
-            (first_block + 63, |header: &mut Header| {
+            (first_block + 15, |header: &mut Header| {
                 header.extra_data = Bytes::from_static(b"fork")
             }),
         ] {
