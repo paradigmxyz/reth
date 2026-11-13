@@ -24,7 +24,8 @@ use reth_db::{
     lockfile::StorageLock,
     static_file::{
         iter_static_files, BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask,
-        StaticFileCursor, StorageChangesetMask, TransactionMask, TransactionSenderMask,
+        StaticFileCursor, StaticFileEntry, StorageChangesetMask, TransactionMask,
+        TransactionSenderMask,
     },
 };
 use reth_db_api::{
@@ -461,11 +462,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let Some(metrics) = &self.metrics else { return Ok(()) };
 
         let static_files = iter_static_files(&self.path).map_err(ProviderError::other)?;
-        for (segment, headers) in &*static_files {
+        for (segment, files) in &*static_files {
             let mut entries = 0;
             let mut size = 0;
 
-            for (block_range, _) in headers {
+            for StaticFileEntry { block_range, .. } in files {
                 let fixed_block_range = self.find_fixed_range(segment, block_range.start());
                 let jar_provider = self
                     .get_segment_provider_for_range(segment, || Some(fixed_block_range), None)?
@@ -477,7 +478,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 size += jar_provider.size() as u64;
             }
 
-            metrics.record_segment(segment, size, headers.len(), entries);
+            metrics.record_segment(segment, size, files.len(), entries);
         }
 
         Ok(())
@@ -1252,21 +1253,24 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let mut indexes = self.indexes.write();
         indexes.clear();
 
-        for (segment, headers) in &*iter_static_files(&self.path).map_err(ProviderError::other)? {
+        for (segment, files) in &*iter_static_files(&self.path).map_err(ProviderError::other)? {
             // Update first and last block for each segment
             //
-            // It's safe to call `expect` here, because every segment has at least one header
+            // It's safe to call `expect` here, because every segment has at least one file
             // associated with it.
-            let min_block_range = Some(headers.first().expect("headers are not empty").0);
-            let max_block = headers.last().expect("headers are not empty").0.end();
+            let min_block_range = Some(files.first().expect("files are not empty").block_range);
+            let max_block = files.last().expect("files are not empty").block_range.end();
 
             let mut expected_block_ranges_by_max_block = BTreeMap::default();
             let mut available_block_ranges_by_max_tx = None;
 
-            for (block_range, header) in headers {
+            for StaticFileEntry { file_range, block_range, header } in files {
                 // Update max expected block -> expected_block_range index
-                expected_block_ranges_by_max_block
-                    .insert(header.expected_block_end(), header.expected_block_range());
+                //
+                // Keyed by the range the file is named after, as `update_index` does. The header's
+                // expected range may start later than the name: `init_genesis` moves the first
+                // changeset file's expected start to a non-zero genesis block.
+                expected_block_ranges_by_max_block.insert(header.expected_block_end(), *file_range);
 
                 // Update max tx -> block_range index
                 if let Some(tx_range) = header.tx_range() {
@@ -3337,6 +3341,46 @@ mod tests {
         assert!(static_files.map.is_empty());
         assert_eq!(static_files.block_hash(0)?, Some(hash));
 
+        Ok(())
+    }
+
+    /// The first changeset file of a chain whose genesis is not at a file boundary starts at the
+    /// genesis block (`SegmentHeader::set_expected_block_start`) but keeps its fixed-range name.
+    /// An index rebuilt from disk must find it under that name.
+    #[test]
+    fn index_finds_file_whose_header_starts_after_its_name() -> eyre::Result<()> {
+        let (static_dir, _) = create_test_static_files_dir();
+        let segment = StaticFileSegment::AccountChangeSets;
+        let genesis = 510;
+        {
+            let static_files: StaticFileProvider<EthPrimitives> =
+                StaticFileProviderBuilder::read_write(&static_dir)
+                    .with_blocks_per_file(100)
+                    .build()?;
+            let mut writer = static_files.get_writer(genesis, segment)?;
+            writer.user_header_mut().set_expected_block_start(genesis);
+            writer.append_account_changeset(Vec::new(), genesis)?;
+            writer.commit()?;
+        }
+
+        let static_files: StaticFileProvider<EthPrimitives> =
+            StaticFileProviderBuilder::read_write(&static_dir).with_blocks_per_file(100).build()?;
+        assert_eq!(
+            static_files.find_fixed_range(segment, genesis),
+            SegmentRangeInclusive::new(500, 599)
+        );
+        assert_eq!(static_files.get_highest_static_file_block(segment), Some(genesis));
+        assert_eq!(static_files.latest_writer(segment)?.next_block_number(), genesis + 1);
+
+        // Also when opened without a genesis number and with another `blocks_per_file`, as
+        // `db stats` opens it: the name is the source of the range, not the configuration.
+        let static_files: StaticFileProvider<EthPrimitives> =
+            StaticFileProvider::read_only(&static_dir)?;
+        assert_eq!(
+            static_files.find_fixed_range(segment, genesis),
+            SegmentRangeInclusive::new(500, 599)
+        );
+        assert_eq!(static_files.get_highest_static_file_block(segment), Some(genesis));
         Ok(())
     }
 
