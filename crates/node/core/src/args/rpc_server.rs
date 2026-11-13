@@ -90,6 +90,7 @@ pub struct DefaultRpcServerArgs {
     rpc_evm_memory_limit: u64,
     rpc_tx_fee_cap: u128,
     rpc_max_simulate_blocks: u64,
+    rpc_max_trace_bytes: Option<usize>,
     rpc_compute_state_root_for_eth_simulate: bool,
     rpc_eth_proof_window: u64,
     rpc_proof_permits: usize,
@@ -334,6 +335,12 @@ impl DefaultRpcServerArgs {
         self
     }
 
+    /// Set the default maximum bytes a single trace may record
+    pub const fn with_rpc_max_trace_bytes(mut self, v: Option<usize>) -> Self {
+        self.rpc_max_trace_bytes = v;
+        self
+    }
+
     /// Set whether to compute state roots for `eth_simulateV1` responses by default.
     pub const fn with_rpc_compute_state_root_for_eth_simulate(mut self, v: bool) -> Self {
         self.rpc_compute_state_root_for_eth_simulate = v;
@@ -429,6 +436,7 @@ impl Default for DefaultRpcServerArgs {
             rpc_evm_memory_limit: (1 << 32) - 1,
             rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
             rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
+            rpc_max_trace_bytes: None,
             rpc_compute_state_root_for_eth_simulate: false,
             rpc_eth_proof_window: constants::DEFAULT_ETH_PROOF_WINDOW,
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
@@ -698,6 +706,18 @@ pub struct RpcServerArgs {
         default_value_t = DefaultRpcServerArgs::get_global().rpc_max_simulate_blocks
     )]
     pub rpc_max_simulate_blocks: u64,
+
+    /// Maximum bytes a single traced transaction may record before the request fails.
+    ///
+    /// Applies to the `debug_trace*` and `trace_*` tracers and counts recorded opcode steps,
+    /// stack snapshots, memory and call inputs. Unlimited by default.
+    #[arg(
+        long = "rpc.max-trace-bytes",
+        value_name = "BYTES",
+        value_parser = RangedU64ValueParser::<usize>::new().range(1..),
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_max_trace_bytes.map(|v| v.to_string().into()))
+    )]
+    pub rpc_max_trace_bytes: Option<usize>,
 
     /// Compute state roots for `eth_simulateV1` responses.
     #[arg(
@@ -997,6 +1017,7 @@ impl Default for RpcServerArgs {
             rpc_evm_memory_limit,
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
+            rpc_max_trace_bytes,
             rpc_compute_state_root_for_eth_simulate,
             rpc_eth_proof_window,
             rpc_proof_permits,
@@ -1046,6 +1067,7 @@ impl Default for RpcServerArgs {
             rpc_evm_memory_limit,
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
+            rpc_max_trace_bytes,
             rpc_compute_state_root_for_eth_simulate,
             rpc_eth_proof_window,
             rpc_proof_permits,
@@ -1314,6 +1336,21 @@ mod tests {
     }
 
     #[test]
+    fn test_rpc_max_trace_bytes_is_optional_and_nonzero() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.rpc_max_trace_bytes, None);
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.max-trace-bytes", "1024"])
+                .args;
+        assert_eq!(args.rpc_max_trace_bytes, Some(1024));
+
+        let result =
+            CommandParser::<RpcServerArgs>::try_parse_from(["reth", "--rpc.max-trace-bytes", "0"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_rpc_server_args() {
         let args = RpcServerArgs {
             http: true,
@@ -1359,6 +1396,7 @@ mod tests {
             rpc_evm_memory_limit: 256,
             rpc_tx_fee_cap: 2_000_000_000_000_000_000u128,
             rpc_max_simulate_blocks: 256,
+            rpc_max_trace_bytes: Some(1 << 20),
             rpc_compute_state_root_for_eth_simulate: false,
             rpc_eth_proof_window: 100_000,
             rpc_proof_permits: 16,
@@ -1448,6 +1486,8 @@ mod tests {
             "2.0",
             "--rpc.max-simulate-blocks",
             "256",
+            "--rpc.max-trace-bytes",
+            "1048576",
             "--rpc.eth-proof-window",
             "100000",
             "--rpc.proof-permits",

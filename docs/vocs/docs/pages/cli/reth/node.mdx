@@ -514,6 +514,11 @@ RPC:
 
           [default: 256]
 
+      --rpc.max-trace-bytes <BYTES>
+          Maximum bytes a single traced transaction may record before the request fails.
+
+          Applies to the `debug_trace*` and `trace_*` tracers and counts recorded opcode steps, stack snapshots, memory and call inputs. Unlimited by default.
+
       --rpc.compute-state-root-for-eth-simulate
           Compute state roots for `eth_simulateV1` responses
 

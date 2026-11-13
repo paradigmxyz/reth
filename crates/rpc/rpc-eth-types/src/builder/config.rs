@@ -90,6 +90,8 @@ pub struct EthConfig {
     pub rpc_gas_cap: u64,
     /// Max number of blocks for `eth_simulateV1`.
     pub rpc_max_simulate_blocks: u64,
+    /// Maximum bytes a single traced transaction may record. `None` is unlimited.
+    pub rpc_max_trace_bytes: Option<usize>,
     /// Whether to compute state roots for `eth_simulateV1` responses.
     pub compute_state_root_for_eth_simulate: bool,
     ///
@@ -139,6 +141,7 @@ impl Default for EthConfig {
             max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
             rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
             rpc_max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
+            rpc_max_trace_bytes: None,
             compute_state_root_for_eth_simulate: false,
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
             fee_history_cache: FeeHistoryCacheConfig::default(),
@@ -206,6 +209,12 @@ impl EthConfig {
     /// Configures the maximum gas limit for `eth_call` and call tracing RPC methods
     pub const fn rpc_max_simulate_blocks(mut self, max_blocks: u64) -> Self {
         self.rpc_max_simulate_blocks = max_blocks;
+        self
+    }
+
+    /// Configures the maximum bytes a single traced transaction may record. `None` is unlimited.
+    pub const fn rpc_max_trace_bytes(mut self, max_trace_bytes: Option<usize>) -> Self {
+        self.rpc_max_trace_bytes = max_trace_bytes;
         self
     }
 
