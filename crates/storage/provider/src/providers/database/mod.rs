@@ -1510,6 +1510,49 @@ mod tests {
         unchanged();
     }
 
+    /// Blocks keep their own receipts when the receipt static files of other blocks in the range
+    /// were deleted or never written.
+    #[test]
+    fn receipts_by_block_range_skips_missing_static_file_receipts() {
+        let checkpoint =
+            PruneCheckpoint { block_number: None, tx_number: None, prune_mode: PruneMode::Full };
+
+        for (case, blocks_per_file, receipt_blocks, delete_below) in [
+            ("deleted files", 3, vec![(0, 9)], Some(6)),
+            ("pruned prefix", 10, vec![(5, 9)], None),
+            ("gap", 3, vec![(0, 2), (4, 9)], None),
+        ] {
+            let factory = receipt_availability_test_factory(
+                blocks_per_file,
+                &receipt_blocks,
+                [checkpoint; 2],
+            );
+            if let Some(block) = delete_below {
+                factory
+                    .static_file_provider()
+                    .delete_segment_below_block(StaticFileSegment::Receipts, block)
+                    .unwrap();
+            }
+
+            let expected = (0..=9)
+                .map(|block| {
+                    let available = delete_below.is_none_or(|deleted| block >= deleted) &&
+                        receipt_blocks
+                            .iter()
+                            .any(|&(start, end)| (start..=end).contains(&block));
+                    if available {
+                        (2 * block..2 * block + 2)
+                            .map(|tx| Receipt { cumulative_gas_used: tx, ..Default::default() })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    }
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(factory.receipts_by_block_range(0..=9).unwrap(), expected, "{case}");
+        }
+    }
+
     fn receipt_availability_test_factory(
         blocks_per_file: u64,
         receipt_blocks: &[(u64, u64)],
@@ -1556,7 +1599,12 @@ mod tests {
             for block in start..=end {
                 writer.increment_block(block).unwrap();
                 for tx in 2 * block..2 * block + 2 {
-                    writer.append_receipt(tx, &Receipt::default()).unwrap();
+                    writer
+                        .append_receipt(
+                            tx,
+                            &Receipt { cumulative_gas_used: tx, ..Default::default() },
+                        )
+                        .unwrap();
                 }
             }
             writer.commit().unwrap();
