@@ -230,21 +230,23 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             1
         };
 
+        // Requests that stay queued keep their position, so the queue stays in priority order.
+        let mut idx = 0;
         for _ in 0..max_checks {
-            let request = self.queued_requests.pop_front().expect("not empty");
+            let request = &self.queued_requests[idx];
             let Some(peer_id) = self.next_best_peer(request.best_peer_requirements()) else {
                 // Optional BAL/snap requests can lose their capable peer while queued; complete
                 // them instead of waiting for future peer churn.
-                if self.should_fail_fast(&request) {
+                if self.should_fail_fast(request) {
+                    let request = self.queued_requests.remove(idx).expect("valid request index");
                     request.send_err_response(RequestError::UnsupportedCapability);
                 } else {
-                    // no peer matches this request's requirements; requeue at the back so other
-                    // queued requests get a chance instead of head-of-line blocking.
-                    self.queued_requests.push_back(request);
+                    idx += 1;
                 }
                 continue
             };
 
+            let request = self.queued_requests.remove(idx).expect("valid request index");
             let request = self.prepare_block_request(peer_id, request);
 
             return PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
@@ -2114,6 +2116,58 @@ mod tests {
             }) if pid == peer_id
         ));
         assert_eq!(fetcher.queued_requests.len(), 1);
+        assert!(matches!(
+            fetcher.queued_requests.front(),
+            Some(DownloadRequest::GetBlockAccessLists { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_poll_keeps_unmatched_request_position() {
+        let (mut fetcher, peer_id) = fetcher_with_peer();
+
+        // The only peer does not support eth/71, so this request stays queued.
+        let (bal_tx, _bal_rx) = oneshot::channel();
+        fetcher.queued_requests.push_back(DownloadRequest::GetBlockAccessLists {
+            request: vec![B256::random()],
+            response: bal_tx,
+            priority: Priority::High,
+            requirement: BalRequirement::Mandatory,
+        });
+        let (bodies_tx, _bodies_rx) = oneshot::channel();
+        fetcher.queued_requests.push_back(DownloadRequest::GetBlockBodies {
+            request: vec![B256::random()],
+            response: bodies_tx,
+            priority: Priority::Normal,
+            range_hint: None,
+        });
+        let (receipts_tx, _receipts_rx) = oneshot::channel();
+        fetcher.queued_requests.push_back(DownloadRequest::GetReceipts {
+            request: vec![B256::random()],
+            response: receipts_tx,
+            priority: Priority::Normal,
+        });
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        // Dispatching a request behind it does not move it.
+        assert!(matches!(
+            fetcher.poll(&mut cx),
+            Poll::Ready(FetchAction::BlockRequest {
+                peer_id: pid,
+                request: BlockRequest::GetBlockBodies(_)
+            }) if pid == peer_id
+        ));
+        assert_eq!(fetcher.queued_requests.len(), 2);
+        assert!(matches!(
+            fetcher.queued_requests.front(),
+            Some(DownloadRequest::GetBlockAccessLists { .. })
+        ));
+
+        // The peer is busy now, and a poll without an idle peer does not move it either.
+        assert!(fetcher.poll(&mut cx).is_pending());
+        assert_eq!(fetcher.queued_requests.len(), 2);
         assert!(matches!(
             fetcher.queued_requests.front(),
             Some(DownloadRequest::GetBlockAccessLists { .. })
