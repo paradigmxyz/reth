@@ -448,6 +448,10 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
     ///
     /// This is more efficient as the params are not copied for the call's future.
     ///
+    /// The callback runs while [`RpcServiceT::call`](crate::middleware::RpcServiceT::call) builds
+    /// the call's future, so middleware that acts when that future is polled does not cover the
+    /// decoding.
+    ///
     /// ## Examples
     ///
     /// ```
