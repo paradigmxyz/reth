@@ -780,6 +780,11 @@ TxPool:
 
           [default: 1]
 
+      --txpool.enforce-tracked-nonce
+          Reject transactions whose nonce is below the sender nonce tracked from canonical updates.
+
+          Closes the window in which a validation result that predates a block inserts an already mined nonce as pending. Assumes sender nonces only move forward, so this is meant for chains without reorgs and very low block times.
+
 Builder:
       --builder.extradata <EXTRA_DATA>
           Block extra data set by the payload builder.

@@ -151,7 +151,7 @@ impl MethodResponse {
     }
 
     /// Same as [`MethodResponse::response`], but sizes the serialization buffer from the method's
-    /// previous responses and records the size of this one.
+    /// previous responses and records the size of this one if it is a success.
     pub(crate) fn sized_response<T>(
         id: Id,
         rp: ResponsePayload<T>,
@@ -161,13 +161,22 @@ impl MethodResponse {
     where
         T: Serialize + Clone,
     {
-        let mut rp = Self::response_with_capacity(id, rp, max_response_size, size_hint.get());
-        // Responses are never shrunk later, so a response much smaller than the previous one
-        // would otherwise keep the unused capacity until it is sent.
-        if rp.json.capacity() / 2 > rp.json.len() {
+        // An error's size says nothing about the method's results, so it neither uses nor updates
+        // the hint.
+        if matches!(rp, ResponsePayload::Error(_)) {
+            return Self::response(id, rp, max_response_size)
+        }
+        let mut rp = Self::response_with_capacity(id, rp, max_response_size, size_hint.capacity());
+        // A response much smaller than the hint would otherwise keep the unused capacity until it
+        // is sent.
+        let unused = rp.json.capacity() - rp.json.len();
+        if unused > rp.json.len() && unused > RESPONSE_SHRINK_THRESHOLD {
             rp.json.shrink_to_fit();
         }
-        size_hint.record(rp.json.len());
+        // A success that exceeded the limit was replaced with an error, which isn't recorded.
+        if rp.is_success() {
+            size_hint.record(rp.json.len());
+        }
         rp
     }
 
@@ -352,10 +361,12 @@ impl BatchResponseBuilder {
     }
 }
 
-/// Size of a method's last response.
+/// Expected size of a method's next successful response.
 ///
 /// Responses of the same method tend to have similar sizes, so serializing into a buffer of the
-/// previous size avoids growing (and copying) large responses step by step.
+/// previous size avoids growing (and copying) large responses step by step. The hint is a decaying
+/// maximum of the method's successful responses, so a `null` or a short response between large
+/// ones barely lowers it, and errors don't change it.
 #[derive(Debug)]
 pub(crate) struct ResponseSizeHint(AtomicUsize);
 
@@ -364,18 +375,32 @@ impl ResponseSizeHint {
         Self(AtomicUsize::new(128))
     }
 
-    fn get(&self) -> usize {
-        self.0.load(Ordering::Relaxed)
+    /// Returns the capacity to reserve for the next response.
+    ///
+    /// It has a quarter more room than the hint, so a response slightly larger than the previous
+    /// ones doesn't double the buffer.
+    fn capacity(&self) -> usize {
+        let hint = self.0.load(Ordering::Relaxed);
+        (hint + hint / 4).min(MAX_RESPONSE_SIZE_HINT)
     }
 
+    /// Records the size of a successful response.
     fn record(&self, len: usize) {
-        self.0.store(len.min(MAX_RESPONSE_SIZE_HINT), Ordering::Relaxed);
+        // Concurrent calls may overwrite each other's update. The hint is only an estimate, so a
+        // lost update costs at most one regrown buffer.
+        let hint = self.0.load(Ordering::Relaxed);
+        let decayed = hint - hint / 8;
+        self.0.store(len.max(decayed).min(MAX_RESPONSE_SIZE_HINT), Ordering::Relaxed);
     }
 }
 
-/// Largest [`ResponseSizeHint`], so one huge response doesn't make every later call of the method,
-/// from any connection, reserve as much.
+/// Largest capacity a [`ResponseSizeHint`] reserves, so one huge response doesn't make every later
+/// call of the method, from any connection, reserve as much.
 const MAX_RESPONSE_SIZE_HINT: usize = 8 * 1024 * 1024;
+
+/// A response is shrunk only if more than half of its buffer, and more than this many bytes, is
+/// unused. Smaller buffers aren't worth reallocating.
+const RESPONSE_SHRINK_THRESHOLD: usize = 16 * 1024;
 
 /// Bounded writer that allows writing at most `max_len` bytes.
 #[derive(Debug, Clone)]
@@ -427,10 +452,7 @@ fn limit_exceeded() -> io::Error {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        BatchResponseBuilder, BoundedWriter, Id, MethodResponse, ResponsePayload, ResponseSizeHint,
-        MAX_RESPONSE_SIZE_HINT,
-    };
+    use super::*;
 
     #[test]
     fn batch_with_single_works() {
@@ -523,27 +545,103 @@ mod tests {
         assert!(serde_json::to_writer(&mut writer, &"x".repeat(99)).is_err());
     }
 
+    /// Serializes `rp` like a method registered on a module.
+    fn sized_response<T: Serialize + Clone>(
+        rp: ResponsePayload<'_, T>,
+        hint: &ResponseSizeHint,
+    ) -> MethodResponse {
+        MethodResponse::sized_response(Id::Number(1), rp, usize::MAX, hint)
+    }
+
+    fn success<T: Clone>(result: &T) -> ResponsePayload<'_, T> {
+        ResponsePayload::success_borrowed(result)
+    }
+
     #[test]
     fn size_hint_is_capped_and_small_responses_shrink() {
         let hint = ResponseSizeHint::new();
         let big = "x".repeat(MAX_RESPONSE_SIZE_HINT);
-        let rp = MethodResponse::sized_response(
-            Id::Number(1),
-            ResponsePayload::success_borrowed(&big),
-            usize::MAX,
-            &hint,
-        );
+        let rp = sized_response(success(&big), &hint);
         assert!(rp.json.len() > MAX_RESPONSE_SIZE_HINT);
-        assert_eq!(hint.get(), MAX_RESPONSE_SIZE_HINT);
+        assert_eq!(hint.0.load(Ordering::Relaxed), MAX_RESPONSE_SIZE_HINT);
+        assert_eq!(hint.capacity(), MAX_RESPONSE_SIZE_HINT);
 
-        let rp = MethodResponse::sized_response(
-            Id::Number(1),
-            ResponsePayload::success_borrowed(&"a"),
-            usize::MAX,
-            &hint,
-        );
+        let rp = sized_response(success(&"a"), &hint);
         assert_eq!(rp.json, r#"{"jsonrpc":"2.0","id":1,"result":"a"}"#);
         assert!(rp.json.capacity() < 2 * rp.json.len());
-        assert_eq!(hint.get(), rp.json.len());
+    }
+
+    #[test]
+    fn size_hint_survives_errors_and_null() {
+        let hint = ResponseSizeHint::new();
+        let big = "x".repeat(100_000);
+        let big_len = sized_response(success(&big), &hint).json.len();
+
+        let rp = sized_response(ResponsePayload::<()>::error(ErrorCode::InternalError), &hint);
+        assert_eq!(rp.as_error_code(), Some(ErrorCode::InternalError.code()));
+        let rp = sized_response(success(&None::<u64>), &hint);
+        assert_eq!(rp.json, r#"{"jsonrpc":"2.0","id":1,"result":null}"#);
+
+        let reserved = hint.capacity();
+        assert!(reserved >= big_len, "reserved {reserved} for {big_len} bytes");
+        let rp = sized_response(success(&big), &hint);
+        // Growing the buffer would at least double it.
+        assert!(rp.json.capacity() < 2 * reserved);
+    }
+
+    #[test]
+    fn errors_do_not_reserve_the_hint() {
+        let hint = ResponseSizeHint::new();
+        sized_response(success(&"x".repeat(8 * 1024)), &hint);
+
+        let rp = sized_response(ResponsePayload::<()>::error(ErrorCode::InternalError), &hint);
+        assert!(rp.json.capacity() < hint.capacity());
+    }
+
+    #[test]
+    fn oversized_response_does_not_change_the_hint() {
+        let hint = ResponseSizeHint::new();
+        let rp =
+            MethodResponse::sized_response(Id::Number(1), success(&"x".repeat(100)), 64, &hint);
+        assert_eq!(rp.as_error_code(), Some(OVERSIZED_RESPONSE_CODE));
+        assert_eq!(
+            hint.0.load(Ordering::Relaxed),
+            ResponseSizeHint::new().0.load(Ordering::Relaxed)
+        );
+    }
+
+    #[test]
+    fn slightly_larger_response_fits_the_reserved_buffer() {
+        let hint = ResponseSizeHint::new();
+        sized_response(success(&"x".repeat(100_000)), &hint);
+
+        let reserved = hint.capacity();
+        let rp = sized_response(success(&"x".repeat(110_000)), &hint);
+        // Growing the buffer would at least double it.
+        assert!(rp.json.capacity() < 2 * reserved);
+    }
+
+    #[test]
+    fn size_hint_decays_to_smaller_responses() {
+        let hint = ResponseSizeHint::new();
+        sized_response(success(&"x".repeat(100_000)), &hint);
+
+        let small = sized_response(success(&"a"), &hint).json.len();
+        assert!(hint.0.load(Ordering::Relaxed) > 80_000);
+        for _ in 0..100 {
+            sized_response(success(&"a"), &hint);
+        }
+        assert_eq!(hint.0.load(Ordering::Relaxed), small);
+    }
+
+    #[test]
+    fn small_unused_capacity_is_not_shrunk() {
+        let hint = ResponseSizeHint::new();
+        sized_response(success(&"x".repeat(8 * 1024)), &hint);
+
+        let reserved = hint.capacity();
+        let rp = sized_response(success(&"a"), &hint);
+        // Most of the buffer is unused, but too little to be worth reallocating.
+        assert!(rp.json.capacity() >= reserved);
     }
 }

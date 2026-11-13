@@ -47,9 +47,19 @@ pub struct SnapshotManifestCommand {
     ///
     /// Chunks sealed in both snapshots are hashed against it instead of being packaged again,
     /// and the new manifest references their published archives. Fails if any sealed chunk's
-    /// files differ from the previous manifest.
+    /// files differ from the previous manifest. With `--rocksdb-archive-per-file`, RocksDB SST and
+    /// blob files that match an archive in it are reused the same way; new or changed files are
+    /// packaged.
     #[arg(long)]
     previous_manifest: Option<PathBuf>,
+
+    /// Package each RocksDB SST and blob file into its own archive instead of one archive.
+    ///
+    /// Unchanged files keep their archive name between snapshots, so they can be uploaded once
+    /// and reused with `--previous-manifest`. Downloaders without support for per-file archives
+    /// fail to parse the manifest, so only enable this once they have updated.
+    #[arg(long)]
+    rocksdb_archive_per_file: bool,
 }
 
 impl SnapshotManifestCommand {
@@ -90,6 +100,7 @@ impl SnapshotManifestCommand {
             self.chain_id,
             blocks_per_file,
             previous.as_ref(),
+            self.rocksdb_archive_per_file,
         )?;
 
         let num_components = manifest.components.len();
