@@ -260,7 +260,7 @@ impl<N: ProviderNodeTypes> BalProvider for BlockchainProvider<N> {
             *bal = self
                 .database
                 .overlay_manager()
-                .block_by_hash(hash)
+                .executed_block_by_hash(hash)
                 .and_then(|block| block.bal().map(|bal| bal.as_raw_bal().as_raw().clone()));
         }
         // Filled BALs only grow the response, so the limit can only cut it shorter.
@@ -1159,7 +1159,7 @@ mod tests {
         BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksInput,
     };
     use alloy_consensus::constants::EMPTY_ROOT_HASH;
-    use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, RpcBlockHash};
+    use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, TxNumber, B256, U256};
     use evm2::evm::AccountInfo;
     use itertools::Itertools;
@@ -1809,7 +1809,7 @@ mod tests {
         // Canonical lookups still only see the canonical chain.
         assert_eq!(provider.block(canonical.number.into())?, Some(canonical.clone().into_block()));
         assert_eq!(provider.block_number(fork_hash)?, None);
-        let fork_canonical_id = BlockId::Hash(RpcBlockHash::from_hash(fork_hash, Some(true)));
+        let fork_canonical_id = BlockId::hash_canonical(fork_hash);
         assert_eq!(provider.block_by_id(fork_canonical_id)?, None);
         assert_eq!(provider.block_hash_for_id(fork_canonical_id)?, None);
         assert_eq!(
@@ -1817,10 +1817,7 @@ mod tests {
             None
         );
         assert_eq!(
-            provider.block_hash_for_id(BlockId::Hash(RpcBlockHash::from_hash(
-                canonical.hash(),
-                Some(true)
-            )))?,
+            provider.block_hash_for_id(BlockId::hash_canonical(canonical.hash()))?,
             Some(canonical.hash())
         );
 

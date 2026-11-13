@@ -411,7 +411,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     /// always identifies the same block.
     fn tree_block(&self, id: BlockHashOrNumber) -> Option<ExecutedBlock<N::Primitives>> {
         let BlockHashOrNumber::Hash(hash) = id else { return None };
-        self.storage_provider.overlay_manager().block_by_hash(&hash)
+        self.storage_provider.overlay_manager().executed_block_by_hash(&hash)
     }
 }
 

@@ -48,6 +48,10 @@ pub type ProviderBlock<P> = <P as BlockReader>::Block;
 ///
 /// If not requested otherwise, implementers of this trait should prioritize fetching blocks from
 /// the database.
+///
+/// Lookups by hash may also return non-canonical blocks the engine tree still holds, such as side
+/// chain or reorged-out blocks. Use [`Self::find_block_by_hash`] with [`BlockSource::Canonical`]
+/// when only canonical blocks are wanted.
 pub trait BlockReader:
     HeaderProvider + BlockBodyIndicesProvider + TransactionsProvider + ReceiptProvider
 {
