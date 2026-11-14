@@ -139,7 +139,8 @@ use reth_errors::{BlockExecutionError, BlockValidationError, ProviderResult};
 use reth_evm::{
     database::StateProviderDatabase, precompile_cache::PrecompileCacheMap, BlockExecutor,
     BlockExecutorFactory, BlockExecutorFor, BlockTransactionResult, ConfigureEvm, Evm as _,
-    EvmEnvFor, EvmTypesFor, ExecutableTxFor, ExecutionCtxFor, OnStateHook, SpecFor,
+    EvmEnvFor, EvmTypesFor, ExecutableTxFor, ExecutionCtxFor, OnStateHook, SendExecutableTxFor,
+    SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_execution_types::DecodedEvmBal;
@@ -1021,7 +1022,12 @@ where
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt, EvmTypesFor<Evm>>,
+        handle: &mut PayloadHandle<
+            impl SendExecutableTxFor<Evm>,
+            Err,
+            N::Receipt,
+            EvmTypesFor<Evm>,
+        >,
         state_hook: Option<StateRootUpdateHook>,
         hint_stream: Option<StateRootHintStream>,
         make_state_provider: &(dyn Fn(bool) -> ProviderResult<EvmStateProviderBox> + Sync),
@@ -1223,7 +1229,7 @@ where
         &self,
         executor: &mut BlockExecutorFor<'_, Evm>,
         transaction_count: usize,
-        transactions: impl Iterator<Item = Result<Tx, Err>>,
+        transactions: impl Iterator<Item = Result<Tx, Err>> + Send,
         receipt_tx: &ReceiptRootSender<N>,
         executed_tx_index: &AtomicUsize,
         prewarm_results: Option<&PrewarmResults<EvmTypesFor<Evm>>>,
@@ -1231,7 +1237,7 @@ where
         make_state_provider: &(dyn Fn(bool) -> ProviderResult<EvmStateProviderBox> + Sync),
     ) -> Result<Vec<Address>, BlockExecutionError>
     where
-        Tx: ExecutableTxFor<Evm>,
+        Tx: SendExecutableTxFor<Evm>,
         Err: core::error::Error + Send + Sync + 'static,
     {
         // Apply pre-execution changes (e.g., beacon root update)
@@ -1325,8 +1331,8 @@ where
         Ok(senders)
     }
 
-    /// Executes the block's transactions with an executor that executes them in parallel, then
-    /// streams their receipts to the receipt root task.
+    /// Executes the block's transactions with an executor that executes them in parallel as they
+    /// arrive, streaming their receipts to the receipt root task as they commit.
     ///
     /// The executor's workers read the parent state through one state provider per thread, each
     /// from `make_state_provider`, filling the execution cache on misses, and send the keys each
@@ -1337,44 +1343,69 @@ where
         &self,
         executor: &mut BlockExecutorFor<'_, Evm>,
         transaction_count: usize,
-        transactions: impl Iterator<Item = Result<Tx, Err>>,
+        transactions: impl Iterator<Item = Result<Tx, Err>> + Send,
         receipt_tx: &ReceiptRootSender<N>,
         executed_tx_index: &AtomicUsize,
         hint_stream: Option<&StateRootHintStream>,
         make_state_provider: &(dyn Fn(bool) -> ProviderResult<EvmStateProviderBox> + Sync),
     ) -> Result<Vec<Address>, BlockExecutionError>
     where
-        Tx: ExecutableTxFor<Evm>,
+        Tx: SendExecutableTxFor<Evm>,
         Err: core::error::Error + Send + Sync + 'static,
     {
         let _span = debug_span!(target: "engine::tree", "execution", parallel = true).entered();
-        let wait_start = Instant::now();
         let mut senders = Vec::with_capacity(transaction_count);
-        let mut txs = Vec::with_capacity(transaction_count);
-        for tx in transactions {
-            let tx = tx.map_err(BlockValidationError::other)?;
-            senders.push(*tx.signer());
-            txs.push(tx);
-        }
-        self.metrics.record_transaction_wait(wait_start.elapsed());
+        let mut wait = Duration::ZERO;
+        let mut transactions = transactions;
+        let transactions = core::iter::from_fn(|| {
+            // Time spent waiting for the next transaction, such as on signature recovery.
+            let wait_start = Instant::now();
+            let tx = transactions.next();
+            wait += wait_start.elapsed();
+            Some(tx?.map(|tx| {
+                senders.push(*tx.signer());
+                tx.into_send_parts()
+            }))
+        });
 
         let make_worker_provider = || make_state_provider(true);
         let base = DbRef::new(SharedStateProviderDatabase::new(&make_worker_provider));
-        executor.execute_transactions_parallel(txs, &base, &|_, changes| {
-            if let Some(hint_stream) = hint_stream {
-                let (targets, _) =
-                    MultiProofTargetsV2::from_account_changes(changes.account_changes());
-                if !targets.is_empty() {
-                    hint_stream.on_access_hint(targets.into());
+        let mut sent = 0;
+        let mut receipt_task_closed = false;
+        let result = executor.execute_transactions_parallel(
+            transactions,
+            &base,
+            &|_, changes| {
+                if let Some(hint_stream) = hint_stream {
+                    let (targets, _) =
+                        MultiProofTargetsV2::from_account_changes(changes.account_changes());
+                    if !targets.is_empty() {
+                        hint_stream.on_access_hint(targets.into());
+                    }
                 }
-            }
-        })?;
+            },
+            &mut |tx_index, receipt| {
+                // Send each receipt once, in order, to the background task for incremental root
+                // computation.
+                if tx_index == sent && !receipt_task_closed {
+                    receipt_task_closed =
+                        receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone())).is_err();
+                    sent += 1;
+                    executed_tx_index.store(sent, Ordering::Relaxed);
+                }
+            },
+        );
+        self.metrics.record_transaction_wait(wait);
+        result?;
         executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
-        for (tx_index, receipt) in executor.receipts().iter().enumerate() {
-            receipt_tx
-                .send(IndexedReceipt::new(tx_index, receipt.clone()))
-                .map_err(|_| BlockExecutionError::msg("receipt root task closed"))?;
+        // Send any receipt the executor did not stream.
+        for (tx_index, receipt) in executor.receipts().iter().enumerate().skip(sent) {
+            receipt_task_closed |=
+                receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone())).is_err();
+        }
+        if receipt_task_closed {
+            return Err(BlockExecutionError::msg("receipt root task closed"))
         }
         Ok(senders)
     }
@@ -1492,7 +1523,7 @@ where
         parallel_bal_execution: bool,
     ) -> Result<
         PayloadHandle<
-            impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
+            impl SendExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
             impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
             N::Receipt,
             EvmTypesFor<Evm>,

@@ -497,27 +497,46 @@ pub trait BlockExecutor: Sized {
         self.execute_transaction_with_result_closure(transaction, |_| {})
     }
 
-    /// Executes and commits a block's `transactions`, with exactly the result of executing them
-    /// one by one with [`Self::execute_transaction`].
+    /// Executes and commits a block's `transactions` as they arrive, with exactly the result of
+    /// executing them one by one with [`Self::execute_transaction`].
     ///
-    /// `base` holds the same state as the executor's database. An executor whose configuration
-    /// [executes in parallel](crate::ConfigureEvm::executes_transactions_in_parallel) shares it
-    /// with its worker threads, and calls `on_speculative` on a worker thread with each
-    /// speculative execution's changes, by transaction index, before validating them: hints for
-    /// prefetching, not committed state, which streams through the state hook. The default
-    /// implementation executes the transactions one by one and ignores both.
+    /// `transactions` yields the block's transactions in order. An error ends the block as it
+    /// would executing them one by one: the transactions before it commit and it is returned. An
+    /// executor whose configuration
+    /// [executes in parallel](crate::ConfigureEvm::executes_transactions_in_parallel) may iterate
+    /// `transactions` on another thread and start each transaction as soon as it arrives.
+    ///
+    /// `base` holds the same state as the executor's database. A parallel executor shares it with
+    /// its worker threads, and calls `on_speculative` on a worker thread with each speculative
+    /// execution's changes, by transaction index, before validating them: hints for prefetching,
+    /// not committed state, which streams through the state hook. `on_receipt` sees each receipt
+    /// the block's transactions record, once, by index and in block order, as soon as it is
+    /// final, so receipts can be hashed while later transactions execute. The default
+    /// implementation executes the transactions one by one and ignores `base` and
+    /// `on_speculative`.
     ///
     /// Call it after [`Self::apply_pre_execution_changes`] and before any transaction of the
     /// block.
-    fn execute_transactions_parallel<T: ExecutorTx<Self>>(
+    fn execute_transactions_parallel<T, E>(
         &mut self,
-        transactions: Vec<T>,
+        transactions: impl Iterator<Item = Result<T, E>> + Send,
         base: &(dyn DynDatabaseRef + Sync),
         on_speculative: &(dyn Fn(usize, TxStateChanges<'_>) + Sync),
-    ) -> Result<(), BlockExecutionError> {
+        on_receipt: &mut dyn FnMut(usize, &Self::Receipt),
+    ) -> Result<(), BlockExecutionError>
+    where
+        T: SendExecutorTx<Self>,
+        E: core::error::Error + Send + Sync + 'static,
+    {
         let _ = (base, on_speculative);
+        let mut sent = self.receipts().len();
         for transaction in transactions {
-            self.execute_transaction(transaction)?;
+            let transaction = transaction.map_err(BlockValidationError::other)?;
+            self.execute_transaction(transaction.into_send_parts())?;
+            for (index, receipt) in self.receipts().iter().enumerate().skip(sent) {
+                on_receipt(index, receipt);
+            }
+            sent = self.receipts().len();
         }
         Ok(())
     }
@@ -845,6 +864,30 @@ where
     Executor: BlockExecutor,
     T: ExecutableTxParts<Recovered<<Executor::Evm as Evm>::Transaction>, Executor::Transaction>,
 {
+}
+
+/// A transaction that can move to another thread together with its recovered transaction, as
+/// [`BlockExecutor::execute_transactions_parallel`] streams transactions to its workers.
+pub trait SendExecutorTx<Executor: BlockExecutor>: Clone + Send {
+    /// The recovered transaction accessor.
+    type Recovered: RecoveredTx<Executor::Transaction> + Send;
+
+    /// Converts the transaction into the executable transaction environment and recovered
+    /// transaction accessor, as [`ExecutableTxParts::into_parts`] does.
+    fn into_send_parts(self) -> (Recovered<<Executor::Evm as Evm>::Transaction>, Self::Recovered);
+}
+
+impl<T, Executor> SendExecutorTx<Executor> for T
+where
+    Executor: BlockExecutor,
+    T: ExecutorTx<Executor> + Clone + Send,
+    T::Recovered: Send,
+{
+    type Recovered = T::Recovered;
+
+    fn into_send_parts(self) -> (Recovered<<Executor::Evm as Evm>::Transaction>, Self::Recovered) {
+        self.into_parts()
+    }
 }
 
 impl<'a, F, Executor, Assembler, N> BlockBuilder
@@ -1647,6 +1690,29 @@ pub trait ExecutableTxFor<Evm: ConfigureEvm>:
 impl<T, Evm: ConfigureEvm> ExecutableTxFor<Evm> for T where
     T: ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>> + RecoveredTx<TxTy<Evm::Primitives>>
 {
+}
+
+/// An [`ExecutableTxFor`] that can move to another thread together with its recovered transaction,
+/// as [`BlockExecutor::execute_transactions_parallel`] streams transactions to its workers.
+pub trait SendExecutableTxFor<Evm: ConfigureEvm>: ExecutableTxFor<Evm> + Clone + Send {
+    /// The recovered transaction accessor.
+    type SendRecovered: RecoveredTx<TxTy<Evm::Primitives>> + Clone + Send;
+
+    /// Converts the transaction into the executable transaction environment and recovered
+    /// transaction accessor, as [`ExecutableTxParts::into_parts`] does.
+    fn into_send_parts(self) -> (TxEnvFor<Evm>, Self::SendRecovered);
+}
+
+impl<T, Evm: ConfigureEvm> SendExecutableTxFor<Evm> for T
+where
+    T: ExecutableTxFor<Evm> + Clone + Send,
+    <T as ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>>>::Recovered: Clone + Send,
+{
+    type SendRecovered = <T as ExecutableTxParts<TxEnvFor<Evm>, TxTy<Evm::Primitives>>>::Recovered;
+
+    fn into_send_parts(self) -> (TxEnvFor<Evm>, Self::SendRecovered) {
+        self.into_parts()
+    }
 }
 
 /// A transaction stored together with its `TxEnv`.
