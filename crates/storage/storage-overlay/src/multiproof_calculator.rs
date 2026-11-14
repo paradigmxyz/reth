@@ -1,7 +1,7 @@
 //! Multiproof calculators over database trie tables with an immutable in-memory overlay.
 
 use alloy_primitives::{map::B256Map, B256};
-use reth_db_api::transaction::DbTx;
+use reth_db_api::{table::Encode, tables, transaction::DbTx};
 use reth_errors::ProviderResult;
 use reth_trie::{
     hashed_cursor::{HashedPostStateCursorFactory, InstrumentedHashedCursorFactory},
@@ -9,13 +9,19 @@ use reth_trie::{
     proof_v2::{MultiProofCalculator, ProofCursorMetrics},
     trie_cursor::{InMemoryTrieCursorFactory, InstrumentedTrieCursorFactory},
     updates::TrieUpdatesSorted,
-    DecodedMultiProofV2, HashedPostStateSorted, MultiProofTargetsV2, TrieInputSorted,
+    DecodedMultiProofV2, HashedPostStateSorted, MultiProofTargetsV2, ProofV2Target,
+    TrieInputSorted,
 };
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedKeyAdapter,
     TrieTableAdapter,
 };
 use std::sync::Arc;
+
+/// Number of account trie path lengths advised for each account proof target.
+///
+/// Tries of up to about 16^8 accounts rarely have branch nodes deeper than this.
+const PREFETCH_ACCOUNT_TRIE_DEPTH: usize = 8;
 
 /// Multiproof calculator for the database's trie table layout.
 ///
@@ -128,4 +134,34 @@ fn table_multiproof_calculator<TX: DbTx + 'static, A: TrieTableAdapter>(
         prefix_sets,
         known_storage_roots,
     )
+}
+
+/// Advises read-ahead of the hashed accounts and account trie nodes that proofs of `targets` read
+/// from `tx`.
+///
+/// Proofs read these pages one at a time, so a batch of cold targets would otherwise wait for one
+/// read after another. `is_v2` selects the packed trie tables used by v2 storage settings.
+pub(crate) fn prefetch_account_proofs<TX: DbTx>(tx: &TX, targets: &[ProofV2Target], is_v2: bool) {
+    if targets.is_empty() {
+        return
+    }
+    let keys: Vec<_> = targets.iter().map(|target| target.key().encode()).collect();
+    tx.prefetch_keys::<tables::HashedAccounts>(&keys);
+    if is_v2 {
+        prefetch_account_trie::<TX, PackedKeyAdapter>(tx, targets);
+    } else {
+        prefetch_account_trie::<TX, LegacyKeyAdapter>(tx, targets);
+    }
+}
+
+/// Advises read-ahead of the account trie nodes on the paths to `targets` in table layout `A`.
+fn prefetch_account_trie<TX: DbTx, A: TrieTableAdapter>(tx: &TX, targets: &[ProofV2Target]) {
+    let keys: Vec<_> = targets
+        .iter()
+        .flat_map(|target| {
+            (1..=PREFETCH_ACCOUNT_TRIE_DEPTH)
+                .map(|len| A::AccountKey::from(target.key_nibbles.slice(..len)).encode())
+        })
+        .collect();
+    tx.prefetch_keys::<A::AccountTrieTable>(&keys);
 }
