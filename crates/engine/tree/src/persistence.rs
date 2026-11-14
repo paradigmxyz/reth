@@ -1,12 +1,14 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
+use reth_db::Database;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, BalProvider, BlockExecutionWriter, BlockHashReader,
     ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksInput,
+    StaticFileProviderFactory, StaticFileWriter, StorageSettingsCache,
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -31,6 +33,20 @@ pub struct PersistenceResult {
     pub last_state_trie_block: BlockNumHash,
     /// The commit duration, only available for save-blocks operations.
     pub commit_duration: Option<Duration>,
+}
+
+/// A deferred changeset prune from a `RemoveBlocksAbove` operation.
+///
+/// Changeset static file truncation is deferred to avoid truncating memory-mapped files while
+/// concurrent readers may still hold handles. The prune is applied at the start of the next
+/// `SaveBlocks`, after waiting for all MDBX readers from the reorg era to drain.
+#[derive(Debug)]
+struct DeferredChangesetPrune {
+    /// The block number to prune changesets to.
+    target_block: u64,
+    /// MDBX txn ID recorded after the `RemoveBlocksAbove` commit. All readers with a txn ID
+    /// strictly below this value must complete before the prune can be applied safely.
+    committed_txn_id: Option<u64>,
 }
 
 /// Writes parts of reth's in memory tree state to the database and static files.
@@ -61,6 +77,12 @@ where
     /// Pending safe block number to be committed with the next block save.
     /// This avoids triggering a separate fsync for each safe block update.
     pending_safe_block: Option<u64>,
+    /// Deferred changeset prune from a previous `RemoveBlocksAbove` operation.
+    ///
+    /// During reorgs, changeset static file truncation is deferred to the next `SaveBlocks`
+    /// commit to avoid truncating files while concurrent readers may still hold stale
+    /// memory-mapped file handles.
+    deferred_changeset_prune: Option<DeferredChangesetPrune>,
 }
 
 impl<N> PersistenceService<N>
@@ -82,6 +104,7 @@ where
             sync_metrics_tx,
             pending_finalized_block: None,
             pending_safe_block: None,
+            deferred_changeset_prune: None,
         }
     }
 }
@@ -131,7 +154,7 @@ where
 
     #[instrument(level = "debug", target = "engine::persistence", skip_all, fields(%new_tip_num))]
     fn on_remove_blocks_above(
-        &self,
+        &mut self,
         new_tip_num: u64,
     ) -> Result<PersistenceResult, PersistenceError> {
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
@@ -152,7 +175,27 @@ where
             })?;
             BlockNumHash::new(frontiers.partial_state_trie, hash)
         };
+
+        // Defer changeset static file truncation to the next SaveBlocks commit.
+        //
+        // `remove_block_and_execution_above` queues prune strategies on the changeset SF writers.
+        // Executing them now would truncate mmap-backed files while concurrent readers may still
+        // hold stale handles (EOF / inconsistent state on historical reads such as eth_getProof).
+        if self.provider.cached_storage_settings().storage_v2 &&
+            let Some(target) = self.provider.static_file_provider().take_changeset_prunes()
+        {
+            let prev_target = self.deferred_changeset_prune.as_ref().map(|d| d.target_block);
+            self.deferred_changeset_prune = Some(DeferredChangesetPrune {
+                target_block: prev_target.map_or(target, |prev| prev.min(target)),
+                committed_txn_id: None,
+            });
+        }
+
         provider_rw.commit()?;
+
+        if let Some(deferred) = &mut self.deferred_changeset_prune {
+            deferred.committed_txn_id = self.provider.db_ref().last_txnid();
+        }
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
@@ -175,6 +218,42 @@ where
         debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
 
         let start_time = Instant::now();
+
+        // Apply any deferred changeset prunes from a previous RemoveBlocksAbove after stale
+        // MDBX readers from that era have drained.
+        if let Some(deferred) = self.deferred_changeset_prune.take() {
+            if let Some(prune_txn) = deferred.committed_txn_id {
+                while self
+                    .provider
+                    .db_ref()
+                    .oldest_reader_txnid()
+                    .is_some_and(|oldest| oldest < prune_txn)
+                {
+                    debug!(
+                        target: "engine::persistence",
+                        target_block = deferred.target_block,
+                        prune_txn,
+                        oldest_reader = ?self.provider.db_ref().oldest_reader_txnid(),
+                        "Waiting for stale readers to drain before changeset prune"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+
+            debug!(
+                target: "engine::persistence",
+                target_block = deferred.target_block,
+                "Applying deferred changeset prunes"
+            );
+            let sf = self.provider.static_file_provider();
+            sf.requeue_changeset_prunes(deferred.target_block)?;
+            sf.commit()?;
+            debug!(
+                target: "engine::persistence",
+                target_block = deferred.target_block,
+                "Applied deferred changeset prunes"
+            );
+        }
 
         let canonical_blocks = input
             .persist_rest_blocks()
