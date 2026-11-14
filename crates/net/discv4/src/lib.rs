@@ -1073,6 +1073,9 @@ impl Discv4Service {
     }
 
     /// Callback invoked when we receive a pong from the peer.
+    ///
+    /// The pong only proves the endpoint that was pinged, so the entry is left untouched unless
+    /// `record` is its stored endpoint (IP and UDP port).
     fn update_on_pong(&mut self, record: NodeRecord, mut last_enr_seq: Option<u64>) {
         if record.id == *self.local_peer_id() {
             return
@@ -1089,7 +1092,9 @@ impl Discv4Service {
 
         let key = kad_key(record.id);
         match self.kbuckets.entry(&key) {
-            kbucket::Entry::Present(mut entry, old_status) => {
+            kbucket::Entry::Present(mut entry, old_status)
+                if entry.value().record.udp_addr() == record.udp_addr() =>
+            {
                 // endpoint is now proven
                 entry.value_mut().establish_proof();
                 entry.value_mut().update_with_enr(last_enr_seq);
@@ -1105,7 +1110,9 @@ impl Discv4Service {
                     }
                 }
             }
-            kbucket::Entry::Pending(mut entry, mut status) => {
+            kbucket::Entry::Pending(mut entry, mut status)
+                if entry.value().record.udp_addr() == record.udp_addr() =>
+            {
                 // endpoint is now proven
                 entry.value_mut().establish_proof();
                 entry.value_mut().update_with_enr(last_enr_seq);
@@ -1122,6 +1129,7 @@ impl Discv4Service {
                     }
                 }
             }
+            // A pong from another endpoint proves nothing about the stored one.
             _ => {}
         };
     }
@@ -1228,7 +1236,7 @@ impl Discv4Service {
                 } else {
                     is_proven = entry.value().has_endpoint_proof;
                 }
-                entry.value_mut().update_with_enr(ping.enr_sq)
+                entry.value_mut().update_on_ping(&record, ping.enr_sq)
             }
             kbucket::Entry::Pending(mut entry, _) => {
                 if entry.value().is_expired() {
@@ -1238,7 +1246,7 @@ impl Discv4Service {
                 } else {
                     is_proven = entry.value().has_endpoint_proof;
                 }
-                entry.value_mut().update_with_enr(ping.enr_sq)
+                entry.value_mut().update_on_ping(&record, ping.enr_sq)
             }
             kbucket::Entry::Absent(entry) => {
                 let mut node = NodeEntry::new(record);
@@ -2652,6 +2660,17 @@ impl NodeEntry {
         self.update_now(|s| std::mem::replace(&mut s.last_enr_seq, last_enr_seq))
     }
 
+    /// Sets the enr seq announced in a ping that was sent from the given endpoint.
+    ///
+    /// Only a ping from the stored endpoint (IP and UDP port) updates the last timestamp, so that
+    /// pings from another endpoint do not defer the re-ping of the stored one.
+    fn update_on_ping(&mut self, from: &NodeRecord, last_enr_seq: Option<u64>) -> Option<u64> {
+        if self.record.udp_addr() == from.udp_addr() {
+            return self.update_with_enr(last_enr_seq)
+        }
+        std::mem::replace(&mut self.last_enr_seq, last_enr_seq)
+    }
+
     /// Increases the failed request counter
     const fn inc_failed_request(&mut self) {
         self.find_node_failures += 1;
@@ -3726,6 +3745,87 @@ mod tests {
             echo: echo_hash,
             expire: service.ping_expiration(),
             enr_sq: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_pong_from_other_endpoint_does_not_prove_stored_endpoint() {
+        let (_discv4, mut service) = create_discv4().await;
+        let mut rng = rand::rng();
+
+        // Neither another IP nor another UDP port on the stored IP is the stored endpoint.
+        for other in ["127.0.0.2:30303", "127.0.0.1:30304"] {
+            let record = NodeRecord::new("127.0.0.1:30303".parse().unwrap(), PeerId::random());
+            let other = NodeRecord::new(other.parse().unwrap(), record.id);
+            let ping = Ping {
+                from: record.into(),
+                to: service.local_node_record.into(),
+                expire: service.ping_expiration(),
+                enr_sq: None,
+            };
+
+            // Both ping queues are full, so the initial ping to the new entry is dropped.
+            for _ in 0..MAX_NODES_PING {
+                insert_initial_ping(&mut service, rng_record(&mut rng));
+            }
+            service.queued_pings.extend(
+                (0..MAX_QUEUED_PINGS).map(|_| (rng_record(&mut rng), PingReason::InitialInsert)),
+            );
+            service.on_ping(ping.clone(), record.udp_addr(), record.id, B256::random());
+            assert!(!service.pending_pings.contains_key(&record.id));
+            service.pending_pings.clear();
+            service.queued_pings.clear();
+
+            // The node then pings from another endpoint and answers the bond ping from there.
+            service.on_ping(ping, other.udp_addr(), record.id, B256::random());
+            let echo_hash = service.pending_pings[&record.id].echo_hash;
+            service.on_pong(make_pong(&service, echo_hash), other.udp_addr(), record.id);
+
+            assert!(service.has_bond(record.id, other.address));
+            assert_eq!(
+                service.on_entry(record.id, |entry| (entry.record, entry.has_endpoint_proof)),
+                Some((record, false))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ping_from_other_endpoint_does_not_defer_reping() {
+        let (_discv4, mut service) = create_discv4().await;
+
+        // Neither another IP nor another UDP port on the stored IP is the stored endpoint.
+        for other in ["127.0.0.2:30303", "127.0.0.1:30304"] {
+            let record = NodeRecord::new("127.0.0.1:30303".parse().unwrap(), PeerId::random());
+            let other = NodeRecord::new(other.parse().unwrap(), record.id);
+            let ping = Ping {
+                from: other.into(),
+                to: service.local_node_record.into(),
+                expire: service.ping_expiration(),
+                enr_sq: None,
+            };
+
+            // The stored endpoint is due for a re-ping.
+            insert_proven_node(&mut service, record);
+            match service.kbuckets.entry(&kad_key(record.id)) {
+                kbucket::Entry::Present(mut entry, _) => {
+                    entry.value_mut().last_seen -= ENDPOINT_PROOF_EXPIRATION;
+                }
+                ev => unreachable!("{ev:?}"),
+            }
+
+            // The node pings from another endpoint and answers the bond ping from there.
+            service.on_ping(ping.clone(), other.udp_addr(), record.id, B256::random());
+            let echo_hash = service.pending_pings[&record.id].echo_hash;
+            service.on_pong(make_pong(&service, echo_hash), other.udp_addr(), record.id);
+
+            service.re_ping_oldest();
+            let request = &service.pending_pings[&record.id];
+            assert_eq!(request.node, record);
+            assert!(matches!(request.reason, PingReason::RePing));
+
+            // A ping from the stored endpoint still refreshes the entry.
+            service.on_ping(ping, record.udp_addr(), record.id, B256::random());
+            assert_eq!(service.on_entry(record.id, NodeEntry::is_expired), Some(false));
         }
     }
 
