@@ -4986,17 +4986,18 @@ mod tests {
         }
         assert_eq!(6, pool.pending_transactions().len());
 
-        // Remove a non-contiguous subset, higher nonce first.
-        let removed = pool.remove_transactions(vec![*txs[4].hash(), *txs[1].hash()]);
-        assert_eq!(2, removed.len());
+        // Remove a non-contiguous subset with the lowest nonce neither first nor last.
+        let removed =
+            pool.remove_transactions(vec![*txs[4].hash(), *txs[1].hash(), *txs[3].hash()]);
+        assert_eq!(3, removed.len());
 
         let pending = pool.pending_transactions();
         assert_eq!(1, pending.len());
         assert_eq!(txs[0].hash(), pending[0].hash());
         let mut queued = pool.queued_transactions().iter().map(|tx| tx.nonce()).collect::<Vec<_>>();
         queued.sort_unstable();
-        assert_eq!(vec![2, 3, 5], queued);
-        for nonce in [2, 3, 5] {
+        assert_eq!(vec![2, 5], queued);
+        for nonce in [2, 5] {
             assert!(pool.all_transactions.txs.get(txs[nonce].id()).unwrap().state.has_nonce_gap());
         }
         pool.assert_invariants();
