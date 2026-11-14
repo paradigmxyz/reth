@@ -1676,6 +1676,17 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
                 .collect()
         }
     }
+
+    fn lowest_storage_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        // Only storage v2 keeps changesets in static files.
+        if !self.cached_storage_settings().storage_v2 {
+            return Ok(None)
+        }
+        Ok(self
+            .static_file_provider
+            .get_lowest_range_start(StaticFileSegment::StorageChangeSets)
+            .filter(|&block| block > 0))
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
@@ -1731,6 +1742,17 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
                 .collect()
         }
     }
+
+    fn lowest_account_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        // Only storage v2 keeps changesets in static files.
+        if !self.cached_storage_settings().storage_v2 {
+            return Ok(None)
+        }
+        Ok(self
+            .static_file_provider
+            .get_lowest_range_start(StaticFileSegment::AccountChangeSets)
+            .filter(|&block| block > 0))
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -1755,19 +1777,6 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             })
             .as_ref()
             .map(OwnedRocksReadSnapshot::as_snapshot)
-    }
-
-    /// Returns the first block of the lowest changeset static file, if it is above genesis.
-    ///
-    /// Only storage v2 keeps changesets in static files; otherwise this returns `None`.
-    fn lowest_static_file_changeset_block(
-        &self,
-        segment: StaticFileSegment,
-    ) -> Option<BlockNumber> {
-        if !self.cached_storage_settings().storage_v2 {
-            return None
-        }
-        self.static_file_provider.get_lowest_range_start(segment).filter(|&block| block > 0)
     }
 }
 
@@ -1803,14 +1812,6 @@ impl<TX: DbTx + 'static, N: NodeTypes> HistoryReader for DatabaseProvider<TX, N>
                 visible_tip,
             )
             .map(Into::into)
-    }
-
-    fn lowest_account_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
-        Ok(self.lowest_static_file_changeset_block(StaticFileSegment::AccountChangeSets))
-    }
-
-    fn lowest_storage_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
-        Ok(self.lowest_static_file_changeset_block(StaticFileSegment::StorageChangeSets))
     }
 }
 

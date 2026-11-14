@@ -38,18 +38,6 @@ pub trait HistoryReader: Send {
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
     ) -> ProviderResult<HistoryInfo>;
-
-    /// Returns the lowest block with stored account changesets, if it is above genesis.
-    ///
-    /// History indices can't answer lookups below this block even when no prune checkpoint
-    /// exists, for example on a node bootstrapped from a snapshot without changesets from
-    /// genesis. `None` means changesets may reach genesis, or this provider can't tell.
-    fn lowest_account_changeset_block(&self) -> ProviderResult<Option<BlockNumber>>;
-
-    /// Returns the lowest block with stored storage changesets, if it is above genesis.
-    ///
-    /// See [`Self::lowest_account_changeset_block`].
-    fn lowest_storage_changeset_block(&self) -> ProviderResult<Option<BlockNumber>>;
 }
 
 /// History Writer
