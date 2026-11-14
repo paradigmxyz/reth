@@ -135,7 +135,7 @@ impl RpcDescription {
                 // doesn't need its own copy of them, unless an argument may borrow from them.
                 let decode_before_future = method.signature.sig.asyncness.is_some() &&
                     !method.params.iter().any(|arg| may_borrow(&arg.ty));
-                let error_ret = if decode_before_future {
+                let error_ret = if method.streaming || decode_before_future {
                     quote! { return Err(e); }
                 } else {
                     let response_payload = self.jrps_server_item(quote! { ResponsePayload });
@@ -151,7 +151,14 @@ impl RpcDescription {
 
                 check_name(&rpc_method_name, rust_method_name.span());
 
-                if decode_before_future {
+                if method.streaming {
+                    self.handle_register_result(quote! {
+                        rpc.register_streaming_method(#rpc_method_name, |params, context| async move {
+                            #parsing
+                            context.as_ref().#rust_method_name(#params_seq).await
+                        })
+                    })
+                } else if decode_before_future {
                     self.handle_register_result(quote! {
                         rpc.register_async_method_raw(#rpc_method_name, |params, context| {
                             #parsing

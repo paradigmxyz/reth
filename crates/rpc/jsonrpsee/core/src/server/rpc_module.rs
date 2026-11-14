@@ -45,7 +45,7 @@ use crate::{
             IntoSubscriptionCloseResponse, PendingSubscriptionSink, Subscribers,
             SubscriptionCloseResponse, SubscriptionKey, SubscriptionPermit, SubscriptionState,
         },
-        MethodResponse, ResponsePayload, ResponseSizeHint, LOG_TARGET,
+        MethodResponse, ResponsePayload, ResponseSizeHint, ResponseStream, LOG_TARGET,
     },
 };
 use futures_util::{future::BoxFuture, FutureExt};
@@ -297,7 +297,7 @@ impl Methods {
             }
         };
 
-        let rp = response.into_json();
+        let rp = response.buffer().await.into_json();
         tracing::trace!(target: LOG_TARGET, "[Methods::inner_call] Method: {}, response: {}", method, rp);
 
         (rp, rx)
@@ -497,6 +497,43 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
                 let future = async move {
                     let rp = call().await.into_response();
                     MethodResponse::sized_response(id, rp, max_response_size, &size_hint)
+                };
+                future.boxed()
+            })),
+        )
+    }
+
+    /// Register a new asynchronous RPC method whose result is sent in parts while it is produced.
+    ///
+    /// The callback returns a [`ResponseStream`] whose producer the transport polls while it sends
+    /// the response. HTTP sends each part as soon as it is produced. WebSocket, IPC, in-process
+    /// calls and batch entries wait for the whole result, see [`MethodResponse::buffer`].
+    ///
+    /// The response size limit applies to the whole result. A result that fails or exceeds the
+    /// limit before its first part is answered with a JSON-RPC error. Once HTTP has sent a part,
+    /// it aborts the response instead.
+    pub fn register_streaming_method<Fun, Fut>(
+        &mut self,
+        method_name: &'static str,
+        callback: Fun,
+    ) -> Result<&mut MethodCallback, RegisterMethodError>
+    where
+        Fut: Future<Output = Result<ResponseStream, ErrorObjectOwned>> + Send,
+        Fun: (Fn(Params<'static>, Arc<Context>) -> Fut) + Clone + Send + Sync + 'static,
+    {
+        let ctx = self.ctx.clone();
+        self.methods.verify_and_insert(
+            method_name,
+            MethodCallback::Async(Arc::new(move |id, params, _, max_response_size| {
+                let ctx = ctx.clone();
+                let callback = callback.clone();
+                let params = params.into_owned();
+
+                let future = async move {
+                    match callback(params, ctx).await {
+                        Ok(stream) => MethodResponse::stream(id, stream, max_response_size).await,
+                        Err(err) => MethodResponse::error(id, err),
+                    }
                 };
                 future.boxed()
             })),

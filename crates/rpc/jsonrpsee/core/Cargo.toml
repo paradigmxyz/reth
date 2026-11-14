@@ -42,7 +42,8 @@ pin-project = { workspace = true, optional = true }
 default = []
 http-helpers = ["bytes", "futures-util", "http-body", "http-body-util", "http"]
 server = [
-    "futures-util",
+    "bytes",
+    "futures-util/std",
     "rustc-hash/std",
     "parking_lot",
     "rand",

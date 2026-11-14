@@ -49,7 +49,12 @@ where
                 }
             };
 
-            let rp = handle_rpc_call(&body, is_single, batch_config, rpc_service).await;
+            let mut rp = handle_rpc_call(&body, is_single, batch_config, rpc_service).await;
+            // HTTP/1.0 has no chunked encoding, so the client couldn't tell an aborted stream
+            // from a complete response.
+            if parts.version < hyper::Version::HTTP_11 {
+                rp = rp.buffer().await;
+            }
 
             // If the response is empty it means that it was a notification or empty batch.
             // For HTTP these are just ACK:ed with a empty body.
@@ -63,13 +68,16 @@ where
 
 /// HTTP response helpers.
 pub mod response {
-    use jsonrpsee_core::server::MethodResponse;
+    use futures_util::StreamExt;
+    use http_body::Frame;
+    use http_body_util::StreamBody;
+    use jsonrpsee_core::server::{MethodResponse, ResponseBody};
     use jsonrpsee_types::{
         error::{reject_too_big_request, ErrorCode},
         ErrorObjectOwned, Id, Response, ResponsePayload,
     };
 
-    use crate::{HttpBody, HttpResponse};
+    use crate::{HttpBody, HttpResponse, LOG_TARGET};
 
     const JSON: &str = "application/json; charset=utf-8";
     const TEXT: &str = "text/plain";
@@ -125,8 +133,19 @@ pub mod response {
     }
 
     /// Create a response from a method response.
+    ///
+    /// A streamed response is sent in parts as they are produced.
+    /// If it fails after it started, the body ends with an error, so hyper aborts the response
+    /// instead of completing it with truncated JSON.
     pub fn from_method_response(rp: MethodResponse) -> HttpResponse {
-        let body = rp.into_json();
+        let body = match rp.into_body() {
+            ResponseBody::Json(json) => HttpBody::from(json),
+            ResponseBody::Stream(stream) => HttpBody::new(StreamBody::new(stream.map(|part| {
+                part.map(Frame::data).inspect_err(|err| {
+                    tracing::debug!(target: LOG_TARGET, %err, "Aborting streamed response");
+                })
+            }))),
+        };
         from_template(hyper::StatusCode::OK, body, JSON)
     }
 

@@ -23,6 +23,7 @@ result_large_err = "allow"
 futures-util = { workspace = true, features = ["io", "async-await-macro", "std"] }
 http = { workspace = true }
 http-body = { version = "1" }
+http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["server", "http1", "http2"] }
 hyper-util = { workspace = true, features = ["tokio", "service", "server-auto"] }
 jsonrpsee-core = { workspace = true, features = ["server", "http-helpers"] }

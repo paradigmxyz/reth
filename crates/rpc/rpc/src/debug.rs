@@ -15,7 +15,7 @@ use alloy_rpc_types_trace::geth::{
 use evm2::evm::StateChangeSource;
 use evm2_inspectors::tracing::{DebugInspector, TransactionContext};
 use futures::Stream;
-use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage};
+use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, ResponseStream, SubscriptionMessage};
 use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
@@ -132,10 +132,35 @@ where
         opts: GethDebugTracingOptions,
         permit: Option<OwnedSemaphorePermit>,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
+        let results = Vec::with_capacity(block.body().transactions().len());
+        self.trace_block_with(block, evm_env, opts, permit, results, |results, result| {
+            results.push(result);
+            Ok(())
+        })
+        .await
+    }
+
+    /// Same as [`Self::trace_block`], but passes the result of each transaction to `push`, in block
+    /// order, as soon as the transaction is traced, and returns `results` after the last one.
+    ///
+    /// `push` runs on the tracing thread, so it may block. An error from `push` stops the trace
+    /// and is returned.
+    async fn trace_block_with<T, F>(
+        &self,
+        block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
+        evm_env: EvmEnvFor<Eth::Evm>,
+        opts: GethDebugTracingOptions,
+        permit: Option<OwnedSemaphorePermit>,
+        mut results: T,
+        mut push: F,
+    ) -> Result<T, Eth::Error>
+    where
+        T: Send + 'static,
+        F: FnMut(&mut T, TraceResult) -> Result<(), Eth::Error> + Send + 'static,
+    {
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let _permit = permit;
-                let mut results = Vec::with_capacity(block.body().transactions().len());
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
@@ -169,7 +194,7 @@ where
                         )
                         .map_err(Eth::Error::from_eth_err)?;
 
-                    results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
+                    push(&mut results, TraceResult::Success { result, tx_hash: Some(tx_hash) })?;
                     if transactions.peek().is_some() {
                         inspector.fuse().map_err(Eth::Error::from_eth_err)?;
                         // need to apply the state changes of this transaction before executing the
@@ -338,6 +363,50 @@ where
         block_id: BlockId,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
+        let (block, evm_env) = self.block_to_trace(block_id).await?;
+        self.trace_block(block, evm_env, opts, None).await
+    }
+
+    /// Same as [`Self::debug_trace_block`], but sends the JSON-RPC result in parts: the list
+    /// opens with the trace of the first transaction and every other trace follows as soon as its
+    /// transaction is traced.
+    ///
+    /// The tracing permit is acquired before the block is looked up and held until the last
+    /// transaction is traced, which doesn't wait for the client to read the parts. Dropping the
+    /// stream cancels the replay before its next transaction.
+    pub async fn debug_trace_block_stream(
+        &self,
+        block_id: BlockId,
+        opts: GethDebugTracingOptions,
+    ) -> Result<ResponseStream, Eth::Error> {
+        let permit = self.acquire_trace_permit().await.ok();
+        let (block, evm_env) = self.block_to_trace(block_id).await?;
+        let this = self.clone();
+        Ok(ResponseStream::new(move |tx| async move {
+            let parts = tx.clone();
+            let first = this
+                .trace_block_with(block, evm_env, opts, permit, true, move |first, result| {
+                    let mut part = vec![if std::mem::take(first) { b'[' } else { b',' }];
+                    serde_json::to_writer(&mut part, &result).map_err(|err| {
+                        Eth::Error::from_eth_err(EthApiError::Internal(RethError::other(err)))
+                    })?;
+                    // A dropped response stops the replay, so nobody receives this error.
+                    parts
+                        .send(part.into())
+                        .map_err(|_| Eth::Error::from_eth_err(EthApiError::InternalEthError))
+                })
+                .await?;
+            let end: &'static [u8] = if first { b"[]" } else { b"]" };
+            tx.send(end.into()).map_err(|_| Eth::Error::from_eth_err(EthApiError::InternalEthError))
+        }))
+    }
+
+    /// Looks up a block to replay and the EVM environment to replay it in.
+    async fn block_to_trace(
+        &self,
+        block_id: BlockId,
+    ) -> Result<(Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>, EvmEnvFor<Eth::Evm>), Eth::Error>
+    {
         let block = self
             .eth_api()
             .recovered_block(block_id)
@@ -348,8 +417,7 @@ where
             return Err(EthApiError::GenesisNotTraceable.into())
         }
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
-
-        self.trace_block(block, evm_env, opts, None).await
+        Ok((block, evm_env))
     }
 
     /// Trace the transaction according to the provided options.
@@ -1183,9 +1251,8 @@ where
         &self,
         block: B256,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
+    ) -> RpcResult<ResponseStream> {
+        self.debug_trace_block_stream(block.into(), opts.unwrap_or_default())
             .await
             .map_err(Into::into)
     }
@@ -1195,9 +1262,8 @@ where
         &self,
         block: BlockNumberOrTag,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
+    ) -> RpcResult<ResponseStream> {
+        self.debug_trace_block_stream(block.into(), opts.unwrap_or_default())
             .await
             .map_err(Into::into)
     }
