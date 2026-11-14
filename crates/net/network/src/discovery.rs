@@ -389,14 +389,22 @@ impl Discovery {
         }
         let udp_addr = record.udp_addr();
         let addr = PeerAddr::new(tcp_addr, Some(udp_addr));
-        _ =
-            self.discovered_nodes.get_or_insert(peer_id, || {
-                self.queued_events.push_back(DiscoveryEvent::NewNode(
-                    DiscoveredEvent::EventQueued { peer_id, addr, fork_id },
-                ));
-
-                addr
-            })
+        // A known peer is forwarded again when its dial address changes, e.g. a dual-stack peer
+        // later seen on its other address family. The UDP port is ignored because discv4 and
+        // discv5 can listen on different ones, and IPs are compared canonically because discv5
+        // reports IPv4 sessions on an IPv6 socket as IPv4-mapped addresses.
+        if self.discovered_nodes.get(&peer_id).is_some_and(|known| {
+            known.tcp().port() == tcp_addr.port() &&
+                known.tcp().ip().to_canonical() == tcp_addr.ip().to_canonical()
+        }) {
+            return
+        }
+        self.discovered_nodes.insert(peer_id, addr);
+        self.queued_events.push_back(DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
+            peer_id,
+            addr,
+            fork_id,
+        }));
     }
 
     fn on_discv4_update(&mut self, update: DiscoveryUpdate) {
@@ -813,8 +821,8 @@ mod tests {
             .await
             .unwrap();
 
-        // this won't emit an event, since the nodes already discovered each other on discv4, the
-        // number of nodes stored for each node on this level remains 1.
+        // the nodes already discovered each other on discv4, so the number of nodes stored for
+        // each node on this level remains 1.
         assert_eq!(1, node_1.discovered_nodes.len());
         assert_eq!(1, node_2.discovered_nodes.len());
     }
@@ -1118,5 +1126,31 @@ mod tests {
                 "primary discovery IP: {primary_ip}, TCP IP: {tcp_ip}, peer IP: {peer_ip}"
             );
         }
+    }
+
+    #[test]
+    fn forwards_changed_address_of_known_peer() {
+        let mut discovery = Discovery::noop();
+        discovery.discovered_nodes = LruMap::new(DEFAULT_MAX_CAPACITY_DISCOVERED_PEERS_CACHE);
+
+        let peer_id = PeerId::random();
+        let v4 = NodeRecord::new((Ipv4Addr::LOCALHOST, 30303).into(), peer_id);
+        let v4_discv5 =
+            NodeRecord::new_with_ports(Ipv4Addr::LOCALHOST.into(), 30303, Some(9200), peer_id);
+        let v4_mapped =
+            NodeRecord::new((Ipv4Addr::LOCALHOST.to_ipv6_mapped(), 30303).into(), peer_id);
+        let v6 = NodeRecord::new((Ipv6Addr::LOCALHOST, 30303).into(), peer_id);
+        for record in [v4, v4_discv5, v4_mapped, v6, v6, v4] {
+            discovery.on_node_record_update(record, None);
+        }
+
+        let new_node = |record: NodeRecord| {
+            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
+                peer_id,
+                addr: PeerAddr::new(record.tcp_addr(), Some(record.udp_addr())),
+                fork_id: None,
+            })
+        };
+        assert_eq!(discovery.queued_events, [new_node(v4), new_node(v6), new_node(v4)]);
     }
 }

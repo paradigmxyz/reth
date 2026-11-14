@@ -947,7 +947,8 @@ impl PeersManager {
 
     /// Called for a newly discovered peer.
     ///
-    /// If the peer already exists, then the address, kind and `fork_id` will be updated.
+    /// If the peer already exists, then its address is updated, and its `fork_id` if one is
+    /// provided.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId>) {
         self.add_peer_kind(peer_id, None, addr, fork_id)
     }
@@ -981,7 +982,8 @@ impl PeersManager {
 
     /// Called for a newly discovered peer.
     ///
-    /// If the peer already exists, then the address, kind and `fork_id` will be updated.
+    /// If the peer already exists, then its address is updated, and its `fork_id` if one is
+    /// provided.
     /// If the peer exists and a [`PeerKind`] is provided then the peer's kind is updated.
     /// New peers without an explicit kind inherit trust registered for their ID.
     pub(crate) fn add_peer_kind(
@@ -1006,7 +1008,10 @@ impl PeersManager {
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
                 let peer = entry.get_mut();
-                peer.fork_id = fork_id.map(Box::new);
+                // Records without a fork ID, e.g. from discv4, keep the one already known.
+                if let Some(fork_id) = fork_id {
+                    peer.fork_id = Some(Box::new(fork_id));
+                }
                 peer.addr = addr;
 
                 if let Some(kind) = kind {
@@ -1690,7 +1695,7 @@ mod tests {
     use std::{
         future::{poll_fn, Future},
         io,
-        net::{IpAddr, Ipv4Addr, SocketAddr},
+        net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
         pin::Pin,
         task::{Context, Poll, Waker},
         time::Duration,
@@ -3916,6 +3921,22 @@ mod tests {
 
         let (best_id, _) = peers.best_unconnected(false).unwrap();
         assert_eq!(best_id, with_fork, "fork_id should break tie when reputation is equal");
+    }
+
+    #[tokio::test]
+    async fn test_add_peer_without_fork_id_keeps_known_fork_id() {
+        let mut peers = PeersManager::default();
+        let peer_id = PeerId::random();
+        let fork_id = ForkId { hash: ForkHash([0xaa, 0xbb, 0xcc, 0xdd]), next: 0 };
+        let v4 = PeerAddr::from_tcp(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 30303));
+        let v6 = PeerAddr::from_tcp(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 30303));
+
+        peers.add_peer(peer_id, v4, Some(fork_id));
+        peers.add_peer(peer_id, v6, None);
+
+        let peer = &peers.peers[&peer_id];
+        assert_eq!(peer.addr, v6);
+        assert_eq!(peer.fork_id.as_deref(), Some(&fork_id));
     }
 
     #[tokio::test]
