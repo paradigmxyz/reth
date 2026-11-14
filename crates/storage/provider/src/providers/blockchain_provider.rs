@@ -182,6 +182,25 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         ))
     }
 
+    /// Returns a historical state provider for `block_hash` using a consistent view.
+    ///
+    /// If `block_hash` is in the view's in-memory snapshot, the overlay is built from that
+    /// snapshot instead of the overlay manager: blocks may have been persisted after the view's
+    /// database transaction was opened and then evicted from the manager.
+    fn state_provider_from_consistent_view(
+        &self,
+        provider: ConsistentProvider<N>,
+        block_hash: B256,
+    ) -> StateProviderBox {
+        let Some(state) = provider.in_memory_state_by_hash(block_hash) else {
+            return self.state_provider_from_database(provider.into_database_provider(), block_hash)
+        };
+        Box::new(OverlayStateProvider::new(
+            provider.into_database_provider(),
+            self.database.overlay_manager().overlay_builder_for_state(state),
+        ))
+    }
+
     /// Returns the canonical in-memory block with `state_root`.
     fn block_state_by_root(&self, state_root: B256) -> Option<Arc<BlockState<N::Primitives>>> {
         self.canonical_in_memory_state
@@ -878,14 +897,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), hash))
+        Ok(self.state_provider_from_consistent_view(provider, hash))
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
+        Ok(self.state_provider_from_consistent_view(provider, block_hash))
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
@@ -1169,7 +1188,8 @@ mod tests {
             create_test_provider_factory, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
         },
-        BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksInput,
+        AccountReader, BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksInput,
+        StateProvider, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     };
     use alloy_consensus::constants::EMPTY_ROOT_HASH;
     use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
@@ -1214,7 +1234,10 @@ mod tests {
     use std::{
         collections::{BTreeMap, HashMap},
         ops::{Bound, Range, RangeBounds},
-        sync::Arc,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
     };
 
     #[test]
@@ -3775,6 +3798,133 @@ mod tests {
         ] {
             assert_eq!(state.basic_account(&address)?, Some(account.clone()));
             assert_eq!(state.storage(address, slot_key)?, Some(value));
+        }
+
+        Ok(())
+    }
+
+    /// Persists the oldest in-memory block and evicts it from the canonical in-memory state and
+    /// the overlay manager right after a history lookup opens its database transaction. The
+    /// requested block is either the evicted block itself or a later block that stays in memory.
+    #[test]
+    fn history_reads_survive_persistence_after_db_tx_creation() -> eyre::Result<()> {
+        for in_memory_blocks in [1, 2] {
+            for by_number in [false, true] {
+                let mut rng = generators::rng();
+                let factory = test_provider_factory_with_genesis()?;
+                let static_files = factory.static_file_provider();
+                static_files.get_writer(0, StaticFileSegment::Receipts)?.increment_block(0)?;
+                static_files.commit()?;
+                let provider = BlockchainProvider::new(factory)?;
+                let mut parent = provider.canonical_in_memory_state.get_canonical_head().num_hash();
+
+                let slot_key = B256::with_last_byte(1);
+                let mut written = Vec::new();
+                let mut blocks = Vec::new();
+                for number in 1..=in_memory_blocks {
+                    let (address, account) = random_account(number);
+                    let hashed_address = keccak256(address);
+                    let value = U256::from(number);
+
+                    let mut hashed_state = HashedPostState::default();
+                    hashed_state.accounts.insert(hashed_address, Some(account.clone()));
+                    hashed_state.storages.insert(
+                        hashed_address,
+                        HashedStorage::from_iter([(keccak256(slot_key), value)]),
+                    );
+
+                    let mut storage = HashMap::default();
+                    storage.insert(U256::from_be_bytes(slot_key.0), (U256::ZERO, value));
+
+                    let block = random_block(
+                        &mut rng,
+                        parent.number + 1,
+                        BlockParams {
+                            parent: Some(parent.hash),
+                            tx_count: Some(0),
+                            ..Default::default()
+                        },
+                    )
+                    .try_recover()
+                    .expect("failed to seal block with senders");
+                    parent = block.num_hash();
+
+                    let execution_output = BlockExecutionOutput {
+                        result: BlockExecutionResult {
+                            receipts: Default::default(),
+                            requests: Default::default(),
+                            gas_used: 0,
+                            blob_gas_used: 0,
+                        },
+                        state: BundleState::new(
+                            [(address, None, Some(account.clone().into()), storage)],
+                            [[(address, Some(None), [])]],
+                            [],
+                        ),
+                    };
+                    blocks.push(ExecutedBlock::new(
+                        Arc::new(block),
+                        Arc::new(execution_output),
+                        SortedTrieData::new(
+                            Arc::new(hashed_state.into_sorted()),
+                            Arc::new(TrieUpdates::default().into_sorted()),
+                        ),
+                    ));
+                    written.push((address, account, value));
+                }
+                for block in &blocks {
+                    provider.database.overlay_manager().insert_block(block.clone());
+                }
+                provider
+                    .canonical_in_memory_state
+                    .update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+
+                let persisted = blocks[0].clone();
+                let persisted_num_hash = persisted.recovered_block().num_hash();
+                let armed = Arc::new(AtomicBool::new(true));
+                let hook_armed = Arc::clone(&armed);
+                let hook_provider = provider.clone();
+                provider.database.db_ref().set_post_transaction_hook(Box::new(move || {
+                    if !hook_armed.swap(false, Ordering::SeqCst) {
+                        return
+                    }
+                    let provider_rw = hook_provider.database_provider_rw().unwrap();
+                    provider_rw
+                        .save_blocks(&SaveBlocksInput::new(vec![persisted.clone()], 0, 0, 1, 1))
+                        .unwrap();
+                    provider_rw.commit().unwrap();
+                    hook_provider
+                        .canonical_in_memory_state
+                        .remove_persisted_blocks(persisted_num_hash);
+                    hook_provider
+                        .database
+                        .overlay_manager()
+                        .remove_blocks([persisted_num_hash.hash]);
+                }));
+
+                let state = if by_number {
+                    provider.history_by_block_number(parent.number)?
+                } else {
+                    provider.history_by_block_hash(parent.hash)?
+                };
+                assert!(!armed.load(Ordering::SeqCst), "handoff ran inside the history lookup");
+                assert_eq!(
+                    provider.database.provider()?.block_number(persisted_num_hash.hash)?,
+                    Some(persisted_num_hash.number)
+                );
+                assert!(provider
+                    .canonical_in_memory_state
+                    .state_by_hash(persisted_num_hash.hash)
+                    .is_none());
+
+                for (address, account, value) in written {
+                    assert_eq!(state.basic_account(&address)?, Some(account));
+                    assert_eq!(state.storage(address, slot_key)?, Some(value));
+                }
+
+                drop(state);
+                provider.database.db_ref().set_post_transaction_hook(Box::new(|| ()));
+            }
         }
 
         Ok(())
