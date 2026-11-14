@@ -2,20 +2,22 @@
 
 use super::LoadBlock;
 use crate::FromEthApiError;
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{BlockHeader, Sealable, Transaction, TxReceipt};
 use alloy_eips::{eip7840::BlobParams, BlockId};
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockNumberOrTag, FeeHistory};
-use futures::{Future, StreamExt};
+use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
-use reth_primitives_traits::BlockBody;
+use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_eth_types::{
     fee_history::calculate_reward_percentiles_for_block, utils::checked_blob_gas_used_ratio,
     EthApiError, FeeHistoryCache, FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
 };
 use reth_storage_api::{
-    BlockIdReader, BlockNumReader, BlockReaderIdExt, HeaderProvider, ProviderHeader,
+    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, HeaderProvider,
+    ProviderHeader, ReceiptProvider,
 };
+use reth_tasks::cancel::is_cancelled;
 use tracing::debug;
 
 /// Fee related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
@@ -194,12 +196,115 @@ pub trait EthFees:
 
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
             } else {
-                // read the requested header range
-                let headers = self.provider()
-                    .sealed_headers_range(start_block..=end_block)
-                    .map_err(Self::Error::from_eth_err)?;
+                let permit = self
+                    .acquire_owned_blocking_io()
+                    .await
+                    .map_err(|_| EthApiError::InternalEthError)?;
+                let (headers, permit) = self
+                    .spawn_blocking_io(move |this| {
+                        let headers = this
+                            .provider()
+                            .sealed_headers_range(start_block..=end_block)
+                            .map_err(Self::Error::from_eth_err)?;
+                        Ok((headers, permit))
+                    })
+                    .await?;
                 if headers.len() != block_count as usize {
                     return Err(EthApiError::InvalidBlockRange.into())
+                }
+
+                if let Some(percentiles) = reward_percentiles.as_ref().filter(|p| !p.is_empty()) {
+                    // Recent blocks are usually in the state cache, which is much cheaper than
+                    // reading and decoding them again. Look up the newest blocks without inserting
+                    // anything and stop at the first miss, so historical ranges, which are rarely
+                    // cached, don't pay a cache round trip per block.
+                    let mut cached = Vec::new();
+                    for header in headers.iter().rev() {
+                        let (Some(block), Some(receipts)) = self
+                            .cache()
+                            .maybe_cached_block_and_receipts(header.hash())
+                            .await
+                            .map_err(Self::Error::from_eth_err)?
+                        else {
+                            break
+                        };
+                        cached.push((block, receipts));
+                    }
+
+                    let uncached = headers.len() - cached.len();
+                    if uncached > 0 {
+                        let hashes =
+                            headers[..uncached].iter().map(|h| h.hash()).collect::<Vec<_>>();
+                        let percentiles = percentiles.clone();
+                        rewards = self
+                            .spawn_blocking_io(move |this| {
+                                let _permit = permit;
+                                let provider = this.provider();
+                                let mut rewards = Vec::with_capacity(hashes.len());
+                                // Read in chunks so only one chunk's blocks and receipts are held
+                                // at a time, instead of the whole range.
+                                for (chunk_start, chunk_hashes) in (start_block..)
+                                    .step_by(FEE_HISTORY_REWARD_CHUNK_SIZE)
+                                    .zip(hashes.chunks(FEE_HISTORY_REWARD_CHUNK_SIZE))
+                                {
+                                    // Stop reading once the request is dropped, instead of holding
+                                    // a blocking thread and permit for the rest of the range.
+                                    if is_cancelled() {
+                                        return Err(EthApiError::InternalEthError.into())
+                                    }
+                                    let chunk_end = chunk_start + chunk_hashes.len() as u64 - 1;
+                                    let blocks = provider
+                                        .block_range(chunk_start..=chunk_end)
+                                        .map_err(Self::Error::from_eth_err)?;
+                                    let receipts = provider
+                                        .receipts_by_block_range(chunk_start..=chunk_end)
+                                        .map_err(Self::Error::from_eth_err)?;
+                                    if blocks.len() != chunk_hashes.len() ||
+                                        receipts.len() != chunk_hashes.len()
+                                    {
+                                        return Err(EthApiError::InvalidBlockRange.into())
+                                    }
+                                    for ((block, receipts), hash) in
+                                        blocks.into_iter().zip(receipts).zip(chunk_hashes)
+                                    {
+                                        // Every read resolves block numbers against the canonical
+                                        // chain at that time, so after a reorg since the headers
+                                        // were read it returns blocks of another fork. The receipt
+                                        // lists of pruned blocks come back short or empty.
+                                        if block.header().hash_slow() != *hash ||
+                                            block.body().transactions().len() != receipts.len()
+                                        {
+                                            return Err(EthApiError::InvalidBlockRange.into())
+                                        }
+                                        rewards.push(block_rewards(
+                                            &percentiles,
+                                            block.header(),
+                                            block.body().transactions(),
+                                            &receipts,
+                                        ));
+                                    }
+                                    // The receipts were read after the blocks, so a reorg in
+                                    // between pairs them with another fork's receipts. That reorg
+                                    // also replaces the chunk's last block.
+                                    let last_hash = provider
+                                        .block_hash(chunk_end)
+                                        .map_err(Self::Error::from_eth_err)?;
+                                    if last_hash != chunk_hashes.last().copied() {
+                                        return Err(EthApiError::InvalidBlockRange.into())
+                                    }
+                                }
+                                Ok(rewards)
+                            })
+                            .await?;
+                    }
+                    for (block, receipts) in cached.iter().rev() {
+                        rewards.push(block_rewards(
+                            percentiles,
+                            block.header(),
+                            block.body().transactions(),
+                            receipts,
+                        ));
+                    }
                 }
 
                 let chain_spec = self.provider().chain_spec();
@@ -216,31 +321,6 @@ pub trait EthFees:
                         header.blob_gas_used().unwrap_or_default(),
                         blob_params.max_blob_gas_per_block(),
                     ));
-                }
-
-                if let Some(percentiles) = reward_percentiles.as_ref().filter(|p| !p.is_empty()) {
-                    let hashes: Vec<_> = headers.iter().map(|h| h.hash()).collect();
-                    let mut stream =
-                        futures::stream::iter(hashes)
-                            .map(|hash| self.cache().get_block_and_receipts(hash))
-                            .buffered(4);
-                    let mut header_idx = 0;
-                    while let Some(result) = stream.next().await {
-                        let header = &headers[header_idx];
-                        header_idx += 1;
-                        let (block, receipts) = result
-                            .map_err(Self::Error::from_eth_err)?
-                            .ok_or(EthApiError::InvalidBlockRange)?;
-                        rewards.push(
-                            calculate_reward_percentiles_for_block(
-                                percentiles,
-                                header.base_fee_per_gas().unwrap_or_default(),
-                                block.body().transactions(),
-                                &receipts,
-                            )
-                            .unwrap_or_default(),
-                        );
-                    }
                 }
 
                 // The spec states that `base_fee_per_gas` "[..] includes the next block after the
@@ -293,6 +373,14 @@ pub trait EthFees:
         entry.rewards.get(index).copied().unwrap_or_default()
     }
 }
+
+/// Number of blocks whose bodies and receipts `eth_feeHistory` reads at once when it has to
+/// compute reward percentiles on a cache miss.
+///
+/// Reading the whole range (up to 1024 blocks) at once holds hundreds of MB of blocks and
+/// receipts per in-flight request on mainnet. Chunks keep the batched range reads, which make
+/// this much faster than per-block lookups, while bounding the memory held by a request.
+const FEE_HISTORY_REWARD_CHUNK_SIZE: usize = 16;
 
 /// Loads fee from database.
 ///
@@ -430,4 +518,20 @@ where
     {
         async move { self.gas_oracle().suggest_tip_cap().await.map_err(Self::Error::from_eth_err) }
     }
+}
+
+/// Reward percentiles of a block, or no rewards if they can't be calculated.
+fn block_rewards(
+    percentiles: &[f64],
+    header: &impl BlockHeader,
+    transactions: &[impl Transaction],
+    receipts: &[impl TxReceipt],
+) -> Vec<u128> {
+    calculate_reward_percentiles_for_block(
+        percentiles,
+        header.base_fee_per_gas().unwrap_or_default(),
+        transactions,
+        receipts,
+    )
+    .unwrap_or_default()
 }

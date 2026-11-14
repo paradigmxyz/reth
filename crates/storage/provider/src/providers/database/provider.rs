@@ -2355,17 +2355,31 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
 
         // fetch all receipts in the transaction range
         let all_receipts = self.receipts_by_tx_range(first_tx..=last_tx)?;
-        let mut receipts_iter = all_receipts.into_iter();
 
-        // distribute receipts to their respective blocks
         let mut result = Vec::with_capacity(block_body_indices.len());
-        for indices in &block_body_indices {
-            if indices.tx_count == 0 {
-                result.push(Vec::new());
-            } else {
-                let block_receipts =
-                    receipts_iter.by_ref().take(indices.tx_count as usize).collect();
-                result.push(block_receipts);
+        if all_receipts.len() as u64 == last_tx - first_tx + 1 {
+            // No gaps: distribute receipts to their respective blocks.
+            let mut receipts_iter = all_receipts.into_iter();
+            for indices in &block_body_indices {
+                if indices.tx_count == 0 {
+                    result.push(Vec::new());
+                } else {
+                    let block_receipts =
+                        receipts_iter.by_ref().take(indices.tx_count as usize).collect();
+                    result.push(block_receipts);
+                }
+            }
+        } else {
+            // Receipt rows are missing, e.g. pruned by the receipts log filter, which keeps only
+            // some receipts of a block. The flat list can't be split by `tx_count` without handing
+            // later blocks' receipts to earlier blocks, so read each block's own tx range.
+            drop(all_receipts);
+            for indices in &block_body_indices {
+                if indices.tx_count == 0 {
+                    result.push(Vec::new());
+                } else {
+                    result.push(self.receipts_by_tx_range(indices.tx_num_range())?);
+                }
             }
         }
 
@@ -4556,6 +4570,86 @@ mod tests {
         for block_receipts in result {
             assert_eq!(block_receipts.len(), 0);
         }
+    }
+
+    #[test]
+    fn test_receipts_by_block_range_keeps_receipts_aligned_with_missing_rows() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let mut rng = generators::rng();
+
+        let tx_counts = [3usize, 3, 0, 2];
+        let mut blocks = Vec::new();
+        let mut parent = B256::ZERO;
+        for (i, tx_count) in tx_counts.into_iter().enumerate() {
+            let block = random_block(
+                &mut rng,
+                i as u64,
+                BlockParams {
+                    parent: Some(parent),
+                    tx_count: Some(tx_count as u8),
+                    ..Default::default()
+                },
+            );
+            parent = block.hash();
+            blocks.push(block);
+        }
+
+        // Every receipt is distinguishable by its cumulative gas.
+        let receipt = |tx_num: u64| Receipt {
+            cumulative_gas_used: 21_000 * (tx_num + 1),
+            success: true,
+            ..Default::default()
+        };
+
+        let provider_rw = factory.provider_rw().unwrap();
+        for block in &blocks {
+            provider_rw.insert_block(&block.clone().try_recover().unwrap()).unwrap();
+        }
+        let body_indices = (0..blocks.len() as u64)
+            .map(|n| provider_rw.block_body_indices(n).unwrap().unwrap())
+            .collect::<Vec<_>>();
+        for indices in &body_indices {
+            for tx_num in indices.tx_num_range() {
+                provider_rw
+                    .tx_ref()
+                    .put::<tables::Receipts<Receipt>>(tx_num, receipt(tx_num))
+                    .unwrap();
+            }
+        }
+
+        // Simulate the receipts log filter dropping rows of block 0: only its first receipt is
+        // retained.
+        let pruned = &body_indices[0];
+        for tx_num in pruned.tx_num_range().skip(1) {
+            assert!(provider_rw
+                .tx_ref()
+                .delete::<tables::Receipts<Receipt>>(tx_num, None)
+                .unwrap());
+        }
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let result = provider.receipts_by_block_range(0..=3).unwrap();
+
+        assert_eq!(result.len(), 4);
+        for (block_number, indices) in body_indices.iter().enumerate() {
+            let expected = if block_number == 0 {
+                vec![receipt(indices.first_tx_num())]
+            } else {
+                indices.tx_num_range().map(receipt).collect()
+            };
+            assert_eq!(result[block_number], expected, "block {block_number}");
+        }
+        assert!(result[2].is_empty());
+
+        // A range that doesn't touch the pruned block still takes the gap-free path.
+        let tail = provider.receipts_by_block_range(1..=3).unwrap();
+        assert_eq!(tail, result[1..]);
+
+        // `receipts_by_block` agrees on which blocks are complete.
+        assert!(provider.receipts_by_block(0.into()).unwrap().is_none());
+        assert_eq!(provider.receipts_by_block(1.into()).unwrap().unwrap(), result[1]);
     }
 
     #[test]

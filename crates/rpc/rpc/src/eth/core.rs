@@ -551,16 +551,17 @@ mod tests {
     use evm2::{evm::CacheDB, AccountInfo};
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
-    use reth_chain_state::CanonStateSubscriptions;
+    use reth_chain_state::{CanonStateSubscriptions, ExecutedBlock, NewCanonicalChain};
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthChainSpec};
     use reth_db_api::{tables, transaction::DbTxMut};
     use reth_db_common::init::{init_genesis, init_genesis_with_settings};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{ConfigureEvm, EvmEnvFor, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::{
-        crypto::secp256k1::sign_message, SealedHeader, SignerRecoverable,
+        crypto::secp256k1::sign_message, SealedBlock, SealedHeader, SignerRecoverable,
     };
     use reth_provider::{
         providers::BlockchainProvider,
@@ -568,7 +569,7 @@ mod tests {
             create_test_provider_factory_with_chain_spec, ExtendedAccount, MockEthProvider,
             NoopProvider,
         },
-        BlockWriter, ExecutionOutcome, PruneCheckpointReader, StageCheckpointReader,
+        BlockWriter, CanonChainTracker, PruneCheckpointReader, StageCheckpointReader,
         StageCheckpointWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     };
     use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
@@ -577,11 +578,14 @@ mod tests {
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
-    use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, RpcInvalidTransactionError};
+    use reth_rpc_eth_types::{
+        fee_history::calculate_reward_percentiles_for_block, receipt::EthReceiptConverter,
+        EthConfig, RpcInvalidTransactionError,
+    };
     use reth_rpc_server_types::constants::DEFAULT_MAX_CALL_MANY_CALLS;
     use reth_storage_api::{
-        BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
-        StorageSettings, TransactionsProvider,
+        BalProvider, BlockHashReader, BlockReader, BlockReaderIdExt, NodePrimitivesProvider,
+        ReceiptProvider, StateProviderFactory, StorageSettings, TransactionsProvider,
     };
     use reth_tasks::cancel::{is_cancelled, CancelOnDrop};
     use reth_testing_utils::generators::{self, random_block, random_receipt, BlockParams};
@@ -877,7 +881,6 @@ mod tests {
         let mut parent_hash = B256::default();
 
         for i in (0..block_count).rev() {
-            let hash = rng.random();
             // Note: Generates saner values to avoid invalid overflows later
             let gas_limit = rng.random::<u32>() as u64;
             let base_fee_per_gas: Option<u64> =
@@ -892,6 +895,7 @@ mod tests {
                 parent_hash,
                 ..Default::default()
             };
+            let hash = header.hash_slow();
             last_header = Some(header.clone());
             parent_hash = hash;
 
@@ -922,6 +926,21 @@ mod tests {
                     transactions.push(transaction);
                 }
             }
+
+            let mut cumulative_gas_used = 0;
+            let receipts = transactions
+                .iter()
+                .map(|tx| {
+                    cumulative_gas_used += rng.random::<u16>() as u64;
+                    reth_ethereum_primitives::Receipt {
+                        tx_type: tx.tx_type(),
+                        success: true,
+                        cumulative_gas_used,
+                        logs: Vec::new(),
+                    }
+                })
+                .collect();
+            mock_provider.add_receipts(header.number, receipts);
 
             mock_provider.add_block(
                 hash,
@@ -1255,6 +1274,274 @@ mod tests {
             fee_history.reward.is_none(),
             "all: no percentiles were requested, so there should be no rewards result"
         );
+    }
+
+    /// Rewards of the last `block_count` blocks up to `newest_block`, computed block by block.
+    fn expected_rewards(
+        mock_provider: &MockEthProvider,
+        newest_block: u64,
+        block_count: u64,
+        percentiles: &[f64],
+    ) -> Vec<Vec<u128>> {
+        (newest_block + 1 - block_count..=newest_block)
+            .map(|number| {
+                let block = mock_provider.block_by_number(number).unwrap().unwrap();
+                let receipts = mock_provider.receipts_by_block(number.into()).unwrap().unwrap();
+                calculate_reward_percentiles_for_block(
+                    percentiles,
+                    block.base_fee_per_gas.unwrap_or_default(),
+                    &block.body.transactions,
+                    &receipts,
+                )
+                .unwrap()
+            })
+            .collect()
+    }
+
+    /// Rewards of blocks outside of the fee history cache are calculated from the provider data.
+    #[tokio::test]
+    async fn test_fee_history_rewards() {
+        let block_count = 10;
+        let newest_block = 1337;
+        let percentiles = vec![0.0, 10.0, 50.0, 90.0, 100.0];
+        let mock_provider = MockEthProvider::default();
+
+        let (eth_api, _, _) =
+            prepare_eth_api(newest_block, None, block_count, mock_provider.clone());
+
+        let rewards = expected_rewards(&mock_provider, newest_block, block_count, &percentiles);
+        let fee_history = eth_api
+            .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles.clone()))
+            .await
+            .unwrap();
+        assert_eq!(fee_history.reward, Some(rewards));
+
+        // A block whose receipts were pruned can't be served.
+        mock_provider.add_receipts(newest_block, Vec::new());
+        let err = eth_api
+            .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles))
+            .await
+            .unwrap_err();
+        assert_eq!(err.message(), EthApiError::InvalidBlockRange.to_string());
+    }
+
+    /// Ranges spanning several read chunks return every block's rewards in order.
+    #[tokio::test]
+    async fn test_fee_history_rewards_multiple_chunks() {
+        // Two full chunks plus a partial one, so chunk boundaries and the tail are covered.
+        let block_count = 2 * 16 + 2;
+        let newest_block = 1337;
+        let percentiles = vec![0.0, 10.0, 50.0, 90.0, 100.0];
+        let mock_provider = MockEthProvider::default();
+
+        let (eth_api, _, _) =
+            prepare_eth_api(newest_block, None, block_count, mock_provider.clone());
+
+        let rewards = expected_rewards(&mock_provider, newest_block, block_count, &percentiles);
+        assert_eq!(rewards.len(), block_count as usize);
+        let fee_history = eth_api
+            .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles.clone()))
+            .await
+            .unwrap();
+        assert_eq!(fee_history.reward, Some(rewards));
+        assert_eq!(fee_history.base_fee_per_gas.len(), block_count as usize + 1);
+        assert_eq!(fee_history.gas_used_ratio.len(), block_count as usize);
+
+        // A block in the last chunk whose receipts were partly pruned still fails the whole
+        // request.
+        let mut receipts = mock_provider.receipts_by_block(newest_block.into()).unwrap().unwrap();
+        receipts.pop();
+        mock_provider.add_receipts(newest_block, receipts);
+        let err = eth_api
+            .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles))
+            .await
+            .unwrap_err();
+        assert_eq!(err.message(), EthApiError::InvalidBlockRange.to_string());
+    }
+
+    /// Blocks that no longer match the headers read first, as after a reorg during the request,
+    /// are rejected instead of mixing forks.
+    #[tokio::test]
+    async fn test_fee_history_rewards_rejects_mixed_forks() {
+        let block_count = 2 * 16;
+        let newest_block = 1337;
+        let first_block = newest_block - block_count + 1;
+        let percentiles = vec![0.0, 50.0, 100.0];
+
+        // The block read for the first block of the second chunk belongs to another fork than its
+        // header, or the last block of the range is no longer the canonical block at its height
+        // once its receipts were read.
+        for (number, blocks_only) in [(first_block + 16, true), (newest_block, false)] {
+            let mock_provider = MockEthProvider::default();
+            let (eth_api, _, _) =
+                prepare_eth_api(newest_block, None, block_count, mock_provider.clone());
+            let hash = mock_provider.block_hash(number).unwrap().unwrap();
+            let mut block = mock_provider.block_by_number(number).unwrap().unwrap();
+            block.header.extra_data = Bytes::from_static(b"fork");
+            if blocks_only {
+                mock_provider.blocks.lock().insert(hash, block);
+            } else {
+                mock_provider.add_block(hash, block);
+            }
+
+            let err = eth_api
+                .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles.clone()))
+                .await
+                .unwrap_err();
+            assert_eq!(err.message(), EthApiError::InvalidBlockRange.to_string());
+        }
+    }
+
+    /// The newest blocks of a range are served from the state cache when it holds them, and only
+    /// the older blocks are read from the provider.
+    #[tokio::test]
+    async fn test_fee_history_rewards_cached_blocks() {
+        let block_count = 2 * 16 + 2;
+        let newest_block = 1337;
+        let percentiles = vec![0.0, 10.0, 50.0, 90.0, 100.0];
+        let mock_provider = MockEthProvider::default();
+
+        let (eth_api, _, _) =
+            prepare_eth_api(newest_block, None, block_count, mock_provider.clone());
+        let rewards = expected_rewards(&mock_provider, newest_block, block_count, &percentiles);
+
+        // Cache the newest three blocks and the oldest one, then prune all their receipts in the
+        // provider. The newest ones are still served from the cache, the oldest one is behind an
+        // uncached block, so it is read from the provider.
+        let first_block = newest_block - block_count + 1;
+        for number in [first_block, newest_block - 2, newest_block - 1, newest_block] {
+            let hash = mock_provider.block_hash(number).unwrap().unwrap();
+            eth_api.cache().get_block_and_receipts(hash).await.unwrap().unwrap();
+        }
+        for number in newest_block - 2..=newest_block {
+            mock_provider.add_receipts(number, Vec::new());
+        }
+        let fee_history = eth_api
+            .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles.clone()))
+            .await
+            .unwrap();
+        assert_eq!(fee_history.reward, Some(rewards));
+
+        mock_provider.add_receipts(first_block, Vec::new());
+        let err = eth_api
+            .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles))
+            .await
+            .unwrap_err();
+        assert_eq!(err.message(), EthApiError::InvalidBlockRange.to_string());
+    }
+
+    /// Rewards of canonical blocks that are not persisted yet use their in-memory receipts, also
+    /// when storage still holds reorged-out blocks at the same heights.
+    #[tokio::test]
+    async fn test_fee_history_rewards_in_memory_blocks() {
+        let mut rng = generators::rng();
+        let factory = create_test_provider_factory_with_chain_spec(Arc::new(
+            ChainSpecBuilder::mainnet().cancun_activated().build(),
+        ));
+        let mut random_block_with_receipts = |number, parent, tx_count| {
+            let params = BlockParams {
+                parent: Some(parent),
+                tx_count: Some(tx_count),
+                ..Default::default()
+            };
+            let mut block = random_block(&mut rng, number, params).into_block();
+            // Legacy transactions only pay a tip above a low base fee.
+            block.header.base_fee_per_gas = Some(1_000);
+            let block = SealedBlock::seal_slow(block).try_recover().unwrap();
+
+            let mut cumulative_gas_used = 0;
+            let receipts = block
+                .body()
+                .transactions
+                .iter()
+                .map(|tx| {
+                    cumulative_gas_used += rng.random::<u16>() as u64;
+                    reth_ethereum_primitives::Receipt {
+                        tx_type: tx.tx_type(),
+                        success: true,
+                        cumulative_gas_used,
+                        logs: Vec::new(),
+                    }
+                })
+                .collect::<Vec<_>>();
+            (block, receipts)
+        };
+        let mut parent = init_genesis(&factory).unwrap();
+        let mut blocks = Vec::new();
+        let mut receipts = Vec::new();
+        for number in 1..=6 {
+            let (block, block_receipts) = random_block_with_receipts(number, parent, 3);
+            parent = block.hash();
+            blocks.push(block);
+            receipts.push(block_receipts);
+        }
+        // A fork of blocks 4 and 5 that storage still holds after the in-memory chain reorged it
+        // out. Its blocks have fewer transactions, so their receipts can't pass for the canonical
+        // ones.
+        let mut stale_blocks = Vec::new();
+        let mut stale_receipts = Vec::new();
+        parent = blocks[2].hash();
+        for number in 4..=5 {
+            let (block, block_receipts) = random_block_with_receipts(number, parent, 2);
+            parent = block.hash();
+            stale_blocks.push(block);
+            stale_receipts.push(block_receipts);
+        }
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .append_blocks_with_state(
+                blocks[..3].iter().chain(&stale_blocks).cloned().collect(),
+                &ExecutionOutcome {
+                    first_block: 1,
+                    receipts: receipts[..3].iter().chain(&stale_receipts).cloned().collect(),
+                    ..Default::default()
+                },
+                Default::default(),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+        provider.canonical_in_memory_state().update_chain(NewCanonicalChain::Commit {
+            new: blocks[3..]
+                .iter()
+                .zip(&receipts[3..])
+                .map(|(block, receipts)| ExecutedBlock {
+                    recovered_block: Arc::new(block.clone()),
+                    execution_output: Arc::new(BlockExecutionOutput {
+                        result: BlockExecutionResult {
+                            receipts: receipts.clone(),
+                            requests: Default::default(),
+                            gas_used: 0,
+                            blob_gas_used: 0,
+                        },
+                        state: Default::default(),
+                    }),
+                    ..Default::default()
+                })
+                .collect(),
+        });
+        provider.set_canonical_head(blocks[5].clone_sealed_header());
+
+        let percentiles = vec![0.0, 50.0, 100.0];
+        let rewards = blocks
+            .iter()
+            .zip(&receipts)
+            .map(|(block, receipts)| {
+                calculate_reward_percentiles_for_block(
+                    &percentiles,
+                    1_000,
+                    &block.body().transactions,
+                    receipts,
+                )
+                .unwrap()
+            })
+            .collect();
+        let fee_history = build_test_eth_api(provider)
+            .fee_history(U64::from(6), BlockNumberOrTag::Latest, Some(percentiles))
+            .await
+            .unwrap();
+        assert_eq!(fee_history.reward, Some(rewards));
     }
 
     #[tokio::test]
