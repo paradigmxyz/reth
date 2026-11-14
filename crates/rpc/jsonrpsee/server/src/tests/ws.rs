@@ -1809,3 +1809,21 @@ async fn ws_pings_do_not_restart_read_timeout() {
     handle.stop().unwrap();
     handle.stopped().with_default_timeout().await.unwrap();
 }
+
+#[tokio::test]
+async fn ws_client_close_is_answered() {
+    init_logger();
+
+    let (addr, handle) = server_with_handles().with_default_timeout().await.unwrap();
+    let mut stream =
+        WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap().into_inner();
+
+    // A close frame with status 1000, which the server echoes before it closes the connection.
+    stream.write_all(&masked_frame(0x88, &[0x03, 0xe8])).await.unwrap();
+    let mut received = Vec::new();
+    stream.read_to_end(&mut received).with_default_timeout().await.unwrap().unwrap();
+    assert_eq!(received, [0x88, 0x02, 0x03, 0xe8]);
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}

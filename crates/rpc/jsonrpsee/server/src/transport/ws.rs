@@ -342,8 +342,10 @@ async fn send_task(
         }));
         let _ = timeout(write_timeout, async {
             // Refused after a close frame from the client, whose reply `tungstenite` has queued
-            // and `close` then writes.
-            let _ = ws_sender.feed(close).await;
+            // and `close` then writes. The split sink only hands a fed message on with the next
+            // flush or close, so it is sent here: a refusal in `close` would skip writing the
+            // reply.
+            let _ = ws_sender.send(close).await;
             ws_sender.close().await
         })
         .await;
