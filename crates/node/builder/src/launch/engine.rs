@@ -445,8 +445,13 @@ impl<B> EngineNodeLauncher<B> {
 
             let _ = exit.send(res);
         };
-        ctx.task_executor()
-            .spawn_critical_with_graceful_shutdown_signal("consensus engine", consensus_engine);
+        // Terminate persists the in-memory blocks and state trie up to the canonical head. An
+        // interrupted save leaves a partial state trie that the next start unwinds, which costs
+        // far more than the save, so shutdown waits for it past the graceful shutdown timeout.
+        ctx.task_executor().spawn_critical_with_untimed_graceful_shutdown_signal(
+            "consensus engine",
+            consensus_engine,
+        );
 
         let engine_events_for_ethstats = engine_events.new_listener();
 
