@@ -31,19 +31,17 @@ use crate::{
     types::SubscriptionId,
     BatchRequestConfig, RegisterMethodError, RpcModule, ServerBuilder, ServerConfig,
 };
-use futures_util::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use jsonrpsee_core::{server::SendTimeoutError, traits::IdProvider, SubscriptionError};
 use jsonrpsee_test_utils::{
     helpers::*,
-    mocks::{Id, WebSocketTestClient, WebSocketTestError},
+    mocks::{Id, WebSocketTestClient, WebSocketTestError, CONNECTION_CLOSED},
     TimeoutFutureExt,
 };
 use jsonrpsee_types::SubscriptionResponse;
 use serde_json::Value as JsonValue;
-use soketto::handshake;
-use tokio_util::compat::TokioAsyncReadCompatExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use super::helpers::server;
+use super::helpers::{server, server_with_handles};
 
 #[tokio::test]
 async fn can_set_the_max_request_body_size() {
@@ -60,12 +58,14 @@ async fn can_set_the_max_request_body_size() {
 
     let mut client = WebSocketTestClient::new(addr).await.unwrap();
 
-    // Invalid: too long
+    // Invalid: too long, which is rejected and closes the connection.
     let req = format!(r#"{{"jsonrpc":"2.0","method":"{}","id":1}}"#, "a".repeat(100));
     let response = client.send_request_text(req).await.unwrap();
     assert_eq!(response, oversized_request(100));
+    assert_eq!(client.receive().await.unwrap_err().to_string(), CONNECTION_CLOSED);
 
     // Max request body size should not override the max response body size
+    let mut client = WebSocketTestClient::new(addr).await.unwrap();
     let req = r#"{"jsonrpc":"2.0","method":"anything","id":1}"#;
     let response = client.send_request_text(req).await.unwrap();
     assert_eq!(response, ok_response(JsonValue::String("a".repeat(100)), Id::Num(1)));
@@ -1584,12 +1584,8 @@ async fn ws_stalled_frame_closes_connection() {
 
     let (handle, addr) = server_with_ping_interval(RpcModule::new(())).await;
 
-    let socket = tokio::net::TcpStream::connect(addr).await.unwrap();
-    let mut client =
-        handshake::Client::new(BufReader::new(BufWriter::new(socket.compat())), "test-client", "/");
-    let response = client.handshake().with_default_timeout().await.unwrap().unwrap();
-    assert!(matches!(response, handshake::ServerResponse::Accepted { .. }));
-    let mut stream = client.into_inner();
+    let mut stream =
+        WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap().into_inner();
 
     // The header of a masked text frame announcing a 1 MiB payload that never follows.
     stream.write_all(&[0x81, 0xff, 0, 0, 0, 0, 0, 0x10, 0, 0, 1, 2, 3, 4]).await.unwrap();
@@ -1656,29 +1652,19 @@ async fn ws_fragmented_oversized_message_closes_connection() {
     let addr = server.local_addr().unwrap();
     let handle = server.start(module);
 
-    let socket = tokio::net::TcpStream::connect(addr).await.unwrap();
-    let mut client =
-        handshake::Client::new(BufReader::new(BufWriter::new(socket.compat())), "test-client", "/");
-    let response = client.handshake().with_default_timeout().await.unwrap().unwrap();
-    assert!(matches!(response, handshake::ServerResponse::Accepted { .. }));
-    let mut stream = client.into_inner();
+    let mut stream =
+        WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap().into_inner();
 
-    // Frames are masked with a zero key, which leaves the payload as it is.
-    let frame = |fin_and_opcode: u8, payload: &[u8]| {
-        [&[fin_and_opcode, 0x80 | payload.len() as u8, 0, 0, 0, 0], payload].concat()
-    };
-    let request = frame(0x81, br#"{"jsonrpc":"2.0","method":"say_hello","id":1}"#);
+    let request = masked_frame(0x81, br#"{"jsonrpc":"2.0","method":"say_hello","id":1}"#);
 
-    // A text message that exceeds the limit with its second fragment. `soketto` then skips the
-    // length of both fragments although it has read the first one, which swallows the request of
-    // that length that follows.
-    stream.write_all(&frame(0x01, &vec![b'a'; request.len()])).await.unwrap();
-    stream.write_all(&frame(0x80, &[b'a'; 60])).await.unwrap();
-    stream.write_all(&request).await.unwrap();
+    // A text message that exceeds the limit with its second fragment, and a request. They are
+    // written at once, as a request that arrives after the close would reset the connection.
+    let message =
+        [masked_frame(0x01, &[b'a'; 60]), masked_frame(0x80, &[b'a'; 60]), request].concat();
+    stream.write_all(&message).await.unwrap();
     stream.flush().await.unwrap();
 
-    // The message is rejected and the connection closed, as the server can't tell where the next
-    // frame starts.
+    // The message is rejected and the connection closed, which leaves the request unanswered.
     let mut received = Vec::new();
     stream.read_to_end(&mut received).with_default_timeout().await.unwrap().unwrap();
     let rejection = oversized_request(100);
@@ -1686,6 +1672,196 @@ async fn ws_fragmented_oversized_message_closes_connection() {
     expected.extend_from_slice(rejection.as_bytes());
     // A close frame with status code 1000.
     expected.extend_from_slice(&[0x88, 0x02, 0x03, 0xe8]);
+    assert_eq!(received, expected);
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+/// A frame with a payload below 126 bytes, masked with a zero key, which leaves the payload as it
+/// is.
+fn masked_frame(fin_and_opcode: u8, payload: &[u8]) -> Vec<u8> {
+    [&[fin_and_opcode, 0x80 | payload.len() as u8, 0, 0, 0, 0], payload].concat()
+}
+
+#[tokio::test]
+async fn ws_request_fragments_around_pong_are_answered() {
+    init_logger();
+
+    let (addr, handle) = server_with_handles().with_default_timeout().await.unwrap();
+    let mut stream =
+        WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap().into_inner();
+
+    // A request in two fragments with a pong in between. The last fragment isn't masked.
+    let request = br#"{"jsonrpc":"2.0","method":"say_hello","id":1}"#;
+    let message = [
+        masked_frame(0x01, &request[..20]),
+        masked_frame(0x8a, &[]),
+        vec![0x80, request[20..].len() as u8],
+        request[20..].to_vec(),
+    ]
+    .concat();
+    stream.write_all(&message).await.unwrap();
+
+    let response = ok_response("hello".into(), Id::Num(1));
+    let mut expected = vec![0x81, response.len() as u8];
+    expected.extend_from_slice(response.as_bytes());
+    let mut received = vec![0; expected.len()];
+    stream.read_exact(&mut received).with_default_timeout().await.unwrap().unwrap();
+    assert_eq!(received, expected);
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn ws_large_response_is_sent_in_fragments() {
+    init_logger();
+
+    const FRAME: usize = 64 * 1024;
+    const RESULT: usize = 2 * FRAME + 1024;
+
+    let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
+    let mut module = RpcModule::new(());
+    module.register_method("large", |_, _| "a".repeat(RESULT)).unwrap();
+    let addr = server.local_addr().unwrap();
+    let handle = server.start(module);
+
+    let mut stream =
+        WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap().into_inner();
+    let request = masked_frame(0x81, br#"{"jsonrpc":"2.0","method":"large","id":1}"#);
+    stream.write_all(&request).await.unwrap();
+
+    // Reads the frames of one message as their first byte and payload length.
+    let read_message = async {
+        let (mut frames, mut payload) = (Vec::new(), Vec::new());
+        loop {
+            let mut header = [0; 2];
+            stream.read_exact(&mut header).await.unwrap();
+            let len = match header[1] {
+                126 => stream.read_u16().await.unwrap() as usize,
+                127 => stream.read_u64().await.unwrap() as usize,
+                len => len as usize,
+            };
+            let read = payload.len();
+            payload.resize(read + len, 0);
+            stream.read_exact(&mut payload[read..]).await.unwrap();
+            frames.push((header[0], len));
+            if header[0] & 0x80 != 0 {
+                return (frames, payload);
+            }
+        }
+    };
+    let (frames, payload) = read_message.with_default_timeout().await.unwrap();
+
+    let response = ok_response(JsonValue::String("a".repeat(RESULT)), Id::Num(1));
+    assert_eq!(payload, response.as_bytes());
+    assert_eq!(frames, [(0x01, FRAME), (0x00, FRAME), (0x80, response.len() - 2 * FRAME)]);
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn ws_pings_are_not_read_while_pongs_are_unwritten() {
+    init_logger();
+
+    let (addr, handle) = server_with_handles().with_default_timeout().await.unwrap();
+    let mut stream =
+        WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap().into_inner();
+
+    // The client floods pings and reads no pong. Once the pongs fill the socket the server must
+    // stop reading, which blocks the client's writes, instead of collecting further pongs.
+    const MOST_WRITTEN: usize = 256 * 1024 * 1024;
+    let pings = masked_frame(0x89, &[0; 125]).repeat(512);
+    let mut written = 0;
+    while let Ok(result) = stream.write_all(&pings).with_timeout(Duration::from_secs(2)).await {
+        result.unwrap();
+        written += pings.len();
+        assert!(written < MOST_WRITTEN, "the server reads pings without writing their pongs");
+    }
+
+    drop(stream);
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn ws_pings_do_not_restart_read_timeout() {
+    init_logger();
+
+    let (handle, addr) = server_with_ping_interval(RpcModule::new(())).await;
+    let stream =
+        WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap().into_inner();
+    let (mut read, mut write) = stream.into_split();
+
+    // The client pings but answers no ping of the server, so the read timeout closes the
+    // connection. A ping written after that may reset it, so only the end of the read is checked.
+    let pings = tokio::spawn(async move {
+        while write.write_all(&masked_frame(0x89, &[])).await.is_ok() {
+            tokio::time::sleep(PING_INTERVAL / 4).await;
+        }
+    });
+    let mut received = Vec::new();
+    let _ = read.read_to_end(&mut received).with_timeout(PING_INTERVAL * 8).await.unwrap();
+    pings.abort();
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn ws_client_close_is_answered() {
+    init_logger();
+
+    let (addr, handle) = server_with_handles().with_default_timeout().await.unwrap();
+    let mut stream =
+        WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap().into_inner();
+
+    // A close frame with status 1000, which the server echoes before it closes the connection.
+    stream.write_all(&masked_frame(0x88, &[0x03, 0xe8])).await.unwrap();
+    let mut received = Vec::new();
+    stream.read_to_end(&mut received).with_default_timeout().await.unwrap().unwrap();
+    assert_eq!(received, [0x88, 0x02, 0x03, 0xe8]);
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn ws_upgrade_accepts_listed_tokens() {
+    init_logger();
+
+    let (addr, handle) = server_with_handles().with_default_timeout().await.unwrap();
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+
+    // `Upgrade` in the second `Connection` header, and `websocket` after another protocol.
+    let request = format!(
+        "GET / HTTP/1.1\r\nHost: {addr}\r\nConnection: keep-alive\r\nConnection: Upgrade\r\n\
+         Upgrade: h2c, websocket\r\nSec-WebSocket-Version: 13\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+
+    let mut head = Vec::new();
+    while !head.ends_with(b"\r\n\r\n") {
+        head.push(stream.read_u8().with_default_timeout().await.unwrap().unwrap());
+    }
+    let head = String::from_utf8(head).unwrap().to_ascii_lowercase();
+    let mut lines = head.lines();
+    assert_eq!(lines.next(), Some("http/1.1 101 switching protocols"));
+    // The accept key of the sample nonce in RFC 6455.
+    assert!(lines.any(|line| line == "sec-websocket-accept: s3pplmbitxaq9kygzzhzrbk+xoo="));
+
+    stream
+        .write_all(&masked_frame(0x81, br#"{"jsonrpc":"2.0","method":"say_hello","id":1}"#))
+        .await
+        .unwrap();
+    let response = ok_response("hello".into(), Id::Num(1));
+    let mut expected = vec![0x81, response.len() as u8];
+    expected.extend_from_slice(response.as_bytes());
+    let mut received = vec![0; expected.len()];
+    stream.read_exact(&mut received).with_default_timeout().await.unwrap().unwrap();
     assert_eq!(received, expected);
 
     handle.stop().unwrap();

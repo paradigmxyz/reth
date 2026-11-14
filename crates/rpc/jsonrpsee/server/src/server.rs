@@ -38,7 +38,10 @@ use std::{
 use crate::{
     future::{ConnectionGuard, ConnectionPermit, ServerHandle, StopHandle},
     middleware::rpc::{catch_call_panic, RpcService},
-    transport::{http, ws, ws::BackgroundTaskParams},
+    transport::{
+        http, ws,
+        ws::{is_upgrade_request, upgrade_response, BackgroundTaskParams},
+    },
     utils::{
         accept_error_backoff, deserialize_notification, no_request_within, NotifyOnRequest,
         PermitBody, WriteTimeoutIo, DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_PING_INTERVAL,
@@ -49,7 +52,7 @@ use crate::{
 
 use futures_util::{
     future::{Either, FutureExt},
-    io::{BufReader, BufWriter},
+    StreamExt,
 };
 use hyper::body::{Bytes, Incoming};
 use hyper_util::{
@@ -80,12 +83,14 @@ use serde::{
     },
     Deserialize,
 };
-use soketto::handshake::http::is_upgrade_request;
 use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
     sync::{mpsc, watch, Notify},
 };
-use tokio_util::compat::TokioAsyncReadCompatExt;
+use tokio_tungstenite::{
+    tungstenite::protocol::{Role, WebSocketConfig},
+    WebSocketStream,
+};
 use tower::{layer::util::Identity, Layer, Service, ServiceExt};
 use tracing::{instrument, Instrument};
 
@@ -727,9 +732,7 @@ where
             let conn = ConnectionState::new(this.stop_handle.clone(), conn_id, conn_permit);
             let server_cfg = this.server_cfg.clone();
 
-            let mut server = soketto::handshake::http::Server::new();
-
-            let response = match server.receive_request(&request) {
+            let response = match upgrade_response(&request) {
                 Ok(response) => {
                     let (tx, rx) = mpsc::channel(this.server_cfg.message_buffer_capacity as usize);
                     let sink =
@@ -761,12 +764,24 @@ where
                                 }
                             };
 
-                            let io = TokioIo::new(upgraded);
-
-                            let stream = BufReader::new(BufWriter::new(io.compat()));
-                            let mut ws_builder = server.into_builder(stream);
-                            ws_builder.set_max_message_size(server_cfg.max_request_body_size as usize);
-                            let (sender, receiver) = ws_builder.finish();
+                            let max_request_size = server_cfg.max_request_body_size as usize;
+                            // `tungstenite` reads a frame whole into its read buffer and never
+                            // shrinks it, so after a frame near the limit the connection keeps
+                            // that much allocated until it closes. An unfinished fragmented
+                            // message takes about twice its size: the collected fragments and the
+                            // read buffer that grew for them.
+                            // Frames that a client didn't mask have always been read.
+                            let ws_config = WebSocketConfig::default()
+                                .max_message_size(Some(max_request_size))
+                                .max_frame_size(Some(max_request_size))
+                                .accept_unmasked_frames(true);
+                            let (sender, receiver) = WebSocketStream::from_raw_socket(
+                                TokioIo::new(upgraded),
+                                Role::Server,
+                                Some(ws_config),
+                            )
+                            .await
+                            .split();
 
                             let params = BackgroundTaskParams {
                                 server_cfg,
@@ -785,7 +800,7 @@ where
                         .in_current_span(),
                     );
 
-                    response.map(|()| HttpBody::empty())
+                    response
                 }
                 Err(e) => {
                     tracing::debug!(target: LOG_TARGET, "Could not upgrade connection: {}", e);

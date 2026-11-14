@@ -26,11 +26,14 @@
 
 use std::{io, net::SocketAddr};
 
-use futures_util::io::{BufReader, BufWriter};
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use soketto::handshake::{self, Error as SokettoError};
 use tokio::net::TcpStream;
-use tokio_util::compat::{Compat, TokioAsyncReadCompatExt};
+use tokio_tungstenite::{
+    client_async,
+    tungstenite::{self, Message},
+    WebSocketStream,
+};
 
 pub use hyper::{HeaderMap, StatusCode, Uri};
 
@@ -56,10 +59,12 @@ pub struct HttpResponse {
     pub body: String,
 }
 
+/// The error of [`WebSocketTestClient::receive`] once the server closed the connection.
+pub const CONNECTION_CLOSED: &str = "connection closed";
+
 /// WebSocket client to construct with arbitrary payload to construct bad payloads.
 pub struct WebSocketTestClient {
-    tx: soketto::Sender<BufReader<BufWriter<Compat<TcpStream>>>>,
-    rx: soketto::Receiver<BufReader<BufWriter<Compat<TcpStream>>>>,
+    stream: WebSocketStream<TcpStream>,
 }
 
 impl std::fmt::Debug for WebSocketTestClient {
@@ -70,63 +75,64 @@ impl std::fmt::Debug for WebSocketTestClient {
 
 #[derive(Debug)]
 pub enum WebSocketTestError {
-    Redirect,
     RejectedWithStatusCode(u16),
-    Soketto(SokettoError),
+    Handshake(tungstenite::Error),
 }
 
 impl From<io::Error> for WebSocketTestError {
     fn from(err: io::Error) -> Self {
-        WebSocketTestError::Soketto(SokettoError::Io(err))
+        WebSocketTestError::Handshake(err.into())
     }
 }
 
 impl WebSocketTestClient {
     pub async fn new(url: SocketAddr) -> Result<Self, WebSocketTestError> {
         let socket = TcpStream::connect(url).await?;
-        let mut client = handshake::Client::new(
-            BufReader::new(BufWriter::new(socket.compat())),
-            "test-client",
-            "/",
-        );
-        match client.handshake().await {
-            Ok(handshake::ServerResponse::Accepted { .. }) => {
-                let (tx, rx) = client.into_builder().finish();
-                Ok(Self { tx, rx })
+        match client_async("ws://test-client/", socket).await {
+            Ok((stream, _)) => Ok(Self { stream }),
+            Err(tungstenite::Error::Http(response)) => {
+                Err(WebSocketTestError::RejectedWithStatusCode(response.status().as_u16()))
             }
-            Ok(handshake::ServerResponse::Redirect { .. }) => Err(WebSocketTestError::Redirect),
-            Ok(handshake::ServerResponse::Rejected { status_code }) => {
-                Err(WebSocketTestError::RejectedWithStatusCode(status_code))
-            }
-            Err(err) => Err(WebSocketTestError::Soketto(err)),
+            Err(err) => Err(WebSocketTestError::Handshake(err)),
         }
     }
 
     pub async fn send_request_text(&mut self, msg: impl AsRef<str>) -> Result<String, Error> {
         self.send(msg).await?;
-        let mut data = Vec::new();
-        self.rx.receive_data(&mut data).await?;
-        String::from_utf8(data).map_err(Into::into)
-    }
-
-    pub async fn send(&mut self, msg: impl AsRef<str>) -> Result<(), Error> {
-        self.tx.send_text(msg).await?;
-        self.tx.flush().await.map_err(Into::into)
-    }
-
-    pub async fn send_request_binary(&mut self, msg: &[u8]) -> Result<String, Error> {
-        self.tx.send_binary(msg).await?;
-        self.tx.flush().await?;
         self.receive().await
     }
 
+    pub async fn send(&mut self, msg: impl AsRef<str>) -> Result<(), Error> {
+        self.stream.send(Message::text(msg.as_ref())).await.map_err(Into::into)
+    }
+
+    pub async fn send_request_binary(&mut self, msg: &[u8]) -> Result<String, Error> {
+        self.stream.send(Message::binary(msg.to_vec())).await?;
+        self.receive().await
+    }
+
+    /// Returns the next text or binary message. Pings are answered by `tungstenite` with the next
+    /// read.
     pub async fn receive(&mut self) -> Result<String, Error> {
-        let mut data = Vec::new();
-        self.rx.receive_data(&mut data).await?;
-        String::from_utf8(data).map_err(Into::into)
+        loop {
+            match self.stream.next().await {
+                Some(Ok(Message::Text(text))) => return Ok(text.as_str().to_owned()),
+                Some(Ok(Message::Binary(data))) => {
+                    return String::from_utf8(data.into()).map_err(Into::into)
+                }
+                Some(Ok(Message::Close(_))) | None => return Err(CONNECTION_CLOSED.into()),
+                Some(Ok(_)) => {}
+                Some(Err(err)) => return Err(err.into()),
+            }
+        }
     }
 
     pub async fn close(&mut self) -> Result<(), Error> {
-        self.tx.close().await.map_err(Into::into)
+        self.stream.close(None).await.map_err(Into::into)
+    }
+
+    /// Returns the connection, to write and read raw frames.
+    pub fn into_inner(self) -> TcpStream {
+        self.stream.into_inner()
     }
 }
