@@ -1715,11 +1715,11 @@ async fn ws_request_fragments_around_pong_are_answered() {
 }
 
 #[tokio::test]
-async fn ws_large_response_is_sent_in_fragments() {
+async fn ws_large_response_is_sent_in_one_frame() {
     init_logger();
 
-    const FRAME: usize = 64 * 1024;
-    const RESULT: usize = 2 * FRAME + 1024;
+    // Longer than a 16-bit payload length.
+    const RESULT: usize = 128 * 1024;
 
     let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
     let mut module = RpcModule::new(());
@@ -1756,7 +1756,7 @@ async fn ws_large_response_is_sent_in_fragments() {
 
     let response = ok_response(JsonValue::String("a".repeat(RESULT)), Id::Num(1));
     assert_eq!(payload, response.as_bytes());
-    assert_eq!(frames, [(0x01, FRAME), (0x00, FRAME), (0x80, response.len() - 2 * FRAME)]);
+    assert_eq!(frames, [(0x81, response.len())]);
 
     handle.stop().unwrap();
     handle.stopped().with_default_timeout().await.unwrap();
@@ -1818,8 +1818,9 @@ async fn ws_client_close_is_answered() {
     let mut stream =
         WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap().into_inner();
 
-    // A close frame with status 1000, which the server echoes before it closes the connection.
-    stream.write_all(&masked_frame(0x88, &[0x03, 0xe8])).await.unwrap();
+    // A close frame with status 1001, which the server answers with status 1000 before it closes
+    // the connection.
+    stream.write_all(&masked_frame(0x88, &[0x03, 0xe9])).await.unwrap();
     let mut received = Vec::new();
     stream.read_to_end(&mut received).with_default_timeout().await.unwrap().unwrap();
     assert_eq!(received, [0x88, 0x02, 0x03, 0xe8]);
@@ -1859,6 +1860,36 @@ async fn ws_upgrade_accepts_listed_tokens() {
         .unwrap();
     let response = ok_response("hello".into(), Id::Num(1));
     let mut expected = vec![0x81, response.len() as u8];
+    expected.extend_from_slice(response.as_bytes());
+    let mut received = vec![0; expected.len()];
+    stream.read_exact(&mut received).with_default_timeout().await.unwrap().unwrap();
+    assert_eq!(received, expected);
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn ws_pings_before_request_are_answered() {
+    init_logger();
+
+    let (addr, handle) = server_with_handles().with_default_timeout().await.unwrap();
+    let mut stream =
+        WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap().into_inner();
+
+    // Written at once, so that each ping is read before the pong to the one before it is written.
+    let message = [
+        masked_frame(0x89, b"a"),
+        masked_frame(0x89, b"b"),
+        masked_frame(0x89, b"c"),
+        masked_frame(0x81, br#"{"jsonrpc":"2.0","method":"say_hello","id":1}"#),
+    ]
+    .concat();
+    stream.write_all(&message).await.unwrap();
+
+    let response = ok_response("hello".into(), Id::Num(1));
+    let mut expected =
+        vec![0x8a, 1, b'a', 0x8a, 1, b'b', 0x8a, 1, b'c', 0x81, response.len() as u8];
     expected.extend_from_slice(response.as_bytes());
     let mut received = vec![0; expected.len()];
     stream.read_exact(&mut received).with_default_timeout().await.unwrap().unwrap();
