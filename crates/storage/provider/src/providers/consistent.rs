@@ -80,6 +80,15 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         self.storage_provider
     }
 
+    /// Returns the in-memory state of the block with `hash`, if it is part of the in-memory chain
+    /// captured by this view.
+    pub(crate) fn in_memory_state_by_hash(
+        &self,
+        hash: B256,
+    ) -> Option<Arc<BlockState<N::Primitives>>> {
+        self.head_block.clone()?.iter().find(|state| state.hash() == hash)
+    }
+
     // Helper function to convert range bounds
     fn convert_range_bounds<T>(
         &self,

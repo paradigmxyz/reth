@@ -182,6 +182,26 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         ))
     }
 
+    /// Returns a state provider for the post-state of `block_hash` over the snapshot of `provider`.
+    ///
+    /// Blocks in the in-memory chain captured by `provider` reuse that chain instead of rebuilding
+    /// an identical one from the overlay manager's block graph. Their state then no longer depends
+    /// on the manager, which the engine prunes once blocks are persisted. Other blocks were
+    /// persisted when `provider` captured its chain, so a block the manager has dropped resolves
+    /// from the database alone.
+    fn history_state_provider(
+        &self,
+        provider: ConsistentProvider<N>,
+        block_hash: B256,
+    ) -> StateProviderBox {
+        let overlay_manager = self.database.overlay_manager();
+        let overlay_builder = match provider.in_memory_state_by_hash(block_hash) {
+            Some(state) => overlay_manager.overlay_builder_for_state(state),
+            None => overlay_manager.overlay_builder(block_hash),
+        };
+        Box::new(OverlayStateProvider::new(provider.into_database_provider(), overlay_builder))
+    }
+
     /// Returns the canonical in-memory block with `state_root`.
     fn block_state_by_root(&self, state_root: B256) -> Option<Arc<BlockState<N::Primitives>>> {
         self.canonical_in_memory_state
@@ -878,14 +898,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), hash))
+        Ok(self.history_state_provider(provider, hash))
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
+        Ok(self.history_state_provider(provider, block_hash))
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
@@ -2465,6 +2485,33 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn history_state_ignores_overlay_manager_pruning() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // The engine can prune blocks from the overlay manager while a call holds a consistent
+        // view that still captured them.
+        let views = [provider.consistent_provider()?, provider.consistent_provider()?];
+        provider.database.overlay_manager().remove_blocks(
+            database_blocks.iter().chain(&in_memory_blocks).map(|block| block.hash()),
+        );
+
+        for (view, block) in views
+            .into_iter()
+            .zip([in_memory_blocks.last().unwrap(), database_blocks.last().unwrap()])
+        {
+            let state = provider.history_state_provider(view, block.hash());
+            assert_eq!(state.block_hash(block.number)?, Some(block.hash()));
+        }
         Ok(())
     }
 
