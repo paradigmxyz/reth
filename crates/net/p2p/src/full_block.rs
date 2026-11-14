@@ -22,6 +22,7 @@ use std::{
     collections::{HashMap, VecDeque},
     fmt::Debug,
     hash::Hash,
+    mem,
     ops::RangeInclusive,
     pin::Pin,
     sync::Arc,
@@ -95,6 +96,7 @@ where
                 bodies: None,
             },
             client,
+            partial_headers: Vec::new(),
             headers: None,
             pending_headers: VecDeque::new(),
             bodies: HashMap::default(),
@@ -683,8 +685,9 @@ enum BodyResponse<B> {
 }
 /// A future that downloads a range of full blocks from the network.
 ///
-/// This first fetches the headers for the given range using the inner `Client`. Once the request
-/// is complete, it will fetch the bodies for the headers it received.
+/// This first fetches the headers for the given range using the inner `Client`. Short headers
+/// responses are kept and the remaining headers are requested from the parent of the lowest header
+/// received so far. Once all headers are received, it will fetch the bodies for them.
 ///
 /// Once the bodies request completes, the [`SealedBlock`]s will be assembled and the future will
 /// yield the full block range.
@@ -709,6 +712,9 @@ where
     count: u64,
     /// Requests for headers and bodies that are in progress.
     request: FullBlockRangeRequest<Client>,
+    /// Validated headers received so far, in falling order from `start_hash`, until all `count`
+    /// headers are received and moved to `headers`.
+    partial_headers: Vec<SealedHeader<Client::Header>>,
     /// Fetched headers.
     headers: Option<Vec<SealedHeader<Client::Header>>>,
     /// The next headers to request bodies for. This is drained as responses are received.
@@ -817,20 +823,40 @@ where
         let (peer, mut headers_falling) =
             headers.map(|h| h.into_iter().map(SealedHeader::seal_slow).collect::<Vec<_>>()).split();
 
-        // fill in the response if it's the correct length
-        if headers_falling.len() == self.count as usize {
+        // peers may cap responses, so any non-empty response that isn't too long is accepted
+        let missing = self.count as usize - self.partial_headers.len();
+        if !headers_falling.is_empty() && headers_falling.len() <= missing {
             // sort headers from highest to lowest block number
             headers_falling.sort_unstable_by_key(|h| Reverse(h.number()));
 
             // check the starting hash
-            if headers_falling[0].hash() == self.start_hash {
-                let headers_rising = headers_falling.iter().rev().cloned().collect::<Vec<_>>();
+            if headers_falling[0].hash() == self.next_headers_start() {
+                // include the lowest header received so far to validate the link to it
+                let headers_rising = headers_falling
+                    .iter()
+                    .rev()
+                    .chain(self.partial_headers.last())
+                    .cloned()
+                    .collect::<Vec<_>>();
                 // check if the downloaded headers are valid
                 if let Err(err) = self.consensus.validate_header_range(&headers_rising) {
                     debug!(target: "downloaders", %err, ?self.start_hash, "Received bad header response");
                     self.client.report_bad_message(peer);
                     return
                 }
+
+                self.partial_headers.extend(headers_falling);
+                if self.partial_headers.len() < self.count as usize {
+                    trace!(
+                        target: "downloaders",
+                        received = self.partial_headers.len(),
+                        count = self.count,
+                        ?self.start_hash,
+                        "Received partial header range response"
+                    );
+                    return
+                }
+                let headers_falling = mem::take(&mut self.partial_headers);
 
                 // get the bodies request so it can be polled later
                 let hashes = headers_falling.iter().map(|h| h.hash()).collect::<Vec<_>>();
@@ -868,6 +894,12 @@ where
     pub const fn count(&self) -> u64 {
         self.count
     }
+
+    /// Returns the hash the next headers request starts at: the parent of the lowest header
+    /// received so far, or `start_hash` if none were received yet.
+    fn next_headers_start(&self) -> B256 {
+        self.partial_headers.last().map_or(self.start_hash, |h| h.parent_hash())
+    }
 }
 
 impl<Client> Future for FetchFullBlockRangeFuture<Client>
@@ -882,11 +914,13 @@ where
         loop {
             match ready!(this.request.poll(cx)) {
                 // This branch handles headers responses from peers - it first ensures that the
-                // starting hash and number of headers matches what we requested.
+                // starting hash matches what we requested and that the response is not longer than
+                // the number of missing headers.
                 //
-                // If these don't match, we penalize the peer and retry the request.
-                // If they do match, we sort the headers by block number and start the request for
-                // the corresponding block bodies.
+                // If the starting hash or the headers are invalid, we penalize the peer and retry
+                // the request. Otherwise we keep the headers and request the remaining ones. Once
+                // all headers are received, we start the request for the corresponding block
+                // bodies.
                 //
                 // The next result that should be yielded by `poll` is the bodies response.
                 RangeResponseResult::Header(res) => {
@@ -900,10 +934,12 @@ where
                     }
 
                     if this.headers.is_none() {
-                        // did not receive a correct response yet, retry
-                        this.request.headers = Some(this.client.get_headers(
-                            HeadersRequest::falling(this.start_hash.into(), this.count),
-                        ));
+                        // did not receive all headers yet, request the missing ones
+                        this.request.headers =
+                            Some(this.client.get_headers(HeadersRequest::falling(
+                                this.next_headers_start().into(),
+                                this.count - this.partial_headers.len() as u64,
+                            )));
                     }
                 }
                 // This branch handles block body responses from peers - it first inserts the
@@ -2040,5 +2076,23 @@ mod tests {
         assert!(request.headers.is_none());
         assert!(request.pending_headers.is_empty());
         assert!(request.request.bodies.is_none());
+    }
+
+    #[tokio::test]
+    async fn download_full_block_range_keeps_partial_headers() {
+        let mut client = TestFullBlockClient::default();
+        client.set_headers_soft_limit(2);
+        let (header, _) = insert_headers_into_client(&client, 0..5);
+        let client = FullBlockClient::test_client(client);
+
+        let received =
+            timeout(Duration::from_secs(1), client.get_full_block_range(header.hash(), 5))
+                .await
+                .expect("range request should complete with capped headers responses");
+
+        assert_eq!(received.len(), 5);
+        for (i, block) in received.iter().enumerate() {
+            assert_eq!(block.number, header.number - i as u64);
+        }
     }
 }
