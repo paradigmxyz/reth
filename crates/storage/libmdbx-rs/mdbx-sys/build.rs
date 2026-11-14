@@ -1,5 +1,5 @@
 use std::{
-    env,
+    env, fs,
     path::{Path, PathBuf},
 };
 
@@ -7,9 +7,13 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let mdbx = manifest_dir.join("libmdbx");
 
-    println!("cargo:rerun-if-changed={}", mdbx.display());
+    let patches = manifest_dir.join("patches");
 
-    let bindings = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("bindings.rs");
+    println!("cargo:rerun-if-changed={}", mdbx.display());
+    println!("cargo:rerun-if-changed={}", patches.display());
+
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let bindings = out_dir.join("bindings.rs");
     generate_bindings(&mdbx, &bindings);
 
     let mut cc = cc::Build::new();
@@ -49,7 +53,33 @@ fn main() {
         cc.flag("-march=native");
     }
 
-    cc.file(mdbx.join("mdbx.c")).compile("libmdbx.a");
+    let source = out_dir.join("mdbx.c");
+    write_patched_source(&mdbx, &patches, &source);
+
+    cc.include(&mdbx).file(source).compile("libmdbx.a");
+}
+
+/// Writes the vendored `mdbx.c` with every `patches/*.patch` applied in file name order, so reth's
+/// changes to libmdbx stay out of the vendored sources.
+fn write_patched_source(mdbx: &Path, patches: &Path, out_file: &Path) {
+    let mut source = fs::read_to_string(mdbx.join("mdbx.c")).expect("Couldn't read mdbx.c");
+
+    let mut paths = fs::read_dir(patches)
+        .expect("Couldn't read patches directory")
+        .map(|entry| entry.expect("Couldn't read patches directory").path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "patch"))
+        .collect::<Vec<_>>();
+    paths.sort();
+
+    for path in paths {
+        let text = fs::read_to_string(&path).expect("Couldn't read patch");
+        let patch = diffy::Patch::from_str(&text)
+            .unwrap_or_else(|err| panic!("Couldn't parse {}: {err}", path.display()));
+        source = diffy::apply(&source, &patch)
+            .unwrap_or_else(|err| panic!("Couldn't apply {}: {err}", path.display()));
+    }
+
+    fs::write(out_file, source).expect("Couldn't write patched mdbx.c");
 }
 
 fn generate_bindings(mdbx: &Path, out_file: &Path) {
