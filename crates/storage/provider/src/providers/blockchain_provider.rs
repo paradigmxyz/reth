@@ -157,11 +157,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         &self,
         state: Arc<BlockState<N::Primitives>>,
     ) -> ProviderResult<StateProviderBox> {
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
+        Ok(Box::new(OverlayStateProvider::new(
+            self.database.provider()?,
             self.database.overlay_manager().overlay_builder_for_state(state),
-        );
-        Ok(Box::new(state_provider_factory.database_provider_ro()?))
+        )))
     }
 
     /// Returns a historical state provider using an existing database snapshot.
@@ -519,6 +518,9 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
 
 impl<N: ProviderNodeTypes> BlockHashReader for BlockchainProvider<N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
+        if let Some(hash) = self.canonical_in_memory_state.hash_by_number(number) {
+            return Ok(Some(hash))
+        }
         self.consistent_provider()?.block_hash(number)
     }
 
@@ -860,12 +862,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
                 self.history_by_block_number(self.earliest_block_number()?)
             }
             BlockNumberOrTag::Pending => self.pending(),
-            BlockNumberOrTag::Number(num) => {
-                let hash = self
-                    .block_hash(num)?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(num.into()))?;
-                self.state_by_block_hash(hash)
-            }
+            BlockNumberOrTag::Number(num) => self.history_by_block_number(num),
         }
     }
 
@@ -874,6 +871,10 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_number, "Getting history by block number");
+        // Same shortcut as in `history_by_block_hash`.
+        if let Some(state) = self.canonical_in_memory_state.state_by_number(block_number) {
+            return self.state_provider_for_state(state)
+        }
         let provider = self.consistent_provider()?;
         let hash = provider
             .block_hash(block_number)?
@@ -883,6 +884,11 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
+        // A canonical in-memory block already holds its chain, which the hash lookup below would
+        // rebuild from the overlay manager's block graph.
+        if let Some(state) = self.canonical_in_memory_state.state_by_hash(block_hash) {
+            return self.state_provider_for_state(state)
+        }
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
         Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
@@ -2595,6 +2601,17 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(
+            first_db_block.hash(),
+            only_database_provider
+                .state_by_block_number_or_tag(BlockNumberOrTag::Number(first_db_block.number))?
+                .block_hash(first_db_block.number)?
+                .unwrap()
+        );
+        assert!(matches!(
+            only_database_provider.state_by_block_number_or_tag(BlockNumberOrTag::Number(u64::MAX)),
+            Err(ProviderError::HeaderNotFound(BlockHashOrNumber::Number(u64::MAX)))
+        ));
+        assert_eq!(
             first_in_memory_block.hash(),
             in_memory_provider
                 .state_by_block_number_or_tag(BlockNumberOrTag::Latest)?
@@ -3759,9 +3776,9 @@ mod tests {
             .canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
 
-        // `latest` reuses the canonical `Arc<BlockState>` chain, while the hash-based lookup
-        // rebuilds an equivalent chain from the overlay manager's block graph. Both must observe
-        // the same in-memory account and storage values.
+        // The provider's own lookups reuse the canonical `Arc<BlockState>` chain, while
+        // `overlay_builder` rebuilds an equivalent chain from the overlay manager's block graph.
+        // All of them must observe the same in-memory account and storage values.
         let rebuilt_from_hash = OverlayStateProviderFactory::new(
             provider.database.clone(),
             provider.database.overlay_manager().overlay_builder(block_hash),
@@ -3772,6 +3789,8 @@ mod tests {
             Box::new(rebuilt_from_hash) as StateProviderBox,
             provider.latest()?,
             provider.state_by_block_hash(block_hash)?,
+            provider.history_by_block_hash(block_hash)?,
+            provider.history_by_block_number(genesis.number + 1)?,
         ] {
             assert_eq!(state.basic_account(&address)?, Some(account.clone()));
             assert_eq!(state.storage(address, slot_key)?, Some(value));

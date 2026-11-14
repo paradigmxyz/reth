@@ -1109,13 +1109,9 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
                 Ok(self.canonical_in_memory_state.get_finalized_header())
             }
             BlockNumberOrTag::Safe => Ok(self.canonical_in_memory_state.get_safe_header()),
-            BlockNumberOrTag::Earliest => self
-                .header_by_number(self.earliest_block_number()?)?
-                .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal_slow(h)))),
+            BlockNumberOrTag::Earliest => self.sealed_header(self.earliest_block_number()?),
             BlockNumberOrTag::Pending => Ok(self.canonical_in_memory_state.pending_sealed_header()),
-            BlockNumberOrTag::Number(num) => self
-                .header_by_number(num)?
-                .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal_slow(h)))),
+            BlockNumberOrTag::Number(num) => self.sealed_header(num),
         }
     }
 
