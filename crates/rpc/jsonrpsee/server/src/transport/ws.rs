@@ -318,6 +318,9 @@ async fn send_task(
     let control = ws_sender.control.clone();
     let mut write_timed_out = false;
     let mut ping_timer = interval_at(Instant::now() + ping_interval, ping_interval);
+    // Whether a yield before the flush is worth its wait: cleared by one that queued nothing, and
+    // set again once a message is found queued behind another.
+    let mut batching = true;
 
     loop {
         let mut result = tokio::select! {
@@ -352,17 +355,21 @@ async fn send_task(
         let mut yielded = false;
         while matches!(result, Ok(Ok(()))) && written < MAX_MESSAGES_PER_FLUSH {
             let Ok(response) = rx.try_recv() else {
-                if yielded || !calls.any() || ws_sender.io.buffer().is_empty() {
+                if yielded || !batching || !calls.any() || ws_sender.io.buffer().is_empty() {
                     break
                 }
                 // Running calls get to queue their responses first, so that a busy connection
                 // writes many small messages with one flush instead of one each. A yield waits
                 // for the next poll of the IO driver, so it is skipped when no call is running
-                // or a large payload has already been written past the buffer.
+                // or a large payload has already been written past the buffer. It is also
+                // skipped after one that queued nothing: a call that outlasts many others would
+                // delay each of their responses otherwise.
                 tokio::task::yield_now().await;
                 yielded = true;
+                batching = false;
                 continue
             };
+            batching = true;
             result = timeout(
                 write_timeout,
                 ws_sender.write_frame(OpCode::Data(Data::Text), response.as_bytes()),
