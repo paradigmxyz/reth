@@ -17,10 +17,13 @@ use reth_stages_api::{
 };
 use reth_storage_api::StorageSettingsCache;
 use reth_storage_errors::provider::ProviderResult;
+use reth_tasks::executor::{
+    channel::mpsc::{self, Receiver},
+    rayon,
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
-    sync::mpsc::{self, Receiver},
 };
 use tracing::*;
 

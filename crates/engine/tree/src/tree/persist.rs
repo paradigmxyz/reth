@@ -14,11 +14,15 @@ use reth_engine_primitives::{ConsensusEngineEvent, SlowBlockInfo};
 use reth_errors::ProviderResult;
 use reth_evm::ConfigureEvm;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BalProvider, BlockReader, ChangeSetReader, DatabaseProviderFactory, ProviderError,
     PruneCheckpointReader, SaveBlocksInput, StageCheckpointReader, StateProviderFactory,
     StateReader, StorageChangeSetReader, StorageSettingsCache,
+};
+use reth_tasks::executor::{
+    channel::{self, TryRecvError},
+    time::Instant,
 };
 use std::time::Duration;
 use tracing::debug;
@@ -72,7 +76,7 @@ where
         if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
             self.state.set_pending_sparse_trie_prune(false);
-            let (tx, rx) = crossbeam_channel::bounded(1);
+            let (tx, rx) = channel::bounded(1);
             let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
         }
@@ -84,7 +88,7 @@ where
         let highest_num_hash = input.last_block();
         debug!(target: "engine::tree", count=input.persist_rest_blocks().len(), blocks = ?input.persist_rest_blocks().iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
 
-        let (tx, rx) = crossbeam_channel::bounded(1);
+        let (tx, rx) = channel::bounded(1);
         let _ = self.persistence.save_blocks(input, tx);
 
         self.persistence_state.start_save(highest_num_hash, rx);
@@ -160,14 +164,12 @@ where
                 self.on_persistence_complete(result, start_time)?;
                 Ok(true)
             }
-            Err(crossbeam_channel::TryRecvError::Empty) => {
+            Err(TryRecvError::Empty) => {
                 // Not ready yet, put it back
                 self.persistence_state.rx = Some((rx, start_time, action));
                 Ok(false)
             }
-            Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                Err(AdvancePersistenceError::ChannelClosed)
-            }
+            Err(TryRecvError::Disconnected) => Err(AdvancePersistenceError::ChannelClosed),
         }
     }
 

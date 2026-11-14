@@ -177,6 +177,7 @@ mod tests {
     use crate::test_utils::TestBlockBuilder;
     use rand::Rng;
     use reth_ethereum_primitives::{EthPrimitives, Receipt};
+    use reth_tasks::executor::{thread, Runtime};
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder<EthPrimitives>,
@@ -191,9 +192,9 @@ mod tests {
     fn create_mock_state_chain(
         test_block_builder: &mut TestBlockBuilder<EthPrimitives>,
         num_blocks: u64,
+        mut parent_hash: B256,
     ) -> Vec<BlockState> {
         let mut chain = Vec::with_capacity(num_blocks as usize);
-        let mut parent_hash = B256::random();
         let mut parent_state: Option<BlockState> = None;
 
         for i in 1..=num_blocks {
@@ -212,83 +213,98 @@ mod tests {
     #[test]
     fn test_state() {
         let number = rand::rng().random::<u64>();
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let block = test_block_builder.get_executed_block_with_number(number, B256::random());
+        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::seeded(42);
+        let parent_hash = B256::random();
+        Runtime::new().run(move || {
+            let block = test_block_builder.get_executed_block_with_number(number, parent_hash);
 
-        let state = BlockState::new(block.clone());
+            let state = BlockState::new(block.clone());
 
-        assert_eq!(state.block(), block);
-        assert_eq!(state.hash(), block.recovered_block().hash());
-        assert_eq!(state.number(), number);
-        assert_eq!(state.state_root(), block.recovered_block().state_root);
+            assert_eq!(state.block(), block);
+            assert_eq!(state.hash(), block.recovered_block().hash());
+            assert_eq!(state.number(), number);
+            assert_eq!(state.state_root(), block.recovered_block().state_root);
+        });
     }
 
     #[test]
     fn test_state_receipts() {
-        let receipts = vec![vec![Receipt::default()]];
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let block =
-            test_block_builder.get_executed_block_with_receipts(receipts.clone(), B256::random());
+        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::seeded(42);
+        let parent_hash = B256::random();
+        Runtime::new().run(move || {
+            let receipts = vec![vec![Receipt::default()]];
+            let block =
+                test_block_builder.get_executed_block_with_receipts(receipts.clone(), parent_hash);
 
-        let state = BlockState::new(block);
+            let state = BlockState::new(block);
 
-        assert_eq!(state.receipts(), receipts.first().unwrap());
+            assert_eq!(state.receipts(), receipts.first().unwrap());
+        });
     }
 
     #[test]
     fn test_block_state_parent_blocks() {
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let chain = create_mock_state_chain(&mut test_block_builder, 4);
+        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::seeded(42);
+        let parent_hash = B256::random();
+        Runtime::new().run(move || {
+            let chain = create_mock_state_chain(&mut test_block_builder, 4, parent_hash);
 
-        let parents: Vec<_> = chain[3].parent_state_chain().collect();
-        assert_eq!(parents.len(), 3);
-        assert_eq!(parents[0].block().recovered_block().number, 3);
-        assert_eq!(parents[1].block().recovered_block().number, 2);
-        assert_eq!(parents[2].block().recovered_block().number, 1);
+            let parents: Vec<_> = chain[3].parent_state_chain().collect();
+            assert_eq!(parents.len(), 3);
+            assert_eq!(parents[0].block().recovered_block().number, 3);
+            assert_eq!(parents[1].block().recovered_block().number, 2);
+            assert_eq!(parents[2].block().recovered_block().number, 1);
 
-        let parents: Vec<_> = chain[2].parent_state_chain().collect();
-        assert_eq!(parents.len(), 2);
-        assert_eq!(parents[0].block().recovered_block().number, 2);
-        assert_eq!(parents[1].block().recovered_block().number, 1);
+            let parents: Vec<_> = chain[2].parent_state_chain().collect();
+            assert_eq!(parents.len(), 2);
+            assert_eq!(parents[0].block().recovered_block().number, 2);
+            assert_eq!(parents[1].block().recovered_block().number, 1);
 
-        assert_eq!(chain[0].parent_state_chain().count(), 0);
+            assert_eq!(chain[0].parent_state_chain().count(), 0);
+        });
     }
 
     #[test]
     fn test_block_state_single_block_state_chain() {
-        let single_block_number = 1;
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let single_block =
-            create_mock_state(&mut test_block_builder, single_block_number, B256::random());
-        let single_block_hash = single_block.block().recovered_block().hash();
+        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::seeded(42);
+        let parent_hash = B256::random();
+        Runtime::new().run(move || {
+            let single_block_number = 1;
+            let single_block =
+                create_mock_state(&mut test_block_builder, single_block_number, parent_hash);
+            let single_block_hash = single_block.block().recovered_block().hash();
 
-        assert_eq!(single_block.parent_state_chain().count(), 0);
+            assert_eq!(single_block.parent_state_chain().count(), 0);
 
-        let block_state_chain = single_block.chain().collect::<Vec<_>>();
-        assert_eq!(block_state_chain.len(), 1);
-        assert_eq!(block_state_chain[0].block().recovered_block().number, single_block_number);
-        assert_eq!(block_state_chain[0].block().recovered_block().hash(), single_block_hash);
+            let block_state_chain = single_block.chain().collect::<Vec<_>>();
+            assert_eq!(block_state_chain.len(), 1);
+            assert_eq!(block_state_chain[0].block().recovered_block().number, single_block_number);
+            assert_eq!(block_state_chain[0].block().recovered_block().hash(), single_block_hash);
+        });
     }
 
     #[test]
     fn test_block_state_chain() {
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let chain = create_mock_state_chain(&mut test_block_builder, 3);
+        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::seeded(42);
+        let parent_hash = B256::random();
+        Runtime::new().run(move || {
+            let chain = create_mock_state_chain(&mut test_block_builder, 3, parent_hash);
 
-        let block_state_chain = chain[2].chain().collect::<Vec<_>>();
-        assert_eq!(block_state_chain.len(), 3);
-        assert_eq!(block_state_chain[0].block().recovered_block().number, 3);
-        assert_eq!(block_state_chain[1].block().recovered_block().number, 2);
-        assert_eq!(block_state_chain[2].block().recovered_block().number, 1);
+            let block_state_chain = chain[2].chain().collect::<Vec<_>>();
+            assert_eq!(block_state_chain.len(), 3);
+            assert_eq!(block_state_chain[0].block().recovered_block().number, 3);
+            assert_eq!(block_state_chain[1].block().recovered_block().number, 2);
+            assert_eq!(block_state_chain[2].block().recovered_block().number, 1);
 
-        let block_state_chain = chain[1].chain().collect::<Vec<_>>();
-        assert_eq!(block_state_chain.len(), 2);
-        assert_eq!(block_state_chain[0].block().recovered_block().number, 2);
-        assert_eq!(block_state_chain[1].block().recovered_block().number, 1);
+            let block_state_chain = chain[1].chain().collect::<Vec<_>>();
+            assert_eq!(block_state_chain.len(), 2);
+            assert_eq!(block_state_chain[0].block().recovered_block().number, 2);
+            assert_eq!(block_state_chain[1].block().recovered_block().number, 1);
 
-        let block_state_chain = chain[0].chain().collect::<Vec<_>>();
-        assert_eq!(block_state_chain.len(), 1);
-        assert_eq!(block_state_chain[0].block().recovered_block().number, 1);
+            let block_state_chain = chain[0].chain().collect::<Vec<_>>();
+            assert_eq!(block_state_chain.len(), 1);
+            assert_eq!(block_state_chain[0].block().recovered_block().number, 1);
+        });
     }
 
     fn block_state_chain(depth: usize, mut parent: Option<Arc<BlockState>>) -> Arc<BlockState> {
@@ -303,25 +319,27 @@ mod tests {
     fn deep_chain_drop_preserves_shared_tail() {
         const DEPTH: usize = 100_000;
 
-        // A recursive drop of either chain would overflow this stack.
-        std::thread::Builder::new()
-            .stack_size(64 * 1024)
-            .spawn(|| {
-                let tail = block_state_chain(DEPTH, None);
-                let tail_payload = Arc::downgrade(&tail.block_ref().execution_output);
-                let head = block_state_chain(DEPTH, Some(tail.clone()));
-                let head_payload = Arc::downgrade(&head.block_ref().execution_output);
+        Runtime::new().run(|| {
+            // A recursive drop of either chain would overflow this stack.
+            thread::Builder::new()
+                .stack_size(64 * 1024)
+                .spawn(|| {
+                    let tail = block_state_chain(DEPTH, None);
+                    let tail_payload = Arc::downgrade(&tail.block_ref().execution_output);
+                    let head = block_state_chain(DEPTH, Some(tail.clone()));
+                    let head_payload = Arc::downgrade(&head.block_ref().execution_output);
 
-                drop(head);
-                assert_eq!(head_payload.strong_count(), 0);
-                assert_eq!(Arc::strong_count(&tail), 1);
-                assert_eq!(tail_payload.strong_count(), DEPTH);
+                    drop(head);
+                    assert_eq!(head_payload.strong_count(), 0);
+                    assert_eq!(Arc::strong_count(&tail), 1);
+                    assert_eq!(tail_payload.strong_count(), DEPTH);
 
-                drop(tail);
-                assert_eq!(tail_payload.strong_count(), 0);
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+                    drop(tail);
+                    assert_eq!(tail_payload.strong_count(), 0);
+                })
+                .unwrap()
+                .join()
+                .unwrap();
+        });
     }
 }

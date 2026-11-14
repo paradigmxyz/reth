@@ -28,17 +28,19 @@ pub mod metrics;
 
 use crate::error::StateRootTaskError;
 use alloy_primitives::B256;
-use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult, StateProofProvider};
-use reth_tasks::{Runtime, WorkerPool};
+use reth_tasks::{
+    executor::{
+        channel::{unbounded, Receiver, Sender},
+        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+        time::Instant,
+    },
+    Runtime, WorkerPool,
+};
 use reth_trie::{DecodedMultiProofV2, MultiProofTargetsV2, ProofV2Target};
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},
-    sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc,
-    },
+    sync::Arc,
     time::Duration,
 };
 use tracing::{debug, debug_span, error, instrument, trace};
@@ -103,13 +105,13 @@ impl AvailabilitySheet {
 pub struct ProofWorkerHandle {
     /// Sender shared with the workers, kept so that [`Self::results`] never disconnects while the
     /// handle is alive.
-    _result_tx: CrossbeamSender<ProofWorkerResult>,
+    _result_tx: Sender<ProofWorkerResult>,
     /// Results sent by both worker pools.
-    result_rx: CrossbeamReceiver<ProofWorkerResult>,
+    result_rx: Receiver<ProofWorkerResult>,
     /// Direct sender to storage worker pool
-    storage_work_tx: CrossbeamSender<StorageProofJob>,
+    storage_work_tx: Sender<StorageProofJob>,
     /// Direct sender to account worker pool
-    account_work_tx: CrossbeamSender<AccountProofJob>,
+    account_work_tx: Sender<AccountProofJob>,
     /// Per-worker availability flags for storage workers. Used to determine whether to chunk
     /// multiproofs.
     storage_availability: Arc<AvailabilitySheet>,
@@ -242,7 +244,7 @@ impl ProofWorkerHandle {
     ///
     /// Results arrive in completion order. The receiver never disconnects while the handle is
     /// alive.
-    pub const fn results(&self) -> &CrossbeamReceiver<ProofWorkerResult> {
+    pub const fn results(&self) -> &Receiver<ProofWorkerResult> {
         &self.result_rx
     }
 
@@ -442,9 +444,9 @@ struct ProofWorker<Factory, J> {
     /// Shared task context with database factory and prefix sets
     task_ctx: ProofTaskCtx<Factory>,
     /// Channel for receiving jobs
-    work_rx: CrossbeamReceiver<J>,
+    work_rx: Receiver<J>,
     /// Sender for job results and worker failures
-    result_tx: CrossbeamSender<ProofWorkerResult>,
+    result_tx: Sender<ProofWorkerResult>,
     /// Per-worker availability flags
     availability: Arc<AvailabilitySheet>,
     /// Set when the handle is dropped, after which nobody reads the results of queued jobs.
@@ -501,7 +503,7 @@ impl<Factory: DatabaseProviderROFactory, J> ProofWorker<Factory, J> {
                     jitter_us = jitter.as_micros(),
                     "Proof worker applying proof jitter"
                 );
-                std::thread::sleep(jitter);
+                reth_tasks::executor::thread::sleep(jitter);
             }
 
             match catch_unwind(AssertUnwindSafe(|| process(&provider, job))) {
@@ -705,9 +707,9 @@ impl From<ProofJobError> for StateRootTaskError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossbeam_channel::RecvTimeoutError;
     use reth_chainspec::ChainSpec;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
+    use reth_tasks::executor::channel::{bounded, RecvTimeoutError};
     use std::sync::Arc;
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
@@ -717,127 +719,132 @@ mod tests {
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
     #[test]
     fn spawn_proof_workers_creates_handle() {
-        let chain_spec = Arc::new(ChainSpec::default());
-        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
-        let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
-        let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
-            provider_factory,
-            reth_storage_overlay::OverlayManager::<
-                reth_ethereum_primitives::EthPrimitives,
-            >::default()
-            .overlay_builder(anchor_hash),
-        );
-        let ctx = test_ctx(factory.clone());
+        reth_tasks::executor::Runtime::new().run(|| {
+            let chain_spec = Arc::new(ChainSpec::default());
+            let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
+            let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
+            let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
+                provider_factory,
+                reth_storage_overlay::OverlayManager::<
+                    reth_ethereum_primitives::EthPrimitives,
+                >::default()
+                .overlay_builder(anchor_hash),
+            );
+            let ctx = test_ctx(factory.clone());
 
-        let runtime = reth_tasks::Runtime::test();
-        let proof_worker_handle = ProofWorkerHandle::new(
-            &runtime,
-            ctx,
-            ProofWorkerCounts::full(&runtime),
-            #[cfg(feature = "metrics")]
-            Default::default(),
-        );
-        let proof_result_rx = proof_worker_handle.results().clone();
+            let runtime = reth_tasks::Runtime::test();
+            let proof_worker_handle = ProofWorkerHandle::new(
+                &runtime,
+                ctx,
+                ProofWorkerCounts::full(&runtime),
+                #[cfg(feature = "metrics")]
+                Default::default(),
+            );
+            let proof_result_rx = proof_worker_handle.results().clone();
 
-        // Workers shut down automatically when the handle is dropped.
-        drop(proof_worker_handle);
+            // Workers shut down automatically when the handle is dropped.
+            drop(proof_worker_handle);
 
-        // Keep the database alive until both pools release their providers.
-        assert_eq!(
-            proof_result_rx.recv_timeout(Duration::from_secs(30)).unwrap_err(),
-            RecvTimeoutError::Disconnected
-        );
-        drop(factory);
+            // Keep the database alive until both pools release their providers.
+            assert_eq!(
+                proof_result_rx.recv_timeout(Duration::from_secs(30)).unwrap_err(),
+                RecvTimeoutError::Disconnected
+            );
+            drop(factory);
+        });
     }
 
     /// Ensures a single pool serves quarter, half, and full-capacity worker counts.
     #[test]
     fn single_pool_serves_fractional_worker_counts() {
-        let provider_factory =
-            create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
-        let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
-        let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
-            provider_factory,
-            reth_storage_overlay::OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default()
-                .overlay_builder(anchor_hash),
-        );
-        let ctx = test_ctx(factory);
-
-        let runtime = reth_tasks::RuntimeBuilder::new(
-            reth_tasks::RuntimeConfig::default()
-                .with_rayon(reth_tasks::RayonConfig { cpu_threads: Some(2), ..Default::default() }),
-        )
-        .build()
-        .unwrap();
-        let pool_threads = runtime.proof_storage_worker_pool().num_threads();
-        assert_eq!(pool_threads, 8);
-        assert_eq!(runtime.proof_account_worker_pool().num_threads(), pool_threads);
-
-        for counts in [
-            ProofWorkerCounts::new(0, 0),
-            ProofWorkerCounts::new(pool_threads / 4, pool_threads / 4),
-            ProofWorkerCounts::new(pool_threads / 2, pool_threads / 2),
-            ProofWorkerCounts::full(&runtime),
-            ProofWorkerCounts::new(pool_threads + 1, pool_threads + 2),
-        ] {
-            let proof_worker_handle = ProofWorkerHandle::new(
-                &runtime,
-                ctx.clone(),
-                counts,
-                #[cfg(feature = "metrics")]
-                Default::default(),
+        reth_tasks::executor::Runtime::new().run(|| {
+            let provider_factory =
+                create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+            let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
+            let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
+                provider_factory,
+                reth_storage_overlay::OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default()
+                    .overlay_builder(anchor_hash),
             );
-            assert_eq!(
-                proof_worker_handle.total_storage_workers(),
-                counts.storage.max(1).min(pool_threads)
-            );
-            assert_eq!(
-                proof_worker_handle.total_account_workers(),
-                counts.account.max(1).min(pool_threads)
-            );
+            let ctx = test_ctx(factory);
 
-            let address = B256::ZERO;
-            let storage_targets = MultiProofTargetsV2 {
-                storage_targets: std::iter::once((address, vec![ProofV2Target::new(B256::ZERO)]))
-                    .collect(),
-                ..Default::default()
-            };
-            assert_eq!(proof_worker_handle.dispatch(storage_targets).unwrap(), 1);
-            let storage_proof = proof_worker_handle
-                .results()
-                .recv_timeout(Duration::from_secs(30))
-                .unwrap()
-                .unwrap();
-            assert!(storage_proof.account_proofs.is_empty());
-            assert!(storage_proof.storage_proofs.contains_key(&address));
+            let runtime = reth_tasks::RuntimeBuilder::new(
+                reth_tasks::RuntimeConfig::default()
+                    .with_rayon(reth_tasks::RayonConfig { cpu_threads: Some(2), ..Default::default() }),
+            )
+            .build()
+            .unwrap();
+            let pool_threads = runtime.proof_storage_worker_pool().num_threads();
+            assert_eq!(pool_threads, 8);
+            assert_eq!(runtime.proof_account_worker_pool().num_threads(), pool_threads);
 
-            let account_targets = MultiProofTargetsV2 {
-                account_targets: vec![ProofV2Target::new(address)],
-                ..Default::default()
-            };
-            assert_eq!(proof_worker_handle.dispatch(account_targets).unwrap(), 1);
-            let account_proof = proof_worker_handle
-                .results()
-                .recv_timeout(Duration::from_secs(30))
-                .unwrap()
-                .unwrap();
-            assert!(account_proof.storage_proofs.is_empty());
+            for counts in [
+                ProofWorkerCounts::new(0, 0),
+                ProofWorkerCounts::new(pool_threads / 4, pool_threads / 4),
+                ProofWorkerCounts::new(pool_threads / 2, pool_threads / 2),
+                ProofWorkerCounts::full(&runtime),
+                ProofWorkerCounts::new(pool_threads + 1, pool_threads + 2),
+            ] {
+                let proof_worker_handle = ProofWorkerHandle::new(
+                    &runtime,
+                    ctx.clone(),
+                    counts,
+                    #[cfg(feature = "metrics")]
+                    Default::default(),
+                );
+                assert_eq!(
+                    proof_worker_handle.total_storage_workers(),
+                    counts.storage.max(1).min(pool_threads)
+                );
+                assert_eq!(
+                    proof_worker_handle.total_account_workers(),
+                    counts.account.max(1).min(pool_threads)
+                );
 
-            let results = proof_worker_handle.results().clone();
-            drop(proof_worker_handle);
-            // Every broadcast holds a result sender until all its workers have exited. An
-            // initialization error is a message here, rather than a successful shutdown.
-            assert!(matches!(
-                results.recv_timeout(Duration::from_secs(30)),
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected)
-            ));
-        }
+                let address = B256::ZERO;
+                let storage_targets = MultiProofTargetsV2 {
+                    storage_targets: std::iter::once((address, vec![ProofV2Target::new(B256::ZERO)]))
+                        .collect(),
+                    ..Default::default()
+                };
+                assert_eq!(proof_worker_handle.dispatch(storage_targets).unwrap(), 1);
+                let storage_proof = proof_worker_handle
+                    .results()
+                    .recv_timeout(Duration::from_secs(30))
+                    .unwrap()
+                    .unwrap();
+                assert!(storage_proof.account_proofs.is_empty());
+                assert!(storage_proof.storage_proofs.contains_key(&address));
+
+                let account_targets = MultiProofTargetsV2 {
+                    account_targets: vec![ProofV2Target::new(address)],
+                    ..Default::default()
+                };
+                assert_eq!(proof_worker_handle.dispatch(account_targets).unwrap(), 1);
+                let account_proof = proof_worker_handle
+                    .results()
+                    .recv_timeout(Duration::from_secs(30))
+                    .unwrap()
+                    .unwrap();
+                assert!(account_proof.storage_proofs.is_empty());
+
+                let results = proof_worker_handle.results().clone();
+                drop(proof_worker_handle);
+                // Every broadcast holds a result sender until all its workers have exited. An
+                // initialization error is a message here, rather than a successful shutdown.
+                assert!(matches!(
+                    results.recv_timeout(Duration::from_secs(30)),
+                    Err(RecvTimeoutError::Disconnected)
+                ));
+            }
+        });
     }
 
     /// Ensures jobs still queued when the handle is dropped are discarded, so a cancelled block's
     /// backlog does not hold the pools that the next block's workers queue behind.
     #[test]
     fn dropped_handle_discards_queued_jobs() {
+        reth_tasks::executor::Runtime::new().run(|| {
         let provider_factory =
             create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
         let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
@@ -849,7 +856,7 @@ mod tests {
         let runtime = reth_tasks::Runtime::test();
 
         // Occupy both pools' blocking tasks so the workers start only after the handle is dropped.
-        let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(0);
+        let (release_tx, release_rx) = bounded::<()>(0);
         for kind in [ProofWorkerKind::Storage, ProofWorkerKind::Account] {
             let release_rx = release_rx.clone();
             runtime.spawn_blocking_named(kind.task_name(), move || {
@@ -881,5 +888,6 @@ mod tests {
             RecvTimeoutError::Disconnected
         );
         drop(factory);
+        });
     }
 }

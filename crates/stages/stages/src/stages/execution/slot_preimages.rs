@@ -1,6 +1,5 @@
 use alloy_primitives::{keccak256, map::HashSet, B256};
 use eyre::Context;
-use rayon::slice::ParallelSliceMut;
 use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -11,6 +10,7 @@ use reth_libmdbx::{
 };
 use reth_provider::{DBProvider, ExecutionOutcome};
 use reth_stages_api::StageError;
+use reth_tasks::executor::rayon::prelude::ParallelSliceMut;
 use reth_trie::bundle_state::{AccountRevert, RevertToSlot};
 use std::path::Path;
 use tracing::trace;

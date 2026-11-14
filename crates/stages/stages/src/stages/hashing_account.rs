@@ -17,11 +17,14 @@ use reth_stages_api::{
     StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_tasks::executor::{
+    channel::mpsc::{self, Receiver},
+    rayon,
+};
 use std::{
     collections::BTreeSet,
     fmt::Debug,
     ops::{Range, RangeInclusive},
-    sync::mpsc::{self, Receiver},
 };
 use tracing::*;
 

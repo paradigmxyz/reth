@@ -12,6 +12,7 @@ use reth_provider::{
 };
 use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
+use reth_tasks::executor::channel::mpsc;
 use std::{io::ErrorKind, path::Path};
 use tracing::info;
 
@@ -119,7 +120,7 @@ where
     N: NodePrimitives,
     F: Fn(BlockNumber) -> N::BlockHeader + Send + Sync + 'static,
 {
-    let (tx, rx) = std::sync::mpsc::channel();
+    let (tx, rx) = mpsc::channel();
 
     let mut handles = Vec::new();
 
@@ -140,7 +141,7 @@ where
             StaticFileSegment::TransactionSenders => "init-state-senders",
             _ => "init-state-segment",
         };
-        let handle = reth_tasks::spawn_os_thread(thread_name, move || {
+        let handle = reth_tasks::spawn_thread(thread_name, move || {
             let result = provider.latest_writer(segment).and_then(|mut writer| {
                 for block_num in 1..=target_height {
                     writer.increment_block(block_num)?;
@@ -156,7 +157,7 @@ where
 
     // Spawn job for appending empty headers
     let provider = sf_provider.clone();
-    let handle = reth_tasks::spawn_os_thread("init-state-headers", move || {
+    let handle = reth_tasks::spawn_thread("init-state-headers", move || {
         let result = provider.latest_writer(StaticFileSegment::Headers).and_then(|mut writer| {
             for block_num in 1..=target_height {
                 // TODO: should we fill with real parent_hash?
@@ -215,13 +216,11 @@ mod tests {
     use alloy_primitives::{address, b256};
     use reth_db_common::init::init_genesis;
     use reth_provider::{test_utils::create_test_provider_factory, DatabaseProviderFactory};
-    use std::{
-        io::Write,
-        sync::{
-            atomic::{AtomicU64, Ordering},
-            Arc,
-        },
+    use reth_tasks::executor::{
+        sync::atomic::{AtomicU64, Ordering},
+        Runtime,
     };
+    use std::{io::Write, sync::Arc};
     use tempfile::NamedTempFile;
 
     #[test]
@@ -302,37 +301,39 @@ mod tests {
     /// is never invoked.
     #[test]
     fn test_setup_without_evm_skips_dummy_chain_for_genesis_header() {
-        let header = Header { number: 0, ..Default::default() };
-        let header_hash = header.hash_slow();
+        Runtime::new().run(|| {
+            let header = Header { number: 0, ..Default::default() };
+            let header_hash = header.hash_slow();
 
-        let provider_factory = create_test_provider_factory();
-        init_genesis(&provider_factory).unwrap();
-        let provider_rw = provider_factory.database_provider_rw().unwrap();
+            let provider_factory = create_test_provider_factory();
+            init_genesis(&provider_factory).unwrap();
+            let provider_rw = provider_factory.database_provider_rw().unwrap();
 
-        let factory_calls = Arc::new(AtomicU64::new(0));
-        let factory_calls_inner = Arc::clone(&factory_calls);
+            let factory_calls = Arc::new(AtomicU64::new(0));
+            let factory_calls_inner = Arc::clone(&factory_calls);
 
-        // The Result of `setup_without_evm` itself is not asserted: with
-        // `number == 0` plus a genesis already written by `init_genesis`,
-        // the subsequent `append_first_block` may legitimately fail. The
-        // bug under test is the OOM in the dummy-chain loop, observable
-        // through the factory-call counter below.
-        let _ = setup_without_evm(
-            &provider_rw,
-            SealedHeader::new(header, header_hash),
-            move |number| {
-                // Bound calls so a regression cannot exhaust the test
-                // runner's memory; the only correct value here is 0.
-                let n = factory_calls_inner.fetch_add(1, Ordering::Relaxed);
-                assert!(n < 8, "header_factory must not be invoked for a genesis-block header");
-                Header { number, ..Default::default() }
-            },
-        );
+            // The Result of `setup_without_evm` itself is not asserted: with
+            // `number == 0` plus a genesis already written by `init_genesis`,
+            // the subsequent `append_first_block` may legitimately fail. The
+            // bug under test is the OOM in the dummy-chain loop, observable
+            // through the factory-call counter below.
+            let _ = setup_without_evm(
+                &provider_rw,
+                SealedHeader::new(header, header_hash),
+                move |number| {
+                    // Bound calls so a regression cannot exhaust the test
+                    // runner's memory; the only correct value here is 0.
+                    let n = factory_calls_inner.fetch_add(1, Ordering::Relaxed);
+                    assert!(n < 8, "header_factory must not be invoked for a genesis-block header");
+                    Header { number, ..Default::default() }
+                },
+            );
 
-        assert_eq!(
-            factory_calls.load(Ordering::Relaxed),
-            0,
-            "append_dummy_chain must be skipped when header.number() == 0"
-        );
+            assert_eq!(
+                factory_calls.load(Ordering::Relaxed),
+                0,
+                "append_dummy_chain must be skipped when header.number() == 0"
+            );
+        });
     }
 }

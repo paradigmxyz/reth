@@ -9,15 +9,14 @@ use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::ProviderResult;
 use reth_evm::{debug_unreachable, ConfigureEvm};
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
-use reth_primitives_traits::{
-    FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedHeader,
-};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
     DatabaseProviderFactory, ProviderError, PruneCheckpointReader, StageCheckpointReader,
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
     TransactionVariant,
 };
+use reth_tasks::executor::time::Instant;
 use reth_trie::{HashedPostState, KeccakKeyHasher, SortedTrieData};
 use std::sync::Arc;
 use tracing::{debug, instrument, trace, warn};

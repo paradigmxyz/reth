@@ -3,13 +3,15 @@
 use super::{Output, StorageJob, StorageWorker};
 use crate::{hashed_cursor::HashedStorageCursor, trie_cursor::TrieStorageCursor};
 use alloy_primitives::{B256, U256};
-use crossbeam_channel::{Receiver, Sender};
 use reth_execution_errors::StateRootError;
 use reth_storage_errors::db::DatabaseError;
+use reth_tasks::executor::{
+    channel::{self, Receiver, Sender},
+    thread::{self, JoinHandle},
+};
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},
     sync::Arc,
-    thread::{self, JoinHandle},
 };
 
 /// Owns storage scheduling and one pending root announcement for the account producer.
@@ -44,7 +46,7 @@ impl StoragePipeline {
         assert!(storage_lookahead > 0, "storage lookahead must be positive");
         // The account producer retains one announcement outside the queue. Reserving its
         // slot here bounds all dispatched roots, including that lookahead, by the limit.
-        let (announcements_tx, announcements) = crossbeam_channel::bounded(storage_lookahead - 1);
+        let (announcements_tx, announcements) = channel::bounded(storage_lookahead - 1);
         let scheduler = StorageScheduler { addresses, workers, context: context.clone() };
         let span = tracing::Span::current();
         let background = thread::Builder::new()
@@ -67,7 +69,7 @@ impl StoragePipeline {
             return None;
         }
         if self.next.is_none() {
-            self.next = crossbeam_channel::select! {
+            self.next = channel::select! {
                 recv(self.announcements) -> announcement => announcement.ok(),
                 recv(self.context.cancel) -> _ => return None,
             };
@@ -76,7 +78,7 @@ impl StoragePipeline {
         if up_to.is_some_and(|bound| *address > bound) {
             return None;
         }
-        let root = crossbeam_channel::select! {
+        let root = channel::select! {
             recv(root) -> root => root,
             recv(self.context.cancel) -> _ => return None,
         };
@@ -143,7 +145,7 @@ where
             let pool = reth_tasks::WorkerPool::new(worker_count, "trie-verify");
             // Reserve backlog space before dispatch so a slow early root can always finish
             // without competing with later results for space.
-            let (jobs_tx, jobs_rx) = crossbeam_channel::bounded(worker_count * 2);
+            let (jobs_tx, jobs_rx) = channel::bounded(worker_count * 2);
             pool.in_place_scope(|scope| {
                 for worker in self.workers.drain(..) {
                     let jobs = jobs_rx.clone();
@@ -175,7 +177,7 @@ where
         for job in self.addresses.by_ref() {
             let job = job?;
             let root = if job.root_required {
-                let (sender, receiver) = crossbeam_channel::bounded(1);
+                let (sender, receiver) = channel::bounded(1);
                 // Announce in scan order before dispatch, regardless of completion order.
                 if !self.context.send(announcements, (job.address, receiver)) {
                     return Ok(());
@@ -212,16 +214,13 @@ impl WorkerContext {
     /// Sends `value`, returning `false` if it was not sent because verification was cancelled or
     /// `sender` disconnected.
     pub(super) fn send<T>(&self, sender: &Sender<T>, value: T) -> bool {
-        crossbeam_channel::select! {
-            send(sender, value) -> result => result.is_ok(),
-            recv(self.cancel) -> _ => false,
-        }
+        channel::send_or_cancel(sender, value, &self.cancel).is_ok()
     }
 
     /// Receives the next job. Returns `None` once `jobs` is exhausted, and may return `None` early
     /// if verification was cancelled.
     pub(super) fn receive<T>(&self, jobs: &Receiver<T>) -> Option<T> {
-        crossbeam_channel::select! {
+        channel::select! {
             recv(jobs) -> job => job.ok(),
             recv(self.cancel) -> _ => None,
         }
@@ -229,7 +228,7 @@ impl WorkerContext {
 
     /// Returns whether verification was cancelled.
     pub(super) fn is_cancelled(&self) -> bool {
-        self.cancel.try_recv() == Err(crossbeam_channel::TryRecvError::Disconnected)
+        self.cancel.try_recv() == Err(channel::TryRecvError::Disconnected)
     }
 
     /// Reports one finding, applying backpressure until it is consumed or verification stops.

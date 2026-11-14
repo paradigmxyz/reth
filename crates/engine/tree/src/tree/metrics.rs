@@ -9,7 +9,8 @@ use reth_metrics::{
     thread::{ThreadResourceUsage, ThreadResourceUsageDelta},
     Metrics,
 };
-use reth_primitives_traits::{constants::gas_units::MEGAGAS, FastInstant as Instant};
+use reth_primitives_traits::constants::gas_units::MEGAGAS;
+use reth_tasks::executor::time::Instant;
 use reth_trie::updates::TrieUpdates;
 use std::time::Duration;
 

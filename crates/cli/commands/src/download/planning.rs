@@ -1,6 +1,6 @@
 use super::{manifest::*, verify::OutputVerifier};
 use eyre::Result;
-use rayon::prelude::*;
+use reth_tasks::executor::rayon::prelude::*;
 use serde::Serialize;
 use std::{collections::BTreeMap, io::Write, path::Path};
 use tracing::info;

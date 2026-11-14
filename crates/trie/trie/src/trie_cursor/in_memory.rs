@@ -391,7 +391,7 @@ impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
 mod tests {
     use super::*;
     use crate::trie_cursor::mock::MockTrieCursor;
-    use parking_lot::Mutex;
+    use reth_tasks::executor::{sync::parking_lot::Mutex, Runtime};
     use std::{collections::BTreeMap, sync::Arc};
     use tracing::debug;
 
@@ -435,449 +435,573 @@ mod tests {
 
     #[test]
     fn test_empty_db_and_memory() {
-        let test_case = InMemoryTrieCursorTestCase {
-            db_nodes: vec![],
-            in_memory_nodes: vec![],
-            expected_results: vec![],
-        };
-        execute_test(test_case);
+        Runtime::new().run(move || {
+            let test_case = InMemoryTrieCursorTestCase {
+                db_nodes: vec![],
+                in_memory_nodes: vec![],
+                expected_results: vec![],
+            };
+            execute_test(test_case);
+        });
     }
 
     #[test]
     fn test_only_db_nodes() {
-        let db_nodes = vec![
-            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
-        ];
+        Runtime::new().run(move || {
+            let db_nodes = vec![
+                (
+                    Nibbles::from_nibbles([0x1]),
+                    BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x2]),
+                    BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x3]),
+                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
+                ),
+            ];
 
-        let test_case = InMemoryTrieCursorTestCase {
-            db_nodes: db_nodes.clone(),
-            in_memory_nodes: vec![],
-            expected_results: db_nodes,
-        };
-        execute_test(test_case);
+            let test_case = InMemoryTrieCursorTestCase {
+                db_nodes: db_nodes.clone(),
+                in_memory_nodes: vec![],
+                expected_results: db_nodes,
+            };
+            execute_test(test_case);
+        });
     }
 
     #[test]
     fn test_only_in_memory_nodes() {
-        let in_memory_nodes = vec![
-            (
-                Nibbles::from_nibbles([0x1]),
-                Some(BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
-            ),
-            (
-                Nibbles::from_nibbles([0x2]),
-                Some(BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None)),
-            ),
-            (
-                Nibbles::from_nibbles([0x3]),
-                Some(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
-            ),
-        ];
+        Runtime::new().run(move || {
+            let in_memory_nodes = vec![
+                (
+                    Nibbles::from_nibbles([0x1]),
+                    Some(BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
+                ),
+                (
+                    Nibbles::from_nibbles([0x2]),
+                    Some(BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None)),
+                ),
+                (
+                    Nibbles::from_nibbles([0x3]),
+                    Some(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+                ),
+            ];
 
-        let expected_results: Vec<(Nibbles, BranchNodeCompact)> = in_memory_nodes
-            .iter()
-            .filter_map(|(k, v)| v.as_ref().map(|node| (*k, node.clone())))
-            .collect();
+            let expected_results: Vec<(Nibbles, BranchNodeCompact)> = in_memory_nodes
+                .iter()
+                .filter_map(|(k, v)| v.as_ref().map(|node| (*k, node.clone())))
+                .collect();
 
-        let test_case =
-            InMemoryTrieCursorTestCase { db_nodes: vec![], in_memory_nodes, expected_results };
-        execute_test(test_case);
+            let test_case =
+                InMemoryTrieCursorTestCase { db_nodes: vec![], in_memory_nodes, expected_results };
+            execute_test(test_case);
+        });
     }
 
     #[test]
     fn test_in_memory_overwrites_db() {
-        let db_nodes = vec![
-            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None)),
-        ];
+        Runtime::new().run(move || {
+            let db_nodes = vec![
+                (
+                    Nibbles::from_nibbles([0x1]),
+                    BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x2]),
+                    BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None),
+                ),
+            ];
 
-        let in_memory_nodes = vec![
-            (
-                Nibbles::from_nibbles([0x1]),
-                Some(BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None)),
-            ),
-            (
-                Nibbles::from_nibbles([0x3]),
-                Some(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
-            ),
-        ];
+            let in_memory_nodes = vec![
+                (
+                    Nibbles::from_nibbles([0x1]),
+                    Some(BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None)),
+                ),
+                (
+                    Nibbles::from_nibbles([0x3]),
+                    Some(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+                ),
+            ];
 
-        let expected_results = vec![
-            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
-        ];
+            let expected_results = vec![
+                (
+                    Nibbles::from_nibbles([0x1]),
+                    BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x2]),
+                    BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x3]),
+                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
+                ),
+            ];
 
-        let test_case = InMemoryTrieCursorTestCase { db_nodes, in_memory_nodes, expected_results };
-        execute_test(test_case);
+            let test_case =
+                InMemoryTrieCursorTestCase { db_nodes, in_memory_nodes, expected_results };
+            execute_test(test_case);
+        });
     }
 
     #[test]
     fn test_in_memory_deletes_db_nodes() {
-        let db_nodes = vec![
-            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
-        ];
+        Runtime::new().run(move || {
+            let db_nodes = vec![
+                (
+                    Nibbles::from_nibbles([0x1]),
+                    BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x2]),
+                    BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x3]),
+                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
+                ),
+            ];
 
-        let in_memory_nodes = vec![(Nibbles::from_nibbles([0x2]), None)];
+            let in_memory_nodes = vec![(Nibbles::from_nibbles([0x2]), None)];
 
-        let expected_results = vec![
-            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
-        ];
+            let expected_results = vec![
+                (
+                    Nibbles::from_nibbles([0x1]),
+                    BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x3]),
+                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
+                ),
+            ];
 
-        let test_case = InMemoryTrieCursorTestCase { db_nodes, in_memory_nodes, expected_results };
-        execute_test(test_case);
+            let test_case =
+                InMemoryTrieCursorTestCase { db_nodes, in_memory_nodes, expected_results };
+            execute_test(test_case);
+        });
     }
 
     #[test]
     fn test_complex_interleaving() {
-        let db_nodes = vec![
-            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x5]), BranchNodeCompact::new(0b0101, 0b0101, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x7]), BranchNodeCompact::new(0b0111, 0b0111, 0, vec![], None)),
-        ];
+        Runtime::new().run(move || {
+            let db_nodes = vec![
+                (
+                    Nibbles::from_nibbles([0x1]),
+                    BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x3]),
+                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x5]),
+                    BranchNodeCompact::new(0b0101, 0b0101, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x7]),
+                    BranchNodeCompact::new(0b0111, 0b0111, 0, vec![], None),
+                ),
+            ];
 
-        let in_memory_nodes = vec![
-            (
-                Nibbles::from_nibbles([0x2]),
-                Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
-            ),
-            (Nibbles::from_nibbles([0x3]), None),
-            (
-                Nibbles::from_nibbles([0x4]),
-                Some(BranchNodeCompact::new(0b0100, 0b0100, 0, vec![], None)),
-            ),
-            (
-                Nibbles::from_nibbles([0x6]),
-                Some(BranchNodeCompact::new(0b0110, 0b0110, 0, vec![], None)),
-            ),
-            (Nibbles::from_nibbles([0x7]), None),
-            (
-                Nibbles::from_nibbles([0x8]),
-                Some(BranchNodeCompact::new(0b1000, 0b1000, 0, vec![], None)),
-            ),
-        ];
+            let in_memory_nodes = vec![
+                (
+                    Nibbles::from_nibbles([0x2]),
+                    Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
+                ),
+                (Nibbles::from_nibbles([0x3]), None),
+                (
+                    Nibbles::from_nibbles([0x4]),
+                    Some(BranchNodeCompact::new(0b0100, 0b0100, 0, vec![], None)),
+                ),
+                (
+                    Nibbles::from_nibbles([0x6]),
+                    Some(BranchNodeCompact::new(0b0110, 0b0110, 0, vec![], None)),
+                ),
+                (Nibbles::from_nibbles([0x7]), None),
+                (
+                    Nibbles::from_nibbles([0x8]),
+                    Some(BranchNodeCompact::new(0b1000, 0b1000, 0, vec![], None)),
+                ),
+            ];
 
-        let expected_results = vec![
-            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x4]), BranchNodeCompact::new(0b0100, 0b0100, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x5]), BranchNodeCompact::new(0b0101, 0b0101, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x6]), BranchNodeCompact::new(0b0110, 0b0110, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x8]), BranchNodeCompact::new(0b1000, 0b1000, 0, vec![], None)),
-        ];
+            let expected_results = vec![
+                (
+                    Nibbles::from_nibbles([0x1]),
+                    BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x2]),
+                    BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x4]),
+                    BranchNodeCompact::new(0b0100, 0b0100, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x5]),
+                    BranchNodeCompact::new(0b0101, 0b0101, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x6]),
+                    BranchNodeCompact::new(0b0110, 0b0110, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x8]),
+                    BranchNodeCompact::new(0b1000, 0b1000, 0, vec![], None),
+                ),
+            ];
 
-        let test_case = InMemoryTrieCursorTestCase { db_nodes, in_memory_nodes, expected_results };
-        execute_test(test_case);
+            let test_case =
+                InMemoryTrieCursorTestCase { db_nodes, in_memory_nodes, expected_results };
+            execute_test(test_case);
+        });
     }
 
     #[test]
     fn test_seek_exact() {
-        let db_nodes = vec![
-            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
-        ];
+        Runtime::new().run(move || {
+            let db_nodes = vec![
+                (
+                    Nibbles::from_nibbles([0x1]),
+                    BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x3]),
+                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
+                ),
+            ];
 
-        let in_memory_nodes = vec![(
-            Nibbles::from_nibbles([0x2]),
-            Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
-        )];
-
-        let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
-        let db_nodes_arc = Arc::new(db_nodes_map);
-        let visited_keys = Arc::new(Mutex::new(Vec::new()));
-        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
-
-        let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
-        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
-
-        let result = cursor.seek_exact(Nibbles::from_nibbles([0x2])).unwrap();
-        assert_eq!(
-            result,
-            Some((
+            let in_memory_nodes = vec![(
                 Nibbles::from_nibbles([0x2]),
-                BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)
-            ))
-        );
-        assert!(visited_keys.lock().is_empty(), "exact overlay hit should not touch the DB cursor");
+                Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
+            )];
 
-        let result = cursor.seek_exact(Nibbles::from_nibbles([0x3])).unwrap();
-        assert_eq!(
-            result,
-            Some((
-                Nibbles::from_nibbles([0x3]),
-                BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)
-            ))
-        );
+            let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
+            let db_nodes_arc = Arc::new(db_nodes_map);
+            let visited_keys = Arc::new(Mutex::new(Vec::new()));
+            let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
 
-        let result = cursor.seek_exact(Nibbles::from_nibbles([0x4])).unwrap();
-        assert_eq!(result, None);
+            let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+            let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
+
+            let result = cursor.seek_exact(Nibbles::from_nibbles([0x2])).unwrap();
+            assert_eq!(
+                result,
+                Some((
+                    Nibbles::from_nibbles([0x2]),
+                    BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)
+                ))
+            );
+            assert!(
+                visited_keys.lock().is_empty(),
+                "exact overlay hit should not touch the DB cursor"
+            );
+
+            let result = cursor.seek_exact(Nibbles::from_nibbles([0x3])).unwrap();
+            assert_eq!(
+                result,
+                Some((
+                    Nibbles::from_nibbles([0x3]),
+                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)
+                ))
+            );
+
+            let result = cursor.seek_exact(Nibbles::from_nibbles([0x4])).unwrap();
+            assert_eq!(result, None);
+        });
     }
 
     #[test]
     fn test_seek_overlay_exact_hit_does_not_touch_db_until_next() {
-        let db_nodes = vec![
-            (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
-        ];
+        Runtime::new().run(move || {
+            let db_nodes = vec![
+                (
+                    Nibbles::from_nibbles([0x2]),
+                    BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x3]),
+                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
+                ),
+            ];
 
-        let in_memory_nodes = vec![(
-            Nibbles::from_nibbles([0x2]),
-            Some(BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None)),
-        )];
-
-        let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
-        let db_nodes_arc = Arc::new(db_nodes_map);
-        let visited_keys = Arc::new(Mutex::new(Vec::new()));
-        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
-
-        let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
-        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
-
-        let result = cursor.seek(Nibbles::from_nibbles([0x2])).unwrap();
-        assert_eq!(
-            result,
-            Some((
+            let in_memory_nodes = vec![(
                 Nibbles::from_nibbles([0x2]),
-                BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None)
-            ))
-        );
-        assert!(visited_keys.lock().is_empty(), "exact overlay hit should not touch the DB cursor");
+                Some(BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None)),
+            )];
 
-        let result = cursor.next().unwrap();
-        assert_eq!(
-            result,
-            Some((
-                Nibbles::from_nibbles([0x3]),
-                BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)
-            ))
-        );
-        assert!(!visited_keys.lock().is_empty(), "next should lazily position the DB cursor");
+            let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
+            let db_nodes_arc = Arc::new(db_nodes_map);
+            let visited_keys = Arc::new(Mutex::new(Vec::new()));
+            let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
+
+            let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+            let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
+
+            let result = cursor.seek(Nibbles::from_nibbles([0x2])).unwrap();
+            assert_eq!(
+                result,
+                Some((
+                    Nibbles::from_nibbles([0x2]),
+                    BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None)
+                ))
+            );
+            assert!(
+                visited_keys.lock().is_empty(),
+                "exact overlay hit should not touch the DB cursor"
+            );
+
+            let result = cursor.next().unwrap();
+            assert_eq!(
+                result,
+                Some((
+                    Nibbles::from_nibbles([0x3]),
+                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)
+                ))
+            );
+            assert!(!visited_keys.lock().is_empty(), "next should lazily position the DB cursor");
+        });
     }
 
     #[test]
     fn test_seek_overlay_exact_hit_repositions_stale_db_on_next() {
-        let db_nodes = vec![
-            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
-        ];
+        Runtime::new().run(move || {
+            let db_nodes = vec![
+                (
+                    Nibbles::from_nibbles([0x1]),
+                    BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None),
+                ),
+                (
+                    Nibbles::from_nibbles([0x3]),
+                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
+                ),
+            ];
 
-        let in_memory_nodes = vec![(
-            Nibbles::from_nibbles([0x2]),
-            Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
-        )];
-
-        let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
-        let db_nodes_arc = Arc::new(db_nodes_map);
-        let visited_keys = Arc::new(Mutex::new(Vec::new()));
-        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
-
-        let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
-        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
-
-        let result = cursor.seek(Nibbles::from_nibbles([0x1])).unwrap();
-        assert_eq!(
-            result,
-            Some((
-                Nibbles::from_nibbles([0x1]),
-                BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)
-            ))
-        );
-        assert_eq!(visited_keys.lock().len(), 1);
-
-        let result = cursor.seek(Nibbles::from_nibbles([0x2])).unwrap();
-        assert_eq!(
-            result,
-            Some((
+            let in_memory_nodes = vec![(
                 Nibbles::from_nibbles([0x2]),
-                BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)
-            ))
-        );
-        assert_eq!(visited_keys.lock().len(), 1, "exact overlay hit should not seek the DB");
+                Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
+            )];
 
-        let result = cursor.next().unwrap();
-        assert_eq!(
-            result,
-            Some((
-                Nibbles::from_nibbles([0x3]),
-                BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)
-            ))
-        );
+            let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
+            let db_nodes_arc = Arc::new(db_nodes_map);
+            let visited_keys = Arc::new(Mutex::new(Vec::new()));
+            let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
+
+            let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+            let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
+
+            let result = cursor.seek(Nibbles::from_nibbles([0x1])).unwrap();
+            assert_eq!(
+                result,
+                Some((
+                    Nibbles::from_nibbles([0x1]),
+                    BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)
+                ))
+            );
+            assert_eq!(visited_keys.lock().len(), 1);
+
+            let result = cursor.seek(Nibbles::from_nibbles([0x2])).unwrap();
+            assert_eq!(
+                result,
+                Some((
+                    Nibbles::from_nibbles([0x2]),
+                    BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)
+                ))
+            );
+            assert_eq!(visited_keys.lock().len(), 1, "exact overlay hit should not seek the DB");
+
+            let result = cursor.next().unwrap();
+            assert_eq!(
+                result,
+                Some((
+                    Nibbles::from_nibbles([0x3]),
+                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)
+                ))
+            );
+        });
     }
 
     #[test]
     fn test_multiple_consecutive_deletes() {
-        let db_nodes: Vec<(Nibbles, BranchNodeCompact)> = (1..=10)
-            .map(|i| {
-                (
-                    Nibbles::from_nibbles([i]),
-                    BranchNodeCompact::new(i as u16, i as u16, 0, vec![], None),
-                )
-            })
-            .collect();
+        Runtime::new().run(move || {
+            let db_nodes: Vec<(Nibbles, BranchNodeCompact)> = (1..=10)
+                .map(|i| {
+                    (
+                        Nibbles::from_nibbles([i]),
+                        BranchNodeCompact::new(i as u16, i as u16, 0, vec![], None),
+                    )
+                })
+                .collect();
 
-        let in_memory_nodes = vec![
-            (Nibbles::from_nibbles([0x3]), None),
-            (Nibbles::from_nibbles([0x4]), None),
-            (Nibbles::from_nibbles([0x5]), None),
-            (Nibbles::from_nibbles([0x6]), None),
-        ];
+            let in_memory_nodes = vec![
+                (Nibbles::from_nibbles([0x3]), None),
+                (Nibbles::from_nibbles([0x4]), None),
+                (Nibbles::from_nibbles([0x5]), None),
+                (Nibbles::from_nibbles([0x6]), None),
+            ];
 
-        let expected_results = vec![
-            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(1, 1, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(2, 2, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x7]), BranchNodeCompact::new(7, 7, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x8]), BranchNodeCompact::new(8, 8, 0, vec![], None)),
-            (Nibbles::from_nibbles([0x9]), BranchNodeCompact::new(9, 9, 0, vec![], None)),
-            (Nibbles::from_nibbles([0xa]), BranchNodeCompact::new(10, 10, 0, vec![], None)),
-        ];
+            let expected_results = vec![
+                (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(1, 1, 0, vec![], None)),
+                (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(2, 2, 0, vec![], None)),
+                (Nibbles::from_nibbles([0x7]), BranchNodeCompact::new(7, 7, 0, vec![], None)),
+                (Nibbles::from_nibbles([0x8]), BranchNodeCompact::new(8, 8, 0, vec![], None)),
+                (Nibbles::from_nibbles([0x9]), BranchNodeCompact::new(9, 9, 0, vec![], None)),
+                (Nibbles::from_nibbles([0xa]), BranchNodeCompact::new(10, 10, 0, vec![], None)),
+            ];
 
-        let test_case = InMemoryTrieCursorTestCase { db_nodes, in_memory_nodes, expected_results };
-        execute_test(test_case);
+            let test_case =
+                InMemoryTrieCursorTestCase { db_nodes, in_memory_nodes, expected_results };
+            execute_test(test_case);
+        });
     }
 
     #[test]
     fn test_empty_db_with_in_memory_deletes() {
-        let in_memory_nodes = vec![
-            (Nibbles::from_nibbles([0x1]), None),
-            (
+        Runtime::new().run(move || {
+            let in_memory_nodes = vec![
+                (Nibbles::from_nibbles([0x1]), None),
+                (
+                    Nibbles::from_nibbles([0x2]),
+                    Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
+                ),
+                (Nibbles::from_nibbles([0x3]), None),
+            ];
+
+            let expected_results = vec![(
                 Nibbles::from_nibbles([0x2]),
-                Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
-            ),
-            (Nibbles::from_nibbles([0x3]), None),
-        ];
+                BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None),
+            )];
 
-        let expected_results = vec![(
-            Nibbles::from_nibbles([0x2]),
-            BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None),
-        )];
-
-        let test_case =
-            InMemoryTrieCursorTestCase { db_nodes: vec![], in_memory_nodes, expected_results };
-        execute_test(test_case);
+            let test_case =
+                InMemoryTrieCursorTestCase { db_nodes: vec![], in_memory_nodes, expected_results };
+            execute_test(test_case);
+        });
     }
 
     #[test]
     fn test_current_key_tracking() {
-        let db_nodes = vec![(
-            Nibbles::from_nibbles([0x2]),
-            BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None),
-        )];
+        Runtime::new().run(move || {
+            let db_nodes = vec![(
+                Nibbles::from_nibbles([0x2]),
+                BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None),
+            )];
 
-        let in_memory_nodes = vec![
-            (
-                Nibbles::from_nibbles([0x1]),
-                Some(BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
-            ),
-            (
-                Nibbles::from_nibbles([0x3]),
-                Some(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
-            ),
-        ];
+            let in_memory_nodes = vec![
+                (
+                    Nibbles::from_nibbles([0x1]),
+                    Some(BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
+                ),
+                (
+                    Nibbles::from_nibbles([0x3]),
+                    Some(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+                ),
+            ];
 
-        let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
-        let db_nodes_arc = Arc::new(db_nodes_map);
-        let visited_keys = Arc::new(Mutex::new(Vec::new()));
-        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
+            let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
+            let db_nodes_arc = Arc::new(db_nodes_map);
+            let visited_keys = Arc::new(Mutex::new(Vec::new()));
+            let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
 
-        let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
-        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
+            let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+            let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
 
-        assert_eq!(cursor.current().unwrap(), None);
+            assert_eq!(cursor.current().unwrap(), None);
 
-        cursor.seek(Nibbles::from_nibbles([0x1])).unwrap();
-        assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x1])));
+            cursor.seek(Nibbles::from_nibbles([0x1])).unwrap();
+            assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x1])));
 
-        cursor.next().unwrap();
-        assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x2])));
+            cursor.next().unwrap();
+            assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x2])));
 
-        cursor.next().unwrap();
-        assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x3])));
+            cursor.next().unwrap();
+            assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x3])));
+        });
     }
 
     #[test]
     fn test_all_storage_nodes_deleted_exact_keys() {
         reth_tracing::init_test_tracing();
 
-        // This test reproduces an edge case where:
-        // - cursor is available
-        // - All in-memory entries are deletions (None values)
-        // - Database has corresponding entries
-        // - Expected: NO leaves should be returned (all deleted)
+        Runtime::new().run(move || {
+            // This test reproduces an edge case where:
+            // - cursor is available
+            // - All in-memory entries are deletions (None values)
+            // - Database has corresponding entries
+            // - Expected: NO leaves should be returned (all deleted)
 
-        // Generate 42 trie node entries with keys distributed across the keyspace
-        let mut db_nodes: Vec<(Nibbles, BranchNodeCompact)> = (0..10)
-            .map(|i| {
-                let key_bytes = vec![(i * 6) as u8, i as u8]; // Spread keys across keyspace
-                let nibbles = Nibbles::unpack(key_bytes);
-                (nibbles, BranchNodeCompact::new(i as u16, i as u16, 0, vec![], None))
-            })
-            .collect();
+            // Generate 42 trie node entries with keys distributed across the keyspace
+            let mut db_nodes: Vec<(Nibbles, BranchNodeCompact)> = (0..10)
+                .map(|i| {
+                    let key_bytes = vec![(i * 6) as u8, i as u8]; // Spread keys across keyspace
+                    let nibbles = Nibbles::unpack(key_bytes);
+                    (nibbles, BranchNodeCompact::new(i as u16, i as u16, 0, vec![], None))
+                })
+                .collect();
 
-        db_nodes.sort_by_key(|(key, _)| *key);
-        db_nodes.dedup_by_key(|(key, _)| *key);
+            db_nodes.sort_by_key(|(key, _)| *key);
+            db_nodes.dedup_by_key(|(key, _)| *key);
 
-        for (key, _) in &db_nodes {
-            debug!("node at {key:?}");
-        }
+            for (key, _) in &db_nodes {
+                debug!("node at {key:?}");
+            }
 
-        // Create in-memory entries with same keys but all None values (deletions)
-        let in_memory_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)> =
-            db_nodes.iter().map(|(key, _)| (*key, None)).collect();
+            // Create in-memory entries with same keys but all None values (deletions)
+            let in_memory_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)> =
+                db_nodes.iter().map(|(key, _)| (*key, None)).collect();
 
-        let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
-        let db_nodes_arc = Arc::new(db_nodes_map);
-        let visited_keys = Arc::new(Mutex::new(Vec::new()));
-        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
+            let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
+            let db_nodes_arc = Arc::new(db_nodes_map);
+            let visited_keys = Arc::new(Mutex::new(Vec::new()));
+            let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
 
-        let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
-        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
+            let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+            let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
 
-        // Seek to beginning should return None (all nodes are deleted)
-        tracing::debug!("seeking to 0x");
-        let result = cursor.seek(Nibbles::default()).unwrap();
-        assert_eq!(
-            result, None,
-            "Expected no entries when all nodes are deleted, but got {:?}",
-            result
-        );
-
-        // Test seek operations at various positions - all should return None
-        let seek_keys = vec![
-            Nibbles::unpack([0x00]),
-            Nibbles::unpack([0x5d]),
-            Nibbles::unpack([0x5e]),
-            Nibbles::unpack([0x5f]),
-            Nibbles::unpack([0xc2]),
-            Nibbles::unpack([0xc5]),
-            Nibbles::unpack([0xc9]),
-            Nibbles::unpack([0xf0]),
-        ];
-
-        for seek_key in seek_keys {
-            tracing::debug!("seeking to {seek_key:?}");
-            let result = cursor.seek(seek_key).unwrap();
+            // Seek to beginning should return None (all nodes are deleted)
+            tracing::debug!("seeking to 0x");
+            let result = cursor.seek(Nibbles::default()).unwrap();
             assert_eq!(
                 result, None,
-                "Expected None when seeking to {:?} but got {:?}",
-                seek_key, result
+                "Expected no entries when all nodes are deleted, but got {:?}",
+                result
             );
-        }
 
-        // next() should also always return None
-        let result = cursor.next().unwrap();
-        assert_eq!(result, None, "Expected None from next() but got {:?}", result);
+            // Test seek operations at various positions - all should return None
+            let seek_keys = vec![
+                Nibbles::unpack([0x00]),
+                Nibbles::unpack([0x5d]),
+                Nibbles::unpack([0x5e]),
+                Nibbles::unpack([0x5f]),
+                Nibbles::unpack([0xc2]),
+                Nibbles::unpack([0xc5]),
+                Nibbles::unpack([0xc9]),
+                Nibbles::unpack([0xf0]),
+            ];
+
+            for seek_key in seek_keys {
+                tracing::debug!("seeking to {seek_key:?}");
+                let result = cursor.seek(seek_key).unwrap();
+                assert_eq!(
+                    result, None,
+                    "Expected None when seeking to {:?} but got {:?}",
+                    seek_key, result
+                );
+            }
+
+            // next() should also always return None
+            let result = cursor.next().unwrap();
+            assert_eq!(result, None, "Expected None from next() but got {:?}", result);
+        });
     }
 
     mod proptest_tests {
         use super::*;
         use itertools::Itertools;
         use proptest::prelude::*;
+        use tracing::debug;
 
         /// Merge `db_nodes` with `in_memory_nodes`, applying the in-memory overlay.
         /// This properly handles deletions (None values in `in_memory_nodes`).
@@ -971,145 +1095,146 @@ mod tests {
                 op_choices in prop::collection::vec(any::<u8>(), 10..500),
             ) {
                 reth_tracing::init_test_tracing();
-                use tracing::debug;
+                Runtime::new().run(move || {
+                    debug!(
+                        db_paths=?db_nodes.iter().map(|(k, _)| k).collect::<Vec<_>>(),
+                        in_mem_nodes=?in_memory_nodes.iter().map(|(k, v)| (k, v.is_some())).collect::<Vec<_>>(),
+                        num_op_choices=?op_choices.len(),
+                        "Starting proptest!",
+                    );
 
-                debug!(
-                    db_paths=?db_nodes.iter().map(|(k, _)| k).collect::<Vec<_>>(),
-                    in_mem_nodes=?in_memory_nodes.iter().map(|(k, v)| (k, v.is_some())).collect::<Vec<_>>(),
-                    num_op_choices=?op_choices.len(),
-                    "Starting proptest!",
-                );
+                    // Create the expected results by merging the two sorted vectors,
+                    // properly handling deletions (None values in in_memory_nodes)
+                    let expected_combined = merge_with_overlay(db_nodes.clone(), in_memory_nodes.clone());
 
-                // Create the expected results by merging the two sorted vectors,
-                // properly handling deletions (None values in in_memory_nodes)
-                let expected_combined = merge_with_overlay(db_nodes.clone(), in_memory_nodes.clone());
+                    // Collect all keys for operation generation
+                    let all_keys: Vec<Nibbles> = expected_combined.iter().map(|(k, _)| *k).collect();
 
-                // Collect all keys for operation generation
-                let all_keys: Vec<Nibbles> = expected_combined.iter().map(|(k, _)| *k).collect();
+                    // Create a control cursor using the combined result with a mock cursor
+                    let control_db_map: BTreeMap<Nibbles, BranchNodeCompact> =
+                        expected_combined.into_iter().collect();
+                    let control_db_arc = Arc::new(control_db_map);
+                    let control_visited_keys = Arc::new(Mutex::new(Vec::new()));
+                    let mut control_cursor = MockTrieCursor::new(control_db_arc, control_visited_keys);
 
-                // Create a control cursor using the combined result with a mock cursor
-                let control_db_map: BTreeMap<Nibbles, BranchNodeCompact> =
-                    expected_combined.into_iter().collect();
-                let control_db_arc = Arc::new(control_db_map);
-                let control_visited_keys = Arc::new(Mutex::new(Vec::new()));
-                let mut control_cursor = MockTrieCursor::new(control_db_arc, control_visited_keys);
+                    // Create the InMemoryTrieCursor being tested
+                    let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> =
+                        db_nodes.into_iter().collect();
+                    let db_nodes_arc = Arc::new(db_nodes_map);
+                    let visited_keys = Arc::new(Mutex::new(Vec::new()));
+                    let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
+                    let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+                    let mut test_cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
 
-                // Create the InMemoryTrieCursor being tested
-                let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> =
-                    db_nodes.into_iter().collect();
-                let db_nodes_arc = Arc::new(db_nodes_map);
-                let visited_keys = Arc::new(Mutex::new(Vec::new()));
-                let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
-                let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
-                let mut test_cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
+                    // Test: seek to the beginning first
+                    let control_first = control_cursor.seek(Nibbles::default()).unwrap();
+                    let test_first = test_cursor.seek(Nibbles::default()).unwrap();
+                    debug!(
+                        control=?control_first.as_ref().map(|(k, _)| k),
+                        test=?test_first.as_ref().map(|(k, _)| k),
+                        "Initial seek returned",
+                    );
+                    assert_eq!(control_first, test_first, "Initial seek mismatch");
 
-                // Test: seek to the beginning first
-                let control_first = control_cursor.seek(Nibbles::default()).unwrap();
-                let test_first = test_cursor.seek(Nibbles::default()).unwrap();
-                debug!(
-                    control=?control_first.as_ref().map(|(k, _)| k),
-                    test=?test_first.as_ref().map(|(k, _)| k),
-                    "Initial seek returned",
-                );
-                assert_eq!(control_first, test_first, "Initial seek mismatch");
+                    // If both cursors returned None, nothing to test
+                    if control_first.is_none() && test_first.is_none() {
+                        return Ok(());
+                    }
 
-                // If both cursors returned None, nothing to test
-                if control_first.is_none() && test_first.is_none() {
-                    return Ok(());
-                }
+                    // Track the last key returned from the cursor
+                    let mut last_returned_key = control_first.as_ref().map(|(k, _)| *k);
 
-                // Track the last key returned from the cursor
-                let mut last_returned_key = control_first.as_ref().map(|(k, _)| *k);
+                    // Execute a sequence of random operations
+                    for choice in op_choices {
+                        let op_type = choice % 3;
 
-                // Execute a sequence of random operations
-                for choice in op_choices {
-                    let op_type = choice % 3;
+                        match op_type {
+                            0 => {
+                                // Next operation
+                                let control_result = control_cursor.next().unwrap();
+                                let test_result = test_cursor.next().unwrap();
+                                debug!(
+                                    control=?control_result.as_ref().map(|(k, _)| k),
+                                    test=?test_result.as_ref().map(|(k, _)| k),
+                                    "Next returned",
+                                );
+                                assert_eq!(control_result, test_result, "Next operation mismatch");
 
-                    match op_type {
-                        0 => {
-                            // Next operation
-                            let control_result = control_cursor.next().unwrap();
-                            let test_result = test_cursor.next().unwrap();
-                            debug!(
-                                control=?control_result.as_ref().map(|(k, _)| k),
-                                test=?test_result.as_ref().map(|(k, _)| k),
-                                "Next returned",
-                            );
-                            assert_eq!(control_result, test_result, "Next operation mismatch");
+                                last_returned_key = control_result.as_ref().map(|(k, _)| *k);
 
-                            last_returned_key = control_result.as_ref().map(|(k, _)| *k);
-
-                            // Stop if both cursors are exhausted
-                            if control_result.is_none() && test_result.is_none() {
-                                break;
+                                // Stop if both cursors are exhausted
+                                if control_result.is_none() && test_result.is_none() {
+                                    break;
+                                }
                             }
-                        }
-                        1 => {
-                            // Seek operation - choose a key >= last_returned_key
-                            if all_keys.is_empty() {
-                                continue;
+                            1 => {
+                                // Seek operation - choose a key >= last_returned_key
+                                if all_keys.is_empty() {
+                                    continue;
+                                }
+
+                                let valid_keys: Vec<_> = all_keys
+                                    .iter()
+                                    .filter(|k| last_returned_key.is_none_or(|last| **k >= last))
+                                    .collect();
+
+                                if valid_keys.is_empty() {
+                                    continue;
+                                }
+
+                                let key = *valid_keys[choice as usize % valid_keys.len()];
+
+                                let control_result = control_cursor.seek(key).unwrap();
+                                let test_result = test_cursor.seek(key).unwrap();
+                                debug!(
+                                    control=?control_result.as_ref().map(|(k, _)| k),
+                                    test=?test_result.as_ref().map(|(k, _)| k),
+                                    ?key,
+                                    "Seek returned",
+                                );
+                                assert_eq!(control_result, test_result, "Seek operation mismatch for key {:?}", key);
+
+                                last_returned_key = control_result.as_ref().map(|(k, _)| *k);
+
+                                // Stop if both cursors are exhausted
+                                if control_result.is_none() && test_result.is_none() {
+                                    break;
+                                }
                             }
+                            _ => {
+                                // SeekExact operation - choose a key >= last_returned_key
+                                if all_keys.is_empty() {
+                                    continue;
+                                }
 
-                            let valid_keys: Vec<_> = all_keys
-                                .iter()
-                                .filter(|k| last_returned_key.is_none_or(|last| **k >= last))
-                                .collect();
+                                let valid_keys: Vec<_> = all_keys
+                                    .iter()
+                                    .filter(|k| last_returned_key.is_none_or(|last| **k >= last))
+                                    .collect();
 
-                            if valid_keys.is_empty() {
-                                continue;
+                                if valid_keys.is_empty() {
+                                    continue;
+                                }
+
+                                let key = *valid_keys[choice as usize  % valid_keys.len()];
+
+                                let control_result = control_cursor.seek_exact(key).unwrap();
+                                let test_result = test_cursor.seek_exact(key).unwrap();
+                                debug!(
+                                    control=?control_result.as_ref().map(|(k, _)| k),
+                                    test=?test_result.as_ref().map(|(k, _)| k),
+                                    ?key,
+                                    "SeekExact returned",
+                                );
+                                assert_eq!(control_result, test_result, "SeekExact operation mismatch for key {:?}", key);
+
+                                // seek_exact updates the last_key internally but only if it found something
+                                last_returned_key = control_result.as_ref().map(|(k, _)| *k);
                             }
-
-                            let key = *valid_keys[choice as usize % valid_keys.len()];
-
-                            let control_result = control_cursor.seek(key).unwrap();
-                            let test_result = test_cursor.seek(key).unwrap();
-                            debug!(
-                                control=?control_result.as_ref().map(|(k, _)| k),
-                                test=?test_result.as_ref().map(|(k, _)| k),
-                                ?key,
-                                "Seek returned",
-                            );
-                            assert_eq!(control_result, test_result, "Seek operation mismatch for key {:?}", key);
-
-                            last_returned_key = control_result.as_ref().map(|(k, _)| *k);
-
-                            // Stop if both cursors are exhausted
-                            if control_result.is_none() && test_result.is_none() {
-                                break;
-                            }
-                        }
-                        _ => {
-                            // SeekExact operation - choose a key >= last_returned_key
-                            if all_keys.is_empty() {
-                                continue;
-                            }
-
-                            let valid_keys: Vec<_> = all_keys
-                                .iter()
-                                .filter(|k| last_returned_key.is_none_or(|last| **k >= last))
-                                .collect();
-
-                            if valid_keys.is_empty() {
-                                continue;
-                            }
-
-                            let key = *valid_keys[choice as usize  % valid_keys.len()];
-
-                            let control_result = control_cursor.seek_exact(key).unwrap();
-                            let test_result = test_cursor.seek_exact(key).unwrap();
-                            debug!(
-                                control=?control_result.as_ref().map(|(k, _)| k),
-                                test=?test_result.as_ref().map(|(k, _)| k),
-                                ?key,
-                                "SeekExact returned",
-                            );
-                            assert_eq!(control_result, test_result, "SeekExact operation mismatch for key {:?}", key);
-
-                            // seek_exact updates the last_key internally but only if it found something
-                            last_returned_key = control_result.as_ref().map(|(k, _)| *k);
                         }
                     }
-                }
+                    Ok::<(), proptest::test_runner::TestCaseError>(())
+                })?;
             }
         }
     }

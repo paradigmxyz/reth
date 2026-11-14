@@ -62,11 +62,11 @@ impl CancelOnDrop {
 
         impl Drop for Restore {
             fn drop(&mut self) {
-                CURRENT.set(self.0.take());
+                with_current(|state| *state.borrow_mut() = self.0.take());
             }
         }
 
-        let _restore = Restore(CURRENT.replace(Some(self.0.clone())));
+        let _restore = Restore(with_current(|state| state.replace(Some(self.0.clone()))));
         f()
     }
 }
@@ -109,19 +109,34 @@ impl ManualCancel {
 ///
 /// Always returns `false` outside of a [`CancelOnDrop::scope`].
 pub fn is_cancelled() -> bool {
-    CURRENT.with_borrow(|state| {
-        state.as_ref().is_some_and(|state| state.load(Ordering::Relaxed) == CANCELLED)
+    with_current(|state| {
+        state.borrow().as_ref().is_some_and(|state| state.load(Ordering::Relaxed) == CANCELLED)
     })
 }
 
-thread_local! {
+std::thread_local! {
     /// Cancellation state of the innermost [`CancelOnDrop::scope`] on this thread.
     static CURRENT: RefCell<Option<Arc<AtomicU8>>> = const { RefCell::new(None) };
+}
+
+#[cfg(feature = "fuzz")]
+crate::executor::thread_local! {
+    static LOGICAL_CURRENT: RefCell<Option<Arc<AtomicU8>>> = const { RefCell::new(None) };
+}
+
+fn with_current<R>(f: impl FnOnce(&RefCell<Option<Arc<AtomicU8>>>) -> R) -> R {
+    // Native Tokio blocking-I/O callers remain outside the selected executor.
+    #[cfg(feature = "fuzz")]
+    if shuttle::current::try_get_current_task().is_some() {
+        return LOGICAL_CURRENT.with(f)
+    }
+    CURRENT.with(f)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::executor::{thread, Runtime};
 
     #[test]
     fn test_default_cancelled() {
@@ -208,34 +223,71 @@ mod tests {
 
     #[test]
     fn test_scope_is_cancelled() {
-        assert!(!is_cancelled());
-
-        let outer = CancelOnDrop::default();
-        let inner = CancelOnDrop::default();
-        outer.scope(|| {
+        Runtime::new().run(|| {
             assert!(!is_cancelled());
-            inner.scope(|| {
-                drop(inner.clone());
-                assert!(is_cancelled());
+
+            let outer = CancelOnDrop::default();
+            let inner = CancelOnDrop::default();
+            outer.scope(|| {
+                assert!(!is_cancelled());
+                inner.scope(|| {
+                    drop(inner.clone());
+                    assert!(is_cancelled());
+                });
+                // the outer state is restored
+                assert!(!is_cancelled());
+                outer.request_finalization();
+                assert!(!is_cancelled());
             });
-            // the outer state is restored
-            assert!(!is_cancelled());
-            outer.request_finalization();
-            assert!(!is_cancelled());
-        });
 
-        // leaving the scope does not cancel
-        assert!(!is_cancelled());
-        assert!(!outer.is_cancelled());
+            // leaving the scope does not cancel
+            assert!(!is_cancelled());
+            assert!(!outer.is_cancelled());
+        });
     }
 
     #[test]
     fn test_scope_restores_on_panic() {
+        Runtime::new().run(|| {
+            let cancel = CancelOnDrop::default();
+            drop(cancel.clone());
+
+            let res = std::panic::catch_unwind(|| cancel.scope(|| panic!("scope panicked")));
+            assert!(res.is_err());
+            assert!(!is_cancelled());
+        });
+    }
+
+    #[test]
+    fn test_scope_is_thread_local() {
+        Runtime::new().run(|| {
+            let cancel = CancelOnDrop::default();
+            drop(cancel.clone());
+            cancel.scope(|| {
+                assert!(is_cancelled());
+                thread::spawn(|| {
+                    assert!(!is_cancelled(), "a new thread must not inherit cancellation");
+                    let local = CancelOnDrop::default();
+                    local.scope(|| {
+                        assert!(!is_cancelled());
+                        thread::yield_now();
+                        assert!(!is_cancelled());
+                    });
+                    assert!(!is_cancelled());
+                })
+                .join()
+                .unwrap();
+                assert!(is_cancelled(), "another thread must not replace this scope");
+            });
+            assert!(!is_cancelled());
+        });
+    }
+
+    #[test]
+    fn test_native_scope_without_executor() {
         let cancel = CancelOnDrop::default();
         drop(cancel.clone());
-
-        let res = std::panic::catch_unwind(|| cancel.scope(|| panic!("scope panicked")));
-        assert!(res.is_err());
+        cancel.scope(|| assert!(is_cancelled()));
         assert!(!is_cancelled());
     }
 }

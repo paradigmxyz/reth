@@ -20,18 +20,25 @@ use reth_errors::ProviderResult;
 use reth_evm::ConfigureEvm;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BalProvider, BlockReader, ChangeSetReader, DatabaseProviderFactory, PruneCheckpointReader,
     StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayManager;
-use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
+use reth_tasks::{
+    executor::{
+        channel,
+        channel::{mpsc, select_biased, Receiver, Sender},
+        time::Instant,
+    },
+    spawn_thread,
+    utils::increase_thread_priority,
+};
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
-use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -374,7 +381,7 @@ where
         evm_config: C,
         runtime: reth_tasks::Runtime,
     ) -> Self {
-        let (incoming_tx, incoming) = crossbeam_channel::unbounded();
+        let (incoming_tx, incoming) = channel::unbounded();
 
         let (payload_builds, payload_build_finished) = PayloadBuildTracker::new();
 
@@ -457,7 +464,7 @@ where
             runtime,
         );
         let incoming = task.incoming_tx.clone();
-        spawn_os_thread("engine", || {
+        spawn_thread("engine", || {
             increase_thread_priority();
             task.run()
         });
@@ -605,7 +612,7 @@ where
         if let Some((persistence_rx, start_time, action)) = maybe_persistence {
             // Biased select prioritizes persistence completion to update in memory state and
             // unblock further writes
-            crossbeam_channel::select_biased! {
+            select_biased! {
                 recv(persistence_rx) -> result => {
                     // Don't put it back - consumed (oneshot-like behavior)
                     match result {
@@ -635,7 +642,7 @@ where
             }
         } else {
             // No persistence in progress - wait on an incoming message or payload job completion.
-            crossbeam_channel::select_biased! {
+            select_biased! {
                 recv(self.payload_build_finished) -> result => match result {
                     Ok(()) => LoopEvent::PayloadBuildFinished,
                     Err(_) => LoopEvent::Disconnected,
@@ -820,8 +827,7 @@ where
                                 let explicit_persistence_wait = if wait_for_persistence {
                                     let pending_persistence = self.persistence_state.rx.take();
                                     if let Some((rx, start_time, _action)) = pending_persistence {
-                                        let (persistence_tx, persistence_rx) =
-                                            std::sync::mpsc::channel();
+                                        let (persistence_tx, persistence_rx) = mpsc::channel();
                                         self.runtime.spawn_blocking_named(
                                             "wait-persist",
                                             move || {

@@ -8,7 +8,6 @@ use alloy_primitives::{
 use itertools::Itertools;
 use metrics::Label;
 use parking_lot::Mutex;
-use rayon::prelude::*;
 use reth_chain_state::ExecutedBlock;
 use reth_db_api::{
     database_metrics::DatabaseMetrics,
@@ -25,6 +24,7 @@ use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
     provider::{ProviderError, ProviderResult},
 };
+use reth_tasks::executor::rayon::prelude::*;
 use rocksdb::{
     statistics::StatsLevel, BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri,
     DBCompressionType, DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,

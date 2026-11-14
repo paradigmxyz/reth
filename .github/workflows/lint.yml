@@ -88,6 +88,17 @@ jobs:
       - run: cargo clippy --workspace --lib --examples --tests --benches --locked
         env:
           RUSTFLAGS: -D warnings
+      # Use a separate configuration so native aliases stay unrestricted in non-fuzz builds.
+      - name: Reject native primitive uses in fuzz builds
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_lint_fuzz_primitives.py'
+          python3 scripts/tests/test_fuzz_primitives_clippy.py
+          status=0
+          python3 scripts/lint-fuzz-primitives.py || status=1
+          python3 scripts/lint-fuzz-primitives.py --all-features || status=1
+          exit "$status"
+        env:
+          RUSTUP_TOOLCHAIN: nightly-2026-10-31
 
   wasm:
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}

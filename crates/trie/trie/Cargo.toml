@@ -44,7 +44,6 @@ triehash = { workspace = true, optional = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 reth-tasks = { workspace = true, features = ["rayon"] }
-crossbeam-channel.workspace = true
 
 [dev-dependencies]
 # reth
@@ -64,7 +63,12 @@ proptest.workspace = true
 rand.workspace = true
 
 [features]
-fuzz = ["reth-trie-sparse/fuzz"]
+fuzz = [
+    "reth-metrics?/fuzz",
+    "reth-trie-sparse/fuzz",
+    "reth-trie-common/fuzz",
+    "reth-tasks/fuzz",
+]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [
     "alloy-primitives/serde",

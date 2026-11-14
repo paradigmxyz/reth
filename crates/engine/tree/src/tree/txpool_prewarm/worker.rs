@@ -7,7 +7,6 @@ use crate::tree::{
     TxPoolPrewarmCacheSnapshot as Snapshot,
 };
 use alloy_primitives::B256;
-use crossbeam_channel::{Receiver, RecvTimeoutError, TryRecvError};
 use reth_evm::{cached::CachedReads, database::StateProviderDatabase, ConfigureEvm, Evm, EvmEnv};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
@@ -16,10 +15,11 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
+use reth_tasks::executor::{
+    channel::{Receiver, RecvTimeoutError, TryRecvError},
+    time::Instant,
 };
+use std::{sync::Arc, time::Duration};
 use tracing::{debug, trace};
 
 /// Maximum interval between snapshot publications and delay when no transaction is ready.
@@ -354,19 +354,21 @@ mod tests {
     use crate::tree::payload_processor::reuse::{PoolResults, POOL_BENEFICIARY};
     use alloy_consensus::{transaction::Recovered, Signed, TxLegacy};
     use alloy_primitives::{Address, Signature, TxKind};
-    use crossbeam_channel::{unbounded, Sender};
     use evm2::BaseEvmTypes;
-    use parking_lot::{Mutex, RwLock};
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::EvmEnvFor;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_stages_api::{StageCheckpoint, StageId};
-    use std::{
-        collections::{HashMap, VecDeque},
-        sync::atomic::{AtomicUsize, Ordering},
+    use reth_tasks::executor::{
+        channel::{unbounded, Sender},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            parking_lot::{Mutex, RwLock},
+        },
         thread::{self, JoinHandle},
     };
+    use std::collections::{HashMap, VecDeque};
 
     /// Upper bound on any single wait; failures surface as panics well before CI timeouts.
     const WAIT_LIMIT: Duration = Duration::from_secs(5);
@@ -542,81 +544,93 @@ mod tests {
 
     #[test]
     fn warms_pool_transactions_into_a_published_snapshot() {
-        let harness = Harness::spawn();
-        let parent_hash = B256::repeat_byte(0x01);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let harness = Harness::spawn();
+            let parent_hash = B256::repeat_byte(0x01);
 
-        // Start before the pool tracks the head, covering the poll-and-retry path.
-        harness.start(parent_hash);
-        wait_until("the untracked head is polled", || {
-            harness.pool.not_ready.load(Ordering::Relaxed) >= 1
+            // Start before the pool tracks the head, covering the poll-and-retry path.
+            harness.start(parent_hash);
+            wait_until("the untracked head is polled", || {
+                harness.pool.not_ready.load(Ordering::Relaxed) >= 1
+            });
+            harness.pool.push(parent_hash, transfer(0xB0));
+
+            let snapshot = harness.published_for(parent_hash);
+            let (accounts, _, _) = snapshot.entry_counts();
+            assert!(accounts >= 1, "speculative execution should cache account reads");
         });
-        harness.pool.push(parent_hash, transfer(0xB0));
-
-        let snapshot = harness.published_for(parent_hash);
-        let (accounts, _, _) = snapshot.entry_counts();
-        assert!(accounts >= 1, "speculative execution should cache account reads");
     }
 
     #[test]
     fn records_results_of_pool_transactions() {
-        let harness = Harness::spawn();
-        let parent_hash = B256::repeat_byte(0x01);
-        let results = harness.start_recording(parent_hash);
-        harness.pool.push(parent_hash, transfer(0xB0));
+        reth_tasks::executor::Runtime::new().run(|| {
+            let harness = Harness::spawn();
+            let parent_hash = B256::repeat_byte(0x01);
+            let results = harness.start_recording(parent_hash);
+            harness.pool.push(parent_hash, transfer(0xB0));
 
-        wait_until("the result is recorded", || results.get(&B256::repeat_byte(0xB0)).is_some());
+            wait_until("the result is recorded", || {
+                results.get(&B256::repeat_byte(0xB0)).is_some()
+            });
+        });
     }
 
     #[test]
     fn overlapping_pauses_require_matching_resumes() {
-        let harness = Harness::spawn();
-        let parent_hash = B256::repeat_byte(0x01);
-        harness.start(parent_hash);
-        harness.pool.push(parent_hash, transfer(0xB0));
-        let before = harness.published_for(parent_hash).entry_counts();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let harness = Harness::spawn();
+            let parent_hash = B256::repeat_byte(0x01);
+            harness.start(parent_hash);
+            harness.pool.push(parent_hash, transfer(0xB0));
+            let before = harness.published_for(parent_hash).entry_counts();
 
-        harness.pause();
-        harness.pause();
-        harness.pool.push(parent_hash, transfer(0xB1));
-        harness.resume();
-        thread::sleep(REFRESH_INTERVAL * 2);
-        assert_eq!(
-            harness.published_entry_counts(),
-            Some(before),
-            "one resume must not release two pauses"
-        );
+            harness.pause();
+            harness.pause();
+            harness.pool.push(parent_hash, transfer(0xB1));
+            harness.resume();
+            thread::sleep(REFRESH_INTERVAL * 2);
+            assert_eq!(
+                harness.published_entry_counts(),
+                Some(before),
+                "one resume must not release two pauses"
+            );
 
-        harness.resume();
-        harness.published(|snapshot| snapshot.entry_counts() != before);
+            harness.resume();
+            harness.published(|snapshot| snapshot.entry_counts() != before);
+        });
     }
 
     #[test]
     fn reuses_the_iterator_per_head_and_reopens_on_switch() {
-        let harness = Harness::spawn();
-        let first = B256::repeat_byte(0x01);
-        let second = B256::repeat_byte(0x02);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let harness = Harness::spawn();
+            let first = B256::repeat_byte(0x01);
+            let second = B256::repeat_byte(0x02);
 
-        harness.start(first);
-        harness.pool.push(first, transfer(0xB0));
-        let before = harness.published_for(first).entry_counts();
-        harness.pool.push(first, transfer(0xB1));
-        harness.published(|snapshot| snapshot.entry_counts() != before);
-        assert_eq!(harness.pool.opened.load(Ordering::Relaxed), 1, "one iterator per head");
+            harness.start(first);
+            harness.pool.push(first, transfer(0xB0));
+            let before = harness.published_for(first).entry_counts();
+            harness.pool.push(first, transfer(0xB1));
+            harness.published(|snapshot| snapshot.entry_counts() != before);
+            assert_eq!(harness.pool.opened.load(Ordering::Relaxed), 1, "one iterator per head");
 
-        harness.start(second);
-        harness.pool.push(second, transfer(0xB2));
-        harness.published_for(second);
-        assert_eq!(harness.pool.opened.load(Ordering::Relaxed), 2);
+            harness.start(second);
+            harness.pool.push(second, transfer(0xB2));
+            harness.published_for(second);
+            assert_eq!(harness.pool.opened.load(Ordering::Relaxed), 2);
+        });
     }
 
     #[test]
     fn shuts_down_when_control_is_dropped() {
-        let harness = Harness::spawn();
-        let parent_hash = B256::repeat_byte(0x01);
-        harness.start(parent_hash);
-        harness.pool.push(parent_hash, transfer(0xB0));
-        harness.published_for(parent_hash);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let harness = Harness::spawn();
+            let parent_hash = B256::repeat_byte(0x01);
+            harness.start(parent_hash);
+            harness.pool.push(parent_hash, transfer(0xB0));
+            harness.published_for(parent_hash);
 
-        harness.shutdown();
+            harness.shutdown();
+        });
     }
 }

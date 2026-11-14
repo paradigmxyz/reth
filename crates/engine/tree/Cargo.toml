@@ -47,7 +47,6 @@ alloy-rpc-types-engine.workspace = true
 
 # common
 futures.workspace = true
-parking_lot.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
 
@@ -58,11 +57,9 @@ reth-metrics = { workspace = true, features = ["common"] }
 # misc
 dashmap.workspace = true
 indexmap.workspace = true
-rayon.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
 derive-where.workspace = true
-crossbeam-channel.workspace = true
 
 # optional deps for test-utils
 reth-prune-types = { workspace = true, optional = true }
@@ -98,6 +95,25 @@ rand.workspace = true
 tracing-subscriber = { workspace = true, features = ["registry"] }
 
 [features]
+fuzz = [
+    "reth-metrics/fuzz",
+    "reth-execution-cache/fuzz",
+    "reth-trie/fuzz",
+    "reth-chain-state/fuzz",
+    "reth-evm/fuzz",
+    "reth-provider/fuzz",
+    "reth-storage-overlay/fuzz",
+    "reth-tasks/fuzz",
+    "reth-trie-parallel/fuzz",
+    "reth-trie-common/fuzz",
+    "reth-trie-sparse/fuzz",
+    "reth-db/fuzz",
+    "reth-evm-ethereum/fuzz",
+    "reth-node-ethereum/fuzz",
+    "reth-stages?/fuzz",
+    "reth-static-file?/fuzz",
+    "reth-prune/fuzz",
+]
 asm-keccak = [
     "reth-evm/asm-keccak",
     "alloy-primitives/asm-keccak",

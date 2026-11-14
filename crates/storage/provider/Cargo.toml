@@ -63,9 +63,6 @@ tokio = { workspace = true, features = ["sync"], optional = true }
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
 evm2 = { workspace = true, optional = true }
 
-# parallel utils
-rayon.workspace = true
-
 rocksdb.workspace = true
 
 [target.'cfg(unix)'.dependencies]
@@ -88,6 +85,14 @@ rand.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 [features]
+fuzz = [
+    "reth-metrics/fuzz",
+    "reth-trie/fuzz",
+    "reth-chain-state/fuzz",
+    "reth-tasks/fuzz",
+    "reth-storage-overlay/fuzz",
+    "reth-db/fuzz",
+]
 test-utils = [
     "dep:evm2",
     "reth-db/test-utils",

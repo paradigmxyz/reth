@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives-traits = { workspace = true, optional = true }
 reth-execution-errors.workspace = true
 reth-trie-common.workspace = true
 tracing = { workspace = true, features = ["attributes"], optional = true }
@@ -24,7 +23,7 @@ alloy-primitives.workspace = true
 
 # misc
 either = { workspace = true, optional = true }
-rayon = { workspace = true, optional = true }
+reth-tasks = { workspace = true, optional = true }
 smallvec = { workspace = true, optional = true }
 strum = { workspace = true, features = ["derive"] }
 
@@ -46,12 +45,16 @@ proptest.workspace = true
 rand.workspace = true
 
 [features]
-fuzz = []
+fuzz = [
+    "reth-metrics?/fuzz",
+    "reth-tasks?/fuzz",
+    "reth-trie-common/fuzz",
+    "reth-trie/fuzz",
+]
 default = ["std", "metrics"]
 std = [
     "dep:either",
-    "dep:rayon",
-    "dep:reth-primitives-traits",
+    "dep:reth-tasks",
     "dep:smallvec",
     "dep:tracing",
     "alloy-primitives/std",
@@ -59,7 +62,6 @@ std = [
     "alloy-trie/std",
     "reth-execution-errors/std",
     "reth-primitives-traits/std",
-    "reth-primitives-traits/rayon",
     "reth-trie-common/std",
     "tracing/std",
     "strum/std",
@@ -68,6 +70,7 @@ std = [
 ]
 metrics = ["dep:reth-metrics", "dep:metrics", "std"]
 test-utils = [
+    "reth-tasks?/test-utils",
     "std",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",

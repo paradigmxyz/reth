@@ -149,7 +149,7 @@ impl ExecutableRecoveredTx {
 pub fn recover_authorizations(tx: alloy_consensus::TxEip7702) -> evm2::ethereum::LazyTxEip7702 {
     #[cfg(feature = "std")]
     if tx.authorization_list.len() >= PARALLEL_AUTHORIZATION_THRESHOLD {
-        use rayon::prelude::*;
+        use reth_tasks::executor::rayon::prelude::*;
 
         let authorities = tx
             .authorization_list

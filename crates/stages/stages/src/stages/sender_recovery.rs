@@ -16,7 +16,8 @@ use reth_stages_api::{
     StageId, TransactionRangeOutput, UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use std::{fmt::Debug, ops::Range, sync::mpsc};
+use reth_tasks::executor::{channel::mpsc, rayon};
+use std::{fmt::Debug, ops::Range};
 use thiserror::Error;
 use tracing::*;
 
@@ -355,7 +356,7 @@ where
     //
     // However, using `std::thread::spawn` allows us to utilize the timeout grace
     // period to complete some work without throwing errors during the shutdown.
-    reth_tasks::spawn_os_thread("sender-recovery", move || {
+    reth_tasks::spawn_thread("sender-recovery", move || {
         while let Ok(chunks) = tx_receiver.recv() {
             for (chunk_range, recovered_senders_tx) in chunks {
                 // Read the raw value, and let the rayon worker to decompress & decode.

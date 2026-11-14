@@ -3,8 +3,8 @@ use crate::{
     ConfigureEvm, EvmEnvFor, ExecutionCtxFor, TxEnvFor,
 };
 use alloy_consensus::transaction::Either;
-use rayon::prelude::*;
 use reth_primitives_traits::TxTy;
+use reth_tasks::executor::rayon::{iter::Map, prelude::*};
 
 /// [`ConfigureEvm`] extension providing methods for executing payloads.
 pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
@@ -153,8 +153,8 @@ where
 {
     type Item = Either<L::Item, R::Item>;
     type Iter = Either<
-        rayon::iter::Map<L::Iter, fn(L::Item) -> Either<L::Item, R::Item>>,
-        rayon::iter::Map<R::Iter, fn(R::Item) -> Either<L::Item, R::Item>>,
+        Map<L::Iter, fn(L::Item) -> Either<L::Item, R::Item>>,
+        Map<R::Iter, fn(R::Item) -> Either<L::Item, R::Item>>,
     >;
 
     fn into_par_iter(self) -> Self::Iter {

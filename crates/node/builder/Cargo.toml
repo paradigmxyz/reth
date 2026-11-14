@@ -81,7 +81,6 @@ eyre.workspace = true
 parking_lot.workspace = true
 jsonrpsee.workspace = true
 fdlimit.workspace = true
-rayon.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true
 
@@ -97,6 +96,23 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 
 [features]
+fuzz = [
+    "reth-chain-state/fuzz",
+    "reth-tasks/fuzz",
+    "reth-downloaders/fuzz",
+    "reth-engine-tree/fuzz",
+    "reth-evm/fuzz",
+    "reth-network/fuzz",
+    "reth-provider/fuzz",
+    "reth-stages/fuzz",
+    "reth-static-file/fuzz",
+    "reth-storage-overlay/fuzz",
+    "reth-db/fuzz",
+    "reth-evm-ethereum/fuzz",
+    "reth-node-ethereum/fuzz",
+    "reth-prune/fuzz",
+    "reth-rpc-eth-types/fuzz",
+]
 default = []
 js-tracer = [
     "reth-rpc/js-tracer",

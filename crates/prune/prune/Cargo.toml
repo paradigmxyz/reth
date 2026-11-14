@@ -43,7 +43,16 @@ tokio.workspace = true
 # reth
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
+reth-tasks.workspace = true
 reth-testing-utils.workspace = true
 reth-tracing.workspace = true
 
 assert_matches.workspace = true
+
+[features]
+fuzz = [
+    "reth-metrics/fuzz",
+    "reth-tasks/fuzz",
+    "reth-provider/fuzz",
+    "reth-stages/fuzz",
+]

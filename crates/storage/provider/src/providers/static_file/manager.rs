@@ -51,6 +51,7 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
+use reth_tasks::executor::{channel::mpsc, rayon};
 use std::{
     collections::BTreeMap,
     fmt::Debug,
@@ -58,7 +59,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
-        mpsc, Arc,
+        Arc,
     },
 };
 use tracing::{debug, info, info_span, instrument, trace, warn};

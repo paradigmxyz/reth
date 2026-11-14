@@ -461,6 +461,7 @@ mod tests {
     };
     use alloy_primitives::{map::B256Map, B256, U256};
     use reth_storage_errors::db::DatabaseErrorInfo;
+    use reth_tasks::executor::Runtime;
     use std::collections::BTreeMap;
 
     fn branch_node(state_mask: u16, tree_mask: u16, hash_mask: u16) -> BranchNodeCompact {
@@ -507,119 +508,128 @@ mod tests {
 
     #[test]
     fn branch_siblings_remain_skippable_by_default() {
-        let mut walker = walker_for_matching_branch_children_test(false);
+        Runtime::new().run(move || {
+            let mut walker = walker_for_matching_branch_children_test(false);
 
-        assert_eq!(walker.key().copied(), Some(Nibbles::default()));
-        assert!(!walker.can_skip_current_node);
+            assert_eq!(walker.key().copied(), Some(Nibbles::default()));
+            assert!(!walker.can_skip_current_node);
 
-        walker.advance().unwrap();
-        assert_eq!(walker.key().copied(), Some(Nibbles::from_nibbles([0x2])));
-        assert!(!walker.can_skip_current_node);
+            walker.advance().unwrap();
+            assert_eq!(walker.key().copied(), Some(Nibbles::from_nibbles([0x2])));
+            assert!(!walker.can_skip_current_node);
 
-        walker.advance().unwrap();
-        assert_eq!(walker.key().copied(), Some(Nibbles::from_nibbles([0x2, 0x3])));
-        assert_eq!(walker.stack.last().unwrap().position(), SubNodePosition::Child(0x3));
-        assert!(!walker.can_skip_current_node);
+            walker.advance().unwrap();
+            assert_eq!(walker.key().copied(), Some(Nibbles::from_nibbles([0x2, 0x3])));
+            assert_eq!(walker.stack.last().unwrap().position(), SubNodePosition::Child(0x3));
+            assert!(!walker.can_skip_current_node);
 
-        walker.advance().unwrap();
-        assert_eq!(walker.key().copied(), Some(Nibbles::from_nibbles([0x2, 0x4])));
-        assert!(walker.can_skip_current_node);
+            walker.advance().unwrap();
+            assert_eq!(walker.key().copied(), Some(Nibbles::from_nibbles([0x2, 0x4])));
+            assert!(walker.can_skip_current_node);
+        });
     }
 
     #[test]
     fn matching_branch_path_can_make_all_children_unskippable() {
-        let mut walker = walker_for_matching_branch_children_test(true);
+        Runtime::new().run(move || {
+            let mut walker = walker_for_matching_branch_children_test(true);
 
-        walker.advance().unwrap();
-        walker.advance().unwrap();
-        walker.advance().unwrap();
-        assert_eq!(walker.key().copied(), Some(Nibbles::from_nibbles([0x2, 0x4])));
-        assert!(!walker.can_skip_current_node);
+            walker.advance().unwrap();
+            walker.advance().unwrap();
+            walker.advance().unwrap();
+            assert_eq!(walker.key().copied(), Some(Nibbles::from_nibbles([0x2, 0x4])));
+            assert!(!walker.can_skip_current_node);
+        });
     }
 
     #[test]
     fn changed_branch_children_remove_orphans() {
-        for regenerate_branch in [false, true] {
-            let mut storage = BTreeMap::from([
-                (B256::right_padding_from(&[0x3a]), U256::ONE),
-                (B256::right_padding_from(&[0x3a, 0x01]), U256::from(10)),
-                (B256::right_padding_from(&[0x3a, 0x10]), U256::from(7)),
-                (B256::right_padding_from(&[0x3b]), U256::from(2)),
-                (B256::right_padding_from(&[0x3c, 0x47]), U256::from(3)),
-                (B256::right_padding_from(&[0x80]), U256::from(4)),
-                (B256::right_padding_from(&[0x81]), U256::from(5)),
-                (B256::right_padding_from(&[0x80, 0x10]), U256::from(8)),
-            ]);
-            if regenerate_branch {
-                storage.insert(B256::right_padding_from(&[0x3c, 0x48]), U256::from(6));
-                storage.insert(B256::right_padding_from(&[0x3c, 0x47, 0x10]), U256::from(9));
-            }
-            let mut harness = TrieTestHarness::new(storage.clone());
-            let expected_nodes = harness
-                .storage_trie_updates()
-                .storage_nodes
-                .iter()
-                .map(|(key, node)| (*key, node.clone()))
-                .collect::<BTreeMap<_, _>>();
-            let mut stored_nodes = expected_nodes.clone();
-            let parent = Nibbles::from_nibbles([0x3]);
-            stored_nodes.get_mut(&parent).unwrap().tree_mask &=
-                !TrieMask::new((1 << 0xa) | (1 << 0xc));
+        Runtime::new().run(move || {
+            for regenerate_branch in [false, true] {
+                let mut storage = BTreeMap::from([
+                    (B256::right_padding_from(&[0x3a]), U256::ONE),
+                    (B256::right_padding_from(&[0x3a, 0x01]), U256::from(10)),
+                    (B256::right_padding_from(&[0x3a, 0x10]), U256::from(7)),
+                    (B256::right_padding_from(&[0x3b]), U256::from(2)),
+                    (B256::right_padding_from(&[0x3c, 0x47]), U256::from(3)),
+                    (B256::right_padding_from(&[0x80]), U256::from(4)),
+                    (B256::right_padding_from(&[0x81]), U256::from(5)),
+                    (B256::right_padding_from(&[0x80, 0x10]), U256::from(8)),
+                ]);
+                if regenerate_branch {
+                    storage.insert(B256::right_padding_from(&[0x3c, 0x48]), U256::from(6));
+                    storage.insert(B256::right_padding_from(&[0x3c, 0x47, 0x10]), U256::from(9));
+                }
+                let mut harness = TrieTestHarness::new(storage.clone());
+                let expected_nodes = harness
+                    .storage_trie_updates()
+                    .storage_nodes
+                    .iter()
+                    .map(|(key, node)| (*key, node.clone()))
+                    .collect::<BTreeMap<_, _>>();
+                let mut stored_nodes = expected_nodes.clone();
+                let parent = Nibbles::from_nibbles([0x3]);
+                stored_nodes.get_mut(&parent).unwrap().tree_mask &=
+                    !TrieMask::new((1 << 0xa) | (1 << 0xc));
 
-            // The cached branch at 0x3c and its descendants are unreachable through 0x3's mask.
-            // Include a descendant which should be regenerated and one which should disappear.
-            let orphan_paths = [
-                Nibbles::from_nibbles([0x3, 0xc]),
-                Nibbles::from_nibbles([0x3, 0xc, 0x4]),
-                Nibbles::from_nibbles([0x3, 0xc, 0x4, 0xf]),
-                Nibbles::from_nibbles([0x3, 0xf, 0x1]),
-                Nibbles::from_nibbles([0x3, 0x1, 0x4]),
-            ];
-            // The valid branch under 0x3a is also hidden by the mask. Its regenerated update can
-            // be split off before the walker finishes 0x3, so resumption must not delete it again.
-            assert!(expected_nodes.contains_key(&Nibbles::from_nibbles([0x3, 0xa])));
-            for path in orphan_paths {
-                let mut stale_node = branch_node(0b11, 0, 0b11);
-                stale_node.hashes = vec![B256::repeat_byte(0xee); 2].into();
-                stored_nodes.insert(path, stale_node);
-            }
-            harness.set_trie_nodes(stored_nodes.clone());
+                // The cached branch at 0x3c and its descendants are unreachable through 0x3's mask.
+                // Include a descendant which should be regenerated and one which should disappear.
+                let orphan_paths = [
+                    Nibbles::from_nibbles([0x3, 0xc]),
+                    Nibbles::from_nibbles([0x3, 0xc, 0x4]),
+                    Nibbles::from_nibbles([0x3, 0xc, 0x4, 0xf]),
+                    Nibbles::from_nibbles([0x3, 0xf, 0x1]),
+                    Nibbles::from_nibbles([0x3, 0x1, 0x4]),
+                ];
+                // The valid branch under 0x3a is also hidden by the mask. Its regenerated update
+                // can be split off before the walker finishes 0x3, so resumption must not delete it
+                // again.
+                assert!(expected_nodes.contains_key(&Nibbles::from_nibbles([0x3, 0xa])));
+                for path in orphan_paths {
+                    let mut stale_node = branch_node(0b11, 0, 0b11);
+                    stale_node.hashes = vec![B256::repeat_byte(0xee); 2].into();
+                    stored_nodes.insert(path, stale_node);
+                }
+                harness.set_trie_nodes(stored_nodes.clone());
 
-            // A change under sibling 0x3a must also clean up 0x3c and state-mask gaps.
-            let prefix_set =
-                PrefixSetMut::from([Nibbles::unpack(B256::right_padding_from(&[0x3a]))]).freeze();
-            for (enabled, threshold) in [(false, u64::MAX), (true, u64::MAX), (true, 1)] {
-                // Also rebuild the neighboring branch in checkpointed runs. Resuming a skipped
-                // branch after a leaf checkpoint currently fails even without orphan cleanup.
-                let changes = if threshold == 1 {
-                    PrefixSetMut::from([
-                        Nibbles::unpack(B256::right_padding_from(&[0x3a])),
-                        Nibbles::unpack(B256::right_padding_from(&[0x80])),
-                    ])
-                    .freeze()
-                } else {
-                    prefix_set.clone()
-                };
-                let (root, updates) =
-                    storage_root_with_progress(&harness, changes, enabled, threshold);
-
-                let mut resulting_nodes = stored_nodes.clone();
-                for (path, node) in updates.into_sorted().storage_nodes {
-                    if let Some(node) = node {
-                        resulting_nodes.insert(path, node);
+                // A change under sibling 0x3a must also clean up 0x3c and state-mask gaps.
+                let prefix_set =
+                    PrefixSetMut::from([Nibbles::unpack(B256::right_padding_from(&[0x3a]))])
+                        .freeze();
+                for (enabled, threshold) in [(false, u64::MAX), (true, u64::MAX), (true, 1)] {
+                    // Also rebuild the neighboring branch in checkpointed runs. Resuming a skipped
+                    // branch after a leaf checkpoint currently fails even without orphan cleanup.
+                    let changes = if threshold == 1 {
+                        PrefixSetMut::from([
+                            Nibbles::unpack(B256::right_padding_from(&[0x3a])),
+                            Nibbles::unpack(B256::right_padding_from(&[0x80])),
+                        ])
+                        .freeze()
                     } else {
-                        resulting_nodes.remove(&path);
+                        prefix_set.clone()
+                    };
+                    let (root, updates) =
+                        storage_root_with_progress(&harness, changes, enabled, threshold);
+
+                    let mut resulting_nodes = stored_nodes.clone();
+                    for (path, node) in updates.into_sorted().storage_nodes {
+                        if let Some(node) = node {
+                            resulting_nodes.insert(path, node);
+                        } else {
+                            resulting_nodes.remove(&path);
+                        }
+                    }
+                    assert_eq!(root, storage_root_prehashed(storage.clone()));
+                    if enabled {
+                        assert_eq!(resulting_nodes, expected_nodes);
+                    } else {
+                        // Normal traversal ignores hidden descendants, but leaves them in the
+                        // cache.
+                        assert_ne!(resulting_nodes, expected_nodes);
                     }
                 }
-                assert_eq!(root, storage_root_prehashed(storage.clone()));
-                if enabled {
-                    assert_eq!(resulting_nodes, expected_nodes);
-                } else {
-                    // Normal traversal ignores hidden descendants, but leaves them in the cache.
-                    assert_ne!(resulting_nodes, expected_nodes);
-                }
             }
-        }
+        });
     }
 
     fn storage_root_with_progress(
@@ -664,58 +674,66 @@ mod tests {
 
     #[test]
     fn orphan_cleanup_skips_live_subtrees() {
-        let parent = Nibbles::from_nibbles([0x3]);
-        let tree_mask = TrieMask::from_nibble(0xa);
-        let orphans = [
-            Nibbles::from_nibbles([0x3, 0xb]),
-            Nibbles::from_nibbles([0x3, 0xb, 0x5]),
-            Nibbles::from_nibbles([0x3, 0xb, 0x5, 0xf]),
-        ];
-        let mut nodes = BTreeMap::from([
-            (parent, branch_node((1 << 0xa) | (1 << 0xb), tree_mask.get(), 0)),
-            (Nibbles::from_nibbles([0x3, 0xa]), branch_node(0b11, 0, 0)),
-            (Nibbles::from_nibbles([0x4]), branch_node(0b11, 0, 0)),
-        ]);
-        for index in 0..128 {
-            nodes.insert(
-                Nibbles::from_nibbles([0x3, 0xa, index / 16, index % 16]),
-                branch_node(0b11, 0, 0),
-            );
-        }
-        nodes.extend(orphans.into_iter().map(|path| (path, branch_node(0b11, 0, 0))));
-        let factory = MockTrieCursorFactory::new(nodes, B256Map::default());
-        let changes = PrefixSetMut::from([Nibbles::from_nibbles([0x3, 0xa])]).freeze();
-        let mut walker =
-            TrieWalker::<_>::state_trie(factory.account_trie_cursor().unwrap(), changes)
-                .unwrap()
-                .with_walk_all_changed_branch_children(true)
-                .with_deletions_retained(true);
-        walker.cursor.seek_exact(parent).unwrap();
-        factory.visited_account_keys().clear();
-        walker.remove_orphaned_descendants(parent, tree_mask).unwrap();
+        Runtime::new().run(move || {
+            let parent = Nibbles::from_nibbles([0x3]);
+            let tree_mask = TrieMask::from_nibble(0xa);
+            let orphans = [
+                Nibbles::from_nibbles([0x3, 0xb]),
+                Nibbles::from_nibbles([0x3, 0xb, 0x5]),
+                Nibbles::from_nibbles([0x3, 0xb, 0x5, 0xf]),
+            ];
+            let mut nodes = BTreeMap::from([
+                (parent, branch_node((1 << 0xa) | (1 << 0xb), tree_mask.get(), 0)),
+                (Nibbles::from_nibbles([0x3, 0xa]), branch_node(0b11, 0, 0)),
+                (Nibbles::from_nibbles([0x4]), branch_node(0b11, 0, 0)),
+            ]);
+            for index in 0..128 {
+                nodes.insert(
+                    Nibbles::from_nibbles([0x3, 0xa, index / 16, index % 16]),
+                    branch_node(0b11, 0, 0),
+                );
+            }
+            nodes.extend(orphans.into_iter().map(|path| (path, branch_node(0b11, 0, 0))));
+            let factory = MockTrieCursorFactory::new(nodes, B256Map::default());
+            let changes = PrefixSetMut::from([Nibbles::from_nibbles([0x3, 0xa])]).freeze();
+            let mut walker =
+                TrieWalker::<_>::state_trie(factory.account_trie_cursor().unwrap(), changes)
+                    .unwrap()
+                    .with_walk_all_changed_branch_children(true)
+                    .with_deletions_retained(true);
+            walker.cursor.seek_exact(parent).unwrap();
+            factory.visited_account_keys().clear();
+            walker.remove_orphaned_descendants(parent, tree_mask).unwrap();
 
-        assert_eq!(walker.take_removed_keys(), HashSet::from_iter(orphans));
-        assert_eq!(walker.cursor.current().unwrap(), Some(parent));
-        let next_count = factory
-            .visited_account_keys()
-            .iter()
-            .filter(|visit| matches!(visit.visit_type, KeyVisitType::Next))
-            .count();
-        assert!(next_count <= 4, "cleanup walked {next_count} entries for 3 orphan nodes");
+            assert_eq!(walker.take_removed_keys(), HashSet::from_iter(orphans));
+            assert_eq!(walker.cursor.current().unwrap(), Some(parent));
+            let next_count = factory
+                .visited_account_keys()
+                .iter()
+                .filter(|visit| matches!(visit.visit_type, KeyVisitType::Next))
+                .count();
+            assert!(next_count <= 4, "cleanup walked {next_count} entries for 3 orphan nodes");
+        });
     }
 
     #[test]
     fn state_trie_initial_read_timeout_returns_error() {
+        Runtime::new().run(move || {
         let error =
             TrieWalker::<_>::state_trie(TimedOutTrieCursor, PrefixSet::default()).unwrap_err();
         assert_matches::assert_matches!(error, DatabaseError::Read(info) if info == timeout_error());
+
+        });
     }
 
     #[test]
     fn storage_trie_initial_read_timeout_returns_error() {
+        Runtime::new().run(move || {
         let error =
             TrieWalker::<_>::storage_trie(TimedOutTrieCursor, PrefixSet::default()).unwrap_err();
         assert_matches::assert_matches!(error, DatabaseError::Read(info) if info == timeout_error());
+
+        });
     }
 
     fn timeout_error() -> DatabaseErrorInfo {

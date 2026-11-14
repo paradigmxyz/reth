@@ -74,4 +74,12 @@ serde_json.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
 [features]
+fuzz = [
+    "reth-metrics/fuzz",
+    "reth-tasks/fuzz",
+    "reth-chain-state/fuzz",
+    "reth-evm/fuzz",
+    "reth-rpc-server-types/fuzz",
+    "reth-trie-common/fuzz",
+]
 js-tracer = ["evm2-inspectors/js-tracer"]

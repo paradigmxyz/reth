@@ -91,30 +91,34 @@ mod tests {
 
     #[test]
     fn test_metered_one_updates_metrics() {
-        let metrics = ExecutorMetrics::default();
-        let block = create_test_block_with_gas(1000);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let metrics = ExecutorMetrics::default();
+            let block = create_test_block_with_gas(1000);
 
-        // Execute with metered_one
-        let result = metrics.metered_one(&block, |b| {
-            // Simulate some work
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            b.header().gas_used()
+            // Execute with metered_one
+            let result = metrics.metered_one(&block, |b| {
+                // Simulate some work
+                reth_tasks::executor::thread::sleep(std::time::Duration::from_millis(10));
+                b.header().gas_used()
+            });
+
+            // Verify result
+            assert_eq!(result, 1000);
         });
-
-        // Verify result
-        assert_eq!(result, 1000);
     }
 
     #[test]
     fn test_metered_helper_tracks_timing() {
-        let metrics = ExecutorMetrics::default();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let metrics = ExecutorMetrics::default();
 
-        let result = metrics.metered(|| {
-            // Simulate some work
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            (500, "test_result")
+            let result = metrics.metered(|| {
+                // Simulate some work
+                reth_tasks::executor::thread::sleep(std::time::Duration::from_millis(10));
+                (500, "test_result")
+            });
+
+            assert_eq!(result, "test_result");
         });
-
-        assert_eq!(result, "test_result");
     }
 }

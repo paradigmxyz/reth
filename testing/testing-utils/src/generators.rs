@@ -1,7 +1,5 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
-// TODO(rand): update ::random calls after rand_09 migration
-
 use alloy_consensus::{Header, SignableTransaction, Transaction as _, TxLegacy};
 use alloy_eips::{
     eip1898::BlockWithParent,
@@ -122,7 +120,7 @@ pub fn random_block_with_parent<R: Rng>(
 pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> SealedHeader {
     let header = alloy_consensus::Header {
         number,
-        nonce: B64::random(),
+        nonce: B64::random_with(rng),
         difficulty: U256::from(rng.random::<u32>()),
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
@@ -142,7 +140,7 @@ pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
         nonce: rng.random::<u16>().into(),
         gas_price: rng.random::<u16>().into(),
         gas_limit: rng.random::<u16>().into(),
-        to: TxKind::Call(Address::random()),
+        to: TxKind::Call(Address::random_with(rng)),
         value: U256::from(rng.random::<u16>()),
         input: Bytes::default(),
     })
@@ -159,8 +157,8 @@ pub fn random_signed_tx<R: Rng>(rng: &mut R) -> TransactionSigned {
 }
 
 /// Signs the [Transaction] with a random key pair.
-pub fn sign_tx_with_random_key_pair<R: Rng>(_rng: &mut R, tx: Transaction) -> TransactionSigned {
-    let key_pair = Keypair::new(&mut rand::rng());
+pub fn sign_tx_with_random_key_pair<R: Rng>(rng: &mut R, tx: Transaction) -> TransactionSigned {
+    let key_pair = generate_key(rng);
     sign_tx_with_key_pair(key_pair, tx)
 }
 
@@ -174,13 +172,13 @@ pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionS
 }
 
 /// Generates a new random [Keypair].
-pub fn generate_key<R: Rng>(_rng: &mut R) -> Keypair {
-    Keypair::new(&mut rand::rng())
+pub fn generate_key<R: Rng>(rng: &mut R) -> Keypair {
+    Keypair::new(rng)
 }
 
 /// Generates a set of [Keypair]s based on the desired count.
-pub fn generate_keys<R: Rng>(_rng: &mut R, count: usize) -> Vec<Keypair> {
-    (0..count).map(|_| Keypair::new(&mut rand::rng())).collect()
+pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<Keypair> {
+    (0..count).map(|_| generate_key(rng)).collect()
 }
 
 /// Generate a random block filled with signed transactions (generated using
@@ -224,7 +222,7 @@ pub fn random_block<R: Rng>(
                 amount: rng.random(),
                 index: i.into(),
                 validator_index: i.into(),
-                address: Address::random(),
+                address: Address::random_with(rng),
             })
             .collect::<Vec<_>>()
     });
@@ -382,8 +380,8 @@ pub fn random_account_change<R: Rng>(
 ) -> (Address, Address, U256, Vec<StorageEntry>) {
     let mut addresses = valid_addresses.choose_multiple(rng, 2).copied();
 
-    let addr_from = addresses.next().unwrap_or_else(Address::random);
-    let addr_to = addresses.next().unwrap_or_else(Address::random);
+    let addr_from = addresses.next().unwrap_or_else(|| Address::random_with(rng));
+    let addr_to = addresses.next().unwrap_or_else(|| Address::random_with(rng));
 
     let balance_change = U256::from(rng.random::<u64>());
 
@@ -415,7 +413,7 @@ pub fn random_storage_entry<R: Rng>(rng: &mut R, key_range: Range<u64>) -> Stora
 pub fn random_eoa_account<R: Rng>(rng: &mut R) -> (Address, Account) {
     let nonce: u64 = rng.random();
     let balance = U256::from(rng.random::<u32>());
-    let addr = Address::random();
+    let addr = Address::random_with(rng);
 
     (addr, Account { nonce, balance, ..Default::default() })
 }
@@ -437,7 +435,7 @@ pub fn random_contract_account_range<R: Rng>(
     let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
     for _ in acc_range {
         let (address, eoa_account) = random_eoa_account(rng);
-        let account = Account { bytecode_hash: Some(B256::random()), ..eoa_account };
+        let account = Account { bytecode_hash: Some(B256::random_with(rng)), ..eoa_account };
         accounts.push((address, account))
     }
     accounts
@@ -471,8 +469,8 @@ pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: O
     let data_byte_count = rng.random::<u8>() as usize;
     let topics_count = topics_count.unwrap_or_else(|| rng.random()) as usize;
     Log::new_unchecked(
-        address.unwrap_or_else(|| Address::random()),
-        std::iter::repeat_with(|| B256::random()).take(topics_count).collect(),
+        address.unwrap_or_else(|| Address::random_with(rng)),
+        std::iter::repeat_with(|| B256::random_with(rng)).take(topics_count).collect(),
         std::iter::repeat_with(|| rng.random()).take(data_byte_count).collect::<Vec<_>>().into(),
     )
 }
@@ -484,7 +482,7 @@ mod tests {
     use alloy_eips::eip2930::AccessList;
     use alloy_primitives::{address, b256, bytes, hex, Signature};
     use reth_primitives_traits::{crypto::secp256k1::sign_message, SignerRecoverable};
-    use std::str::FromStr;
+    use std::{fmt::Debug, str::FromStr};
 
     #[test]
     fn test_sign_message() {
@@ -501,8 +499,9 @@ mod tests {
         });
         let signature_hash = tx.signature_hash();
 
+        let mut rng = rng_with_seed(b"sign-message");
         for _ in 0..100 {
-            let key_pair = Keypair::new(&mut rand::rng());
+            let key_pair = generate_key(&mut rng);
 
             let signature =
                 sign_message(B256::from_slice(&key_pair.to_secret_bytes()[..]), signature_hash)
@@ -553,5 +552,67 @@ mod tests {
             false,
         );
         assert_eq!(expected, signature);
+    }
+
+    #[test]
+    fn seeded_headers_transactions_and_keys_are_reproducible() {
+        assert_seeded(|rng| random_header(rng, 10, Some(B256::ZERO)));
+        assert_seeded(|rng| random_header_range(rng, 10..13, B256::ZERO));
+        assert_seeded(random_tx);
+        assert_seeded(random_signed_tx);
+        assert_seeded(|rng| {
+            sign_tx_with_random_key_pair(rng, Transaction::Legacy(TxLegacy::default()))
+        });
+        assert_seeded(|rng| generate_key(rng).to_secret_bytes());
+        assert_seeded(|rng| {
+            generate_keys(rng, 3).into_iter().map(|key| key.to_secret_bytes()).collect::<Vec<_>>()
+        });
+    }
+
+    #[test]
+    fn seeded_blocks_accounts_and_logs_are_reproducible() {
+        assert_seeded(|rng| {
+            random_block(
+                rng,
+                10,
+                BlockParams {
+                    parent: Some(B256::ZERO),
+                    tx_count: Some(2),
+                    ommers_count: Some(1),
+                    withdrawals_count: Some(2),
+                    ..Default::default()
+                },
+            )
+        });
+        assert_seeded(|rng| {
+            random_block_range(
+                rng,
+                10..=12,
+                BlockRangeParams {
+                    tx_count: 1..3,
+                    withdrawals_count: Some(1..3),
+                    ..Default::default()
+                },
+            )
+        });
+        assert_seeded(random_eoa_account);
+        assert_seeded(|rng| random_eoa_accounts(rng, 3));
+        assert_seeded(|rng| random_contract_account_range(rng, &mut (0..3)));
+        for addresses in [vec![], vec![Address::ZERO], vec![Address::ZERO, Address::repeat_byte(1)]]
+        {
+            assert_seeded(|rng| random_account_change(rng, &addresses, 1..4, 0..16));
+        }
+        assert_seeded(|rng| random_log(rng, None, Some(2)));
+        assert_seeded(|rng| random_log(rng, Some(Address::ZERO), Some(0)));
+        let transaction = random_signed_tx(&mut rng_with_seed(b"receipt-transaction"));
+        assert_seeded(|rng| {
+            (0..16).map(|_| random_receipt(rng, &transaction, Some(2), Some(2))).collect::<Vec<_>>()
+        });
+    }
+
+    fn assert_seeded<T: Debug + Eq>(generate: impl Fn(&mut StdRng) -> T) {
+        let expected = generate(&mut rng_with_seed(b"first"));
+        assert_eq!(expected, generate(&mut rng_with_seed(b"first")));
+        assert_ne!(expected, generate(&mut rng_with_seed(b"second")));
     }
 }

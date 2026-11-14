@@ -23,12 +23,13 @@ use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives, SealedBlock, SealedHeader};
+use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 use reth_provider::{
     BalProvider, BlockReader, ChangeSetReader, DatabaseProviderFactory, PruneCheckpointReader,
     StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache,
 };
+use reth_tasks::executor::time::Instant;
 use tracing::{debug, error, instrument, trace, warn};
 
 impl<N, P, T, V, C> EngineApiTreeHandler<N, P, T, V, C>

@@ -682,6 +682,7 @@ mod tests {
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{BlockExecutor, BlockExecutorFactory, CommitChanges};
     use reth_primitives_traits::Recovered;
+    use reth_tasks::executor::{channel, Runtime};
     use std::{collections::BTreeMap, convert::Infallible, sync::Arc};
 
     fn segment(
@@ -957,60 +958,68 @@ mod tests {
 
     #[test]
     fn dao_fork_drain_keeps_empty_accounts() {
-        let [absent, empty, empty_with_balance, nonce_only, ..] = dao_fork::DAO_HARDFORK_ACCOUNTS;
-        let beneficiary = dao_fork::DAO_HARDFORK_BENEFICIARY;
+        Runtime::new().run(|| {
+            let [absent, empty, empty_with_balance, nonce_only, ..] =
+                dao_fork::DAO_HARDFORK_ACCOUNTS;
+            let beneficiary = dao_fork::DAO_HARDFORK_BENEFICIARY;
 
-        let execute = |accounts: &[(Address, AccountInfo)]| {
-            let mut database = TestDatabase::default();
-            database.accounts.extend(accounts.iter().cloned());
-            let chain_spec = ChainSpecBuilder::mainnet()
-                .with_fork(EthereumHardfork::Dao, ForkCondition::Block(1))
-                .build();
-            let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(chain_spec));
-            let env = EthEvmEnv::new(
-                SpecId::FRONTIER,
-                BlockEnv::<BaseEvmTypes> {
-                    number: U256::from(1),
-                    gas_limit: U256::from(30_000),
-                    beneficiary: Address::with_last_byte(0xbe),
-                    ..Default::default()
-                },
-                1,
-            );
-            let evm = factory.evm_with_env(Db::new(database), env);
-            let mut executor = factory.create_executor(evm, segment(0, 1, B256::ZERO).ctx);
-            let (tx, rx) = std::sync::mpsc::channel();
-            executor.set_state_hook(move |update| tx.send(update).unwrap());
-            executor.apply_pre_execution_changes().unwrap();
-            let output = executor.finish_with_block_access_list().unwrap().0;
-            // The streamed updates hash to the same state as the finished bundle.
-            let mut streamed = reth_trie_common::HashedPostState::default();
-            for update in rx.try_iter() {
-                streamed.extend(reth_execution_types::state_update_to_hashed_post_state(&update));
-            }
-            let bundled = reth_trie_common::HashedPostState::from_bundle_state::<
-                reth_trie_common::KeccakKeyHasher,
-            >(&output.state.state);
-            assert_eq!(streamed.into_sorted(), bundled.into_sorted());
-            output
-        };
+            let execute = |accounts: &[(Address, AccountInfo)]| {
+                let mut database = TestDatabase::default();
+                database.accounts.extend(accounts.iter().cloned());
+                let chain_spec = ChainSpecBuilder::mainnet()
+                    .with_fork(EthereumHardfork::Dao, ForkCondition::Block(1))
+                    .build();
+                let factory =
+                    super::super::factory::EthBlockExecutorFactory::new(Arc::new(chain_spec));
+                let env = EthEvmEnv::new(
+                    SpecId::FRONTIER,
+                    BlockEnv::<BaseEvmTypes> {
+                        number: U256::from(1),
+                        gas_limit: U256::from(30_000),
+                        beneficiary: Address::with_last_byte(0xbe),
+                        ..Default::default()
+                    },
+                    1,
+                );
+                let evm = factory.evm_with_env(Db::new(database), env);
+                let mut executor = factory.create_executor(evm, segment(0, 1, B256::ZERO).ctx);
+                let (tx, rx) = channel::unbounded();
+                executor.set_state_hook(move |update| tx.send(update).unwrap());
+                executor.apply_pre_execution_changes().unwrap();
+                let output = executor.finish_with_block_access_list().unwrap().0;
+                // The streamed updates hash to the same state as the finished bundle.
+                let mut streamed = reth_trie_common::HashedPostState::default();
+                for update in rx.try_iter() {
+                    streamed
+                        .extend(reth_execution_types::state_update_to_hashed_post_state(&update));
+                }
+                let bundled = reth_trie_common::HashedPostState::from_bundle_state::<
+                    reth_trie_common::KeccakKeyHasher,
+                >(&output.state.state);
+                assert_eq!(streamed.into_sorted(), bundled.into_sorted());
+                output
+            };
 
-        // The fork predates EIP-161, so drained accounts stay, absent and empty ones included.
-        let output = execute(&[
-            (empty, AccountInfo::default()),
-            (empty_with_balance, AccountInfo::default().with_balance(U256::from(7))),
-            (nonce_only, AccountInfo { nonce: 1, balance: U256::from(3), ..Default::default() }),
-        ]);
-        assert_eq!(output.account(&absent).unwrap().unwrap().balance, U256::ZERO);
-        assert_eq!(output.account(&empty), None);
-        assert_eq!(output.account(&empty_with_balance).unwrap().unwrap().balance, U256::ZERO);
-        let nonce_only_account = output.account(&nonce_only).unwrap().unwrap();
-        assert_eq!((nonce_only_account.nonce, nonce_only_account.balance), (1, U256::ZERO));
-        assert_eq!(output.account(&beneficiary).unwrap().unwrap().balance, U256::from(10));
+            // The fork predates EIP-161, so drained accounts stay, absent and empty ones included.
+            let output = execute(&[
+                (empty, AccountInfo::default()),
+                (empty_with_balance, AccountInfo::default().with_balance(U256::from(7))),
+                (
+                    nonce_only,
+                    AccountInfo { nonce: 1, balance: U256::from(3), ..Default::default() },
+                ),
+            ]);
+            assert_eq!(output.account(&absent).unwrap().unwrap().balance, U256::ZERO);
+            assert_eq!(output.account(&empty), None);
+            assert_eq!(output.account(&empty_with_balance).unwrap().unwrap().balance, U256::ZERO);
+            let nonce_only_account = output.account(&nonce_only).unwrap().unwrap();
+            assert_eq!((nonce_only_account.nonce, nonce_only_account.balance), (1, U256::ZERO));
+            assert_eq!(output.account(&beneficiary).unwrap().unwrap().balance, U256::from(10));
 
-        // Nothing is drained, and the empty beneficiary stays unchanged.
-        let output = execute(&[(beneficiary, AccountInfo::default())]);
-        assert_eq!(output.account(&beneficiary), None);
+            // Nothing is drained, and the empty beneficiary stays unchanged.
+            let output = execute(&[(beneficiary, AccountInfo::default())]);
+            assert_eq!(output.account(&beneficiary), None);
+        });
     }
 
     #[test]

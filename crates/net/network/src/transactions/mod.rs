@@ -1,7 +1,7 @@
 //! Transactions management for the p2p network.
 
 use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, transaction::TxHashRef};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use reth_tasks::executor::rayon::iter::{IntoParallelIterator, ParallelIterator};
 use smallvec::SmallVec;
 
 /// Normalized transaction announcements.

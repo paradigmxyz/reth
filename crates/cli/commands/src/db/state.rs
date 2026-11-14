@@ -1,6 +1,5 @@
 use alloy_primitives::{keccak256, Address, BlockNumber, B256, U256};
 use clap::Parser;
-use parking_lot::Mutex;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     database::Database,
@@ -13,12 +12,15 @@ use reth_provider::{
     StaticFileProviderFactory,
 };
 use reth_storage_api::{BlockNumReader, StateProvider, StateProviderFactory, StorageSettingsCache};
-use reth_tasks::spawn_scoped_os_thread;
-use std::{
-    collections::BTreeSet,
-    thread,
-    time::{Duration, Instant},
+use reth_tasks::{
+    executor::{
+        sync::parking_lot::Mutex,
+        thread,
+        time::{Duration, Instant},
+    },
+    spawn_scoped_thread,
 };
+use std::collections::BTreeSet;
 use tracing::info;
 
 /// Log progress every 30 seconds
@@ -266,9 +268,8 @@ impl Command {
         keys: &mut BTreeSet<B256>,
     ) -> eyre::Result<()> {
         const CHUNK_SIZE: u64 = 500_000; // 500k blocks per thread
-        let num_threads = std::thread::available_parallelism()
-            .map(|p| p.get().saturating_sub(1).max(1))
-            .unwrap_or(4);
+        let num_threads =
+            thread::available_parallelism().map(|p| p.get().saturating_sub(1).max(1)).unwrap_or(4);
 
         // Get the current tip block
         let tip = tool.provider_factory.provider()?.best_block_number()?;
@@ -308,7 +309,7 @@ impl Command {
         thread::scope(|s| {
             let handles: Vec<_> = (0..num_threads)
                 .map(|thread_id| {
-                    spawn_scoped_os_thread(s, "db-state-worker", move || {
+                    spawn_scoped_thread(s, "db-state-worker", move || {
                         loop {
                             // Get next chunk to process
                             let chunk_idx = {

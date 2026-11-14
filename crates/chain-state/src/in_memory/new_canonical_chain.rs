@@ -117,116 +117,124 @@ mod tests {
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::Bytes;
     use reth_execution_types::DecodedEvmBal;
+    use reth_tasks::executor::Runtime;
     use reth_trie::LazyTrieData;
     use std::collections::BTreeMap;
 
     #[test]
     fn test_to_chain_notification() {
-        // Generate 4 blocks
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let block0 = test_block_builder.get_executed_block_with_number(0, B256::random());
-        let block1 =
-            test_block_builder.get_executed_block_with_number(1, block0.recovered_block.hash());
-        let block1a =
-            test_block_builder.get_executed_block_with_number(1, block0.recovered_block.hash());
-        let block2 =
-            test_block_builder.get_executed_block_with_number(2, block1.recovered_block.hash());
-        let block2a =
-            test_block_builder.get_executed_block_with_number(2, block1.recovered_block.hash());
+        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::seeded(42);
+        let parent_hash = B256::random();
+        Runtime::new().run(move || {
+            // Generate 4 blocks
+            let block0 = test_block_builder.get_executed_block_with_number(0, parent_hash);
+            let block1 =
+                test_block_builder.get_executed_block_with_number(1, block0.recovered_block.hash());
+            let block1a =
+                test_block_builder.get_executed_block_with_number(1, block0.recovered_block.hash());
+            let block2 =
+                test_block_builder.get_executed_block_with_number(2, block1.recovered_block.hash());
+            let block2a =
+                test_block_builder.get_executed_block_with_number(2, block1.recovered_block.hash());
 
-        // Test commit notification
-        let chain_commit = NewCanonicalChain::Commit { new: vec![block0.clone(), block1.clone()] };
+            // Test commit notification
+            let chain_commit =
+                NewCanonicalChain::Commit { new: vec![block0.clone(), block1.clone()] };
 
-        // Build expected trie data map
-        let mut expected_trie_data = BTreeMap::new();
-        expected_trie_data.insert(0, LazyTrieData::ready(block0.trie_data()));
-        expected_trie_data.insert(1, LazyTrieData::ready(block1.trie_data()));
+            // Build expected trie data map
+            let mut expected_trie_data = BTreeMap::new();
+            expected_trie_data.insert(0, LazyTrieData::ready(block0.trie_data()));
+            expected_trie_data.insert(1, LazyTrieData::ready(block1.trie_data()));
 
-        // Build expected execution outcome (first_block matches first block number)
-        let commit_execution_outcome = ExecutionOutcome {
-            receipts: vec![vec![], vec![]],
-            requests: vec![Requests::default(), Requests::default()],
-            first_block: 0,
-            ..Default::default()
-        };
+            // Build expected execution outcome (first_block matches first block number)
+            let commit_execution_outcome = ExecutionOutcome {
+                receipts: vec![vec![], vec![]],
+                requests: vec![Requests::default(), Requests::default()],
+                first_block: 0,
+                ..Default::default()
+            };
 
-        assert_eq!(
-            chain_commit.to_chain_notification(),
-            CanonStateNotification::Commit {
-                new: Arc::new(Chain::new(
-                    vec![block0.recovered_block().clone(), block1.recovered_block().clone()],
-                    commit_execution_outcome,
-                    expected_trie_data,
-                ))
-            }
-        );
+            assert_eq!(
+                chain_commit.to_chain_notification(),
+                CanonStateNotification::Commit {
+                    new: Arc::new(Chain::new(
+                        vec![block0.recovered_block().clone(), block1.recovered_block().clone()],
+                        commit_execution_outcome,
+                        expected_trie_data,
+                    ))
+                }
+            );
 
-        // Test reorg notification
-        let chain_reorg = NewCanonicalChain::Reorg {
-            new: vec![block1a.clone(), block2a.clone()],
-            old: vec![block1.clone(), block2.clone()],
-        };
+            // Test reorg notification
+            let chain_reorg = NewCanonicalChain::Reorg {
+                new: vec![block1a.clone(), block2a.clone()],
+                old: vec![block1.clone(), block2.clone()],
+            };
 
-        // Build expected trie data for old chain
-        let mut old_trie_data = BTreeMap::new();
-        old_trie_data.insert(1, LazyTrieData::ready(block1.trie_data()));
-        old_trie_data.insert(2, LazyTrieData::ready(block2.trie_data()));
+            // Build expected trie data for old chain
+            let mut old_trie_data = BTreeMap::new();
+            old_trie_data.insert(1, LazyTrieData::ready(block1.trie_data()));
+            old_trie_data.insert(2, LazyTrieData::ready(block2.trie_data()));
 
-        // Build expected trie data for new chain
-        let mut new_trie_data = BTreeMap::new();
-        new_trie_data.insert(1, LazyTrieData::ready(block1a.trie_data()));
-        new_trie_data.insert(2, LazyTrieData::ready(block2a.trie_data()));
+            // Build expected trie data for new chain
+            let mut new_trie_data = BTreeMap::new();
+            new_trie_data.insert(1, LazyTrieData::ready(block1a.trie_data()));
+            new_trie_data.insert(2, LazyTrieData::ready(block2a.trie_data()));
 
-        // Build expected execution outcome for reorg chains (first_block matches first block
-        // number)
-        let reorg_execution_outcome = ExecutionOutcome {
-            receipts: vec![vec![], vec![]],
-            requests: vec![Requests::default(), Requests::default()],
-            first_block: 1,
-            ..Default::default()
-        };
+            // Build expected execution outcome for reorg chains (first_block matches first block
+            // number)
+            let reorg_execution_outcome = ExecutionOutcome {
+                receipts: vec![vec![], vec![]],
+                requests: vec![Requests::default(), Requests::default()],
+                first_block: 1,
+                ..Default::default()
+            };
 
-        assert_eq!(
-            chain_reorg.to_chain_notification(),
-            CanonStateNotification::Reorg {
-                old: Arc::new(Chain::new(
-                    vec![block1.recovered_block().clone(), block2.recovered_block().clone()],
-                    reorg_execution_outcome.clone(),
-                    old_trie_data,
-                )),
-                new: Arc::new(Chain::new(
-                    vec![block1a.recovered_block().clone(), block2a.recovered_block().clone()],
-                    reorg_execution_outcome,
-                    new_trie_data,
-                ))
-            }
-        );
+            assert_eq!(
+                chain_reorg.to_chain_notification(),
+                CanonStateNotification::Reorg {
+                    old: Arc::new(Chain::new(
+                        vec![block1.recovered_block().clone(), block2.recovered_block().clone()],
+                        reorg_execution_outcome.clone(),
+                        old_trie_data,
+                    )),
+                    new: Arc::new(Chain::new(
+                        vec![block1a.recovered_block().clone(), block2a.recovered_block().clone()],
+                        reorg_execution_outcome,
+                        new_trie_data,
+                    ))
+                }
+            );
+        });
     }
 
     #[test]
     fn test_to_chain_notification_carries_prepared_bal() {
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let block0 = test_block_builder.get_executed_block_with_number(0, B256::random());
-        let block1 = test_block_builder
-            .get_executed_block_with_number(1, block0.recovered_block.hash())
-            .with_bal(Some(Arc::new(DecodedEvmBal::new(
-                Arc::default(),
-                Bytes::from_static(&[0xc0]),
-            ))));
+        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::seeded(42);
+        let parent_hash = B256::random();
+        Runtime::new().run(move || {
+            let block0 = test_block_builder.get_executed_block_with_number(0, parent_hash);
+            let block1 = test_block_builder
+                .get_executed_block_with_number(1, block0.recovered_block.hash())
+                .with_bal(Some(Arc::new(DecodedEvmBal::new(
+                    Arc::default(),
+                    Bytes::from_static(&[0xc0]),
+                ))));
 
-        let chain = NewCanonicalChain::Commit { new: vec![block0, block1.clone()] };
-        let CanonStateNotification::Commit { new } = chain.to_chain_notification() else {
-            panic!("expected a commit notification")
-        };
+            let chain = NewCanonicalChain::Commit { new: vec![block0, block1.clone()] };
+            let CanonStateNotification::Commit { new } = chain.to_chain_notification() else {
+                panic!("expected a commit notification")
+            };
 
-        // Only the block whose payload carried a BAL contributes one.
-        assert_eq!(new.bals().len(), 1);
-        assert_eq!(new.bal_at(1), block1.bal());
+            // Only the block whose payload carried a BAL contributes one.
+            assert_eq!(new.bals().len(), 1);
+            assert_eq!(new.bal_at(1), block1.bal());
 
-        let mut blocks_and_bals = new.blocks_and_bals();
-        let (block, bal) = blocks_and_bals.next().expect("block with BAL");
-        assert_eq!(block.hash(), block1.recovered_block.hash());
-        assert_eq!(Some(bal), block1.bal());
-        assert!(blocks_and_bals.next().is_none());
+            let mut blocks_and_bals = new.blocks_and_bals();
+            let (block, bal) = blocks_and_bals.next().expect("block with BAL");
+            assert_eq!(block.hash(), block1.recovered_block.hash());
+            assert_eq!(Some(bal), block1.bal());
+            assert!(blocks_and_bals.next().is_none());
+        });
     }
 }

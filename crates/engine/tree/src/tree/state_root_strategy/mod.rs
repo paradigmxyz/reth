@@ -58,20 +58,28 @@ mod sparse_trie;
 use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};
 use crate::tree::{metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, TreeConfig};
 use alloy_primitives::B256;
-use crossbeam_channel::Receiver as CrossbeamReceiver;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie, SparseTrieWithStorageRoots};
 use reth_errors::ProviderResult;
 use reth_evm::ConfigureEvm;
-use reth_primitives_traits::{
-    AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedHeader,
-};
+use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
     StageCheckpointReader, StateRootProvider, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-use reth_tasks::utils::increase_thread_priority;
+use reth_tasks::{
+    executor::{
+        channel::{
+            self,
+            mpsc::{self, RecvTimeoutError},
+            Receiver,
+        },
+        thread,
+        time::Instant,
+    },
+    utils::increase_thread_priority,
+};
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use reth_trie_parallel::proof_task::{
     metrics::ProofWorkerIdleMetrics, ProofTaskCtx, ProofWorkerCounts, ProofWorkerHandle,
@@ -87,14 +95,7 @@ pub use reth_trie_parallel::{
 use reth_trie_sparse::{
     ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, TrieNodeEpoch,
 };
-use std::{
-    fmt,
-    sync::{
-        mpsc::{self, RecvTimeoutError},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{fmt, sync::Arc, time::Duration};
 use tracing::{debug, debug_span, instrument, warn, Span};
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
@@ -554,7 +555,7 @@ impl DefaultStateRootStrategy {
             config,
             pending_sparse_trie_prune_blocks,
         } = options;
-        let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
+        let (updates_tx, from_multi_proof) = channel::unbounded();
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
 
         let worker_counts = ProofWorkerCounts::new(
@@ -619,8 +620,8 @@ impl DefaultStateRootStrategy {
         multiproof_provider_factory: OverlayStateProviderFactory<F, N>,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, StateRootTaskError>>,
         hashed_state_tx: mpsc::Sender<Arc<HashedPostState>>,
-        from_multi_proof: CrossbeamReceiver<StateRootMessage>,
-        cancel_rx: CrossbeamReceiver<()>,
+        from_multi_proof: Receiver<StateRootMessage>,
+        cancel_rx: Receiver<()>,
         options: SparseTrieTaskOptions<N>,
     ) where
         N: NodePrimitives,
@@ -1246,7 +1247,7 @@ where
                 }
             }
 
-            std::thread::sleep(Duration::from_millis(1));
+            thread::sleep(Duration::from_millis(1));
         }
     }
 }
@@ -1271,6 +1272,7 @@ mod tests {
         HashingWriter,
     };
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
+    use reth_tasks::executor::{channel, thread};
     use reth_testing_utils::generators;
     use reth_trie::test_utils::state_root;
     use reth_trie_common::bundle_state::StorageSlot;
@@ -1326,92 +1328,151 @@ mod tests {
 
     #[test]
     fn finish_publishes_only_accepted_sparse_trie() {
-        let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
-        let genesis_hash = init_genesis(&factory).unwrap();
-        let provider = BlockchainProvider::new(factory).unwrap();
-        let runtime = reth_tasks::Runtime::test();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let factory =
+                create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+            let genesis_hash = init_genesis(&factory).unwrap();
+            let provider = BlockchainProvider::new(factory).unwrap();
+            let runtime = reth_tasks::Runtime::test();
 
-        for timeout in [None, Some(Duration::from_secs(1))] {
-            for (finish, matching_root) in [(false, true), (true, true), (true, false)] {
-                let overlay_manager = OverlayManager::<EthPrimitives>::default();
-                let block = RecoveredBlock::new_unhashed(
-                    reth_ethereum_primitives::Block {
-                        header: alloy_consensus::Header {
-                            state_root: B256::with_last_byte(1),
+            for timeout in [None, Some(Duration::from_secs(1))] {
+                for (finish, matching_root) in [(false, true), (true, true), (true, false)] {
+                    let overlay_manager = OverlayManager::<EthPrimitives>::default();
+                    let block = RecoveredBlock::new_unhashed(
+                        reth_ethereum_primitives::Block {
+                            header: alloy_consensus::Header {
+                                state_root: B256::with_last_byte(1),
+                                ..Default::default()
+                            },
                             ..Default::default()
                         },
-                        ..Default::default()
-                    },
-                    Vec::new(),
-                );
-                let (completer, trie) = mpsc::channel();
-                let (pending_trie_tx, pending_trie_rx) = mpsc::channel();
-                pending_trie_tx
-                    .send(PendingSparseTrie {
-                        state_root: if matching_root { block.state_root } else { B256::ZERO },
-                        anchor_hash: genesis_hash,
-                        trie,
-                    })
-                    .unwrap();
-                let (result_tx, result_rx) = mpsc::channel();
-                result_tx
-                    .send(Ok(StateRootComputeOutcome {
-                        state_root: if matching_root { block.state_root } else { B256::ZERO },
-                        trie_updates: Default::default(),
-                        hashed_state: Default::default(),
-                    }))
-                    .unwrap();
-                let mut job = SparseTrieStateRootJob {
-                    pending_trie_rx,
-                    overlay_manager: overlay_manager.clone(),
-                    handle: StateRootHandle::new(
-                        B256::ZERO,
-                        crossbeam_channel::unbounded().0,
-                        StateRootTaskCancelGuard::channel().0,
-                        result_rx,
-                        mpsc::channel().1,
-                    ),
-                    state_provider_factory: OverlayStateProviderFactory::new(
-                        provider.clone(),
-                        overlay_manager.overlay_builder(genesis_hash),
-                    ),
-                    executor: runtime.clone(),
-                    timeout,
-                    metrics: Default::default(),
-                };
-                assert!(overlay_manager.take_sparse_trie().is_none());
-                if finish {
-                    job.finish(
-                        &block,
-                        Arc::new(BlockExecutionOutput::default()),
-                        &LazyHashedPostState::ready(Default::default()),
-                    )
-                    .unwrap();
-                }
-                drop(job);
-                let preserved = overlay_manager.take_sparse_trie();
-                assert_eq!(preserved.is_some(), finish && matching_root);
-                // Publication must finish before trie finalization does.
-                assert_eq!(
-                    completer.send(SparseTrieWithStorageRoots::default()).is_ok(),
-                    finish && matching_root
-                );
-                if let Some(preserved) = preserved {
-                    assert!(preserved.into_trie_for(block.hash()).unwrap().is_some());
+                        Vec::new(),
+                    );
+                    let (completer, trie) = mpsc::channel();
+                    let (pending_trie_tx, pending_trie_rx) = mpsc::channel();
+                    pending_trie_tx
+                        .send(PendingSparseTrie {
+                            state_root: if matching_root { block.state_root } else { B256::ZERO },
+                            anchor_hash: genesis_hash,
+                            trie,
+                        })
+                        .unwrap();
+                    let (result_tx, result_rx) = mpsc::channel();
+                    result_tx
+                        .send(Ok(StateRootComputeOutcome {
+                            state_root: if matching_root { block.state_root } else { B256::ZERO },
+                            trie_updates: Default::default(),
+                            hashed_state: Default::default(),
+                        }))
+                        .unwrap();
+                    let mut job = SparseTrieStateRootJob {
+                        pending_trie_rx,
+                        overlay_manager: overlay_manager.clone(),
+                        handle: StateRootHandle::new(
+                            B256::ZERO,
+                            channel::unbounded().0,
+                            StateRootTaskCancelGuard::channel().0,
+                            result_rx,
+                            mpsc::channel().1,
+                        ),
+                        state_provider_factory: OverlayStateProviderFactory::new(
+                            provider.clone(),
+                            overlay_manager.overlay_builder(genesis_hash),
+                        ),
+                        executor: runtime.clone(),
+                        timeout,
+                        metrics: Default::default(),
+                    };
+                    assert!(overlay_manager.take_sparse_trie().is_none());
+                    if finish {
+                        job.finish(
+                            &block,
+                            Arc::new(BlockExecutionOutput::default()),
+                            &LazyHashedPostState::ready(Default::default()),
+                        )
+                        .unwrap();
+                    }
+                    drop(job);
+                    let preserved = overlay_manager.take_sparse_trie();
+                    assert_eq!(preserved.is_some(), finish && matching_root);
+                    // Publication must finish before trie finalization does.
+                    assert_eq!(
+                        completer.send(SparseTrieWithStorageRoots::default()).is_ok(),
+                        finish && matching_root
+                    );
+                    if let Some(preserved) = preserved {
+                        assert!(preserved.into_trie_for(block.hash()).unwrap().is_some());
+                    }
                 }
             }
-        }
+        });
     }
 
     #[test]
     fn failed_parent_trie_closes_handoff_without_publishing() {
-        let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
-        let genesis_hash = init_genesis(&factory).unwrap();
-        let runtime = reth_tasks::Runtime::test();
-        {
-            let (completer, trie) = mpsc::channel();
-            let preserved = PreservedSparseTrie::pending(trie, genesis_hash, B256::ZERO);
-            drop(completer);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let factory =
+                create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+            let genesis_hash = init_genesis(&factory).unwrap();
+            let runtime = reth_tasks::Runtime::test();
+            {
+                let (completer, trie) = mpsc::channel();
+                let preserved = PreservedSparseTrie::pending(trie, genesis_hash, B256::ZERO);
+                drop(completer);
+                let (mut handle, pending_trie_rx) = DefaultStateRootStrategy::default()
+                    .spawn_state_root(
+                        &runtime,
+                        OverlayStateProviderFactory::new(
+                            factory,
+                            OverlayManager::<EthPrimitives>::default()
+                                .overlay_builder(genesis_hash),
+                        ),
+                        StateRootTaskOptions::<EthPrimitives> {
+                            parent_header: SealedHeader::new(Default::default(), genesis_hash),
+                            preserved_sparse_trie: Some(preserved),
+                            transaction_count: None,
+                            gas_used: None,
+                            config: &TreeConfig::default(),
+                            pending_sparse_trie_prune_blocks: None,
+                        },
+                    );
+                assert!(handle.state_root().is_err());
+                assert!(matches!(
+                    pending_trie_rx.recv_timeout(Duration::from_secs(5)),
+                    Err(RecvTimeoutError::Disconnected)
+                ));
+            }
+            for name in ["sparse-trie", "storage-workers", "account-workers"] {
+                runtime.spawn_blocking_named(name, || {}).get();
+            }
+        });
+    }
+
+    #[test]
+    fn publication_does_not_wait_for_worker() {
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (pending_trie_tx, pending_trie_rx) = mpsc::channel();
+            let overlay_manager = OverlayManager::<EthPrimitives>::default();
+            let (done_tx, done_rx) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                publish_sparse_trie(&pending_trie_rx, &overlay_manager, B256::ZERO, B256::ZERO);
+                assert!(overlay_manager.take_sparse_trie().is_none());
+                done_tx.send(()).unwrap();
+            });
+            let result = done_rx.recv_timeout(Duration::from_secs(5));
+            drop(pending_trie_tx);
+            worker.join().unwrap();
+            result.expect("publication should not wait for the root task");
+        });
+    }
+
+    #[test]
+    fn dropped_root_receiver_still_completes_pending_trie() {
+        reth_tasks::executor::Runtime::new().run(|| {
+            let factory =
+                create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+            let genesis_hash = init_genesis(&factory).unwrap();
+            let runtime = reth_tasks::Runtime::test();
             let (mut handle, pending_trie_rx) = DefaultStateRootStrategy::default()
                 .spawn_state_root(
                     &runtime,
@@ -1421,137 +1482,105 @@ mod tests {
                     ),
                     StateRootTaskOptions::<EthPrimitives> {
                         parent_header: SealedHeader::new(Default::default(), genesis_hash),
-                        preserved_sparse_trie: Some(preserved),
+                        preserved_sparse_trie: None,
                         transaction_count: None,
                         gas_used: None,
                         config: &TreeConfig::default(),
                         pending_sparse_trie_prune_blocks: None,
                     },
                 );
-            assert!(handle.state_root().is_err());
-            assert!(matches!(
-                pending_trie_rx.recv_timeout(Duration::from_secs(5)),
-                Err(RecvTimeoutError::Disconnected)
-            ));
-        }
-        for name in ["sparse-trie", "storage-workers", "account-workers"] {
-            runtime.spawn_blocking_named(name, || {}).get();
-        }
-    }
-
-    #[test]
-    fn publication_does_not_wait_for_worker() {
-        let (pending_trie_tx, pending_trie_rx) = mpsc::channel();
-        let overlay_manager = OverlayManager::<EthPrimitives>::default();
-        let (done_tx, done_rx) = mpsc::channel();
-        let worker = std::thread::spawn(move || {
-            publish_sparse_trie(&pending_trie_rx, &overlay_manager, B256::ZERO, B256::ZERO);
-            assert!(overlay_manager.take_sparse_trie().is_none());
-            done_tx.send(()).unwrap();
+            drop(handle.take_state_root_rx());
+            drop(handle.take_execution_hook());
+            let pending = pending_trie_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(pending.anchor_hash, genesis_hash);
+            pending
+                .trie
+                .recv_timeout(Duration::from_secs(5))
+                .expect("handed-off trie must be completed");
+            drop(handle);
+            for name in
+                ["sparse-trie", "trie-hashing", "storage-workers", "account-workers", "drop"]
+            {
+                runtime.spawn_blocking_named(name, || {}).get();
+            }
         });
-        let result = done_rx.recv_timeout(Duration::from_secs(5));
-        drop(pending_trie_tx);
-        worker.join().unwrap();
-        result.expect("publication should not wait for the root task");
-    }
-
-    #[test]
-    fn dropped_root_receiver_still_completes_pending_trie() {
-        let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
-        let genesis_hash = init_genesis(&factory).unwrap();
-        let runtime = reth_tasks::Runtime::test();
-        let (mut handle, pending_trie_rx) = DefaultStateRootStrategy::default().spawn_state_root(
-            &runtime,
-            OverlayStateProviderFactory::new(
-                factory,
-                OverlayManager::<EthPrimitives>::default().overlay_builder(genesis_hash),
-            ),
-            StateRootTaskOptions::<EthPrimitives> {
-                parent_header: SealedHeader::new(Default::default(), genesis_hash),
-                preserved_sparse_trie: None,
-                transaction_count: None,
-                gas_used: None,
-                config: &TreeConfig::default(),
-                pending_sparse_trie_prune_blocks: None,
-            },
-        );
-        drop(handle.take_state_root_rx());
-        drop(handle.take_execution_hook());
-        let pending = pending_trie_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert_eq!(pending.anchor_hash, genesis_hash);
-        pending
-            .trie
-            .recv_timeout(Duration::from_secs(5))
-            .expect("handed-off trie must be completed");
-        drop(handle);
-        for name in ["sparse-trie", "trie-hashing", "storage-workers", "account-workers", "drop"] {
-            runtime.spawn_blocking_named(name, || {}).get();
-        }
     }
 
     #[test]
     fn sparse_trie_prune_target_uses_requested_range() {
-        let parent = alloy_eips::BlockNumHash { hash: B256::with_last_byte(9), number: 9 };
-        assert_eq!(
-            sparse_trie_prune_target::<EthPrimitives>(B256::ZERO, false, parent, None),
-            None
-        );
-        assert_eq!(
-            sparse_trie_prune_target::<EthPrimitives>(B256::ZERO, false, parent, Some(&[])),
-            Some((TrieNodeEpoch::new(10), parent.hash))
-        );
+        let mut block_builder = TestBlockBuilder::seeded(42);
+        reth_tasks::executor::Runtime::new().run(move || {
+            let parent = alloy_eips::BlockNumHash { hash: B256::with_last_byte(9), number: 9 };
+            assert_eq!(
+                sparse_trie_prune_target::<EthPrimitives>(B256::ZERO, false, parent, None),
+                None
+            );
+            assert_eq!(
+                sparse_trie_prune_target::<EthPrimitives>(B256::ZERO, false, parent, Some(&[])),
+                Some((TrieNodeEpoch::new(10), parent.hash))
+            );
 
-        let mut blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(7..10).collect();
-        blocks.reverse();
+            let mut blocks: Vec<_> = block_builder.get_executed_blocks(7..10).collect();
+            blocks.reverse();
 
-        let anchor = blocks[0].recovered_block().hash();
-        assert_eq!(
-            sparse_trie_prune_target(anchor, true, parent, Some(&blocks)),
-            Some((TrieNodeEpoch::new(7), anchor))
-        );
+            let anchor = blocks[0].recovered_block().hash();
+            assert_eq!(
+                sparse_trie_prune_target(anchor, true, parent, Some(&blocks)),
+                Some((TrieNodeEpoch::new(7), anchor))
+            );
+        });
     }
 
     #[test]
     fn sparse_trie_prune_target_advances_to_prune_anchor() {
-        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..5).collect();
-        let reused_anchor_hash = blocks[0].recovered_block().hash();
-        let expected_prune_anchor = blocks[1].recovered_block().hash();
-        let parent = blocks[3].recovered_block().num_hash();
-        let prune_blocks: Vec<_> = blocks.into_iter().skip(2).rev().collect();
+        let mut block_builder = TestBlockBuilder::seeded(42);
+        reth_tasks::executor::Runtime::new().run(move || {
+            let blocks: Vec<_> = block_builder.get_executed_blocks(1..5).collect();
+            let reused_anchor_hash = blocks[0].recovered_block().hash();
+            let expected_prune_anchor = blocks[1].recovered_block().hash();
+            let parent = blocks[3].recovered_block().num_hash();
+            let prune_blocks: Vec<_> = blocks.into_iter().skip(2).rev().collect();
 
-        assert_eq!(
-            sparse_trie_prune_target(reused_anchor_hash, true, parent, Some(&prune_blocks),),
-            Some((TrieNodeEpoch::new(3), expected_prune_anchor))
-        );
+            assert_eq!(
+                sparse_trie_prune_target(reused_anchor_hash, true, parent, Some(&prune_blocks),),
+                Some((TrieNodeEpoch::new(3), expected_prune_anchor))
+            );
+        });
     }
 
     #[test]
     fn sparse_trie_prune_target_keeps_parent_for_fresh_trie() {
-        let mut blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..3).collect();
-        blocks.reverse();
-        let parent_hash = B256::with_last_byte(0xaa);
+        let mut block_builder = TestBlockBuilder::seeded(42);
+        reth_tasks::executor::Runtime::new().run(move || {
+            let mut blocks: Vec<_> = block_builder.get_executed_blocks(1..3).collect();
+            blocks.reverse();
+            let parent_hash = B256::with_last_byte(0xaa);
 
-        assert_eq!(
-            sparse_trie_prune_target(
-                parent_hash,
-                false,
-                blocks[0].recovered_block().num_hash(),
-                Some(&blocks),
-            ),
-            Some((TrieNodeEpoch::new(1), parent_hash))
-        );
+            assert_eq!(
+                sparse_trie_prune_target(
+                    parent_hash,
+                    false,
+                    blocks[0].recovered_block().num_hash(),
+                    Some(&blocks),
+                ),
+                Some((TrieNodeEpoch::new(1), parent_hash))
+            );
+        });
     }
 
     #[test]
     fn sparse_trie_prune_target_advances_reused_anchor_when_parent_becomes_durable() {
-        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
-        let old_anchor = blocks[1].recovered_block().hash();
-        let parent = blocks[2].recovered_block().num_hash();
+        let mut block_builder = TestBlockBuilder::seeded(42);
+        reth_tasks::executor::Runtime::new().run(move || {
+            let blocks: Vec<_> = block_builder.get_executed_blocks(1..4).collect();
+            let old_anchor = blocks[1].recovered_block().hash();
+            let parent = blocks[2].recovered_block().num_hash();
 
-        assert_eq!(
-            sparse_trie_prune_target::<EthPrimitives>(old_anchor, true, parent, Some(&[])),
-            Some((TrieNodeEpoch::new(4), parent.hash))
-        );
+            assert_eq!(
+                sparse_trie_prune_target::<EthPrimitives>(old_anchor, true, parent, Some(&[])),
+                Some((TrieNodeEpoch::new(4), parent.hash))
+            );
+        });
     }
 
     fn create_mock_state_updates(
@@ -1604,152 +1633,158 @@ mod tests {
     #[test]
     fn payload_builder_trie_matches_serial_root_and_can_be_reused() {
         reth_tracing::init_test_tracing();
-
-        let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
-        let genesis_hash = init_genesis(&factory).unwrap();
         let state_updates = create_mock_state_updates(10, 10);
-        let mut accumulated_state: HashMap<Address, (Account, HashMap<B256, U256>)> =
-            HashMap::default();
+        reth_tasks::executor::Runtime::new().run(move || {
+            let factory =
+                create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+            let genesis_hash = init_genesis(&factory).unwrap();
+            let mut accumulated_state: HashMap<Address, (Account, HashMap<B256, U256>)> =
+                HashMap::default();
 
-        {
-            let provider_rw = factory.provider_rw().expect("failed to get provider");
-            for update in &state_updates {
-                let account_updates = update.accounts.iter().map(|account| {
-                    (
-                        account.address,
-                        account.current.as_ref().map(reth_primitives_traits::Account::from),
-                    )
-                });
-                provider_rw
-                    .insert_account_for_hashing(account_updates)
-                    .expect("failed to insert accounts");
-
-                let storage_updates = update.accounts.iter().map(|account| {
-                    let storage_entries = account.storage.iter().map(|(slot, value)| {
-                        StorageEntry { key: B256::from(*slot), value: value.present_value }
-                    });
-                    (account.address, storage_entries)
-                });
-                provider_rw
-                    .insert_storage_for_hashing(storage_updates)
-                    .expect("failed to insert storage");
-            }
-            provider_rw.commit().expect("failed to commit changes");
-        }
-
-        for update in &state_updates {
-            for account in &update.accounts {
-                let storage: HashMap<B256, U256> = account
-                    .storage
-                    .iter()
-                    .map(|(key, value)| (B256::from(*key), value.present_value))
-                    .collect();
-                let entry = accumulated_state.entry(account.address).or_default();
-                entry.0 = reth_primitives_traits::Account::from(account.current.as_ref().unwrap());
-                entry.1.extend(storage);
-            }
-        }
-
-        let provider_factory = BlockchainProvider::new(factory).unwrap();
-        let runtime = reth_tasks::Runtime::test();
-        let overlay_manager = OverlayManager::<EthPrimitives>::default();
-        let config = TreeConfig::default()
-            .with_has_enough_parallelism(true)
-            .with_share_sparse_trie_with_payload_builder(true);
-        let mut state = EngineApiTreeState::new(
-            10,
-            10,
-            config.invalid_header_hit_eviction_threshold(),
-            alloy_eips::BlockNumHash::new(0, genesis_hash),
-            crate::engine::EngineApiKind::Ethereum,
-            overlay_manager.clone(),
-        );
-        let mut root_from_regular = state_root(accumulated_state.clone());
-        let mut preserved: Option<PreservedSparseTrie> = None;
-        for (number, (reuse, return_payload, matching_root)) in [
-            (false, false, true),
-            (false, true, false),
-            (false, true, true),
-            (true, true, true),
-            (true, false, true),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            assert_eq!(preserved.is_some(), reuse);
-            let parent_hash =
-                preserved.as_ref().map_or(genesis_hash, PreservedSparseTrie::block_hash);
-            let block_hash = B256::with_last_byte(number as u8 + 1);
-            if let Some(preserved) = preserved.take() {
-                overlay_manager.store_sparse_trie(preserved);
-            }
-            let parent_header = alloy_consensus::Header {
-                number: number as u64,
-                state_root: if reuse { root_from_regular } else { B256::ZERO },
-                ..Default::default()
-            };
-            let mut state_root_handle = <DefaultStateRootStrategy as StateRootStrategy<
-                EthPrimitives,
-                _,
-                EthEvmConfig,
-            >>::prepare_payload_builder(
-                &DefaultStateRootStrategy::default(),
-                PayloadStateRootJobContext::new(
-                    &runtime,
-                    &overlay_manager,
-                    parent_hash,
-                    &parent_header,
-                    1,
-                    &mut state,
-                    OverlayStateProviderFactory::new(
-                        provider_factory.clone(),
-                        overlay_manager.overlay_builder(genesis_hash),
-                    ),
-                    &config,
-                ),
-            )
-            .unwrap()
-            .unwrap();
-            let on_payload_built = state_root_handle.take_on_payload_built().unwrap();
-            let mut state_hook = state_root_handle.take_state_hook();
-            if reuse {
-                let mut update = state_updates.last().unwrap().clone();
-                for account in &mut update.accounts {
-                    let info = account.current.as_mut().unwrap();
-                    info.nonce += number as u64;
-                    accumulated_state.get_mut(&account.address).unwrap().0 =
-                        reth_primitives_traits::Account::from(&*info);
-                }
-                state_hook.on_state(update);
-                root_from_regular = state_root(accumulated_state.clone());
-            } else {
+            {
+                let provider_rw = factory.provider_rw().expect("failed to get provider");
                 for update in &state_updates {
-                    state_hook.on_state(update.clone());
+                    let account_updates = update.accounts.iter().map(|account| {
+                        (
+                            account.address,
+                            account.current.as_ref().map(reth_primitives_traits::Account::from),
+                        )
+                    });
+                    provider_rw
+                        .insert_account_for_hashing(account_updates)
+                        .expect("failed to insert accounts");
+
+                    let storage_updates = update.accounts.iter().map(|account| {
+                        let storage_entries = account.storage.iter().map(|(slot, value)| {
+                            StorageEntry { key: B256::from(*slot), value: value.present_value }
+                        });
+                        (account.address, storage_entries)
+                    });
+                    provider_rw
+                        .insert_storage_for_hashing(storage_updates)
+                        .expect("failed to insert storage");
+                }
+                provider_rw.commit().expect("failed to commit changes");
+            }
+
+            for update in &state_updates {
+                for account in &update.accounts {
+                    let storage: HashMap<B256, U256> = account
+                        .storage
+                        .iter()
+                        .map(|(key, value)| (B256::from(*key), value.present_value))
+                        .collect();
+                    let entry = accumulated_state.entry(account.address).or_default();
+                    entry.0 =
+                        reth_primitives_traits::Account::from(account.current.as_ref().unwrap());
+                    entry.1.extend(storage);
                 }
             }
-            drop(state_hook);
 
-            let root_from_task = state_root_handle.state_root().expect("task failed").state_root;
-            assert_eq!(root_from_task, root_from_regular);
-            assert!(overlay_manager.take_sparse_trie().is_none());
-            drop(state_root_handle);
-            if return_payload {
-                on_payload_built(
-                    block_hash,
-                    if matching_root { root_from_task } else { B256::ZERO },
-                );
-            } else {
-                drop(on_payload_built);
+            let provider_factory = BlockchainProvider::new(factory).unwrap();
+            let runtime = reth_tasks::Runtime::test();
+            let overlay_manager = OverlayManager::<EthPrimitives>::default();
+            let config = TreeConfig::default()
+                .with_has_enough_parallelism(true)
+                .with_share_sparse_trie_with_payload_builder(true);
+            let mut state = EngineApiTreeState::new(
+                10,
+                10,
+                config.invalid_header_hit_eviction_threshold(),
+                alloy_eips::BlockNumHash::new(0, genesis_hash),
+                crate::engine::EngineApiKind::Ethereum,
+                overlay_manager.clone(),
+            );
+            let mut root_from_regular = state_root(accumulated_state.clone());
+            let mut preserved: Option<PreservedSparseTrie> = None;
+            for (number, (reuse, return_payload, matching_root)) in [
+                (false, false, true),
+                (false, true, false),
+                (false, true, true),
+                (true, true, true),
+                (true, false, true),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                assert_eq!(preserved.is_some(), reuse);
+                let parent_hash =
+                    preserved.as_ref().map_or(genesis_hash, PreservedSparseTrie::block_hash);
+                let block_hash = B256::with_last_byte(number as u8 + 1);
+                if let Some(preserved) = preserved.take() {
+                    overlay_manager.store_sparse_trie(preserved);
+                }
+                let parent_header = alloy_consensus::Header {
+                    number: number as u64,
+                    state_root: if reuse { root_from_regular } else { B256::ZERO },
+                    ..Default::default()
+                };
+                let mut state_root_handle = <DefaultStateRootStrategy as StateRootStrategy<
+                    EthPrimitives,
+                    _,
+                    EthEvmConfig,
+                >>::prepare_payload_builder(
+                    &DefaultStateRootStrategy::default(),
+                    PayloadStateRootJobContext::new(
+                        &runtime,
+                        &overlay_manager,
+                        parent_hash,
+                        &parent_header,
+                        1,
+                        &mut state,
+                        OverlayStateProviderFactory::new(
+                            provider_factory.clone(),
+                            overlay_manager.overlay_builder(genesis_hash),
+                        ),
+                        &config,
+                    ),
+                )
+                .unwrap()
+                .unwrap();
+                let on_payload_built = state_root_handle.take_on_payload_built().unwrap();
+                let mut state_hook = state_root_handle.take_state_hook();
+                if reuse {
+                    let mut update = state_updates.last().unwrap().clone();
+                    for account in &mut update.accounts {
+                        let info = account.current.as_mut().unwrap();
+                        info.nonce += number as u64;
+                        accumulated_state.get_mut(&account.address).unwrap().0 =
+                            reth_primitives_traits::Account::from(&*info);
+                    }
+                    state_hook.on_state(update);
+                    root_from_regular = state_root(accumulated_state.clone());
+                } else {
+                    for update in &state_updates {
+                        state_hook.on_state(update.clone());
+                    }
+                }
+                drop(state_hook);
+
+                let root_from_task =
+                    state_root_handle.state_root().expect("task failed").state_root;
+                assert_eq!(root_from_task, root_from_regular);
+                assert!(overlay_manager.take_sparse_trie().is_none());
+                drop(state_root_handle);
+                if return_payload {
+                    on_payload_built(
+                        block_hash,
+                        if matching_root { root_from_task } else { B256::ZERO },
+                    );
+                } else {
+                    drop(on_payload_built);
+                }
+                preserved = overlay_manager.take_sparse_trie();
+                assert_eq!(preserved.is_some(), return_payload && matching_root);
+                if let Some(preserved) = &preserved {
+                    assert_eq!(preserved.block_hash(), block_hash);
+                    assert_eq!(preserved.anchor_hash(), genesis_hash);
+                }
             }
-            preserved = overlay_manager.take_sparse_trie();
-            assert_eq!(preserved.is_some(), return_payload && matching_root);
-            if let Some(preserved) = &preserved {
-                assert_eq!(preserved.block_hash(), block_hash);
-                assert_eq!(preserved.anchor_hash(), genesis_hash);
+            for name in
+                ["sparse-trie", "trie-hashing", "storage-workers", "account-workers", "drop"]
+            {
+                runtime.spawn_blocking_named(name, || {}).get();
             }
-        }
-        for name in ["sparse-trie", "trie-hashing", "storage-workers", "account-workers", "drop"] {
-            runtime.spawn_blocking_named(name, || {}).get();
-        }
+        });
     }
 }

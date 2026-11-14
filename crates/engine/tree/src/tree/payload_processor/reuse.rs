@@ -36,15 +36,11 @@ use evm2::{
     utils::WordExt,
     EvmFeatures, EvmTypes, Inspector, InspectorConfig, OpcodeSet, TxResultWithState, Version,
 };
-use parking_lot::{Mutex, RwLock};
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
+use reth_tasks::executor::sync::{
+    atomic::{AtomicUsize, Ordering},
+    parking_lot::{Mutex, RwLock},
 };
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 /// Balances above this are compared exactly, so that applying balance changes cannot overflow.
 const MAX_REBASED_BALANCE: U256 = U256::from_limbs([u64::MAX, u64::MAX, 0, 0]);
@@ -1543,133 +1539,176 @@ mod tests {
 
     #[test]
     fn reuses_independent_transactions() {
-        let txs = [tx(1, 0, sender(2), 1), tx(3, 0, Address::repeat_byte(0xaa), 1)];
-        assert_eq!(reuse(&txs), [Ok(()), Ok(())]);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let txs = [tx(1, 0, sender(2), 1), tx(3, 0, Address::repeat_byte(0xaa), 1)];
+            assert_eq!(reuse(&txs), [Ok(()), Ok(())]);
+        });
     }
 
     #[test]
     fn rebases_unobserved_balances() {
-        // The last transaction's caller and recipient were credited by earlier ones.
-        let txs = [tx(1, 0, NOOP, 1), tx(1, 1, sender(2), 1), tx(2, 0, NOOP, 1)];
-        assert_eq!(reuse(&txs), [Ok(()), Ok(()), Ok(())]);
+        reth_tasks::executor::Runtime::new().run(|| {
+            // The last transaction's caller and recipient were credited by earlier ones.
+            let txs = [tx(1, 0, NOOP, 1), tx(1, 1, sender(2), 1), tx(2, 0, NOOP, 1)];
+            assert_eq!(reuse(&txs), [Ok(()), Ok(()), Ok(())]);
+        });
     }
 
     #[test]
     fn reuses_predicted_writes() {
-        let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1), tx(1, 1, COUNTER, 1)];
-        assert_eq!(reuse(&txs), [Ok(()), Ok(()), Ok(())]);
-        // Results executed before the transactions they depend on are executed again.
-        assert_eq!(reuse_in(&txs, &[2, 1, 0], true), [Ok(()), Ok(()), Ok(())]);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1), tx(1, 1, COUNTER, 1)];
+            assert_eq!(reuse(&txs), [Ok(()), Ok(()), Ok(())]);
+            // Results executed before the transactions they depend on are executed again.
+            assert_eq!(reuse_in(&txs, &[2, 1, 0], true), [Ok(()), Ok(()), Ok(())]);
+        });
     }
 
     #[test]
     fn refreshes_against_executed_writes() {
-        let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1), tx(1, 1, sender(3), 1)];
-        assert_eq!(reuse_in(&txs, &[1, 2], true), [Err(ReuseMiss::Missing), Ok(()), Ok(())]);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1), tx(1, 1, sender(3), 1)];
+            assert_eq!(reuse_in(&txs, &[1, 2], true), [Err(ReuseMiss::Missing), Ok(()), Ok(())]);
+        });
     }
 
     #[test]
     fn rebases_original_balances() {
-        // The first transaction leaves the forwarder 5 wei more, and the second forwards 5 wei, so
-        // its rebased balance equals its speculative balance before the second transaction.
-        let txs = [tx(1, 0, FORWARDER, 10), tx(2, 0, FORWARDER, 0)];
-        assert_eq!(reuse_in(&txs, &[1], false), [Err(ReuseMiss::Missing), Ok(())]);
+        reth_tasks::executor::Runtime::new().run(|| {
+            // The first transaction leaves the forwarder 5 wei more, and the second forwards 5 wei,
+            // so its rebased balance equals its speculative balance before the second transaction.
+            let txs = [tx(1, 0, FORWARDER, 10), tx(2, 0, FORWARDER, 0)];
+            assert_eq!(reuse_in(&txs, &[1], false), [Err(ReuseMiss::Missing), Ok(())]);
+        });
     }
 
     #[test]
     fn rejects_stale_storage() {
-        let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1)];
-        assert_eq!(reuse_in(&txs, &[1], false), [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1)];
+            assert_eq!(
+                reuse_in(&txs, &[1], false),
+                [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]
+            );
+        });
     }
 
     #[test]
     fn rejects_stale_callers() {
-        let txs = [tx(1, 0, sender(2), 1), tx(1, 1, sender(3), 1)];
-        assert_eq!(reuse_in(&txs, &[1], false), [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let txs = [tx(1, 0, sender(2), 1), tx(1, 1, sender(3), 1)];
+            assert_eq!(
+                reuse_in(&txs, &[1], false),
+                [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]
+            );
+        });
     }
 
     #[test]
     fn rejects_observed_balances() {
-        let txs = [
-            tx(1, 0, SELF_BALANCE_READER, 1),
-            tx(2, 0, SELF_BALANCE_READER, 1),
-            tx(3, 0, BENEFICIARY_BALANCE_READER, 1),
-        ];
-        assert_eq!(
-            reuse_in(&txs, &[1, 2], false),
-            [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale), Err(ReuseMiss::Stale)]
-        );
+        reth_tasks::executor::Runtime::new().run(|| {
+            let txs = [
+                tx(1, 0, SELF_BALANCE_READER, 1),
+                tx(2, 0, SELF_BALANCE_READER, 1),
+                tx(3, 0, BENEFICIARY_BALANCE_READER, 1),
+            ];
+            assert_eq!(
+                reuse_in(&txs, &[1, 2], false),
+                [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale), Err(ReuseMiss::Stale)]
+            );
+        });
     }
 
     #[test]
     fn rejects_lower_sender_balances() {
-        let txs = [tx(1, 0, FORWARDER, 0), tx(2, 0, FORWARDER, 0), tx(3, 0, FORWARDER, 0)];
-        // The forwarder can send twice from its speculative balance, but not three times.
-        assert_eq!(
-            reuse_in(&txs, &[1, 2], false),
-            [Err(ReuseMiss::Missing), Ok(()), Err(ReuseMiss::Stale)]
-        );
+        reth_tasks::executor::Runtime::new().run(|| {
+            let txs = [tx(1, 0, FORWARDER, 0), tx(2, 0, FORWARDER, 0), tx(3, 0, FORWARDER, 0)];
+            // The forwarder can send twice from its speculative balance, but not three times.
+            assert_eq!(
+                reuse_in(&txs, &[1, 2], false),
+                [Err(ReuseMiss::Missing), Ok(()), Err(ReuseMiss::Stale)]
+            );
+        });
     }
 
     #[test]
     fn reuses_pool_results() {
-        // The last transaction's caller was credited by the first one.
-        let txs = [tx(1, 0, sender(2), 1), tx(3, 0, COUNTER, 1), tx(2, 0, GAS_LIMIT_READER, 1)];
-        assert_eq!(reuse_pool(&txs, &txs, BENEFICIARY), [Ok(()), Ok(()), Ok(())]);
-        // Transactions missing from the pool are executed.
-        assert_eq!(
-            reuse_pool(&txs, &txs[1..], BENEFICIARY),
-            [Err(ReuseMiss::Missing), Ok(()), Ok(())]
-        );
+        reth_tasks::executor::Runtime::new().run(|| {
+            // The last transaction's caller was credited by the first one.
+            let txs = [tx(1, 0, sender(2), 1), tx(3, 0, COUNTER, 1), tx(2, 0, GAS_LIMIT_READER, 1)];
+            assert_eq!(reuse_pool(&txs, &txs, BENEFICIARY), [Ok(()), Ok(()), Ok(())]);
+            // Transactions missing from the pool are executed.
+            assert_eq!(
+                reuse_pool(&txs, &txs[1..], BENEFICIARY),
+                [Err(ReuseMiss::Missing), Ok(()), Ok(())]
+            );
+        });
     }
 
     #[test]
     fn rejects_stale_pool_results() {
-        // Test transactions are hashed without their sender.
-        let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 2)];
-        assert_eq!(reuse_pool(&txs, &txs, BENEFICIARY), [Ok(()), Err(ReuseMiss::Stale)]);
-        // The beneficiary must exist to be credited.
-        let missing = Address::repeat_byte(0xbf);
-        assert_eq!(reuse_pool(&txs, &txs, missing), [Err(ReuseMiss::Stale), Err(ReuseMiss::Stale)]);
+        reth_tasks::executor::Runtime::new().run(|| {
+            // Test transactions are hashed without their sender.
+            let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 2)];
+            assert_eq!(reuse_pool(&txs, &txs, BENEFICIARY), [Ok(()), Err(ReuseMiss::Stale)]);
+            // The beneficiary must exist to be credited.
+            let missing = Address::repeat_byte(0xbf);
+            assert_eq!(
+                reuse_pool(&txs, &txs, missing),
+                [Err(ReuseMiss::Stale), Err(ReuseMiss::Stale)]
+            );
+        });
     }
 
     #[test]
     fn rejects_zero_credit_to_empty_beneficiary() {
-        // Executing the credit deletes the empty beneficiary, which detached state cannot express.
-        let txs = [tx_with_gas_price(1, 0, COUNTER, 1, 100_000, 1)];
-        assert_eq!(reuse_pool(&txs, &txs, EMPTY), [Err(ReuseMiss::Stale)]);
+        reth_tasks::executor::Runtime::new().run(|| {
+            // Executing the credit deletes the empty beneficiary, which detached state cannot
+            // express.
+            let txs = [tx_with_gas_price(1, 0, COUNTER, 1, 100_000, 1)];
+            assert_eq!(reuse_pool(&txs, &txs, EMPTY), [Err(ReuseMiss::Stale)]);
+        });
     }
 
     #[test]
     fn rejects_pool_results_observing_block_env() {
-        let txs = [
-            tx(1, 0, TIMESTAMP_READER, 1),
-            tx(2, 0, BENEFICIARY_READER, 1),
-            tx(3, 0, POOL_BENEFICIARY, 1),
-            tx(4, 0, POOL_BENEFICIARY_CALLER, 1),
-            tx(6, 0, BENEFICIARY, 1),
-            tx(7, 0, PREVRANDAO_READER, 1),
-        ];
-        assert_eq!(reuse_pool(&txs, &txs, BENEFICIARY), [Err(ReuseMiss::Missing); 6]);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let txs = [
+                tx(1, 0, TIMESTAMP_READER, 1),
+                tx(2, 0, BENEFICIARY_READER, 1),
+                tx(3, 0, POOL_BENEFICIARY, 1),
+                tx(4, 0, POOL_BENEFICIARY_CALLER, 1),
+                tx(6, 0, BENEFICIARY, 1),
+                tx(7, 0, PREVRANDAO_READER, 1),
+            ];
+            assert_eq!(reuse_pool(&txs, &txs, BENEFICIARY), [Err(ReuseMiss::Missing); 6]);
 
-        let txs = [tx(1, 0, GAS_LIMIT_READER, 1)];
-        let differs = BlockEnvFields { gas_limit: true, ..Default::default() };
-        assert_eq!(reuse_pool_with(&txs, &txs, BENEFICIARY, differs), [Err(ReuseMiss::Missing)]);
+            let txs = [tx(1, 0, GAS_LIMIT_READER, 1)];
+            let differs = BlockEnvFields { gas_limit: true, ..Default::default() };
+            assert_eq!(
+                reuse_pool_with(&txs, &txs, BENEFICIARY, differs),
+                [Err(ReuseMiss::Missing)]
+            );
+        });
     }
 
     #[test]
     fn seeds_only_unexecuted_transactions() {
-        let txs = [tx(1, 0, COUNTER, 1)];
-        let differs = BlockEnvFields::default();
-        let seeds = PoolSeeds::new(Arc::new(pool_results(&txs)), BENEFICIARY, differs);
-        assert!(Prewarm::new(&txs, &[]).results.seed(0, txs[0].tx_hash(), &seeds).is_some());
-        assert!(Prewarm::new(&txs, &[0]).results.seed(0, txs[0].tx_hash(), &seeds).is_none());
+        reth_tasks::executor::Runtime::new().run(|| {
+            let txs = [tx(1, 0, COUNTER, 1)];
+            let differs = BlockEnvFields::default();
+            let seeds = PoolSeeds::new(Arc::new(pool_results(&txs)), BENEFICIARY, differs);
+            assert!(Prewarm::new(&txs, &[]).results.seed(0, txs[0].tx_hash(), &seeds).is_some());
+            assert!(Prewarm::new(&txs, &[0]).results.seed(0, txs[0].tx_hash(), &seeds).is_none());
+        });
     }
 
     #[test]
     fn rejects_pool_results_overflowing_the_beneficiary() {
-        let txs = [tx(1, 0, COUNTER, 1)];
-        assert_eq!(reuse_pool(&txs, &txs, SATURATED), [Err(ReuseMiss::Stale)]);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let txs = [tx(1, 0, COUNTER, 1)];
+            assert_eq!(reuse_pool(&txs, &txs, SATURATED), [Err(ReuseMiss::Stale)]);
+        });
     }
 
     /// Stores the recorded result of `tx` in `results` again under `hash`, after `modify` changed
@@ -1698,199 +1737,230 @@ mod tests {
 
     #[test]
     fn bounds_pool_results() {
-        let txs = [tx(1, 0, COUNTER, 1)];
-        let results = pool_results(&txs);
-        assert!(store_again(&results, &txs[0], B256::ZERO, |_, _| {}));
-        // Deployed code counts towards the bound.
-        assert!(!store_again(&results, &txs[0], B256::with_last_byte(1), |result, _| {
-            let original = result.pending_state.account_info(&COUNTER).unwrap().clone();
-            let current = original
-                .clone()
-                .with_code(Bytecode::new_raw(vec![0; MAX_POOL_RESULT_BYTES].into()));
-            result.pending_state.insert_account(COUNTER, Some(original), Some(current));
-        }));
+        reth_tasks::executor::Runtime::new().run(|| {
+            let txs = [tx(1, 0, COUNTER, 1)];
+            let results = pool_results(&txs);
+            assert!(store_again(&results, &txs[0], B256::ZERO, |_, _| {}));
+            // Deployed code counts towards the bound.
+            assert!(!store_again(&results, &txs[0], B256::with_last_byte(1), |result, _| {
+                let original = result.pending_state.account_info(&COUNTER).unwrap().clone();
+                let current = original
+                    .clone()
+                    .with_code(Bytecode::new_raw(vec![0; MAX_POOL_RESULT_BYTES].into()));
+                result.pending_state.insert_account(COUNTER, Some(original), Some(current));
+            }));
+        });
     }
 
     #[test]
     fn rejects_recorded_pool_hashes() {
-        let txs = [tx(1, 0, COUNTER, 1)];
-        let results = pool_results(&txs);
-        assert!(!store_again(&results, &txs[0], *txs[0].tx_hash(), |_, _| {}));
-        assert!(store_again(&results, &txs[0], B256::ZERO, |_, _| {}));
+        reth_tasks::executor::Runtime::new().run(|| {
+            let txs = [tx(1, 0, COUNTER, 1)];
+            let results = pool_results(&txs);
+            assert!(!store_again(&results, &txs[0], *txs[0].tx_hash(), |_, _| {}));
+            assert!(store_again(&results, &txs[0], B256::ZERO, |_, _| {}));
+        });
     }
 
     #[test]
     fn rejects_saturated_pool_beneficiaries() {
-        let txs = [tx(1, 0, COUNTER, 1)];
-        let results = pool_results(&txs);
-        // Crediting a saturated balance leaves it unchanged.
-        assert!(!store_again(&results, &txs[0], B256::ZERO, |result, beneficiary| {
-            beneficiary.info = Some(AccountInfo { balance: U256::MAX, ..Default::default() });
-            result.pending_state.insert_account(POOL_BENEFICIARY, None, beneficiary.info.clone());
-        }));
-        assert!(store_again(&results, &txs[0], B256::ZERO, |_, _| {}));
+        reth_tasks::executor::Runtime::new().run(|| {
+            let txs = [tx(1, 0, COUNTER, 1)];
+            let results = pool_results(&txs);
+            // Crediting a saturated balance leaves it unchanged.
+            assert!(!store_again(&results, &txs[0], B256::ZERO, |result, beneficiary| {
+                beneficiary.info = Some(AccountInfo { balance: U256::MAX, ..Default::default() });
+                result.pending_state.insert_account(
+                    POOL_BENEFICIARY,
+                    None,
+                    beneficiary.info.clone(),
+                );
+            }));
+            assert!(store_again(&results, &txs[0], B256::ZERO, |_, _| {}));
+        });
     }
 
     #[test]
     fn rejects_pool_results_running_out_of_gas() {
-        // Enough gas to read the balance of the warm beneficiary in the block, but not of the cold
-        // one during speculation.
-        let txs = [tx_with_gas_limit(1, 0, BENEFICIARY_BALANCE_BY_ADDRESS, 0, 21_500)];
-        assert_eq!(reuse_pool(&txs, &txs, BENEFICIARY), [Err(ReuseMiss::Missing)]);
+        reth_tasks::executor::Runtime::new().run(|| {
+            // Enough gas to read the balance of the warm beneficiary in the block, but not of the
+            // cold one during speculation.
+            let txs = [tx_with_gas_limit(1, 0, BENEFICIARY_BALANCE_BY_ADDRESS, 0, 21_500)];
+            assert_eq!(reuse_pool(&txs, &txs, BENEFICIARY), [Err(ReuseMiss::Missing)]);
+        });
     }
 
     #[test]
     fn rejects_invalid_transactions() {
-        assert_eq!(reusable(&[tx(1, 0, NOOP, 0)]), Ok(()));
-        // The caller cannot pay for the value.
-        assert_eq!(reusable(&[tx(1, 0, NOOP, 10u64.pow(19))]), Err(ReuseMiss::Stale));
-        // The caller's nonce differs.
-        assert_eq!(reusable(&[tx(1, 1, NOOP, 0)]), Err(ReuseMiss::Stale));
-        // The caller's nonce cannot be incremented.
-        assert_eq!(reusable(&[tx(EXHAUSTED_SENDER, u64::MAX, NOOP, 0)]), Err(ReuseMiss::Stale));
-        // Speculative execution fails.
-        assert_eq!(
-            reusable(&[tx_with_gas_limit(1, 0, NOOP, 0, 40_000_000)]),
-            Err(ReuseMiss::Stale)
-        );
-        // The most the caller may spend overflows, though the effective fee does not.
-        let overflowing = Transaction::Eip1559(TxEip1559 {
-            chain_id: 1,
-            max_fee_per_gas: u128::MAX,
-            gas_limit: 100_000,
-            to: TxKind::Call(NOOP),
-            ..Default::default()
+        reth_tasks::executor::Runtime::new().run(|| {
+            assert_eq!(reusable(&[tx(1, 0, NOOP, 0)]), Ok(()));
+            // The caller cannot pay for the value.
+            assert_eq!(reusable(&[tx(1, 0, NOOP, 10u64.pow(19))]), Err(ReuseMiss::Stale));
+            // The caller's nonce differs.
+            assert_eq!(reusable(&[tx(1, 1, NOOP, 0)]), Err(ReuseMiss::Stale));
+            // The caller's nonce cannot be incremented.
+            assert_eq!(reusable(&[tx(EXHAUSTED_SENDER, u64::MAX, NOOP, 0)]), Err(ReuseMiss::Stale));
+            // Speculative execution fails.
+            assert_eq!(
+                reusable(&[tx_with_gas_limit(1, 0, NOOP, 0, 40_000_000)]),
+                Err(ReuseMiss::Stale)
+            );
+            // The most the caller may spend overflows, though the effective fee does not.
+            let overflowing = Transaction::Eip1559(TxEip1559 {
+                chain_id: 1,
+                max_fee_per_gas: u128::MAX,
+                gas_limit: 100_000,
+                to: TxKind::Call(NOOP),
+                ..Default::default()
+            });
+            let overflowing = Recovered::new_unchecked(
+                TransactionSigned::new_unhashed(overflowing, Signature::test_signature()),
+                sender(1),
+            );
+            assert_eq!(reusable(&[overflowing]), Err(ReuseMiss::Stale));
         });
-        let overflowing = Recovered::new_unchecked(
-            TransactionSigned::new_unhashed(overflowing, Signature::test_signature()),
-            sender(1),
-        );
-        assert_eq!(reusable(&[overflowing]), Err(ReuseMiss::Stale));
     }
 
     #[test]
     fn keeps_stale_results_unchanged() {
-        let txs = [tx(1, 0, NOOP, 0)];
-        let prewarm = Prewarm::new(&txs, &[0]);
-        // The caller's balance can be rebased, but the callee changed.
-        let mut db = parent_state();
-        db.insert_account_info(
-            &sender(1),
-            AccountInfo { balance: U256::from(2 * 10u64.pow(18)), ..Default::default() },
-        );
-        let mut noop = DynDatabase::get_account(&mut db, &NOOP).unwrap().unwrap();
-        noop.nonce = 1;
-        db.insert_account_info(&NOOP, noop);
-        let mut stale = db;
-        assert_eq!(
-            prewarm.results.take_valid(0, &mut stale).unwrap().map(drop),
-            Err(ReuseMiss::Stale)
-        );
+        reth_tasks::executor::Runtime::new().run(|| {
+            let txs = [tx(1, 0, NOOP, 0)];
+            let prewarm = Prewarm::new(&txs, &[0]);
+            // The caller's balance can be rebased, but the callee changed.
+            let mut db = parent_state();
+            db.insert_account_info(
+                &sender(1),
+                AccountInfo { balance: U256::from(2 * 10u64.pow(18)), ..Default::default() },
+            );
+            let mut noop = DynDatabase::get_account(&mut db, &NOOP).unwrap().unwrap();
+            noop.nonce = 1;
+            db.insert_account_info(&NOOP, noop);
+            let mut stale = db;
+            assert_eq!(
+                prewarm.results.take_valid(0, &mut stale).unwrap().map(drop),
+                Err(ReuseMiss::Stale)
+            );
 
-        let mut state = parent_state();
-        let result = prewarm.results.take_valid(0, &mut state).unwrap().unwrap();
-        let fee = U256::from(21_000 * GAS_PRICE);
-        assert_eq!(
-            result.pending_state.account_info(&sender(1)).unwrap().balance,
-            U256::from(10u64.pow(18)) - fee
-        );
+            let mut state = parent_state();
+            let result = prewarm.results.take_valid(0, &mut state).unwrap().unwrap();
+            let fee = U256::from(21_000 * GAS_PRICE);
+            assert_eq!(
+                result.pending_state.account_info(&sender(1)).unwrap().balance,
+                U256::from(10u64.pow(18)) - fee
+            );
+        });
     }
 
     #[test]
     fn keeps_results_on_database_errors() {
-        let txs = [tx(1, 0, NOOP, 0)];
-        let prewarm = Prewarm::new(&txs, &[0]);
-        assert!(matches!(
-            prewarm.results.take_valid(0, &mut FailingDb),
-            Err(err) if err.to_string() == ProviderError::BestBlockNotFound.to_string()
-        ));
-        let mut state = parent_state();
-        assert_eq!(prewarm.results.take_valid(0, &mut state).unwrap().map(drop), Ok(()));
+        reth_tasks::executor::Runtime::new().run(|| {
+            let txs = [tx(1, 0, NOOP, 0)];
+            let prewarm = Prewarm::new(&txs, &[0]);
+            assert!(matches!(
+                prewarm.results.take_valid(0, &mut FailingDb),
+                Err(err) if err.to_string() == ProviderError::BestBlockNotFound.to_string()
+            ));
+            let mut state = parent_state();
+            assert_eq!(prewarm.results.take_valid(0, &mut state).unwrap().map(drop), Ok(()));
+        });
     }
 
     #[test]
     fn rejects_unknown_code() {
-        assert_eq!(reuse_in(&[tx(1, 0, UNKNOWN_CODE, 0)], &[0], false), [Err(ReuseMiss::Stale)]);
+        reth_tasks::executor::Runtime::new().run(|| {
+            assert_eq!(
+                reuse_in(&[tx(1, 0, UNKNOWN_CODE, 0)], &[0], false),
+                [Err(ReuseMiss::Stale)]
+            );
+        });
     }
 
     #[test]
     fn rejects_rebasing_unbounded_or_zero_balances() {
-        let rebased = [tx(1, 0, sender(4), 1), tx(2, 0, sender(4), 1)];
-        assert_eq!(reuse_in(&rebased, &[1], false), [Err(ReuseMiss::Missing), Ok(())]);
-        for txs in [
-            [tx(1, 0, RICH, 1), tx(2, 0, RICH, 1)],
-            [tx(1, 0, ZERO_BALANCE, 1), tx(2, 0, ZERO_BALANCE, 1)],
-            // Any unbounded balance read makes every balance exact.
-            [tx(1, 0, sender(4), 1), tx(4, 0, RICH, 1)],
-        ] {
-            assert_eq!(
-                reuse_in(&txs, &[1], false),
-                [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]
-            );
-        }
+        reth_tasks::executor::Runtime::new().run(|| {
+            let rebased = [tx(1, 0, sender(4), 1), tx(2, 0, sender(4), 1)];
+            assert_eq!(reuse_in(&rebased, &[1], false), [Err(ReuseMiss::Missing), Ok(())]);
+            for txs in [
+                [tx(1, 0, RICH, 1), tx(2, 0, RICH, 1)],
+                [tx(1, 0, ZERO_BALANCE, 1), tx(2, 0, ZERO_BALANCE, 1)],
+                // Any unbounded balance read makes every balance exact.
+                [tx(1, 0, sender(4), 1), tx(4, 0, RICH, 1)],
+            ] {
+                assert_eq!(
+                    reuse_in(&txs, &[1], false),
+                    [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]
+                );
+            }
+        });
     }
 
     #[test]
     fn preserves_account_lifecycle_and_rejects_rebasing_it() {
-        let creation = Recovered::new_unchecked(
-            TransactionSigned::new_unhashed(
-                Transaction::Legacy(TxLegacy {
-                    chain_id: Some(1),
-                    gas_price: GAS_PRICE,
-                    gas_limit: 100_000,
-                    to: TxKind::Create,
-                    input: bytes!("60015f5500"),
-                    ..Default::default()
-                }),
-                Signature::test_signature(),
-            ),
-            sender(1),
-        );
-        for (transaction, address) in
-            [(creation, sender(1).create(0)), (tx(1, 0, SELFDESTRUCTER, 0), SELFDESTRUCTER)]
-        {
-            let txs = [transaction];
-            assert_eq!(reuse(&txs), [Ok(())]);
-            let prewarm = Prewarm::new(&txs, &[0]);
-            // An observed SELFDESTRUCT balance is exact; creation also cannot have its
-            // lifecycle flags reset by metadata replacement during rebasing.
-            let mut db = parent_state();
-            let mut info = DynDatabase::get_account(&mut db, &address).unwrap().unwrap();
-            info.balance += U256::ONE;
-            db.insert_account_info(&address, info);
-            assert_eq!(
-                prewarm.results.take_valid(0, &mut db).unwrap().map(drop),
-                Err(ReuseMiss::Stale)
+        reth_tasks::executor::Runtime::new().run(|| {
+            let creation = Recovered::new_unchecked(
+                TransactionSigned::new_unhashed(
+                    Transaction::Legacy(TxLegacy {
+                        chain_id: Some(1),
+                        gas_price: GAS_PRICE,
+                        gas_limit: 100_000,
+                        to: TxKind::Create,
+                        input: bytes!("60015f5500"),
+                        ..Default::default()
+                    }),
+                    Signature::test_signature(),
+                ),
+                sender(1),
             );
-            let result = prewarm.results.take_valid(0, &mut parent_state()).unwrap().unwrap();
-            let account =
-                result.pending_state.account_changes().find(|a| a.address == address).unwrap();
-            if address == sender(1).create(0) {
-                assert!(account.created);
-                assert_eq!(account.storage.slots[&U256::ZERO].value.current, U256::ONE);
-            } else {
-                // EIP-6780 retains pre-existing contracts after SELFDESTRUCT.
-                assert_eq!(account.current.unwrap().balance, U256::ZERO);
+            for (transaction, address) in
+                [(creation, sender(1).create(0)), (tx(1, 0, SELFDESTRUCTER, 0), SELFDESTRUCTER)]
+            {
+                let txs = [transaction];
+                assert_eq!(reuse(&txs), [Ok(())]);
+                let prewarm = Prewarm::new(&txs, &[0]);
+                // An observed SELFDESTRUCT balance is exact; creation also cannot have its
+                // lifecycle flags reset by metadata replacement during rebasing.
+                let mut db = parent_state();
+                let mut info = DynDatabase::get_account(&mut db, &address).unwrap().unwrap();
+                info.balance += U256::ONE;
+                db.insert_account_info(&address, info);
+                assert_eq!(
+                    prewarm.results.take_valid(0, &mut db).unwrap().map(drop),
+                    Err(ReuseMiss::Stale)
+                );
+                let result = prewarm.results.take_valid(0, &mut parent_state()).unwrap().unwrap();
+                let account =
+                    result.pending_state.account_changes().find(|a| a.address == address).unwrap();
+                if address == sender(1).create(0) {
+                    assert!(account.created);
+                    assert_eq!(account.storage.slots[&U256::ZERO].value.current, U256::ONE);
+                } else {
+                    // EIP-6780 retains pre-existing contracts after SELFDESTRUCT.
+                    assert_eq!(account.current.unwrap().balance, U256::ZERO);
+                }
             }
-        }
+        });
     }
 
     #[test]
     fn rejects_results_after_failed_observer_reads() {
-        let reads = ReadSet {
-            accounts: vec![AccountRead {
-                address: sender(1),
-                info: Some(AccountInfo {
-                    balance: U256::from(10u64.pow(18)),
-                    ..Default::default()
-                }),
-                balance: BalanceDependency::None,
-                predicted: false,
-            }],
-            ..Default::default()
-        };
-        let mut balances = BalanceTracker { read_failed: true, ..Default::default() };
-        let tx = tx(1, 0, NOOP, 0);
-        assert!(reads.finish(&mut balances, SpeculativeTx::new(tx.signer(), tx.inner())).is_err());
+        reth_tasks::executor::Runtime::new().run(|| {
+            let reads = ReadSet {
+                accounts: vec![AccountRead {
+                    address: sender(1),
+                    info: Some(AccountInfo {
+                        balance: U256::from(10u64.pow(18)),
+                        ..Default::default()
+                    }),
+                    balance: BalanceDependency::None,
+                    predicted: false,
+                }],
+                ..Default::default()
+            };
+            let mut balances = BalanceTracker { read_failed: true, ..Default::default() };
+            let tx = tx(1, 0, NOOP, 0);
+            assert!(reads
+                .finish(&mut balances, SpeculativeTx::new(tx.signer(), tx.inner()))
+                .is_err());
+        });
     }
 }

@@ -15,14 +15,14 @@ use crate::{
 use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::BranchNodeCompact;
-use crossbeam_channel::{Receiver, Sender};
 use reth_execution_errors::StateRootError;
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
-use std::{
-    sync::Arc,
+use reth_tasks::executor::{
+    channel::{self, Receiver, Sender},
     thread::{self, JoinHandle},
 };
+use std::sync::Arc;
 
 mod compare;
 mod pipeline;
@@ -103,8 +103,8 @@ where
         let account_verifier = SingleVerifier::new(None, trie)?;
         assert!(!storage_workers.is_empty(), "verification requires storage workers");
         assert!(storage_lookahead > 0, "storage lookahead must be positive");
-        let (events_tx, events) = crossbeam_channel::bounded(FINDINGS_CAPACITY);
-        let (cancel, cancel_rx) = crossbeam_channel::bounded(0);
+        let (events_tx, events) = channel::bounded(FINDINGS_CAPACITY);
+        let (cancel, cancel_rx) = channel::bounded(0);
         let context = WorkerContext::new(events_tx, cancel_rx);
         let mut account = AccountVerifier {
             accounts,

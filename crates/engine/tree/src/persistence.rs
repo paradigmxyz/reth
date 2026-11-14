@@ -1,24 +1,23 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
-use crossbeam_channel::Sender as CrossbeamSender;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, BalProvider, BlockExecutionWriter, BlockHashReader,
     ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksInput,
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
-use reth_tasks::spawn_os_thread;
-use std::{
-    sync::{
-        mpsc::{Receiver, SendError, Sender},
-        Arc,
+use reth_tasks::{
+    executor::{
+        channel::{mpsc, Sender},
+        thread::JoinHandle,
+        time::Instant,
     },
-    thread::JoinHandle,
-    time::Duration,
+    spawn_thread,
 };
+use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 use tracing::{debug, error, instrument, warn};
 
@@ -38,8 +37,8 @@ pub struct PersistenceResult {
 /// This is meant to be a spawned service that listens for various incoming persistence operations,
 /// performing those actions on disk, and returning the result in a channel.
 ///
-/// This should be spawned in its own thread with [`std::thread::spawn`], since this performs
-/// blocking I/O operations in an endless loop.
+/// This should be spawned in its own thread with [`reth_tasks::executor::thread::spawn`], since
+/// this performs blocking I/O operations in an endless loop.
 #[derive(Debug)]
 pub struct PersistenceService<N>
 where
@@ -48,7 +47,7 @@ where
     /// The provider factory to use
     provider: ProviderFactory<N>,
     /// Incoming requests
-    incoming: Receiver<PersistenceAction<N::Primitives>>,
+    incoming: mpsc::Receiver<PersistenceAction<N::Primitives>>,
     /// The pruner
     pruner: PrunerWithFactory<ProviderFactory<N>>,
     /// metrics
@@ -70,7 +69,7 @@ where
     /// Create a new persistence service
     pub fn new(
         provider: ProviderFactory<N>,
-        incoming: Receiver<PersistenceAction<N::Primitives>>,
+        incoming: mpsc::Receiver<PersistenceAction<N::Primitives>>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
     ) -> Self {
@@ -265,13 +264,13 @@ pub enum PersistenceError {
 #[derive(Debug)]
 pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     /// Advances the block-data and state/trie persistence frontiers described by the input.
-    SaveBlocks(SaveBlocksInput<N>, CrossbeamSender<PersistenceResult>),
+    SaveBlocks(SaveBlocksInput<N>, Sender<PersistenceResult>),
 
     /// Removes block data above the given block number from the database.
     ///
     /// This will first update checkpoints from the database, then remove actual block data from
     /// static files.
-    RemoveBlocksAbove(u64, CrossbeamSender<PersistenceResult>),
+    RemoveBlocksAbove(u64, Sender<PersistenceResult>),
 
     /// Update the persisted finalized block on disk
     SaveFinalizedBlock(u64),
@@ -284,18 +283,18 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
 #[derive(Debug, Clone)]
 pub struct PersistenceHandle<N: NodePrimitives = EthPrimitives> {
     /// The channel used to communicate with the persistence service
-    sender: Sender<PersistenceAction<N>>,
+    sender: mpsc::Sender<PersistenceAction<N>>,
     /// Guard that joins the service thread when all handles are dropped.
     /// Uses `Arc` so the handle remains `Clone`.
     _service_guard: Arc<ServiceGuard>,
 }
 
 impl<T: NodePrimitives> PersistenceHandle<T> {
-    /// Create a new [`PersistenceHandle`] from a [`Sender<PersistenceAction>`].
+    /// Create a new [`PersistenceHandle`] from a [`mpsc::Sender<PersistenceAction>`].
     ///
     /// This is intended for testing purposes where you want to mock the persistence service.
     /// For production use, prefer [`spawn_service`](Self::spawn_service).
-    pub fn new(sender: Sender<PersistenceAction<T>>) -> Self {
+    pub fn new(sender: mpsc::Sender<PersistenceAction<T>>) -> Self {
         Self { sender, _service_guard: Arc::new(ServiceGuard(None)) }
     }
 
@@ -313,12 +312,12 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         N: ProviderNodeTypes,
     {
         // create the initial channels
-        let (db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (db_service_tx, db_service_rx) = mpsc::channel();
 
         // spawn the persistence service
         let db_service =
             PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
-        let join_handle = spawn_os_thread("persistence", || {
+        let join_handle = spawn_thread("persistence", || {
             if let Err(err) = db_service.run() {
                 error!(target: "engine::persistence", ?err, "Persistence service failed");
             }
@@ -335,7 +334,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn send_action(
         &self,
         action: PersistenceAction<T>,
-    ) -> Result<(), SendError<PersistenceAction<T>>> {
+    ) -> Result<(), mpsc::SendError<PersistenceAction<T>>> {
         self.sender.send(action)
     }
 
@@ -347,8 +346,8 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn save_blocks(
         &self,
         input: SaveBlocksInput<T>,
-        tx: CrossbeamSender<PersistenceResult>,
-    ) -> Result<(), SendError<PersistenceAction<T>>> {
+        tx: Sender<PersistenceResult>,
+    ) -> Result<(), mpsc::SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::SaveBlocks(input, tx))
     }
 
@@ -359,7 +358,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn save_finalized_block_number(
         &self,
         finalized_block: u64,
-    ) -> Result<(), SendError<PersistenceAction<T>>> {
+    ) -> Result<(), mpsc::SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::SaveFinalizedBlock(finalized_block))
     }
 
@@ -370,7 +369,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn save_safe_block_number(
         &self,
         safe_block: u64,
-    ) -> Result<(), SendError<PersistenceAction<T>>> {
+    ) -> Result<(), mpsc::SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::SaveSafeBlock(safe_block))
     }
 
@@ -382,8 +381,8 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn remove_blocks_above(
         &self,
         block_num: u64,
-        tx: CrossbeamSender<PersistenceResult>,
-    ) -> Result<(), SendError<PersistenceAction<T>>> {
+        tx: Sender<PersistenceResult>,
+    ) -> Result<(), mpsc::SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
     }
 }
@@ -427,6 +426,7 @@ mod tests {
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
+    use reth_tasks::executor::{channel, thread};
     use tokio::sync::mpsc::unbounded_channel;
 
     fn default_persistence_handle() -> PersistenceHandle<EthPrimitives> {
@@ -457,72 +457,98 @@ mod tests {
 
     #[test]
     fn test_pruner_prunes_bal_store() {
-        reth_tracing::init_test_tracing();
-
         let old_hash = B256::random();
         let retained_hash = B256::random();
-        let old_bal = Bytes::from_static(b"old");
-        let retained_bal = Bytes::from_static(b"retained");
-        let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
-            BalConfig::with_in_memory_retention(PruneMode::Before(2)),
-        ));
+        reth_tasks::executor::Runtime::new().run(move || {
+            reth_tracing::init_test_tracing();
 
-        bal_store.insert(NumHash::new(1, old_hash), RawBal::new(old_bal)).unwrap();
-        bal_store
-            .insert(NumHash::new(2, retained_hash), RawBal::new(retained_bal.clone()))
-            .unwrap();
+            let old_bal = Bytes::from_static(b"old");
+            let retained_bal = Bytes::from_static(b"retained");
+            let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
+                BalConfig::with_in_memory_retention(PruneMode::Before(2)),
+            ));
 
-        let provider = create_test_provider_factory().with_bal_store(bal_store.clone());
-        let (_finished_exex_height_tx, finished_exex_height_rx) =
-            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
-        let pruner =
-            Pruner::new_with_factory(provider.clone(), vec![], 0, 0, None, finished_exex_height_rx);
-        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
-        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        let mut service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
+            bal_store.insert(NumHash::new(1, old_hash), RawBal::new(old_bal)).unwrap();
+            bal_store
+                .insert(NumHash::new(2, retained_hash), RawBal::new(retained_bal.clone()))
+                .unwrap();
 
-        service.maybe_run_pruner(2).unwrap();
+            let provider = create_test_provider_factory().with_bal_store(bal_store.clone());
+            let (_finished_exex_height_tx, finished_exex_height_rx) =
+                tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+            let pruner = Pruner::new_with_factory(
+                provider.clone(),
+                vec![],
+                0,
+                0,
+                None,
+                finished_exex_height_rx,
+            );
+            let (_db_service_tx, db_service_rx) = mpsc::channel();
+            let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+            let mut service =
+                PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
 
-        assert_eq!(
-            bal_store.get_by_hashes(&[old_hash, retained_hash]).unwrap(),
-            vec![None, Some(retained_bal)]
-        );
+            service.maybe_run_pruner(2).unwrap();
+
+            assert_eq!(
+                bal_store.get_by_hashes(&[old_hash, retained_hash]).unwrap(),
+                vec![None, Some(retained_bal)]
+            );
+        });
     }
 
     #[test]
     fn test_pruner_ignores_bal_store_prune_error() {
-        reth_tracing::init_test_tracing();
+        reth_tasks::executor::Runtime::new().run(|| {
+            reth_tracing::init_test_tracing();
 
-        let provider = create_test_provider_factory()
-            .with_bal_store(BalStoreHandle::new(FailingPruneBalStore));
-        let (_finished_exex_height_tx, finished_exex_height_rx) =
-            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
-        let pruner =
-            Pruner::new_with_factory(provider.clone(), vec![], 0, 0, None, finished_exex_height_rx);
-        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
-        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        let mut service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
+            let provider = create_test_provider_factory()
+                .with_bal_store(BalStoreHandle::new(FailingPruneBalStore));
+            let (_finished_exex_height_tx, finished_exex_height_rx) =
+                tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+            let pruner = Pruner::new_with_factory(
+                provider.clone(),
+                vec![],
+                0,
+                0,
+                None,
+                finished_exex_height_rx,
+            );
+            let (_db_service_tx, db_service_rx) = mpsc::channel();
+            let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+            let mut service =
+                PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
 
-        service.maybe_run_pruner(2).unwrap();
+            service.maybe_run_pruner(2).unwrap();
+        });
     }
 
     #[test]
     fn test_remove_blocks_above_requires_tip_header() {
-        let provider = create_test_provider_factory();
-        init_genesis(&provider).unwrap();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let provider = create_test_provider_factory();
+            init_genesis(&provider).unwrap();
 
-        let (_finished_exex_height_tx, finished_exex_height_rx) =
-            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
-        let pruner =
-            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
-        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
-        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        let service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
+            let (_finished_exex_height_tx, finished_exex_height_rx) =
+                tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+            let pruner = Pruner::new_with_factory(
+                provider.clone(),
+                vec![],
+                5,
+                0,
+                None,
+                finished_exex_height_rx,
+            );
+            let (_db_service_tx, db_service_rx) = mpsc::channel();
+            let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+            let service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
 
-        assert!(matches!(
-            service.on_remove_blocks_above(1),
-            Err(PersistenceError::ProviderError(ProviderError::HeaderNotFound(_)))
-        ));
+            assert!(matches!(
+                service.on_remove_blocks_above(1),
+                Err(PersistenceError::ProviderError(ProviderError::HeaderNotFound(_)))
+            ));
+        });
     }
 
     #[derive(Debug)]
@@ -544,92 +570,107 @@ mod tests {
 
     #[test]
     fn test_save_blocks_single_block() {
-        reth_tracing::init_test_tracing();
-        let handle = default_persistence_handle();
-        let block_number = 1;
-        let mut test_block_builder = TestBlockBuilder::eth();
-        let executed =
-            test_block_builder.get_executed_block_with_number(block_number, B256::random());
-        let block_hash = executed.recovered_block().hash();
+        let mut test_block_builder = TestBlockBuilder::seeded(42);
+        let parent_hash = B256::random();
+        reth_tasks::executor::Runtime::new().run(move || {
+            let executed = test_block_builder.get_executed_block_with_number(1, parent_hash);
+            reth_tracing::init_test_tracing();
+            let handle = default_persistence_handle();
+            let block_hash = executed.recovered_block().hash();
 
-        let blocks = full_save_input(vec![executed]);
-        let (tx, rx) = crossbeam_channel::bounded(1);
+            let blocks = full_save_input(vec![executed]);
+            let (tx, rx) = channel::bounded(1);
 
-        handle.save_blocks(blocks, tx).unwrap();
+            handle.save_blocks(blocks, tx).unwrap();
 
-        let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
+            let result =
+                rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
 
-        assert_eq!(block_hash, result.last_block.hash);
-        assert_eq!(result.last_state_trie_block, result.last_block);
+            assert_eq!(block_hash, result.last_block.hash);
+            assert_eq!(result.last_state_trie_block, result.last_block);
+        });
     }
 
     #[test]
     fn test_save_blocks_flushes_bal_store() {
-        reth_tracing::init_test_tracing();
-        let provider = create_test_provider_factory();
-        let bal_store = BalStoreHandle::new(RocksDBBalStore::new(provider.rocksdb_provider()));
-        let provider = provider.with_bal_store(bal_store);
-        init_genesis(&provider).unwrap();
+        let mut test_block_builder = TestBlockBuilder::seeded(42);
+        let parent_hash = B256::random();
+        reth_tasks::executor::Runtime::new().run(move || {
+            let executed = test_block_builder.get_executed_block_with_number(1, parent_hash);
+            reth_tracing::init_test_tracing();
+            let provider = create_test_provider_factory();
+            let bal_store = BalStoreHandle::new(RocksDBBalStore::new(provider.rocksdb_provider()));
+            let provider = provider.with_bal_store(bal_store);
+            init_genesis(&provider).unwrap();
 
-        let mut test_block_builder = TestBlockBuilder::eth();
-        let executed = test_block_builder.get_executed_block_with_number(1, B256::random());
-        let num_hash = executed.recovered_block().num_hash();
-        let raw_bal = Bytes::from_static(&[0xc0]);
+            let num_hash = executed.recovered_block().num_hash();
+            let raw_bal = Bytes::from_static(&[0xc0]);
 
-        provider.bal_store().insert(num_hash, RawBal::new(raw_bal.clone())).unwrap();
+            provider.bal_store().insert(num_hash, RawBal::new(raw_bal.clone())).unwrap();
 
-        let (_finished_exex_height_tx, finished_exex_height_rx) =
-            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
-        let pruner =
-            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
-        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        let handle = PersistenceHandle::<EthPrimitives>::spawn_service(
-            provider.clone(),
-            pruner,
-            sync_metrics_tx,
-        );
-        let (tx, rx) = crossbeam_channel::bounded(1);
+            let (_finished_exex_height_tx, finished_exex_height_rx) =
+                tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+            let pruner = Pruner::new_with_factory(
+                provider.clone(),
+                vec![],
+                5,
+                0,
+                None,
+                finished_exex_height_rx,
+            );
+            let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+            let handle = PersistenceHandle::<EthPrimitives>::spawn_service(
+                provider.clone(),
+                pruner,
+                sync_metrics_tx,
+            );
+            let (tx, rx) = channel::bounded(1);
 
-        handle.save_blocks(full_save_input(vec![executed]), tx).unwrap();
+            handle.save_blocks(full_save_input(vec![executed]), tx).unwrap();
 
-        let result = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
-        assert_eq!(result.last_block, num_hash);
-        let persisted_store = RocksDBBalStore::new(provider.rocksdb_provider());
-        assert_eq!(persisted_store.get_by_hash(num_hash.hash).unwrap(), Some(raw_bal));
+            let result =
+                rx.recv_timeout(std::time::Duration::from_secs(10)).expect("test timed out");
+            assert_eq!(result.last_block, num_hash);
+            let persisted_store = RocksDBBalStore::new(provider.rocksdb_provider());
+            assert_eq!(persisted_store.get_by_hash(num_hash.hash).unwrap(), Some(raw_bal));
+        });
     }
 
     #[test]
     fn test_save_blocks_multiple_blocks() {
-        reth_tracing::init_test_tracing();
-        let handle = default_persistence_handle();
+        let mut test_block_builder = TestBlockBuilder::seeded(42);
+        reth_tasks::executor::Runtime::new().run(move || {
+            let blocks = test_block_builder.get_executed_blocks(1..6).collect::<Vec<_>>();
+            reth_tracing::init_test_tracing();
+            let handle = default_persistence_handle();
 
-        let mut test_block_builder = TestBlockBuilder::eth();
-        let blocks = test_block_builder.get_executed_blocks(1..6).collect::<Vec<_>>();
-        let last_hash = blocks.last().unwrap().recovered_block().hash();
-        let (tx, rx) = crossbeam_channel::bounded(1);
+            let last_hash = blocks.last().unwrap().recovered_block().hash();
+            let (tx, rx) = channel::bounded(1);
 
-        handle.save_blocks(full_save_input(blocks), tx).unwrap();
-        let result = rx.recv().unwrap();
-        assert_eq!(last_hash, result.last_block.hash);
+            handle.save_blocks(full_save_input(blocks), tx).unwrap();
+            let result = rx.recv().unwrap();
+            assert_eq!(last_hash, result.last_block.hash);
+        });
     }
 
     #[test]
     fn test_save_blocks_multiple_calls() {
-        reth_tracing::init_test_tracing();
-        let handle = default_persistence_handle();
+        let mut test_block_builder = TestBlockBuilder::seeded(42);
+        reth_tasks::executor::Runtime::new().run(move || {
+            reth_tracing::init_test_tracing();
+            let handle = default_persistence_handle();
 
-        let ranges = [1..2, 2..3, 3..5, 5..6];
-        let mut test_block_builder = TestBlockBuilder::eth();
-        for range in ranges {
-            let blocks = test_block_builder.get_executed_blocks(range).collect::<Vec<_>>();
-            let last_hash = blocks.last().unwrap().recovered_block().hash();
-            let (tx, rx) = crossbeam_channel::bounded(1);
+            for range in [1..2, 2..3, 3..5, 5..6] {
+                let blocks = test_block_builder.get_executed_blocks(range).collect::<Vec<_>>();
+                let last_hash = blocks.last().unwrap().recovered_block().hash();
+                let (tx, rx) = channel::bounded(1);
 
-            handle.save_blocks(full_save_input(blocks), tx).unwrap();
+                handle.save_blocks(full_save_input(blocks), tx).unwrap();
 
-            let result = rx.recv().unwrap();
-            assert_eq!(last_hash, result.last_block.hash);
-        }
+                let result = rx.recv().unwrap();
+                assert_eq!(last_hash, result.last_block.hash);
+            }
+        });
     }
 
     /// Verifies that committing `save_blocks` history before running the pruner
@@ -641,40 +682,42 @@ mod tests {
     /// first, then runs the pruner against committed state in a separate provider.
     #[test]
     fn test_save_blocks_then_prune_preserves_new_history() {
-        reth_tracing::init_test_tracing();
+        reth_tasks::executor::Runtime::new().run(|| {
+            reth_tracing::init_test_tracing();
 
-        let provider_factory = create_test_provider_factory();
-        let tracked_addr = Address::repeat_byte(0xBE);
+            let provider_factory = create_test_provider_factory();
+            let tracked_addr = Address::repeat_byte(0xBE);
 
-        // Phase 1: Establish baseline history for blocks 0..20.
-        let rocksdb = provider_factory.rocksdb_provider();
-        {
-            let mut batch = rocksdb.batch();
-            let initial_blocks: Vec<u64> = (0..20).collect();
-            let shard = BlockNumberList::new_pre_sorted(initial_blocks.iter().copied());
-            batch
-                .put::<tables::AccountsHistory>(ShardedKey::new(tracked_addr, u64::MAX), &shard)
-                .unwrap();
-            batch.commit().unwrap();
-        }
+            // Phase 1: Establish baseline history for blocks 0..20.
+            let rocksdb = provider_factory.rocksdb_provider();
+            {
+                let mut batch = rocksdb.batch();
+                let initial_blocks: Vec<u64> = (0..20).collect();
+                let shard = BlockNumberList::new_pre_sorted(initial_blocks.iter().copied());
+                batch
+                    .put::<tables::AccountsHistory>(ShardedKey::new(tracked_addr, u64::MAX), &shard)
+                    .unwrap();
+                batch.commit().unwrap();
+            }
 
-        // Phase 2: Simulate the fixed on_save_blocks flow.
-        // Step 1: save_blocks appends new entries 20..25 and commits immediately.
-        let mut batch1 = rocksdb.batch();
-        batch1.append_account_history_shard(tracked_addr, 20..25u64).unwrap();
-        batch1.commit().unwrap();
+            // Phase 2: Simulate the fixed on_save_blocks flow.
+            // Step 1: save_blocks appends new entries 20..25 and commits immediately.
+            let mut batch1 = rocksdb.batch();
+            batch1.append_account_history_shard(tracked_addr, 20..25u64).unwrap();
+            batch1.commit().unwrap();
 
-        // Step 2: Pruner runs AFTER commit, so it reads state that includes 20..25.
-        // Prunes entries ≤ 14, leaving [15..25).
-        let mut batch2 = rocksdb.batch();
-        batch2.prune_account_history_to(tracked_addr, 14).unwrap();
-        batch2.commit().unwrap();
+            // Step 2: Pruner runs AFTER commit, so it reads state that includes 20..25.
+            // Prunes entries ≤ 14, leaving [15..25).
+            let mut batch2 = rocksdb.batch();
+            batch2.prune_account_history_to(tracked_addr, 14).unwrap();
+            batch2.commit().unwrap();
 
-        // Verify new entries survived pruning.
-        let shards = rocksdb.account_history_shards(tracked_addr).unwrap();
-        let entries: Vec<u64> = shards.iter().flat_map(|(_, list)| list.iter()).collect();
-        let expected: Vec<u64> = (15..25).collect();
-        assert_eq!(entries, expected, "new entries 20..25 must survive pruning");
+            // Verify new entries survived pruning.
+            let shards = rocksdb.account_history_shards(tracked_addr).unwrap();
+            let entries: Vec<u64> = shards.iter().flat_map(|(_, list)| list.iter()).collect();
+            let expected: Vec<u64> = (15..25).collect();
+            assert_eq!(entries, expected, "new entries 20..25 must survive pruning");
+        });
     }
 
     #[test]
@@ -771,7 +814,7 @@ mod tests {
         // reorg thread is on
         #[expect(clippy::redundant_clone)]
         let pf = provider_factory.clone();
-        let reorg_handle = std::thread::spawn(move || {
+        let reorg_handle = thread::spawn(move || {
             let provider_rw = pf.database_provider_rw().unwrap();
             let frontiers = provider_rw.remove_block_and_execution_above(1).unwrap();
             assert_eq!(frontiers.partial_state_trie, 1);
@@ -784,7 +827,7 @@ mod tests {
         });
 
         // Give the reorg thread time to start and block on wait_for_pre_commit_readers.
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(100));
 
         // The pre-reorg provider still holds its MDBX snapshot — it must still see
         // the OLD block 2 from before the reorg.

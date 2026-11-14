@@ -1,6 +1,6 @@
 //! Tracking of active payload build jobs.
 
-use crossbeam_channel::{Receiver, Sender};
+use reth_tasks::executor::channel::{self, Receiver, Sender};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -16,7 +16,7 @@ pub(super) struct PayloadBuildTracker {
 impl PayloadBuildTracker {
     /// Creates a tracker and a receiver notified when its active count reaches zero.
     pub(super) fn new() -> (Self, Receiver<()>) {
-        let (finished_tx, finished_rx) = crossbeam_channel::bounded(1);
+        let (finished_tx, finished_rx) = channel::bounded(1);
         (Self { active: Arc::new(AtomicUsize::new(0)), finished_tx }, finished_rx)
     }
 

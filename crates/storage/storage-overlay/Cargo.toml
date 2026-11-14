@@ -40,10 +40,10 @@ metrics.workspace = true
 
 # misc
 parking_lot.workspace = true
-rayon = { workspace = true, optional = true }
 tracing.workspace = true
 
 [dev-dependencies]
+reth-tasks.workspace = true
 reth-chain-state = { workspace = true, features = ["test-utils"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
@@ -53,6 +53,16 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 alloy-consensus.workspace = true
 
 [features]
+fuzz = [
+    "reth-metrics/fuzz",
+    "reth-trie/fuzz",
+    "reth-chain-state/fuzz",
+    "dep:reth-tasks",
+    "reth-tasks/fuzz",
+    "reth-trie-common/fuzz",
+    "reth-db/fuzz",
+    "reth-provider/fuzz",
+]
 default = ["metrics"]
 metrics = ["reth-trie/metrics", "reth-trie-db/metrics"]
-rayon = ["dep:rayon", "dep:reth-tasks"]
+rayon = ["dep:reth-tasks"]

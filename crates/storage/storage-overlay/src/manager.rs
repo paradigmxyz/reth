@@ -14,7 +14,6 @@ use crate::{
 };
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockNumber, B256};
-use parking_lot::Mutex;
 use reth_chain_state::{BlockState, ExecutedBlock, PreservedSparseTrie};
 use reth_errors::ProviderResult;
 use reth_ethereum_primitives::EthPrimitives;
@@ -26,19 +25,26 @@ use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, PruneCheckpointReader, StageCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
-#[cfg(feature = "rayon")]
-use reth_tasks::WorkerPool;
 use reth_trie::{
     proof_v2::ProofCursorMetrics, updates::TrieUpdatesSorted, HashedPostStateSorted,
     TrieInputSorted,
 };
-use std::{
-    fmt,
-    ops::RangeInclusive,
-    sync::{Arc, OnceLock},
+use std::{fmt, ops::RangeInclusive, sync::Arc};
+use tracing::{debug, trace};
+
+#[cfg(not(feature = "fuzz"))]
+use parking_lot::Mutex;
+#[cfg(not(feature = "fuzz"))]
+use std::{sync::OnceLock, time::Instant};
+
+#[cfg(feature = "fuzz")]
+use reth_tasks::executor::{
+    sync::{parking_lot::Mutex, OnceLock},
     time::Instant,
 };
-use tracing::{debug, trace};
+
+#[cfg(feature = "rayon")]
+use reth_tasks::{executor::rayon, WorkerPool};
 
 /// Manages state trie and execution overlays for in-memory blocks.
 ///
@@ -1075,15 +1081,13 @@ mod tests {
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::Account;
-    #[cfg(feature = "rayon")]
-    use reth_tasks::WorkerPool;
+    use reth_tasks::executor::{channel::mpsc, thread};
     use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, HashedStorage, SortedTrieData};
     use reth_trie_common::bundle_state::BundleState;
-    use std::{
-        sync::{mpsc, Arc},
-        thread,
-        time::Duration,
-    };
+    use std::{sync::Arc, time::Duration};
+
+    #[cfg(feature = "rayon")]
+    use reth_tasks::WorkerPool;
 
     fn with_unique_state(
         block: &ExecutedBlock<EthPrimitives>,
@@ -1120,7 +1124,7 @@ mod tests {
     }
 
     fn test_blocks() -> Vec<ExecutedBlock<EthPrimitives>> {
-        TestBlockBuilder::eth()
+        TestBlockBuilder::seeded(42)
             .get_executed_blocks(1..4)
             .enumerate()
             .map(|(index, block)| with_unique_state(&block, index as u8 + 1))
@@ -1160,458 +1164,514 @@ mod tests {
 
     #[test]
     fn builds_managed_overlay_for_inserted_blocks() {
-        let manager = OverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks {
-            manager.insert_block(block.clone());
-        }
+        reth_tasks::executor::Runtime::new().run(|| {
+            let manager = OverlayManager::default();
+            let blocks = test_blocks();
+            for block in &blocks {
+                manager.insert_block(block.clone());
+            }
 
-        let anchor_hash = blocks[0].recovered_block().parent_hash();
+            let anchor_hash = blocks[0].recovered_block().parent_hash();
 
-        let (_, state) =
-            overlay_for_parent(&manager, blocks[2].recovered_block().hash(), anchor_hash).unwrap();
-        assert_eq!(state.accounts.len(), 3);
+            let (_, state) =
+                overlay_for_parent(&manager, blocks[2].recovered_block().hash(), anchor_hash)
+                    .unwrap();
+            assert_eq!(state.accounts.len(), 3);
 
-        let short_anchor = blocks[1].recovered_block().hash();
-        let (_, short) =
-            overlay_for_parent(&manager, blocks[2].recovered_block().hash(), short_anchor).unwrap();
-        assert_eq!(short.accounts.len(), 1);
-        let (_, cached_short) =
-            overlay_for_parent(&manager, blocks[2].recovered_block().hash(), short_anchor).unwrap();
-        assert!(Arc::ptr_eq(&short, &cached_short));
+            let short_anchor = blocks[1].recovered_block().hash();
+            let (_, short) =
+                overlay_for_parent(&manager, blocks[2].recovered_block().hash(), short_anchor)
+                    .unwrap();
+            assert_eq!(short.accounts.len(), 1);
+            let (_, cached_short) =
+                overlay_for_parent(&manager, blocks[2].recovered_block().hash(), short_anchor)
+                    .unwrap();
+            assert!(Arc::ptr_eq(&short, &cached_short));
+        });
     }
 
     #[test]
     fn builds_execution_overlay_for_inserted_blocks() {
-        let manager = OverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks {
-            manager.insert_block(block.clone());
-        }
+        reth_tasks::executor::Runtime::new().run(|| {
+            let manager = OverlayManager::default();
+            let blocks = test_blocks();
+            for block in &blocks {
+                manager.insert_block(block.clone());
+            }
 
-        let anchor_hash = blocks[0].recovered_block().parent_hash();
-        let overlay = manager
-            .execution_overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
-            .unwrap();
+            let anchor_hash = blocks[0].recovered_block().parent_hash();
+            let overlay = manager
+                .execution_overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
+                .unwrap();
 
-        for id in 1..=3 {
-            let address = Address::with_last_byte(id);
-            let code_hash = B256::with_last_byte(id + 64);
-            assert_eq!(overlay.accounts()[&address].as_ref().unwrap().nonce, id as u64);
-            assert_eq!(overlay.storage()[&address][&U256::from(id)], U256::from(id));
-            assert_eq!(overlay.code_hashes()[&code_hash], Bytecode::new_raw(vec![id].into()));
-        }
-        assert_eq!(
-            overlay.block_hashes(),
-            blocks[..=2].iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(),
-        );
+            for id in 1..=3 {
+                let address = Address::with_last_byte(id);
+                let code_hash = B256::with_last_byte(id + 64);
+                assert_eq!(overlay.accounts()[&address].as_ref().unwrap().nonce, id as u64);
+                assert_eq!(overlay.storage()[&address][&U256::from(id)], U256::from(id));
+                assert_eq!(overlay.code_hashes()[&code_hash], Bytecode::new_raw(vec![id].into()));
+            }
+            assert_eq!(
+                overlay.block_hashes(),
+                blocks[..=2]
+                    .iter()
+                    .map(|block| block.recovered_block().num_hash())
+                    .collect::<Vec<_>>(),
+            );
 
-        let cached = manager
-            .execution_overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
-            .unwrap();
-        assert!(Arc::ptr_eq(&overlay, &cached));
+            let cached = manager
+                .execution_overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
+                .unwrap();
+            assert!(Arc::ptr_eq(&overlay, &cached));
 
-        let short_anchor = blocks[1].recovered_block().hash();
-        let short = manager
-            .execution_overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor)
-            .unwrap();
-        assert_eq!(short.accounts().len(), 1);
+            let short_anchor = blocks[1].recovered_block().hash();
+            let short = manager
+                .execution_overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor)
+                .unwrap();
+            assert_eq!(short.accounts().len(), 1);
+        });
     }
 
     #[test]
     fn computing_sibling_evicts_ready_cached_overlays() {
-        let manager = OverlayManager::default();
-        let mut builder = TestBlockBuilder::eth();
-        let anchor_hash = B256::random();
-        let parent = builder.get_executed_block_with_number(1, anchor_hash);
-        let parent_hash = parent.recovered_block().hash();
-        let first = builder.get_executed_block_with_number(2, parent_hash);
-        let sibling = builder.get_executed_block_with_number(2, parent_hash);
-        let sibling_hash = sibling.recovered_block().hash();
-        let first_key = OverlayCacheKey { anchor_hash, tip_hash: first.recovered_block().hash() };
+        reth_tasks::executor::Runtime::new().run(|| {
+            let manager = OverlayManager::default();
+            let mut builder = TestBlockBuilder::seeded(42);
+            let anchor_hash = B256::with_last_byte(255);
+            let parent = builder.get_executed_block_with_number(1, anchor_hash);
+            let parent_hash = parent.recovered_block().hash();
+            let first = builder.get_executed_block_with_number(2, parent_hash);
+            let sibling = builder.get_executed_block_with_number(2, parent_hash);
+            let sibling_hash = sibling.recovered_block().hash();
+            let first_key =
+                OverlayCacheKey { anchor_hash, tip_hash: first.recovered_block().hash() };
 
-        manager.insert_block(parent);
-        manager.insert_block(first);
-        manager.insert_block(sibling);
-        manager
-            .inner
-            .state_trie_overlays
-            .entries
-            .insert(first_key, OverlayCacheEntry::Ready(Arc::new(TrieInputSorted::default())));
-        manager
-            .inner
-            .execution_overlays
-            .entries
-            .insert(first_key, OverlayCacheEntry::Ready(Arc::new(ExecutionOverlay::default())));
+            manager.insert_block(parent);
+            manager.insert_block(first);
+            manager.insert_block(sibling);
+            manager
+                .inner
+                .state_trie_overlays
+                .entries
+                .insert(first_key, OverlayCacheEntry::Ready(Arc::new(TrieInputSorted::default())));
+            manager
+                .inner
+                .execution_overlays
+                .entries
+                .insert(first_key, OverlayCacheEntry::Ready(Arc::new(ExecutionOverlay::default())));
 
-        overlay_for_parent(&manager, sibling_hash, anchor_hash).unwrap();
-        manager.execution_overlay_for_parent(sibling_hash, anchor_hash).unwrap();
+            overlay_for_parent(&manager, sibling_hash, anchor_hash).unwrap();
+            manager.execution_overlay_for_parent(sibling_hash, anchor_hash).unwrap();
 
-        assert!(!manager.inner.state_trie_overlays.entries.contains_key(&first_key));
-        assert!(!manager.inner.execution_overlays.entries.contains_key(&first_key));
+            assert!(!manager.inner.state_trie_overlays.entries.contains_key(&first_key));
+            assert!(!manager.inner.execution_overlays.entries.contains_key(&first_key));
+        });
     }
 
     #[test]
     fn promotes_ready_parent_overlays_to_the_child() {
-        let manager = OverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks {
-            manager.insert_block(block.clone());
-        }
+        reth_tasks::executor::Runtime::new().run(|| {
+            let manager = OverlayManager::default();
+            let blocks = test_blocks();
+            for block in &blocks {
+                manager.insert_block(block.clone());
+            }
 
-        let anchor_hash = blocks[0].recovered_block().parent_hash();
-        let parent_hash = blocks[1].recovered_block().hash();
-        let child_hash = blocks[2].recovered_block().hash();
-        let parent_key = OverlayCacheKey { anchor_hash, tip_hash: parent_hash };
-        let child_key = OverlayCacheKey { anchor_hash, tip_hash: child_hash };
+            let anchor_hash = blocks[0].recovered_block().parent_hash();
+            let parent_hash = blocks[1].recovered_block().hash();
+            let child_hash = blocks[2].recovered_block().hash();
+            let parent_key = OverlayCacheKey { anchor_hash, tip_hash: parent_hash };
+            let child_key = OverlayCacheKey { anchor_hash, tip_hash: child_hash };
 
-        overlay_for_parent(&manager, parent_hash, anchor_hash).unwrap();
-        manager.execution_overlay_for_parent(parent_hash, anchor_hash).unwrap();
+            overlay_for_parent(&manager, parent_hash, anchor_hash).unwrap();
+            manager.execution_overlay_for_parent(parent_hash, anchor_hash).unwrap();
 
-        overlay_for_parent(&manager, child_hash, anchor_hash).unwrap();
-        manager.execution_overlay_for_parent(child_hash, anchor_hash).unwrap();
+            overlay_for_parent(&manager, child_hash, anchor_hash).unwrap();
+            manager.execution_overlay_for_parent(child_hash, anchor_hash).unwrap();
 
-        assert!(!manager.inner.state_trie_overlays.entries.contains_key(&parent_key));
-        assert!(manager.inner.state_trie_overlays.entries.contains_key(&child_key));
-        assert!(!manager.inner.execution_overlays.entries.contains_key(&parent_key));
-        assert!(manager.inner.execution_overlays.entries.contains_key(&child_key));
+            assert!(!manager.inner.state_trie_overlays.entries.contains_key(&parent_key));
+            assert!(manager.inner.state_trie_overlays.entries.contains_key(&child_key));
+            assert!(!manager.inner.execution_overlays.entries.contains_key(&parent_key));
+            assert!(manager.inner.execution_overlays.entries.contains_key(&child_key));
+        });
     }
 
     #[test]
     fn promotes_parent_overlays_held_by_callers() {
-        let manager = OverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks {
-            manager.insert_block(block.clone());
-        }
+        reth_tasks::executor::Runtime::new().run(|| {
+            let manager = OverlayManager::default();
+            let blocks = test_blocks();
+            for block in &blocks {
+                manager.insert_block(block.clone());
+            }
 
-        let anchor_hash = blocks[0].recovered_block().parent_hash();
-        let parent_hash = blocks[1].recovered_block().hash();
-        let child_hash = blocks[2].recovered_block().hash();
-        let parent_key = OverlayCacheKey { anchor_hash, tip_hash: parent_hash };
+            let anchor_hash = blocks[0].recovered_block().parent_hash();
+            let parent_hash = blocks[1].recovered_block().hash();
+            let child_hash = blocks[2].recovered_block().hash();
+            let parent_key = OverlayCacheKey { anchor_hash, tip_hash: parent_hash };
 
-        overlay_for_parent(&manager, parent_hash, anchor_hash).unwrap();
-        let state_parent = manager
-            .inner
-            .state_trie_overlays
-            .entries
-            .get(&parent_key)
-            .and_then(|entry| match entry.value() {
-                OverlayCacheEntry::Ready(input) => Some(Arc::clone(input)),
-                OverlayCacheEntry::Computing(_) => None,
-            })
-            .unwrap();
-        let execution_parent =
-            manager.execution_overlay_for_parent(parent_hash, anchor_hash).unwrap();
+            overlay_for_parent(&manager, parent_hash, anchor_hash).unwrap();
+            let state_parent = manager
+                .inner
+                .state_trie_overlays
+                .entries
+                .get(&parent_key)
+                .and_then(|entry| match entry.value() {
+                    OverlayCacheEntry::Ready(input) => Some(Arc::clone(input)),
+                    OverlayCacheEntry::Computing(_) => None,
+                })
+                .unwrap();
+            let execution_parent =
+                manager.execution_overlay_for_parent(parent_hash, anchor_hash).unwrap();
 
-        let (_, child_state) = overlay_for_parent(&manager, child_hash, anchor_hash).unwrap();
-        let child_execution =
-            manager.execution_overlay_for_parent(child_hash, anchor_hash).unwrap();
+            let (_, child_state) = overlay_for_parent(&manager, child_hash, anchor_hash).unwrap();
+            let child_execution =
+                manager.execution_overlay_for_parent(child_hash, anchor_hash).unwrap();
 
-        assert!(!manager.inner.state_trie_overlays.entries.contains_key(&parent_key));
-        assert!(!manager.inner.execution_overlays.entries.contains_key(&parent_key));
-        assert_eq!(state_parent.state.accounts.len(), 2);
-        assert_eq!(execution_parent.accounts().len(), 2);
-        assert_eq!(child_state.accounts.len(), 3);
-        assert_eq!(child_execution.accounts().len(), 3);
+            assert!(!manager.inner.state_trie_overlays.entries.contains_key(&parent_key));
+            assert!(!manager.inner.execution_overlays.entries.contains_key(&parent_key));
+            assert_eq!(state_parent.state.accounts.len(), 2);
+            assert_eq!(execution_parent.accounts().len(), 2);
+            assert_eq!(child_state.accounts.len(), 3);
+            assert_eq!(child_execution.accounts().len(), 3);
+        });
     }
 
     #[test]
     fn does_not_cache_or_take_parent_overlays_for_unmanaged_blocks() {
-        let manager = OverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks[..2] {
-            manager.insert_block(block.clone());
-        }
+        reth_tasks::executor::Runtime::new().run(|| {
+            let manager = OverlayManager::default();
+            let blocks = test_blocks();
+            for block in &blocks[..2] {
+                manager.insert_block(block.clone());
+            }
 
-        let anchor_hash = blocks[0].recovered_block().parent_hash();
-        let parent_hash = blocks[1].recovered_block().hash();
-        let child_hash = blocks[2].recovered_block().hash();
-        let parent_key = OverlayCacheKey { anchor_hash, tip_hash: parent_hash };
-        let child_key = OverlayCacheKey { anchor_hash, tip_hash: child_hash };
-        let parent_state = manager.block_state(parent_hash).unwrap();
-        let child_state = BlockState::with_parent(blocks[2].clone(), Some(Arc::new(parent_state)));
-        let cache_config = OverlayCacheConfig { precompute: false, write_to_cache: false };
+            let anchor_hash = blocks[0].recovered_block().parent_hash();
+            let parent_hash = blocks[1].recovered_block().hash();
+            let child_hash = blocks[2].recovered_block().hash();
+            let parent_key = OverlayCacheKey { anchor_hash, tip_hash: parent_hash };
+            let child_key = OverlayCacheKey { anchor_hash, tip_hash: child_hash };
+            let parent_state = manager.block_state(parent_hash).unwrap();
+            let child_state =
+                BlockState::with_parent(blocks[2].clone(), Some(Arc::new(parent_state)));
+            let cache_config = OverlayCacheConfig { precompute: false, write_to_cache: false };
 
-        overlay_for_parent(&manager, parent_hash, anchor_hash).unwrap();
-        manager.execution_overlay_for_parent(parent_hash, anchor_hash).unwrap();
+            overlay_for_parent(&manager, parent_hash, anchor_hash).unwrap();
+            manager.execution_overlay_for_parent(parent_hash, anchor_hash).unwrap();
 
-        let (_, state) =
-            manager.overlay_for_parent(&child_state, anchor_hash, cache_config).unwrap();
-        let execution = manager
-            .execution_overlay_for_block_state(&child_state, anchor_hash, cache_config)
-            .unwrap();
+            let (_, state) =
+                manager.overlay_for_parent(&child_state, anchor_hash, cache_config).unwrap();
+            let execution = manager
+                .execution_overlay_for_block_state(&child_state, anchor_hash, cache_config)
+                .unwrap();
 
-        assert_eq!(state.accounts.len(), 3);
-        assert_eq!(execution.accounts().len(), 3);
-        assert!(manager.inner.state_trie_overlays.entries.contains_key(&parent_key));
-        assert!(!manager.inner.state_trie_overlays.entries.contains_key(&child_key));
-        assert!(manager.inner.execution_overlays.entries.contains_key(&parent_key));
-        assert!(!manager.inner.execution_overlays.entries.contains_key(&child_key));
+            assert_eq!(state.accounts.len(), 3);
+            assert_eq!(execution.accounts().len(), 3);
+            assert!(manager.inner.state_trie_overlays.entries.contains_key(&parent_key));
+            assert!(!manager.inner.state_trie_overlays.entries.contains_key(&child_key));
+            assert!(manager.inner.execution_overlays.entries.contains_key(&parent_key));
+            assert!(!manager.inner.execution_overlays.entries.contains_key(&child_key));
+        });
     }
 
     #[cfg(feature = "rayon")]
     #[test]
     fn uncached_overlays_do_not_use_worker_pool() {
-        let worker_pool = Arc::new(WorkerPool::new(1, "uncached-overlay-test"));
-        let manager = OverlayManager::new(Arc::clone(&worker_pool));
-        let block = test_blocks().remove(0);
-        let anchor_hash = block.recovered_block().parent_hash();
-        let parent_state = BlockState::new(block);
-        let cache_config = OverlayCacheConfig { precompute: false, write_to_cache: false };
+        reth_tasks::executor::Runtime::new().run(|| {
+            let worker_pool = Arc::new(WorkerPool::new(1, "uncached-overlay-test"));
+            let manager = OverlayManager::new(Arc::clone(&worker_pool));
+            let block = test_blocks().remove(0);
+            let anchor_hash = block.recovered_block().parent_hash();
+            let parent_state = BlockState::new(block);
+            let cache_config = OverlayCacheConfig { precompute: false, write_to_cache: false };
 
-        let (started_tx, started_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        worker_pool.spawn(move || {
-            started_tx.send(()).unwrap();
-            release_rx.recv().unwrap();
+            let (started_tx, started_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            worker_pool.spawn(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            });
+            started_rx.recv().unwrap();
+
+            let (completed_tx, completed_rx) = mpsc::channel();
+            let task = thread::spawn(move || {
+                let execution = manager.execution_overlay_for_block_state(
+                    &parent_state,
+                    anchor_hash,
+                    cache_config,
+                );
+                let state = manager.overlay_for_parent(&parent_state, anchor_hash, cache_config);
+                completed_tx.send((execution, state)).unwrap();
+            });
+
+            let completed = completed_rx.recv_timeout(Duration::from_millis(100));
+            release_tx.send(()).unwrap();
+            task.join().unwrap();
+
+            assert!(completed.is_ok(), "uncached overlay used the worker pool");
+            let (execution, state) = completed.unwrap();
+            assert!(execution.is_ok());
+            assert!(state.is_ok());
         });
-        started_rx.recv().unwrap();
-
-        let (completed_tx, completed_rx) = mpsc::channel();
-        let task = thread::spawn(move || {
-            let execution =
-                manager.execution_overlay_for_block_state(&parent_state, anchor_hash, cache_config);
-            let state = manager.overlay_for_parent(&parent_state, anchor_hash, cache_config);
-            completed_tx.send((execution, state)).unwrap();
-        });
-
-        let completed = completed_rx.recv_timeout(Duration::from_millis(100));
-        release_tx.send(()).unwrap();
-        task.join().unwrap();
-
-        assert!(completed.is_ok(), "uncached overlay used the worker pool");
-        let (execution, state) = completed.unwrap();
-        assert!(execution.is_ok());
-        assert!(state.is_ok());
     }
 
     #[cfg(feature = "rayon")]
     #[test]
     fn precomputes_execution_overlay_for_cached_parent() {
-        let manager = OverlayManager::new(Arc::new(WorkerPool::new(1, "execution-overlay-test")));
-        let blocks = test_blocks();
-        let anchor_hash = blocks[0].recovered_block().parent_hash();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let manager =
+                OverlayManager::new(Arc::new(WorkerPool::new(1, "execution-overlay-test")));
+            let blocks = test_blocks();
+            let anchor_hash = blocks[0].recovered_block().parent_hash();
 
-        manager.insert_block(blocks[0].clone());
-        manager
-            .execution_overlay_for_parent(blocks[0].recovered_block().hash(), anchor_hash)
-            .unwrap();
+            manager.insert_block(blocks[0].clone());
+            manager
+                .execution_overlay_for_parent(blocks[0].recovered_block().hash(), anchor_hash)
+                .unwrap();
 
-        manager.insert_block(blocks[1].clone());
-        let key = OverlayCacheKey { anchor_hash, tip_hash: blocks[1].recovered_block().hash() };
-        let deadline = std::time::Instant::now() + Duration::from_secs(1);
-        while !manager
-            .inner
-            .execution_overlays
-            .entries
-            .get(&key)
-            .is_some_and(|entry| matches!(entry.value(), OverlayCacheEntry::Ready(_)))
-        {
-            assert!(std::time::Instant::now() < deadline, "execution overlay was not precomputed");
-            thread::sleep(Duration::from_millis(10));
-        }
-        assert!(!manager.inner.execution_overlays.entries.contains_key(&OverlayCacheKey {
-            anchor_hash,
-            tip_hash: blocks[0].recovered_block().hash(),
-        }));
+            manager.insert_block(blocks[1].clone());
+            let key = OverlayCacheKey { anchor_hash, tip_hash: blocks[1].recovered_block().hash() };
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while !manager
+                .inner
+                .execution_overlays
+                .entries
+                .get(&key)
+                .is_some_and(|entry| matches!(entry.value(), OverlayCacheEntry::Ready(_)))
+            {
+                assert!(Instant::now() < deadline, "execution overlay was not precomputed");
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert!(!manager.inner.execution_overlays.entries.contains_key(&OverlayCacheKey {
+                anchor_hash,
+                tip_hash: blocks[0].recovered_block().hash(),
+            }));
+        });
     }
 
     #[cfg(feature = "rayon")]
     #[test]
     fn precomputes_execution_overlay_after_anchor_advances() {
-        let manager = OverlayManager::new(Arc::new(WorkerPool::new(1, "execution-overlay-test")));
-        let blocks = test_blocks();
-        for block in &blocks {
-            manager.insert_block(block.clone());
-        }
-        let tip_hash = blocks[2].recovered_block().hash();
-        let old_anchor = blocks[0].recovered_block().parent_hash();
-        manager.execution_overlay_for_parent(tip_hash, old_anchor).unwrap();
-
-        // The state/trie frontier advances to block 1. Block 2 may already be persisted at the
-        // Finish frontier, but its execution state must remain in the overlay until trie
-        // persistence.
-        let new_anchor = blocks[0].recovered_block().hash();
-        manager.remove_blocks([new_anchor]);
-        assert!(!manager
-            .inner
-            .execution_overlays
-            .entries
-            .contains_key(&OverlayCacheKey { anchor_hash: old_anchor, tip_hash }));
-
-        manager.precompute_execution_overlay(tip_hash, new_anchor);
-
-        let key = OverlayCacheKey { anchor_hash: new_anchor, tip_hash };
-        let deadline = std::time::Instant::now() + Duration::from_secs(1);
-        let overlay = loop {
-            if let Some(overlay) = manager.inner.execution_overlays.ready(&key) {
-                break overlay
+        reth_tasks::executor::Runtime::new().run(|| {
+            let manager =
+                OverlayManager::new(Arc::new(WorkerPool::new(1, "execution-overlay-test")));
+            let blocks = test_blocks();
+            for block in &blocks {
+                manager.insert_block(block.clone());
             }
-            assert!(std::time::Instant::now() < deadline, "new anchor overlay was not precomputed");
-            thread::sleep(Duration::from_millis(10));
-        };
-        assert_eq!(
-            overlay.block_hashes(),
-            blocks[1..].iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(),
-        );
-        assert!(!overlay.accounts().contains_key(&Address::with_last_byte(1)));
-        for id in 2..=3 {
-            let address = Address::with_last_byte(id);
-            assert_eq!(overlay.accounts()[&address].as_ref().unwrap().nonce, id as u64);
-            assert_eq!(overlay.storage()[&address][&U256::from(id)], U256::from(id));
-        }
-        let cached = manager.execution_overlay_for_parent(tip_hash, new_anchor).unwrap();
-        assert!(Arc::ptr_eq(&overlay, &cached));
+            let tip_hash = blocks[2].recovered_block().hash();
+            let old_anchor = blocks[0].recovered_block().parent_hash();
+            manager.execution_overlay_for_parent(tip_hash, old_anchor).unwrap();
+
+            // The state/trie frontier advances to block 1. Block 2 may already be persisted at the
+            // Finish frontier, but its execution state must remain in the overlay until trie
+            // persistence.
+            let new_anchor = blocks[0].recovered_block().hash();
+            manager.remove_blocks([new_anchor]);
+            assert!(!manager
+                .inner
+                .execution_overlays
+                .entries
+                .contains_key(&OverlayCacheKey { anchor_hash: old_anchor, tip_hash }));
+
+            manager.precompute_execution_overlay(tip_hash, new_anchor);
+
+            let key = OverlayCacheKey { anchor_hash: new_anchor, tip_hash };
+            let deadline = Instant::now() + Duration::from_secs(1);
+            let overlay = loop {
+                if let Some(overlay) = manager.inner.execution_overlays.ready(&key) {
+                    break overlay
+                }
+                assert!(Instant::now() < deadline, "new anchor overlay was not precomputed");
+                thread::sleep(Duration::from_millis(10));
+            };
+            assert_eq!(
+                overlay.block_hashes(),
+                blocks[1..]
+                    .iter()
+                    .map(|block| block.recovered_block().num_hash())
+                    .collect::<Vec<_>>(),
+            );
+            assert!(!overlay.accounts().contains_key(&Address::with_last_byte(1)));
+            for id in 2..=3 {
+                let address = Address::with_last_byte(id);
+                assert_eq!(overlay.accounts()[&address].as_ref().unwrap().nonce, id as u64);
+                assert_eq!(overlay.storage()[&address][&U256::from(id)], U256::from(id));
+            }
+            let cached = manager.execution_overlay_for_parent(tip_hash, new_anchor).unwrap();
+            assert!(Arc::ptr_eq(&overlay, &cached));
+        });
     }
 
     #[cfg(feature = "rayon")]
     #[test]
     fn execution_overlay_precompute_does_not_wait_for_pending_entry() {
-        let worker_pool = Arc::new(WorkerPool::new(1, "execution-overlay-pending-test"));
-        let manager = OverlayManager::new(Arc::clone(&worker_pool));
-        let block = test_blocks().remove(0);
-        let anchor_hash = block.recovered_block().parent_hash();
-        let tip_hash = block.recovered_block().hash();
-        manager.insert_block(block);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let worker_pool = Arc::new(WorkerPool::new(1, "execution-overlay-pending-test"));
+            let manager = OverlayManager::new(Arc::clone(&worker_pool));
+            let block = test_blocks().remove(0);
+            let anchor_hash = block.recovered_block().parent_hash();
+            let tip_hash = block.recovered_block().hash();
+            manager.insert_block(block);
 
-        let waiter = Arc::new(OverlayWaiter::new());
-        manager.inner.execution_overlays.entries.insert(
-            OverlayCacheKey { anchor_hash, tip_hash },
-            OverlayCacheEntry::Computing(Arc::clone(&waiter)),
-        );
+            let waiter = Arc::new(OverlayWaiter::new());
+            manager.inner.execution_overlays.entries.insert(
+                OverlayCacheKey { anchor_hash, tip_hash },
+                OverlayCacheEntry::Computing(Arc::clone(&waiter)),
+            );
 
-        let (tx, rx) = mpsc::channel();
-        worker_pool.spawn(move || {
-            manager.precompute_execution_overlay_for_parent(tip_hash, anchor_hash).unwrap();
-            tx.send(()).unwrap();
+            let (tx, rx) = mpsc::channel();
+            worker_pool.spawn(move || {
+                manager.precompute_execution_overlay_for_parent(tip_hash, anchor_hash).unwrap();
+                tx.send(()).unwrap();
+            });
+
+            let completed = rx.recv_timeout(Duration::from_millis(100));
+            waiter.finish(Arc::new(ExecutionOverlay::default()));
+            assert!(completed.is_ok(), "execution overlay precompute waited for pending entry");
         });
-
-        let completed = rx.recv_timeout(Duration::from_millis(100));
-        waiter.finish(Arc::new(ExecutionOverlay::default()));
-        assert!(completed.is_ok(), "execution overlay precompute waited for pending entry");
     }
 
     #[test]
     fn contains_hash_detects_hashes_from_anchor_to_parent() {
-        let manager = OverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks {
-            manager.insert_block(block.clone());
-        }
+        reth_tasks::executor::Runtime::new().run(|| {
+            let manager = OverlayManager::default();
+            let blocks = test_blocks();
+            for block in &blocks {
+                manager.insert_block(block.clone());
+            }
 
-        let anchor_hash = blocks[0].recovered_block().parent_hash();
-        let parent_hash = blocks[2].recovered_block().hash();
+            let anchor_hash = blocks[0].recovered_block().parent_hash();
+            let parent_hash = blocks[2].recovered_block().hash();
 
-        assert!(manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
-        for block in &blocks {
-            assert!(manager.contains_hash(
-                parent_hash,
-                anchor_hash,
-                block.recovered_block().hash()
-            ));
-        }
-        assert!(!manager.contains_hash(parent_hash, anchor_hash, B256::random()));
+            assert!(manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
+            for block in &blocks {
+                assert!(manager.contains_hash(
+                    parent_hash,
+                    anchor_hash,
+                    block.recovered_block().hash()
+                ));
+            }
+            assert!(!manager.contains_hash(parent_hash, anchor_hash, B256::with_last_byte(254)));
+        });
     }
 
     #[test]
     fn contains_hash_rejects_hash_before_anchor() {
-        let manager = OverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks {
-            manager.insert_block(block.clone());
-        }
+        reth_tasks::executor::Runtime::new().run(|| {
+            let manager = OverlayManager::default();
+            let blocks = test_blocks();
+            for block in &blocks {
+                manager.insert_block(block.clone());
+            }
 
-        let parent_hash = blocks[2].recovered_block().hash();
-        let anchor_hash = blocks[1].recovered_block().hash();
-        let before_anchor_hash = blocks[0].recovered_block().hash();
+            let parent_hash = blocks[2].recovered_block().hash();
+            let anchor_hash = blocks[1].recovered_block().hash();
+            let before_anchor_hash = blocks[0].recovered_block().hash();
 
-        assert!(manager.contains_hash(parent_hash, anchor_hash, parent_hash));
-        assert!(manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
-        assert!(!manager.contains_hash(parent_hash, anchor_hash, before_anchor_hash));
+            assert!(manager.contains_hash(parent_hash, anchor_hash, parent_hash));
+            assert!(manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
+            assert!(!manager.contains_hash(parent_hash, anchor_hash, before_anchor_hash));
+        });
     }
 
     #[test]
     fn contains_hash_rejects_unknown_anchor() {
-        let manager = OverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks {
-            manager.insert_block(block.clone());
-        }
+        reth_tasks::executor::Runtime::new().run(|| {
+            let manager = OverlayManager::default();
+            let blocks = test_blocks();
+            for block in &blocks {
+                manager.insert_block(block.clone());
+            }
 
-        let parent_hash = blocks[2].recovered_block().hash();
-        let anchor_hash = B256::random();
+            let parent_hash = blocks[2].recovered_block().hash();
+            let anchor_hash = B256::with_last_byte(255);
 
-        assert!(!manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
+            assert!(!manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
+        });
     }
 
     #[test]
     fn required_lookup_waits_for_in_progress_overlay() {
-        let manager = OverlayManager::<EthPrimitives>::default();
-        let block = test_blocks().remove(0);
-        let parent_state = BlockState::new(block);
-        let key = OverlayCacheKey {
-            anchor_hash: parent_state.block_ref().recovered_block().parent_hash(),
-            tip_hash: parent_state.hash(),
-        };
-        let waiter = Arc::new(OverlayWaiter::new());
-        manager
-            .inner
-            .state_trie_overlays
-            .entries
-            .insert(key, OverlayCacheEntry::Computing(Arc::clone(&waiter)));
+        reth_tasks::executor::Runtime::new().run(|| {
+            let manager = OverlayManager::<EthPrimitives>::default();
+            let block = test_blocks().remove(0);
+            let parent_state = BlockState::new(block);
+            let key = OverlayCacheKey {
+                anchor_hash: parent_state.block_ref().recovered_block().parent_hash(),
+                tip_hash: parent_state.hash(),
+            };
+            let waiter = Arc::new(OverlayWaiter::new());
+            manager
+                .inner
+                .state_trie_overlays
+                .entries
+                .insert(key, OverlayCacheEntry::Computing(Arc::clone(&waiter)));
 
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
-            let res = manager
-                .overlay_for_parent(&parent_state, key.anchor_hash, OverlayCacheConfig::default())
-                .map(|(_, state)| state);
-            tx.send(res).unwrap();
+            let (tx, rx) = mpsc::channel();
+            thread::spawn(move || {
+                let res = manager
+                    .overlay_for_parent(
+                        &parent_state,
+                        key.anchor_hash,
+                        OverlayCacheConfig::default(),
+                    )
+                    .map(|(_, state)| state);
+                tx.send(res).unwrap();
+            });
+
+            assert!(matches!(
+                rx.recv_timeout(Duration::from_millis(50)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ));
+
+            waiter.finish(Arc::new(TrieInputSorted::default()));
+
+            let state = rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
+            assert!(state.is_empty());
         });
-
-        assert!(matches!(
-            rx.recv_timeout(Duration::from_millis(50)),
-            Err(mpsc::RecvTimeoutError::Timeout)
-        ));
-
-        waiter.finish(Arc::new(TrieInputSorted::default()));
-
-        let state = rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
-        assert!(state.is_empty());
     }
 
     #[test]
     fn prunes_cached_overlays_after_removing_blocks() {
-        let manager = OverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks {
-            manager.insert_block(block.clone());
-        }
+        reth_tasks::executor::Runtime::new().run(|| {
+            let manager = OverlayManager::default();
+            let blocks = test_blocks();
+            for block in &blocks {
+                manager.insert_block(block.clone());
+            }
 
-        let original_anchor = blocks[0].recovered_block().parent_hash();
-        overlay_for_parent(&manager, blocks[2].recovered_block().hash(), original_anchor).unwrap();
-        manager
-            .execution_overlay_for_parent(blocks[2].recovered_block().hash(), original_anchor)
-            .unwrap();
+            let original_anchor = blocks[0].recovered_block().parent_hash();
+            overlay_for_parent(&manager, blocks[2].recovered_block().hash(), original_anchor)
+                .unwrap();
+            manager
+                .execution_overlay_for_parent(blocks[2].recovered_block().hash(), original_anchor)
+                .unwrap();
 
-        manager.remove_blocks([
-            blocks[0].recovered_block().hash(),
-            blocks[1].recovered_block().hash(),
-        ]);
+            manager.remove_blocks([
+                blocks[0].recovered_block().hash(),
+                blocks[1].recovered_block().hash(),
+            ]);
 
-        let anchor_hash = blocks[1].recovered_block().hash();
-        assert!(overlay_for_parent(&manager, blocks[2].recovered_block().hash(), original_anchor)
+            let anchor_hash = blocks[1].recovered_block().hash();
+            assert!(overlay_for_parent(
+                &manager,
+                blocks[2].recovered_block().hash(),
+                original_anchor
+            )
             .is_err());
-        assert!(manager
-            .execution_overlay_for_parent(blocks[2].recovered_block().hash(), original_anchor)
-            .is_err());
+            assert!(manager
+                .execution_overlay_for_parent(blocks[2].recovered_block().hash(), original_anchor)
+                .is_err());
 
-        let (_, state) =
-            overlay_for_parent(&manager, blocks[2].recovered_block().hash(), anchor_hash).unwrap();
-        assert_eq!(state.accounts.len(), 1);
-        let execution = manager
-            .execution_overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
-            .unwrap();
-        assert_eq!(execution.accounts().len(), 1);
+            let (_, state) =
+                overlay_for_parent(&manager, blocks[2].recovered_block().hash(), anchor_hash)
+                    .unwrap();
+            assert_eq!(state.accounts.len(), 1);
+            let execution = manager
+                .execution_overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
+                .unwrap();
+            assert_eq!(execution.accounts().len(), 1);
+        });
     }
 }

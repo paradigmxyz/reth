@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives-traits = { workspace = true, features = ["std"] }
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-provider.workspace = true
@@ -28,7 +27,6 @@ tracing.workspace = true
 
 # misc
 thiserror.workspace = true
-crossbeam-channel.workspace = true
 crossbeam-utils.workspace = true
 
 # `metrics` feature
@@ -52,6 +50,13 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 rand.workspace = true
 
 [features]
+fuzz = [
+    "reth-metrics?/fuzz",
+    "reth-trie/fuzz",
+    "reth-tasks/fuzz",
+    "reth-provider/fuzz",
+    "reth-storage-overlay/fuzz",
+]
 default = ["metrics"]
 metrics = ["reth-metrics", "dep:metrics"]
 trie-debug = [

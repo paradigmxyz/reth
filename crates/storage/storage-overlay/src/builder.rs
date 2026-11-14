@@ -31,6 +31,9 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument};
 
+#[cfg(feature = "rayon")]
+use reth_tasks::executor::rayon;
+
 /// Contains the trie and hashed-state data required to initialize an overlay state provider.
 #[derive(Debug, Clone)]
 pub struct StateTrieOverlay {
@@ -901,7 +904,7 @@ mod tests {
     }
 
     fn test_blocks() -> Vec<ExecutedBlock<EthPrimitives>> {
-        TestBlockBuilder::eth()
+        TestBlockBuilder::seeded(42)
             .get_executed_blocks(0..5)
             .enumerate()
             .map(|(index, block)| with_unique_trie_data(&block, index as u8 + 1))
@@ -959,516 +962,564 @@ mod tests {
 
     #[test]
     fn execution_overlay_extends_bundle_state() {
-        let address = Address::with_last_byte(1);
-        let no_storage = Address::with_last_byte(2);
-        let slot = U256::from(2);
-        let value = U256::from(3);
-        let code = Bytecode::new_raw(vec![0x60, 0x00].into());
-        let code_hash = code.hash_slow();
-        let account = AccountInfo::new(U256::from(5), 4, code_hash, Some(code.clone()));
-        let state = BundleState::builder(0..=0)
-            .state_present_account_info(address, account.clone())
-            .state_present_account_info(no_storage, AccountInfo::default())
-            .state_storage(address, HashMap::from_iter([(slot, (U256::ZERO, value))]))
-            .contract(code_hash, code.clone())
-            .build();
-        let mut overlay = ExecutionOverlay::default();
-        overlay.extend_state(&state);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let address = Address::with_last_byte(1);
+            let no_storage = Address::with_last_byte(2);
+            let slot = U256::from(2);
+            let value = U256::from(3);
+            let code = Bytecode::new_raw(vec![0x60, 0x00].into());
+            let code_hash = code.hash_slow();
+            let account = AccountInfo::new(U256::from(5), 4, code_hash, Some(code.clone()));
+            let state = BundleState::builder(0..=0)
+                .state_present_account_info(address, account.clone())
+                .state_present_account_info(no_storage, AccountInfo::default())
+                .state_storage(address, HashMap::from_iter([(slot, (U256::ZERO, value))]))
+                .contract(code_hash, code.clone())
+                .build();
+            let mut overlay = ExecutionOverlay::default();
+            overlay.extend_state(&state);
 
-        let stored_account = overlay.accounts[&address].as_ref().unwrap();
-        assert_eq!(stored_account, &account);
-        assert_eq!(stored_account.code, Some(code.clone()));
-        assert_eq!(overlay.storage[&address][&slot], value);
-        assert!(!overlay.storage.contains_key(&no_storage));
-        assert_eq!(overlay.storage_value(no_storage, slot), None);
-        assert_eq!(overlay.code_hashes[&code_hash], code);
+            let stored_account = overlay.accounts[&address].as_ref().unwrap();
+            assert_eq!(stored_account, &account);
+            assert_eq!(stored_account.code, Some(code.clone()));
+            assert_eq!(overlay.storage[&address][&slot], value);
+            assert!(!overlay.storage.contains_key(&no_storage));
+            assert_eq!(overlay.storage_value(no_storage, slot), None);
+            assert_eq!(overlay.code_hashes[&code_hash], code);
+        });
     }
 
     #[test]
     fn execution_overlay_zeroes_unobserved_storage_for_destroyed_accounts() {
-        let address = Address::with_last_byte(1);
-        let mut state = BundleState::default();
-        state.state.insert(
-            address,
-            BundleAccount::new(
-                Some(AccountInfo::default()),
-                None,
-                Default::default(),
-                AccountStatus::Destroyed,
-            ),
-        );
+        reth_tasks::executor::Runtime::new().run(|| {
+            let address = Address::with_last_byte(1);
+            let mut state = BundleState::default();
+            state.state.insert(
+                address,
+                BundleAccount::new(
+                    Some(AccountInfo::default()),
+                    None,
+                    Default::default(),
+                    AccountStatus::Destroyed,
+                ),
+            );
 
-        let mut overlay = ExecutionOverlay::default();
-        overlay.storage.entry(address).or_default().insert(U256::ZERO, U256::from(1));
-        overlay.extend_state(&state);
+            let mut overlay = ExecutionOverlay::default();
+            overlay.storage.entry(address).or_default().insert(U256::ZERO, U256::from(1));
+            overlay.extend_state(&state);
 
-        assert!(!overlay.storage.contains_key(&address));
-        assert_eq!(overlay.storage_value(address, U256::ZERO), Some(U256::ZERO));
+            assert!(!overlay.storage.contains_key(&address));
+            assert_eq!(overlay.storage_value(address, U256::ZERO), Some(U256::ZERO));
+        });
     }
 
     #[test]
     fn execution_overlay_storage_changes_preserve_account_fallback() {
-        let address = Address::with_last_byte(1);
-        let info = AccountInfo::default().with_balance(U256::from(5));
-        let state = BundleState::builder(0..=0)
-            .state_original_account_info(address, info.clone())
-            .state_present_account_info(address, info.clone())
-            .state_storage(address, HashMap::from_iter([(U256::ZERO, (U256::ZERO, U256::from(1)))]))
-            .build();
-        let mut overlay = ExecutionOverlay::default();
-        overlay.extend_state(&state);
-        assert!(!overlay.accounts.contains_key(&address));
-        assert_eq!(overlay.storage_value(address, U256::ZERO), Some(U256::from(1)));
+        reth_tasks::executor::Runtime::new().run(|| {
+            let address = Address::with_last_byte(1);
+            let info = AccountInfo::default().with_balance(U256::from(5));
+            let state = BundleState::builder(0..=0)
+                .state_original_account_info(address, info.clone())
+                .state_present_account_info(address, info.clone())
+                .state_storage(
+                    address,
+                    HashMap::from_iter([(U256::ZERO, (U256::ZERO, U256::from(1)))]),
+                )
+                .build();
+            let mut overlay = ExecutionOverlay::default();
+            overlay.extend_state(&state);
+            assert!(!overlay.accounts.contains_key(&address));
+            assert_eq!(overlay.storage_value(address, U256::ZERO), Some(U256::from(1)));
 
-        overlay.accounts.insert(address, Some(info.clone()));
-        overlay.extend_state(&state);
-        assert_eq!(overlay.accounts[&address], Some(info));
+            overlay.accounts.insert(address, Some(info.clone()));
+            overlay.extend_state(&state);
+            assert_eq!(overlay.accounts[&address], Some(info));
+        });
     }
 
     #[test]
     fn overlay_builder_for_state_matches_hash_lookup() {
-        // The state trie frontier sits at block 1 while Finish is at block 3, so the in-memory
-        // chain straddles the state-masking frontier.
-        let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
-        for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
-        }
-        let canonical = canonical_in_memory_state(&blocks[2..=4]);
-        let provider = factory.provider().unwrap();
+        reth_tasks::executor::Runtime::new().run(|| {
+            // The state trie frontier sits at block 1 while Finish is at block 3, so the in-memory
+            // chain straddles the state-masking frontier.
+            let (factory, blocks) = setup_frontiers(1, 3);
+            let manager = OverlayManager::default();
+            for block in &blocks[2..=4] {
+                manager.insert_block(block.clone());
+            }
+            let canonical = canonical_in_memory_state(&blocks[2..=4]);
+            let provider = factory.provider().unwrap();
 
-        // The head, a block below the head, and the oldest in-memory block, whose chain no longer
-        // covers the Finish frontier and therefore anchors below it.
-        for index in [4usize, 3, 2] {
-            let hash = blocks[index].recovered_block().hash();
-            let state = canonical.state_by_hash(hash).expect("canonical state for in-memory block");
-            assert_eq!(state.hash(), hash);
+            // The head, a block below the head, and the oldest in-memory block, whose chain no
+            // longer covers the Finish frontier and therefore anchors below it.
+            for index in [4usize, 3, 2] {
+                let hash = blocks[index].recovered_block().hash();
+                let state =
+                    canonical.state_by_hash(hash).expect("canonical state for in-memory block");
+                assert_eq!(state.hash(), hash);
 
-            let from_hash = manager.overlay_builder(hash);
-            let from_state = manager.overlay_builder_for_state(state);
+                let from_hash = manager.overlay_builder(hash);
+                let from_state = manager.overlay_builder_for_state(state);
 
-            let anchor = anchor_num_hash(&from_hash.anchor_at_parent(&provider).unwrap());
-            assert_eq!(
-                anchor_num_hash(&from_state.anchor_at_parent(&provider).unwrap()),
-                anchor,
-                "block {index} must resolve the same anchor from both builders"
-            );
+                let anchor = anchor_num_hash(&from_hash.anchor_at_parent(&provider).unwrap());
+                assert_eq!(
+                    anchor_num_hash(&from_state.anchor_at_parent(&provider).unwrap()),
+                    anchor,
+                    "block {index} must resolve the same anchor from both builders"
+                );
 
-            let (hash_overlay, hash_fallback) = from_hash.execution_overlay(&provider).unwrap();
-            let (state_overlay, state_fallback) = from_state.execution_overlay(&provider).unwrap();
-            assert_eq!(state_fallback, hash_fallback);
-            assert!(
-                Arc::ptr_eq(&hash_overlay, &state_overlay),
-                "block {index} must resolve the cached execution overlay"
-            );
+                let (hash_overlay, hash_fallback) = from_hash.execution_overlay(&provider).unwrap();
+                let (state_overlay, state_fallback) =
+                    from_state.execution_overlay(&provider).unwrap();
+                assert_eq!(state_fallback, hash_fallback);
+                assert!(
+                    Arc::ptr_eq(&hash_overlay, &state_overlay),
+                    "block {index} must resolve the cached execution overlay"
+                );
 
-            let (hash_nodes, hash_state) =
-                from_hash.resolve_state_trie_overlays(anchor.hash).unwrap();
-            let (state_nodes, state_state) =
-                from_state.resolve_state_trie_overlays(anchor.hash).unwrap();
-            assert!(
-                Arc::ptr_eq(&hash_nodes, &state_nodes),
-                "block {index} must resolve the cached trie overlay nodes"
-            );
-            assert!(
-                Arc::ptr_eq(&hash_state, &state_state),
-                "block {index} must resolve the cached trie overlay state"
-            );
+                let (hash_nodes, hash_state) =
+                    from_hash.resolve_state_trie_overlays(anchor.hash).unwrap();
+                let (state_nodes, state_state) =
+                    from_state.resolve_state_trie_overlays(anchor.hash).unwrap();
+                assert!(
+                    Arc::ptr_eq(&hash_nodes, &state_nodes),
+                    "block {index} must resolve the cached trie overlay nodes"
+                );
+                assert!(
+                    Arc::ptr_eq(&hash_state, &state_state),
+                    "block {index} must resolve the cached trie overlay state"
+                );
 
-            // The fully built overlay folds in database reverts for anchors below Finish, so
-            // compare it by value rather than by pointer.
-            let hash_trie = from_hash.build_state_trie_overlay(&provider, false).unwrap();
-            let state_trie = from_state.build_state_trie_overlay(&provider, false).unwrap();
-            assert_eq!(account_keys(&state_trie), account_keys(&hash_trie), "block {index}");
-            assert_eq!(
-                account_node_paths(&state_trie),
-                account_node_paths(&hash_trie),
-                "block {index}"
-            );
-        }
+                // The fully built overlay folds in database reverts for anchors below Finish, so
+                // compare it by value rather than by pointer.
+                let hash_trie = from_hash.build_state_trie_overlay(&provider, false).unwrap();
+                let state_trie = from_state.build_state_trie_overlay(&provider, false).unwrap();
+                assert_eq!(account_keys(&state_trie), account_keys(&hash_trie), "block {index}");
+                assert_eq!(
+                    account_node_paths(&state_trie),
+                    account_node_paths(&hash_trie),
+                    "block {index}"
+                );
+            }
+        });
     }
 
     #[test]
     fn managed_overlay_starts_at_state_trie_frontier() {
-        let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
-        for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
-        }
-        let provider = factory.provider().unwrap();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (factory, blocks) = setup_frontiers(1, 3);
+            let manager = OverlayManager::default();
+            for block in &blocks[2..=4] {
+                manager.insert_block(block.clone());
+            }
+            let provider = factory.provider().unwrap();
 
-        for (parent_index, expected_ids) in [(3, vec![3, 4]), (4, vec![3, 4, 5])] {
-            let overlay = manager
-                .overlay_builder(blocks[parent_index].recovered_block().hash())
-                .build_state_trie_overlay(&provider, true)
-                .unwrap();
+            for (parent_index, expected_ids) in [(3, vec![3, 4]), (4, vec![3, 4, 5])] {
+                let overlay = manager
+                    .overlay_builder(blocks[parent_index].recovered_block().hash())
+                    .build_state_trie_overlay(&provider, true)
+                    .unwrap();
 
-            assert_eq!(
-                account_keys(&overlay),
-                expected_ids.iter().copied().map(B256::with_last_byte).collect::<Vec<_>>()
-            );
-            assert_eq!(
-                account_node_paths(&overlay),
-                expected_ids
-                    .iter()
-                    .copied()
-                    .map(|id| Nibbles::from_nibbles([id]))
-                    .collect::<Vec<_>>()
-            );
-        }
+                assert_eq!(
+                    account_keys(&overlay),
+                    expected_ids.iter().copied().map(B256::with_last_byte).collect::<Vec<_>>()
+                );
+                assert_eq!(
+                    account_node_paths(&overlay),
+                    expected_ids
+                        .iter()
+                        .copied()
+                        .map(|id| Nibbles::from_nibbles([id]))
+                        .collect::<Vec<_>>()
+                );
+            }
+        });
     }
 
     #[test]
     fn managed_overlay_skips_when_finish_is_the_anchor() {
-        let (factory, blocks) = setup_frontiers(3, 3);
-        let manager = OverlayManager::default();
-        manager.insert_block(blocks[4].clone());
-        let provider = factory.provider().unwrap();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (factory, blocks) = setup_frontiers(3, 3);
+            let manager = OverlayManager::default();
+            manager.insert_block(blocks[4].clone());
+            let provider = factory.provider().unwrap();
 
-        let overlay = manager
-            .overlay_builder(blocks[4].recovered_block().hash())
-            .with_skip_overlay_for_reused_sparse_trie(blocks[3].recovered_block().hash())
-            .build_state_trie_overlay(&provider, true)
-            .unwrap();
+            let overlay = manager
+                .overlay_builder(blocks[4].recovered_block().hash())
+                .with_skip_overlay_for_reused_sparse_trie(blocks[3].recovered_block().hash())
+                .build_state_trie_overlay(&provider, true)
+                .unwrap();
 
-        assert!(overlay.input().state.is_empty());
-        assert!(overlay.input().nodes.is_empty());
+            assert!(overlay.input().state.is_empty());
+            assert!(overlay.input().nodes.is_empty());
+        });
     }
 
     #[test]
     fn no_reverts_errors_when_reverts_are_required() {
-        let (factory, blocks) = setup_frontiers(2, 3);
-        let provider = factory.provider().unwrap();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (factory, blocks) = setup_frontiers(2, 3);
+            let provider = factory.provider().unwrap();
 
-        let builder = OverlayManager::<EthPrimitives>::default()
-            .overlay_builder(blocks[1].recovered_block().hash())
-            .with_no_reverts();
-        let error = builder.build_state_trie_overlay(&provider, true).unwrap_err();
+            let builder = OverlayManager::<EthPrimitives>::default()
+                .overlay_builder(blocks[1].recovered_block().hash())
+                .with_no_reverts();
+            let error = builder.build_state_trie_overlay(&provider, true).unwrap_err();
 
-        assert!(error.to_string().contains("reverts are disabled"));
+            assert!(error.to_string().contains("reverts are disabled"));
+        });
     }
 
     #[test]
     fn appended_overlay_rejects_noncanonical_anchor_when_reverts_are_required() {
-        let (factory, blocks) = setup_frontiers(1, 3);
-        let provider = factory.provider().unwrap();
-        let parent_hash = B256::with_last_byte(100);
-        assert_ne!(parent_hash, blocks[1].recovered_block().hash());
-        let block = TestBlockBuilder::eth()
-            .get_executed_block_with_number(blocks[2].block_number(), parent_hash);
-        let builder =
-            OverlayManager::default().overlay_builder(parent_hash).with_appended_block(block);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (factory, blocks) = setup_frontiers(1, 3);
+            let provider = factory.provider().unwrap();
+            let parent_hash = B256::with_last_byte(100);
+            assert_ne!(parent_hash, blocks[1].recovered_block().hash());
+            let block = TestBlockBuilder::seeded(42)
+                .get_executed_block_with_number(blocks[2].block_number(), parent_hash);
+            let builder =
+                OverlayManager::default().overlay_builder(parent_hash).with_appended_block(block);
 
-        assert!(matches!(
-            builder.execution_overlay(&provider),
-            Err(ProviderError::BlockHashNotFound(hash)) if hash == parent_hash
-        ));
-        assert!(matches!(
-            builder.build_state_trie_overlay(&provider, true),
-            Err(ProviderError::BlockHashNotFound(hash)) if hash == parent_hash
-        ));
+            assert!(matches!(
+                builder.execution_overlay(&provider),
+                Err(ProviderError::BlockHashNotFound(hash)) if hash == parent_hash
+            ));
+            assert!(matches!(
+                builder.build_state_trie_overlay(&provider, true),
+                Err(ProviderError::BlockHashNotFound(hash)) if hash == parent_hash
+            ));
+        });
     }
 
     #[test]
     fn state_trie_overlay_invalidates_reverts_and_fork_without_trie_changesets() {
-        let (factory, blocks) = setup_frontiers(3, 3);
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw
-            .tx_ref()
-            .put::<tables::AccountChangeSets>(
-                3,
-                AccountBeforeTx {
-                    address: Address::with_last_byte(1),
-                    info: Some(Account::default()),
-                },
-            )
-            .unwrap();
-        provider_rw.commit().unwrap();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (factory, blocks) = setup_frontiers(3, 3);
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw
+                .tx_ref()
+                .put::<tables::AccountChangeSets>(
+                    3,
+                    AccountBeforeTx {
+                        address: Address::with_last_byte(1),
+                        info: Some(Account::default()),
+                    },
+                )
+                .unwrap();
+            provider_rw.commit().unwrap();
 
-        // The fork changes keys distinct from those reverted on disk.
-        let fork = TestBlockBuilder::eth()
-            .get_executed_block_with_number(2, blocks[1].recovered_block().hash());
-        let fork = with_unique_trie_data(&fork, 2);
-        let provider = factory.provider().unwrap();
-        let overlay = OverlayManager::<EthPrimitives>::default()
-            .overlay_builder(blocks[1].recovered_block().hash())
-            .with_appended_block(fork)
-            .build_state_trie_overlay(&provider, false)
-            .unwrap();
+            // The fork changes keys distinct from those reverted on disk.
+            let fork = TestBlockBuilder::seeded(42)
+                .get_executed_block_with_number(2, blocks[1].recovered_block().hash());
+            let fork = with_unique_trie_data(&fork, 2);
+            let provider = factory.provider().unwrap();
+            let overlay = OverlayManager::<EthPrimitives>::default()
+                .overlay_builder(blocks[1].recovered_block().hash())
+                .with_appended_block(fork)
+                .build_state_trie_overlay(&provider, false)
+                .unwrap();
 
-        // The fork's trie nodes are relative to the anchor, not to the Finish trie on disk.
-        assert!(account_node_paths(&overlay).is_empty());
+            // The fork's trie nodes are relative to the anchor, not to the Finish trie on disk.
+            assert!(account_node_paths(&overlay).is_empty());
 
-        let mut prefix_sets = overlay.input().prefix_sets.clone().freeze();
-        assert!(prefix_sets
-            .account_prefix_set
-            .contains(&Nibbles::unpack(keccak256(Address::with_last_byte(1)))));
-        assert!(prefix_sets.account_prefix_set.contains(&Nibbles::unpack(B256::with_last_byte(2))));
-        assert!(prefix_sets
-            .storage_prefix_sets
-            .get_mut(&B256::with_last_byte(2))
-            .unwrap()
-            .contains(&Nibbles::unpack(B256::with_last_byte(34))));
+            let mut prefix_sets = overlay.input().prefix_sets.clone().freeze();
+            assert!(prefix_sets
+                .account_prefix_set
+                .contains(&Nibbles::unpack(keccak256(Address::with_last_byte(1)))));
+            assert!(prefix_sets
+                .account_prefix_set
+                .contains(&Nibbles::unpack(B256::with_last_byte(2))));
+            assert!(prefix_sets
+                .storage_prefix_sets
+                .get_mut(&B256::with_last_byte(2))
+                .unwrap()
+                .contains(&Nibbles::unpack(B256::with_last_byte(34))));
+        });
     }
 
     #[test]
     fn execution_overlay_marks_historical_fallback() {
-        let (factory, blocks) = setup_frontiers(1, 3);
-        let provider_rw = factory.provider_rw().unwrap();
-        let address = Address::with_last_byte(1);
-        let slot = U256::from(5);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (factory, blocks) = setup_frontiers(1, 3);
+            let provider_rw = factory.provider_rw().unwrap();
+            let address = Address::with_last_byte(1);
+            let slot = U256::from(5);
 
-        provider_rw
-            .tx_ref()
-            .put::<tables::AccountChangeSets>(
-                2,
-                AccountBeforeTx {
-                    address,
-                    info: Some(Account { balance: U256::from(10), ..Default::default() }),
-                },
-            )
-            .unwrap();
-        provider_rw
-            .tx_ref()
-            .put::<tables::AccountChangeSets>(
-                3,
-                AccountBeforeTx {
-                    address,
-                    info: Some(Account { balance: U256::from(20), ..Default::default() }),
-                },
-            )
-            .unwrap();
-        for (block_number, value) in [(2, 10), (3, 15)] {
-            provider_rw
-                .tx_ref()
-                .put::<tables::StorageChangeSets>(
-                    BlockNumberAddress((block_number, address)),
-                    StorageEntry { key: B256::from(slot), value: U256::from(value) },
-                )
-                .unwrap();
-        }
-        provider_rw.commit().unwrap();
-
-        let provider = factory.provider().unwrap();
-        let (overlay, fallback_block_number) = OverlayManager::<EthPrimitives>::default()
-            .overlay_builder(blocks[1].recovered_block().hash())
-            .execution_overlay(&provider)
-            .unwrap();
-
-        assert_eq!(fallback_block_number, Some(2));
-        assert!(overlay.accounts.is_empty());
-        assert!(overlay.storage.is_empty());
-        assert!(overlay.code_hashes.is_empty());
-    }
-
-    #[test]
-    fn execution_overlay_uses_managed_blocks_after_the_anchor() {
-        let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
-        for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
-        }
-        let provider = factory.provider().unwrap();
-
-        let (overlay, fallback_block_number) = manager
-            .overlay_builder(blocks[3].recovered_block().hash())
-            .execution_overlay(&provider)
-            .unwrap();
-
-        assert_eq!(fallback_block_number, None);
-
-        for id in [3, 4] {
-            let address = Address::with_last_byte(id);
-            let slot = U256::from(id);
-            assert_eq!(overlay.accounts[&address].as_ref().unwrap().balance, U256::from(id));
-            assert_eq!(overlay.storage[&address][&slot], U256::from(id));
-            assert!(overlay.code_hashes.contains_key(&B256::with_last_byte(id + 64)));
-        }
-        assert_eq!(
-            overlay.block_hashes,
-            blocks[2..=3]
-                .iter()
-                .map(|block| block.recovered_block().num_hash())
-                .collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn execution_overlay_marks_historical_fallback_for_managed_fork() {
-        let (factory, blocks) = setup_frontiers(1, 3);
-        let address = Address::with_last_byte(1);
-        let slot = U256::ONE;
-        let provider_rw = factory.provider_rw().unwrap();
-        for (block_number, balance, storage_value) in [(2u64, 10u64, 10u64), (3u64, 20u64, 15u64)] {
             provider_rw
                 .tx_ref()
                 .put::<tables::AccountChangeSets>(
-                    block_number,
+                    2,
                     AccountBeforeTx {
                         address,
-                        info: Some(Account { balance: U256::from(balance), ..Default::default() }),
+                        info: Some(Account { balance: U256::from(10), ..Default::default() }),
                     },
                 )
                 .unwrap();
             provider_rw
                 .tx_ref()
-                .put::<tables::StorageChangeSets>(
-                    BlockNumberAddress((block_number, address)),
-                    StorageEntry { key: B256::from(slot), value: U256::from(storage_value) },
+                .put::<tables::AccountChangeSets>(
+                    3,
+                    AccountBeforeTx {
+                        address,
+                        info: Some(Account { balance: U256::from(20), ..Default::default() }),
+                    },
                 )
                 .unwrap();
-        }
-        provider_rw.commit().unwrap();
+            for (block_number, value) in [(2, 10), (3, 15)] {
+                provider_rw
+                    .tx_ref()
+                    .put::<tables::StorageChangeSets>(
+                        BlockNumberAddress((block_number, address)),
+                        StorageEntry { key: B256::from(slot), value: U256::from(value) },
+                    )
+                    .unwrap();
+            }
+            provider_rw.commit().unwrap();
 
-        let mut side_chain_builder = TestBlockBuilder::eth();
-        let side_block_two = side_chain_builder.get_executed_block_with_number(
-            blocks[2].block_number(),
-            blocks[1].recovered_block().hash(),
-        );
-        let side_block_two = with_unique_trie_data(&side_block_two, 1);
-        let side_block_three = side_chain_builder.get_executed_block_with_number(
-            blocks[3].block_number(),
-            side_block_two.recovered_block().hash(),
-        );
-        let side_block_three = with_unique_trie_data(&side_block_three, 1);
-        assert_ne!(
-            side_block_three.recovered_block().hash(),
-            blocks[3].recovered_block().hash(),
-            "the managed chain must not contain the durable Finish block"
-        );
+            let provider = factory.provider().unwrap();
+            let (overlay, fallback_block_number) = OverlayManager::<EthPrimitives>::default()
+                .overlay_builder(blocks[1].recovered_block().hash())
+                .execution_overlay(&provider)
+                .unwrap();
 
-        let manager = OverlayManager::default();
-        manager.insert_block(side_block_two.clone());
-        manager.insert_block(side_block_three.clone());
-        let provider = factory.provider().unwrap();
+            assert_eq!(fallback_block_number, Some(2));
+            assert!(overlay.accounts.is_empty());
+            assert!(overlay.storage.is_empty());
+            assert!(overlay.code_hashes.is_empty());
+        });
+    }
 
-        let (overlay, fallback_block_number) = manager
-            .overlay_builder(side_block_three.recovered_block().hash())
-            .execution_overlay(&provider)
-            .unwrap();
+    #[test]
+    fn execution_overlay_uses_managed_blocks_after_the_anchor() {
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (factory, blocks) = setup_frontiers(1, 3);
+            let manager = OverlayManager::default();
+            for block in &blocks[2..=4] {
+                manager.insert_block(block.clone());
+            }
+            let provider = factory.provider().unwrap();
 
-        assert_eq!(fallback_block_number, Some(2));
+            let (overlay, fallback_block_number) = manager
+                .overlay_builder(blocks[3].recovered_block().hash())
+                .execution_overlay(&provider)
+                .unwrap();
 
-        assert_eq!(overlay.accounts[&address].as_ref().unwrap().balance, U256::ONE);
-        assert_eq!(overlay.storage[&address][&slot], U256::ONE);
-        assert_eq!(
-            overlay.block_hashes,
-            [side_block_two, side_block_three]
-                .iter()
-                .map(|block| block.recovered_block().num_hash())
-                .collect::<Vec<_>>()
-        );
+            assert_eq!(fallback_block_number, None);
+
+            for id in [3, 4] {
+                let address = Address::with_last_byte(id);
+                let slot = U256::from(id);
+                assert_eq!(overlay.accounts[&address].as_ref().unwrap().balance, U256::from(id));
+                assert_eq!(overlay.storage[&address][&slot], U256::from(id));
+                assert!(overlay.code_hashes.contains_key(&B256::with_last_byte(id + 64)));
+            }
+            assert_eq!(
+                overlay.block_hashes,
+                blocks[2..=3]
+                    .iter()
+                    .map(|block| block.recovered_block().num_hash())
+                    .collect::<Vec<_>>()
+            );
+        });
+    }
+
+    #[test]
+    fn execution_overlay_marks_historical_fallback_for_managed_fork() {
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (factory, blocks) = setup_frontiers(1, 3);
+            let address = Address::with_last_byte(1);
+            let slot = U256::ONE;
+            let provider_rw = factory.provider_rw().unwrap();
+            for (block_number, balance, storage_value) in
+                [(2u64, 10u64, 10u64), (3u64, 20u64, 15u64)]
+            {
+                provider_rw
+                    .tx_ref()
+                    .put::<tables::AccountChangeSets>(
+                        block_number,
+                        AccountBeforeTx {
+                            address,
+                            info: Some(Account {
+                                balance: U256::from(balance),
+                                ..Default::default()
+                            }),
+                        },
+                    )
+                    .unwrap();
+                provider_rw
+                    .tx_ref()
+                    .put::<tables::StorageChangeSets>(
+                        BlockNumberAddress((block_number, address)),
+                        StorageEntry { key: B256::from(slot), value: U256::from(storage_value) },
+                    )
+                    .unwrap();
+            }
+            provider_rw.commit().unwrap();
+
+            let mut side_chain_builder = TestBlockBuilder::seeded(43);
+            let side_block_two = side_chain_builder.get_executed_block_with_number(
+                blocks[2].block_number(),
+                blocks[1].recovered_block().hash(),
+            );
+            let side_block_two = with_unique_trie_data(&side_block_two, 1);
+            let side_block_three = side_chain_builder.get_executed_block_with_number(
+                blocks[3].block_number(),
+                side_block_two.recovered_block().hash(),
+            );
+            let side_block_three = with_unique_trie_data(&side_block_three, 1);
+            assert_ne!(
+                side_block_three.recovered_block().hash(),
+                blocks[3].recovered_block().hash(),
+                "the managed chain must not contain the durable Finish block"
+            );
+
+            let manager = OverlayManager::default();
+            manager.insert_block(side_block_two.clone());
+            manager.insert_block(side_block_three.clone());
+            let provider = factory.provider().unwrap();
+
+            let (overlay, fallback_block_number) = manager
+                .overlay_builder(side_block_three.recovered_block().hash())
+                .execution_overlay(&provider)
+                .unwrap();
+
+            assert_eq!(fallback_block_number, Some(2));
+
+            assert_eq!(overlay.accounts[&address].as_ref().unwrap().balance, U256::ONE);
+            assert_eq!(overlay.storage[&address][&slot], U256::ONE);
+            assert_eq!(
+                overlay.block_hashes,
+                [side_block_two, side_block_three]
+                    .iter()
+                    .map(|block| block.recovered_block().num_hash())
+                    .collect::<Vec<_>>()
+            );
+        });
     }
 
     #[test]
     fn managed_overlay_uses_persisted_parent_even_if_retained() {
-        let (factory, blocks) = setup_frontiers(2, 3);
-        let manager = OverlayManager::default();
-        manager.insert_block(blocks[1].clone());
-        let provider = factory.provider().unwrap();
-        let builder = manager.overlay_builder(blocks[1].recovered_block().hash());
-        match builder.anchor_at_parent(&provider).unwrap() {
-            AnchorForParent::RevertsRequired { anchor, finish } => {
-                assert_eq!(anchor, blocks[1].recovered_block().num_hash());
-                assert_eq!(finish, blocks[3].recovered_block().num_hash());
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (factory, blocks) = setup_frontiers(2, 3);
+            let manager = OverlayManager::default();
+            manager.insert_block(blocks[1].clone());
+            let provider = factory.provider().unwrap();
+            let builder = manager.overlay_builder(blocks[1].recovered_block().hash());
+            match builder.anchor_at_parent(&provider).unwrap() {
+                AnchorForParent::RevertsRequired { anchor, finish } => {
+                    assert_eq!(anchor, blocks[1].recovered_block().num_hash());
+                    assert_eq!(finish, blocks[3].recovered_block().num_hash());
+                }
+                AnchorForParent::NoReverts { .. } => {
+                    panic!("persisted parent below Finish must require reverts")
+                }
             }
-            AnchorForParent::NoReverts { .. } => {
-                panic!("persisted parent below Finish must require reverts")
-            }
-        }
+        });
     }
 
     #[test]
     fn builder_appends_block_to_parent_state() {
-        let manager = OverlayManager::default();
-        let blocks = test_blocks();
-        for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
-        }
+        reth_tasks::executor::Runtime::new().run(|| {
+            let manager = OverlayManager::default();
+            let blocks = test_blocks();
+            for block in &blocks[2..=4] {
+                manager.insert_block(block.clone());
+            }
 
-        let block = TestBlockBuilder::eth().get_executed_block_with_number(
-            blocks[4].recovered_block().number() + 1,
-            blocks[4].recovered_block().hash(),
-        );
-        let builder = manager
-            .overlay_builder(block.recovered_block().parent_hash())
-            .with_appended_block(block.clone());
+            let block = TestBlockBuilder::seeded(42).get_executed_block_with_number(
+                blocks[4].recovered_block().number() + 1,
+                blocks[4].recovered_block().hash(),
+            );
+            let builder = manager
+                .overlay_builder(block.recovered_block().parent_hash())
+                .with_appended_block(block.clone());
 
-        assert_eq!(builder.parent_hash, block.recovered_block().hash());
-        assert_eq!(
-            builder.parent_state.unwrap().chain().map(BlockState::hash).collect::<Vec<_>>(),
-            std::iter::once(&block)
-                .chain(blocks[2..=4].iter().rev())
-                .map(|block| block.recovered_block().hash())
-                .collect::<Vec<_>>(),
-        );
+            assert_eq!(builder.parent_hash, block.recovered_block().hash());
+            assert_eq!(
+                builder.parent_state.unwrap().chain().map(BlockState::hash).collect::<Vec<_>>(),
+                std::iter::once(&block)
+                    .chain(blocks[2..=4].iter().rev())
+                    .map(|block| block.recovered_block().hash())
+                    .collect::<Vec<_>>(),
+            );
+        });
     }
 
     #[test]
     fn overlay_after_state_trie_frontier_requires_managed_coverage() {
-        let (factory, blocks) = setup_frontiers(1, 3);
-        let provider = factory.provider().unwrap();
-        let error = OverlayManager::<EthPrimitives>::default()
-            .overlay_builder(blocks[3].recovered_block().hash())
-            .build_state_trie_overlay(&provider, true)
-            .unwrap_err();
+        reth_tasks::executor::Runtime::new().run(|| {
+            let (factory, blocks) = setup_frontiers(1, 3);
+            let provider = factory.provider().unwrap();
+            let error = OverlayManager::<EthPrimitives>::default()
+                .overlay_builder(blocks[3].recovered_block().hash())
+                .build_state_trie_overlay(&provider, true)
+                .unwrap_err();
 
-        assert!(
-            error.to_string().contains("is after partial state trie frontier"),
-            "unexpected error: {error}"
-        );
+            assert!(
+                error.to_string().contains("is after partial state trie frontier"),
+                "unexpected error: {error}"
+            );
+        });
     }
 
     #[test]
     fn managed_overlay_skips_manager_for_persisted_parent() {
-        let parent_hash = B256::with_last_byte(1);
-        let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let parent_hash = B256::with_last_byte(1);
+            let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
 
-        let (trie, state) = builder.resolve_state_trie_overlays(parent_hash).unwrap();
-        assert!(trie.is_empty());
-        assert!(state.is_empty());
+            let (trie, state) = builder.resolve_state_trie_overlays(parent_hash).unwrap();
+            assert!(trie.is_empty());
+            assert!(state.is_empty());
+        });
     }
 
     #[test]
     fn managed_overlay_errors_if_parent_is_not_persisted_or_managed() {
-        let parent_hash = B256::with_last_byte(1);
-        let anchor_hash = B256::with_last_byte(2);
-        let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
+        reth_tasks::executor::Runtime::new().run(|| {
+            let parent_hash = B256::with_last_byte(1);
+            let anchor_hash = B256::with_last_byte(2);
+            let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
 
-        let err = builder.resolve_state_trie_overlays(anchor_hash).unwrap_err();
+            let err = builder.resolve_state_trie_overlays(anchor_hash).unwrap_err();
 
-        assert!(err.to_string().contains("cannot be anchored"));
+            assert!(err.to_string().contains("cannot be anchored"));
+        });
     }
 
     #[test]
     fn managed_overlay_skip_requires_both_frontiers() {
-        let parent_hash = B256::with_last_byte(1);
-        let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
-        assert!(!builder.should_skip_overlay_for_reused_sparse_trie(parent_hash, parent_hash));
+        reth_tasks::executor::Runtime::new().run(|| {
+            let parent_hash = B256::with_last_byte(1);
+            let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
+            assert!(!builder.should_skip_overlay_for_reused_sparse_trie(parent_hash, parent_hash));
 
-        let builder = builder.with_skip_overlay_for_reused_sparse_trie(parent_hash);
-        assert!(builder.should_skip_overlay_for_reused_sparse_trie(parent_hash, parent_hash));
-        assert!(!builder
-            .should_skip_overlay_for_reused_sparse_trie(B256::with_last_byte(3), parent_hash,));
+            let builder = builder.with_skip_overlay_for_reused_sparse_trie(parent_hash);
+            assert!(builder.should_skip_overlay_for_reused_sparse_trie(parent_hash, parent_hash));
+            assert!(!builder
+                .should_skip_overlay_for_reused_sparse_trie(B256::with_last_byte(3), parent_hash,));
 
-        let blocks = test_blocks();
-        let manager = OverlayManager::default();
-        for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
-        }
-        let builder = manager
-            .overlay_builder(blocks[4].recovered_block().hash())
-            .with_skip_overlay_for_reused_sparse_trie(blocks[1].recovered_block().hash());
-        assert!(builder.should_skip_overlay_for_reused_sparse_trie(
-            blocks[1].recovered_block().hash(),
-            blocks[3].recovered_block().hash(),
-        ));
+            let blocks = test_blocks();
+            let manager = OverlayManager::default();
+            for block in &blocks[2..=4] {
+                manager.insert_block(block.clone());
+            }
+            let builder = manager
+                .overlay_builder(blocks[4].recovered_block().hash())
+                .with_skip_overlay_for_reused_sparse_trie(blocks[1].recovered_block().hash());
+            assert!(builder.should_skip_overlay_for_reused_sparse_trie(
+                blocks[1].recovered_block().hash(),
+                blocks[3].recovered_block().hash(),
+            ));
 
-        let builder =
-            builder.with_skip_overlay_for_reused_sparse_trie(blocks[2].recovered_block().hash());
-        assert!(!builder.should_skip_overlay_for_reused_sparse_trie(
-            blocks[1].recovered_block().hash(),
-            blocks[3].recovered_block().hash(),
-        ));
+            let builder = builder
+                .with_skip_overlay_for_reused_sparse_trie(blocks[2].recovered_block().hash());
+            assert!(!builder.should_skip_overlay_for_reused_sparse_trie(
+                blocks[1].recovered_block().hash(),
+                blocks[3].recovered_block().hash(),
+            ));
+        });
     }
 }

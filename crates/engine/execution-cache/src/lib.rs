@@ -22,9 +22,9 @@ pub use txpool::*;
 
 use alloy_primitives::B256;
 use metrics::{Counter, Histogram};
-use parking_lot::Mutex;
 use reth_metrics::Metrics;
 use reth_primitives_traits::FastInstant as Instant;
+use reth_tasks::executor::sync::parking_lot::Mutex;
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, instrument, warn};
 
@@ -191,98 +191,144 @@ struct PayloadExecutionCacheMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_tasks::executor::{channel::mpsc, thread, Runtime};
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
     fn single_checkout_blocks_second() {
-        let cache = PayloadExecutionCache::default();
-        let hash = B256::repeat_byte(1u8);
+        Runtime::new().run(|| {
+            let cache = PayloadExecutionCache::default();
+            let hash = B256::repeat_byte(1u8);
 
-        cache.update_with_guard(|slot| {
-            *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+            cache.update_with_guard(|slot| {
+                *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+            });
+
+            let first = cache.get_cache_for(hash);
+            assert!(first.is_some());
+
+            let second = cache.get_cache_for(hash);
+            assert!(second.is_none());
         });
-
-        let first = cache.get_cache_for(hash);
-        assert!(first.is_some());
-
-        let second = cache.get_cache_for(hash);
-        assert!(second.is_none());
     }
 
     #[test]
     fn checkout_available_after_drop() {
-        let cache = PayloadExecutionCache::default();
-        let hash = B256::repeat_byte(2u8);
+        Runtime::new().run(|| {
+            let cache = PayloadExecutionCache::default();
+            let hash = B256::repeat_byte(2u8);
 
-        cache.update_with_guard(|slot| {
-            *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+            cache.update_with_guard(|slot| {
+                *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+            });
+
+            let checked_out = cache.get_cache_for(hash);
+            assert!(checked_out.is_some());
+            drop(checked_out);
+
+            let second = cache.get_cache_for(hash);
+            assert!(second.is_some());
         });
-
-        let checked_out = cache.get_cache_for(hash);
-        assert!(checked_out.is_some());
-        drop(checked_out);
-
-        let second = cache.get_cache_for(hash);
-        assert!(second.is_some());
     }
 
     #[test]
     fn raw_cache_handle_blocks_checkout_until_drop() {
-        let cache = PayloadExecutionCache::default();
-        let hash = B256::repeat_byte(3u8);
+        Runtime::new().run(|| {
+            let cache = PayloadExecutionCache::default();
+            let hash = B256::repeat_byte(3u8);
 
-        cache.update_with_guard(|slot| {
-            *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+            cache.update_with_guard(|slot| {
+                *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+            });
+
+            let checked_out = cache.get_cache_for(hash).expect("checkout should succeed");
+            let cache_handle = checked_out.cache().clone();
+            drop(checked_out);
+
+            let blocked = cache.get_cache_for(hash);
+            assert!(blocked.is_none(), "raw ExecutionCache handle should keep slot in use");
+
+            drop(cache_handle);
+
+            let available = cache.get_cache_for(hash);
+            assert!(available.is_some(), "checkout should succeed after raw handle is dropped");
         });
-
-        let checked_out = cache.get_cache_for(hash).expect("checkout should succeed");
-        let cache_handle = checked_out.cache().clone();
-        drop(checked_out);
-
-        let blocked = cache.get_cache_for(hash);
-        assert!(blocked.is_none(), "raw ExecutionCache handle should keep slot in use");
-
-        drop(cache_handle);
-
-        let available = cache.get_cache_for(hash);
-        assert!(available.is_some(), "checkout should succeed after raw handle is dropped");
     }
 
     #[test]
     fn hash_mismatch_clears_and_retags() {
-        let cache = PayloadExecutionCache::default();
-        let hash_a = B256::repeat_byte(0xAA);
-        let hash_b = B256::repeat_byte(0xBB);
+        Runtime::new().run(|| {
+            let cache = PayloadExecutionCache::default();
+            let hash_a = B256::repeat_byte(0xAA);
+            let hash_b = B256::repeat_byte(0xBB);
 
-        cache.update_with_guard(|slot| {
-            *slot = Some(SavedCache::new(hash_a, ExecutionCache::new(1_000)))
+            cache.update_with_guard(|slot| {
+                *slot = Some(SavedCache::new(hash_a, ExecutionCache::new(1_000)))
+            });
+
+            let checked_out = cache.get_cache_for(hash_b);
+            assert!(checked_out.is_some());
+            assert_eq!(checked_out.unwrap().executed_block_hash(), hash_b);
         });
-
-        let checked_out = cache.get_cache_for(hash_b);
-        assert!(checked_out.is_some());
-        assert_eq!(checked_out.unwrap().executed_block_hash(), hash_b);
     }
 
     #[test]
     fn empty_cache_returns_none() {
-        let cache = PayloadExecutionCache::default();
-        assert!(cache.get_cache_for(B256::ZERO).is_none());
+        Runtime::new().run(|| {
+            let cache = PayloadExecutionCache::default();
+            assert!(cache.get_cache_for(B256::ZERO).is_none());
+        });
+    }
+
+    #[test]
+    fn cache_lock_yields_while_update_waits_for_validation() {
+        Runtime::new().run(|| {
+            let cache = PayloadExecutionCache::default();
+            let updating_cache = cache.clone();
+            let (locked_tx, locked_rx) = mpsc::channel();
+            let (validated_tx, validated_rx) = mpsc::channel();
+            let update = thread::spawn(move || {
+                updating_cache.update_with_guard(|_| {
+                    locked_tx.send(()).unwrap();
+                    validated_rx.recv().unwrap();
+                });
+            });
+            locked_rx.recv().unwrap();
+
+            let reading_cache = cache;
+            let started = Arc::new(AtomicBool::new(false));
+            let reading_started = started.clone();
+            let reader = thread::spawn(move || {
+                reading_started.store(true, Ordering::Relaxed);
+                assert!(reading_cache.get_cache_for(B256::ZERO).is_none());
+            });
+            // Native atomics do not yield between the signal and the lock attempt under fuzz.
+            while !started.load(Ordering::Relaxed) {
+                thread::yield_now();
+            }
+            validated_tx.send(()).unwrap();
+            update.join().unwrap();
+            reader.join().unwrap();
+        });
     }
 
     #[test]
     fn checkout_distinguishes_empty_from_in_use() {
-        let cache = PayloadExecutionCache::default();
-        let hash = B256::repeat_byte(7u8);
-        assert!(matches!(cache.checkout(hash), CacheCheckout::Empty));
+        Runtime::new().run(|| {
+            let cache = PayloadExecutionCache::default();
+            let hash = B256::repeat_byte(7u8);
+            assert!(matches!(cache.checkout(hash), CacheCheckout::Empty));
 
-        cache.update_with_guard(|slot| {
-            *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+            cache.update_with_guard(|slot| {
+                *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+            });
+            let held = cache.get_cache_for(hash).expect("checkout should succeed");
+
+            assert!(matches!(
+                cache.checkout(B256::repeat_byte(8u8)),
+                CacheCheckout::InUse { cached_hash } if cached_hash == hash
+            ));
+            drop(held);
         });
-        let held = cache.get_cache_for(hash).expect("checkout should succeed");
-
-        assert!(matches!(
-            cache.checkout(B256::repeat_byte(8u8)),
-            CacheCheckout::InUse { cached_hash } if cached_hash == hash
-        ));
-        drop(held);
     }
 }
