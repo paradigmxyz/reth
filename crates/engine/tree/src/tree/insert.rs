@@ -127,11 +127,19 @@ where
         let mut outcome = if self.backfill_sync_state.is_idle() {
             self.try_insert_payload(payload)?.into_outcome()
         } else {
-            TreeOutcome::new(self.try_buffer_payload(payload)?)
+            // While buffering, only already known blocks are answered as valid.
+            let status = self.try_buffer_payload(payload)?;
+            let already_seen = status.is_valid();
+            TreeOutcome::new(status).with_already_seen(already_seen)
         };
 
-        // if the block is valid and it is the current sync target head, make it canonical
-        if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
+        // if the block is valid and it is the current sync target head, make it canonical. While
+        // backfill is not idle the pipeline owns the database, so leave canonicalization to the end
+        // of backfill.
+        if outcome.outcome.is_valid() &&
+            self.backfill_sync_state.is_idle() &&
+            self.is_sync_target_head(block_hash)
+        {
             // Only create the canonical event if this block isn't already the canonical head
             if self.state.tree_state.canonical_block_hash() != block_hash {
                 outcome = outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical {
@@ -202,6 +210,7 @@ where
     /// so they are buffered (stored in memory) until their parent blocks are synced.
     ///
     /// Returns:
+    /// - `Valid`: Block is already known, so it is not validated again
     /// - `Syncing`: Payload successfully buffered
     /// - Error status: Payload is malformed or invalid
     pub(super) fn try_buffer_payload(
@@ -212,8 +221,11 @@ where
         let num_hash = payload.num_hash();
 
         match self.payload_validator.convert_payload_to_block(payload) {
-            // if the block is well-formed, buffer it for later
+            // if the block is well-formed and not already known, buffer it for later
             Ok(block) => {
+                if self.is_block_known(num_hash).map_err(InsertBlockFatalError::from)? {
+                    return Ok(PayloadStatus::new(PayloadStatusEnum::Valid, Some(num_hash.hash)))
+                }
                 if let Err(error) = self.buffer_block(block) {
                     self.on_insert_block_error(error)
                 } else {
@@ -235,6 +247,21 @@ where
         } else {
             self.provider.is_known(hash)
         }
+    }
+
+    /// Returns `true` if the block was already validated: it is in memory, or persisted at or
+    /// below the last persisted block.
+    ///
+    /// The last persisted block never exceeds the Finish checkpoint, the highest block every stage
+    /// processed, so a stored header at or below it belongs to a validated block. Backfill writes
+    /// headers above it before executing their blocks. A backfill run that unwinds below it ends
+    /// right away, and the last persisted block is lowered before any headers are written again.
+    fn is_block_known(&self, block: BlockNumHash) -> ProviderResult<bool> {
+        if self.state.tree_state.contains_hash(&block.hash) {
+            return Ok(true)
+        }
+        Ok(block.number <= self.persistence_state.last_persisted_block.number &&
+            self.provider.sealed_header_by_hash(block.hash)?.is_some())
     }
 
     /// Return sealed block header from in-memory state or database by hash.
@@ -406,25 +433,15 @@ where
         let block_num_hash = block_id.block;
         debug!(target: "engine::tree", block=?block_num_hash, parent = ?block_id.parent, "Inserting new block into tree");
 
-        // Check if block already exists - first in memory, then DB only if it could be persisted
-        if self.state.tree_state.contains_hash(&block_num_hash.hash) {
-            convert_to_block(self, input)?;
-            return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
-        }
-
-        // Only query DB if block could be persisted (number <= last persisted block).
-        // New blocks from CL always have number > last persisted, so skip DB lookup for them.
-        if block_num_hash.number <= self.persistence_state.last_persisted_block.number {
-            match self.provider.sealed_header_by_hash(block_num_hash.hash) {
-                Err(err) => {
-                    let block = convert_to_block(self, input)?;
-                    return Err(InsertBlockError::new(block.split().0, err.into()).into());
-                }
-                Ok(Some(_)) => {
-                    convert_to_block(self, input)?;
-                    return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
-                }
-                Ok(None) => {}
+        match self.is_block_known(block_num_hash) {
+            Ok(true) => {
+                convert_to_block(self, input)?;
+                return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
+            }
+            Ok(false) => {}
+            Err(err) => {
+                let block = convert_to_block(self, input)?;
+                return Err(InsertBlockError::new(block.split().0, err.into()).into());
             }
         }
 
