@@ -1,7 +1,9 @@
 //! Database version utils.
 
+use reth_fs_util::FsPathError;
 use std::{
-    fs, io,
+    fs,
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 
@@ -74,8 +76,15 @@ pub fn get_db_version<P: AsRef<Path>>(db_path: P) -> Result<u64, DatabaseVersion
 ///
 /// This function will create a file if it does not exist,
 /// and will entirely replace its contents if it does.
-pub fn create_db_version_file<P: AsRef<Path>>(db_path: P) -> io::Result<()> {
-    fs::write(db_version_file_path(db_path), DB_VERSION.to_string())
+///
+/// The file is written atomically and synced, together with its directory, before this returns.
+/// Otherwise a power loss shortly after the database is created can leave an empty file behind,
+/// which [`check_db_version_file`] reports as [`DatabaseVersionError::MalformedFile`] on every
+/// later start.
+pub fn create_db_version_file<P: AsRef<Path>>(db_path: P) -> Result<(), FsPathError> {
+    reth_fs_util::atomic_write_file(&db_version_file_path(db_path), |file| {
+        file.write_all(DB_VERSION.to_string().as_bytes())
+    })
 }
 
 /// Returns a database version file path.
@@ -85,10 +94,34 @@ pub fn db_version_file_path<P: AsRef<Path>>(db_path: P) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_db_version_file, db_version_file_path, DatabaseVersionError};
+    use super::{
+        check_db_version_file, create_db_version_file, db_version_file_path, DatabaseVersionError,
+    };
     use assert_matches::assert_matches;
     use std::fs;
     use tempfile::tempdir;
+
+    #[test]
+    fn created_file_passes_the_check() {
+        let dir = tempdir().unwrap();
+        create_db_version_file(&dir).unwrap();
+
+        assert_matches!(check_db_version_file(&dir), Ok(()));
+        // Only the version file is left behind, not the temporary file it was written through.
+        let names: Vec<_> =
+            fs::read_dir(&dir).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+        assert_eq!(names, [super::DB_VERSION_FILE_NAME]);
+    }
+
+    #[test]
+    fn created_file_replaces_a_malformed_one() {
+        let dir = tempdir().unwrap();
+        fs::write(db_version_file_path(&dir), "").unwrap();
+        assert_matches!(check_db_version_file(&dir), Err(DatabaseVersionError::MalformedFile));
+
+        create_db_version_file(&dir).unwrap();
+        assert_matches!(check_db_version_file(&dir), Ok(()));
+    }
 
     #[test]
     fn missing_file() {
