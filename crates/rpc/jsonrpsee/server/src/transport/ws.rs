@@ -403,7 +403,8 @@ async fn send_task(
     // Send the close message, unless a write already timed out: the client isn't reading, so the
     // close frame would block on the same full socket. The receive half is dropped by the
     // connection task, which closes the socket.
-    // A close frame from the client is answered with this one too.
+    // A close frame from the client is answered with this one too, so its status isn't echoed:
+    // nothing is read after it, which leaves the reply that `tungstenite` has queued unwritten.
     if !write_timed_out {
         let _ = timeout(write_timeout, async {
             let code = u16::from(CloseCode::Normal).to_be_bytes();
@@ -475,8 +476,8 @@ impl Drop for Sender {
     }
 }
 
-/// The read half of a connection, through which `tungstenite` also writes the replies to pings
-/// and closes: they are handed to the [`Sender`], which writes them between messages.
+/// The read half of a connection, through which `tungstenite` also writes the replies to pings:
+/// they are handed to the [`Sender`], which writes them between messages.
 pub(crate) struct ReadIo {
     read: ReadHalf<TokioIo<Upgraded>>,
     control: Arc<ControlFrames>,
