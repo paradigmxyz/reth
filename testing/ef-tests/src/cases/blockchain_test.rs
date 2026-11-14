@@ -1,17 +1,23 @@
 //! Test runners for `BlockchainTests` in <https://github.com/ethereum/tests>
 
 use crate::{
+    case::{load_json, spawn_worker},
     models::{BlockchainTest, ForkSpec},
+    result::{FixtureResult, Rejection},
     Case, Error, Suite,
 };
-use alloy_eip7928::bal::Bal;
+use alloy_eip7928::{
+    bal::{Bal, RawBal},
+    BlockAccessList,
+};
 use alloy_eips::{
     eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, eip7251::CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS,
 };
+use alloy_primitives::B256;
 use alloy_rlp::Decodable;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_consensus::{Consensus, HeaderValidator};
+use reth_consensus::{Consensus, ConsensusError, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
@@ -21,7 +27,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_evm_ethereum::EthEvmConfig;
-use reth_primitives_traits::{ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{GotExpected, ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
 use reth_provider::{
     providers::{RocksDBBuilder, RocksDBProvider, StaticFileProviderBuilder},
     test_utils::MockNodeTypesWithDB,
@@ -37,8 +43,14 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, LazyLock},
+    sync::{Arc, Mutex, OnceLock},
 };
+use tracing::debug;
+
+/// The tracing target on which the engine reports which executor runs each block
+/// (`reth_engine_tree::tree::payload_validator::BAL_EXECUTION_PATH_TARGET`), and on which block
+/// import reports the same.
+pub const BAL_EXECUTION_PATH_TARGET: &str = "engine::tree::bal_execution_path";
 
 /// A handler for the blockchain test suite.
 #[derive(Debug)]
@@ -51,6 +63,69 @@ impl BlockchainTests {
     pub const fn new(suite_path: PathBuf) -> Self {
         Self { suite_path }
     }
+
+    /// Runs every fixture in the JSON `files`, one file at a time on each of `workers` threads,
+    /// and passes one result per fixture to `on_result` as it completes.
+    ///
+    /// Unlike [`Suite::run`], this reports a file that fails to load as a failed result instead
+    /// of panicking.
+    ///
+    /// The files are not run on the rayon pool: a rayon thread waiting on block execution's own
+    /// parallel work would start other files meanwhile, with no bound on how many are open.
+    pub fn run_fixtures(
+        files: Vec<PathBuf>,
+        options: BlockTestOptions,
+        workers: usize,
+        on_result: &(dyn Fn(FixtureResult) + Sync),
+    ) {
+        let files = Mutex::new(files.into_iter());
+        // A closure, so the queue's lock is released before the file runs: a guard taken in the
+        // `while let` condition would be held until the end of the loop body.
+        let next_file = || files.lock().unwrap().next();
+        std::thread::scope(|scope| {
+            for _ in 0..workers.max(1) {
+                spawn_worker(scope, || {
+                    while let Some(path) = next_file() {
+                        Self::run_file(&path, options, on_result);
+                    }
+                });
+            }
+        });
+    }
+
+    /// Runs every fixture in the JSON file at `path` and passes one result per fixture to
+    /// `on_result`.
+    fn run_file(path: &Path, options: BlockTestOptions, on_result: &dyn Fn(FixtureResult)) {
+        let case = match BlockchainTestCase::load(path) {
+            Ok(case) => case,
+            Err(err) => return on_result(FixtureResult::load_failed(path, err)),
+        };
+        for (name, test) in case.tests {
+            if BlockchainTestCase::excluded_fork(test.network) {
+                continue
+            }
+            let fork = format!("{:?}", test.network);
+            if case.skip {
+                on_result(FixtureResult::new(name, fork, Err(Error::Skipped)));
+                continue
+            }
+            let mut last_block_hash = test.genesis_block_header.hash;
+            let mut rejections = Vec::new();
+            let result = BlockchainTestCase::run_single_case_with(
+                &name,
+                &test,
+                options,
+                &mut last_block_hash,
+                &mut rejections,
+            )
+            .and_then(|()| check_last_block_hash(&test, last_block_hash));
+            on_result(
+                FixtureResult::new(name, fork, result)
+                    .with_last_block_hash(last_block_hash)
+                    .with_rejections(rejections),
+            );
+        }
+    }
 }
 
 impl Suite for BlockchainTests {
@@ -59,6 +134,18 @@ impl Suite for BlockchainTests {
     fn suite_path(&self) -> &Path {
         &self.suite_path
     }
+}
+
+/// Options for running blockchain tests.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BlockTestOptions {
+    /// Whether blocks run on the sequential executor, as with the node's
+    /// `--engine.disable-bal-parallel-execution`. Block import always runs the sequential
+    /// executor, so this only changes the reported reason.
+    pub bal_sequential: bool,
+    /// Whether blocks execute without the access list the fixture delivers, as a block received
+    /// without its list does.
+    pub bal_withhold: bool,
 }
 
 /// An Ethereum blockchain test.
@@ -122,8 +209,35 @@ impl BlockchainTestCase {
     /// Execute a single `BlockchainTest`, validating the outcome against the
     /// expectations encoded in the JSON file.
     pub fn run_single_case(name: &str, case: &BlockchainTest) -> Result<(), Error> {
+        let mut last_block_hash = B256::ZERO;
+        Self::run_single_case_with(
+            name,
+            case,
+            BlockTestOptions::default(),
+            &mut last_block_hash,
+            &mut Vec::new(),
+        )
+    }
+
+    /// Like [`Self::run_single_case`], with the given options. `last_block_hash` is set to the
+    /// hash of the last block that was imported, or of genesis if none was, and the block that
+    /// was rejected, if any, is added to `rejections` with reth's error.
+    pub fn run_single_case_with(
+        name: &str,
+        case: &BlockchainTest,
+        options: BlockTestOptions,
+        last_block_hash: &mut B256,
+        rejections: &mut Vec<Rejection>,
+    ) -> Result<(), Error> {
         let expectation = Self::expected_failure(case);
-        match run_case(case) {
+        let result = run_case(case, options, last_block_hash);
+        // Block number 0 is the genesis setup, not a fixture block.
+        if let Err(Error::BlockProcessingFailed { block_number, err }) = &result &&
+            *block_number > 0
+        {
+            rejections.push(rejection(case, *block_number, err.to_string()));
+        }
+        match result {
             // All blocks executed successfully.
             Ok(()) => {
                 // Check if the test case specifies that it should have failed
@@ -170,15 +284,7 @@ impl BlockchainTestCase {
 
 impl Case for BlockchainTestCase {
     fn load(path: &Path) -> Result<Self, Error> {
-        Ok(Self {
-            tests: {
-                let s = fs::read_to_string(path)
-                    .map_err(|error| Error::Io { path: path.into(), error })?;
-                serde_json::from_str(&s)
-                    .map_err(|error| Error::CouldNotDeserialize { path: path.into(), error })?
-            },
-            skip: should_skip(path),
-        })
+        Ok(Self { tests: load_json(path)?, skip: should_skip(path) })
     }
 
     /// Runs the test cases for the Ethereum Forks test suite.
@@ -215,7 +321,11 @@ impl Case for BlockchainTestCase {
 /// Returns:
 /// - `Ok(())` if all blocks execute successfully.
 /// - `Err(Error)` if any block fails to execute correctly.
-fn run_case(case: &BlockchainTest) -> Result<(), Error> {
+fn run_case(
+    case: &BlockchainTest,
+    options: BlockTestOptions,
+    last_block_hash: &mut B256,
+) -> Result<(), Error> {
     // Create a new test database and initialize a provider for the test case.
     let chain_spec = case.network.to_chain_spec();
     let factory = create_test_provider_factory(chain_spec.clone());
@@ -230,6 +340,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     .unwrap();
 
     provider.insert_block(&genesis_block).map_err(|err| Error::block_failed(0, err))?;
+    *last_block_hash = genesis_block.hash();
 
     // Increment block number for receipts static file
     provider
@@ -254,16 +365,16 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     .map_err(|err| Error::block_failed(0, err))?;
     provider.write_trie_updates(trie_updates).map_err(|err| Error::block_failed(0, err))?;
 
-    // Decode blocks
-    let blocks = decode_blocks(&case.blocks)?;
-
     let executor_provider = EthEvmConfig::ethereum(chain_spec.clone());
     let mut parent = genesis_block;
     let mut bal_buf = Vec::new();
 
-    for (block_index, block) in blocks.iter().enumerate() {
-        // Note: same as the comment on `decode_blocks` as to why we cannot use block.number
+    for (block_index, fixture_block) in case.blocks.iter().enumerate() {
+        // The blocks do not include the genesis block which is why we have the plus one.
+        // We also cannot use block.number because for invalid blocks, this may be incorrect.
         let block_number = (block_index + 1) as u64;
+        // Decoded one at a time, so that the blocks before one that does not decode are imported.
+        let block = &decode_block(fixture_block, block_number)?;
 
         // Insert the block into the database
         provider.insert_block(block).map_err(|err| Error::block_failed(block_number, err))?;
@@ -275,6 +386,18 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         // Consensus checks before block execution
         pre_execution_checks(chain_spec.clone(), &parent, block)
             .map_err(|err| Error::block_failed(block_number, err))?;
+
+        // Like a block downloaded with its access list, the delivered list counts only when the
+        // header commits to one.
+        let delivered =
+            fixture_block.access_list().filter(|_| block.block_access_list_hash.is_some());
+        let access_list = delivered
+            .filter(|_| !options.bal_withhold)
+            .map(|access_list| check_delivered_access_list(block, access_list))
+            .transpose()
+            .map_err(|err| Error::block_failed(block_number, err))?
+            .flatten();
+        report_execution_path(block, delivered.is_some(), access_list.is_some(), options);
 
         // Execute the block
         let state_provider = provider.latest();
@@ -316,7 +439,9 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         if computed_state_root != block.state_root {
             return Err(Error::block_failed(
                 block_number,
-                Error::Assertion("state root mismatch".to_string()),
+                ConsensusError::BodyStateRootDiff(
+                    GotExpected { got: computed_state_root, expected: block.state_root }.into(),
+                ),
             ));
         }
 
@@ -341,6 +466,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Since there were no errors, update the parent block
+        *last_block_hash = block.hash();
         parent = block.clone()
     }
 
@@ -368,25 +494,99 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     Ok(())
 }
 
-fn decode_blocks(
-    test_case_blocks: &[crate::models::Block],
-) -> Result<Vec<RecoveredBlock<Block>>, Error> {
-    let mut blocks = Vec::with_capacity(test_case_blocks.len());
-    for (block_index, block) in test_case_blocks.iter().enumerate() {
-        // The blocks do not include the genesis block which is why we have the plus one.
-        // We also cannot use block.number because for invalid blocks, this may be incorrect.
-        let block_number = (block_index + 1) as u64;
-
-        let decoded = SealedBlock::<Block>::decode(&mut block.rlp.as_ref())
-            .map_err(|err| Error::block_failed(block_number, err))?;
-
-        let recovered_block =
-            decoded.try_recover().map_err(|err| Error::block_failed(block_number, err))?;
-
-        blocks.push(recovered_block);
+/// Checks that the chain ends on the fixture's `lastblockhash`, whether or not a block was
+/// rejected.
+fn check_last_block_hash(case: &BlockchainTest, last_block_hash: B256) -> Result<(), Error> {
+    if last_block_hash == case.lastblockhash {
+        return Ok(())
     }
+    Err(Error::Assertion(format!(
+        "last block hash mismatch: got {last_block_hash}, expected {}",
+        case.lastblockhash
+    )))
+}
 
-    Ok(blocks)
+/// The rejection of the fixture block with the given number, counted from 1, with its hash if
+/// it decodes.
+fn rejection(case: &BlockchainTest, block_number: u64, error: String) -> Rejection {
+    let index = (block_number - 1) as usize;
+    let hash = case
+        .blocks
+        .get(index)
+        .and_then(|block| SealedBlock::<Block>::decode(&mut block.rlp.as_ref()).ok())
+        .map(|block| block.hash());
+    Rejection { index, hash, error }
+}
+
+/// Decodes the fixture block with the given number, counted from 1, and recovers its senders.
+fn decode_block(
+    block: &crate::models::Block,
+    block_number: u64,
+) -> Result<RecoveredBlock<Block>, Error> {
+    SealedBlock::<Block>::decode(&mut block.rlp.as_ref())
+        .map_err(|err| Error::block_failed(block_number, err))?
+        .try_recover()
+        .map_err(|err| Error::block_failed(block_number, err))
+}
+
+/// Checks the access list delivered beside a block the way reth's sync checks one downloaded with
+/// it. A list whose RLP, in the order delivered, does not hash to the header's commitment, or that
+/// does not decode, is dropped (`Ok(None)`) and the block is judged on its header alone. A matching
+/// list is committed to by the header, so it must also fit the block's gas limit.
+fn check_delivered_access_list(
+    block: &RecoveredBlock<Block>,
+    access_list: &serde_json::Value,
+) -> Result<Option<Bal>, ConsensusError> {
+    if let Some(expected) = block.block_access_list_hash &&
+        let Ok(access_list) = serde_json::from_value::<BlockAccessList>(access_list.clone()) &&
+        RawBal::new(alloy_rlp::encode(&access_list).into()).ensure_hash(expected).is_ok()
+    {
+        let access_list = Bal::from(access_list);
+        access_list.validate_gas_limit(block.gas_limit)?;
+        return Ok(Some(access_list))
+    }
+    Ok(None)
+}
+
+/// Reports, on the engine's [`BAL_EXECUTION_PATH_TARGET`], which executor runs the block. Block
+/// import has only the sequential executor, so the reason is the first gate that would also rule
+/// out the parallel one in the engine, or else `block-import`.
+fn report_execution_path(
+    block: &RecoveredBlock<Block>,
+    delivered: bool,
+    attached: bool,
+    options: BlockTestOptions,
+) {
+    let reason = execution_path_reason(delivered, attached, options);
+    debug!(
+        target: BAL_EXECUTION_PATH_TARGET,
+        block = block.number,
+        hash = %block.hash(),
+        path = "sequential",
+        reason,
+        "Executing block"
+    );
+}
+
+/// The engine's gates in its order, the access list before the switch. A delivered list that was
+/// withheld or dropped is reported as `withheld` or `bad-access-list`, which therefore also come
+/// before `disabled`.
+const fn execution_path_reason(
+    delivered: bool,
+    attached: bool,
+    options: BlockTestOptions,
+) -> &'static str {
+    if !delivered {
+        "no-access-list"
+    } else if options.bal_withhold {
+        "withheld"
+    } else if !attached {
+        "bad-access-list"
+    } else if options.bal_sequential {
+        "disabled"
+    } else {
+        "block-import"
+    }
 }
 
 fn pre_execution_checks(
@@ -482,15 +682,34 @@ fn path_contains(path_str: &str, rhs: &[&str]) -> bool {
 /// Opening `RocksDB` is expensive and ef-tests never use it: the storage settings stay at v1, so
 /// everything is stored in MDBX and static files. A fresh instance per case dominates the runtime.
 ///
-/// The backing directory is created with [`reth_db::test_utils::tempdir_path`], which leaks it:
-/// statics are never dropped, so there is no point at which a temp dir guard could clean
-/// up. This costs one small, mostly empty directory in the system temp dir per test process.
-static SHARED_ROCKSDB: LazyLock<RocksDBProvider> = LazyLock::new(|| {
-    RocksDBBuilder::new(reth_db::test_utils::tempdir_path().join("rocksdb"))
-        .with_default_tables()
-        .build()
-        .expect("failed to create shared test RocksDB provider")
-});
+/// The backing directory is created with [`reth_db::test_utils::tempdir_path`]. Statics are never
+/// dropped, so the instance is never closed and no close can run while the process exits. A test
+/// process leaves its small, mostly empty directory in the system temp dir; `ef-test-runner`
+/// removes it with [`remove_shared_rocksdb`] once every fixture ran.
+static SHARED_ROCKSDB: OnceLock<(PathBuf, RocksDBProvider)> = OnceLock::new();
+
+/// Returns the [`SHARED_ROCKSDB`] instance, created on first use.
+pub fn shared_rocksdb() -> RocksDBProvider {
+    let (_, rocksdb) = SHARED_ROCKSDB.get_or_init(|| {
+        let path = reth_db::test_utils::tempdir_path();
+        let rocksdb = RocksDBBuilder::new(path.join("rocksdb"))
+            .with_default_tables()
+            .build()
+            .expect("failed to create shared test RocksDB provider");
+        (path, rocksdb)
+    });
+    rocksdb.clone()
+}
+
+/// Removes the directory of the [`SHARED_ROCKSDB`] instance, if one was created. Call it only once
+/// no case runs anymore.
+pub fn remove_shared_rocksdb() {
+    if let Some((path, _)) = SHARED_ROCKSDB.get() &&
+        let Err(err) = fs::remove_dir_all(path)
+    {
+        eprintln!("failed to remove {}: {err}", path.display());
+    }
+}
 
 /// Creates a provider factory for a single test case.
 ///
@@ -517,7 +736,7 @@ fn create_test_provider_factory(
             .with_genesis_block_number(genesis_block_number)
             .build()
             .expect("static file provider"),
-        SHARED_ROCKSDB.clone(),
+        shared_rocksdb(),
         Runtime::test(),
     )
     .expect("failed to create test provider factory");
@@ -528,4 +747,86 @@ fn create_test_provider_factory(
     );
 
     factory
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A block with the given gas limit whose header commits to `access_list`.
+    fn block_committing_to(
+        access_list: &serde_json::Value,
+        gas_limit: u64,
+    ) -> RecoveredBlock<Block> {
+        let access_list: Bal =
+            serde_json::from_value::<BlockAccessList>(access_list.clone()).unwrap().into();
+        let header = alloy_consensus::Header {
+            gas_limit,
+            block_access_list_hash: Some(access_list.compute_hash()),
+            ..Default::default()
+        };
+        RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, Vec::new())
+    }
+
+    fn access_list(storage_read: &str) -> serde_json::Value {
+        json!([{
+            "address": "0x0000000000000000000000000000000000000001",
+            "storageChanges": [],
+            "storageReads": [storage_read],
+            "balanceChanges": [],
+            "nonceChanges": [],
+            "codeChanges": []
+        }])
+    }
+
+    #[test]
+    fn delivered_access_list_is_dropped_unless_it_matches() {
+        let block = block_committing_to(&access_list("0x1"), 30_000_000);
+        assert!(check_delivered_access_list(&block, &access_list("0x1")).unwrap().is_some());
+        assert!(check_delivered_access_list(&block, &access_list("0x2")).unwrap().is_none());
+        let undecodable = json!({"address": "0x01"});
+        assert!(check_delivered_access_list(&block, &undecodable).unwrap().is_none());
+
+        // A matching list is committed to by the header, so it still fails the gas limit.
+        let block = block_committing_to(&access_list("0x1"), 1);
+        assert!(check_delivered_access_list(&block, &access_list("0x1")).is_err());
+        assert!(check_delivered_access_list(&block, &access_list("0x2")).unwrap().is_none());
+    }
+
+    /// The list is hashed in the order delivered, so the same entries in another order are dropped.
+    #[test]
+    fn reordered_access_list_is_dropped() {
+        let account = |address: &str| {
+            json!({
+                "address": address,
+                "storageChanges": [],
+                "storageReads": [],
+                "balanceChanges": [],
+                "nonceChanges": [],
+                "codeChanges": []
+            })
+        };
+        let first = account("0x0000000000000000000000000000000000000001");
+        let second = account("0x0000000000000000000000000000000000000002");
+        let block = block_committing_to(&json!([first, second]), 30_000_000);
+        assert!(check_delivered_access_list(&block, &json!([first, second])).unwrap().is_some());
+        assert!(check_delivered_access_list(&block, &json!([second, first])).unwrap().is_none());
+    }
+
+    #[test]
+    fn dropped_or_withheld_access_list_is_reported_before_the_switch() {
+        let disabled = BlockTestOptions { bal_sequential: true, ..Default::default() };
+        let withheld = BlockTestOptions { bal_withhold: true, ..Default::default() };
+        let withheld_disabled = BlockTestOptions { bal_sequential: true, bal_withhold: true };
+        let default = BlockTestOptions::default();
+        assert_eq!(execution_path_reason(false, false, disabled), "no-access-list");
+        assert_eq!(execution_path_reason(false, false, withheld), "no-access-list");
+        assert_eq!(execution_path_reason(true, false, withheld), "withheld");
+        assert_eq!(execution_path_reason(true, false, withheld_disabled), "withheld");
+        assert_eq!(execution_path_reason(true, false, disabled), "bad-access-list");
+        assert_eq!(execution_path_reason(true, false, default), "bad-access-list");
+        assert_eq!(execution_path_reason(true, true, disabled), "disabled");
+        assert_eq!(execution_path_reason(true, true, default), "block-import");
+    }
 }

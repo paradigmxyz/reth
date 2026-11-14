@@ -2,8 +2,10 @@
 
 use crate::result::{CaseResult, Error};
 use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
+use serde::de::DeserializeOwned;
 use std::{
     fmt::Debug,
+    fs,
     path::{Path, PathBuf},
     sync::LazyLock,
 };
@@ -20,6 +22,17 @@ static POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
         .build()
         .expect("failed to build the test case thread pool")
 });
+
+/// Spawns a scoped worker thread with the stack size of the test case pool's threads.
+pub fn spawn_worker<'scope, F>(scope: &'scope std::thread::Scope<'scope, '_>, f: F)
+where
+    F: FnOnce() + Send + 'scope,
+{
+    std::thread::Builder::new()
+        .stack_size(WORKER_STACK_SIZE)
+        .spawn_scoped(scope, f)
+        .expect("failed to spawn a worker thread");
+}
 
 /// A single test case, capable of loading a JSON description of itself and running it.
 ///
@@ -56,4 +69,12 @@ impl<T: Case> Cases<T> {
                 .collect()
         })
     }
+}
+
+/// Reads the JSON test file at `path`.
+pub fn load_json<T: DeserializeOwned>(path: &Path) -> Result<T, Error> {
+    let contents =
+        fs::read_to_string(path).map_err(|error| Error::Io { path: path.into(), error })?;
+    serde_json::from_str(&contents)
+        .map_err(|error| Error::CouldNotDeserialize { path: path.into(), error })
 }

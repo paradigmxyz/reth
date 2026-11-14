@@ -56,7 +56,7 @@ pub trait Suite {
 }
 
 /// Recursively find all files with a given extension.
-fn find_all_files_with_extension(path: &Path, extension: &str) -> Vec<PathBuf> {
+pub fn find_all_files_with_extension(path: &Path, extension: &str) -> Vec<PathBuf> {
     WalkDir::new(path)
         .into_iter()
         .filter_map(Result::ok)
