@@ -765,6 +765,11 @@ where
                             };
 
                             let max_request_size = server_cfg.max_request_body_size as usize;
+                            // `tungstenite` reads a frame whole into its read buffer and never
+                            // shrinks it, so after a frame near the limit the connection keeps
+                            // that much allocated until it closes. An unfinished fragmented
+                            // message takes about twice its size: the collected fragments and the
+                            // read buffer that grew for them.
                             // Frames that a client didn't mask have always been read.
                             let ws_config = WebSocketConfig::default()
                                 .max_message_size(Some(max_request_size))
