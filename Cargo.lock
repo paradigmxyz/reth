@@ -5716,12 +5716,11 @@ dependencies = [
  "pin-project",
  "serde",
  "serde_json",
- "soketto",
  "test-case",
  "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
- "tokio-util",
+ "tokio-tungstenite",
  "tower",
  "tracing",
  "tracing-subscriber",
@@ -5737,9 +5736,8 @@ dependencies = [
  "hyper-util",
  "serde",
  "serde_json",
- "soketto",
  "tokio",
- "tokio-util",
+ "tokio-tungstenite",
 ]
 
 [[package]]
@@ -12015,22 +12013,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "soketto"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e859df029d160cb88608f5d7df7fb4753fd20fdfb4de5644f3d8b8440841721"
-dependencies = [
- "base64 0.22.1",
- "bytes",
- "futures",
- "http",
- "httparse",
- "log",
- "rand 0.8.8",
- "sha1",
-]
-
-[[package]]
 name = "spin"
 version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12627,7 +12609,6 @@ checksum = "494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52"
 dependencies = [
  "bytes",
  "futures-core",
- "futures-io",
  "futures-sink",
  "futures-util",
  "libc",

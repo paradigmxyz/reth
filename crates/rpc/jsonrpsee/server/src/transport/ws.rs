@@ -7,32 +7,62 @@ use crate::{
 
 use futures_util::{
     future::{self, Either},
-    io::{BufReader, BufWriter},
-    Future, StreamExt, TryStreamExt,
+    stream::{SplitSink, SplitStream},
+    Future, SinkExt, StreamExt, TryStreamExt,
 };
-use hyper::upgrade::Upgraded;
+use http::header::{CONNECTION, UPGRADE};
+use hyper::{body::Bytes, upgrade::Upgraded};
 use hyper_util::rt::TokioIo;
 use jsonrpsee_core::{classify_message, middleware::RpcServiceT, server::MethodSink};
 use jsonrpsee_types::{
     error::{reject_too_big_request, ErrorCode},
     Id,
 };
-use soketto::{connection::Error as SokettoError, data::ByteSlice125};
 use tokio::{
     sync::{mpsc, oneshot, Semaphore},
-    time::{interval_at, timeout, Instant},
+    time::{interval_at, timeout, timeout_at, Instant},
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_util::compat::Compat;
+use tokio_tungstenite::{
+    tungstenite::{
+        self,
+        error::CapacityError,
+        protocol::{
+            frame::{
+                coding::{CloseCode, Data, OpCode},
+                Frame,
+            },
+            CloseFrame,
+        },
+        Message, Utf8Bytes,
+    },
+    WebSocketStream,
+};
 
-pub(crate) type Sender = soketto::Sender<BufReader<BufWriter<Compat<TokioIo<Upgraded>>>>>;
-pub(crate) type Receiver = soketto::Receiver<BufReader<BufWriter<Compat<TokioIo<Upgraded>>>>>;
+pub(crate) type Sender = SplitSink<WebSocketStream<TokioIo<Upgraded>>, Message>;
+pub(crate) type Receiver = SplitStream<WebSocketStream<TokioIo<Upgraded>>>;
 
-pub use soketto::handshake::http::is_upgrade_request;
+/// Returns whether the request asks for an upgrade to the WebSocket protocol.
+pub fn is_upgrade_request<B>(request: &http::Request<B>) -> bool {
+    let has_token = |name, token: &[u8]| {
+        request.headers().get_all(name).iter().any(|value| {
+            value
+                .as_bytes()
+                .split(|&b| b == b',')
+                .any(|listed| listed.trim_ascii().eq_ignore_ascii_case(token))
+        })
+    };
+    has_token(CONNECTION, b"upgrade") && has_token(UPGRADE, b"websocket")
+}
 
 /// Most queued messages written before a flush, which bounds how long written messages wait in
 /// the buffer.
 const MAX_MESSAGES_PER_FLUSH: usize = 64;
+
+/// Largest payload of a frame sent to the client; a longer message is sent in fragments.
+/// `tungstenite` copies a frame into its write buffer whole, moves what a partial write left of it
+/// to the front each time, and keeps the buffer's capacity for the connection.
+const MAX_FRAME_PAYLOAD: usize = 64 * 1024;
 
 pub(crate) struct BackgroundTaskParams<S> {
     pub(crate) server_cfg: ServerConfig,
@@ -72,46 +102,55 @@ where
     } = server_cfg;
 
     let (conn_tx, conn_rx) = oneshot::channel();
+    // The receive stream asks the send task to write out the pongs. It holds one request, so the
+    // receive stream waits while a write is blocked.
+    let (pong_tx, pong_rx) = mpsc::channel(1);
 
     // Spawn another task that sends out the responses on the Websocket.
     let send_task_handle =
-        tokio::spawn(send_task(rx, ws_sender, write_timeout, ping_interval, conn_rx));
+        tokio::spawn(send_task(rx, ws_sender, write_timeout, ping_interval, pong_rx, conn_rx));
 
     let stopped = conn.stop_handle.clone().shutdown();
     let rpc_service = Arc::new(rpc_service);
 
     tokio::pin!(stopped);
 
-    // `soketto` allocates a frame's announced length before reading its payload, so a frame that
+    // `tungstenite` reserves a frame's announced length before its payload arrives, so a frame that
     // never completes would hold that buffer for good. A pong can't arrive inside a frame, so a
     // read that yields neither a message nor a pong to the pings within two intervals is stuck.
     let read_timeout = ping_interval * 2;
-    let ws_stream = futures_util::stream::unfold(Some(ws_receiver), move |receiver| async move {
-        let mut receiver = receiver?;
-        let mut data = Vec::new();
-        loop {
-            let Ok(received) = timeout(read_timeout, receiver.receive(&mut data)).await else {
-                return Some((
-                    Err(SokettoError::Io(io::ErrorKind::TimedOut.into())),
-                    Some(receiver),
-                ));
-            };
-            match received {
-                Ok(soketto::Incoming::Data(_)) => return Some((Ok(data), Some(receiver))),
-                // Pongs only answer the server's pings, which restarts the read timeout.
-                Ok(soketto::Incoming::Pong(_)) => data.clear(),
-                Ok(soketto::Incoming::Closed(_)) | Err(SokettoError::Closed) => return None,
-                // `soketto` skips the length of the whole message once it exceeds the limit,
-                // although the fragments in `data` were already read. That many bytes of the
-                // frames after the message are skipped with it, so the receiver is no longer at a
-                // frame boundary and the stream ends after this error.
-                Err(e @ SokettoError::MessageTooLarge { .. }) if !data.is_empty() => {
-                    return Some((Err(e), None));
+    let ws_stream = futures_util::stream::unfold(Some(ws_receiver), move |receiver| {
+        let pong_tx = pong_tx.clone();
+        async move {
+            let mut receiver = receiver?;
+            let mut deadline = Instant::now() + read_timeout;
+            loop {
+                let Ok(received) = timeout_at(deadline, receiver.next()).await else {
+                    return Some((
+                        Err(tungstenite::Error::Io(io::ErrorKind::TimedOut.into())),
+                        Some(receiver),
+                    ));
+                };
+                match received? {
+                    Ok(Message::Text(text)) => return Some((Ok(text.into()), Some(receiver))),
+                    Ok(Message::Binary(data)) => return Some((Ok(data), Some(receiver))),
+                    // Pongs only answer the server's pings, which restarts the read timeout.
+                    Ok(Message::Pong(_)) => deadline = Instant::now() + read_timeout,
+                    // `tungstenite` has queued the pong and would write it with a later read or
+                    // write. The send task flushes it instead, so that pongs can't pile up in the
+                    // write buffer of a client that isn't reading.
+                    Ok(Message::Ping(_)) => {
+                        // The send task has ended, and the connection with it.
+                        if pong_tx.send(()).await.is_err() {
+                            return None;
+                        }
+                    }
+                    Ok(Message::Close(_)) => return None,
+                    // Raw frames are only written, never read.
+                    Ok(Message::Frame(_)) => {}
+                    // `tungstenite` reads nothing more after an error, so the stream ends with it.
+                    Err(e) => return Some((Err(e), None)),
                 }
-                // The closing reason is already logged by `soketto` trace log level.
-                // Return the `Closed` error to avoid logging unnecessary warnings on clean
-                // shutdown.
-                Err(e) => return Some((Err(e), Some(receiver))),
             }
         }
     })
@@ -139,10 +178,10 @@ where
                 stopped = stop;
 
                 match err {
-                    SokettoError::Closed => {
-                        break Ok(Shutdown::ConnectionClosed);
-                    }
-                    SokettoError::MessageTooLarge { current, maximum } => {
+                    tungstenite::Error::Capacity(CapacityError::MessageTooLong {
+                        size: current,
+                        max_size: maximum,
+                    }) => {
                         tracing::debug!(
                             target: LOG_TARGET,
                             "WS recv error: message too large current={}/max={}",
@@ -157,6 +196,8 @@ where
                             break Ok(Shutdown::ConnectionClosed);
                         }
 
+                        // The stream has ended, so the next read closes the connection after the
+                        // rejection is written.
                         continue;
                     }
                     err => {
@@ -228,6 +269,7 @@ async fn send_task(
     mut ws_sender: Sender,
     write_timeout: Duration,
     ping_interval: Duration,
+    mut pong_rx: mpsc::Receiver<()>,
     mut stop: oneshot::Receiver<()>,
 ) {
     let mut write_timed_out = false;
@@ -249,20 +291,22 @@ async fn send_task(
             // Pings go before queued messages, so that a subscription that keeps the queue full
             // can't hold them back until the read timeout closes the connection.
             _ = ping_timer.tick() => {
-                let payload = ByteSlice125::try_from(&[][..]).expect("empty ping payload fits");
-                timeout(write_timeout, ws_sender.send_ping(payload)).await
+                timeout(write_timeout, ws_sender.feed(Message::Ping(Bytes::new()))).await
             }
+            // Pongs go before queued messages too, as the receive stream waits for them. The
+            // flush below writes the pong.
+            Some(()) = pong_rx.recv() => Ok(Ok(())),
             response = rx.recv() => {
                 // Nothing else to receive.
                 let Some(response) = response else { break };
-                timeout(write_timeout, ws_sender.send_text_owned(response)).await
+                timeout(write_timeout, feed_text(&mut ws_sender, response)).await
             }
         };
         // Write the messages that are already queued too, and flush them together.
         let mut written = 1;
         while matches!(result, Ok(Ok(()))) && written < MAX_MESSAGES_PER_FLUSH {
             let Ok(response) = rx.try_recv() else { break };
-            result = timeout(write_timeout, ws_sender.send_text_owned(response)).await;
+            result = timeout(write_timeout, feed_text(&mut ws_sender, response)).await;
             written += 1;
         }
         if matches!(result, Ok(Ok(()))) {
@@ -292,22 +336,47 @@ async fn send_task(
     // close frame would block on the same full socket. The receive half is dropped by the
     // connection task, which closes the socket.
     if !write_timed_out {
-        let _ = timeout(write_timeout, ws_sender.close()).await;
+        let close = Message::Close(Some(CloseFrame {
+            code: CloseCode::Normal,
+            reason: Utf8Bytes::default(),
+        }));
+        let _ = timeout(write_timeout, async {
+            // Refused after a close frame from the client, whose reply `tungstenite` has queued
+            // and `close` then writes.
+            let _ = ws_sender.feed(close).await;
+            ws_sender.close().await
+        })
+        .await;
+    }
+}
+
+/// Queues `text` as one message, in frames of at most [`MAX_FRAME_PAYLOAD`] bytes.
+async fn feed_text(ws_sender: &mut Sender, text: String) -> Result<(), tungstenite::Error> {
+    let mut payload = Bytes::from(text);
+    let mut opcode = OpCode::Data(Data::Text);
+    loop {
+        let fragment = payload.split_to(payload.len().min(MAX_FRAME_PAYLOAD));
+        let frame = Frame::message(fragment, opcode, payload.is_empty());
+        ws_sender.feed(Message::Frame(frame)).await?;
+        if payload.is_empty() {
+            return Ok(());
+        }
+        opcode = OpCode::Data(Data::Continue);
     }
 }
 
 enum Receive<S> {
     ConnectionClosed,
     Stopped,
-    Err(SokettoError, S),
-    Ok(Vec<u8>, S),
+    Err(tungstenite::Error, S),
+    Ok(Bytes, S),
 }
 
 /// Attempts to read data from WebSocket fails if the server was stopped.
 async fn try_recv<T, S>(ws_stream: &mut T, stopped: S) -> Receive<S>
 where
     S: Future<Output = ()> + Unpin,
-    T: StreamExt<Item = Result<Vec<u8>, SokettoError>> + Unpin,
+    T: StreamExt<Item = Result<Bytes, tungstenite::Error>> + Unpin,
 {
     // `select` polls its first argument first and returns as soon as that one is ready, so the stop
     // signal has to come first. Polling the stream first starves it: a peer that always has another
@@ -335,13 +404,13 @@ pub(crate) enum Shutdown {
 /// This will return once the connection has been terminated or all pending calls have been
 /// executed.
 async fn graceful_shutdown<S>(
-    result: Result<Shutdown, SokettoError>,
+    result: Result<Shutdown, tungstenite::Error>,
     pending_calls: mpsc::Receiver<()>,
     ws_stream: S,
     mut conn_tx: oneshot::Sender<()>,
     send_task_handle: tokio::task::JoinHandle<()>,
 ) where
-    S: StreamExt<Item = Result<Vec<u8>, SokettoError>> + Unpin,
+    S: StreamExt<Item = Result<Bytes, tungstenite::Error>> + Unpin,
 {
     let pending_calls = ReceiverStream::new(pending_calls);
 
@@ -374,9 +443,27 @@ mod tests {
     #[tokio::test]
     async fn try_recv_observes_stop_while_input_stays_ready() {
         // A peer that always has another message ready must not keep the session from stopping.
-        let mut always_ready = stream::repeat_with(|| Ok::<_, SokettoError>(b"{}".to_vec()));
+        let mut always_ready =
+            stream::repeat_with(|| Ok::<_, tungstenite::Error>(Bytes::from_static(b"{}")));
 
         let received = try_recv(&mut always_ready, future::ready(())).await;
         assert!(matches!(received, Receive::Stopped));
+    }
+
+    #[test]
+    fn upgrade_request_is_detected_in_header_lists() {
+        let request = |connection, upgrade| {
+            http::Request::builder()
+                .header(CONNECTION, connection)
+                .header(UPGRADE, upgrade)
+                .body(())
+                .unwrap()
+        };
+
+        assert!(is_upgrade_request(&request("Upgrade", "websocket")));
+        assert!(is_upgrade_request(&request("keep-alive, Upgrade", "h2c, WebSocket")));
+        assert!(!is_upgrade_request(&request("keep-alive", "websocket")));
+        assert!(!is_upgrade_request(&request("upgrade", "h2c")));
+        assert!(!is_upgrade_request(&http::Request::new(())));
     }
 }
