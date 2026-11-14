@@ -33,13 +33,13 @@ where
 {
     let block_num_hash = header.num_hash();
     if !filter.matches_block(&block_num_hash) {
-        return Ok(vec![])
+        return Ok(vec![]);
     }
 
     // An empty address/topic set matches any bloom, so this can only skip blocks that have no
     // matching logs.
     if !filter.matches_bloom(header.logs_bloom()) {
-        return Ok(vec![])
+        return Ok(vec![]);
     }
 
     let mut all_logs = Vec::new();
@@ -115,35 +115,12 @@ where
             if filter.matches(log) {
                 // if this is the first match in the receipt's logs, look up the transaction hash
                 if transaction_hash.is_none() {
-                    transaction_hash = match &provider_or_block {
-                        ProviderOrBlock::Block(block) => {
-                            block.body().transactions().get(receipt_idx).map(|t| *t.tx_hash())
-                        }
-                        ProviderOrBlock::Provider(provider) => {
-                            let first_tx_num = match loaded_first_tx_num {
-                                Some(num) => num,
-                                None => {
-                                    let block_body_indices = provider
-                                        .block_body_indices(block_num_hash.number)?
-                                        .ok_or(ProviderError::BlockBodyIndicesNotFound(
-                                            block_num_hash.number,
-                                        ))?;
-                                    loaded_first_tx_num = Some(block_body_indices.first_tx_num);
-                                    block_body_indices.first_tx_num
-                                }
-                            };
-
-                            // This is safe because Transactions and Receipts have the same
-                            // keys.
-                            let transaction_id = first_tx_num + receipt_idx as u64;
-                            let transaction =
-                                provider.transaction_by_id(transaction_id)?.ok_or_else(|| {
-                                    ProviderError::TransactionNotFound(transaction_id.into())
-                                })?;
-
-                            Some(*transaction.tx_hash())
-                        }
-                    };
+                    transaction_hash = block_transaction_hash(
+                        &provider_or_block,
+                        block_num_hash.number,
+                        receipt_idx,
+                        &mut loaded_first_tx_num,
+                    )?;
                 }
 
                 let log = Log {
@@ -167,6 +144,45 @@ where
     }
 
     Ok(())
+}
+
+/// Returns the hash of the transaction at `tx_index` in the block.
+///
+/// `first_tx_num` caches the number of the block's first transaction between calls for the same
+/// block, so that the block body indices are read only once.
+pub fn block_transaction_hash<P>(
+    provider_or_block: &ProviderOrBlock<'_, P>,
+    block_number: u64,
+    tx_index: usize,
+    first_tx_num: &mut Option<u64>,
+) -> Result<Option<TxHash>, ProviderError>
+where
+    P: BlockReader<Transaction: SignedTransaction>,
+{
+    match provider_or_block {
+        ProviderOrBlock::Block(block) => {
+            Ok(block.body().transactions().get(tx_index).map(|t| *t.tx_hash()))
+        }
+        ProviderOrBlock::Provider(provider) => {
+            let first_tx_num = match *first_tx_num {
+                Some(num) => num,
+                None => {
+                    let block_body_indices = provider
+                        .block_body_indices(block_number)?
+                        .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
+                    *first_tx_num.insert(block_body_indices.first_tx_num)
+                }
+            };
+
+            // This is safe because Transactions and Receipts have the same keys.
+            let transaction_id = first_tx_num + tx_index as u64;
+            let transaction = provider
+                .transaction_by_id(transaction_id)?
+                .ok_or_else(|| ProviderError::TransactionNotFound(transaction_id.into()))?;
+
+            Ok(Some(*transaction.tx_hash()))
+        }
+    }
 }
 
 /// Computes the block range based on the filter range and current block numbers.
