@@ -264,7 +264,7 @@ where
     Ok(out)
 }
 
-/// Applies precompile move overrides from state overrides to the EVM's precompiles map.
+/// Applies precompile moves and code overrides to this EVM's native dispatch.
 ///
 /// This function processes `movePrecompileToAddress` entries from the state overrides and
 /// moves precompiles from their original addresses to new addresses. The original address
@@ -279,9 +279,6 @@ pub fn apply_precompile_overrides(
             account_override.move_precompile_to.map(|dest| (*source, dest))
         })
         .collect();
-    if moves.is_empty() {
-        return Ok(())
-    }
 
     for (source, dest) in &moves {
         if source == dest {
@@ -295,6 +292,13 @@ pub fn apply_precompile_overrides(
     evm.move_precompiles(moves).map_err(|MovePrecompileError::NotAPrecompile(addr)| {
         EthSimulateError::NotAPrecompile(addr)
     })?;
+
+    // Move from the original native set before code overrides shadow destination dispatch.
+    evm.disable_precompiles(
+        state_overrides
+            .iter()
+            .filter_map(|(address, account)| account.code.as_ref().map(|_| *address)),
+    );
 
     Ok(())
 }
@@ -725,17 +729,14 @@ impl SimulatedState {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        apply_precompile_overrides, sanitize_chain, EthSimulateError, ProviderResult,
-        SimulatedState, INTERNAL_ERROR_CODE,
-    };
+    use super::*;
     use crate::{cache::db::apply_state_overrides_with_state, error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
-    use alloy_consensus::Header;
+    use alloy_consensus::{transaction::Recovered, Header, TxLegacy};
     use alloy_primitives::{
         address, keccak256,
         map::{AddressMap, B256Map},
-        Address, B256, U256,
+        Address, Bytes, TxKind, B256, U256,
     };
     use alloy_rpc_types_eth::{
         simulate::SimBlock,
@@ -743,7 +744,7 @@ mod tests {
         BlockOverrides, TransactionRequest,
     };
     use evm2::{
-        ethereum::ethereum_tx_registry,
+        ethereum::{ethereum_tx_registry, TxEnvelope},
         evm::{AccountInfo, CacheDB, EmptyDB, InMemoryDB},
         BaseEvmTypes, Evm, Precompiles, SpecId,
     };
@@ -1117,5 +1118,218 @@ mod tests {
                 "block {index}"
             );
         }
+    }
+
+    fn execute_code_override(target: Address, code: Option<Bytes>) -> Bytes {
+        execute_state_overrides(
+            target,
+            StateOverride::from_iter([(target, AccountOverride { code, ..Default::default() })]),
+        )
+    }
+
+    fn execute_state_overrides(target: Address, overrides: StateOverride) -> Bytes {
+        let caller = Address::repeat_byte(0xaa);
+        let mut db = InMemoryDB::default();
+        db.insert_account_info(
+            &caller,
+            AccountInfo { balance: U256::from(u64::MAX), ..Default::default() },
+        );
+        apply_state_overrides_with_state(overrides.clone(), &mut db, None).unwrap();
+        let mut evm = Evm::<BaseEvmTypes>::new(
+            SpecId::PRAGUE,
+            Default::default(),
+            ethereum_tx_registry(SpecId::PRAGUE),
+            db,
+            Precompiles::base(SpecId::PRAGUE),
+        );
+        apply_precompile_overrides(&overrides, &mut evm).unwrap();
+        let tx = Recovered::new_unchecked(
+            TxEnvelope::Legacy(TxLegacy {
+                gas_limit: 100_000,
+                to: TxKind::Call(target),
+                input: Bytes::from_static(&[0x12, 0x34]),
+                ..Default::default()
+            }),
+            caller,
+        );
+        let result = evm.transact(&tx).unwrap().discard();
+        assert!(result.status);
+        let repeated = evm.transact(&tx).unwrap().discard();
+        assert!(repeated.status);
+        assert_eq!(result.output, repeated.output);
+        result.output
+    }
+
+    #[test]
+    fn code_masks_are_block_scoped_with_current_block_moves() {
+        let source = Address::with_last_byte(4);
+        let destination = Address::with_last_byte(2);
+        let caller = Address::repeat_byte(0xaa);
+        let mut db = InMemoryDB::default();
+        db.insert_account_info(
+            &caller,
+            AccountInfo { balance: U256::from(u64::MAX), ..Default::default() },
+        );
+        let overrides = StateOverride::from_iter([
+            (source, AccountOverride { code: Some(Bytes::new()), ..Default::default() }),
+            (destination, AccountOverride { code: Some(Bytes::new()), ..Default::default() }),
+        ]);
+        apply_state_overrides_with_state(overrides.clone(), &mut db, None).unwrap();
+        for block in 0..3 {
+            let mut evm = Evm::<BaseEvmTypes>::new(
+                SpecId::PRAGUE,
+                Default::default(),
+                ethereum_tx_registry(SpecId::PRAGUE),
+                &mut db,
+                Precompiles::base(SpecId::PRAGUE),
+            );
+            if block == 0 {
+                apply_precompile_overrides(&overrides, &mut evm).unwrap();
+            }
+            assert_eq!(RethEvm::has_precompile(&evm, &source), block != 0);
+            assert_eq!(RethEvm::has_precompile(&evm, &destination), block != 0);
+            let target = if block == 1 {
+                // Current-block moves may replace native dispatch over persisted account code.
+                let moves = StateOverride::from_iter([(
+                    source,
+                    AccountOverride { move_precompile_to: Some(destination), ..Default::default() },
+                )]);
+                apply_precompile_overrides(&moves, &mut evm).unwrap();
+                assert!(RethEvm::has_precompile(&evm, &destination));
+                assert!(!RethEvm::has_precompile(&evm, &source));
+                destination
+            } else {
+                source
+            };
+            let tx = Recovered::new_unchecked(
+                TxEnvelope::Legacy(TxLegacy {
+                    gas_limit: 100_000,
+                    to: TxKind::Call(target),
+                    input: Bytes::from_static(b"input"),
+                    ..Default::default()
+                }),
+                caller,
+            );
+            let result = evm.transact(&tx).unwrap().discard();
+            assert!(result.status);
+            if block == 0 {
+                assert_eq!(result.output, Bytes::new());
+            } else {
+                assert_eq!(result.output, Bytes::from_static(b"input"));
+            }
+        }
+        // Per-block policy does not mutate the shared native implementation table.
+        assert!(RethEvm::has_precompile(&test_evm(), &source));
+        assert!(RethEvm::has_precompile(&test_evm(), &destination));
+    }
+
+    #[test]
+    fn code_override_ordinary_address_executes_replacement() {
+        // Store and return the single byte 42.
+        let code = Bytes::from_static(&[0x60, 0x2a, 0x60, 0, 0x53, 0x60, 1, 0x60, 0, 0xf3]);
+        assert_eq!(
+            execute_code_override(Address::repeat_byte(0xbb), Some(code)),
+            Bytes::from_static(&[42]),
+        );
+    }
+
+    #[test]
+    fn code_override_identity_without_code_preserves_precompile() {
+        assert_eq!(
+            execute_code_override(Address::with_last_byte(4), None),
+            Bytes::from_static(&[0x12, 0x34]),
+        );
+    }
+
+    #[test]
+    fn code_override_identity_executes_replacement() {
+        let code = Bytes::from_static(&[0x60, 0x2a, 0x60, 0, 0x53, 0x60, 1, 0x60, 0, 0xf3]);
+        assert_eq!(
+            execute_code_override(Address::with_last_byte(4), Some(code)),
+            Bytes::from_static(&[42]),
+        );
+    }
+
+    #[test]
+    fn code_override_identity_empty_disables_precompile() {
+        assert_eq!(
+            execute_code_override(Address::with_last_byte(4), Some(Bytes::new())),
+            Bytes::new()
+        );
+    }
+
+    #[test]
+    fn code_override_nested_call_executes_replacement() {
+        let target = Address::repeat_byte(0xbb);
+        let identity = Address::with_last_byte(4);
+        // CALL identity with empty input and return its one-byte output.
+        let caller = Bytes::from_static(&[
+            0x60, 1, 0x60, 0, 0x60, 0, 0x60, 0, 0x60, 0, 0x60, 4, 0x61, 0xff, 0xff, 0xf1, 0x50,
+            0x60, 1, 0x60, 0, 0xf3,
+        ]);
+        let replacement = Bytes::from_static(&[0x60, 0x2a, 0x60, 0, 0x53, 0x60, 1, 0x60, 0, 0xf3]);
+        let overrides = StateOverride::from_iter([
+            (target, AccountOverride { code: Some(caller), ..Default::default() }),
+            (identity, AccountOverride { code: Some(replacement), ..Default::default() }),
+        ]);
+        assert_eq!(execute_state_overrides(target, overrides), Bytes::from_static(&[42]));
+    }
+
+    #[test]
+    fn code_override_move_preserves_native_at_destination() {
+        let source = Address::with_last_byte(4);
+        let destination = Address::repeat_byte(0xbb);
+        let overrides = StateOverride::from_iter([(
+            source,
+            AccountOverride {
+                code: Some(Bytes::new()),
+                move_precompile_to: Some(destination),
+                ..Default::default()
+            },
+        )]);
+        assert_eq!(
+            execute_state_overrides(destination, overrides.clone()),
+            Bytes::from_static(&[0x12, 0x34])
+        );
+        assert_eq!(execute_state_overrides(source, overrides), Bytes::new());
+    }
+
+    #[test]
+    fn code_override_at_move_destination_shadows_native() {
+        let source = Address::with_last_byte(4);
+        let destination = Address::repeat_byte(0xbb);
+        let overrides = StateOverride::from_iter([
+            (
+                source,
+                AccountOverride { move_precompile_to: Some(destination), ..Default::default() },
+            ),
+            (destination, AccountOverride { code: Some(Bytes::new()), ..Default::default() }),
+        ]);
+        assert_eq!(execute_state_overrides(destination, overrides), Bytes::new());
+    }
+
+    #[test]
+    fn code_override_nested_staticcall_preserves_warm_access_gas() {
+        let target = Address::repeat_byte(0xbb);
+        let identity = Address::with_last_byte(4);
+        // Return GAS before and after a STATICCALL with empty input and output.
+        let probe = Bytes::from_static(&[
+            0x5a, 0x5f, 0x52, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 4, 0x5a, 0xfa, 0x50, 0x5a, 0x60, 0x20,
+            0x52, 0x60, 0x40, 0x5f, 0xf3,
+        ]);
+        let gas_used = |code: Option<Bytes>| {
+            let output = execute_state_overrides(
+                target,
+                StateOverride::from_iter([
+                    (target, AccountOverride { code: Some(probe.clone()), ..Default::default() }),
+                    (identity, AccountOverride { code, ..Default::default() }),
+                ]),
+            );
+            U256::from_be_slice(&output[..32]) - U256::from_be_slice(&output[32..])
+        };
+        // Identity costs 15 gas for empty input; empty account code and STOP cost zero.
+        assert_eq!(gas_used(None), U256::from(140));
+        assert_eq!(gas_used(Some(Bytes::new())), U256::from(125));
+        assert_eq!(gas_used(Some(Bytes::from_static(&[0x00]))), U256::from(125));
     }
 }

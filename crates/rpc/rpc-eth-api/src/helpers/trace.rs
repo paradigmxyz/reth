@@ -4,7 +4,7 @@ use super::{Call, LoadBlock, LoadState, LoadTransaction};
 use crate::{FromEthApiError, FromEvmError};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eip7928::{bal::DecodedBal, BlockAccessIndex};
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use evm2::evm::Bal as EvmBal;
 use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
@@ -57,7 +57,24 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         DB: Database,
         I: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
     {
+        self.inspect_with_code_overrides(db, evm_env, tx_env, inspector, [])
+    }
+
+    /// Inspects a call with native dispatch disabled at explicit code override addresses.
+    fn inspect_with_code_overrides<DB, I>(
+        &self,
+        db: DB,
+        evm_env: EvmEnvFor<Self::Evm>,
+        tx_env: &TxEnvFor<Self::Evm>,
+        inspector: I,
+        code_overrides: impl IntoIterator<Item = Address>,
+    ) -> Result<(I, TxResultWithStateFor<Self::Evm>), Self::Error>
+    where
+        DB: Database,
+        I: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
+    {
         let mut evm = self.evm_config().evm_with_env(db, evm_env);
+        evm.disable_precompiles(code_overrides);
         evm.transact_with_inspector(tx_env, inspector).map_err(Self::Error::from_evm_err)
     }
 

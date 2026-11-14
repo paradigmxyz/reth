@@ -13,9 +13,14 @@ use alloy_eips::{
     eip2718::{Typed2718, WithEncoded},
     eip2930::AccessList,
 };
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{map::AddressSet, Address, B256};
 use core::fmt::Debug;
-use evm2::interpreter::{Interpreter, Message, MessageResult};
+use evm2::{
+    evm::precompile::{PrecompileOutput, PrecompileProvider},
+    interpreter::{GasTracker, Interpreter, Message, MessageResult},
+    precompiles::{MovePrecompileError, PrecompileId},
+    EvmTypesHost, PrecompileError,
+};
 use reth_execution_types::{BlockExecutionResult, StateUpdate};
 use reth_primitives_traits::{
     Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, SignedTransaction,
@@ -138,6 +143,11 @@ pub trait Evm {
         moves: impl IntoIterator<Item = (Address, Address)>,
     ) -> Result<(), evm2::precompiles::MovePrecompileError>;
 
+    /// Disables native dispatch at the given addresses for this EVM only.
+    ///
+    /// Subsequent transactions execute the account code at these addresses, including empty code.
+    fn disable_precompiles(&mut self, addresses: impl IntoIterator<Item = Address>);
+
     /// Executes a transaction, lets `observe` inspect the executed transaction and its state
     /// changes, then discards its writes.
     fn transact_and_discard<R>(
@@ -243,6 +253,14 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         moves: impl IntoIterator<Item = (Address, Address)>,
     ) -> Result<(), evm2::precompiles::MovePrecompileError> {
         self.precompiles_mut().move_precompiles(&moves.into_iter().collect::<Vec<_>>())
+    }
+
+    fn disable_precompiles(&mut self, addresses: impl IntoIterator<Item = Address>) {
+        let disabled = AddressSet::from_iter(addresses);
+        if !disabled.is_empty() {
+            let inner = self.take_precompiles();
+            self.set_precompiles(FilteredPrecompiles { inner, disabled });
+        }
     }
 
     fn transact_and_discard<R>(
@@ -1668,6 +1686,70 @@ impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for WithTxEnv<T
     }
 }
 
+/// Request-local native dispatch filter that preserves custom providers and their caches.
+struct FilteredPrecompiles<'a, T: EvmTypesHost> {
+    inner: Box<dyn PrecompileProvider<T> + 'a>,
+    disabled: AddressSet,
+}
+
+impl<T: EvmTypesHost> PrecompileProvider<T> for FilteredPrecompiles<'_, T> {
+    fn addresses(&self) -> Vec<Address> {
+        self.inner
+            .addresses()
+            .into_iter()
+            .filter(|address| !self.disabled.contains(address))
+            .collect()
+    }
+
+    fn warm_addresses(&self, warm: &mut evm2::evm::PrewarmSet) {
+        // Code overrides change native dispatch, but preserve the provider's warm set.
+        self.inner.warm_addresses(warm);
+    }
+
+    fn precompile_ids(&self) -> Vec<(Address, PrecompileId)> {
+        self.inner
+            .precompile_ids()
+            .into_iter()
+            .filter(|(address, _)| !self.disabled.contains(address))
+            .collect()
+    }
+
+    fn contains(&self, address: &Address) -> bool {
+        !self.disabled.contains(address) && self.inner.contains(address)
+    }
+
+    fn move_precompiles(
+        &mut self,
+        moves: &[(Address, Address)],
+    ) -> Result<(), MovePrecompileError> {
+        if let Some((source, _)) =
+            moves.iter().find(|(source, dest)| source != dest && !self.contains(source))
+        {
+            return Err(MovePrecompileError::NotAPrecompile(*source));
+        }
+        self.inner.move_precompiles(moves)?;
+        // A move installs a new native implementation even at a previously filtered destination.
+        for (source, dest) in moves {
+            if source != dest {
+                self.disabled.remove(dest);
+            }
+        }
+        Ok(())
+    }
+
+    fn execute(
+        &mut self,
+        evm: &mut evm2::Evm<'_, T>,
+        message: &Message<T>,
+        gas: &mut GasTracker,
+    ) -> Option<Result<PrecompileOutput, PrecompileError>> {
+        if self.disabled.contains(&message.call_target) {
+            return None;
+        }
+        self.inner.execute(evm, message, gas)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1744,5 +1826,57 @@ mod tests {
         assert_parts(&Either::<_, Recovered<TxLegacy>>::Left(recovered.clone()));
         assert_parts(&Either::<Recovered<TxLegacy>, _>::Right(recovered.clone()));
         assert_parts(&WithTxEnv { tx_env: (), tx: Arc::new(recovered) });
+    }
+
+    #[test]
+    fn code_filter_preserves_provider_warm_set() {
+        struct CustomWarmSet;
+
+        impl PrecompileProvider<evm2::BaseEvmTypes> for CustomWarmSet {
+            fn addresses(&self) -> Vec<Address> {
+                vec![Address::with_last_byte(4)]
+            }
+
+            fn warm_addresses(&self, warm: &mut evm2::evm::PrewarmSet) {
+                warm.warm(&Address::with_last_byte(4));
+                warm.warm(&Address::repeat_byte(0x40));
+            }
+
+            fn precompile_ids(&self) -> Vec<(Address, PrecompileId)> {
+                Vec::new()
+            }
+
+            fn contains(&self, address: &Address) -> bool {
+                *address == Address::with_last_byte(4)
+            }
+
+            fn move_precompiles(
+                &mut self,
+                _moves: &[(Address, Address)],
+            ) -> Result<(), MovePrecompileError> {
+                unreachable!("this test does not move precompiles")
+            }
+
+            fn execute(
+                &mut self,
+                _evm: &mut evm2::Evm<'_, evm2::BaseEvmTypes>,
+                _message: &Message<evm2::BaseEvmTypes>,
+                _gas: &mut GasTracker,
+            ) -> Option<Result<PrecompileOutput, PrecompileError>> {
+                unreachable!("this test only checks provider metadata")
+            }
+        }
+
+        let filtered = FilteredPrecompiles {
+            inner: Box::new(CustomWarmSet),
+            disabled: AddressSet::from_iter([Address::with_last_byte(4)]),
+        };
+        let mut expected = evm2::evm::PrewarmSet::new();
+        CustomWarmSet.warm_addresses(&mut expected);
+        let mut actual = evm2::evm::PrewarmSet::new();
+        filtered.warm_addresses(&mut actual);
+        assert_eq!(actual, expected);
+        assert!(filtered.addresses().is_empty());
+        assert!(!filtered.contains(&Address::with_last_byte(4)));
     }
 }

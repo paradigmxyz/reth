@@ -398,6 +398,90 @@ mod tests {
     };
 
     #[test]
+    fn code_filters_preserve_custom_provider_cache_and_metadata() {
+        let spec = SpecId::OSAKA;
+        let hidden = Address::with_last_byte(2);
+        let custom = Address::repeat_byte(0x40);
+        let input = Bytes::from_static(b"input");
+        let shared = PrecompileCacheMap::default();
+        shared.cache_for_address(custom).insert(
+            input.clone(),
+            CacheEntry {
+                output: PrecompileOutput::new(Bytes::from_static(b"cached custom output")),
+                regular_gas_used: 60,
+                spec,
+            },
+        );
+        let make_provider = || {
+            let mut precompiles = evm2::Precompiles::<BaseEvmTypes>::base(spec);
+            let entry = precompiles.as_map_mut().remove(Address::with_last_byte(4)).unwrap();
+            precompiles.as_map_mut().insert(entry.with_address(custom));
+            CachedPrecompileProvider::new(
+                precompiles,
+                shared.clone(),
+                spec,
+                PrecompileCachePolicy::All,
+                false,
+            )
+        };
+        let mut evm = Evm::<BaseEvmTypes>::new(
+            spec,
+            BlockEnv::<BaseEvmTypes>::default(),
+            TxRegistry::new(),
+            InMemoryDB::default(),
+            make_provider(),
+        );
+        let expected_ids = evm
+            .precompiles()
+            .precompile_ids()
+            .into_iter()
+            .filter(|(address, _)| *address != hidden)
+            .collect::<Vec<_>>();
+        crate::Evm::disable_precompiles(&mut evm, [hidden]);
+        assert_eq!(evm.precompiles().precompile_ids(), expected_ids);
+        assert!(!evm.precompiles().contains(&hidden));
+        assert!(evm.precompiles().contains(&custom));
+        assert!(!evm.precompiles().addresses().contains(&hidden));
+        assert!(evm.precompiles().addresses().contains(&custom));
+        let mut warm = evm2::evm::PrewarmSet::new();
+        evm.precompiles().warm_addresses(&mut warm);
+        assert!(warm.is_warm(&hidden));
+        assert!(warm.is_warm(&custom));
+        let mut filtered = evm.take_precompiles();
+        let mut message = Message::<BaseEvmTypes> {
+            call_target: hidden,
+            input: input.into(),
+            ..Default::default()
+        };
+        assert!(filtered.execute(&mut evm, &message, &mut GasTracker::new(30_000)).is_none());
+        message.call_target = custom;
+        for _ in 0..2 {
+            let output = filtered
+                .execute(&mut evm, &message, &mut GasTracker::new(30_000))
+                .unwrap()
+                .unwrap();
+            assert_eq!(output.bytes(), b"cached custom output");
+        }
+        assert_eq!(
+            filtered.move_precompiles(&[(hidden, custom)]),
+            Err(evm2::precompiles::MovePrecompileError::NotAPrecompile(hidden))
+        );
+        assert_eq!(filtered.precompile_ids(), expected_ids);
+        // A new EVM sharing the cache retains its independent native dispatch table.
+        let other = make_provider();
+        assert!(other.contains(&hidden));
+        assert!(other.contains(&custom));
+        // A later move can install a native implementation at a filtered destination.
+        filtered.move_precompiles(&[(custom, hidden)]).unwrap();
+        assert!(filtered.contains(&hidden));
+        assert!(!filtered.contains(&custom));
+        let mut warm = evm2::evm::PrewarmSet::new();
+        filtered.warm_addresses(&mut warm);
+        assert!(warm.is_warm(&hidden));
+        assert!(!warm.is_warm(&custom));
+    }
+
+    #[test]
     fn cached_precompile_metadata_matches_inner() {
         let precompiles = evm2::Precompiles::<BaseEvmTypes>::base(SpecId::OSAKA);
         let expected = precompiles.precompile_ids();
