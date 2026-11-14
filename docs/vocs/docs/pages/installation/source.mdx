@@ -12,7 +12,7 @@ Reth does **not** work on Windows WSL1.
 
 ## Dependencies
 
-First, **install Rust** using [rustup](https://rustup.rs/)：
+First, **install Rust** using [rustup](https://rustup.rs/). On Windows, download and run `rustup-init.exe` and select the MSVC toolchain. On Linux and macOS, run:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -37,7 +37,9 @@ operating system:
 
 These are needed to build bindings for Reth's database.
 
-The Minimum Supported Rust Version (MSRV) of this project is 1.88.0. If you already have a version of Rust installed,
+For native Windows builds, also install the Visual Studio Build Tools with the **Desktop development with C++** workload and make `perl` available on `PATH` for `asm-keccak`.
+
+The Minimum Supported Rust Version (MSRV) of this project is 1.96.0. If you already have a version of Rust installed,
 you can check your version by running `rustc --version`. To update your version of Rust, run `rustup update`.
 
 ## Build Reth
@@ -49,7 +51,9 @@ git clone https://github.com/paradigmxyz/reth
 cd reth
 ```
 
-Then, install Reth into your `PATH` directly via:
+### Linux and macOS
+
+Install Reth into your `PATH` directly:
 
 ```bash
 cargo install --locked --path bin/reth --bin reth
@@ -57,13 +61,31 @@ cargo install --locked --path bin/reth --bin reth
 
 The binary will now be accessible as `reth` via the command line, and exist under your default `.cargo/bin` folder.
 
-Alternatively, you can build yourself with:
+You can also build the binary directly:
 
 ```bash
 cargo build --release
 ```
 
 This will place the reth binary under `./target/release/reth`, and you can copy it to your directory of preference after that.
+
+### Windows (MSVC)
+
+Run the following command to build `target/release/reth.exe`:
+
+```powershell
+cargo build --locked -p reth --bin reth --release --no-default-features --features otlp,otlp-logs,js-tracer,keccak-cache-global,asm-keccak,min-trace-logs,portable
+```
+
+To install Reth into your `PATH`, run:
+
+```powershell
+cargo install --locked --path bin/reth --bin reth --no-default-features --features otlp,otlp-logs,js-tracer,keccak-cache-global,asm-keccak,min-trace-logs,portable
+```
+
+These commands omit `gmp`, whose build script rejects MSVC, and `jit`, which requires LLVM development libraries. The EVM uses its Rust implementation of `MODEXP` and runs in interpreter mode.
+
+### Verify the build
 
 Compilation may take around 10 minutes. Installation was successful if `reth --help` displays the [command-line documentation](/cli/reth).
 
@@ -81,10 +103,13 @@ The `reth` directory will be the location you cloned reth to during the installa
 cd reth
 git fetch
 git checkout ${VERSION}
-cargo build --release
 ```
 
+Run the build command for your platform after checking out the release.
+
 ## Optimizations
+
+For Windows MSVC builds, keep the Cargo feature flags from the Windows build command when changing profiles or compiler flags.
 
 **Profiles**
 
