@@ -48,6 +48,9 @@ use tracing::{trace, warn};
 /// Bound admission-time throttling independently of long-lived security bans.
 const MAX_INCOMING_IP_THROTTLE_ENTRIES: u32 = 16_384;
 
+/// Bound the dial throttle. An evicted IP only loses its escalation.
+const MAX_DIAL_IP_THROTTLE_ENTRIES: u32 = 16_384;
+
 /// Maintains the state of _all_ the peers known to the network.
 ///
 /// This is supposed to be owned by the network itself, but can be reached via the [`PeersHandle`].
@@ -82,6 +85,8 @@ pub struct PeersManager {
     ban_list: BanList,
     /// Bounded recent-source throttle, separate from security bans.
     incoming_ip_throttle: LruMap<IpAddr, std::time::Instant>,
+    /// Public IPs whose last dials of discovered peers failed before the remote authenticated.
+    dial_ip_throttle: LruMap<IpAddr, DialIpThrottle>,
     /// Tracks currently backed off peers.
     backed_off_peers: HashMap<PeerId, std::time::Instant, FbBuildHasher<64>>,
     /// Interval at which to check for peers to unban and release from the backoff map.
@@ -231,6 +236,7 @@ impl PeersManager {
             connection_info: ConnectionInfo::new(connection_info),
             ban_list,
             incoming_ip_throttle: LruMap::new(MAX_INCOMING_IP_THROTTLE_ENTRIES),
+            dial_ip_throttle: LruMap::new(MAX_DIAL_IP_THROTTLE_ENTRIES),
             backed_off_peers: Default::default(),
             ban_duration,
             backoff_durations,
@@ -702,7 +708,29 @@ impl PeersManager {
             // ACK, transport, and Hello timeout errors can precede the first authenticated frame.
             // The outer timeout carries no handshake phase, so it is also treated conservatively.
             // Back off the attempt without penalizing that identity or its discovery record.
-            if self.peers.get(peer_id).is_some_and(|peer| peer.state.is_pending_out()) {
+            if let Some(peer) = self.peers.get_mut(peer_id) &&
+                peer.state.is_pending_out()
+            {
+                // The identity is unproven, so repeated failures only rank the peer below untried
+                // ones. The growing retry delay is charged to the dialed IP, which fresh
+                // identities can't reset. Trusted and static peers neither charge nor wait for it.
+                peer.unauthenticated_dial_failures =
+                    peer.unauthenticated_dial_failures.saturating_add(1);
+                if !peer.is_trusted() &&
+                    !peer.is_static() &&
+                    !self.trusted_peer_ids.contains(peer_id) &&
+                    let Some(ip) = dial_ip(peer)
+                {
+                    let failures =
+                        self.dial_ip_throttle.peek(&ip).map_or(0, |throttle| throttle.failures);
+                    self.dial_ip_throttle.insert(
+                        ip,
+                        DialIpThrottle {
+                            failures: failures.saturating_add(1),
+                            until: self.backoff_durations.backoff_until(BackoffKind::Low, failures),
+                        },
+                    );
+                }
                 self.on_outgoing_pending_session_gracefully_closed(peer_id);
                 self.backoff_peer_until(
                     *peer_id,
@@ -712,7 +740,20 @@ impl PeersManager {
             }
             return
         }
+        // Every other handshake error follows a valid frame from the remote, which only the dialed
+        // identity can produce.
+        self.on_dial_authenticated(peer_id);
         self.on_connection_failure(remote_addr, peer_id, err, ReputationChangeKind::FailedToConnect)
+    }
+
+    /// Clears the unauthenticated dial failures of the peer and its IP.
+    fn on_dial_authenticated(&mut self, peer_id: &PeerId) {
+        if let Some(peer) = self.peers.get_mut(peer_id) {
+            peer.unauthenticated_dial_failures = 0;
+            if let Some(ip) = dial_ip(peer) {
+                self.dial_ip_throttle.remove(&ip);
+            }
+        }
     }
 
     /// Gracefully disconnected an active session
@@ -756,6 +797,7 @@ impl PeersManager {
     /// Called when a _pending_ outbound connection is successful.
     pub(crate) fn on_active_outgoing_established(&mut self, peer_id: PeerId) {
         let at_capacity = self.connection_info.is_outbound_at_capacity();
+        self.on_dial_authenticated(&peer_id);
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             trace!(target: "net::peers", ?peer_id, "established active outgoing connection");
             self.connection_info.decr_state(peer.state);
@@ -1201,21 +1243,39 @@ impl PeersManager {
     /// not currently marked as banned or backed off.
     ///
     /// Among remaining peers, the one with the highest reputation is selected. When reputation is
-    /// equal, a peer with a discovered `fork_id` is preferred since it indicates a compatible fork.
+    /// equal, a peer with fewer unauthenticated dial failures is preferred, then one with a
+    /// discovered `fork_id` since it indicates a compatible fork.
     ///
     /// If `trusted_nodes_only` is enabled, see [`PeersConfig`], then this will only consider
     /// `trusted` peers, including registered trusted IDs whose addresses were discovered before
     /// hostname resolution. The same restriction applies when `trusted_only` is set.
     ///
+    /// Peers on an IP in `dialing_ips` are skipped, as are discovered peers on an IP that is
+    /// throttled after unauthenticated dial failures.
+    ///
     /// Returns `None` if no peer is available.
-    fn best_unconnected(&mut self, trusted_only: bool) -> Option<(PeerId, &mut Peer)> {
+    fn best_unconnected(
+        &mut self,
+        trusted_only: bool,
+        dialing_ips: &[IpAddr],
+    ) -> Option<(PeerId, &mut Peer)> {
+        let now = std::time::Instant::now();
         let mut unconnected = self.peers.iter_mut().filter(|(peer_id, peer)| {
             !peer.is_backed_off() &&
                 !peer.is_banned() &&
                 peer.state.is_unconnected() &&
                 (!(self.trusted_nodes_only || trusted_only) ||
                     peer.is_trusted() ||
-                    self.trusted_peer_ids.contains(*peer_id))
+                    self.trusted_peer_ids.contains(*peer_id)) &&
+                dial_ip(peer).is_none_or(|ip| {
+                    !dialing_ips.contains(&ip) &&
+                        (peer.is_trusted() ||
+                            peer.is_static() ||
+                            self.trusted_peer_ids.contains(*peer_id) ||
+                            self.dial_ip_throttle
+                                .peek(&ip)
+                                .is_none_or(|throttle| throttle.until <= now))
+                })
         });
 
         // keep track of the best peer, if there's one
@@ -1237,8 +1297,14 @@ impl PeersManager {
                 return Some((*maybe_better.0, maybe_better.1))
             }
 
-            // prefer higher reputation, break ties by fork_id presence
-            match maybe_better.1.reputation.cmp(&best_peer.1.reputation) {
+            // prefer higher reputation, then fewer unauthenticated dial failures, break ties by
+            // fork_id presence
+            match maybe_better.1.reputation.cmp(&best_peer.1.reputation).then_with(|| {
+                best_peer
+                    .1
+                    .unauthenticated_dial_failures
+                    .cmp(&maybe_better.1.unauthenticated_dial_failures)
+            }) {
                 std::cmp::Ordering::Greater => best_peer = maybe_better,
                 std::cmp::Ordering::Equal
                     if maybe_better.1.fork_id.is_some() && best_peer.1.fork_id.is_none() =>
@@ -1306,10 +1372,19 @@ impl PeersManager {
     fn fill_outbound_slots(&mut self) {
         self.tick();
 
-        if !self.net_connection_state.is_active() {
+        if !self.net_connection_state.is_active() || !self.connection_info.has_out_dial_capacity() {
             // nothing to fill
             return
         }
+
+        // At most one pending dial per IP. Bounded by the concurrent dial limit, so a linear
+        // lookup is cheaper than hashing.
+        let mut dialing_ips: Vec<IpAddr> = self
+            .peers
+            .values()
+            .filter(|peer| peer.state.is_pending_out())
+            .filter_map(dial_ip)
+            .collect();
 
         // as long as there are slots available fill them with the best peers
         while self.connection_info.has_out_dial_capacity() {
@@ -1317,10 +1392,14 @@ impl PeersManager {
             // peers can never crowd them out; only the concurrent dial limit applies to them.
             let has_out_capacity = self.connection_info.has_out_capacity();
             let action = {
-                let Some((peer_id, peer)) = self.best_unconnected(!has_out_capacity) else { break };
+                let Some((peer_id, peer)) = self.best_unconnected(!has_out_capacity, &dialing_ips)
+                else {
+                    break
+                };
 
                 trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "schedule outbound connection");
 
+                dialing_ips.extend(dial_ip(peer));
                 peer.state = PeerConnectionState::PendingOut;
                 PeerAction::Connect { peer_id, remote_addr: peer.addr.tcp() }
             };
@@ -1660,6 +1739,15 @@ impl BackoffReason {
     }
 }
 
+/// Dial throttle of an IP after dials to it failed before the remote authenticated.
+#[derive(Debug)]
+struct DialIpThrottle {
+    /// Consecutive failed dials, scales the throttle duration.
+    failures: u8,
+    /// Discovered peers on the IP are not dialed before this.
+    until: std::time::Instant,
+}
+
 /// Returns a random duration uniformly distributed in `[mean * 3/5, mean * 7/5]`.
 ///
 /// With the default 5-minute mean this gives `[3 min, 7 min]`, matching Geth's peer dropper:
@@ -1668,6 +1756,13 @@ fn jitter_rotation_interval(mean: Duration) -> Duration {
     let min_nanos = (mean * 3 / 5).as_nanos() as u64;
     let max_nanos = (mean * 7 / 5).as_nanos() as u64;
     Duration::from_nanos(rand::rng().random_range(min_nanos..=max_nanos))
+}
+
+/// Returns the IP that dials are limited by, or `None` for non-global IPs so that local setups
+/// with several nodes on one host are not dialed one at a time.
+fn dial_ip(peer: &Peer) -> Option<IpAddr> {
+    let ip = peer.addr.tcp().ip().to_canonical();
+    is_global(&ip).then_some(ip)
 }
 
 #[cfg(test)]
@@ -3005,7 +3100,7 @@ mod tests {
             PeerAddr::from_tcp(basic_sock),
             None,
         );
-        assert!(peers.best_unconnected(true).is_none());
+        assert!(peers.best_unconnected(true, &[]).is_none());
         peers.queued_actions.clear();
 
         // a trusted peer is dialed regardless
@@ -3914,7 +4009,7 @@ mod tests {
         peers.add_peer(with_fork, PeerAddr::from_tcp(addr), None);
         peers.peers.get_mut(&with_fork).unwrap().fork_id = Some(Box::new(fork_id));
 
-        let (best_id, _) = peers.best_unconnected(false).unwrap();
+        let (best_id, _) = peers.best_unconnected(false, &[]).unwrap();
         assert_eq!(best_id, with_fork, "fork_id should break tie when reputation is equal");
     }
 
@@ -4589,6 +4684,103 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_unauthenticated_dial_failures_throttle_ip() {
+        let mut config = PeersConfig::test();
+        config.backoff_durations.low = Duration::from_secs(30);
+        config.backoff_durations.max = Duration::from_secs(60 * 60);
+        let mut peers = PeersManager::new(config);
+        let ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 1));
+        let addr = |port| SocketAddr::new(ip, port);
+        let dial = |peers: &mut PeersManager, kind, port| {
+            let peer_id = PeerId::random();
+            peers.add_and_connect_kind(peer_id, kind, PeerAddr::from_tcp(addr(port)), None);
+            peer_id
+        };
+        let timeout = PendingSessionHandshakeError::Timeout;
+
+        // Every fresh identity on the IP extends the throttle instead of resetting it.
+        for attempt in 1u8..=3 {
+            let port = u16::from(attempt);
+            let peer_id = dial(&mut peers, PeerKind::Basic, port);
+            let before = std::time::Instant::now();
+            peers.on_outgoing_pending_session_dropped(&addr(port), &peer_id, &timeout);
+            let after = std::time::Instant::now();
+            let backoff = Duration::from_secs(30 * u64::from(attempt));
+            let throttle = peers.dial_ip_throttle.peek(&ip).unwrap();
+            assert_eq!(throttle.failures, attempt);
+            assert!(throttle.until >= before + backoff);
+            assert!(throttle.until <= after + backoff);
+        }
+
+        // Static and trusted peers don't charge the IP.
+        let until = peers.dial_ip_throttle.peek(&ip).unwrap().until;
+        for (kind, port) in [(PeerKind::Static, 4), (PeerKind::Trusted, 5)] {
+            let peer_id = dial(&mut peers, kind, port);
+            peers.on_outgoing_pending_session_dropped(&addr(port), &peer_id, &timeout);
+            let throttle = peers.dial_ip_throttle.peek(&ip).unwrap();
+            assert_eq!((throttle.failures, throttle.until), (3, until));
+        }
+
+        // An untried identity on the throttled IP has to wait, other IPs are unaffected.
+        let (untried, other_ip) = (PeerId::random(), PeerId::random());
+        peers.add_peer(untried, PeerAddr::from_tcp(addr(6)), None);
+        peers.add_peer(other_ip, PeerAddr::from_tcp("203.0.113.2:30303".parse().unwrap()), None);
+        peers.fill_outbound_slots();
+        assert!(peers.peers[&untried].state.is_unconnected());
+        assert!(peers.peers[&other_ip].state.is_pending_out());
+
+        // Static peers are dialed regardless.
+        let static_peer = PeerId::random();
+        peers.add_peer_kind(static_peer, Some(PeerKind::Static), PeerAddr::from_tcp(addr(7)), None);
+        peers.fill_outbound_slots();
+        assert!(peers.peers[&static_peer].state.is_pending_out());
+
+        // A reply from the remote or an established session clears the failures.
+        let too_many_peers = PendingSessionHandshakeError::Eth(EthStreamError::P2PStreamError(
+            P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(
+                DisconnectReason::TooManyPeers,
+            )),
+        ));
+        for established in [false, true] {
+            let peer_id = dial(&mut peers, PeerKind::Basic, 8);
+            peers.on_outgoing_pending_session_dropped(&addr(8), &peer_id, &timeout);
+            assert!(peers.dial_ip_throttle.peek(&ip).is_some());
+            assert_eq!(peers.peers[&peer_id].unauthenticated_dial_failures, 1);
+
+            let peer_addr = PeerAddr::from_tcp(addr(8));
+            peers.add_and_connect_kind(peer_id, PeerKind::Basic, peer_addr, None);
+            if established {
+                peers.on_active_outgoing_established(peer_id);
+            } else {
+                peers.on_outgoing_pending_session_dropped(&addr(8), &peer_id, &too_many_peers);
+            }
+            assert!(peers.dial_ip_throttle.peek(&ip).is_none());
+            assert_eq!(peers.peers[&peer_id].unauthenticated_dial_failures, 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_best_unconnected_prefers_fewer_unauthenticated_dial_failures() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = PeerAddr::from_tcp(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 30303));
+        let (first, second) = (PeerId::random(), PeerId::random());
+        peers.add_peer(first, addr, None);
+        peers.add_peer(second, addr, None);
+
+        // One of the two orders can't be satisfied by the iteration order alone. A known fork id
+        // doesn't outweigh the failures.
+        for (failed, untried) in [(first, second), (second, first)] {
+            let peer = peers.peers.get_mut(&failed).unwrap();
+            peer.unauthenticated_dial_failures = 1;
+            peer.fork_id = Some(Box::new(ForkId { hash: ForkHash([0; 4]), next: 0 }));
+            let peer = peers.peers.get_mut(&untried).unwrap();
+            peer.unauthenticated_dial_failures = 0;
+            peer.fork_id = None;
+            assert_eq!(peers.best_unconnected(false, &[]).unwrap().0, untried);
+        }
+    }
+
+    #[tokio::test]
     async fn test_dns_trusted_ids_bypass_outbound_capacity() {
         for register_first in [false, true] {
             let mut peers = PeersManager::new(PeersConfig::test().with_max_outbound(0));
@@ -4741,5 +4933,66 @@ mod tests {
             );
             assert!(peers.queued_actions.is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn test_one_pending_dial_per_public_ip() {
+        let mut peers = PeersManager::new(PeersConfig::default());
+        let public_ip = Ipv4Addr::new(203, 0, 113, 1);
+        let mut add = |ip: IpAddr, port: u16| {
+            let peer_id = PeerId::random();
+            peers.add_peer(peer_id, PeerAddr::from_tcp(SocketAddr::new(ip, port)), None);
+            peer_id
+        };
+
+        // IPv4-mapped addresses are the same host as the plain IPv4 address.
+        let mut same_ip = (0..5).map(|port| add(public_ip.into(), port)).collect::<Vec<_>>();
+        same_ip.push(add(public_ip.to_ipv6_mapped().into(), 5));
+        let other_ip = add(Ipv4Addr::new(203, 0, 113, 2).into(), 0);
+        let loopback = (0..3).map(|port| add(Ipv4Addr::LOCALHOST.into(), port)).collect::<Vec<_>>();
+
+        peers.fill_outbound_slots();
+        let pending = |peers: &PeersManager, ids: &[PeerId]| {
+            ids.iter()
+                .filter(|id| peers.peers[*id].state.is_pending_out())
+                .copied()
+                .collect::<Vec<_>>()
+        };
+        let dialed = pending(&peers, &same_ip);
+        assert_eq!(dialed.len(), 1);
+        assert_eq!(pending(&peers, &[other_ip]), [other_ip]);
+        assert_eq!(pending(&peers, &loopback), loopback);
+
+        // Once the pending dial is resolved, the next peer on that IP is dialed.
+        peers.on_active_outgoing_established(dialed[0]);
+        peers.fill_outbound_slots();
+        let next = pending(&peers, &same_ip);
+        assert_eq!(next.len(), 1);
+        assert_ne!(next, dialed);
+    }
+
+    #[tokio::test]
+    async fn test_pending_dial_ip_limit_prefers_trusted_peer() {
+        let mut peers = PeersManager::new(PeersConfig::default());
+        let ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 1));
+        let addr = |port| PeerAddr::from_tcp(SocketAddr::new(ip, port));
+
+        let basic = PeerId::random();
+        peers.add_peer(basic, addr(0), None);
+        peers.fill_outbound_slots();
+        assert!(peers.peers[&basic].state.is_pending_out());
+
+        // a trusted peer on the same IP waits for the pending dial, then goes first
+        let trusted = PeerId::random();
+        let other_basic = PeerId::random();
+        peers.add_peer_kind(trusted, Some(PeerKind::Trusted), addr(1), None);
+        peers.add_peer(other_basic, addr(2), None);
+        peers.fill_outbound_slots();
+        assert!(peers.peers[&trusted].state.is_unconnected());
+
+        peers.on_active_outgoing_established(basic);
+        peers.fill_outbound_slots();
+        assert!(peers.peers[&trusted].state.is_pending_out());
+        assert!(peers.peers[&other_basic].state.is_unconnected());
     }
 }
