@@ -40,7 +40,7 @@ use crate::{
     middleware::rpc::{catch_call_panic, RpcService},
     transport::{
         http, ws,
-        ws::{is_upgrade_request, BackgroundTaskParams},
+        ws::{is_upgrade_request, upgrade_response, BackgroundTaskParams},
     },
     utils::{
         accept_error_backoff, deserialize_notification, no_request_within, NotifyOnRequest,
@@ -88,10 +88,7 @@ use tokio::{
     sync::{mpsc, watch, Notify},
 };
 use tokio_tungstenite::{
-    tungstenite::{
-        handshake::server::create_response_with_body,
-        protocol::{Role, WebSocketConfig},
-    },
+    tungstenite::protocol::{Role, WebSocketConfig},
     WebSocketStream,
 };
 use tower::{layer::util::Identity, Layer, Service, ServiceExt};
@@ -735,7 +732,7 @@ where
             let conn = ConnectionState::new(this.stop_handle.clone(), conn_id, conn_permit);
             let server_cfg = this.server_cfg.clone();
 
-            let response = match create_response_with_body(&request, HttpBody::empty) {
+            let response = match upgrade_response(&request) {
                 Ok(response) => {
                     let (tx, rx) = mpsc::channel(this.server_cfg.message_buffer_capacity as usize);
                     let sink =

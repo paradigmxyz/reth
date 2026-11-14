@@ -1827,3 +1827,43 @@ async fn ws_client_close_is_answered() {
     handle.stop().unwrap();
     handle.stopped().with_default_timeout().await.unwrap();
 }
+
+#[tokio::test]
+async fn ws_upgrade_accepts_listed_tokens() {
+    init_logger();
+
+    let (addr, handle) = server_with_handles().with_default_timeout().await.unwrap();
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+
+    // `Upgrade` in the second `Connection` header, and `websocket` after another protocol.
+    let request = format!(
+        "GET / HTTP/1.1\r\nHost: {addr}\r\nConnection: keep-alive\r\nConnection: Upgrade\r\n\
+         Upgrade: h2c, websocket\r\nSec-WebSocket-Version: 13\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+
+    let mut head = Vec::new();
+    while !head.ends_with(b"\r\n\r\n") {
+        head.push(stream.read_u8().with_default_timeout().await.unwrap().unwrap());
+    }
+    let head = String::from_utf8(head).unwrap().to_ascii_lowercase();
+    let mut lines = head.lines();
+    assert_eq!(lines.next(), Some("http/1.1 101 switching protocols"));
+    // The accept key of the sample nonce in RFC 6455.
+    assert!(lines.any(|line| line == "sec-websocket-accept: s3pplmbitxaq9kygzzhzrbk+xoo="));
+
+    stream
+        .write_all(&masked_frame(0x81, br#"{"jsonrpc":"2.0","method":"say_hello","id":1}"#))
+        .await
+        .unwrap();
+    let response = ok_response("hello".into(), Id::Num(1));
+    let mut expected = vec![0x81, response.len() as u8];
+    expected.extend_from_slice(response.as_bytes());
+    let mut received = vec![0; expected.len()];
+    stream.read_exact(&mut received).with_default_timeout().await.unwrap().unwrap();
+    assert_eq!(received, expected);
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}

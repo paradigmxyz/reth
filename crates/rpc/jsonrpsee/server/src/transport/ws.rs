@@ -2,7 +2,7 @@ use std::{io, sync::Arc, time::Duration};
 
 use crate::{
     server::{handle_rpc_call, ConnectionState, ServerConfig},
-    LOG_TARGET,
+    HttpBody, HttpResponse, LOG_TARGET,
 };
 
 use futures_util::{
@@ -10,7 +10,10 @@ use futures_util::{
     stream::{SplitSink, SplitStream},
     Future, SinkExt, StreamExt, TryStreamExt,
 };
-use http::header::{CONNECTION, UPGRADE};
+use http::{
+    header::{CONNECTION, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION, UPGRADE},
+    Method, StatusCode, Version,
+};
 use hyper::{body::Bytes, upgrade::Upgraded};
 use hyper_util::rt::TokioIo;
 use jsonrpsee_core::{classify_message, middleware::RpcServiceT, server::MethodSink};
@@ -26,7 +29,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_tungstenite::{
     tungstenite::{
         self,
-        error::CapacityError,
+        error::{CapacityError, ProtocolError},
+        handshake::derive_accept_key,
         protocol::{
             frame::{
                 coding::{CloseCode, Data, OpCode},
@@ -53,6 +57,34 @@ pub fn is_upgrade_request<B>(request: &http::Request<B>) -> bool {
         })
     };
     has_token(CONNECTION, b"upgrade") && has_token(UPGRADE, b"websocket")
+}
+
+/// Returns the response that accepts `request`, for which [`is_upgrade_request`] holds.
+///
+/// `tungstenite` would only read the first `Connection` header and want an `Upgrade` header of
+/// exactly `websocket`, which refuses requests that [`is_upgrade_request`] accepts.
+pub(crate) fn upgrade_response<B>(
+    request: &http::Request<B>,
+) -> Result<HttpResponse, tungstenite::Error> {
+    if request.method() != Method::GET {
+        return Err(ProtocolError::WrongHttpMethod.into());
+    }
+    if request.version() < Version::HTTP_11 {
+        return Err(ProtocolError::WrongHttpVersion.into());
+    }
+    if request.headers().get(SEC_WEBSOCKET_VERSION).is_none_or(|version| version != "13") {
+        return Err(ProtocolError::MissingSecWebSocketVersionHeader.into());
+    }
+    let key =
+        request.headers().get(SEC_WEBSOCKET_KEY).ok_or(ProtocolError::MissingSecWebSocketKey)?;
+
+    Ok(http::Response::builder()
+        .status(StatusCode::SWITCHING_PROTOCOLS)
+        .version(request.version())
+        .header(CONNECTION, "Upgrade")
+        .header(UPGRADE, "websocket")
+        .header(SEC_WEBSOCKET_ACCEPT, derive_accept_key(key.as_bytes()))
+        .body(HttpBody::empty())?)
 }
 
 /// Most queued messages written before a flush, which bounds how long written messages wait in
