@@ -21,7 +21,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
-    ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
+    ExecutionData, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
     ForkchoiceUpdateError,
 };
 use assert_matches::assert_matches;
@@ -2136,6 +2136,68 @@ fn test_on_new_payload_backfill_buffering() {
 
     // Verify the buffered block matches what we submitted
     assert_eq!(*buffered_block, sealed, "Buffered block should match submitted payload");
+}
+
+fn execution_data(block: &SealedBlock<Block>) -> ExecutionData {
+    let (payload, sidecar) =
+        ExecutionPayload::from_block_unchecked(block.hash(), &block.clone().into_block());
+    ExecutionData { payload, sidecar }
+}
+
+/// A known block is answered `VALID` during backfill instead of being validated and buffered again,
+/// without making it canonical while the pipeline owns the database.
+#[test]
+fn test_on_new_payload_known_block_during_backfill() {
+    reth_tracing::init_test_tracing();
+
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let known = blocks[1].recovered_block().clone_sealed_block();
+    let mut test_harness = TestHarness::new(MAINNET.clone())
+        .with_blocks(blocks)
+        .with_backfill_state(BackfillSyncState::Active);
+    test_harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: known.hash(),
+            safe_block_hash: known.hash(),
+            finalized_block_hash: known.hash(),
+        },
+        ForkchoiceStatus::Syncing,
+    );
+
+    let outcome = test_harness.tree.on_new_payload(execution_data(&known)).unwrap();
+
+    assert_eq!(outcome.outcome, PayloadStatus::new(PayloadStatusEnum::Valid, Some(known.hash())));
+    assert!(outcome.already_seen);
+    assert!(outcome.event.is_none());
+    assert!(test_harness.tree.state.buffer.block(&known.hash()).is_none());
+}
+
+/// During backfill only blocks persisted at or below the last persisted block count as known,
+/// because backfill writes headers above it before executing their blocks.
+#[test]
+fn test_on_new_payload_persisted_block_during_backfill() {
+    reth_tracing::init_test_tracing();
+
+    let blocks: Vec<_> = TestBlockBuilder::eth()
+        .get_executed_blocks(1..3)
+        .map(|block| block.recovered_block().clone())
+        .collect();
+    let mut test_harness =
+        TestHarness::new(MAINNET.clone()).with_backfill_state(BackfillSyncState::Active);
+    test_harness.persist_blocks(blocks.clone());
+    test_harness.tree.persistence_state.last_persisted_block = blocks[0].num_hash();
+
+    let persisted =
+        test_harness.tree.on_new_payload(execution_data(blocks[0].sealed_block())).unwrap();
+    let staged =
+        test_harness.tree.on_new_payload(execution_data(blocks[1].sealed_block())).unwrap();
+
+    assert_eq!(
+        persisted.outcome,
+        PayloadStatus::new(PayloadStatusEnum::Valid, Some(blocks[0].hash()))
+    );
+    assert!(staged.outcome.is_syncing());
+    assert!(test_harness.tree.state.buffer.block(&blocks[1].hash()).is_some());
 }
 
 /// Test that captures the Engine-API rule where malformed payloads report latestValidHash = None
