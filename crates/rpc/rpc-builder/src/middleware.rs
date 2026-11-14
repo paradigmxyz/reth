@@ -35,7 +35,7 @@ impl<T> RethRpcMiddleware for T where
 pub type AuthHttpService<RM> = TowerServiceNoHttp<Stack<RM, Identity>>;
 
 /// Helper alias trait for auth-server HTTP transport middleware layers.
-pub trait RethAuthHttpMiddleware<RM>:
+pub trait RethAuthHttpMiddleware<RM: Layer<RpcService>>:
     tower::Layer<
         AuthHttpService<RM>,
         Service: tower::Service<
@@ -51,7 +51,7 @@ pub trait RethAuthHttpMiddleware<RM>:
 {
 }
 
-impl<T, RM> RethAuthHttpMiddleware<RM> for T where
+impl<T, RM: Layer<RpcService>> RethAuthHttpMiddleware<RM> for T where
     T: tower::Layer<
             AuthHttpService<RM>,
             Service: tower::Service<

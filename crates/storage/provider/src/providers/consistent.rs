@@ -12,7 +12,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
-use reth_chain_state::{BlockState, CanonicalInMemoryState};
+use reth_chain_state::{BlockState, CanonicalInMemoryState, ExecutedBlock};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::RecoveredBlockAndExecutionOutput;
@@ -36,7 +36,7 @@ use std::{
 
 /// Type that interacts with a snapshot view of the blockchain (storage and in-memory) at time of
 /// instantiation, EXCEPT for pending, safe and finalized block which might change while holding
-/// this provider.
+/// this provider, and non-canonical blocks by hash, which are read from the live engine tree.
 ///
 /// CAUTION: Avoid holding this provider for too long or the inner database transaction will
 /// time-out.
@@ -404,6 +404,15 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         }
         fetch_from_db(&self.storage_provider)
     }
+
+    /// Returns a block the engine tree holds by hash, such as a side chain or reorged-out block.
+    ///
+    /// This reads the live tree rather than this provider's snapshot, which is safe because a hash
+    /// always identifies the same block.
+    fn tree_block(&self, id: BlockHashOrNumber) -> Option<ExecutedBlock<N::Primitives>> {
+        let BlockHashOrNumber::Hash(hash) = id else { return None };
+        self.storage_provider.overlay_manager().executed_block_by_hash(&hash)
+    }
 }
 
 impl<N: ProviderNodeTypes> NodePrimitivesProvider for ConsistentProvider<N> {
@@ -621,11 +630,13 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
     }
 
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
-        self.get_in_memory_or_storage_by_block(
-            id,
-            |db_provider| db_provider.block(id),
-            |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
-        )
+        Ok(self
+            .get_in_memory_or_storage_by_block(
+                id,
+                |db_provider| db_provider.block(id),
+                |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
+            )?
+            .or_else(|| self.tree_block(id).map(|block| block.recovered_block().clone_block())))
     }
 
     fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
@@ -649,11 +660,13 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.get_in_memory_or_storage_by_block(
-            id,
-            |db_provider| db_provider.recovered_block(id, transaction_kind),
-            |block_state| Ok(Some(block_state.block().recovered_block().clone())),
-        )
+        Ok(self
+            .get_in_memory_or_storage_by_block(
+                id,
+                |db_provider| db_provider.recovered_block(id, transaction_kind),
+                |block_state| Ok(Some(block_state.block().recovered_block().clone())),
+            )?
+            .or_else(|| self.tree_block(id).map(|block| block.recovered_block().clone())))
     }
 
     fn sealed_block_with_senders(
@@ -661,11 +674,13 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.get_in_memory_or_storage_by_block(
-            id,
-            |db_provider| db_provider.sealed_block_with_senders(id, transaction_kind),
-            |block_state| Ok(Some(block_state.block().recovered_block().clone())),
-        )
+        Ok(self
+            .get_in_memory_or_storage_by_block(
+                id,
+                |db_provider| db_provider.sealed_block_with_senders(id, transaction_kind),
+                |block_state| Ok(Some(block_state.block().recovered_block().clone())),
+            )?
+            .or_else(|| self.tree_block(id).map(|block| block.recovered_block().clone())))
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
@@ -775,6 +790,22 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         }
 
         self.storage_provider.transaction_by_hash_with_meta(tx_hash)
+    }
+
+    fn transaction_by_hash_with_meta_and_sender(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta, Option<Address>)>> {
+        if let Some(found) = self.head_block.as_ref().and_then(|b| {
+            b.chain().find_map(|block_state| {
+                let indexed = block_state.find_indexed(tx_hash)?;
+                Some((indexed.tx().clone(), indexed.meta(), Some(indexed.recovered_tx().signer())))
+            })
+        }) {
+            return Ok(Some(found))
+        }
+
+        self.storage_provider.transaction_by_hash_with_meta_and_sender(tx_hash)
     }
 
     fn transactions_by_block(

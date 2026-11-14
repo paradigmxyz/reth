@@ -31,6 +31,7 @@ use crate::{
     types::SubscriptionId,
     BatchRequestConfig, RegisterMethodError, RpcModule, ServerBuilder, ServerConfig,
 };
+use futures_util::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use jsonrpsee_core::{server::SendTimeoutError, traits::IdProvider, SubscriptionError};
 use jsonrpsee_test_utils::{
     helpers::*,
@@ -39,6 +40,8 @@ use jsonrpsee_test_utils::{
 };
 use jsonrpsee_types::SubscriptionResponse;
 use serde_json::Value as JsonValue;
+use soketto::handshake;
+use tokio_util::compat::TokioAsyncReadCompatExt;
 
 use super::helpers::server;
 
@@ -1573,4 +1576,70 @@ async fn subscription_response_respects_max_response_body_size() {
 
     handle.stop().unwrap();
     handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn ws_stalled_frame_closes_connection() {
+    init_logger();
+
+    let (handle, addr) = server_with_ping_interval(RpcModule::new(())).await;
+
+    let socket = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let mut client =
+        handshake::Client::new(BufReader::new(BufWriter::new(socket.compat())), "test-client", "/");
+    let response = client.handshake().with_default_timeout().await.unwrap().unwrap();
+    assert!(matches!(response, handshake::ServerResponse::Accepted { .. }));
+    let mut stream = client.into_inner();
+
+    // The header of a masked text frame announcing a 1 MiB payload that never follows.
+    stream.write_all(&[0x81, 0xff, 0, 0, 0, 0, 0, 0x10, 0, 0, 1, 2, 3, 4]).await.unwrap();
+    stream.flush().await.unwrap();
+
+    // The client answers no pings, so the read timeout closes the connection.
+    let mut received = Vec::new();
+    stream.read_to_end(&mut received).with_timeout(PING_INTERVAL * 8).await.unwrap().unwrap();
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn ws_pongs_keep_silent_connection_open() {
+    init_logger();
+
+    let mut module = RpcModule::new(());
+    module
+        .register_async_method("slow", |_, _| async {
+            tokio::time::sleep(PING_INTERVAL * 4).await;
+            "done"
+        })
+        .unwrap();
+    let (handle, addr) = server_with_ping_interval(module).await;
+
+    // The client sends nothing while the call runs, but reading the answer replies to the pings.
+    let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
+    let req = r#"{"jsonrpc":"2.0","method":"slow","id":1}"#;
+    let response = client.send_request_text(req).with_default_timeout().await.unwrap().unwrap();
+    assert_eq!(response, ok_response("done".into(), Id::Num(1)));
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+const PING_INTERVAL: Duration = Duration::from_millis(250);
+
+/// Starts a server for `module` that pings its WebSocket connections every [`PING_INTERVAL`].
+async fn server_with_ping_interval(
+    module: RpcModule<()>,
+) -> (crate::ServerHandle, std::net::SocketAddr) {
+    let mut config = ServerConfig::builder().build();
+    config.ping_interval = PING_INTERVAL;
+    let server = ServerBuilder::with_config(config)
+        .build("127.0.0.1:0")
+        .with_default_timeout()
+        .await
+        .unwrap()
+        .unwrap();
+    let addr = server.local_addr().unwrap();
+    (server.start(module), addr)
 }

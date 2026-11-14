@@ -870,9 +870,9 @@ where
 
     /// Executes a block and returns the state root after each transaction.
     ///
-    /// The block is either canonical or a bad block the engine rejected. Execution stops at the
-    /// first transaction that is invalid on top of its predecessors, so the result for a bad block
-    /// holds the roots before that transaction.
+    /// The block is canonical, a non-canonical block the engine tree still holds, or a bad block
+    /// the engine rejected. Execution stops at the first transaction that is invalid on top of
+    /// its predecessors, so the result for a bad block holds the roots before that transaction.
     pub async fn intermediate_roots(&self, block_hash: B256) -> Result<Vec<B256>, Eth::Error> {
         let block = match self.eth_api().recovered_block(block_hash.into()).await? {
             Some(block) => block,
