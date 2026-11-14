@@ -299,8 +299,21 @@ where
                 }
                 StateRootMessage::StateUpdate(state) => {
                     let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update").entered();
-                    let hashed = reth_execution_types::state_update_to_hashed_post_state(&state);
-                    SparseTrieTaskMessage::HashedState(hashed)
+                    // Only a pre-EIP-6780 SELFDESTRUCT deletes an account that had code. Its
+                    // storage may predate the transaction, and the sparse trie cannot wipe it.
+                    if state.accounts.iter().any(|account| {
+                        account.current.is_none() &&
+                            account
+                                .original
+                                .as_ref()
+                                .is_some_and(|info| !info.is_empty_code_hash())
+                    }) {
+                        SparseTrieTaskMessage::DestroyedContract
+                    } else {
+                        let hashed =
+                            reth_execution_types::state_update_to_hashed_post_state(&state);
+                        SparseTrieTaskMessage::HashedState(hashed)
+                    }
                 }
                 StateRootMessage::FinishedStateUpdates => {
                     SparseTrieTaskMessage::FinishedStateUpdates
@@ -391,7 +404,7 @@ where
                     let update = message.map_err(|_| StateRootTaskError::Other(
                         "updates channel disconnected before state root calculation".into(),
                     ))?;
-                    if let Some(hashed_state) = self.on_message(update) {
+                    if let Some(hashed_state) = self.on_message(update)? {
                         finalized_hashed_state = Some(hashed_state);
                     }
                     self.pending_updates += 1;
@@ -591,8 +604,11 @@ where
     }
 
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
-    fn on_message(&mut self, message: SparseTrieTaskMessage) -> Option<Arc<HashedPostState>> {
-        match message {
+    fn on_message(
+        &mut self,
+        message: SparseTrieTaskMessage,
+    ) -> Result<Option<Arc<HashedPostState>>, StateRootTaskError> {
+        Ok(match message {
             SparseTrieTaskMessage::PrefetchProofs(targets) => {
                 self.on_prewarm_targets(targets);
                 None
@@ -601,13 +617,18 @@ where
                 self.on_hashed_state_update(hashed_state);
                 None
             }
+            SparseTrieTaskMessage::DestroyedContract => {
+                return Err(StateRootTaskError::Other(
+                    "state update destroyed a contract whose storage cannot be wiped".into(),
+                ))
+            }
             SparseTrieTaskMessage::FinishedStateUpdates => {
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
                 let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
                 self.finished_state_updates = true;
                 Some(hashed_state)
             }
-        }
+        })
     }
 
     #[instrument(
@@ -1646,6 +1667,9 @@ impl PendingTargets {
 enum SparseTrieTaskMessage {
     /// A hashed state update ready to be processed.
     HashedState(HashedPostState),
+    /// A state update deleted an account that had code, so the task must fail and leave the root
+    /// to the serial path, which zeroes the account's storage from the parent state.
+    DestroyedContract,
     /// Prefetch proof targets (passed through directly).
     PrefetchProofs(MultiProofTargetsV2),
     /// Signals that all state updates have been received.

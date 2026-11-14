@@ -434,10 +434,11 @@ pub struct StateRootJobOutcome {
     pub state_root: B256,
     /// Trie updates associated with the computed state root.
     pub trie_updates: Arc<TrieUpdates>,
-    /// Hashed post state recomputed by a fallback path.
+    /// Hashed post state recomputed by a fallback path, or to zero the storage of destroyed
+    /// accounts.
     ///
-    /// When set, the root was not derived from the streamed updates, so validation replaces its
-    /// streaming-derived hashed post state with this one and re-runs hashed-state checks.
+    /// When set, the root was not derived from the hashed post state passed to the job, so
+    /// validation replaces it with this one and re-runs hashed-state checks.
     pub hashed_state: Option<Arc<HashedPostState>>,
 }
 
@@ -447,7 +448,7 @@ impl StateRootJobOutcome {
         Self { state_root, trie_updates, hashed_state: None }
     }
 
-    /// Sets the hashed post state recomputed by a fallback path.
+    /// Sets the hashed post state the job recomputed.
     pub fn with_hashed_state(mut self, hashed_state: Option<Arc<HashedPostState>>) -> Self {
         self.hashed_state = hashed_state;
         self
@@ -1060,13 +1061,24 @@ where
     fn finish(
         &mut self,
         _block: &RecoveredBlock<N::Block>,
-        _output: Arc<BlockExecutionOutput<N::Receipt>>,
+        output: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome> {
         let provider = self.state_provider_factory.database_provider_ro()?;
-        let (state_root, trie_updates) =
-            provider.state_root_with_updates(hashed_state.get().as_ref().clone())?;
-        Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates)))
+        // The hashed state from the bundle keeps the parent storage of destroyed accounts, which
+        // the provider zeroes from the parent state.
+        let refreshed = output
+            .state
+            .state()
+            .values()
+            .any(|account| account.was_destroyed() && account.original_info.is_some())
+            .then(|| provider.hashed_post_state(&output.state).map(Arc::new))
+            .transpose()?;
+        let (state_root, trie_updates) = provider.state_root_with_updates(
+            refreshed.as_ref().unwrap_or_else(|| hashed_state.get()).as_ref().clone(),
+        )?;
+        Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates))
+            .with_hashed_state(refreshed))
     }
 }
 
@@ -1255,25 +1267,26 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::constants::KECCAK_EMPTY;
-    use alloy_primitives::{map::HashMap, Address, U256};
+    use alloy_primitives::{keccak256, map::HashMap, Address, U256};
     use evm2::evm::AccountInfo;
     use rand::Rng;
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
-    use reth_ethereum_primitives::EthPrimitives;
+    use reth_ethereum_primitives::{EthPrimitives, Receipt};
     use reth_evm::OnStateHook;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_types::{AccountUpdate, StateUpdate};
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-        HashingWriter,
+        providers::BlockchainProvider,
+        test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
+        HashingWriter, ProviderFactory,
     };
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
     use reth_testing_utils::generators;
-    use reth_trie::test_utils::state_root;
-    use reth_trie_common::bundle_state::StorageSlot;
+    use reth_trie::{test_utils::state_root, KeccakKeyHasher};
+    use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, StorageSlot};
 
     #[test]
     fn proof_worker_count_scales_with_block_gas() {
@@ -1751,5 +1764,148 @@ mod tests {
         for name in ["sparse-trie", "trie-hashing", "storage-workers", "account-workers", "drop"] {
             runtime.spawn_blocking_named(name, || {}).get();
         }
+    }
+
+    /// Returns a database whose state holds a contract with slots 1 and 2.
+    fn contract_with_storage() -> (ProviderFactory<MockNodeTypesWithDB>, B256, Address, AccountInfo)
+    {
+        let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+        let genesis_hash = init_genesis(&factory).unwrap();
+        let contract = Address::with_last_byte(0xc0);
+        let info =
+            AccountInfo { nonce: 1, code_hash: B256::with_last_byte(1), ..Default::default() };
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_account_for_hashing([(contract, Some(Account::from(&info)))]).unwrap();
+        provider_rw
+            .insert_storage_for_hashing([(
+                contract,
+                [
+                    StorageEntry::new(B256::with_last_byte(1), U256::from(5)),
+                    StorageEntry::new(B256::with_last_byte(2), U256::from(6)),
+                ],
+            )])
+            .unwrap();
+        provider_rw.commit().unwrap();
+        (factory, genesis_hash, contract, info)
+    }
+
+    #[test]
+    fn sparse_task_fails_on_destroyed_contract() {
+        let (factory, genesis_hash, contract, info) = contract_with_storage();
+        let runtime = reth_tasks::Runtime::test();
+        let root_after = |account: AccountUpdate| {
+            let (mut handle, _pending_trie_rx) = DefaultStateRootStrategy::default()
+                .spawn_state_root(
+                    &runtime,
+                    OverlayStateProviderFactory::new(
+                        factory.clone(),
+                        OverlayManager::<EthPrimitives>::default().overlay_builder(genesis_hash),
+                    ),
+                    StateRootTaskOptions::<EthPrimitives> {
+                        parent_header: SealedHeader::new(Default::default(), genesis_hash),
+                        preserved_sparse_trie: None,
+                        transaction_count: None,
+                        gas_used: None,
+                        config: &TreeConfig::default(),
+                        pending_sparse_trie_prune_blocks: None,
+                    },
+                );
+            let mut update = StateUpdate::default();
+            update.accounts.push(account);
+            let mut hook = handle.take_execution_hook();
+            hook.on_state(update);
+            drop(hook);
+            handle.state_root().map(|outcome| outcome.state_root)
+        };
+
+        // A pre-EIP-6780 SELFDESTRUCT deletes a contract that existed before the transaction.
+        let err = root_after(AccountUpdate {
+            address: contract,
+            original: Some(info.clone()),
+            current: None,
+            created: false,
+            wiped: true,
+            storage: Vec::new(),
+        })
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "state update destroyed a contract whose storage cannot be wiped"
+        );
+
+        // An account created and destroyed in one transaction has no storage to wipe.
+        let root = root_after(AccountUpdate {
+            address: Address::with_last_byte(0xc1),
+            original: None,
+            current: None,
+            created: true,
+            wiped: true,
+            storage: vec![(U256::from(1), StorageSlot::new_changed(U256::ZERO, U256::from(7)))],
+        })
+        .unwrap();
+        assert_eq!(
+            root,
+            state_root([(
+                contract,
+                (
+                    Account::from(&info),
+                    [
+                        (B256::with_last_byte(1), U256::from(5)),
+                        (B256::with_last_byte(2), U256::from(6))
+                    ]
+                )
+            )])
+        );
+
+        for name in ["sparse-trie", "trie-hashing", "storage-workers", "account-workers", "drop"] {
+            runtime.spawn_blocking_named(name, || {}).get();
+        }
+    }
+
+    #[test]
+    fn synchronous_root_zeroes_storage_of_destroyed_accounts() {
+        let (factory, genesis_hash, contract, info) = contract_with_storage();
+        let mut job = SynchronousStateRootJob {
+            state_provider_factory: OverlayStateProviderFactory::new(
+                factory,
+                OverlayManager::<EthPrimitives>::default().overlay_builder(genesis_hash),
+            ),
+        };
+        let block = RecoveredBlock::new_unhashed(Default::default(), Vec::new());
+        let mut finish = |output: BlockExecutionOutput<Receipt>| {
+            let hashed_state =
+                LazyHashedPostState::ready(Arc::new(HashedPostState::from_bundle_state::<
+                    KeccakKeyHasher,
+                >(output.state.state())));
+            job.finish(&block, Arc::new(output), &hashed_state).unwrap()
+        };
+
+        assert!(finish(BlockExecutionOutput::default()).hashed_state.is_none());
+
+        // A pre-EIP-6780 SELFDESTRUCT, then a re-creation that writes slot 1.
+        let mut output = BlockExecutionOutput::default();
+        output.state.state.insert(
+            contract,
+            BundleAccount::new(
+                Some(info.clone()),
+                Some(info.clone()),
+                std::iter::once((
+                    U256::from(1),
+                    StorageSlot::new_changed(U256::from(5), U256::from(9)),
+                ))
+                .collect(),
+                AccountStatus::DestroyedChanged,
+            ),
+        );
+        let outcome = finish(output);
+        assert_eq!(
+            outcome.state_root,
+            state_root([(
+                contract,
+                (Account::from(&info), [(B256::with_last_byte(1), U256::from(9))])
+            )])
+        );
+        let storage = &outcome.hashed_state.unwrap().storages[&keccak256(contract)].storage;
+        assert_eq!(storage[&keccak256(B256::with_last_byte(2))], U256::ZERO);
     }
 }
