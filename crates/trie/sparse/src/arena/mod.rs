@@ -26,6 +26,17 @@ use tracing::{instrument, trace};
 
 const TRACE_TARGET: &str = "trie::arena";
 
+/// Returns the span rayon workers enter around subtrie work: the current span when trace-level
+/// spans are on, or a disabled span otherwise, since only trace-level spans run below it and
+/// entering an enabled span costs the subscriber a lookup per job.
+fn worker_parent_span() -> tracing::Span {
+    if tracing::enabled!(target: TRACE_TARGET, tracing::Level::TRACE) {
+        tracing::Span::current()
+    } else {
+        tracing::Span::none()
+    }
+}
+
 /// The maximum path length (in nibbles) for nodes that live in the upper trie. Nodes at this
 /// depth or deeper belong to lower subtries.
 const UPPER_TRIE_MAX_DEPTH: usize = 2;
@@ -2444,7 +2455,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             let (_, subtrie, node_vec) = &mut taken[0];
             subtrie.reveal_nodes(node_vec)?;
         } else {
-            let parent_span = tracing::Span::current();
+            let parent_span = worker_parent_span();
             let results: Vec<SparseTrieResult<()>> = taken
                 .par_iter_mut()
                 .map(|(_, subtrie, node_vec)| {
@@ -2537,7 +2548,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     subtrie.update_cached_rlp(new_epoch);
                 }
             } else {
-                let parent_span = tracing::Span::current();
+                let parent_span = worker_parent_span();
                 taken = taken
                     .into_par_iter()
                     .map(|(idx, mut subtrie)| {
@@ -2737,7 +2748,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 let (_, ref mut subtrie) = taken[0];
                 pruned += subtrie.prune(prune_before);
             } else {
-                let parent_span = tracing::Span::current();
+                let parent_span = worker_parent_span();
                 pruned += taken
                     .par_iter_mut()
                     .map(|(_, subtrie)| {
@@ -2992,7 +3003,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             let (_, ref mut subtrie, ref range) = taken[0];
             subtrie.update_leaves(&sorted[range.clone()]);
         } else {
-            let parent_span = tracing::Span::current();
+            let parent_span = worker_parent_span();
             taken.par_iter_mut().for_each(|(_, subtrie, range)| {
                 let _guard = parent_span.enter();
                 subtrie.update_leaves(&sorted[range.clone()]);
