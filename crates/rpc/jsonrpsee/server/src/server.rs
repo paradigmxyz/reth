@@ -25,32 +25,25 @@
 // DEALINGS IN THE SOFTWARE.
 
 use std::{
-    borrow::Cow,
-    fmt,
-    future::Future,
-    net::SocketAddr,
-    pin::Pin,
-    sync::{Arc, OnceLock},
-    task::Poll,
+    borrow::Cow, fmt, future::Future, net::SocketAddr, pin::Pin, sync::Arc, task::Poll,
     time::Duration,
 };
 
 use crate::{
-    future::{ConnectionGuard, ConnectionPermit, ServerHandle, StopHandle},
+    future::{ConnectionGuard, ServerHandle, StopHandle},
     middleware::rpc::{catch_call_panic, RpcService},
-    transport::{
-        http, ws,
-        ws::{is_upgrade_request, upgrade_response, BackgroundTaskParams},
-    },
+    transport::{http, ws, ws::BackgroundTaskParams},
     utils::{
         accept_error_backoff, deserialize_notification, no_request_within, NotifyOnRequest,
-        PermitBody, WriteTimeoutIo, DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_PING_INTERVAL,
-        DEFAULT_WRITE_TIMEOUT,
+        PermitBody, WriteTimeoutIo, DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_WRITE_TIMEOUT,
     },
     HttpBody, HttpRequest, HttpResponse, LOG_TARGET,
 };
 
-use futures_util::future::{Either, FutureExt};
+use futures_util::{
+    future::{Either, FutureExt},
+    io::{BufReader, BufWriter},
+};
 use hyper::body::{Bytes, Incoming};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
@@ -80,11 +73,12 @@ use serde::{
     },
     Deserialize,
 };
+use soketto::handshake::http::is_upgrade_request;
 use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
-    sync::{mpsc, watch, Notify},
+    sync::{mpsc, watch, Notify, OwnedSemaphorePermit},
 };
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tokio_util::compat::TokioAsyncReadCompatExt;
 use tower::{layer::util::Identity, Layer, Service, ServiceExt};
 use tracing::{instrument, Instrument};
 
@@ -228,9 +222,6 @@ pub struct ServerConfig {
     /// Timeout for writing a single message to a WebSocket connection and for a stalled HTTP
     /// response write.
     pub(crate) write_timeout: Duration,
-    /// Interval at which WebSocket connections are pinged. A connection that completes neither a
-    /// message nor a pong within twice this interval is closed.
-    pub(crate) ping_interval: Duration,
 }
 
 /// The builder to configure and create a JSON-RPC server configuration.
@@ -258,7 +249,7 @@ pub struct ConnectionState {
     /// Connection ID
     pub(crate) conn_id: usize,
     /// Connection guard.
-    pub(crate) _conn_permit: Arc<ConnectionPermit>,
+    pub(crate) _conn_permit: Arc<OwnedSemaphorePermit>,
 }
 
 impl ConnectionState {
@@ -266,7 +257,7 @@ impl ConnectionState {
     pub fn new(
         stop_handle: StopHandle,
         conn_id: usize,
-        conn_permit: ConnectionPermit,
+        conn_permit: OwnedSemaphorePermit,
     ) -> ConnectionState {
         Self { stop_handle, conn_id, _conn_permit: Arc::new(conn_permit) }
     }
@@ -300,7 +291,6 @@ impl Default for ServerConfigBuilder {
             id_provider: Arc::new(RandomIntegerIdProvider),
             first_request_timeout: Some(DEFAULT_FIRST_REQUEST_TIMEOUT),
             write_timeout: DEFAULT_WRITE_TIMEOUT,
-            ping_interval: DEFAULT_PING_INTERVAL,
         })
     }
 }
@@ -640,7 +630,8 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 }
 
 /// Data required by the server to handle requests.
-struct ServiceData<S> {
+#[derive(Debug, Clone)]
+struct ServiceData {
     /// Registered server methods.
     methods: Methods,
     /// Stop handle.
@@ -651,36 +642,16 @@ struct ServiceData<S> {
     conn_guard: ConnectionGuard,
     /// ServerConfig
     server_cfg: ServerConfig,
-    /// RPC service for the HTTP requests of the connection, built on the first one.
-    http_rpc_service: OnceLock<Arc<S>>,
 }
 
 /// jsonrpsee tower service without HTTP specific middleware.
 ///
-/// hyper clones the service for every request, so the connection's state is shared behind an
-/// [`Arc`].
-///
 /// # Note
 /// This is similar to [`hyper::service::service_fn`].
-pub struct TowerServiceNoHttp<L: Layer<RpcService>> {
-    inner: Arc<ServiceData<L::Service>>,
+#[derive(Debug, Clone)]
+pub struct TowerServiceNoHttp<L> {
+    inner: ServiceData,
     rpc_middleware: RpcServiceBuilder<L>,
-}
-
-impl<L: Layer<RpcService> + Clone> Clone for TowerServiceNoHttp<L> {
-    fn clone(&self) -> Self {
-        Self { inner: self.inner.clone(), rpc_middleware: self.rpc_middleware.clone() }
-    }
-}
-
-// Not derived, a derive would require the RPC service of the middleware to be `Debug` as well.
-impl<L: Layer<RpcService> + fmt::Debug> fmt::Debug for TowerServiceNoHttp<L> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TowerServiceNoHttp")
-            .field("conn_id", &self.inner.conn_id)
-            .field("rpc_middleware", &self.rpc_middleware)
-            .finish_non_exhaustive()
-    }
 }
 
 impl<Body, RpcMiddleware> Service<HttpRequest<Body>> for TowerServiceNoHttp<RpcMiddleware>
@@ -707,6 +678,7 @@ where
         let request = request.map(HttpBody::new);
 
         let conn_guard = &self.inner.conn_guard;
+        let stop_handle = self.inner.stop_handle.clone();
         let conn_id = self.inner.conn_id;
 
         tracing::trace!(target: LOG_TARGET, "{:?}", request);
@@ -715,6 +687,8 @@ where
             return async move { Ok(http::response::too_many_requests()) }.boxed();
         };
 
+        let conn = ConnectionState::new(stop_handle.clone(), conn_id, conn_permit);
+
         let max_conns = conn_guard.max_connections();
         let curr_conns = max_conns - conn_guard.available_connections();
         tracing::debug!(target: LOG_TARGET, "Accepting new connection {}/{}", curr_conns, max_conns);
@@ -722,11 +696,11 @@ where
         let is_upgrade_request = is_upgrade_request(&request);
 
         if self.inner.server_cfg.enable_ws && is_upgrade_request {
-            let this = &self.inner;
-            let conn = ConnectionState::new(this.stop_handle.clone(), conn_id, conn_permit);
-            let server_cfg = this.server_cfg.clone();
+            let this = self.inner.clone();
 
-            let response = match upgrade_response(&request) {
+            let mut server = soketto::handshake::http::Server::new();
+
+            let response = match server.receive_request(&request) {
                 Ok(response) => {
                     let (tx, rx) = mpsc::channel(this.server_cfg.message_buffer_capacity as usize);
                     let sink =
@@ -758,22 +732,15 @@ where
                                 }
                             };
 
-                            let max_request_size = server_cfg.max_request_body_size as usize;
-                            // `tungstenite` reads a frame whole into its read buffer and never
-                            // shrinks it, so after a frame near the limit the connection keeps
-                            // that much allocated until it closes. An unfinished fragmented
-                            // message takes about twice its size: the collected fragments and the
-                            // read buffer that grew for them.
-                            // Frames that a client didn't mask have always been read.
-                            let ws_config = WebSocketConfig::default()
-                                .max_message_size(Some(max_request_size))
-                                .max_frame_size(Some(max_request_size))
-                                .accept_unmasked_frames(true);
-                            let (sender, receiver) =
-                                ws::split(TokioIo::new(upgraded), ws_config).await;
+                            let io = TokioIo::new(upgraded);
+
+                            let stream = BufReader::new(BufWriter::new(io.compat()));
+                            let mut ws_builder = server.into_builder(stream);
+                            ws_builder.set_max_message_size(this.server_cfg.max_request_body_size as usize);
+                            let (sender, receiver) = ws_builder.finish();
 
                             let params = BackgroundTaskParams {
-                                server_cfg,
+                                server_cfg: this.server_cfg,
                                 conn,
                                 ws_sender: sender,
                                 ws_receiver: receiver,
@@ -789,7 +756,7 @@ where
                         .in_current_span(),
                     );
 
-                    response
+                    response.map(|()| HttpBody::empty())
                 }
                 Err(e) => {
                     tracing::debug!(target: LOG_TARGET, "Could not upgrade connection: {}", e);
@@ -802,27 +769,23 @@ where
             let this = &self.inner;
             let max_response_size = this.server_cfg.max_response_body_size;
             let max_request_size = this.server_cfg.max_request_body_size;
+            let methods = this.methods.clone();
             let batch_config = this.server_cfg.batch_requests_config;
 
-            let rpc_service = this
-                .http_rpc_service
-                .get_or_init(|| {
-                    Arc::new(self.rpc_middleware.service(RpcService::without_subscriptions(
-                        this.methods.clone(),
-                        max_response_size as usize,
-                        this.conn_id.into(),
-                    )))
-                })
-                .clone();
+            let rpc_service = self.rpc_middleware.service(RpcService::without_subscriptions(
+                methods,
+                max_response_size as usize,
+                this.conn_id.into(),
+            ));
 
             Box::pin(async move {
                 let rp =
-                    http::call_with_service(request, batch_config, max_request_size, &*rpc_service)
+                    http::call_with_service(request, batch_config, max_request_size, rpc_service)
                         .await;
                 // NOTE: The `conn guard` must be held until the response body is written (or
                 // dropped) to respect the `max_connections` limit, because hyper writes the body
                 // after this future completes.
-                Ok(rp.map(|body| HttpBody::new(PermitBody::new(body, conn_permit))))
+                Ok(rp.map(|body| HttpBody::new(PermitBody::new(body, conn))))
             })
         } else {
             // NOTE: the `conn guard` is dropped when this function which is fine
@@ -849,7 +812,6 @@ struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
 fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
     params: ProcessConnection<HttpMiddleware, RpcMiddleware>,
 ) where
-    RpcMiddleware: Layer<RpcService>,
     HttpMiddleware: Layer<TowerServiceNoHttp<RpcMiddleware>> + Send + 'static,
     <HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service: Service<HttpRequest, Response = HttpResponse<Body>, Error = BoxError>
         + Clone
@@ -883,14 +845,13 @@ fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
     let write_timeout = server_cfg.write_timeout;
 
     let tower_service = TowerServiceNoHttp {
-        inner: Arc::new(ServiceData {
+        inner: ServiceData {
             server_cfg,
             methods,
             stop_handle: stop_handle.clone(),
             conn_id,
             conn_guard: conn_guard.clone(),
-            http_rpc_service: OnceLock::new(),
-        }),
+        },
         rpc_middleware,
     };
 

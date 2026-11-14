@@ -237,7 +237,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
     /// Stops this builder from retaining the trie reverts it accumulates in the changeset cache.
     ///
-    /// Use it for anchors a peer or RPC caller chooses: cached reverts are keyed by the anchor and
+    /// Use it for anchors an untrusted peer chooses: cached reverts are keyed by the anchor and
     /// stay until their start block is evicted, so they would otherwise pile up in the cache the
     /// engine shares.
     pub const fn without_trie_revert_caching(mut self) -> Self {
@@ -265,11 +265,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     #[cfg(test)]
     fn anchor_at_parent<Provider>(&self, provider: &Provider) -> ProviderResult<AnchorForParent>
     where
-        Provider: StageCheckpointReader
-            + BlockNumReader
-            + PruneCheckpointReader
-            + ChangeSetReader
-            + StorageChangeSetReader,
+        Provider: StageCheckpointReader + BlockNumReader + PruneCheckpointReader,
     {
         let (partial_state_trie, finish) = database_state_frontiers(provider)?;
         self.anchor_at_parent_with_frontiers(provider, partial_state_trie, finish)
@@ -283,7 +279,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         finish: BlockNumHash,
     ) -> ProviderResult<AnchorForParent>
     where
-        Provider: BlockNumReader + PruneCheckpointReader + ChangeSetReader + StorageChangeSetReader,
+        Provider: BlockNumReader + PruneCheckpointReader,
     {
         let mut in_mem_chain = self
             .parent_state
@@ -360,17 +356,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         }
 
         // Otherwise reverts are required; we check the changesets to make sure they are actually
-        // available before signaling that they are required. The first block of the lowest
-        // changeset file bounds them like a prune checkpoint: a node bootstrapped without
-        // changesets from genesis has no checkpoint for the history it never had.
+        // available before signaling that they are required.
         let account_history = provider
             .get_prune_checkpoint(PruneSegment::AccountHistory)?
-            .and_then(|checkpoint| checkpoint.block_number)
-            .max(provider.lowest_account_changeset_block()?);
+            .and_then(|checkpoint| checkpoint.block_number);
         let storage_history = provider
             .get_prune_checkpoint(PruneSegment::StorageHistory)?
-            .and_then(|checkpoint| checkpoint.block_number)
-            .max(provider.lowest_storage_changeset_block()?);
+            .and_then(|checkpoint| checkpoint.block_number);
         let lower_bound = account_history.max(storage_history).unwrap_or_default();
         let available_range = lower_bound..=finish.number;
         if !available_range.contains(&anchor.number) {

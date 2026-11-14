@@ -40,7 +40,7 @@ use reth_rpc_eth_types::{
     EthApiError, RpcInvalidTransactionError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
-use reth_tasks::cancel::is_cancelled;
+use reth_tasks::{cancel::is_cancelled, CancelOnDrop};
 use std::fmt;
 use tracing::{debug, trace};
 
@@ -655,17 +655,22 @@ pub trait Call:
                 .acquire_owned_blocking_io()
                 .await
                 .map_err(|_| EthApiError::InternalEthError)?;
+            let guard = CancelOnDrop::default();
+            let cancel = guard.clone();
             let this = self.clone();
 
-            self.spawn_with_call_at(request, at, overrides, move |db, evm_env, tx_env| {
-                let _permit = permit;
-                if is_cancelled() {
-                    // callsite dropped the request
-                    return Err(EthApiError::InternalEthError.into())
-                }
-                this.transact(db, evm_env, tx_env)
-            })
-            .await
+            let res = self
+                .spawn_with_call_at(request, at, overrides, move |db, evm_env, tx_env| {
+                    let _permit = permit;
+                    if cancel.is_cancelled() {
+                        // callsite dropped the guard
+                        return Err(EthApiError::InternalEthError.into())
+                    }
+                    this.transact(db, evm_env, tx_env)
+                })
+                .await;
+            drop(guard);
+            res
         }
     }
 

@@ -49,6 +49,7 @@ alloy-rpc-types-engine.workspace = true
 futures.workspace = true
 parking_lot.workspace = true
 thiserror.workspace = true
+thread_local.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
 
 # metrics

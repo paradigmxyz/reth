@@ -26,12 +26,9 @@
 
 //! Utilities for handling async code.
 
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use std::sync::Arc;
 
-use tokio::sync::watch;
+use tokio::sync::{watch, OwnedSemaphorePermit, Semaphore, TryAcquireError};
 
 /// Create channel to determine whether
 /// the server shall continue to run or not.
@@ -88,34 +85,32 @@ impl ServerHandle {
 }
 
 /// Limits the number of connections.
-///
-/// Permits are only ever tried, never waited for, so they are counted with an atomic: a semaphore
-/// would lock its waiter list on every release.
 #[derive(Clone, Debug)]
 pub struct ConnectionGuard {
-    in_use: Arc<AtomicUsize>,
+    inner: Arc<Semaphore>,
     max: usize,
 }
 
 impl ConnectionGuard {
     /// Create a new connection guard.
     pub fn new(limit: usize) -> Self {
-        Self { in_use: Arc::new(AtomicUsize::new(0)), max: limit }
+        Self { inner: Arc::new(Semaphore::new(limit)), max: limit }
     }
 
     /// Acquire a connection permit.
     pub fn try_acquire(&self) -> Option<ConnectionPermit> {
-        self.in_use
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |in_use| {
-                (in_use < self.max).then_some(in_use + 1)
-            })
-            .ok()
-            .map(|_| ConnectionPermit(self.in_use.clone()))
+        match self.inner.clone().try_acquire_owned() {
+            Ok(guard) => Some(guard),
+            Err(TryAcquireError::Closed) => {
+                unreachable!("Semaphore::Close is never called and can't be closed; qed")
+            }
+            Err(TryAcquireError::NoPermits) => None,
+        }
     }
 
     /// Get the number of available connection slots.
     pub fn available_connections(&self) -> usize {
-        self.max - self.in_use.load(Ordering::Relaxed)
+        self.inner.available_permits()
     }
 
     /// Get the maximum number of connections.
@@ -124,12 +119,5 @@ impl ConnectionGuard {
     }
 }
 
-/// Connection permit, which frees its connection slot when dropped.
-#[derive(Debug)]
-pub struct ConnectionPermit(Arc<AtomicUsize>);
-
-impl Drop for ConnectionPermit {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::Relaxed);
-    }
-}
+/// Connection permit.
+pub type ConnectionPermit = OwnedSemaphorePermit;

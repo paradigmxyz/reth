@@ -34,7 +34,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{ConnectionPermit, HttpBody};
+use crate::{ConnectionState, HttpBody};
 
 use futures_util::{future, ready};
 use hyper::body::{Bytes, Frame};
@@ -61,9 +61,6 @@ const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_secs(1);
 /// Default timeout for writing a single WebSocket message and for a stalled HTTP response write,
 /// matching geth.
 pub(crate) const DEFAULT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// Default interval at which WebSocket connections are pinged, matching geth.
-pub(crate) const DEFAULT_PING_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Notifies `request_received` whenever hyper passes a request to the service.
 #[derive(Debug, Clone)]
@@ -216,12 +213,12 @@ pub(crate) struct PermitBody {
     inner: HttpBody,
     /// Rest of the data frame that is being yielded in chunks.
     pending: Bytes,
-    _conn_permit: ConnectionPermit,
+    _conn: ConnectionState,
 }
 
 impl PermitBody {
-    pub(crate) fn new(inner: HttpBody, conn_permit: ConnectionPermit) -> Self {
-        Self { inner, pending: Bytes::new(), _conn_permit: conn_permit }
+    pub(crate) fn new(inner: HttpBody, conn: ConnectionState) -> Self {
+        Self { inner, pending: Bytes::new(), _conn: conn }
     }
 }
 

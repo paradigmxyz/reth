@@ -105,6 +105,7 @@ use crate::tree::{
         reuse::{PrewarmResults, ReuseMiss},
         PayloadProcessor,
     },
+    shared_state_db::SharedStateProviderDatabase,
     txpool_prewarm,
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
@@ -128,7 +129,7 @@ use crate::tree::{
     },
 };
 use alloy_primitives::Address;
-use evm2::evm::{AccountInfo, Bal as EvmBal};
+use evm2::evm::{AccountInfo, Bal as EvmBal, DbRef};
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -724,6 +725,7 @@ where
                     &input,
                     &mut handle,
                     execution_state_hook,
+                    &make_state_provider,
                 ),
                 Err(err) => Err(err.into()),
             }
@@ -1011,6 +1013,7 @@ where
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt, EvmTypesFor<Evm>>,
         state_hook: Option<StateRootUpdateHook>,
+        make_state_provider: &(dyn Fn(bool) -> ProviderResult<EvmStateProviderBox> + Sync),
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
         InsertBlockErrorKind,
@@ -1061,6 +1064,7 @@ where
                     &receipt_tx,
                     &executed_tx_index,
                     prewarm_results.as_deref(),
+                    make_state_provider,
                 )?;
 
                 let post_exec_start = Instant::now();
@@ -1211,6 +1215,7 @@ where
         receipt_tx: &ReceiptRootSender<N>,
         executed_tx_index: &AtomicUsize,
         prewarm_results: Option<&PrewarmResults<EvmTypesFor<Evm>>>,
+        make_state_provider: &(dyn Fn(bool) -> ProviderResult<EvmStateProviderBox> + Sync),
     ) -> Result<Vec<Address>, BlockExecutionError>
     where
         Tx: ExecutableTxFor<Evm>,
@@ -1221,6 +1226,17 @@ where
         debug_span!(target: "engine::tree", "pre_execution")
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
+
+        if executor.executes_in_parallel() {
+            return self.execute_transactions_parallel(
+                executor,
+                transaction_count,
+                transactions,
+                receipt_tx,
+                executed_tx_index,
+                make_state_provider,
+            )
+        }
 
         // Execute transactions
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
@@ -1291,6 +1307,48 @@ where
         drop(exec_span);
         if prewarm_results.is_some() {
             self.metrics.prewarm_reuse.record(reuse_stats);
+        }
+        Ok(senders)
+    }
+
+    /// Executes the block's transactions with an executor that executes them in parallel, then
+    /// streams their receipts to the receipt root task.
+    ///
+    /// The executor's workers read the parent state through one state provider per thread, each
+    /// from `make_state_provider`, filling the execution cache on misses.
+    fn execute_transactions_parallel<Tx, Err>(
+        &self,
+        executor: &mut BlockExecutorFor<'_, Evm>,
+        transaction_count: usize,
+        transactions: impl Iterator<Item = Result<Tx, Err>>,
+        receipt_tx: &ReceiptRootSender<N>,
+        executed_tx_index: &AtomicUsize,
+        make_state_provider: &(dyn Fn(bool) -> ProviderResult<EvmStateProviderBox> + Sync),
+    ) -> Result<Vec<Address>, BlockExecutionError>
+    where
+        Tx: ExecutableTxFor<Evm>,
+        Err: core::error::Error + Send + Sync + 'static,
+    {
+        let _span = debug_span!(target: "engine::tree", "execution", parallel = true).entered();
+        let wait_start = Instant::now();
+        let mut senders = Vec::with_capacity(transaction_count);
+        let mut txs = Vec::with_capacity(transaction_count);
+        for tx in transactions {
+            let tx = tx.map_err(BlockValidationError::other)?;
+            senders.push(*tx.signer());
+            txs.push(tx);
+        }
+        self.metrics.record_transaction_wait(wait_start.elapsed());
+
+        let make_worker_provider = || make_state_provider(true);
+        let base = DbRef::new(SharedStateProviderDatabase::new(&make_worker_provider));
+        executor.execute_transactions_parallel(txs, &base)?;
+        executed_tx_index.store(senders.len(), Ordering::Relaxed);
+
+        for (tx_index, receipt) in executor.receipts().iter().enumerate() {
+            receipt_tx
+                .send(IndexedReceipt::new(tx_index, receipt.clone()))
+                .map_err(|_| BlockExecutionError::msg("receipt root task closed"))?;
         }
         Ok(senders)
     }

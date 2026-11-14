@@ -61,7 +61,7 @@ impl Visitor<'_> for TwoPointZeroVisitor {
     {
         match s {
             "2.0" => Ok(TwoPointZero),
-            _ => Err(de::Error::invalid_value(Unexpected::Other("string"), &self)),
+            _ => Err(de::Error::invalid_value(Unexpected::Str(s), &self)),
         }
     }
 }
@@ -173,15 +173,15 @@ impl<'a> ParamsSequence<'a> {
         T: Deserialize<'a>,
     {
         let mut json = self.0;
-        match json.chars().next()? {
-            ']' => {
+        match json.as_bytes().first()? {
+            b']' => {
                 self.0 = "";
                 return None;
             }
-            '[' | ',' => json = &json[1..],
-            found => {
+            b'[' | b',' => json = &json[1..],
+            _ => {
                 let errmsg =
-                    format!("Invalid params. Expected one of '[', ']' or ',' but found {found:?}");
+                    format!("Invalid params. Expected one of '[', ']' or ',' but found {json:?}");
                 return Some(Err(invalid_params(errmsg)));
             }
         }
@@ -465,20 +465,13 @@ impl<'de: 'a, 'a> Deserialize<'de> for Id<'a> {
     }
 }
 
-/// Maximum length of the error data of an invalid-params error, which can quote request input.
-const MAX_INVALID_PARAMS_DATA: usize = 1024;
-
 fn invalid_params(e: impl ToString) -> ErrorObjectOwned {
-    let mut data = e.to_string();
-    data.truncate(data.floor_char_boundary(MAX_INVALID_PARAMS_DATA));
-    ErrorObject::owned(ErrorCode::InvalidParams.code(), INVALID_PARAMS_MSG, Some(data))
+    ErrorObject::owned(ErrorCode::InvalidParams.code(), INVALID_PARAMS_MSG, Some(e.to_string()))
 }
 
 #[cfg(test)]
 mod test {
-    use super::{
-        Cow, Id, JsonValue, Params, SubscriptionId, TwoPointZero, MAX_INVALID_PARAMS_DATA,
-    };
+    use super::{Cow, Id, JsonValue, Params, SubscriptionId, TwoPointZero};
     use crate::response::SubscriptionPayload;
     use serde::Deserialize;
 
@@ -755,14 +748,5 @@ mod test {
             seq.optional_next::<serde_json::Value>().unwrap(),
             Some(serde_json::json!({"named":7}))
         );
-    }
-
-    #[test]
-    fn invalid_params_data_is_truncated_at_a_char_boundary() {
-        // serde quotes the whole mismatched string in its error.
-        let params = format!(r#"["{}"]"#, "🦀".repeat(MAX_INVALID_PARAMS_DATA));
-        let err = Params::new(Some(&params)).sequence().next::<u64>().unwrap_err();
-        let data = serde_json::from_str::<String>(err.data().unwrap().get()).unwrap();
-        assert_eq!(data, format!("invalid type: string \"{}", "🦀".repeat(250)));
     }
 }

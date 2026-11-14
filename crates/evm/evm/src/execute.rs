@@ -15,7 +15,10 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
-use evm2::interpreter::{Interpreter, Message, MessageResult};
+use evm2::{
+    evm::DynDatabaseRef,
+    interpreter::{Interpreter, Message, MessageResult},
+};
 use reth_execution_types::{BlockExecutionResult, StateUpdate};
 use reth_primitives_traits::{
     Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, SignedTransaction,
@@ -491,6 +494,33 @@ pub trait BlockExecutor: Sized {
         transaction: impl ExecutorTx<Self>,
     ) -> Result<GasOutput, BlockExecutionError> {
         self.execute_transaction_with_result_closure(transaction, |_| {})
+    }
+
+    /// Returns `true` if [`Self::execute_transactions_parallel`] executes transactions on worker
+    /// threads, which read the block's state from the database it is given.
+    fn executes_in_parallel(&self) -> bool {
+        false
+    }
+
+    /// Executes and commits a block's `transactions`, with exactly the result of executing them
+    /// one by one with [`Self::execute_transaction`].
+    ///
+    /// `base` holds the same state as the executor's database. An executor that
+    /// [executes in parallel](Self::executes_in_parallel) shares it with its worker threads; the
+    /// default implementation executes the transactions one by one and ignores it.
+    ///
+    /// Call it after [`Self::apply_pre_execution_changes`] and before any transaction of the
+    /// block.
+    fn execute_transactions_parallel<T: ExecutorTx<Self>>(
+        &mut self,
+        transactions: Vec<T>,
+        base: &(dyn DynDatabaseRef + Sync),
+    ) -> Result<(), BlockExecutionError> {
+        let _ = base;
+        for transaction in transactions {
+            self.execute_transaction(transaction)?;
+        }
+        Ok(())
     }
 
     /// Returns receipts accumulated so far.

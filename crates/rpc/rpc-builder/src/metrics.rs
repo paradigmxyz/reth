@@ -21,7 +21,8 @@ use tower::Layer;
 /// Metrics for the RPC server.
 ///
 /// Metrics are divided into two categories:
-/// - Connection metrics: metrics for the connection (e.g. number of connections opened)
+/// - Connection metrics: metrics for the connection (e.g. number of connections opened, relevant
+///   for WS and IPC)
 /// - Request metrics: metrics for each RPC method (e.g. number of calls started, time taken to
 ///   process a call)
 #[derive(Default, Debug, Clone)]
@@ -113,11 +114,9 @@ where
         if let Some((_, call_metrics)) = &call_metrics {
             call_metrics.started_total.increment(1);
         }
-        // Sync methods and the params decoding of async methods run inside `call`.
-        let started_at = Instant::now();
         MeteredRequestFuture {
             fut: self.inner.call(req),
-            started_at,
+            started_at: Instant::now(),
             metrics: self.metrics.clone(),
             method: call_metrics.map(|(method, _)| *method),
         }

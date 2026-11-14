@@ -19,5 +19,6 @@ hyper-util = { workspace = true, features = ["tokio", "client-legacy", "http1", 
 http-body-util = { workspace = true }
 serde = { workspace = true, features = ["derive", "alloc"] }
 serde_json = { workspace = true, features = ["raw_value"] }
+soketto = { version = "0.8.1", features = ["http"] }
 tokio = { workspace = true, features = ["net", "rt-multi-thread", "macros", "time"] }
-tokio-tungstenite = { workspace = true }
+tokio-util = { workspace = true, features = ["compat"] }
