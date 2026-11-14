@@ -616,6 +616,12 @@ where
                     }
                 };
 
+                let mut slot_account_ids =
+                    self.get_sender_ids(transaction.additional_slot_accounts());
+                slot_account_ids.retain(|id| *id != sender_id);
+                slot_account_ids.sort_unstable();
+                slot_account_ids.dedup();
+
                 let tx = ValidPoolTransaction {
                     transaction,
                     transaction_id,
@@ -623,6 +629,7 @@ where
                     timestamp,
                     origin,
                     authority_ids: authorities.map(|auths| self.get_sender_ids(auths)),
+                    slot_account_ids,
                 };
 
                 let added = match pool.add_transaction(tx, balance, state_nonce, bytecode_hash) {

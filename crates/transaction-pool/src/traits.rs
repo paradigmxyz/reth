@@ -1546,6 +1546,20 @@ pub trait PoolTransaction:
     fn requires_nonce_check(&self) -> bool {
         true
     }
+
+    /// Accounts other than the sender that this transaction occupies a pool slot of.
+    ///
+    /// The pool counts the transaction against each of them in addition to its sender and
+    /// rejects it once any of them has `PoolConfig::max_account_slots` transactions pooled.
+    /// Unlike the sender, such an account gets no exemption for a transaction at the on-chain
+    /// nonce.
+    ///
+    /// Defaults to none. Chains where another account can back a transaction, for example by
+    /// paying its fees, return those accounts so one of them cannot back an unbounded number of
+    /// pooled transactions from different senders.
+    fn additional_slot_accounts(&self) -> Vec<Address> {
+        Vec::new()
+    }
 }
 
 /// Super trait for transactions that can be converted to and from Eth transactions intended for the

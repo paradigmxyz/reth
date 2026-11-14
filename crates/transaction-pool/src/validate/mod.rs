@@ -308,6 +308,9 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub origin: TransactionOrigin,
     /// The sender ids of the 7702 transaction authorities.
     pub authority_ids: Option<Vec<SenderId>>,
+    /// The distinct accounts other than the sender that this transaction occupies a pool slot
+    /// of, see [`PoolTransaction::additional_slot_accounts`].
+    pub slot_account_ids: Vec<SenderId>,
 }
 
 // === impl ValidPoolTransaction ===
@@ -481,6 +484,7 @@ impl<T: PoolTransaction> Clone for ValidPoolTransaction<T> {
             timestamp: self.timestamp,
             origin: self.origin,
             authority_ids: self.authority_ids.clone(),
+            slot_account_ids: self.slot_account_ids.clone(),
         }
     }
 }
