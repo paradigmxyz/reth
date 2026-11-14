@@ -83,7 +83,7 @@ use crate::{
         AllPoolTransactions, BestTransactionsAttributes, BlockInfo, GetPooledTransactionLimit,
         NewBlobSidecar, PoolSize, PoolTransaction, PropagatedTransactions, TransactionOrigin,
     },
-    validate::{TransactionValidationOutcome, ValidPoolTransaction, ValidTransaction},
+    validate::{Authority, TransactionValidationOutcome, ValidPoolTransaction, ValidTransaction},
     CanonicalStateUpdate, EthPoolTransaction, PoolConfig, TransactionOrdering,
     TransactionValidator,
 };
@@ -622,7 +622,13 @@ where
                     propagate,
                     timestamp,
                     origin,
-                    authority_ids: authorities.map(|auths| self.get_sender_ids(auths)),
+                    authority_ids: authorities.map(|auths| {
+                        self.get_sender_ids(auths.iter().map(|auth| auth.id))
+                            .into_iter()
+                            .zip(auths)
+                            .map(|(id, auth)| Authority { id, nonce: auth.nonce })
+                            .collect()
+                    }),
                 };
 
                 let added = match pool.add_transaction(tx, balance, state_nonce, bytecode_hash) {
@@ -1748,7 +1754,7 @@ mod tests {
         test_utils::{
             testing_pool, MockTransaction, MockTransactionFactory, TestPool, TestPoolBuilder,
         },
-        validate::ValidTransaction,
+        validate::{Authority, ValidTransaction},
         BlockInfo, FullTransactionEvent, PoolConfig, SubPool, SubPoolLimit, TransactionEvent,
         TransactionListenerKind, TransactionOrigin, TransactionPool, TransactionPoolExt,
         TransactionValidationOutcome, ValidPoolTransaction, U256,
@@ -2098,7 +2104,7 @@ mod tests {
                 bytecode_hash: None,
                 transaction: ValidTransaction::Valid(tx),
                 propagate: true,
-                authorities: Some(vec![auth]),
+                authorities: Some(vec![Authority { id: auth, nonce: 0 }]),
             }],
         );
 

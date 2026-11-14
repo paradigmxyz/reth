@@ -1,8 +1,9 @@
 use std::marker::PhantomData;
 
 use crate::{
-    validate::ValidTransaction, EthPooledTransaction, PoolTransaction, TransactionOrigin,
-    TransactionValidationOutcome, TransactionValidator,
+    validate::{Authority, ValidTransaction},
+    EthPooledTransaction, PoolTransaction, TransactionOrigin, TransactionValidationOutcome,
+    TransactionValidator,
 };
 use reth_ethereum_primitives::Block;
 
@@ -43,7 +44,12 @@ where
     ) -> TransactionValidationOutcome<Self::Transaction> {
         // Always return valid
         let authorities = transaction.authorization_list().map(|auths| {
-            auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>()
+            auths
+                .iter()
+                .flat_map(|auth| {
+                    auth.recover_authority().map(|id| Authority { id, nonce: auth.nonce() })
+                })
+                .collect::<Vec<_>>()
         });
         TransactionValidationOutcome::Valid {
             balance: *transaction.cost(),
