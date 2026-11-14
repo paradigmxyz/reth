@@ -35,6 +35,8 @@ fn custom_rpc_defaults_apply_to_cli() {
             prewarm_bals: Some(5),
             max_concurrent_db_requests: 6,
             max_cached_tx_hashes: 7,
+            max_block_responses: 8,
+            block_response_depth: 9,
         })
         .try_init()
         .unwrap();

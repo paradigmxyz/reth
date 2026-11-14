@@ -158,4 +158,12 @@ pub mod cache {
 
     /// Default maximum number of transaction hashes to cache for lookups.
     pub const DEFAULT_MAX_CACHED_TX_HASHES: u32 = 100_000;
+
+    /// Default cache size for serialized block and receipt responses: the three responses of
+    /// each recent block, and of the block that is about to stop being one.
+    pub const DEFAULT_BLOCK_RESPONSE_CACHE_MAX_LEN: u32 = 18;
+
+    /// Default distance below the best block up to which block and receipt responses are
+    /// cached.
+    pub const DEFAULT_BLOCK_RESPONSE_CACHE_DEPTH: u64 = 4;
 }

@@ -138,6 +138,8 @@ impl RethRpcServerConfig for RpcServerArgs {
             prewarm_bals: self.rpc_state_cache.prewarm_bals,
             max_concurrent_db_requests: self.rpc_state_cache.max_concurrent_db_requests,
             max_cached_tx_hashes: self.rpc_state_cache.max_cached_tx_hashes,
+            max_block_responses: self.rpc_state_cache.max_block_responses,
+            block_response_depth: self.rpc_state_cache.block_response_depth,
         }
     }
 
@@ -329,6 +331,10 @@ mod tests {
                 "4096",
                 "--rpc-cache.idle-timeout",
                 timeout,
+                "--rpc-cache.max-block-responses",
+                "40",
+                "--rpc-cache.block-response-depth",
+                "50",
             ])
             .args;
             assert_eq!(
@@ -341,6 +347,8 @@ mod tests {
                     max_receipts_bytes: 0,
                     max_bals_bytes: 4096,
                     idle_timeout: expected_timeout,
+                    max_block_responses: 40,
+                    block_response_depth: 50,
                     ..Default::default()
                 }
             );
