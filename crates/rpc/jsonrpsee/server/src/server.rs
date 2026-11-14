@@ -56,7 +56,7 @@ use futures_util::{
 };
 use hyper::body::{Bytes, Incoming};
 use hyper_util::{
-    rt::{TokioExecutor, TokioIo},
+    rt::{TokioExecutor, TokioIo, TokioTimer},
     service::TowerToHyperService,
 };
 use jsonrpsee_core::{
@@ -229,7 +229,8 @@ pub struct ServerConfig {
     pub(crate) message_buffer_capacity: u32,
     /// ID provider.
     pub(crate) id_provider: Arc<dyn IdProvider>,
-    /// Timeout for receiving the first request of a connection.
+    /// Timeout for receiving the first request of a connection, and the next request head of an
+    /// HTTP/1 keep-alive connection.
     pub(crate) first_request_timeout: Option<Duration>,
     /// Timeout for writing a single message to a WebSocket connection and for a stalled HTTP
     /// response write.
@@ -432,7 +433,8 @@ impl ServerConfigBuilder {
     }
 
     /// Configure how long a connection may take to send its first request, e.g. the WebSocket
-    /// upgrade request, before it is closed. `None` disables the timeout.
+    /// upgrade request, before it is closed. An HTTP/1 keep-alive connection is closed as well
+    /// when it takes longer to send the head of its next request. `None` disables the timeout.
     ///
     /// Default is 30 seconds.
     pub fn set_first_request_timeout(mut self, first_request_timeout: Option<Duration>) -> Self {
@@ -917,7 +919,10 @@ fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
             request_received.clone(),
         );
         let io = TokioIo::new(WriteTimeoutIo::new(socket, write_timeout));
-        let builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+        let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+        // Also bounds how long an idle HTTP/1 keep-alive connection waits for its next request,
+        // which holds the socket without a connection permit.
+        builder.http1().timer(TokioTimer::new()).header_read_timeout(first_request_timeout);
         let conn = builder.serve_connection_with_upgrades(io, service);
         let stopped = stop_handle.shutdown();
 
