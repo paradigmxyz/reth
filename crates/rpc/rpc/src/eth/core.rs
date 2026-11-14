@@ -1359,8 +1359,8 @@ mod tests {
         assert_eq!(err.message(), EthApiError::InvalidBlockRange.to_string());
     }
 
-    /// A range whose chunks don't form one canonical chain, as after a reorg between two chunk
-    /// reads, is rejected instead of mixing forks.
+    /// Blocks that no longer match the headers read first, as after a reorg during the request,
+    /// are rejected instead of mixing forks.
     #[tokio::test]
     async fn test_fee_history_rewards_rejects_mixed_forks() {
         let block_count = 2 * 16;
@@ -1368,23 +1368,21 @@ mod tests {
         let first_block = newest_block - block_count + 1;
         let percentiles = vec![0.0, 50.0, 100.0];
 
-        // The first block of the second chunk doesn't extend the first chunk, or the last block
-        // of the range is no longer the canonical block at its height. No chunk follows the
-        // latter, so only the canonical check can reject it.
-        for (number, fork) in [
-            (
-                first_block + 16,
-                (|header: &mut Header| header.parent_hash = B256::random()) as fn(&mut Header),
-            ),
-            (newest_block, |header: &mut Header| header.extra_data = Bytes::from_static(b"fork")),
-        ] {
+        // The block read for the first block of the second chunk belongs to another fork than its
+        // header, or the last block of the range is no longer the canonical block at its height
+        // once its receipts were read.
+        for (number, blocks_only) in [(first_block + 16, true), (newest_block, false)] {
             let mock_provider = MockEthProvider::default();
             let (eth_api, _, _) =
                 prepare_eth_api(newest_block, None, block_count, mock_provider.clone());
             let hash = mock_provider.block_hash(number).unwrap().unwrap();
             let mut block = mock_provider.block_by_number(number).unwrap().unwrap();
-            fork(&mut block.header);
-            mock_provider.add_block(hash, block);
+            block.header.extra_data = Bytes::from_static(b"fork");
+            if blocks_only {
+                mock_provider.blocks.lock().insert(hash, block);
+            } else {
+                mock_provider.add_block(hash, block);
+            }
 
             let err = eth_api
                 .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles.clone()))
@@ -1392,6 +1390,44 @@ mod tests {
                 .unwrap_err();
             assert_eq!(err.message(), EthApiError::InvalidBlockRange.to_string());
         }
+    }
+
+    /// The newest blocks of a range are served from the state cache when it holds them, and only
+    /// the older blocks are read from the provider.
+    #[tokio::test]
+    async fn test_fee_history_rewards_cached_blocks() {
+        let block_count = 2 * 16 + 2;
+        let newest_block = 1337;
+        let percentiles = vec![0.0, 10.0, 50.0, 90.0, 100.0];
+        let mock_provider = MockEthProvider::default();
+
+        let (eth_api, _, _) =
+            prepare_eth_api(newest_block, None, block_count, mock_provider.clone());
+        let rewards = expected_rewards(&mock_provider, newest_block, block_count, &percentiles);
+
+        // Cache the newest three blocks and the oldest one, then prune all their receipts in the
+        // provider. The newest ones are still served from the cache, the oldest one is behind an
+        // uncached block, so it is read from the provider.
+        let first_block = newest_block - block_count + 1;
+        for number in [first_block, newest_block - 2, newest_block - 1, newest_block] {
+            let hash = mock_provider.block_hash(number).unwrap().unwrap();
+            eth_api.cache().get_block_and_receipts(hash).await.unwrap().unwrap();
+        }
+        for number in newest_block - 2..=newest_block {
+            mock_provider.add_receipts(number, Vec::new());
+        }
+        let fee_history = eth_api
+            .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles.clone()))
+            .await
+            .unwrap();
+        assert_eq!(fee_history.reward, Some(rewards));
+
+        mock_provider.add_receipts(first_block, Vec::new());
+        let err = eth_api
+            .fee_history(U64::from(block_count), newest_block.into(), Some(percentiles))
+            .await
+            .unwrap_err();
+        assert_eq!(err.message(), EthApiError::InvalidBlockRange.to_string());
     }
 
     /// Rewards of canonical blocks that are not persisted yet use their in-memory receipts, also
