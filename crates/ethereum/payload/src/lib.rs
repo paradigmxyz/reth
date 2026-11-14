@@ -14,7 +14,7 @@ use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
 use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
-    PayloadConfig,
+    PayloadConfig, PayloadStateRootHandle,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
@@ -117,10 +117,18 @@ where
         &self,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<EthBuiltPayload, PayloadBuilderError> {
+        self.build_empty_payload_with_state_root(config, None)
+    }
+
+    fn build_empty_payload_with_state_root(
+        &self,
+        config: PayloadConfig<Self::Attributes>,
+        state_root_handle: Option<PayloadStateRootHandle>,
+    ) -> Result<EthBuiltPayload, PayloadBuilderError> {
         let args = BuildArguments::new(
             Default::default(),
             Default::default(),
-            None,
+            state_root_handle,
             config,
             Default::default(),
             None,
@@ -226,13 +234,14 @@ where
     let regular_gas_limit_cap = builder.evm_env().regular_gas_limit_cap();
 
     // If we have a state-root task, wire a state hook that streams per-tx state diffs.
-    let use_state_root_task =
-        if let Some(task) = state_root_handle.as_mut().filter(|_| stream_state_updates) {
-            let mut hook = task.take_state_hook();
-            builder.set_state_hook(move |state| hook.on_state(state))
-        } else {
-            false
-        };
+    let use_state_root_task = if let Some(task) =
+        state_root_handle.as_mut().filter(|task| stream_state_updates && task.has_state_hook())
+    {
+        let mut hook = task.take_state_hook();
+        builder.set_state_hook(move |state| hook.on_state(state))
+    } else {
+        false
+    };
 
     builder.apply_pre_execution_changes().map_err(|err| {
         warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
@@ -462,25 +471,30 @@ where
             state_provider.as_ref(),
             Some((parent_header.state_root, TrieUpdates::default())),
         )?
-    } else if use_state_root_task {
-        let mut task = state_root_handle.expect("state-root task exists if hook was installed");
-        // The state-root task has been computing incrementally alongside tx execution.
-        // This recv() waits for the final root hash — most work is already done.
-        // Fall back to sync state root if the trie pipeline fails.
-        builder.finish_with_state_root(state_provider.as_ref(), |_| match task.state_root() {
-            Ok(outcome) => {
-                debug!(
-                    target: "payload_builder",
-                    id = %payload_id,
-                    state_root = ?outcome.state_root,
-                    job = task.name(),
-                    "received state root from state-root job"
-                );
-                Ok(Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))))
-            }
-            Err(err) => {
-                warn!(target: "payload_builder", id = %payload_id, %err, "state-root job failed, falling back to sync state root");
-                Ok(None)
+    } else if use_state_root_task ||
+        state_root_handle.as_ref().is_some_and(|task| task.uses_output())
+    {
+        let mut task = state_root_handle.expect("state-root backend was selected");
+        let requires_output = task.uses_output();
+        // Streaming jobs overlap execution; output backends compute from the final bundle.
+        // Only a streaming MPT job may fall back to synchronous MPT computation.
+        builder.finish_with_state_root(state_provider.as_ref(), |output| {
+            match task.finish_with_output(&output.state) {
+                Ok(outcome) => {
+                    debug!(
+                        target: "payload_builder",
+                        id = %payload_id,
+                        state_root = ?outcome.state_root,
+                        job = task.name(),
+                        "received state root from state-root job"
+                    );
+                    Ok(Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))))
+                }
+                Err(err) if requires_output => Err(BlockExecutionError::other(err)),
+                Err(err) => {
+                    warn!(target: "payload_builder", id = %payload_id, %err, "state-root job failed, falling back to sync state root");
+                    Ok(None)
+                }
             }
         })?
     } else {

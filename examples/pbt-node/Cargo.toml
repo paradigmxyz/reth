@@ -1,0 +1,16 @@
+[package]
+name = "example-pbt-node"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-ethereum = { workspace = true, features = ["node", "test-utils"] }
+reth-node-pbt.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tempfile.workspace = true
+eyre.workspace = true

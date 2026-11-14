@@ -4208,6 +4208,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-pbt-node"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "reth-ethereum",
+ "reth-node-pbt",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "example-polygon-p2p"
 version = "0.0.0"
 dependencies = [
@@ -6924,6 +6935,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "pbt"
+version = "0.1.0"
+source = "git+https://github.com/Rimeeeeee/pbtree?rev=f69a681bbd767ea151e1057c3c5fc022b91b2461#f69a681bbd767ea151e1057c3c5fc022b91b2461"
+dependencies = [
+ "alloy-eip7928",
+ "alloy-primitives",
+ "alloy-trie",
+ "blake3",
+ "imbl",
+ "rayon",
+ "rocksdb",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "pem"
 version = "3.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7893,10 +7919,12 @@ dependencies = [
  "backon",
  "blake3",
  "clap",
+ "eyre",
  "http-body-util",
  "hyper",
  "hyper-util",
  "reth-chainspec",
+ "reth-cli",
  "reth-cli-runner",
  "reth-cli-util",
  "reth-consensus",
@@ -7912,6 +7940,7 @@ dependencies = [
  "reth-node-core",
  "reth-node-ethereum",
  "reth-node-metrics",
+ "reth-node-pbt",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-primitives-traits",
@@ -8711,6 +8740,7 @@ dependencies = [
  "reth-trie",
  "reth-trie-common",
  "reth-trie-parallel",
+ "reth-trie-pbt",
  "reth-trie-sparse",
  "thiserror 2.0.21",
  "tokio",
@@ -9877,6 +9907,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-node-pbt"
+version = "2.11.0"
+dependencies = [
+ "alloy-eip7928",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types-engine",
+ "clap",
+ "eyre",
+ "jsonrpsee",
+ "reth-cli",
+ "reth-e2e-test-utils",
+ "reth-engine-tree",
+ "reth-ethereum",
+ "reth-fs-util",
+ "reth-payload-primitives",
+ "reth-stages",
+ "reth-storage-overlay",
+ "reth-tracing",
+ "reth-trie-pbt",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "reth-node-types"
 version = "2.11.0"
 dependencies = [
@@ -11031,6 +11090,24 @@ dependencies = [
  "reth-trie",
  "thiserror 2.0.21",
  "tracing",
+]
+
+[[package]]
+name = "reth-trie-pbt"
+version = "2.11.0"
+dependencies = [
+ "alloy-primitives",
+ "pbt",
+ "reth-fs-util",
+ "reth-lru",
+ "reth-primitives-traits",
+ "reth-storage-api",
+ "reth-storage-errors",
+ "reth-trie",
+ "reth-trie-common",
+ "rocksdb",
+ "tempfile",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

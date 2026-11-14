@@ -453,6 +453,14 @@ where
         let overlay = self.execution_overlay.get().expect("execution overlay was just initialized");
         Ok((&overlay.overlay, overlay.historical_fallback.as_ref()))
     }
+
+    /// Returns the finalized PBT retirement boundary from this provider's database snapshot.
+    ///
+    /// `None` means MPT nodes must still be maintained. Read this before computing a
+    /// commitment so concurrent disposal cannot change the view used by that computation.
+    pub fn mpt_retired_at(&self) -> ProviderResult<Option<BlockNumber>> {
+        self.provider().mpt_retired_at()
+    }
 }
 
 impl<Provider, N: NodePrimitives> Drop for OverlayStateProvider<Provider, N>
@@ -1471,5 +1479,28 @@ mod tests {
 
         assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
         assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage));
+    }
+
+    #[test]
+    fn retirement_boundary_is_pinned_to_the_provider_snapshot() {
+        let factory = create_test_provider_factory();
+        let manager = OverlayManager::<EthPrimitives>::default();
+        let overlay =
+            OverlayStateProviderFactory::new(factory.clone(), manager.overlay_builder(B256::ZERO));
+        let before = overlay.database_provider_ro().unwrap();
+        assert_eq!(before.mpt_retired_at().unwrap(), None);
+        let writer = factory.provider_rw().unwrap();
+        writer
+            .tx_ref()
+            .put::<tables::ChainState>(tables::ChainStateKey::PbtMptRetiredBlock, 7)
+            .unwrap();
+        writer.commit().unwrap();
+        assert_eq!(before.mpt_retired_at().unwrap(), None);
+        assert_eq!(overlay.database_provider_ro().unwrap().mpt_retired_at().unwrap(), Some(7));
+        #[cfg(feature = "pbt")]
+        assert_eq!(
+            manager.compute_block_trie_updates(&factory.provider().unwrap(), 8).unwrap(),
+            TrieUpdatesSorted::default()
+        );
     }
 }

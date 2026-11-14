@@ -882,15 +882,26 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     /// This includes calculating the resulted state root and comparing it with the parent block
     /// state root.
     pub fn unwind_trie_state_from(&self, from: BlockNumber) -> ProviderResult<()> {
+        let retired = self.mpt_retired_at()?;
+        if retired.is_some_and(|finalized| from <= finalized) {
+            return Err(ProviderError::other(std::io::Error::other(
+                "cannot unwind past MPT retirement; re-anchor or resync",
+            )))
+        }
         let finish =
             self.get_stage_checkpoint(reth_stages_types::StageId::Finish)?.ok_or_else(|| {
                 ProviderError::InsufficientChangesets { requested: from, available: 0..=0 }
             })?;
 
         // Calculate changesets before modifying hashed state used to reconstruct historical tries.
-        let trie_revert = self
-            .overlay_manager
-            .get_or_compute_cached_changesets_range(self, from..=finish.block_number)?;
+        let trie_revert = if retired.is_none() {
+            Some(
+                self.overlay_manager
+                    .get_or_compute_cached_changesets_range(self, from..=finish.block_number)?,
+            )
+        } else {
+            None
+        };
 
         let changed_accounts = self.account_changesets_range(from..)?;
 
@@ -908,7 +919,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // Unwind storage history indices.
         self.unwind_storage_history_indices(changed_storages.iter().copied())?;
 
-        self.write_trie_updates_sorted(&trie_revert)?;
+        if let Some(trie_revert) = trie_revert {
+            self.write_trie_updates_sorted(&trie_revert)?;
+        }
 
         Ok(())
     }
@@ -3300,6 +3313,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         if trie_updates.is_empty() {
             return Ok(0)
         }
+        #[cfg(feature = "pbt")]
+        if self.mpt_retired_at()?.is_some() {
+            return Ok(0)
+        }
 
         // Track the number of inserted entries.
         let mut num_entries = 0;
@@ -3308,8 +3325,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
             Self::write_account_trie_updates::<A>(self.tx_ref(), trie_updates, &mut num_entries)?;
         });
 
-        num_entries +=
-            self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter())?;
+        // The transaction's retirement check above also covers these storage writes.
+        let mut storage_tries = trie_updates.storage_tries_ref().iter().collect::<Vec<_>>();
+        storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        reth_trie_db::with_adapter!(self, |A| {
+            Self::write_storage_tries::<A>(self.tx_ref(), storage_tries, &mut num_entries)?;
+        });
 
         Ok(num_entries)
     }
@@ -3325,6 +3346,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         &self,
         storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
     ) -> ProviderResult<usize> {
+        // In-flight pre-retirement jobs can finish after the disposal transaction.
+        #[cfg(feature = "pbt")]
+        if self.mpt_retired_at()?.is_some() {
+            return Ok(0)
+        }
         let mut num_entries = 0;
         let mut storage_tries = storage_tries.collect::<Vec<_>>();
         storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
@@ -4069,8 +4095,17 @@ impl<TX: DbTx + 'static, N: NodeTypes> ChainStateBlockReader for DatabaseProvide
     }
 }
 
-impl<TX: DbTxMut, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N> {
+impl<TX: DbTxMut + DbTx, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N> {
     fn save_finalized_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
+        // A delayed finality flush must not reopen the permanent retirement boundary.
+        #[cfg(feature = "pbt")]
+        let retired = self
+            .tx
+            .get::<tables::ChainState>(tables::ChainStateKey::PbtMptRetiredBlock)?
+            .unwrap_or_default();
+        #[cfg(not(feature = "pbt"))]
+        let retired = 0;
+        let block_number = block_number.max(retired);
         Ok(self
             .tx
             .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, block_number)?)
@@ -4193,10 +4228,35 @@ mod tests {
     use reth_storage_api::{DatabaseProviderFactory, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
-        bundle_state::BundleState, HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData,
-        StoredNibbles, StoredNibblesSubKey,
+        bundle_state::BundleState, BranchNodeCompact, HashedPostState, KeccakKeyHasher, Nibbles,
+        SortedTrieData, StoredNibbles, StoredNibblesSubKey,
     };
     use std::{sync::mpsc, time::Duration};
+
+    #[test]
+    fn chain_state_lookups_do_not_substitute_adjacent_keys() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        assert_eq!(provider.last_finalized_block_number().unwrap(), None);
+        assert_eq!(provider.last_safe_block_number().unwrap(), None);
+        provider.save_safe_block_number(17).unwrap();
+        assert_eq!(provider.last_finalized_block_number().unwrap(), None);
+        assert_eq!(provider.last_safe_block_number().unwrap(), Some(17));
+        provider
+            .tx_ref()
+            .put::<tables::ChainState>(tables::ChainStateKey::PbtMptRetiredBlock, 9)
+            .unwrap();
+        provider
+            .tx_ref()
+            .delete::<tables::ChainState>(tables::ChainStateKey::LastSafeBlock, None)
+            .unwrap();
+        assert_eq!(provider.last_safe_block_number().unwrap(), None);
+        provider
+            .tx_ref()
+            .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, 7)
+            .unwrap();
+        assert_eq!(provider.last_finalized_block_number().unwrap(), Some(7));
+    }
 
     /// Seeds block zero through the writer core because [`SaveBlocksInput`] only describes
     /// advancing an existing persistence frontier.
@@ -6113,6 +6173,64 @@ mod tests {
         assert!(all_blocks.contains(&3), "block 3 should remain");
         assert!(!all_blocks.contains(&7), "block 7 should be unwound");
         assert!(!all_blocks.contains(&10), "block 10 should be unwound");
+    }
+
+    #[cfg(feature = "pbt")]
+    #[test]
+    fn retirement_marker_is_not_finality_or_safety() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::ChainState>(tables::ChainStateKey::PbtMptRetiredBlock, 7)
+            .unwrap();
+        assert_eq!(provider.mpt_retired_at().unwrap(), Some(7));
+        assert_eq!(provider.last_finalized_block_number().unwrap(), None);
+        assert_eq!(provider.last_safe_block_number().unwrap(), None);
+        provider.save_safe_block_number(8).unwrap();
+        assert_eq!(provider.last_finalized_block_number().unwrap(), None);
+        assert_eq!(provider.last_safe_block_number().unwrap(), Some(8));
+        provider.save_finalized_block_number(7).unwrap();
+        assert_eq!(provider.last_finalized_block_number().unwrap(), Some(7));
+        provider.save_finalized_block_number(3).unwrap();
+        assert_eq!(provider.last_finalized_block_number().unwrap(), Some(7));
+    }
+
+    #[cfg(feature = "pbt")]
+    #[test]
+    fn retired_mpt_rejects_late_trie_writes_and_deep_unwind() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let storage = StorageTrieUpdatesSorted {
+            storage_nodes: vec![(
+                Nibbles::from_nibbles([1]),
+                Some(BranchNodeCompact::new(1, 0, 0, vec![], None)),
+            )],
+        };
+        let updates = TrieUpdatesSorted::new(
+            vec![(Nibbles::from_nibbles([1]), Some(BranchNodeCompact::new(1, 0, 0, vec![], None)))],
+            B256Map::from_iter([(B256::ZERO, storage)]),
+        );
+        assert_eq!(provider.write_trie_updates_sorted(&updates).unwrap(), 2);
+        provider.tx_ref().clear::<tables::AccountsTrie>().unwrap();
+        provider.tx_ref().clear::<tables::StoragesTrie>().unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::ChainState>(tables::ChainStateKey::PbtMptRetiredBlock, 7)
+            .unwrap();
+        assert_eq!(provider.write_trie_updates_sorted(&updates).unwrap(), 0);
+        assert_eq!(
+            provider
+                .write_storage_trie_updates_sorted(updates.storage_tries_ref().iter(),)
+                .unwrap(),
+            0
+        );
+        assert_eq!(provider.tx_ref().entries::<tables::AccountsTrie>().unwrap(), 0);
+        assert_eq!(provider.tx_ref().entries::<tables::StoragesTrie>().unwrap(), 0);
+        assert_eq!(
+            provider.unwind_trie_state_from(7).unwrap_err().to_string(),
+            "cannot unwind past MPT retirement; re-anchor or resync",
+        );
     }
 
     #[test]

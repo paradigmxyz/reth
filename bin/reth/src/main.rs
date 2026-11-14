@@ -13,8 +13,11 @@ static MALLOC_CONF: &[u8] = b"prof:true,prof_active:true,lg_prof_sample:19\0";
 
 use clap::Parser;
 use reth::cli::Cli;
-use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_ethereum::{snap::EthereumBackfill, EthereumNode};
+use reth_node_pbt::{
+    cli::{PbtArgs, PbtChainSpecParser},
+    PbtNode,
+};
 use tracing::info;
 
 fn main() {
@@ -44,8 +47,36 @@ fn main() {
         unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
     }
 
-    if let Err(err) = Cli::<EthereumChainSpecParser>::parse().run(async move |builder, _| {
+    let cli = Cli::<PbtChainSpecParser, PbtArgs>::parse();
+    if let Err(err) = cli.run(async move |mut builder, args| {
+        let activation = args.activation(&builder.config().chain)?;
+        args.validate_directory(builder.config().datadir().data_dir())?;
         info!(target: "reth::cli", "Launching node");
+        if let Some(activation) = activation {
+            let pbt = PbtNode::new_with_config(
+                builder.config().chain.clone(),
+                builder.config().datadir().data_dir(),
+                activation,
+                args.config()?,
+            )?
+            .with_parallel(args.parallel());
+            builder.config_mut().chain = pbt.chain_spec();
+            let backfill = pbt.backfill();
+            let methods = pbt.rpc_module()?;
+            let handle = builder
+                .with_types::<EthereumNode>()
+                .with_components(EthereumNode::components())
+                .with_add_ons(pbt.add_ons())
+                .extend_rpc_modules(move |ctx| {
+                    ctx.modules.remove_method_from_configured("eth_getProof");
+                    ctx.auth_module.remove_auth_method("eth_getProof");
+                    ctx.auth_module.merge_auth_methods(methods)?;
+                    Ok(())
+                })
+                .launch_with_debug_capabilities_and_backfill(backfill)
+                .await?;
+            return handle.wait_for_node_exit().await;
+        }
         let backfill = EthereumBackfill::new(builder.config());
         let handle = builder
             .node(EthereumNode::default())

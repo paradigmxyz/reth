@@ -1,0 +1,61 @@
+[package]
+name = "reth-trie-pbt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Reth adapters for the external partitioned binary state tree"
+
+[lints]
+workspace = true
+
+[dependencies]
+pbt.workspace = true
+
+# execution
+reth-trie-common = { workspace = true, features = ["std"], optional = true }
+
+# conversion
+reth-trie = { workspace = true, optional = true }
+reth-storage-api = { workspace = true, optional = true, features = ["std"] }
+reth-storage-errors = { workspace = true, optional = true, features = ["std"] }
+
+# persistence
+reth-fs-util = { workspace = true, optional = true }
+reth-lru = { workspace = true, optional = true }
+rocksdb = { workspace = true, optional = true }
+
+# execution, conversion, persistence
+alloy-primitives = { workspace = true, features = ["std"], optional = true }
+thiserror = { workspace = true, features = ["std"], optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+reth-trie = { workspace = true, features = ["test-utils"] }
+reth-primitives-traits.workspace = true
+
+[features]
+default = []
+migration = ["pbt/migration"]
+execution = ["dep:reth-trie-common", "dep:alloy-primitives", "dep:thiserror"]
+bal = ["pbt/bal"]
+parallel = ["pbt/parallel"]
+persistence = [
+    "migration",
+    "pbt/persistence",
+    "dep:reth-fs-util",
+    "dep:reth-lru",
+    "dep:rocksdb",
+    "dep:alloy-primitives",
+    "dep:thiserror",
+]
+conversion = [
+    "migration",
+    "dep:reth-trie",
+    "dep:reth-storage-api",
+    "dep:reth-storage-errors",
+    "dep:alloy-primitives",
+    "dep:thiserror",
+]

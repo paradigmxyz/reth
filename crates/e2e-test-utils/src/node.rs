@@ -893,6 +893,25 @@ where
         .await
     }
 
+    /// Waits until durable execution state and trie persistence cover `number`.
+    /// Unlike block-data persistence, this accounts for a deferred state/trie frontier
+    /// recorded in the Finish checkpoint. Uses the harness's bounded polling timeout.
+    pub async fn wait_for_persisted_state(&self, number: BlockNumber) -> eyre::Result<()> {
+        let provider = &self.inner.provider;
+        poll_until(format!("state at block {number} to be persisted"), move || async move {
+            let checkpoint =
+                provider.database_provider_ro()?.get_stage_checkpoint(StageId::Finish)?;
+            Ok(checkpoint.and_then(|checkpoint| {
+                let frontier = checkpoint
+                    .finish_stage_checkpoint()
+                    .and_then(|finish| finish.partial_state_trie())
+                    .unwrap_or(checkpoint.block_number);
+                (frontier >= number).then_some(())
+            }))
+        })
+        .await
+    }
+
     /// Waits until the pruner has pruned `segment` of the node up to at least the block with the
     /// given number.
     ///
@@ -1874,6 +1893,7 @@ mod tests {
         assert_send(node.wait_for_pooled([B256::ZERO]));
         assert_send(node.wait_for_pool_removal([B256::ZERO]));
         assert_send(node.wait_for_persisted_block(0));
+        assert_send(node.wait_for_persisted_state(0));
         assert_send(node.wait_for_prune_checkpoint(PruneSegment::SenderRecovery, 0));
         assert_send(node.wait_for_head(B256::ZERO));
         assert_send(node.assert_new_block(B256::ZERO, B256::ZERO, 0));

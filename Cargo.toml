@@ -40,6 +40,7 @@ members = [
     "crates/ethereum/engine-primitives/",
     "crates/ethereum/evm",
     "crates/ethereum/node",
+    "crates/ethereum/pbt",
     "crates/ethereum/payload/",
     "crates/ethereum/primitives/",
     "crates/ethereum/reth/",
@@ -122,6 +123,7 @@ members = [
     "crates/trie/common",
     "crates/trie/db",
     "crates/trie/parallel/",
+    "crates/trie/pbt/",
     "crates/trie/sparse",
     "crates/trie/trie",
     "examples/beacon-api-sidecar-fetcher/",
@@ -129,6 +131,7 @@ members = [
     "examples/bsc-p2p",
     "examples/custom-dev-node/",
     "examples/custom-state-root/",
+    "examples/pbt-node/",
     "examples/custom-engine-types/",
     "examples/custom-evm/",
     "examples/custom-hardforks/",
@@ -395,6 +398,7 @@ reth-node-api = { path = "crates/node/api" }
 reth-node-builder = { path = "crates/node/builder" }
 reth-node-core = { path = "crates/node/core" }
 reth-node-ethereum = { path = "crates/ethereum/node" }
+reth-node-pbt = { path = "crates/ethereum/pbt" }
 reth-node-ethstats = { path = "crates/node/ethstats" }
 reth-node-events = { path = "crates/node/events" }
 reth-node-metrics = { path = "crates/node/metrics" }
@@ -436,6 +440,7 @@ reth-trie = { path = "crates/trie/trie" }
 reth-trie-common = { path = "crates/trie/common", default-features = false }
 reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
+reth-trie-pbt = { path = "crates/trie/pbt" }
 reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
@@ -538,6 +543,8 @@ byteorder = "1"
 fixed-cache = { version = "0.1.10", default-features = false, features = ["alloc"] }
 moka = "0.12"
 chrono = "0.4.41"
+
+pbt = { git = "https://github.com/Rimeeeeee/pbtree", rev = "f69a681bbd767ea151e1057c3c5fc022b91b2461", default-features = false }
 
 # metrics
 metrics = "0.24.0"

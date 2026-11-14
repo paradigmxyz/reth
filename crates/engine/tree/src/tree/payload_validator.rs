@@ -1474,40 +1474,25 @@ where
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
     ) -> Option<PayloadStateRootHandle> {
-        let state_provider_factory = match self.overlay_state_provider_factory(parent_hash, state) {
-            Ok(Some(state_provider_factory)) => state_provider_factory,
-            Ok(None) => return None,
-            Err(err) => {
-                warn!(
-                    target: "engine::tree::payload_validator",
-                    %err,
-                    %parent_hash,
-                    "failed to prepare payload-builder state-root provider"
-                );
-                return None
-            }
-        };
-        match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext::new(
-            &self.runtime,
-            &self.overlay_manager,
-            parent_hash,
-            parent_header,
-            timestamp,
-            state,
-            state_provider_factory,
-            &self.config,
-        )) {
-            Ok(handle) => handle,
-            Err(err) => {
-                warn!(
-                    target: "engine::tree::payload_validator",
-                    %err,
-                    %parent_hash,
-                    "failed to prepare payload-builder state-root job"
-                );
-                None
-            }
-        }
+        let required = self.state_root_strategy.requires_payload_output(timestamp);
+        let result = (|| {
+            let Some(state_provider_factory) =
+                self.overlay_state_provider_factory(parent_hash, state)?
+            else {
+                return Ok(None)
+            };
+            self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext::new(
+                &self.runtime,
+                &self.overlay_manager,
+                parent_hash,
+                parent_header,
+                timestamp,
+                state,
+                state_provider_factory,
+                &self.config,
+            ))
+        })();
+        resolve_payload_state_root(required, result)
     }
 
     /// Spawns a background task to compute and sort trie data for the executed block.
@@ -2109,4 +2094,50 @@ struct ExecutedBal {
     alloy: BlockAccessList,
     /// evm2 form, shared with the executed block so consumers can reuse it.
     evm: Arc<EvmBal>,
+}
+
+fn resolve_payload_state_root(
+    required: bool,
+    result: ProviderResult<Option<PayloadStateRootHandle>>,
+) -> Option<PayloadStateRootHandle> {
+    let error = match result {
+        Ok(Some(handle)) => return Some(handle),
+        Ok(None) if !required => return None,
+        Ok(None) => ProviderError::other(std::io::Error::other(
+            "required payload state-root provider is unavailable",
+        )),
+        Err(error) => error,
+    };
+    if !required {
+        warn!(target: "engine::tree::payload_validator", %error, "failed to prepare payload-builder state-root job");
+        return None
+    }
+    let error = Arc::new(error);
+    Some(PayloadStateRootHandle::from_output("required", move |_| {
+        Err(reth_trie_parallel::error::StateRootTaskError::Other(Box::new(error.clone())))
+    }))
+}
+
+#[cfg(test)]
+mod required_payload_tests {
+    use super::*;
+    use reth_evm::BundleState;
+
+    #[test]
+    fn missing_and_failed_required_backends_cannot_fall_back_to_mpt() {
+        for result in [Ok(None), Err(ProviderError::HeaderNotFound(B256::ZERO.into()))] {
+            let mut handle = resolve_payload_state_root(true, result).unwrap();
+            assert!(handle.uses_output());
+            assert!(matches!(
+                handle.finish_with_output(&BundleState::default()),
+                Err(reth_trie_parallel::error::StateRootTaskError::Other(_))
+            ));
+        }
+        assert!(resolve_payload_state_root(false, Ok(None)).is_none());
+        assert!(resolve_payload_state_root(
+            false,
+            Err(ProviderError::HeaderNotFound(B256::ZERO.into()))
+        )
+        .is_none());
+    }
 }

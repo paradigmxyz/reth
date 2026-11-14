@@ -5,6 +5,7 @@ use reth_db_api::{
     cursor::DbCursorRO,
     database::Database,
     table::Table,
+    tables::{ChainState, ChainStateKey},
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
@@ -144,6 +145,14 @@ pub trait DBProvider: DbTxProvider + Sized {
             items.push(i)
         }
         Ok(items)
+    }
+
+    /// Returns the finalized PBT block at which MPT nodes were permanently retired.
+    ///
+    /// `None` means MPT maintenance is still required. Flat execution state is retained
+    /// independently; callers must not recreate MPT nodes once this marker exists.
+    fn mpt_retired_at(&self) -> ProviderResult<Option<u64>> {
+        Ok(self.tx_ref().get::<ChainState>(ChainStateKey::PbtMptRetiredBlock)?)
     }
 }
 

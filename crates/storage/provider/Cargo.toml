@@ -88,6 +88,7 @@ rand.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 [features]
+pbt = ["reth-storage-overlay/pbt"]
 test-utils = [
     "dep:evm2",
     "reth-db/test-utils",

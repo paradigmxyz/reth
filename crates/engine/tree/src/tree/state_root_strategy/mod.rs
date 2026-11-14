@@ -55,6 +55,10 @@
 
 mod sparse_trie;
 
+/// Experimental fork-aware PBT commitment and shadow computation.
+#[cfg(feature = "pbt")]
+pub mod pbt;
+
 use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};
 use crate::tree::{metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, TreeConfig};
 use alloy_primitives::B256;
@@ -126,6 +130,13 @@ where
         _ctx: PayloadStateRootJobContext<'_, N, P>,
     ) -> ProviderResult<Option<PayloadStateRootHandle>> {
         Ok(None)
+    }
+
+    /// Returns whether payload building must use this strategy's output at `timestamp`.
+    /// When true, missing providers or preparation failures must fail the payload job
+    /// instead of selecting the builder's synchronous MPT fallback.
+    fn requires_payload_output(&self, _timestamp: u64) -> bool {
+        false
     }
 }
 
@@ -235,6 +246,7 @@ where
     overlay_manager: &'a OverlayManager<N>,
     env: &'a ExecutionEnv<Evm>,
     parent_header: &'a SealedHeader<N::BlockHeader>,
+    parent_state_root: Option<B256>,
     state_provider_factory: OverlayStateProviderFactory<P, N>,
     config: &'a TreeConfig,
     parallel_bal_execution: bool,
@@ -276,11 +288,19 @@ where
             overlay_manager,
             env,
             parent_header,
+            parent_state_root: None,
             state_provider_factory,
             config,
             parallel_bal_execution,
             state,
         }
+    }
+
+    /// Selects the parent commitment used by an auxiliary MPT job without changing
+    /// the canonical parent header or block hash (which may commit to another tree).
+    pub const fn with_parent_state_root(mut self, root: B256) -> Self {
+        self.parent_state_root = Some(root);
+        self
     }
 
     /// Returns the execution environment for the block.
@@ -416,6 +436,11 @@ pub trait StateRootJob<N: NodePrimitives>: Send {
     /// Human-readable strategy name used in logs.
     fn name(&self) -> &'static str;
 
+    /// Publishes auxiliary caches after the wrapping strategy validates its commitment.
+    /// The default does nothing. `state_root` is this job's computed auxiliary root,
+    /// not necessarily the root committed by the canonical header.
+    fn on_validated(&mut self, _block_hash: B256, _state_root: B256) {}
+
     /// Completes the job after execution.
     ///
     /// Called at most once per prepared job; implementations may panic if called again.
@@ -522,6 +547,27 @@ impl DefaultStateRootStrategy {
         }
     }
 
+    /// Spawns the default MPT task using the canonical parent's state root.
+    pub fn spawn_state_root<N, F>(
+        &self,
+        executor: &reth_tasks::Runtime,
+        factory: OverlayStateProviderFactory<F, N>,
+        options: StateRootTaskOptions<'_, N>,
+    ) -> (StateRootHandle, mpsc::Receiver<PendingSparseTrie>)
+    where
+        N: NodePrimitives,
+        F: DatabaseProviderFactory + Clone + 'static,
+        F::Provider: BlockNumReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + StorageSettingsCache
+            + 'static,
+    {
+        self.spawn_state_root_with_parent_root(executor, factory, options, None)
+    }
+
     /// Spawns the default state-root computation pipeline.
     ///
     /// The authoritative update capability taken from the returned handle must be dropped or
@@ -529,11 +575,12 @@ impl DefaultStateRootStrategy {
     /// Publish the returned pending trie with [`publish_sparse_trie`] only after accepting the
     /// matching block root. Dropping that receiver discards the reusable trie.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
-    pub fn spawn_state_root<N, F>(
+    fn spawn_state_root_with_parent_root<N, F>(
         &self,
         executor: &reth_tasks::Runtime,
         multiproof_provider_factory: OverlayStateProviderFactory<F, N>,
         options: StateRootTaskOptions<'_, N>,
+        root_override: Option<B256>,
     ) -> (StateRootHandle, mpsc::Receiver<PendingSparseTrie>)
     where
         N: NodePrimitives,
@@ -574,7 +621,7 @@ impl DefaultStateRootStrategy {
         let (state_root_tx, state_root_rx) = mpsc::channel();
         let (pending_trie_tx, pending_trie_rx) = mpsc::channel();
         let (hashed_state_tx, hashed_state_rx) = mpsc::channel();
-        let parent_state_root = parent_header.state_root();
+        let parent_state_root = root_override.unwrap_or_else(|| parent_header.state_root());
 
         self.spawn_sparse_trie_task(
             executor,
@@ -585,6 +632,7 @@ impl DefaultStateRootStrategy {
             cancel_rx,
             SparseTrieTaskOptions {
                 parent_header,
+                parent_state_root,
                 preserved_sparse_trie,
                 pending_trie_tx,
                 chunk_size: config.multiproof_chunk_size(),
@@ -635,6 +683,7 @@ impl DefaultStateRootStrategy {
     {
         let SparseTrieTaskOptions {
             parent_header,
+            parent_state_root,
             preserved_sparse_trie,
             pending_trie_tx,
             chunk_size,
@@ -652,7 +701,6 @@ impl DefaultStateRootStrategy {
             reth_tasks::once!(increase_thread_priority);
 
             let parent_hash = parent_header.hash();
-            let parent_state_root = parent_header.state_root();
             let new_epoch = TrieNodeEpoch::new(parent_header.number().saturating_add(1));
 
             let _enter = debug_span!(
@@ -835,6 +883,7 @@ pub fn publish_sparse_trie<N: NodePrimitives>(
 
 struct SparseTrieTaskOptions<N: NodePrimitives> {
     parent_header: SealedHeader<N::BlockHeader>,
+    parent_state_root: B256,
     preserved_sparse_trie: Option<PreservedSparseTrie>,
     pending_trie_tx: mpsc::Sender<PendingSparseTrie>,
     chunk_size: usize,
@@ -923,6 +972,7 @@ where
             overlay_manager,
             env,
             parent_header,
+            parent_state_root,
             state_provider_factory,
             config,
             parallel_bal_execution,
@@ -930,7 +980,7 @@ where
         } = ctx;
 
         let preserved_sparse_trie = overlay_manager.take_sparse_trie();
-        let (mut handle, pending_trie_rx) = self.spawn_state_root(
+        let (mut handle, pending_trie_rx) = self.spawn_state_root_with_parent_root(
             executor,
             state_provider_factory.clone(),
             StateRootTaskOptions {
@@ -941,6 +991,7 @@ where
                 config,
                 pending_sparse_trie_prune_blocks,
             },
+            parent_state_root,
         );
 
         // The execution mode decides who finishes the update stream: the execution hook on
@@ -959,6 +1010,7 @@ where
 
         let mut prepared = PreparedStateRootJob::new(
             Box::new(SparseTrieStateRootJob {
+                verify_header_root: parent_state_root.is_none(),
                 pending_trie_rx,
                 overlay_manager: overlay_manager.clone(),
                 handle,
@@ -1079,6 +1131,7 @@ struct SparseTrieStateRootJob<N: NodePrimitives, P> {
     executor: reth_tasks::Runtime,
     timeout: Option<Duration>,
     metrics: BlockValidationMetrics,
+    verify_header_root: bool,
 }
 
 impl<N, P> SparseTrieStateRootJob<N, P>
@@ -1140,6 +1193,9 @@ where
         outcome: StateRootComputeOutcome,
     ) -> ProviderResult<StateRootJobOutcome> {
         let outcome = StateRootJobOutcome::new(outcome.state_root, outcome.trie_updates);
+        if !self.verify_header_root {
+            return Ok(outcome)
+        }
         if outcome.state_root == block.header().state_root() {
             publish_sparse_trie(
                 &self.pending_trie_rx,
@@ -1171,6 +1227,17 @@ where
         + StorageSettingsCache
         + 'static,
 {
+    fn on_validated(&mut self, block_hash: B256, state_root: B256) {
+        if !self.verify_header_root {
+            publish_sparse_trie(
+                &self.pending_trie_rx,
+                &self.overlay_manager,
+                block_hash,
+                state_root,
+            );
+        }
+    }
+
     fn name(&self) -> &'static str {
         "sparse-trie"
     }
@@ -1213,6 +1280,9 @@ where
         loop {
             if let Ok(Ok(outcome)) = task_rx.try_recv() {
                 let outcome = StateRootJobOutcome::new(outcome.state_root, outcome.trie_updates);
+                if !self.verify_header_root {
+                    return Ok(outcome)
+                }
                 if outcome.state_root == block.header().state_root() {
                     publish_sparse_trie(
                         &self.pending_trie_rx,
@@ -1332,7 +1402,13 @@ mod tests {
         let runtime = reth_tasks::Runtime::test();
 
         for timeout in [None, Some(Duration::from_secs(1))] {
-            for (finish, matching_root) in [(false, true), (true, true), (true, false)] {
+            for (finish, matching_root, verify_header_root, publish_auxiliary) in [
+                (false, true, true, false),
+                (true, true, true, false),
+                (true, false, true, false),
+                (true, false, false, false),
+                (true, false, false, true),
+            ] {
                 let overlay_manager = OverlayManager::<EthPrimitives>::default();
                 let block = RecoveredBlock::new_unhashed(
                     reth_ethereum_primitives::Block {
@@ -1362,6 +1438,7 @@ mod tests {
                     }))
                     .unwrap();
                 let mut job = SparseTrieStateRootJob {
+                    verify_header_root,
                     pending_trie_rx,
                     overlay_manager: overlay_manager.clone(),
                     handle: StateRootHandle::new(
@@ -1381,20 +1458,35 @@ mod tests {
                 };
                 assert!(overlay_manager.take_sparse_trie().is_none());
                 if finish {
-                    job.finish(
-                        &block,
-                        Arc::new(BlockExecutionOutput::default()),
-                        &LazyHashedPostState::ready(Default::default()),
-                    )
-                    .unwrap();
+                    let outcome = job
+                        .finish(
+                            &block,
+                            Arc::new(BlockExecutionOutput::default()),
+                            &LazyHashedPostState::ready(Default::default()),
+                        )
+                        .unwrap();
+                    if !verify_header_root {
+                        assert_eq!(outcome.state_root, B256::ZERO);
+                        assert!(overlay_manager.take_sparse_trie().is_none());
+                        if publish_auxiliary {
+                            job.on_validated(block.hash(), outcome.state_root);
+                        }
+                    }
                 }
                 drop(job);
                 let preserved = overlay_manager.take_sparse_trie();
-                assert_eq!(preserved.is_some(), finish && matching_root);
+                assert_eq!(
+                    preserved.is_some(),
+                    finish &&
+                        ((verify_header_root && matching_root) ||
+                            (!verify_header_root && publish_auxiliary))
+                );
                 // Publication must finish before trie finalization does.
                 assert_eq!(
                     completer.send(SparseTrieWithStorageRoots::default()).is_ok(),
-                    finish && matching_root
+                    finish &&
+                        ((verify_header_root && matching_root) ||
+                            (!verify_header_root && publish_auxiliary))
                 );
                 if let Some(preserved) = preserved {
                     assert!(preserved.into_trie_for(block.hash()).unwrap().is_some());
