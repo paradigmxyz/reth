@@ -437,6 +437,15 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         None
     }
 
+    /// Recomputes the fork-dependent configuration (spec id, precompiles, opcode table, warm set)
+    /// of the given EVM environment from its block environment's `number` and `timestamp`.
+    ///
+    /// Callers that mutate the block environment after construction — notably block overrides on
+    /// `eth_call`, `eth_estimateGas` and `debug_traceCall` — must invoke this so the EVM applies
+    /// the rules of the overridden block context. Caller-specific settings such as the removed
+    /// features must be applied after the refresh. The default implementation is a no-op.
+    fn update_cfg_env_from_block_env(&self, _evm_env: &mut EvmEnvFor<Self>) {}
+
     /// Returns a new [`Executor`] for executing blocks.
     ///
     /// The executor processes complete blocks including:

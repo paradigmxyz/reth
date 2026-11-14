@@ -921,6 +921,14 @@ pub trait Call:
         // track whether the request has a gas limit set
         let requested_gas = request.as_ref().gas_limit();
 
+        // A block override can move the call into another fork, so apply it before the
+        // fork-dependent settings below and re-derive the fork rules from the overridden block.
+        if let Some(block_overrides) = overrides.block {
+            apply_block_overrides(*block_overrides, db, &mut evm_env);
+            // Re-derive fork rules (spec, precompiles, warm set) from the overridden block context.
+            self.evm_config().update_cfg_env_from_block_env(&mut evm_env);
+        }
+
         // Disable block gas limit check to allow executing transactions with higher gas limit (call
         // gas limit): https://github.com/paradigmxyz/reth/issues/18577
         evm_env.version_mut().features.remove(evm2::EvmFeatures::BLOCK_GAS_LIMIT_CHECK);
@@ -958,9 +966,6 @@ pub trait Call:
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();
 
-        if let Some(block_overrides) = overrides.block {
-            apply_block_overrides(*block_overrides, db, &mut evm_env);
-        }
         if let Some(state_overrides) = overrides.state {
             apply_state_overrides(state_overrides, db)
                 .map_err(EthApiError::from_state_overrides_err)?;
