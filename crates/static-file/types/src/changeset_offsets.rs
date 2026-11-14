@@ -7,8 +7,16 @@ use crate::ChangesetOffset;
 use std::{
     fs::{File, OpenOptions},
     io::{self, Write},
-    os::unix::fs::FileExt,
     path::Path,
+};
+
+#[cfg(unix)]
+use std::os::unix::fs::FileExt;
+
+#[cfg(windows)]
+use std::{
+    io::{Seek, SeekFrom},
+    os::windows::fs::FileExt,
 };
 
 /// Writer for appending changeset offsets to a sidecar file.
@@ -105,10 +113,18 @@ impl ChangesetOffsetWriter {
             std::cmp::Ordering::Equal => {}
         }
 
-        let records_written = committed_len;
+        #[cfg(unix)]
         let file = OpenOptions::new().create(true).append(true).open(path)?;
 
-        Ok(Self { file, records_written, pending_truncation: None })
+        #[cfg(windows)]
+        let file = {
+            // Windows append-only handles cannot truncate the file.
+            let mut file = file;
+            file.seek(SeekFrom::End(0))?;
+            file
+        };
+
+        Ok(Self { file, records_written: committed_len, pending_truncation: None })
     }
 
     /// Appends a single changeset offset record.
@@ -142,6 +158,8 @@ impl ChangesetOffsetWriter {
     /// resurrect the old file length.
     pub fn truncate(&mut self, len: u64) -> io::Result<()> {
         self.file.set_len(len * Self::RECORD_SIZE as u64)?;
+        #[cfg(windows)]
+        self.file.seek(SeekFrom::End(0))?;
         self.file.sync_all()?;
         self.pending_truncation = None;
         self.records_written = len;
@@ -205,7 +223,7 @@ impl ChangesetOffsetReader {
 
         let byte_pos = block_index * Self::RECORD_SIZE as u64;
         let mut buf = [0u8; Self::RECORD_SIZE];
-        self.file.read_exact_at(&mut buf, byte_pos)?;
+        read_exact_at(&self.file, &mut buf, byte_pos)?;
 
         let offset = u64::from_le_bytes(buf[..8].try_into().unwrap());
         let num_changes = u64::from_le_bytes(buf[8..].try_into().unwrap());
@@ -228,7 +246,7 @@ impl ChangesetOffsetReader {
 
         for i in 0..count {
             let pos = byte_pos + (i as u64) * Self::RECORD_SIZE as u64;
-            self.file.read_exact_at(&mut buf, pos)?;
+            read_exact_at(&self.file, &mut buf, pos)?;
             let offset = u64::from_le_bytes(buf[..8].try_into().unwrap());
             let num_changes = u64::from_le_bytes(buf[8..].try_into().unwrap());
             result.push(ChangesetOffset::new(offset, num_changes));
@@ -246,6 +264,27 @@ impl ChangesetOffsetReader {
     pub const fn is_empty(&self) -> bool {
         self.len == 0
     }
+}
+
+#[cfg(unix)]
+fn read_exact_at(file: &File, buf: &mut [u8], offset: u64) -> io::Result<()> {
+    file.read_exact_at(buf, offset)
+}
+
+#[cfg(windows)]
+fn read_exact_at(file: &File, mut buf: &mut [u8], mut offset: u64) -> io::Result<()> {
+    while !buf.is_empty() {
+        match file.seek_read(buf, offset) {
+            Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+            Ok(read) => {
+                buf = &mut buf[read..];
+                offset += read as u64;
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -306,6 +345,14 @@ mod tests {
         let reader = ChangesetOffsetReader::new(&path, 2).unwrap();
         assert_eq!(reader.len(), 2);
         assert!(reader.get(2).unwrap().is_none());
+
+        writer.truncate_deferred(1);
+        writer.append(&ChangesetOffset::new(1, 4)).unwrap();
+        writer.sync().unwrap();
+        assert_eq!(
+            reader.get_range(0, 2).unwrap(),
+            [ChangesetOffset::new(0, 1), ChangesetOffset::new(1, 4),]
+        );
     }
 
     #[test]
@@ -432,6 +479,17 @@ mod tests {
             assert_eq!(entry2.offset(), 15);
             assert_eq!(entry2.num_changes(), 20); // Not 7 from the old uncommitted record
         }
+    }
+
+    #[test]
+    fn test_reads_past_physical_end() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.csoff");
+        std::fs::write(&path, 100u64.to_le_bytes()).unwrap();
+
+        let reader = ChangesetOffsetReader::new(&path, 1).unwrap();
+        assert_eq!(reader.get(0).unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
+        assert_eq!(reader.get_range(0, 1).unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
     }
 
     #[test]
