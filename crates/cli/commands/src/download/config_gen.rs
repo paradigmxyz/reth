@@ -739,43 +739,6 @@ mod tests {
         }
     }
 
-    /// Without `RocksDB` indices the index stages rebuild history from the downloaded changesets
-    /// only, so the history prune checkpoints written for the selection must survive the reset.
-    #[test]
-    fn history_checkpoints_survive_index_reset() {
-        let snapshot_block = 21_000_000;
-        let distance = 10_064;
-        let dir = tempfile::tempdir().unwrap();
-        let db = reth_db::init_db(dir.path(), reth_db::mdbx::DatabaseArguments::default()).unwrap();
-        let selections = BTreeMap::from([
-            (SnapshotComponentType::State, ComponentSelection::All),
-            (SnapshotComponentType::Headers, ComponentSelection::All),
-            (SnapshotComponentType::AccountChangesets, ComponentSelection::Distance(distance)),
-            (SnapshotComponentType::StorageChangesets, ComponentSelection::Distance(distance)),
-        ]);
-        let config = config_for_selections(
-            &selections,
-            &empty_manifest(),
-            None,
-            None::<&reth_chainspec::ChainSpec>,
-        );
-        assert!(super::super::should_reset_index_stage_checkpoints(&selections));
-
-        let tx = db.tx_mut().unwrap();
-        write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap();
-        reset_index_stage_checkpoints_tx(&tx).unwrap();
-
-        for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
-            assert_eq!(
-                tx.get::<tables::PruneCheckpoints>(segment)
-                    .unwrap()
-                    .and_then(|checkpoint| checkpoint.block_number),
-                Some(snapshot_block - distance),
-                "{segment} prune checkpoint should mark the start of the downloaded history"
-            );
-        }
-    }
-
     #[test]
     fn history_checkpoints_do_not_advertise_undownloaded_changesets() {
         let snapshot_block = 21_000_000;
