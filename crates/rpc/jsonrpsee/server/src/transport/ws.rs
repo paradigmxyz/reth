@@ -164,8 +164,14 @@ where
                     ));
                 };
                 match received? {
-                    Ok(Message::Text(text)) => return Some((Ok(text.into()), Some(receiver))),
-                    Ok(Message::Binary(data)) => return Some((Ok(data), Some(receiver))),
+                    // A payload is a slice of `tungstenite`'s read buffer, so a call that held it
+                    // would keep the whole buffer allocated once the next frame needs a new one.
+                    Ok(Message::Text(text)) => {
+                        return Some((Ok(Bytes::copy_from_slice(text.as_bytes())), Some(receiver)))
+                    }
+                    Ok(Message::Binary(data)) => {
+                        return Some((Ok(Bytes::copy_from_slice(&data)), Some(receiver)))
+                    }
                     // Pongs only answer the server's pings, which restarts the read timeout.
                     Ok(Message::Pong(_)) => deadline = Instant::now() + read_timeout,
                     // `tungstenite` has queued the pong and would write it with a later read or
