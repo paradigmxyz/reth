@@ -1,4 +1,13 @@
-use std::{io, sync::Arc, time::Duration};
+use std::{
+    io,
+    pin::Pin,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use crate::{
     server::{handle_rpc_call, ConnectionState, ServerConfig},
@@ -7,8 +16,7 @@ use crate::{
 
 use futures_util::{
     future::{self, Either},
-    stream::{SplitSink, SplitStream},
-    Future, SinkExt, StreamExt, TryStreamExt,
+    Future, StreamExt, TryStreamExt,
 };
 use http::{
     header::{CONNECTION, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION, UPGRADE},
@@ -21,8 +29,10 @@ use jsonrpsee_types::{
     error::{reject_too_big_request, ErrorCode},
     Id,
 };
+use parking_lot::Mutex;
 use tokio::{
-    sync::{mpsc, oneshot, Semaphore},
+    io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter, ReadBuf, ReadHalf, WriteHalf},
+    sync::{mpsc, oneshot, Notify, Semaphore},
     time::{interval_at, timeout, timeout_at, Instant},
 };
 use tokio_stream::wrappers::ReceiverStream;
@@ -32,19 +42,15 @@ use tokio_tungstenite::{
         error::{CapacityError, ProtocolError},
         handshake::derive_accept_key,
         protocol::{
-            frame::{
-                coding::{CloseCode, Data, OpCode},
-                Frame,
-            },
-            CloseFrame,
+            frame::coding::{CloseCode, Control, Data, OpCode},
+            Role, WebSocketConfig,
         },
-        Message, Utf8Bytes,
+        Message,
     },
     WebSocketStream,
 };
 
-pub(crate) type Sender = SplitSink<WebSocketStream<TokioIo<Upgraded>>, Message>;
-pub(crate) type Receiver = SplitStream<WebSocketStream<TokioIo<Upgraded>>>;
+pub(crate) type Receiver = WebSocketStream<ReadIo>;
 
 /// Returns whether the request asks for an upgrade to the WebSocket protocol.
 pub fn is_upgrade_request<B>(request: &http::Request<B>) -> bool {
@@ -91,11 +97,6 @@ pub(crate) fn upgrade_response<B>(
 /// the buffer.
 const MAX_MESSAGES_PER_FLUSH: usize = 64;
 
-/// Largest payload of a frame sent to the client; a longer message is sent in fragments.
-/// `tungstenite` copies a frame into its write buffer whole, moves what a partial write left of it
-/// to the front each time, and keeps the buffer's capacity for the connection.
-const MAX_FRAME_PAYLOAD: usize = 64 * 1024;
-
 pub(crate) struct BackgroundTaskParams<S> {
     pub(crate) server_cfg: ServerConfig,
     pub(crate) conn: ConnectionState,
@@ -134,13 +135,18 @@ where
     } = server_cfg;
 
     let (conn_tx, conn_rx) = oneshot::channel();
-    // The receive stream asks the send task to write out the pongs. It holds one request, so the
-    // receive stream waits while a write is blocked.
-    let (pong_tx, pong_rx) = mpsc::channel(1);
+    let control = ws_sender.control.clone();
+    let call_permits = Arc::new(Semaphore::new(message_buffer_capacity as usize));
 
     // Spawn another task that sends out the responses on the Websocket.
-    let send_task_handle =
-        tokio::spawn(send_task(rx, ws_sender, write_timeout, ping_interval, pong_rx, conn_rx));
+    let send_task_handle = tokio::spawn(send_task(
+        rx,
+        ws_sender,
+        write_timeout,
+        ping_interval,
+        CallsInFlight { permits: call_permits.clone(), max: message_buffer_capacity as usize },
+        conn_rx,
+    ));
 
     let stopped = conn.stop_handle.clone().shutdown();
     let rpc_service = Arc::new(rpc_service);
@@ -152,7 +158,7 @@ where
     // read that yields neither a message nor a pong to the pings within two intervals is stuck.
     let read_timeout = ping_interval * 2;
     let ws_stream = futures_util::stream::unfold(Some(ws_receiver), move |receiver| {
-        let pong_tx = pong_tx.clone();
+        let control = control.clone();
         async move {
             let mut receiver = receiver?;
             let mut deadline = Instant::now() + read_timeout;
@@ -174,12 +180,13 @@ where
                     }
                     // Pongs only answer the server's pings, which restarts the read timeout.
                     Ok(Message::Pong(_)) => deadline = Instant::now() + read_timeout,
-                    // `tungstenite` has queued the pong and would write it with a later read or
-                    // write. The send task flushes it instead, so that pongs can't pile up in the
-                    // write buffer of a client that isn't reading.
+                    // `tungstenite` has queued the pong and writes it with the next read, into
+                    // the control frames that the send task writes out. The read waits for the
+                    // previous pong to be written, so that pongs can't pile up for a client that
+                    // isn't reading.
                     Ok(Message::Ping(_)) => {
                         // The send task has ended, and the connection with it.
-                        if pong_tx.send(()).await.is_err() {
+                        if !control.written().await {
                             return None;
                         }
                     }
@@ -195,8 +202,6 @@ where
     .fuse();
 
     tokio::pin!(ws_stream);
-
-    let call_permits = Arc::new(Semaphore::new(message_buffer_capacity as usize));
 
     let result = loop {
         let receive = tokio::select! {
@@ -307,9 +312,10 @@ async fn send_task(
     mut ws_sender: Sender,
     write_timeout: Duration,
     ping_interval: Duration,
-    mut pong_rx: mpsc::Receiver<()>,
+    calls: CallsInFlight,
     mut stop: oneshot::Receiver<()>,
 ) {
+    let control = ws_sender.control.clone();
     let mut write_timed_out = false;
     let mut ping_timer = interval_at(Instant::now() + ping_interval, ping_interval);
 
@@ -329,26 +335,43 @@ async fn send_task(
             // Pings go before queued messages, so that a subscription that keeps the queue full
             // can't hold them back until the read timeout closes the connection.
             _ = ping_timer.tick() => {
-                timeout(write_timeout, ws_sender.feed(Message::Ping(Bytes::new()))).await
+                timeout(write_timeout, ws_sender.write_frame(OpCode::Control(Control::Ping), &[])).await
             }
-            // Pongs go before queued messages too, as the receive stream waits for them. The
-            // flush below writes the pong.
-            Some(()) = pong_rx.recv() => Ok(Ok(())),
+            // Pongs go before queued messages too, as the receive stream waits for them.
+            () = control.queued.notified() => {
+                timeout(write_timeout, ws_sender.write_control()).await
+            }
             response = rx.recv() => {
                 // Nothing else to receive.
                 let Some(response) = response else { break };
-                timeout(write_timeout, feed_text(&mut ws_sender, response)).await
+                timeout(write_timeout, ws_sender.write_frame(OpCode::Data(Data::Text), response.as_bytes())).await
             }
         };
         // Write the messages that are already queued too, and flush them together.
         let mut written = 1;
+        let mut yielded = false;
         while matches!(result, Ok(Ok(()))) && written < MAX_MESSAGES_PER_FLUSH {
-            let Ok(response) = rx.try_recv() else { break };
-            result = timeout(write_timeout, feed_text(&mut ws_sender, response)).await;
+            let Ok(response) = rx.try_recv() else {
+                if yielded || !calls.any() || ws_sender.io.buffer().is_empty() {
+                    break
+                }
+                // Running calls get to queue their responses first, so that a busy connection
+                // writes many small messages with one flush instead of one each. A yield waits
+                // for the next poll of the IO driver, so it is skipped when no call is running
+                // or a large payload has already been written past the buffer.
+                tokio::task::yield_now().await;
+                yielded = true;
+                continue
+            };
+            result = timeout(
+                write_timeout,
+                ws_sender.write_frame(OpCode::Data(Data::Text), response.as_bytes()),
+            )
+            .await;
             written += 1;
         }
         if matches!(result, Ok(Ok(()))) {
-            result = timeout(write_timeout, ws_sender.flush()).await;
+            result = timeout(write_timeout, ws_sender.io.flush()).await;
         }
 
         // If websocket message send fail then terminate the connection.
@@ -373,35 +396,156 @@ async fn send_task(
     // Send the close message, unless a write already timed out: the client isn't reading, so the
     // close frame would block on the same full socket. The receive half is dropped by the
     // connection task, which closes the socket.
+    // A close frame from the client is answered with this one too.
     if !write_timed_out {
-        let close = Message::Close(Some(CloseFrame {
-            code: CloseCode::Normal,
-            reason: Utf8Bytes::default(),
-        }));
         let _ = timeout(write_timeout, async {
-            // Refused after a close frame from the client, whose reply `tungstenite` has queued
-            // and `close` then writes. The split sink only hands a fed message on with the next
-            // flush or close, so it is sent here: a refusal in `close` would skip writing the
-            // reply.
-            let _ = ws_sender.send(close).await;
-            ws_sender.close().await
+            let code = u16::from(CloseCode::Normal).to_be_bytes();
+            ws_sender.write_frame(OpCode::Control(Control::Close), &code).await?;
+            ws_sender.io.shutdown().await
         })
         .await;
     }
 }
 
-/// Queues `text` as one message, in frames of at most [`MAX_FRAME_PAYLOAD`] bytes.
-async fn feed_text(ws_sender: &mut Sender, text: String) -> Result<(), tungstenite::Error> {
-    let mut payload = Bytes::from(text);
-    let mut opcode = OpCode::Data(Data::Text);
-    loop {
-        let fragment = payload.split_to(payload.len().min(MAX_FRAME_PAYLOAD));
-        let frame = Frame::message(fragment, opcode, payload.is_empty());
-        ws_sender.feed(Message::Frame(frame)).await?;
-        if payload.is_empty() {
-            return Ok(());
+/// Splits an upgraded connection into the halves that write and read its WebSocket frames.
+///
+/// `tungstenite` only reads: it copies every frame it writes into its write buffer, which costs a
+/// copy of each response and, when the socket takes part of a write, a move of the rest.
+pub(crate) async fn split(io: TokioIo<Upgraded>, config: WebSocketConfig) -> (Sender, Receiver) {
+    let (read, write) = tokio::io::split(io);
+    let control = Arc::new(ControlFrames::default());
+    let receiver = WebSocketStream::from_raw_socket(
+        ReadIo { read, control: control.clone() },
+        Role::Server,
+        Some(config),
+    )
+    .await;
+    (Sender { io: BufWriter::new(write), control }, receiver)
+}
+
+/// Writes the frames of a connection, which a server sends unmasked and unfragmented.
+pub(crate) struct Sender {
+    /// Collects small frames until a flush, and writes a payload larger than its buffer directly.
+    io: BufWriter<WriteHalf<TokioIo<Upgraded>>>,
+    control: Arc<ControlFrames>,
+}
+
+impl Sender {
+    /// Writes one final frame with `payload`, which isn't flushed.
+    async fn write_frame(&mut self, opcode: OpCode, payload: &[u8]) -> io::Result<()> {
+        let mut header = [0; 10];
+        header[0] = 0x80 | u8::from(opcode);
+        let len = payload.len();
+        let header_len = if len < 126 {
+            header[1] = len as u8;
+            2
+        } else if let Ok(len) = u16::try_from(len) {
+            header[1] = 126;
+            header[2..4].copy_from_slice(&len.to_be_bytes());
+            4
+        } else {
+            header[1] = 127;
+            header[2..].copy_from_slice(&(len as u64).to_be_bytes());
+            10
+        };
+        self.io.write_all(&header[..header_len]).await?;
+        self.io.write_all(payload).await
+    }
+
+    /// Writes the control frames that `tungstenite` has queued, which aren't flushed.
+    async fn write_control(&mut self) -> io::Result<()> {
+        let frames = std::mem::take(&mut *self.control.frames.lock());
+        self.io.write_all(&frames).await?;
+        self.control.written.notify_waiters();
+        Ok(())
+    }
+}
+
+impl Drop for Sender {
+    fn drop(&mut self) {
+        self.control.closed.store(true, Ordering::Release);
+        self.control.written.notify_waiters();
+    }
+}
+
+/// The read half of a connection, through which `tungstenite` also writes the replies to pings
+/// and closes: they are handed to the [`Sender`], which writes them between messages.
+pub(crate) struct ReadIo {
+    read: ReadHalf<TokioIo<Upgraded>>,
+    control: Arc<ControlFrames>,
+}
+
+impl AsyncRead for ReadIo {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.read).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for ReadIo {
+    /// Takes all of `buf`, so that it always holds whole frames.
+    fn poll_write(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        self.control.frames.lock().extend_from_slice(buf);
+        self.control.queued.notify_one();
+        Poll::Ready(Ok(buf.len()))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+/// Control frames that `tungstenite` has written while reading, which the [`Sender`] writes out.
+#[derive(Default)]
+struct ControlFrames {
+    frames: Mutex<Vec<u8>>,
+    /// Notifies the [`Sender`] that frames are queued.
+    queued: Notify,
+    /// Notifies the reader that the queued frames have been written.
+    written: Notify,
+    /// Whether the [`Sender`] has been dropped.
+    closed: AtomicBool,
+}
+
+impl ControlFrames {
+    /// Waits until no control frame is queued, and returns `false` once the [`Sender`] is gone.
+    async fn written(&self) -> bool {
+        loop {
+            // Created before the check, so that a notification in between isn't missed.
+            let written = self.written.notified();
+            if self.closed.load(Ordering::Acquire) {
+                return false;
+            }
+            if self.frames.lock().is_empty() {
+                return true;
+            }
+            written.await;
         }
-        opcode = OpCode::Data(Data::Continue);
+    }
+}
+
+/// The calls of a connection that are running, whose responses the send task may wait for.
+struct CallsInFlight {
+    permits: Arc<Semaphore>,
+    /// The permits of the semaphore, of which every running call holds one.
+    max: usize,
+}
+
+impl CallsInFlight {
+    /// Returns whether any call is running.
+    fn any(&self) -> bool {
+        self.permits.available_permits() < self.max
     }
 }
 
