@@ -3,6 +3,8 @@
 mod block_state;
 pub use block_state::BlockState;
 
+mod blocks;
+
 mod canonical;
 pub use canonical::CanonicalInMemoryState;
 
