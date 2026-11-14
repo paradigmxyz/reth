@@ -1715,11 +1715,11 @@ async fn ws_request_fragments_around_pong_are_answered() {
 }
 
 #[tokio::test]
-async fn ws_large_response_is_sent_in_fragments() {
+async fn ws_large_response_is_sent_in_one_frame() {
     init_logger();
 
-    const FRAME: usize = 64 * 1024;
-    const RESULT: usize = 2 * FRAME + 1024;
+    // Longer than a 16-bit payload length.
+    const RESULT: usize = 128 * 1024;
 
     let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
     let mut module = RpcModule::new(());
@@ -1756,7 +1756,7 @@ async fn ws_large_response_is_sent_in_fragments() {
 
     let response = ok_response(JsonValue::String("a".repeat(RESULT)), Id::Num(1));
     assert_eq!(payload, response.as_bytes());
-    assert_eq!(frames, [(0x01, FRAME), (0x00, FRAME), (0x80, response.len() - 2 * FRAME)]);
+    assert_eq!(frames, [(0x81, response.len())]);
 
     handle.stop().unwrap();
     handle.stopped().with_default_timeout().await.unwrap();

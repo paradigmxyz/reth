@@ -27,11 +27,12 @@ hyper = { workspace = true, features = ["server", "http1", "http2"] }
 hyper-util = { workspace = true, features = ["tokio", "service", "server-auto"] }
 jsonrpsee-core = { workspace = true, features = ["server", "http-helpers"] }
 jsonrpsee-types = { workspace = true }
+parking_lot = { workspace = true }
 pin-project = { workspace = true }
 serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std", "raw_value"] }
 thiserror = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["net", "rt-multi-thread", "macros", "time"] }
+tokio = { workspace = true, features = ["io-util", "net", "rt-multi-thread", "macros", "time"] }
 tokio-stream = { workspace = true, features = ["sync"] }
 tokio-tungstenite = { workspace = true }
 tower = { workspace = true, features = ["util"] }

@@ -50,10 +50,7 @@ use crate::{
     HttpBody, HttpRequest, HttpResponse, LOG_TARGET,
 };
 
-use futures_util::{
-    future::{Either, FutureExt},
-    StreamExt,
-};
+use futures_util::future::{Either, FutureExt};
 use hyper::body::{Bytes, Incoming};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
@@ -87,10 +84,7 @@ use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
     sync::{mpsc, watch, Notify},
 };
-use tokio_tungstenite::{
-    tungstenite::protocol::{Role, WebSocketConfig},
-    WebSocketStream,
-};
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tower::{layer::util::Identity, Layer, Service, ServiceExt};
 use tracing::{instrument, Instrument};
 
@@ -775,13 +769,8 @@ where
                                 .max_message_size(Some(max_request_size))
                                 .max_frame_size(Some(max_request_size))
                                 .accept_unmasked_frames(true);
-                            let (sender, receiver) = WebSocketStream::from_raw_socket(
-                                TokioIo::new(upgraded),
-                                Role::Server,
-                                Some(ws_config),
-                            )
-                            .await
-                            .split();
+                            let (sender, receiver) =
+                                ws::split(TokioIo::new(upgraded), ws_config).await;
 
                             let params = BackgroundTaskParams {
                                 server_cfg,
