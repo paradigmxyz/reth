@@ -1,9 +1,13 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
 
+use crate::message::{
+    decode_envelope_fields, decoded_list_size, decoded_list_size_with,
+    ensure_list_within_memory_budget, skip_rlp_item,
+};
 use alloc::vec::Vec;
 use alloy_consensus::{ReceiptWithBloom, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt};
 use alloy_primitives::B256;
-use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use alloy_rlp::{Decodable, Header, RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
 use reth_ethereum_primitives::Receipt;
@@ -93,6 +97,25 @@ impl<T: RlpDecodableReceipt> alloy_rlp::Decodable for Receipts<T> {
     }
 }
 
+impl<T: RlpDecodableReceipt + TxReceipt> Receipts<T> {
+    /// Decodes the RLP list of receipt lists, rejecting it before decoding if the lists with their
+    /// receipts, logs and topics would take more than `memory_budget` bytes in memory.
+    pub fn decode_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        ensure_list_within_memory_budget::<Vec<ReceiptWithBloom<T>>>(buf, memory_budget, |list| {
+            decoded_list_size_with::<ReceiptWithBloom<T>>(list, |receipt| {
+                // A receipt is encoded as `[status, cumulative-gas, bloom, logs]` inside an
+                // EIP-2718 envelope.
+                let (_, mut fields) = decode_envelope_fields(receipt)?;
+                decoded_logs_size::<T::Log>(&mut fields, 3)
+            })
+        })?;
+        Self::decode(buf)
+    }
+}
+
 /// Eth/69 receipt response type that removes bloom filters from the protocol.
 ///
 /// This is effectively a subset of [`Receipts`].
@@ -126,6 +149,22 @@ impl<T: TxReceipt> Receipts69<T> {
 impl<T: TxReceipt> From<Receipts69<T>> for Receipts<T> {
     fn from(receipts: Receipts69<T>) -> Self {
         receipts.into_with_bloom()
+    }
+}
+
+impl<T: Decodable + TxReceipt> Receipts69<T> {
+    /// Decodes the RLP list of receipt lists, rejecting it before decoding if the lists with their
+    /// receipts, logs and topics would take more than `memory_budget` bytes in memory.
+    pub fn decode_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        ensure_list_within_memory_budget::<Vec<T>>(
+            buf,
+            memory_budget,
+            decoded_receipt69_list_size::<T>,
+        )?;
+        Self::decode(buf)
     }
 }
 
@@ -191,12 +230,55 @@ impl<T: TxReceipt> From<Receipts70<T>> for Receipts<T> {
     }
 }
 
+impl<T: Decodable + TxReceipt> Receipts70<T> {
+    /// Decodes the `lastBlockIncomplete` flag and the RLP list of receipt lists, rejecting them
+    /// before decoding if the lists with their receipts, logs and topics would take more than
+    /// `memory_budget` bytes in memory.
+    pub fn decode_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        let mut receipts = *buf;
+        bool::decode(&mut receipts)?;
+        ensure_list_within_memory_budget::<Vec<T>>(
+            receipts,
+            memory_budget,
+            decoded_receipt69_list_size::<T>,
+        )?;
+        Self::decode(buf)
+    }
+}
+
+/// Returns the bytes that decoding the RLP list of eth/69 receipts at the front of `buf` into a
+/// `Vec<T>` takes, together with their logs and topics, and advances `buf` past the list.
+fn decoded_receipt69_list_size<T: TxReceipt>(buf: &mut &[u8]) -> alloy_rlp::Result<usize> {
+    decoded_list_size_with::<T>(buf, |receipt| {
+        // An eth/69 receipt is encoded as `[tx-type, status, cumulative-gas, logs]`.
+        let mut fields = Header::decode_bytes(receipt, true)?;
+        decoded_logs_size::<T::Log>(&mut fields, 3)
+    })
+}
+
+/// Returns the bytes that decoding the logs among the RLP `fields` of a receipt into a `Vec<L>`
+/// takes, together with their topics, where the logs follow `logs_index` other fields.
+fn decoded_logs_size<L>(fields: &mut &[u8], logs_index: usize) -> alloy_rlp::Result<usize> {
+    for _ in 0..logs_index {
+        skip_rlp_item(fields)?;
+    }
+    decoded_list_size_with::<L>(fields, |log| {
+        // A log is encoded as `[address, topics, data]`.
+        let mut log = Header::decode_bytes(log, true)?;
+        skip_rlp_item(&mut log)?;
+        decoded_list_size::<B256>(&mut log)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{message::RequestPair, GetReceipts, Receipts};
     use alloy_consensus::TxType;
-    use alloy_primitives::{b256, hex, Address, Bloom, Log};
+    use alloy_primitives::{b256, hex, Address, Bloom, Bytes, Log};
     use alloy_rlp::{Decodable, Encodable};
 
     #[test]
@@ -406,5 +488,107 @@ mod tests {
         let decoded = RequestPair::<Receipts70>::decode(&mut buf).unwrap();
         assert!(buf.is_empty(), "buffer not fully consumed on decode");
         assert_eq!(decoded, resp);
+    }
+
+    #[test]
+    fn receipts_memory_budget() {
+        let receipts = vec![vec![Receipt::default(); 5], vec![Receipt::default(); 1]];
+        // Decoding grows the outer list to 4 lists and the receipt lists to 8 and 4.
+        let size = 4 * core::mem::size_of::<Vec<Receipt>>() + 12 * core::mem::size_of::<Receipt>();
+        let exceeded = alloy_rlp::Error::Custom("decoded list exceeds memory budget");
+
+        let receipts69 = Receipts69::<Receipt>(receipts.clone());
+        let encoded = alloy_rlp::encode(&receipts69);
+        let mut buf = encoded.as_slice();
+        assert_eq!(Receipts69::decode_with_memory_budget(&mut buf, size), Ok(receipts69));
+        assert!(buf.is_empty());
+        assert_eq!(
+            Receipts69::<Receipt>::decode_with_memory_budget(&mut encoded.as_slice(), size - 1)
+                .unwrap_err(),
+            exceeded
+        );
+
+        let receipts70 = Receipts70 { last_block_incomplete: true, receipts: receipts.clone() };
+        let encoded = alloy_rlp::encode(&receipts70);
+        let mut buf = encoded.as_slice();
+        assert_eq!(Receipts70::decode_with_memory_budget(&mut buf, size), Ok(receipts70));
+        assert!(buf.is_empty());
+        assert_eq!(
+            Receipts70::<Receipt>::decode_with_memory_budget(&mut encoded.as_slice(), size - 1)
+                .unwrap_err(),
+            exceeded
+        );
+
+        let receipts = Receipts69(receipts).into_with_bloom();
+        let size = 4 * core::mem::size_of::<Vec<ReceiptWithBloom<Receipt>>>() +
+            12 * core::mem::size_of::<ReceiptWithBloom<Receipt>>();
+        let encoded = alloy_rlp::encode(&receipts);
+        let mut buf = encoded.as_slice();
+        assert_eq!(Receipts::decode_with_memory_budget(&mut buf, size), Ok(receipts));
+        assert!(buf.is_empty());
+        assert_eq!(
+            Receipts::<Receipt>::decode_with_memory_budget(&mut encoded.as_slice(), size - 1)
+                .unwrap_err(),
+            exceeded
+        );
+    }
+
+    #[test]
+    fn receipts_memory_budget_counts_logs() {
+        let log =
+            |topics| Log::new_unchecked(Address::ZERO, vec![B256::ZERO; topics], Bytes::new());
+        let receipt = Receipt {
+            tx_type: TxType::Eip1559,
+            success: true,
+            cumulative_gas_used: 21_000,
+            logs: vec![log(5), log(0)],
+        };
+        let receipts = vec![vec![receipt]];
+        // Decoding grows the outer, receipt and log lists to 4 items and the first log's topics
+        // to 8.
+        let logs = 4 * core::mem::size_of::<Log>() + 8 * core::mem::size_of::<B256>();
+        let exceeded = alloy_rlp::Error::Custom("decoded list exceeds memory budget");
+
+        let size =
+            4 * core::mem::size_of::<Vec<Receipt>>() + 4 * core::mem::size_of::<Receipt>() + logs;
+        let receipts69 = Receipts69::<Receipt>(receipts.clone());
+        let encoded = alloy_rlp::encode(&receipts69);
+        assert_eq!(
+            Receipts69::decode_with_memory_budget(&mut encoded.as_slice(), size),
+            Ok(receipts69)
+        );
+        assert_eq!(
+            Receipts69::<Receipt>::decode_with_memory_budget(&mut encoded.as_slice(), size - 1)
+                .unwrap_err(),
+            exceeded
+        );
+
+        let receipts70 = Receipts70 { last_block_incomplete: false, receipts: receipts.clone() };
+        let encoded = alloy_rlp::encode(&receipts70);
+        assert_eq!(
+            Receipts70::decode_with_memory_budget(&mut encoded.as_slice(), size),
+            Ok(receipts70)
+        );
+        assert_eq!(
+            Receipts70::<Receipt>::decode_with_memory_budget(&mut encoded.as_slice(), size - 1)
+                .unwrap_err(),
+            exceeded
+        );
+
+        // The typed receipt is wrapped in an RLP string on eth/68.
+        let receipts = Receipts69(receipts).into_with_bloom();
+        let size = 4 * core::mem::size_of::<Vec<ReceiptWithBloom<Receipt>>>() +
+            4 * core::mem::size_of::<ReceiptWithBloom<Receipt>>() +
+            logs;
+        let encoded = alloy_rlp::encode(&receipts);
+        assert_eq!(
+            Receipts::decode_with_memory_budget(&mut encoded.as_slice(), size),
+            Ok(receipts)
+        );
+        assert_eq!(
+            Receipts::<Receipt>::decode_with_memory_budget(&mut encoded.as_slice(), size - 1)
+                .unwrap_err(),
+            exceeded
+        );
     }
 }

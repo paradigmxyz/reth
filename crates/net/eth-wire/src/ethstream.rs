@@ -7,7 +7,10 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
-    message::{EthBroadcastMessage, MessageError, MAX_MESSAGE_SIZE, TX_MEMORY_BUDGET_MULTIPLIER},
+    message::{
+        EthBroadcastMessage, MessageError, MAX_MESSAGE_SIZE, RESPONSE_MEMORY_BUDGET_MULTIPLIER,
+        TX_MEMORY_BUDGET_MULTIPLIER,
+    },
     p2pstream::HANDSHAKE_TIMEOUT,
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
     UnifiedStatus,
@@ -173,10 +176,11 @@ where
 
         self.take_pending_response(&bytes)?;
 
-        let msg = match ProtocolMessage::decode_message_with_tx_memory_budget(
+        let msg = match ProtocolMessage::decode_message_with_memory_budget(
             self.version,
             &mut bytes.as_ref(),
-            self.max_message_size * TX_MEMORY_BUDGET_MULTIPLIER,
+            self.max_message_size.saturating_mul(TX_MEMORY_BUDGET_MULTIPLIER),
+            self.max_message_size.saturating_mul(RESPONSE_MEMORY_BUDGET_MULTIPLIER),
         ) {
             Ok(m) => m,
             Err(err) => {
@@ -521,7 +525,7 @@ mod tests {
         errors::{EthHandshakeError, EthStreamError},
         ethstream::RawCapabilityMessage,
         hello::DEFAULT_TCP_PORT,
-        message::RequestPair,
+        message::{MessageError, RequestPair, RESPONSE_MEMORY_BUDGET_MULTIPLIER},
         p2pstream::UnauthedP2PStream,
         BlockAccessLists, BlockBodies, BlockHeaders, Cells, EthMessage, EthMessageID, EthStream,
         EthVersion, GetBlockAccessLists, GetBlockBodies, GetCells, GetReceipts70,
@@ -529,16 +533,18 @@ mod tests {
         Status, StatusMessage,
     };
     use alloy_chains::NamedChain;
+    use alloy_consensus::{Signed, TxLegacy};
     use alloy_primitives::{
         bytes::{Bytes, BytesMut},
-        B128, B256, U256,
+        Signature, B128, B256, U256,
     };
     use alloy_rlp::Decodable;
     use futures::{SinkExt, StreamExt};
     use reth_ecies::stream::ECIESStream;
-    use reth_eth_wire_types::{EthNetworkPrimitives, UnifiedStatus};
+    use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives, UnifiedStatus};
     use reth_ethereum_forks::{ForkFilter, Head};
     use reth_network_peers::pk2id;
+    use reth_primitives_traits::BlockBody;
     use secp256k1::SecretKey;
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};
@@ -1165,5 +1171,72 @@ mod tests {
                 }
             ));
         }
+    }
+
+    #[test]
+    fn rejects_block_bodies_over_memory_budget() {
+        type Body = <EthNetworkPrimitives as NetworkPrimitives>::BlockBody;
+        type Tx = <Body as BlockBody>::Transaction;
+
+        let max_message_size = 1024;
+        let mut eth = EthStreamInner::<EthNetworkPrimitives>::with_max_message_size(
+            EthVersion::Eth68,
+            max_message_size,
+        );
+        // Decoding grows the body list to 4 bodies and the transaction list to a power of two.
+        let max_txs = 1 <<
+            ((max_message_size * RESPONSE_MEMORY_BUDGET_MULTIPLIER -
+                4 * core::mem::size_of::<Body>()) /
+                core::mem::size_of::<Tx>())
+            .ilog2();
+        let tx = Tx::from(Signed::new_unhashed(
+            TxLegacy::default(),
+            Signature::new(U256::ZERO, U256::ZERO, false),
+        ));
+        let request = |request_id| {
+            EthMessage::GetBlockBodies(RequestPair {
+                request_id,
+                message: GetBlockBodies(vec![B256::ZERO]),
+            })
+        };
+        let bodies = |request_id, txs| {
+            EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
+                request_id,
+                message: BlockBodies(vec![Body {
+                    transactions: vec![tx.clone(); txs],
+                    ..Default::default()
+                }]),
+            })
+        };
+
+        eth.encode_message(request(1)).unwrap();
+        assert_eq!(eth.decode_message(encode(bodies(1, max_txs))).unwrap(), bodies(1, max_txs));
+
+        eth.encode_message(request(2)).unwrap();
+        assert!(matches!(
+            eth.decode_message(encode(bodies(2, max_txs + 1))),
+            Err(EthStreamError::InvalidMessage(MessageError::RlpError(alloy_rlp::Error::Custom(
+                "decoded list exceeds memory budget"
+            ))))
+        ));
+    }
+
+    #[test]
+    fn memory_budget_saturates_for_large_message_size() {
+        let mut eth = EthStreamInner::<EthNetworkPrimitives>::with_max_message_size(
+            EthVersion::Eth68,
+            usize::MAX / RESPONSE_MEMORY_BUDGET_MULTIPLIER + 1,
+        );
+        eth.encode_message(EthMessage::GetBlockBodies(RequestPair {
+            request_id: 1,
+            message: GetBlockBodies(vec![B256::ZERO]),
+        }))
+        .unwrap();
+
+        let response = EthMessage::BlockBodies(RequestPair {
+            request_id: 1,
+            message: BlockBodies(vec![Default::default()]),
+        });
+        assert_eq!(eth.decode_message(encode(response.clone())).unwrap(), response);
     }
 }
