@@ -44,7 +44,7 @@ use reth_provider::{
     test_utils::MockEthProvider, BalStoreHandle, BlockExecutionOutput, HeaderProvider,
     InMemoryBalStore, RawBal,
 };
-use reth_stages_api::ControlFlow;
+use reth_stages_api::{ControlFlow, StageCheckpoint, StageId};
 use reth_tasks::spawn_os_thread;
 use reth_trie_common::SortedTrieData;
 use std::{
@@ -2198,6 +2198,45 @@ fn test_on_new_payload_persisted_block_during_backfill() {
     );
     assert!(staged.outcome.is_syncing());
     assert!(test_harness.tree.state.buffer.block(&blocks[1].hash()).is_some());
+}
+
+/// After an unwind that leaves stages below the target, the tree resumes from the Finish
+/// checkpoint and reruns backfill to the target instead of treating unprocessed blocks as valid.
+#[test]
+fn test_on_backfill_sync_finished_partial_unwind() {
+    reth_tracing::init_test_tracing();
+
+    let blocks: Vec<_> = TestBlockBuilder::eth()
+        .get_executed_blocks(1..5)
+        .map(|block| block.recovered_block().clone())
+        .collect();
+    let mut test_harness =
+        TestHarness::new(MAINNET.clone()).with_backfill_state(BackfillSyncState::Active);
+    test_harness.persist_blocks(blocks.clone());
+    test_harness.tree.persistence_state.last_persisted_block = blocks[3].num_hash();
+    test_harness.provider.enable_database_provider();
+    test_harness.provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(1));
+
+    test_harness
+        .tree
+        .on_backfill_sync_finished(ControlFlow::Unwind {
+            target: 2,
+            bad_block: Box::new(BlockWithParent::new(blocks[1].hash(), blocks[2].num_hash())),
+        })
+        .unwrap();
+
+    assert_eq!(test_harness.tree.persistence_state.last_persisted_block, blocks[0].num_hash());
+    assert_eq!(test_harness.tree.state.tree_state.canonical_head(), &blocks[0].num_hash());
+    assert!(test_harness.tree.backfill_sync_state.is_pending());
+    assert_matches!(
+        test_harness.from_tree_rx.try_recv().unwrap(),
+        EngineApiEvent::BackfillAction(BackfillAction::Start(target))
+            if target.sync_target() == Some(blocks[1].hash())
+    );
+
+    let outcome =
+        test_harness.tree.on_new_payload(execution_data(blocks[1].sealed_block())).unwrap();
+    assert!(outcome.outcome.is_syncing());
 }
 
 /// Test that captures the Engine-API rule where malformed payloads report latestValidHash = None

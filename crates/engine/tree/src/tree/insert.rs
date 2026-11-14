@@ -252,10 +252,10 @@ where
     /// Returns `true` if the block was already validated: it is in memory, or persisted at or
     /// below the last persisted block.
     ///
-    /// The database is only checked up to the last persisted block. New blocks from the CL are
-    /// above it, and backfill writes headers above it before executing their blocks. A backfill run
-    /// that unwinds below it ends right away, and the last persisted block is lowered before any
-    /// headers are written again.
+    /// The last persisted block never exceeds the Finish checkpoint, the highest block every stage
+    /// processed, so a stored header at or below it belongs to a validated block. Backfill writes
+    /// headers above it before executing their blocks. A backfill run that unwinds below it ends
+    /// right away, and the last persisted block is lowered before any headers are written again.
     fn is_block_known(&self, block: BlockNumHash) -> ProviderResult<bool> {
         if self.state.tree_state.contains_hash(&block.hash) {
             return Ok(true)
