@@ -78,4 +78,15 @@ pub trait ChangeSetReader {
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>>;
+
+    /// Returns the first block of the lowest stored account changeset file, if it is above
+    /// genesis.
+    ///
+    /// No account changesets are stored below this block even when no prune checkpoint exists,
+    /// for example on a node bootstrapped from a snapshot without changesets from genesis. The
+    /// block itself may be an empty pruned anchor, so callers treat it like a prune checkpoint.
+    /// `None` means changesets may reach genesis, or this provider can't tell.
+    fn lowest_account_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        Ok(None)
+    }
 }
