@@ -217,15 +217,17 @@ where
     ///
     /// This is the only place the decision is made: the tx iterator uses it to skip creating the
     /// prewarm channel and cloning every transaction into it, and the resulting `Option` receiver
-    /// then selects the mode, so the two cannot disagree.
-    const fn prewarms_transactions(
+    /// then selects the mode, so the two cannot disagree. Blocks the executor executes in
+    /// parallel are not prewarmed: its workers execute every transaction speculatively already.
+    fn prewarms_transactions(
         &self,
         transaction_count: usize,
         parallel_bal_execution: bool,
     ) -> bool {
         !parallel_bal_execution &&
             !self.disable_transaction_prewarming &&
-            transaction_count >= SMALL_BLOCK_TX_THRESHOLD
+            transaction_count >= SMALL_BLOCK_TX_THRESHOLD &&
+            !self.evm_config.executes_transactions_in_parallel(transaction_count)
     }
 
     /// Transaction count threshold below which sequential conversion is used.

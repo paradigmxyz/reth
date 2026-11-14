@@ -685,6 +685,16 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         false
     }
 
+    /// Returns whether engine validation executes blocks of `transaction_count` transactions with
+    /// [`BlockExecutor::execute_transactions_parallel`] on worker threads.
+    ///
+    /// The engine then skips transaction prewarming, whose speculative executions the workers'
+    /// own replace, and prefetches the trie nodes the workers' speculative changes touch instead.
+    fn executes_transactions_in_parallel(&self, transaction_count: usize) -> bool {
+        let _ = transaction_count;
+        false
+    }
+
     /// Wraps a speculative prewarm execution result of `tx` into the result consumed by
     /// [`BlockExecutor::commit_transaction`].
     ///

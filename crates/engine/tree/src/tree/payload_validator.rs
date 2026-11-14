@@ -161,7 +161,7 @@ use reth_provider::{
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, LazyTrieData};
-use reth_trie_common::bundle_state::BundleAccount;
+use reth_trie_common::{bundle_state::BundleAccount, MultiProofTargetsV2};
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -628,13 +628,22 @@ where
         // retained anywhere else, so the task's update channel closes when producers finish.
         let hint_stream = state_root_job.take_hint_stream();
         let hashed_update_stream = state_root_job.take_hashed_update_stream();
+        // An executor that executes the block in parallel replaces transaction prewarming: its
+        // workers' speculative changes are the access hints.
+        let (prewarm_hint_stream, execution_hint_stream) = if !parallel_bal_execution &&
+            self.evm_config.executes_transactions_in_parallel(env.transaction_count)
+        {
+            (None, hint_stream)
+        } else {
+            (hint_stream, None)
+        };
 
         // Spawn transaction conversion and prewarming.
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
             state_provider_factory.clone(),
-            hint_stream,
+            prewarm_hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
         ));
@@ -725,6 +734,7 @@ where
                     &input,
                     &mut handle,
                     execution_state_hook,
+                    execution_hint_stream,
                     &make_state_provider,
                 ),
                 Err(err) => Err(err.into()),
@@ -1013,6 +1023,7 @@ where
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt, EvmTypesFor<Evm>>,
         state_hook: Option<StateRootUpdateHook>,
+        hint_stream: Option<StateRootHintStream>,
         make_state_provider: &(dyn Fn(bool) -> ProviderResult<EvmStateProviderBox> + Sync),
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
@@ -1064,6 +1075,7 @@ where
                     &receipt_tx,
                     &executed_tx_index,
                     prewarm_results.as_deref(),
+                    hint_stream.as_ref(),
                     make_state_provider,
                 )?;
 
@@ -1215,6 +1227,7 @@ where
         receipt_tx: &ReceiptRootSender<N>,
         executed_tx_index: &AtomicUsize,
         prewarm_results: Option<&PrewarmResults<EvmTypesFor<Evm>>>,
+        hint_stream: Option<&StateRootHintStream>,
         make_state_provider: &(dyn Fn(bool) -> ProviderResult<EvmStateProviderBox> + Sync),
     ) -> Result<Vec<Address>, BlockExecutionError>
     where
@@ -1227,13 +1240,14 @@ where
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
-        if executor.executes_in_parallel() {
+        if self.evm_config.executes_transactions_in_parallel(transaction_count) {
             return self.execute_transactions_parallel(
                 executor,
                 transaction_count,
                 transactions,
                 receipt_tx,
                 executed_tx_index,
+                hint_stream,
                 make_state_provider,
             )
         }
@@ -1315,7 +1329,10 @@ where
     /// streams their receipts to the receipt root task.
     ///
     /// The executor's workers read the parent state through one state provider per thread, each
-    /// from `make_state_provider`, filling the execution cache on misses.
+    /// from `make_state_provider`, filling the execution cache on misses, and send the keys each
+    /// speculative execution changed to `hint_stream`, so the state root task fetches their proofs
+    /// before the changes commit.
+    #[expect(clippy::too_many_arguments)]
     fn execute_transactions_parallel<Tx, Err>(
         &self,
         executor: &mut BlockExecutorFor<'_, Evm>,
@@ -1323,6 +1340,7 @@ where
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &ReceiptRootSender<N>,
         executed_tx_index: &AtomicUsize,
+        hint_stream: Option<&StateRootHintStream>,
         make_state_provider: &(dyn Fn(bool) -> ProviderResult<EvmStateProviderBox> + Sync),
     ) -> Result<Vec<Address>, BlockExecutionError>
     where
@@ -1342,7 +1360,15 @@ where
 
         let make_worker_provider = || make_state_provider(true);
         let base = DbRef::new(SharedStateProviderDatabase::new(&make_worker_provider));
-        executor.execute_transactions_parallel(txs, &base)?;
+        executor.execute_transactions_parallel(txs, &base, &|_, changes| {
+            if let Some(hint_stream) = hint_stream {
+                let (targets, _) =
+                    MultiProofTargetsV2::from_account_changes(changes.account_changes());
+                if !targets.is_empty() {
+                    hint_stream.on_access_hint(targets.into());
+                }
+            }
+        })?;
         executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
         for (tx_index, receipt) in executor.receipts().iter().enumerate() {
