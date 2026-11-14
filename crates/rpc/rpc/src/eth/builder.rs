@@ -33,6 +33,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     rpc_converter: Rpc,
     gas_cap: GasCap,
     max_simulate_blocks: u64,
+    max_trace_bytes: Option<usize>,
     compute_state_root_for_eth_simulate: bool,
     eth_proof_window: u64,
     fee_history_cache_config: FeeHistoryCacheConfig,
@@ -89,6 +90,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             rpc_converter,
             gas_cap,
             max_simulate_blocks,
+            max_trace_bytes,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -114,6 +116,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             rpc_converter: f(rpc_converter),
             gas_cap,
             max_simulate_blocks,
+            max_trace_bytes,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -152,6 +155,7 @@ where
             gas_oracle: None,
             gas_cap: GasCap::default(),
             max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
+            max_trace_bytes: None,
             compute_state_root_for_eth_simulate: false,
             eth_proof_window: DEFAULT_ETH_PROOF_WINDOW,
             blocking_task_pool: None,
@@ -193,6 +197,7 @@ where
             rpc_converter: _,
             gas_cap,
             max_simulate_blocks,
+            max_trace_bytes,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -218,6 +223,7 @@ where
             rpc_converter,
             gas_cap,
             max_simulate_blocks,
+            max_trace_bytes,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -250,6 +256,7 @@ where
             rpc_converter,
             gas_cap,
             max_simulate_blocks,
+            max_trace_bytes,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -275,6 +282,7 @@ where
             rpc_converter,
             gas_cap,
             max_simulate_blocks,
+            max_trace_bytes,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -335,6 +343,12 @@ where
     /// Sets the maximum number of blocks for `eth_simulateV1`.
     pub const fn max_simulate_blocks(mut self, max_simulate_blocks: u64) -> Self {
         self.max_simulate_blocks = max_simulate_blocks;
+        self
+    }
+
+    /// Sets the maximum bytes a single traced transaction may record. `None` is unlimited.
+    pub const fn max_trace_bytes(mut self, max_trace_bytes: Option<usize>) -> Self {
+        self.max_trace_bytes = max_trace_bytes;
         self
     }
 
@@ -534,6 +548,7 @@ where
             gas_oracle,
             gas_cap,
             max_simulate_blocks,
+            max_trace_bytes,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             blocking_task_pool,
@@ -585,6 +600,7 @@ where
                 eth_state_cache_config.prewarm_bals.is_some(),
             gas_cap: gas_cap.into(),
             max_simulate_blocks,
+            max_trace_bytes,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             pending_block_kind,
