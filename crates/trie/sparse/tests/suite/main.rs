@@ -21,7 +21,7 @@ use alloy_primitives::{keccak256, map::B256Map, B256, U256};
 use alloy_rlp::{encode_fixed_size, Decodable};
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie::test_utils::TrieTestHarness;
-use reth_trie_common::{Nibbles, ProofV2Target, TrieNodeV2};
+use reth_trie_common::{Nibbles, ProofTrieNode, ProofV2Target, TrieNode};
 use reth_trie_sparse::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, TrieNodeEpoch};
 use std::{collections::BTreeMap, iter::once};
 
@@ -32,6 +32,7 @@ mod prune;
 mod reveal_nodes;
 mod root;
 mod set_root;
+mod standard_proofs;
 mod take_updates;
 mod update_leaves;
 mod wipe_clear;
@@ -109,7 +110,7 @@ impl SuiteTestHarness {
         }
     }
 
-    /// Initializes a trie with the harness root node and reveals all proof nodes for the
+    /// Initializes a trie with the harness root batch and reveals all proof nodes for the
     /// given target keys. Returns the initialized trie.
     fn init_trie_with_targets<T: SparseTrie>(
         &self,
@@ -117,10 +118,9 @@ impl SuiteTestHarness {
         retain_updates: bool,
         new_trie: fn() -> T,
     ) -> T {
-        let root_node = self.root_node();
+        let mut root_nodes = self.root_nodes();
         let mut trie = (new_trie)();
-        trie.set_root(root_node.node, root_node.masks, retain_updates)
-            .expect("set_root should succeed");
+        trie.set_root(&mut root_nodes, retain_updates).expect("set_root should succeed");
 
         if !target_keys.is_empty() {
             let mut targets: Vec<ProofV2Target> =
@@ -195,6 +195,7 @@ use prune::*;
 use reveal_nodes::*;
 use root::*;
 use set_root::*;
+use standard_proofs::*;
 use take_updates::*;
 use update_leaves::*;
 use wipe_clear::*;
@@ -214,6 +215,7 @@ sparse_trie_tests! {
 
     // reveal_nodes
     test_reveal_nodes_empty_slice,
+    test_reveal_nodes_rejects_missing_extension_branch,
     test_reveal_nodes_single_leaf,
     test_reveal_nodes_idempotent,
     test_reveal_nodes_with_branch_masks,
@@ -223,6 +225,11 @@ sparse_trie_tests! {
     test_reveal_insert_reveal_preserves_branch_state,
     test_remove_then_reveal_does_not_overwrite_collapsed_node,
     test_insert_then_reveal_does_not_overwrite_branch,
+
+    // standard_proofs
+    root_extension_branch_pair_preserves_updates,
+    nonroot_extension_branch_pair_preserves_updates,
+    duplicate_calculator_extension_pairs_preserve_updates,
 
     // update_leaves
     test_update_leaves_insert_new_leaf,

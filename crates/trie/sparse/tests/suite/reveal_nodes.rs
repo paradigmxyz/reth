@@ -1,6 +1,6 @@
 use super::*;
-use alloy_trie::{nodes::BranchNodeRef, TrieMask};
-use reth_trie_common::{BranchNodeV2, RlpNode};
+use reth_execution_errors::SparseTrieErrorKind;
+use reth_trie_sparse::SparseTrieUpdates;
 
 /// Empty slice is a no-op.
 ///
@@ -16,9 +16,9 @@ pub(super) fn test_reveal_nodes_empty_slice<T: SparseTrie>(new_trie: fn() -> T) 
         BTreeMap::from([(key_a, U256::ONE), (key_b, U256::from(2))]);
 
     let harness = SuiteTestHarness::new(storage);
-    let root_node = harness.root_node();
+    let mut root_nodes = harness.root_nodes();
     let mut trie = (new_trie)();
-    trie.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
+    trie.set_root(&mut root_nodes, true).expect("set_root should succeed");
 
     let root_before = trie.root(epoch(0));
 
@@ -145,7 +145,7 @@ pub(super) fn test_reveal_nodes_skips_on_empty_root<T: SparseTrie>(new_trie: fn(
 
     // Create a trie with an empty root.
     let mut trie = (new_trie)();
-    trie.set_root(TrieNodeV2::EmptyRoot, None, true).expect("set_root EmptyRoot should succeed");
+    trie.set_root(&mut [ProofTrieNode::empty()], true).expect("set_root EmptyRoot should succeed");
 
     // Reveal non-empty proof nodes — should be a no-op on an empty root.
     trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes on empty root should succeed");
@@ -195,9 +195,9 @@ pub(super) fn test_reveal_nodes_filters_unreachable_boundary_leaves<T: SparseTri
     let harness = SuiteTestHarness::new(storage);
 
     // Initialize trie with root and reveal ONLY group A keys.
-    let root_node = harness.root_node();
+    let mut root_nodes = harness.root_nodes();
     let mut trie = (new_trie)();
-    trie.set_root(root_node.node, root_node.masks, false).expect("set_root should succeed");
+    trie.set_root(&mut root_nodes, false).expect("set_root should succeed");
 
     let mut targets_a: Vec<ProofV2Target> = keys_a.iter().map(|k| ProofV2Target::new(*k)).collect();
     let (mut proof_a, _) = harness.proof_v2(&mut targets_a);
@@ -392,41 +392,99 @@ pub(super) fn test_insert_then_reveal_does_not_overwrite_branch<T: SparseTrie>(
 ///
 /// When root is an extension that crosses the upper/lower boundary, a boundary node path can be
 /// reachable even if there is no explicit upper branch at `path[..UPPER_TRIE_MAX_DEPTH - 1]`.
-/// Revealing such a node should not panic.
+/// The calculator root batch reveals the boundary branch with its extension; revealing its
+/// leaves later should not skip them because the upper parent branch is absent.
 pub(super) fn test_reveal_boundary_node_with_missing_upper_parent_branch<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {
-    // Root reveals as extension [0x1, 0x2] with a branch below it at path 0x12.
-    // Use two children so the branch shape is canonical.
-    let child_hash_0 = RlpNode::word_rlp(&B256::repeat_byte(0xAA));
-    let child_hash_1 = RlpNode::word_rlp(&B256::repeat_byte(0xBB));
-    let state_mask = TrieMask::new(0b0011);
-    let branch_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNodeRef::new(
-        &[child_hash_0.clone(), child_hash_1.clone()],
-        state_mask,
-    )));
-    let root = TrieNodeV2::Branch(BranchNodeV2::new(
-        Nibbles::from_nibbles([0x1, 0x2]),
-        vec![child_hash_0, child_hash_1],
-        state_mask,
-        Some(branch_rlp),
+    let key_a = B256::right_padding_from(&[0x12, 0x00]);
+    let key_b = B256::right_padding_from(&[0x12, 0x10]);
+    let harness = SuiteTestHarness::new([(key_a, U256::ONE), (key_b, U256::from(2))].into());
+    let mut root_nodes = harness.root_nodes();
+    assert_eq!(root_nodes.len(), 2);
+    let branch = &root_nodes[0];
+    assert_eq!(branch.path, Nibbles::from_nibbles([1, 2]));
+    assert!(matches!(branch.node, TrieNode::Branch(_)));
+    assert_eq!(branch.masks, None, "this branch has no persisted descendants");
+    let TrieNode::Extension(extension) = &root_nodes[1].node else {
+        panic!("fixture root must be an extension");
+    };
+    assert_eq!(extension.key, Nibbles::from_nibbles([1, 2]));
+    let mut trie = (new_trie)();
+    trie.set_root(&mut root_nodes, false).expect("extension and boundary branch should reveal");
+    assert!(matches!(
+        trie.find_leaf(&Nibbles::unpack(key_a), None),
+        Err(LeafLookupError::BlindedNode { .. })
     ));
 
-    let mut trie = (new_trie)();
-    trie.set_root(root, None, false).expect("set_root should succeed");
+    let (mut proof, _) =
+        harness.proof_v2(&mut [ProofV2Target::new(key_a), ProofV2Target::new(key_b)]);
+    // The already-revealed boundary branch has no upper parent branch at [1]. Both of its
+    // leaves must be revealed rather than silently skipped by the upper-parent lookup.
+    assert!(!proof.iter().any(|node| node.path == Nibbles::from_nibbles([1])));
+    assert!(proof.iter().any(|node| node.path == Nibbles::from_nibbles([1, 2]) &&
+        matches!(node.node, TrieNode::Branch(_))));
+    trie.reveal_nodes(&mut proof).expect("boundary branch and leaves should reveal");
+    for (key, value) in [(key_a, U256::ONE), (key_b, U256::from(2))] {
+        let value = encode_fixed_size(&value).to_vec();
+        assert_eq!(trie.find_leaf(&Nibbles::unpack(key), Some(&value)), Ok(LeafLookup::Exists));
+        assert_eq!(trie.get_leaf_value(&Nibbles::unpack(key)), Some(&value));
+    }
+    assert_eq!(trie.root(epoch(1)), harness.original_root());
+}
 
-    // Before the fix this panicked at `hashes_from_upper` when trying to unwrap
-    // `upper_subtrie.nodes.get_mut([0x1])`.
-    //
-    // In this shape, 0x12 is the lower branch root path and 0x120/0x121 are its children.
-    // The missing entry is the upper parent at [0x1], which the old code incorrectly unwrapped.
-    let boundary_path = Nibbles::from_nibbles([0x1, 0x2]);
-    let leaf =
-        TrieNodeV2::Leaf(reth_trie_common::LeafNode::new(Nibbles::from_nibbles([0x3]), vec![0x01]));
-    trie.reveal_nodes(&mut [reth_trie_common::ProofTrieNodeV2 {
-        path: boundary_path,
-        node: leaf,
-        masks: None,
-    }])
-    .expect("boundary reveal should not panic");
+/// Incomplete extension pairs fail before earlier nodes in the batch become visible.
+pub(super) fn test_reveal_nodes_rejects_missing_extension_branch<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
+    let first = B256::right_padding_from(&[0x00]);
+    let second = B256::right_padding_from(&[0x12, 0x31]);
+    let third = B256::right_padding_from(&[0x12, 0x32]);
+    let harness = SuiteTestHarness::new(
+        [(first, U256::ONE), (second, U256::from(2)), (third, U256::from(3))].into(),
+    );
+    let mut trie = harness.init_trie_with_targets(&[], true, new_trie);
+    let (mut proof, _) = harness.proof_v2(&mut [
+        ProofV2Target::new(first),
+        ProofV2Target::new(second),
+        ProofV2Target::new(third),
+    ]);
+    let extension_path = Nibbles::from_nibbles([1]);
+    let extension = proof.iter().find(|node| node.path == extension_path).unwrap();
+    let TrieNode::Extension(extension) = &extension.node else {
+        panic!("fixture must contain the nonroot extension");
+    };
+    let branch_path = extension_path.join(&extension.key);
+    assert!(proof
+        .iter()
+        .any(|node| node.path == branch_path && matches!(node.node, TrieNode::Branch(_))));
+    let mut incomplete = proof.clone();
+    incomplete.retain(|node| node.path != branch_path);
+    let error = trie.reveal_nodes(&mut incomplete).unwrap_err();
+    match error.kind() {
+        SparseTrieErrorKind::Reveal { path, node } => {
+            assert_eq!(*path, extension_path);
+            assert_eq!(format!("{node:?}"), format!("{extension:?}"));
+        }
+        other => panic!("expected Reveal error, got {other:?}"),
+    }
+    for key in [first, second, third] {
+        assert!(matches!(
+            trie.find_leaf(&Nibbles::unpack(key), None),
+            Err(LeafLookupError::BlindedNode { .. })
+        ));
+    }
+    assert_eq!(trie.root(epoch(0)), harness.original_root());
+    assert_eq!(trie.take_updates(), SparseTrieUpdates::default());
+
+    // Retry after rejection, then mutate to exercise cursor reuse and retained updates.
+    trie.reveal_nodes(&mut proof).unwrap();
+    for key in [first, second, third] {
+        assert_eq!(trie.find_leaf(&Nibbles::unpack(key), None), Ok(LeafLookup::Exists));
+    }
+    let changes = BTreeMap::from([(second, U256::from(4))]);
+    let mut updates = SuiteTestHarness::leaf_updates(&changes);
+    harness.reveal_and_update(&mut trie, &mut updates);
+    assert!(updates.is_empty());
+    assert_eq!(trie.root(epoch(1)), harness.get_root_with_updates(&changes).0);
 }

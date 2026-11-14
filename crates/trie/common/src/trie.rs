@@ -64,3 +64,10 @@ pub struct ProofTrieNode {
     /// Both masks are always set together (from database branch nodes).
     pub masks: Option<BranchNodeMasks>,
 }
+
+impl ProofTrieNode {
+    /// Creates a placeholder containing an empty root at the empty path.
+    pub fn empty() -> Self {
+        Self { path: Nibbles::default(), node: TrieNode::EmptyRoot, masks: None }
+    }
+}
