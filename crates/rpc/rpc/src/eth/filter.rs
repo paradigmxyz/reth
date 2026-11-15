@@ -36,7 +36,7 @@ use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, Transa
 use std::{
     collections::{HashMap, VecDeque},
     fmt,
-    iter::{Peekable, StepBy},
+    iter::StepBy,
     ops::RangeInclusive,
     pin::Pin,
     sync::Arc,
@@ -83,8 +83,12 @@ const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500k
 const _: () = assert!(CACHED_MODE_BLOCK_THRESHOLD <= MAX_HEADERS_RANGE);
 
 /// Minimum number of bloom matching blocks in a header window for fetching their receipts in
-/// parallel
-const PARALLEL_PROCESSING_THRESHOLD: usize = 1000;
+/// parallel.
+///
+/// Every parallel task costs a blocking thread and a blocking IO permit, so each task must get the
+/// receipts of a few blocks, here four, to pay for itself. A window with fewer matches is read one
+/// block at a time, which also checks the receipt cache first.
+const PARALLEL_PROCESSING_THRESHOLD: usize = 4 * DEFAULT_PARALLEL_CONCURRENCY;
 
 /// Default concurrency for parallel processing
 const DEFAULT_PARALLEL_CONCURRENCY: usize = 4;
@@ -1124,8 +1128,9 @@ impl<
         let use_cached_mode =
             Self::should_use_cached_mode(&sealed_headers, block_count, distance_from_tip);
 
-        // Fetching receipts in parallel is only worth the extra tasks when most of the window has
-        // them to read; the sequential path serves the rest from the receipt cache where it can
+        // Fetching receipts in parallel is only worth the extra tasks when the window has enough
+        // matching blocks to give each task several; the sequential path serves the rest from the
+        // receipt cache where it can.
         let parallel = sealed_headers.len() >= PARALLEL_PROCESSING_THRESHOLD;
 
         if use_cached_mode && !sealed_headers.is_empty() {
@@ -1133,7 +1138,7 @@ impl<
         } else {
             Self::Range(RangeBlockMode {
                 filter_inner,
-                iter: sealed_headers.into_iter().peekable(),
+                iter: sealed_headers.into_iter(),
                 next: VecDeque::new(),
                 max_range: (max_headers_range as usize).min(MAX_PARALLEL_BATCH_SIZE),
                 parallel,
@@ -1215,11 +1220,11 @@ struct RangeBlockMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + LoadReceipt + EthBlocks,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
-    iter: Peekable<std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>>,
+    iter: std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
     next: VecDeque<ReceiptBlockResult<Eth::Provider>>,
-    /// Maximum number of consecutive blocks fetched by one batch of parallel tasks
+    /// Maximum number of blocks fetched by one batch of parallel tasks.
     max_range: usize,
-    /// Whether receipts are fetched in parallel batches of consecutive blocks
+    /// Whether receipts are fetched in parallel batches.
     parallel: bool,
     // Stream of ongoing receipt fetching tasks
     pending_tasks: FuturesOrdered<ReceiptFetchFuture<Eth::Provider>>,
@@ -1257,30 +1262,10 @@ impl<
                 continue;
             }
 
-            let mut range_headers = Vec::with_capacity(self.max_range.min(self.iter.len() + 1));
-            range_headers.push(next_header);
-
-            // Collect consecutive blocks up to max_range size
-            while range_headers.len() < self.max_range {
-                let Some(peeked) = self.iter.peek() else { break };
-                let Some(last_header) = range_headers.last() else { break };
-
-                let expected_next = last_header.number() + 1;
-                if peeked.number() != expected_next {
-                    trace!(
-                        target: "rpc::eth::filter",
-                        last_block = last_header.number(),
-                        next_block = peeked.number(),
-                        expected = expected_next,
-                        range_size = range_headers.len(),
-                        "Non-consecutive block detected, stopping range collection"
-                    );
-                    break; // Non-consecutive block, stop here
-                }
-
-                let Some(next_header) = self.iter.next() else { break };
-                range_headers.push(next_header);
-            }
+            // Receipts are read by hash, so a batch can skip the blocks between bloom matches.
+            let range_headers = std::iter::once(next_header)
+                .chain(self.iter.by_ref().take(self.max_range.saturating_sub(1)))
+                .collect();
 
             self.spawn_parallel_tasks(range_headers);
             // Continue loop to await the spawned tasks
@@ -1408,11 +1393,11 @@ mod tests {
     use crate::{eth::EthApi, EthApiBuilder};
     use alloy_consensus::TxLegacy;
     use alloy_network::Ethereum;
-    use alloy_primitives::{Bloom, FixedBytes};
+    use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, Log, LogData, Signature};
     use rand::Rng;
     use reth_chainspec::{ChainSpec, ChainSpecProvider};
     use reth_db_api::models::StoredBlockBodyIndices;
-    use reth_ethereum_primitives::TxType;
+    use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned, TxType};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::MockEthProvider;
@@ -1499,7 +1484,7 @@ mod tests {
 
         let mut range_mode = RangeBlockMode {
             filter_inner,
-            iter: headers.into_iter().peekable(),
+            iter: headers.into_iter(),
             next: VecDeque::new(),
             max_range,
             parallel: false,
@@ -1581,7 +1566,7 @@ mod tests {
 
         let mut range_mode = RangeBlockMode {
             filter_inner,
-            iter: headers.into_iter().peekable(),
+            iter: headers.into_iter(),
             next: VecDeque::from([mock_result_1, mock_result_2]), // Queue two results
             max_range: 100,
             parallel: false,
@@ -1650,7 +1635,7 @@ mod tests {
 
         let mut range_mode = RangeBlockMode {
             filter_inner,
-            iter: headers.into_iter().peekable(),
+            iter: headers.into_iter(),
             next: VecDeque::new(),
             max_range: 100,
             parallel: false,
@@ -1724,7 +1709,7 @@ mod tests {
 
         let mut range_mode = RangeBlockMode {
             filter_inner,
-            iter: headers.into_iter().peekable(),
+            iter: headers.into_iter(),
             next: VecDeque::new(),
             max_range: 3, // include the 3 blocks in the first queried results
             parallel: false,
@@ -1816,7 +1801,7 @@ mod tests {
 
         let mut range_mode = RangeBlockMode {
             filter_inner,
-            iter: headers.into_iter().peekable(),
+            iter: headers.into_iter(),
             next: VecDeque::new(),
             max_range: 1,
             parallel: false,
@@ -1828,14 +1813,14 @@ mod tests {
         assert!(result1.is_ok());
         assert!(result1.unwrap().is_some()); // Should have processed block 100
 
-        assert!(range_mode.iter.peek().is_some()); // Should still have block 101
+        assert_eq!(range_mode.iter.len(), 1); // Should still have block 101
 
         let result2 = range_mode.next().await;
         assert!(result2.is_ok());
         assert!(result2.unwrap().is_some()); // Should have processed block 101
 
         // now iterator should be exhausted
-        assert!(range_mode.iter.peek().is_none());
+        assert_eq!(range_mode.iter.len(), 0);
 
         // further calls should return None
         let result3 = range_mode.next().await;
@@ -2302,5 +2287,153 @@ mod tests {
             .await
             .unwrap();
         assert!(logs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_selective_range_scan_fetches_in_parallel() {
+        let provider = MockEthProvider::default();
+        let address = Address::with_last_byte(1);
+        let log = Log { address, data: LogData::new_unchecked(vec![], Bytes::new()) };
+        let mut bloom = Bloom::default();
+        bloom.accrue_log(&log);
+        let tx = TransactionSigned::new_unhashed(
+            TxLegacy {
+                chain_id: Some(1),
+                gas_price: 21_000,
+                gas_limit: 21_000,
+                ..Default::default()
+            }
+            .into(),
+            Signature::test_signature(),
+        );
+        let receipt = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 21_000,
+            logs: vec![log],
+            success: true,
+        };
+
+        // A log every 50 blocks gives each header window 20 bloom matches, which is far from a
+        // full window but enough for the parallel path.
+        let log_blocks = (0..=2_500u64).step_by(50).collect::<Vec<_>>();
+        let mut matching_headers = Vec::new();
+        let mut parent_hash = FixedBytes::default();
+        for number in 0..=2_500u64 {
+            let has_log = log_blocks.contains(&number);
+            let header = alloy_consensus::Header {
+                number,
+                parent_hash,
+                logs_bloom: if has_log { bloom } else { Bloom::default() },
+                ..Default::default()
+            };
+            parent_hash = header.hash_slow();
+            if has_log {
+                matching_headers.push(SealedHeader::new(header.clone(), parent_hash));
+            }
+            let transactions = if has_log { vec![tx.clone()] } else { Vec::new() };
+            provider.add_block(
+                parent_hash,
+                Block { header, body: BlockBody { transactions, ..Default::default() } },
+            );
+            if has_log {
+                provider.add_receipts(number, vec![receipt.clone()]);
+                provider.add_block_body_indices(
+                    number,
+                    StoredBlockBodyIndices { first_tx_num: number / 50, tx_count: 1 },
+                );
+            } else {
+                provider.add_receipts(number, vec![]);
+            }
+        }
+
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+        let filter = Filter::new().address(address);
+        let logs = eth_filter
+            .inner
+            .clone()
+            .get_logs_in_block_range(filter.clone(), 0, 2_500, QueryLimits::default())
+            .await
+            .unwrap();
+        let blocks = logs.iter().map(|log| log.block_number.unwrap()).collect::<Vec<_>>();
+        assert_eq!(blocks, log_blocks);
+
+        // The log limit still names the last block before the one that exceeds it.
+        let err = eth_filter
+            .inner
+            .clone()
+            .get_logs_in_block_range(
+                filter,
+                0,
+                2_500,
+                QueryLimits { max_blocks_per_filter: None, max_logs_per_response: Some(25) },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                EthFilterError::QueryExceedsMaxResults {
+                    max_logs: 25,
+                    from_block: 0,
+                    to_block: 1_249
+                }
+            ),
+            "{err:?}"
+        );
+
+        // A window with fewer matches than the threshold reads one block at a time.
+        let first_window = matching_headers
+            .iter()
+            .take_while(|header| header.number() < MAX_HEADERS_RANGE)
+            .cloned()
+            .collect::<Vec<_>>();
+        let new_range_mode = |headers| {
+            let RangeMode::Range(range_mode) = RangeMode::new(
+                eth_filter.inner.clone(),
+                headers,
+                0,
+                2_500,
+                MAX_HEADERS_RANGE,
+                2_500,
+            ) else {
+                panic!("a range over several windows must not use cached mode")
+            };
+            range_mode
+        };
+        assert!(
+            !new_range_mode(first_window[..PARALLEL_PROCESSING_THRESHOLD - 1].to_vec()).parallel
+        );
+
+        // The window's matches are not consecutive, yet one parallel batch of four tasks with five
+        // blocks each fetches all of them.
+        let mut parallel = new_range_mode(first_window.clone());
+        assert!(parallel.parallel);
+        let mut parallel_results = vec![parallel.next().await.unwrap().unwrap()];
+        assert_eq!(parallel.iter.len(), 0);
+        assert_eq!(parallel.next.len() + parallel.pending_tasks.len() * 5, first_window.len() - 1);
+        while let Some(result) = parallel.next().await.unwrap() {
+            parallel_results.push(result);
+        }
+
+        // It returns the blocks in the same order and with the same receipts as one at a time.
+        let mut sequential = new_range_mode(first_window);
+        sequential.parallel = false;
+        let mut sequential_results = Vec::new();
+        while let Some(result) = sequential.next().await.unwrap() {
+            assert!(sequential.next.is_empty());
+            sequential_results.push(result);
+        }
+        let summary = |results: &[ReceiptBlockResult<MockEthProvider>]| {
+            results
+                .iter()
+                .map(|result| (result.header.hash(), result.receipts.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(summary(&parallel_results), summary(&sequential_results));
+        assert_eq!(parallel_results.len(), 20);
     }
 }
