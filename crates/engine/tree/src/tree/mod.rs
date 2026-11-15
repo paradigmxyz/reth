@@ -2362,6 +2362,12 @@ where
             self.state.tree_state.canonical_block_hash(),
             in_memory_persisted_block.hash,
         );
+        // Proof workers read the state trie against the same frontier, and merging the whole
+        // in-memory range for it can take far longer than executing a block.
+        self.state.tree_state.overlay_manager.precompute_state_trie_overlay(
+            self.state.tree_state.canonical_block_hash(),
+            in_memory_persisted_block.hash,
+        );
         self.state.set_pending_sparse_trie_prune(self.should_prune_sparse_trie());
         Ok(())
     }

@@ -318,6 +318,16 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 (key.tip_hash == parent_hash).then_some(key.anchor_hash)
             })
             .collect::<Vec<_>>();
+        let cached_parent_state_trie_overlays = self
+            .inner
+            .state_trie_overlays
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                let key = *entry.key();
+                (key.tip_hash == parent_hash).then_some(key.anchor_hash)
+            })
+            .collect::<Vec<_>>();
 
         debug!(
             target: "storage::overlay::manager",
@@ -325,19 +335,22 @@ impl<N: NodePrimitives> OverlayManager<N> {
             %parent_hash,
             "inserted block into state trie overlay manager"
         );
-        if cached_parent_overlays.is_empty() {
+        if cached_parent_overlays.is_empty() && cached_parent_state_trie_overlays.is_empty() {
             return
         }
 
         #[cfg(not(feature = "rayon"))]
-        let _ = cached_parent_overlays;
+        let _ = (cached_parent_overlays, cached_parent_state_trie_overlays);
 
-        // When a new block is inserted we optimistically and asynchronously flatten an execution
-        // overlay for it
+        // When a new block is inserted we optimistically and asynchronously flatten its execution
+        // and state trie overlays, extending the parent's, so the next payload does not.
         #[cfg(feature = "rayon")]
         {
             for anchor_hash in cached_parent_overlays {
                 self.precompute_execution_overlay(hash, anchor_hash);
+            }
+            for anchor_hash in cached_parent_state_trie_overlays {
+                self.precompute_state_trie_overlay(hash, anchor_hash);
             }
         }
     }
@@ -366,6 +379,36 @@ impl<N: NodePrimitives> OverlayManager<N> {
             .entered();
             if let Err(err) = manager.precompute_execution_overlay_for_parent(tip_hash, anchor_hash) {
                 debug!(target: "storage::overlay::manager", %err, "Skipping execution overlay precompute");
+            }
+        });
+    }
+
+    /// Optimistically computes a state trie overlay from `anchor_hash` to `tip_hash`.
+    ///
+    /// This returns without waiting for computation. When the parent's overlay for the same anchor
+    /// is still computing, the background task waits for it and extends it instead of merging
+    /// every block again. A concurrent persistence or reorg may make the requested range
+    /// unavailable, in which case the background task skips it.
+    #[cfg(feature = "rayon")]
+    pub fn precompute_state_trie_overlay(&self, tip_hash: B256, anchor_hash: B256) {
+        if tip_hash == anchor_hash {
+            return
+        }
+        let Some(worker_pool) = &self.inner.worker_pool else { return };
+        let manager = self.clone();
+        let parent_span = tracing::Span::current();
+        worker_pool.spawn(move || {
+            let _span = tracing::trace_span!(
+                target: "storage::overlay::manager",
+                parent: &parent_span,
+                "precompute_state_trie_overlay",
+                %tip_hash,
+                %anchor_hash,
+            )
+            .entered();
+            if let Err(err) = manager.precompute_state_trie_overlay_for_parent(tip_hash, anchor_hash)
+            {
+                debug!(target: "storage::overlay::manager", %err, "Skipping state trie overlay precompute");
             }
         });
     }
@@ -496,6 +539,41 @@ impl<N: NodePrimitives> OverlayManager<N> {
             &parent_state,
             anchor_hash,
             OverlayCacheConfig { precompute: true, write_to_cache: true },
+        )
+        .map(drop)
+    }
+
+    #[cfg(feature = "rayon")]
+    fn precompute_state_trie_overlay_for_parent(
+        &self,
+        parent_hash: B256,
+        anchor_hash: B256,
+    ) -> Result<(), StateTrieOverlayError> {
+        let parent_state = self
+            .block_state(parent_hash)
+            .ok_or(StateTrieOverlayError { tip_hash: parent_hash, anchor_hash })?;
+        // Extending a computing parent overlay is far cheaper than merging the whole range again.
+        let grandparent_key = OverlayCacheKey {
+            anchor_hash,
+            tip_hash: parent_state.block_ref().recovered_block().parent_hash(),
+        };
+        let computing_parent =
+            self.inner.state_trie_overlays.entries.get(&grandparent_key).and_then(|entry| {
+                match entry.value() {
+                    OverlayCacheEntry::Computing(waiter) => Some(Arc::clone(waiter)),
+                    OverlayCacheEntry::Ready(_) => None,
+                }
+            });
+        if let Some(waiter) = computing_parent {
+            waiter.input.wait();
+        }
+        self.get_or_compute_overlay(
+            &self.inner.state_trie_overlays,
+            &self.inner.metrics,
+            anchor_hash,
+            &parent_state,
+            OverlayCacheConfig { precompute: true, write_to_cache: true },
+            |input, span| self.compute_state_trie_overlay(input, anchor_hash, span, true),
         )
         .map(drop)
     }
