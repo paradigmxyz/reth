@@ -250,6 +250,13 @@ where
     /// Size of the first parallel tx batch in non-BAL path.
     const FIRST_PARALLEL_TX_WINDOW_SIZE: usize = 64;
 
+    /// Largest parallel tx batch in non-BAL path.
+    ///
+    /// No transaction of a batch reaches execution before the whole batch is converted, so an
+    /// executor that keeps up with conversion would otherwise wait for most of a large block's
+    /// second half at once.
+    const MAX_PARALLEL_TX_WINDOW_SIZE: usize = 256;
+
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
     /// For blocks with fewer than [`Self::SMALL_BLOCK_TX_THRESHOLD`] transactions, uses
@@ -373,7 +380,7 @@ where
                                 break;
                             }
 
-                            batch_size = batch_size.saturating_mul(2);
+                            batch_size = (batch_size * 2).min(Self::MAX_PARALLEL_TX_WINDOW_SIZE);
 
                             let chunk = chunk
                                 .into_par_iter()
