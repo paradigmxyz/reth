@@ -181,6 +181,9 @@ const MAX_EXPECTED_GAS_LIMIT_MULTIPLIER: u64 = 2;
 /// Worker name for deferred trie data preparation.
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 
+/// Receipts a parallel execution sends to the receipt root task at once.
+const RECEIPT_BATCH_SIZE: usize = 32;
+
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
 type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
@@ -1375,6 +1378,9 @@ where
         let base = DbRef::new(SharedStateProviderDatabase::new(&make_worker_provider));
         let mut sent = 0;
         let mut receipt_task_closed = false;
+        // Receipts are sent in batches: each send to the idle receipt root task wakes it, which
+        // costs the committing thread more than the receipt itself.
+        let mut batch = Vec::with_capacity(RECEIPT_BATCH_SIZE);
         let result = executor.execute_transactions_parallel(
             transactions,
             &base,
@@ -1387,13 +1393,20 @@ where
                     }
                 }
             },
-            &mut |tx_index, receipt| {
+            &mut |tx_index, receipt, copy| {
                 // Send each receipt once, in order, to the background task for incremental root
                 // computation.
                 if tx_index == sent && !receipt_task_closed {
-                    receipt_task_closed =
-                        receipt_tx.send(IndexedReceipt::new(tx_index, receipt.clone())).is_err();
+                    batch.push(IndexedReceipt::new(
+                        tx_index,
+                        copy.unwrap_or_else(|| receipt.clone()),
+                    ));
                     sent += 1;
+                    if batch.len() == RECEIPT_BATCH_SIZE || sent == transaction_count {
+                        for receipt in batch.drain(..) {
+                            receipt_task_closed |= receipt_tx.send(receipt).is_err();
+                        }
+                    }
                     executed_tx_index.store(sent, Ordering::Relaxed);
                 }
             },
@@ -1401,6 +1414,9 @@ where
         self.metrics.record_transaction_wait(wait);
         result?;
         executed_tx_index.store(senders.len(), Ordering::Relaxed);
+        for receipt in batch {
+            receipt_task_closed |= receipt_tx.send(receipt).is_err();
+        }
 
         // Send any receipt the executor did not stream.
         for (tx_index, receipt) in executor.receipts().iter().enumerate().skip(sent) {

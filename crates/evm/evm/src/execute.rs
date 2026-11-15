@@ -511,9 +511,10 @@ pub trait BlockExecutor: Sized {
     /// execution's changes, by transaction index, before validating them: hints for prefetching,
     /// not committed state, which streams through the state hook. `on_receipt` sees each receipt
     /// the block's transactions record, once, by index and in block order, as soon as it is
-    /// final, so receipts can be hashed while later transactions execute. The default
-    /// implementation executes the transactions one by one and ignores `base` and
-    /// `on_speculative`.
+    /// final, so receipts can be hashed while later transactions execute. It also gets an owned
+    /// copy of the receipt when the executor prepared one off the committing thread, so that it
+    /// can keep the receipt without cloning it. The default implementation executes the
+    /// transactions one by one, ignores `base` and `on_speculative`, and prepares no copies.
     ///
     /// Call it after [`Self::apply_pre_execution_changes`] and before any transaction of the
     /// block.
@@ -522,7 +523,7 @@ pub trait BlockExecutor: Sized {
         transactions: impl Iterator<Item = Result<T, E>> + Send,
         base: &(dyn DynDatabaseRef + Sync),
         on_speculative: &(dyn Fn(usize, TxStateChanges<'_>) + Sync),
-        on_receipt: &mut dyn FnMut(usize, &Self::Receipt),
+        on_receipt: &mut dyn FnMut(usize, &Self::Receipt, Option<Self::Receipt>),
     ) -> Result<(), BlockExecutionError>
     where
         T: SendExecutorTx<Self>,
@@ -534,7 +535,7 @@ pub trait BlockExecutor: Sized {
             let transaction = transaction.map_err(BlockValidationError::other)?;
             self.execute_transaction(transaction.into_send_parts())?;
             for (index, receipt) in self.receipts().iter().enumerate().skip(sent) {
-                on_receipt(index, receipt);
+                on_receipt(index, receipt, None);
             }
             sent = self.receipts().len();
         }
