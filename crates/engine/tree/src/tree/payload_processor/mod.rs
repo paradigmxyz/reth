@@ -37,7 +37,7 @@ pub use reth_trie_parallel::{
 use std::{
     ops::Not,
     sync::{
-        atomic::{AtomicBool, AtomicUsize},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc, Arc, OnceLock,
     },
 };
@@ -52,6 +52,14 @@ pub(crate) mod reuse;
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
+
+/// Number of blocks, after the processor is created, that the executor would execute in parallel
+/// but that execute sequentially with transaction prewarming instead, to warm the cross-block
+/// cache.
+///
+/// Until the cache is warm, the parallel workers' base reads miss it, and such a block executes
+/// slower than sequentially with prewarming filling the cache ahead of execution.
+pub const PARALLEL_EXECUTION_WARMUP_BLOCKS: usize = 64;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
@@ -117,6 +125,9 @@ where
     /// Dedicated blocking pool for warming the BAL read-set, created lazily on the first BAL block
     /// (see [`Self::bal_prewarm_pool`]). Its threads exit when the processor is dropped.
     bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
+    /// Number of blocks executed sequentially out of the first
+    /// [`PARALLEL_EXECUTION_WARMUP_BLOCKS`] the executor would execute in parallel.
+    parallel_warmup_blocks: AtomicUsize,
 }
 
 impl<Evm> PayloadProcessor<Evm>
@@ -147,6 +158,7 @@ where
             disable_bal_batch_io: config.disable_bal_batch_io(),
             reuse_prewarm_results: config.prewarm_reuse(),
             bal_prewarm_pool: OnceLock::new(),
+            parallel_warmup_blocks: AtomicUsize::new(0),
         }
     }
 
@@ -158,6 +170,23 @@ where
                 bal_prewarm_pool::BalPrewarmPool::new(bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS)
             })
             .clone()
+    }
+
+    /// Returns whether to execute a block of `transaction_count` transactions in parallel, with
+    /// [`BlockExecutor::execute_transactions_parallel`](reth_evm::execute::BlockExecutor::execute_transactions_parallel).
+    ///
+    /// Call it once per block: while transaction prewarming and the state cache are on, each of
+    /// the first [`PARALLEL_EXECUTION_WARMUP_BLOCKS`] blocks the executor would execute in
+    /// parallel counts toward the warmup and executes sequentially with prewarming instead.
+    pub fn executes_transactions_in_parallel(&self, transaction_count: usize) -> bool {
+        self.evm_config.executes_transactions_in_parallel(transaction_count) &&
+            (self.disable_transaction_prewarming ||
+                self.disable_state_cache ||
+                self.parallel_warmup_blocks
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |blocks| {
+                        (blocks < PARALLEL_EXECUTION_WARMUP_BLOCKS).then_some(blocks + 1)
+                    })
+                    .is_err())
     }
 
     /// Returns the shared execution cache handle used for engine backpressure.
@@ -181,6 +210,7 @@ where
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
+        parallel_execution: bool,
     ) -> IteratorPayloadHandle<Evm, I>
     where
         P: DatabaseProviderFactory + Clone + 'static,
@@ -193,8 +223,11 @@ where
             + HistoryReader
             + 'static,
     {
-        let prewarm_transactions =
-            self.prewarms_transactions(env.transaction_count, parallel_bal_execution);
+        let prewarm_transactions = self.prewarms_transactions(
+            env.transaction_count,
+            parallel_bal_execution,
+            parallel_execution,
+        );
         let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(
             transactions,
             env.transaction_count,
@@ -217,17 +250,19 @@ where
     ///
     /// This is the only place the decision is made: the tx iterator uses it to skip creating the
     /// prewarm channel and cloning every transaction into it, and the resulting `Option` receiver
-    /// then selects the mode, so the two cannot disagree. Blocks the executor executes in
-    /// parallel are not prewarmed: its workers execute every transaction speculatively already.
+    /// then selects the mode, so the two cannot disagree. Blocks executed in parallel
+    /// (`parallel_execution`) are not prewarmed: the workers execute every transaction
+    /// speculatively already.
     fn prewarms_transactions(
         &self,
         transaction_count: usize,
         parallel_bal_execution: bool,
+        parallel_execution: bool,
     ) -> bool {
         !parallel_bal_execution &&
+            !parallel_execution &&
             !self.disable_transaction_prewarming &&
-            transaction_count >= SMALL_BLOCK_TX_THRESHOLD &&
-            !self.evm_config.executes_transactions_in_parallel(transaction_count)
+            transaction_count >= SMALL_BLOCK_TX_THRESHOLD
     }
 
     /// Transaction count threshold below which sequential conversion is used.

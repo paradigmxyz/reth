@@ -629,15 +629,13 @@ where
         // retained anywhere else, so the task's update channel closes when producers finish.
         let hint_stream = state_root_job.take_hint_stream();
         let hashed_update_stream = state_root_job.take_hashed_update_stream();
-        // An executor that executes the block in parallel replaces transaction prewarming: its
-        // workers' speculative changes are the access hints.
-        let (prewarm_hint_stream, execution_hint_stream) = if !parallel_bal_execution &&
-            self.evm_config.executes_transactions_in_parallel(env.transaction_count)
-        {
-            (None, hint_stream)
-        } else {
-            (hint_stream, None)
-        };
+        // Decided once per block: the payload processor counts it toward its warmup.
+        let parallel_execution = !parallel_bal_execution &&
+            self.payload_processor.executes_transactions_in_parallel(env.transaction_count);
+        // Parallel execution replaces transaction prewarming: the workers' speculative changes
+        // are the access hints.
+        let (prewarm_hint_stream, execution_hint_stream) =
+            if parallel_execution { (None, hint_stream) } else { (hint_stream, None) };
 
         // Spawn transaction conversion and prewarming.
         let mut handle = ensure_ok!(self.spawn_payload_processor(
@@ -647,6 +645,7 @@ where
             prewarm_hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
+            parallel_execution,
         ));
 
         // Create optional cache stats for detailed block logging
@@ -736,6 +735,7 @@ where
                     &mut handle,
                     execution_state_hook,
                     execution_hint_stream,
+                    parallel_execution,
                     &make_state_provider,
                 ),
                 Err(err) => Err(err.into()),
@@ -1030,6 +1030,7 @@ where
         >,
         state_hook: Option<StateRootUpdateHook>,
         hint_stream: Option<StateRootHintStream>,
+        parallel_execution: bool,
         make_state_provider: &(dyn Fn(bool) -> ProviderResult<EvmStateProviderBox> + Sync),
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
@@ -1082,6 +1083,7 @@ where
                     &executed_tx_index,
                     prewarm_results.as_deref(),
                     hint_stream.as_ref(),
+                    parallel_execution,
                     make_state_provider,
                 )?;
 
@@ -1234,6 +1236,7 @@ where
         executed_tx_index: &AtomicUsize,
         prewarm_results: Option<&PrewarmResults<EvmTypesFor<Evm>>>,
         hint_stream: Option<&StateRootHintStream>,
+        parallel_execution: bool,
         make_state_provider: &(dyn Fn(bool) -> ProviderResult<EvmStateProviderBox> + Sync),
     ) -> Result<Vec<Address>, BlockExecutionError>
     where
@@ -1246,7 +1249,7 @@ where
             .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
-        if self.evm_config.executes_transactions_in_parallel(transaction_count) {
+        if parallel_execution {
             return self.execute_transactions_parallel(
                 executor,
                 transaction_count,
@@ -1521,6 +1524,7 @@ where
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
+        parallel_execution: bool,
     ) -> Result<
         PayloadHandle<
             impl SendExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
@@ -1538,6 +1542,7 @@ where
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
+            parallel_execution,
         );
 
         self.metrics.block_validation.spawn_payload_processor.record(start.elapsed().as_secs_f64());
