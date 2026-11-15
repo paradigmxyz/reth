@@ -95,6 +95,7 @@ pub enum ExecutionParent<H> {
 impl<H: TreeHasher> ExecutionParent<H> {
     /// Applies authoritative output to an isolated child. Global code ownership is only
     /// needed when a previously committed contract is replaced or removed.
+    /// Disk overlays apply serially. The parallel flag selects the eager batch implementation.
     pub fn apply_bundle(
         &self,
         bundle: &BundleState,
@@ -149,8 +150,15 @@ impl<H: TreeHasher> ExecutionState<H> {
         }
     }
 
+    /// Returns whether this result used the parallel batch implementation.
+    ///
+    /// The eager batch implementation can use incremental hashing for sparse updates.
+    pub const fn uses_parallel_batch(&self, requested: bool) -> bool {
+        requested && cfg!(feature = "parallel") && matches!(self, Self::Eager(_))
+    }
+
     /// Returns the resulting number of leaves.
-    pub fn leaf_count(&self) -> usize {
+    pub const fn leaf_count(&self) -> usize {
         match self {
             Self::Eager(state) => state.tree().len(),
             Self::Disk(state) => state.leaf_count(),

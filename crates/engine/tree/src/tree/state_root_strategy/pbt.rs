@@ -3,7 +3,7 @@
 use super::*;
 use reth_evm::EvmEnv as _;
 use reth_trie_pbt::{
-    execution::ExecutionParent,
+    execution::{ExecutionParent, ExecutionState},
     migration::mpt_root,
     persistence::SnapshotStore,
     replay::{replay, replay_parallel},
@@ -119,7 +119,7 @@ impl<H: TreeHasher> PbtStateRootStrategy<H> {
         Ok(())
     }
 
-    /// Enables parallel hashing for dense block and BAL state-update batches.
+    /// Enables parallel hashing for dense eager state updates and BAL replay batches.
     /// Small or sparse changes retain incremental updates; commitment rules stay identical.
     pub const fn with_parallel(mut self, parallel: bool) -> Self {
         self.parallel = parallel;
@@ -281,7 +281,9 @@ where
                 phase = "payload",
                 parent_number,
                 timestamp,
-                parallel,
+                parallel_requested = parallel,
+                parallel = state.uses_parallel_batch(parallel),
+                disk_overlay = matches!(&state, ExecutionState::Disk(_)),
                 maintain_mpt = retired.is_none(),
                 accounts = bundle.state().len(),
                 leaves = state.leaf_count(),
@@ -384,7 +386,9 @@ where
             block_number = block.number(),
             block_hash = ?block.hash(),
             pbt_root = ?state.root(),
-            parallel = self.parallel,
+            parallel_requested = self.parallel,
+            parallel = state.uses_parallel_batch(self.parallel),
+            disk_overlay = matches!(&state, ExecutionState::Disk(_)),
             maintain_mpt,
             active = self.active,
             accounts,

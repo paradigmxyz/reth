@@ -227,6 +227,63 @@ fn dense_parallel_execution_matches_serial_and_preserves_failed_parent() {
     assert_eq!(parallel.root(), before);
 }
 
+#[cfg(all(feature = "parallel", feature = "persistence"))]
+#[test]
+fn cold_dense_execution_uses_serial_overlay_and_matches_both_eager_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut parent = StateTree::<Blake3Hasher>::new();
+    let mut bundle = BundleState::default();
+    for index in 0u64..4096 {
+        let address = Address::from_word(B256::from(U256::from(index)));
+        parent.set_account(address, AccountData { nonce: 1, ..Default::default() }).unwrap();
+        parent.set_storage(address, U256::from(64), B256::repeat_byte(1)).unwrap();
+        let mut account = BundleAccount::new(
+            None,
+            Some(Default::default()),
+            Default::default(),
+            AccountStatus::Changed,
+        );
+        account.info.as_mut().unwrap().nonce = 2;
+        account.storage.insert(
+            U256::from(64),
+            StorageSlot::new_changed(U256::from_be_bytes([1; 32]), U256::from(index + 1)),
+        );
+        bundle.state.insert(address, account);
+    }
+    let anchor = B256::repeat_byte(1);
+    let child = B256::repeat_byte(2);
+    let limits = DecodeLimits::default();
+    let native = DecodeLimits::native();
+    let mut store = SnapshotStore::open_with_limits(dir.path(), limits, native).unwrap();
+    store.set_cache_budget(0).unwrap();
+    store.save_block_with_number(anchor, 0, &parent).unwrap();
+    let disk = store.execution_parent(anchor, Some(parent.root())).unwrap();
+    assert!(matches!(&disk, ExecutionParent::Disk(_)));
+
+    let eager = ExecutionParent::Eager(parent);
+    let serial = eager.apply_bundle(&bundle, false).unwrap();
+    let parallel = eager.apply_bundle(&bundle, true).unwrap();
+    let overlay = disk.apply_bundle(&bundle, true).unwrap();
+    assert!(matches!(&overlay, ExecutionState::Disk(_)));
+    assert!(!overlay.uses_parallel_batch(true));
+    assert!(!serial.uses_parallel_batch(false));
+    assert!(parallel.uses_parallel_batch(true));
+    assert_eq!(overlay.root(), serial.root());
+    assert_eq!(overlay.root(), parallel.root());
+    assert_eq!(overlay.leaf_count(), serial.leaf_count());
+    assert_eq!(overlay.leaf_count(), parallel.leaf_count());
+
+    store.save_execution_block(child, 1, &overlay).unwrap();
+    drop((disk, overlay, store));
+    let reopened = SnapshotStore::<Blake3Hasher>::open_with_limits(dir.path(), limits, native)
+        .unwrap()
+        .load_block(child)
+        .unwrap();
+    assert_eq!(reopened.root(), serial.root());
+    let ExecutionState::Eager(serial) = serial else { panic!("expected eager execution") };
+    assert!(reopened.tree().entries().eq(serial.tree().entries()));
+}
+
 #[cfg(feature = "persistence")]
 #[test]
 fn cold_execution_publishes_only_accepted_overlays_and_reopens() {

@@ -1019,7 +1019,13 @@ mod tests {
     async fn parallel_payload_building_matches_checkpoint_and_bal_roots() -> eyre::Result<()> {
         reth_tracing::init_test_tracing();
         let directory = tempfile::tempdir()?;
-        let store = Arc::new(SnapshotStore::open(directory.path(), DecodeLimits::default())?);
+        let mut store = SnapshotStore::open_with_limits(
+            directory.path(),
+            DecodeLimits::default(),
+            DecodeLimits::native(),
+        )?;
+        store.set_cache_budget(0)?;
+        let store = Arc::new(store);
         let chain =
             prepare_chain((*test_chain_spec(EthereumHardfork::Amsterdam)).clone(), 0, &store)?;
         let mut node = launch_test_node_with_parallel(chain, store.clone(), 0, 64, true).await?;
@@ -1034,6 +1040,9 @@ mod tests {
         assert_eq!(state.root(), mined.block().state_root);
         let raw = node.inner.provider.bal_store().get_by_hash(mined.block().hash())?.unwrap();
         let bal = DecodedBal::from_raw_bal(RawBal::new(raw))?;
+        // The validated block supplies the auxiliary MPT root for the next cold job.
+        let next = node.advance_block().await?;
+        assert_eq!(store.verify_block(next.block().hash())?, next.block().state_root);
         let strategy = PbtStateRootStrategy::new(store, 0).with_parallel(true);
         let replayed = strategy.replay(
             &parent,
@@ -1152,6 +1161,7 @@ mod tests {
         checkpoints: PathBuf,
         activation: u64,
         startup: Startup,
+        cache_max_bytes: Option<usize>,
     }
 
     impl NodeTypes for RestartNode {
@@ -1178,8 +1188,14 @@ mod tests {
         }
 
         fn add_ons(&self) -> Self::AddOns {
-            let store =
-                Arc::new(SnapshotStore::open(&self.checkpoints, DecodeLimits::default()).unwrap());
+            let limits = DecodeLimits::default();
+            let native_limits = self.cache_max_bytes.map_or(limits, |_| DecodeLimits::native());
+            let mut store =
+                SnapshotStore::open_with_limits(&self.checkpoints, limits, native_limits).unwrap();
+            if let Some(bytes) = self.cache_max_bytes {
+                store.set_cache_budget(bytes).unwrap();
+            }
+            let store = Arc::new(store);
             addons(
                 Arc::new(PbtStateRootStrategy::new(store, self.activation)),
                 self.startup.clone(),
@@ -1274,6 +1290,7 @@ mod tests {
                 checkpoints: node_checkpoints.clone(),
                 activation,
                 startup: node_startup.lock().unwrap().clone(),
+                ..Default::default()
             })
             .with_restartable_nodes()
             .with_backfill(move |_| {
@@ -2207,6 +2224,7 @@ mod tests {
                     checkpoints: node_checkpoints.clone(),
                     activation,
                     startup: Startup { keep_mpt, ..Default::default() },
+                    cache_max_bytes: Some(0),
                 })
                 .with_restartable_nodes()
                 .with_tree_config_modifier(|config| {
@@ -2322,6 +2340,7 @@ mod tests {
             drop(provider);
             let transaction = sender.transfer(recipient, U256::from(5)).await;
             let canonical = node.mine([transaction]).await?.ensure_success()?;
+            assert_eq!(store.verify_block(canonical.block().hash())?, canonical.block().state_root);
             assert_eq!(
                 store.load_block(canonical.block().hash())?.account(recipient).unwrap().balance,
                 U256::from(14)
@@ -2335,8 +2354,13 @@ mod tests {
                 node.inner.provider.latest()?.basic_account(&recipient)?.unwrap().balance,
                 store.load_block(fork[1].block().hash())?.account(recipient).unwrap().balance,
             );
-            let next = node.advance_block().await?;
-            assert_eq!(store.verify_block(next.block().hash())?, next.block().state_root);
+
+            let payload = node.new_payload().await?;
+            let hash = payload.block().hash();
+            let root = payload.block().state_root;
+            assert!(!store.contains_block(hash)?);
+            node.import_payload(payload).await?;
+            assert_eq!(store.verify_block(hash)?, root);
             let provider = node.inner.provider.database_provider_ro()?;
             assert_eq!(provider.mpt_retired_at()?.is_some(), !keep_mpt);
             if !keep_mpt {
