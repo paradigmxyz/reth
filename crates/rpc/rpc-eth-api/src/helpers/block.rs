@@ -8,16 +8,20 @@ use crate::{
 use alloy_consensus::{transaction::TxHashRef, TxReceipt};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::BlockId;
+use alloy_primitives::B256;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Index};
 use evm2::evm::Bal as EvmBal;
 use futures::Future;
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockBody, RecoveredBlock, SealedHeader, TransactionMeta,
+    AlloyBlockHeader, Block as _, BlockBody, RecoveredBlock, SealedHeader, TransactionMeta,
 };
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
 use reth_rpc_eth_types::block::SharedReceipts;
-use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
+use reth_storage_api::{
+    BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
+    HeaderProvider, ProviderHeader, ProviderReceipt, ProviderTx,
+};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::sync::Arc;
 
@@ -44,9 +48,22 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
         Self: FullEthApiTypes,
     {
         async move {
-            let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
+            let header = match cached_block_or_hash(self, block_id).await? {
+                Some(CachedBlockOrHash::Block(block)) => block.clone_sealed_header(),
+                Some(CachedBlockOrHash::Hash(block_hash)) => {
+                    let Some(header) = self
+                        .provider()
+                        .sealed_header_by_hash(block_hash)
+                        .map_err(Self::Error::from_eth_err)?
+                    else {
+                        return Ok(None)
+                    };
+                    header
+                }
+                None => return Ok(None),
+            };
             // Header responses omit the block size: https://github.com/ethereum/execution-apis/pull/877
-            let header = self.converter().convert_header(block.clone_sealed_header(), None)?;
+            let header = self.converter().convert_header(header, None)?;
             Ok(Some(header))
         }
     }
@@ -82,7 +99,39 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
         &self,
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<usize>, Self::Error>> + Send {
-        async move { Ok(self.recovered_block(block_id).await?.map(|b| b.body().transaction_count())) }
+        async move {
+            let block_hash = match cached_block_or_hash(self, block_id).await? {
+                Some(CachedBlockOrHash::Block(block)) => {
+                    return Ok(Some(block.body().transaction_count()))
+                }
+                Some(CachedBlockOrHash::Hash(block_hash)) => block_hash,
+                None => return Ok(None),
+            };
+
+            let provider = self.provider();
+            let Some(number) =
+                provider.block_number(block_hash).map_err(Self::Error::from_eth_err)?
+            else {
+                return Ok(None)
+            };
+            // The body indices are read by number, so they belong to the requested block only if
+            // the number still maps to its hash afterwards. If a reorg moved it, or the indices are
+            // missing, the count comes from the block itself.
+            if let Some(indices) =
+                provider.block_body_indices(number).map_err(Self::Error::from_eth_err)? &&
+                provider.block_hash(number).map_err(Self::Error::from_eth_err)? ==
+                    Some(block_hash)
+            {
+                return Ok(Some(indices.tx_count as usize))
+            }
+
+            Ok(self
+                .cache()
+                .get_recovered_block(block_hash)
+                .await
+                .map_err(Self::Error::from_eth_err)?
+                .map(|block| block.body().transaction_count()))
+        }
     }
 
     /// Helper function for `eth_getBlockReceipts`.
@@ -206,10 +255,23 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     ) -> impl Future<Output = Result<Option<Vec<ProviderHeader<Self::Provider>>>, Self::Error>> + Send
     {
         async move {
-            if let Some(block) = self.recovered_block(block_id).await? {
-                Ok(block.body().ommers().map(|o| o.to_vec()))
-            } else {
-                Ok(None)
+            match cached_block_or_hash(self, block_id).await? {
+                Some(CachedBlockOrHash::Block(block)) => {
+                    Ok(block.body().ommers().map(|o| o.to_vec()))
+                }
+                // The ommers are part of the body, but reading the block without its senders
+                // skips the senders table and, where senders are pruned, their recovery.
+                Some(CachedBlockOrHash::Hash(block_hash)) => {
+                    self.spawn_blocking_io(move |this| {
+                        let block = this
+                            .provider()
+                            .block_by_hash(block_hash)
+                            .map_err(Self::Error::from_eth_err)?;
+                        Ok(block.and_then(|block| block.body().ommers().map(|o| o.to_vec())))
+                    })
+                    .await
+                }
+                None => Ok(None),
             }
         }
     }
@@ -224,11 +286,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     ) -> impl Future<Output = Result<Option<RpcBlock<Self::NetworkTypes>>, Self::Error>> + Send
     {
         async move {
-            let uncles = self
-                .recovered_block(block_id)
-                .await?
-                .map(|block| block.body().ommers().map(|o| o.to_vec()).unwrap_or_default())
-                .unwrap_or_default();
+            let uncles = self.ommers(block_id).await?.unwrap_or_default();
 
             uncles
                 .into_iter()
@@ -338,4 +396,42 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
                 .map_err(Self::Error::from_eth_err)
         }
     }
+}
+
+/// A block found without loading it into the cache, or the hash to read it by.
+enum CachedBlockOrHash<B: reth_primitives_traits::Block> {
+    /// The pending block or a block that is already cached.
+    Block(Arc<RecoveredBlock<B>>),
+    /// The hash of a block that is not cached.
+    Hash(B256),
+}
+
+/// Returns the pending block or the cached block for the given block id, or the hash of the block
+/// if it is not cached.
+///
+/// Unlike [`LoadBlock::recovered_block`], this never loads an uncached block with its senders, so
+/// a request that needs only part of the block can read that part from the provider.
+///
+/// Returns `None` if the pending block is not available or the block id does not resolve to a
+/// hash.
+async fn cached_block_or_hash<T: LoadBlock>(
+    eth: &T,
+    block_id: BlockId,
+) -> Result<Option<CachedBlockOrHash<<T::Provider as BlockReader>::Block>>, T::Error> {
+    if block_id.is_pending() {
+        return Ok(eth.recovered_block(block_id).await?.map(CachedBlockOrHash::Block))
+    }
+
+    let Some(block_hash) =
+        eth.provider().block_hash_for_id(block_id).map_err(T::Error::from_eth_err)?
+    else {
+        return Ok(None)
+    };
+
+    Ok(Some(
+        match eth.cache().get_maybe_block(block_hash).await.map_err(T::Error::from_eth_err)? {
+            Some(block) => CachedBlockOrHash::Block(block),
+            None => CachedBlockOrHash::Hash(block_hash),
+        },
+    ))
 }

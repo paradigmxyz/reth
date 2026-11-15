@@ -550,6 +550,12 @@ where
     async fn block_uncles_count_by_hash(&self, hash: B256) -> RpcResult<Option<U256>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getUncleCountByBlockHash");
 
+        // Only a missing block or a body without an ommers list needs the full block, which counts
+        // the missing list as zero uncles.
+        if let Some(ommers) = EthBlocks::ommers(self, hash.into()).await? {
+            return Ok(Some(U256::from(ommers.len())))
+        }
+
         if let Some(block) = self.block_by_hash(hash, false).await? {
             Ok(Some(U256::from(block.uncles.len())))
         } else {
@@ -563,6 +569,12 @@ where
         number: BlockNumberOrTag,
     ) -> RpcResult<Option<U256>> {
         trace!(target: "rpc::eth", ?number, "Serving eth_getUncleCountByBlockNumber");
+
+        // Only a missing block or a body without an ommers list needs the full block, which counts
+        // the missing list as zero uncles.
+        if let Some(ommers) = EthBlocks::ommers(self, number.into()).await? {
+            return Ok(Some(U256::from(ommers.len())))
+        }
 
         if let Some(block) = self.block_by_number(number, false).await? {
             Ok(Some(U256::from(block.uncles.len())))

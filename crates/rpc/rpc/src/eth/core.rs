@@ -545,7 +545,7 @@ mod tests {
     use alloy_rpc_types_eth::{
         simulate::{SimBlock, SimulatePayload},
         state::{AccountOverride, EvmOverrides, StateOverride},
-        BlockOverrides, Bundle, TransactionRequest,
+        BlockOverrides, Bundle, Index, TransactionRequest,
     };
     use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
     use evm2::{evm::CacheDB, AccountInfo};
@@ -573,7 +573,9 @@ mod tests {
     };
     use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
     use reth_rpc_eth_api::{
-        helpers::{Call, EthBlocks, EthCall, EthTransactions, LoadPendingBlock, SpawnBlocking},
+        helpers::{
+            Call, EthBlocks, EthCall, EthTransactions, LoadBlock, LoadPendingBlock, SpawnBlocking,
+        },
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
@@ -2195,5 +2197,183 @@ mod tests {
             .unwrap()
             .is_some());
         }
+    }
+
+    #[tokio::test]
+    async fn header_count_and_uncle_lookups_skip_loading_blocks() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().genesis(Genesis::default()).build());
+        let mut rng = generators::rng();
+        for (settings, prune_senders) in [
+            (StorageSettings::v2(), false),
+            (StorageSettings::v1(), false),
+            (StorageSettings::v1(), true),
+        ] {
+            let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+            let mut parent = init_genesis_with_settings(&factory, settings).unwrap();
+            // Both blocks are pre-merge, so block 2 stores its ommers.
+            let blocks = (1..=2u8)
+                .map(|number| {
+                    let block = random_block(
+                        &mut rng,
+                        number.into(),
+                        BlockParams {
+                            parent: Some(parent),
+                            tx_count: Some(number + 1),
+                            ommers_count: Some(number - 1),
+                            ..Default::default()
+                        },
+                    );
+                    parent = block.hash();
+                    block.try_recover().unwrap()
+                })
+                .collect::<Vec<_>>();
+
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw
+                .append_blocks_with_state(
+                    blocks.clone(),
+                    &ExecutionOutcome {
+                        first_block: 1,
+                        receipts: blocks
+                            .iter()
+                            .map(|block| vec![Default::default(); block.body().transactions.len()])
+                            .collect(),
+                        ..Default::default()
+                    },
+                    Default::default(),
+                )
+                .unwrap();
+            if prune_senders {
+                provider_rw.tx_ref().clear::<tables::TransactionSenders>().unwrap();
+            }
+            provider_rw.update_pipeline_stages(2, false).unwrap();
+            provider_rw.commit().unwrap();
+
+            let api = build_test_eth_api(BlockchainProvider::new(factory).unwrap());
+            for block in &blocks {
+                let expected_header =
+                    api.converter().convert_header(block.clone_sealed_header(), None).unwrap();
+                let ommers = &block.body().ommers;
+                // The block is read uncached first and then from the cache.
+                for cached in [false, true] {
+                    for (block_id, number) in [
+                        (BlockId::hash(block.hash()), BlockNumberOrTag::Number(block.number)),
+                        (BlockId::number(block.number), BlockNumberOrTag::Number(block.number)),
+                    ] {
+                        if cached {
+                            LoadBlock::recovered_block(&api, block_id).await.unwrap().unwrap();
+                        }
+                        assert_eq!(
+                            EthBlocks::rpc_block_header(&api, block_id).await.unwrap(),
+                            Some(expected_header.clone())
+                        );
+                        assert_eq!(
+                            EthBlocks::block_transaction_count(&api, block_id).await.unwrap(),
+                            Some(block.body().transactions.len())
+                        );
+                        assert_eq!(
+                            EthBlocks::ommers(&api, block_id).await.unwrap().as_ref(),
+                            Some(ommers)
+                        );
+                        let uncle =
+                            EthBlocks::ommer_by_block_and_index(&api, block_id, Index::from(0))
+                                .await
+                                .unwrap();
+                        assert_eq!(
+                            uncle.map(|uncle| uncle.header.hash),
+                            ommers.first().map(|ommer| ommer.hash_slow())
+                        );
+                        let count = Some(U256::from(ommers.len()));
+                        assert_eq!(
+                            <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::block_uncles_count_by_hash(
+                                &api,
+                                block.hash()
+                            )
+                            .await
+                            .unwrap(),
+                            count
+                        );
+                        assert_eq!(
+                            <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::block_uncles_count_by_number(
+                                &api, number
+                            )
+                            .await
+                            .unwrap(),
+                            count
+                        );
+                        assert_eq!(
+                            api.cache().get_maybe_block(block.hash()).await.unwrap().is_some(),
+                            cached
+                        );
+                    }
+                }
+            }
+
+            for block_id in [BlockId::hash(B256::random()), BlockId::number(3)] {
+                assert_eq!(EthBlocks::rpc_block_header(&api, block_id).await.unwrap(), None);
+                assert_eq!(EthBlocks::block_transaction_count(&api, block_id).await.unwrap(), None);
+                assert_eq!(EthBlocks::ommers(&api, block_id).await.unwrap(), None);
+                assert!(EthBlocks::ommer_by_block_and_index(&api, block_id, Index::from(0))
+                    .await
+                    .unwrap()
+                    .is_none());
+            }
+            assert_eq!(
+                <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::block_uncles_count_by_hash(
+                    &api,
+                    B256::random()
+                )
+                .await
+                .unwrap(),
+                None
+            );
+            assert_eq!(
+                <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::block_uncles_count_by_number(
+                    &api,
+                    BlockNumberOrTag::Number(3)
+                )
+                .await
+                .unwrap(),
+                None
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn header_count_and_uncle_lookups_read_pending_block_as_before() {
+        let provider = MockEthProvider::default();
+        let parent =
+            Header { gas_limit: 30_000_000, base_fee_per_gas: Some(1), ..Default::default() };
+        provider.add_block(parent.hash_slow(), Block { header: parent, body: Default::default() });
+        let api = build_test_eth_api(provider);
+
+        // The node builds the pending block locally.
+        let pending = BlockId::pending();
+        let block = LoadBlock::recovered_block(&api, pending).await.unwrap();
+        assert!(block.is_some());
+        assert_eq!(
+            EthBlocks::rpc_block_header(&api, pending).await.unwrap(),
+            block.as_ref().map(|block| api
+                .converter()
+                .convert_header(block.clone_sealed_header(), None)
+                .unwrap())
+        );
+        assert_eq!(
+            EthBlocks::block_transaction_count(&api, pending).await.unwrap(),
+            block.as_ref().map(|block| block.body().transactions.len())
+        );
+        assert_eq!(
+            EthBlocks::ommers(&api, pending).await.unwrap(),
+            block.as_ref().map(|block| block.body().ommers.clone())
+        );
+        assert_eq!(
+            <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::block_uncles_count_by_number(
+                &api,
+                BlockNumberOrTag::Pending
+            )
+            .await
+            .unwrap(),
+            block.map(|block| U256::from(block.body().ommers.len()))
+        );
     }
 }
