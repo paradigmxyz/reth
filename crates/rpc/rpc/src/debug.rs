@@ -972,7 +972,7 @@ where
             .provider()
             .block_with_senders_by_id(block_id, TransactionVariant::NoHash)
             .to_rpc_result()?
-            .unwrap_or_default();
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
         Ok(block.into_transactions_recovered().map(|tx| tx.encoded_2718().into()).collect())
     }
 

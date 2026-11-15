@@ -318,6 +318,7 @@ async fn test_basic_debug_calls(client: &RpcClient) {
         .request::<_, Option<Bytes>>("debug_getRawTransaction", (B256::default(),))
         .await
         .unwrap();
+    client.request::<_, Vec<Bytes>>("debug_getRawTransactions", (block_id,)).await.unwrap_err();
     client.request::<_, Vec<Bytes>>("debug_getRawReceipts", (block_id,)).await.unwrap_err();
     client.request_noparams::<Vec<Value>>("debug_getBadBlocks").await.unwrap();
     client.request_noparams::<()>("debug_clearTxpool").await.unwrap();
