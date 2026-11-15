@@ -629,12 +629,12 @@ where
         // retained anywhere else, so the task's update channel closes when producers finish.
         let hint_stream = state_root_job.take_hint_stream();
         let hashed_update_stream = state_root_job.take_hashed_update_stream();
-        // An executor that executes the block in parallel replaces transaction prewarming: its
-        // workers' speculative changes are the access hints.
+        // An executor that executes the block in parallel sends its workers' speculative changes
+        // as access hints, alongside the hints of transaction prewarming.
         let (prewarm_hint_stream, execution_hint_stream) = if !parallel_bal_execution &&
             self.evm_config.executes_transactions_in_parallel(env.transaction_count)
         {
-            (None, hint_stream)
+            (hint_stream.clone(), hint_stream)
         } else {
             (hint_stream, None)
         };
