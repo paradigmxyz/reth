@@ -49,7 +49,7 @@ pub struct Discovery {
     /// All nodes discovered via discovery protocol.
     ///
     /// These nodes can be ephemeral and are updated via the discovery protocol.
-    discovered_nodes: LruMap<PeerId, PeerAddr>,
+    discovered_nodes: LruMap<PeerId, DiscoveredNode>,
     /// Local ENR of the discovery v4 service (discv5 ENR has same [`PeerId`]).
     local_enr: NodeRecord,
     /// Handler to interact with the Discovery v4 service
@@ -379,27 +379,44 @@ impl Discovery {
         Ok(())
     }
 
-    /// Processes an incoming [`NodeRecord`] update from a discovery service
-    fn on_node_record_update(&mut self, record: NodeRecord, fork_id: Option<ForkId>) {
+    /// Processes an incoming [`NodeRecord`] update from a discovery service.
+    fn on_node_record_update(
+        &mut self,
+        record: NodeRecord,
+        fork_id: Option<ForkId>,
+        enr_seq: Option<u64>,
+    ) {
         let peer_id = record.id;
         let tcp_addr = record.tcp_addr();
-        if tcp_addr.port() == 0 {
-            // useless peer for p2p
-            return
-        }
         let udp_addr = record.udp_addr();
         let addr = PeerAddr::new(tcp_addr, Some(udp_addr));
-        // A known peer is forwarded again when its dial address changes, e.g. a dual-stack peer
-        // later seen on its other address family. The UDP port is ignored because discv4 and
-        // discv5 can listen on different ones, and IPs are compared canonically because discv5
-        // reports IPv4 sessions on an IPv6 socket as IPv4-mapped addresses.
-        if self.discovered_nodes.get(&peer_id).is_some_and(|known| {
-            known.tcp().port() == tcp_addr.port() &&
-                known.tcp().ip().to_canonical() == tcp_addr.ip().to_canonical()
-        }) {
-            return
+        if let Some(known) = self.discovered_nodes.get(&peer_id) {
+            // A delayed discv4 proof validates UDP reachability, not the TCP port of the
+            // record that started it. It cannot supersede an endpoint learned from an ENR.
+            if enr_seq < known.enr_seq {
+                return
+            }
+            // Even an unchanged endpoint can carry a newer ENR. Unsequenced discv4 updates
+            // must not erase the freshness information learned from discv5 or DNS.
+            known.enr_seq = enr_seq;
+            if tcp_addr.port() == 0 {
+                return
+            }
+            known.dialable_enr_seq = enr_seq;
+            // Discovery protocols may use different UDP ports for the same dial address.
+            if known.addr.tcp().port() == tcp_addr.port() &&
+                known.addr.tcp().ip().to_canonical() == tcp_addr.ip().to_canonical()
+            {
+                return
+            }
+            known.addr = addr;
+        } else {
+            if tcp_addr.port() == 0 {
+                return
+            }
+            self.discovered_nodes
+                .insert(peer_id, DiscoveredNode { addr, enr_seq, dialable_enr_seq: enr_seq });
         }
-        self.discovered_nodes.insert(peer_id, addr);
         self.queued_events.push_back(DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
             peer_id,
             addr,
@@ -409,10 +426,37 @@ impl Discovery {
 
     fn on_discv4_update(&mut self, update: DiscoveryUpdate) {
         match update {
-            DiscoveryUpdate::Added(record) | DiscoveryUpdate::DiscoveredAtCapacity(record) => {
-                self.on_node_record_update(record, None);
+            DiscoveryUpdate::Added(record) => {
+                self.on_node_record_update(record, None, None);
             }
-            DiscoveryUpdate::EnrForkId(node, fork_id) => {
+            DiscoveryUpdate::DiscoveredAtCapacity(record) => {
+                // Full-bucket referrals need not have an endpoint proof. They may introduce
+                // a peer, but must not replace an address already learned for its ID.
+                if !self.discovered_nodes.contains(&record.id) {
+                    self.on_node_record_update(record, None, None);
+                }
+            }
+            DiscoveryUpdate::EnrForkId(mut node, fork_id) => {
+                // This event also updates the peer manager's address, independently of whether
+                // it changed. Keep the deduplication cache aligned without losing ENR freshness.
+                if node.tcp_port != 0 {
+                    let addr = PeerAddr::new(node.tcp_addr(), Some(node.udp_addr()));
+                    if let Some(known) = self.discovered_nodes.get_or_insert(node.id, || {
+                        DiscoveredNode { addr, enr_seq: None, dialable_enr_seq: None }
+                    }) {
+                        if known.enr_seq.is_some() {
+                            // Retain the newer endpoint, but still deliver the fork ID.
+                            node = NodeRecord::new_with_ports(
+                                known.addr.tcp().ip(),
+                                known.addr.tcp().port(),
+                                known.addr.udp().map(|addr| addr.port()),
+                                node.id,
+                            );
+                        } else {
+                            known.addr = addr;
+                        }
+                    }
+                }
                 self.queued_events.push_back(DiscoveryEvent::EnrForkId(node, fork_id))
             }
             DiscoveryUpdate::Removed(peer_id) => {
@@ -446,10 +490,10 @@ impl Discovery {
                 self.discv5_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
             {
                 if let Some(discv5) = self.discv5.as_mut() &&
-                    let Some(DiscoveredPeer { node_record, fork_id }) =
+                    let Some(DiscoveredPeer { node_record, fork_id, enr_seq }) =
                         discv5.on_discv5_update(update)
                 {
-                    self.on_node_record_update(node_record, fork_id);
+                    self.on_node_record_update(node_record, fork_id, Some(enr_seq));
                 }
             }
 
@@ -457,6 +501,14 @@ impl Discovery {
             while let Some(Poll::Ready(Some(update))) =
                 self.dns_discovery_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
             {
+                let enr_seq = update.enr.seq();
+                // An equal ENR must not undo an address recovered from a live session.
+                // A newer ENR seen only on a disabled TCP family may still supply an endpoint.
+                if self.discovered_nodes.peek(&update.node_record.id).is_some_and(|known| {
+                    Some(enr_seq) < known.enr_seq || known.dialable_enr_seq == Some(enr_seq)
+                }) {
+                    continue
+                }
                 self.add_discv4_node(update.node_record);
                 if let Err(err) = self.add_discv5_node(update.enr) {
                     trace!(target: "net::discovery",
@@ -464,7 +516,7 @@ impl Discovery {
                         "failed adding node discovered by dns to discv5"
                     );
                 }
-                self.on_node_record_update(update.node_record, update.fork_id);
+                self.on_node_record_update(update.node_record, update.fork_id, Some(enr_seq));
             }
 
             while let Some(Poll::Ready(ip)) =
@@ -506,6 +558,16 @@ impl Discovery {
             }
         }
     }
+}
+
+/// The last forwarded address and the highest ENR sequence observed for a peer.
+#[derive(Debug)]
+struct DiscoveredNode {
+    addr: PeerAddr,
+    enr_seq: Option<u64>,
+    /// Latest ENR that supplied a usable address; may lag `enr_seq` when TCP is disabled
+    /// for a session's address family.
+    dialable_enr_seq: Option<u64>,
 }
 
 const fn set_bound_rlpx_port_if_unset(config: &mut reth_discv5::Config, port: u16) {
@@ -575,6 +637,7 @@ impl Discovery {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_ethereum_forks::ForkHash;
     use std::{
         net::{Ipv4Addr, Ipv6Addr, SocketAddrV4},
         time::Duration,
@@ -1140,8 +1203,10 @@ mod tests {
         let v4_mapped =
             NodeRecord::new((Ipv4Addr::LOCALHOST.to_ipv6_mapped(), 30303).into(), peer_id);
         let v6 = NodeRecord::new((Ipv6Addr::LOCALHOST, 30303).into(), peer_id);
-        for record in [v4, v4_discv5, v4_mapped, v6, v6, v4] {
-            discovery.on_node_record_update(record, None);
+        let new_port = NodeRecord { tcp_port: 30304, ..v4 };
+        let no_tcp = NodeRecord { tcp_port: 0, ..v4 };
+        for record in [v4, v4_discv5, v4_mapped, v6, v6, v4, new_port, no_tcp] {
+            discovery.on_node_record_update(record, None, None);
         }
 
         let new_node = |record: NodeRecord| {
@@ -1151,6 +1216,222 @@ mod tests {
                 fork_id: None,
             })
         };
-        assert_eq!(discovery.queued_events, [new_node(v4), new_node(v6), new_node(v4)]);
+        assert_eq!(
+            discovery.queued_events,
+            [new_node(v4), new_node(v6), new_node(v4), new_node(new_port)]
+        );
+    }
+
+    #[test]
+    fn capacity_referrals_do_not_replace_known_addresses() {
+        let mut discovery = Discovery::noop();
+        discovery.discovered_nodes = LruMap::new(DEFAULT_MAX_CAPACITY_DISCOVERED_PEERS_CACHE);
+        let peer_id = PeerId::random();
+        let known = NodeRecord::new((Ipv4Addr::LOCALHOST, 30303).into(), peer_id);
+        let referred = NodeRecord::new((Ipv6Addr::LOCALHOST, 30304).into(), peer_id);
+        discovery.on_discv4_update(DiscoveryUpdate::Added(known));
+        discovery.queued_events.clear();
+
+        discovery.on_discv4_update(DiscoveryUpdate::DiscoveredAtCapacity(referred));
+        assert!(discovery.queued_events.is_empty());
+
+        // Proven updates and previously unknown referrals still reach the peer manager.
+        discovery.on_discv4_update(DiscoveryUpdate::Added(referred));
+        let unknown = NodeRecord { id: PeerId::random(), ..known };
+        discovery.on_discv4_update(DiscoveryUpdate::DiscoveredAtCapacity(unknown));
+        assert_eq!(discovery.queued_events.len(), 2);
+    }
+
+    #[test]
+    fn fork_id_updates_keep_address_cache_in_sync() {
+        let mut discovery = Discovery::noop();
+        discovery.discovered_nodes = LruMap::new(DEFAULT_MAX_CAPACITY_DISCOVERED_PEERS_CACHE);
+        let peer_id = PeerId::random();
+        let v4 = NodeRecord::new((Ipv4Addr::LOCALHOST, 30303).into(), peer_id);
+        let v6 = NodeRecord::new((Ipv6Addr::LOCALHOST, 30303).into(), peer_id);
+        let fork_id = ForkId { hash: ForkHash([1, 2, 3, 4]), next: 0 };
+        discovery.on_node_record_update(v4, None, None);
+        discovery.on_node_record_update(v6, None, None);
+        discovery.on_discv4_update(DiscoveryUpdate::EnrForkId(v4, fork_id));
+        discovery.queued_events.clear();
+
+        discovery.on_node_record_update(v6, None, None);
+        assert_eq!(discovery.queued_events.len(), 1);
+        discovery.queued_events.clear();
+        discovery.on_discv4_update(DiscoveryUpdate::EnrForkId(v6, fork_id));
+        assert_eq!(discovery.queued_events, [DiscoveryEvent::EnrForkId(v6, fork_id)]);
+    }
+
+    #[tokio::test]
+    async fn older_dns_enr_does_not_replace_session_address() {
+        let mut discovery = start_shared_port_node(0).await;
+        let secret = SecretKey::new(&mut rand::rng());
+        let old = Enr::builder()
+            .ip4(Ipv4Addr::new(127, 0, 0, 2))
+            .tcp4(30303)
+            .udp4(30303)
+            .seq(1)
+            .build(&secret)
+            .unwrap();
+        let fresh = Enr::builder()
+            .ip4(Ipv4Addr::LOCALHOST)
+            .tcp4(30303)
+            .udp4(30303)
+            .seq(2)
+            .build(&secret)
+            .unwrap();
+        let advertised = fresh.clone();
+        let EnrCombinedKeyWrapper(fresh) = fresh.try_into().unwrap();
+        let (discv5_tx, discv5_rx) = mpsc::channel(4);
+        discovery.discv5_updates = Some(ReceiverStream::new(discv5_rx));
+        discv5_tx
+            .try_send(discv5::Event::SessionEstablished(
+                fresh.clone(),
+                (Ipv4Addr::new(127, 0, 0, 4), 30303).into(),
+            ))
+            .unwrap();
+        let newer = Enr::builder()
+            .ip4(Ipv4Addr::new(127, 0, 0, 3))
+            .tcp4(30304)
+            .udp4(30303)
+            .seq(3)
+            .build(&secret)
+            .unwrap();
+        let (dns_tx, dns_rx) = mpsc::channel(4);
+        discovery.dns_discovery_updates = Some(ReceiverStream::new(dns_rx));
+        dns_tx
+            .try_send(DnsNodeRecordUpdate {
+                node_record: NodeRecord::try_from(&old).unwrap(),
+                fork_id: None,
+                enr: old,
+            })
+            .unwrap();
+
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+        assert_eq!(
+            discovery.poll(&mut cx),
+            Poll::Ready(DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
+                peer_id: enr_to_discv4_id(&fresh).unwrap(),
+                addr: PeerAddr::new_with_ports(
+                    Ipv4Addr::new(127, 0, 0, 4).into(),
+                    30303,
+                    Some(30303)
+                ),
+                fork_id: None,
+            }))
+        );
+        assert_eq!(discovery.poll(&mut cx), Poll::Pending);
+
+        // NAT recovery uses the live session IP. Replaying that same ENR through DNS must
+        // not undo it, even though the sequence number matches.
+        dns_tx
+            .try_send(DnsNodeRecordUpdate {
+                node_record: NodeRecord::try_from(&advertised).unwrap(),
+                fork_id: None,
+                enr: advertised,
+            })
+            .unwrap();
+        assert_eq!(discovery.poll(&mut cx), Poll::Pending);
+
+        // A genuinely newer DNS record can still move a peer's dial address.
+        let record = NodeRecord::try_from(&newer).unwrap();
+        dns_tx
+            .try_send(DnsNodeRecordUpdate { node_record: record, fork_id: None, enr: newer })
+            .unwrap();
+        assert_eq!(
+            discovery.poll(&mut cx),
+            Poll::Ready(DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
+                peer_id: record.id,
+                addr: PeerAddr::new(record.tcp_addr(), Some(record.udp_addr())),
+                fork_id: None,
+            }))
+        );
+
+        let next = Enr::builder()
+            .ip4(Ipv4Addr::new(127, 0, 0, 5))
+            .tcp4(30305)
+            .udp4(30303)
+            .ip6(Ipv6Addr::LOCALHOST)
+            .tcp6(0)
+            .udp6(30303)
+            .seq(4)
+            .build(&secret)
+            .unwrap();
+        let EnrCombinedKeyWrapper(session_enr) = next.clone().try_into().unwrap();
+        discv5_tx
+            .try_send(discv5::Event::SessionEstablished(
+                session_enr,
+                (Ipv6Addr::LOCALHOST, 30303).into(),
+            ))
+            .unwrap();
+        assert_eq!(discovery.poll(&mut cx), Poll::Pending);
+
+        // The disabled IPv6 TCP endpoint must not prevent this ENR's usable IPv4 update.
+        let record = NodeRecord::try_from(&next).unwrap();
+        dns_tx
+            .try_send(DnsNodeRecordUpdate { node_record: record, fork_id: None, enr: next })
+            .unwrap();
+        assert_eq!(
+            discovery.poll(&mut cx),
+            Poll::Ready(DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
+                peer_id: record.id,
+                addr: PeerAddr::new(record.tcp_addr(), Some(record.udp_addr())),
+                fork_id: None,
+            }))
+        );
+    }
+
+    #[test]
+    fn enr_freshness_survives_deduplication_and_discv4() {
+        let mut discovery = Discovery::noop();
+        discovery.discovered_nodes = LruMap::new(DEFAULT_MAX_CAPACITY_DISCOVERED_PEERS_CACHE);
+        let peer_id = PeerId::random();
+        let v4 = NodeRecord::new((Ipv4Addr::LOCALHOST, 30303).into(), peer_id);
+        let v6 = NodeRecord::new((Ipv6Addr::LOCALHOST, 30303).into(), peer_id);
+        discovery.on_node_record_update(v4, None, Some(2));
+        discovery.queued_events.clear();
+        discovery.on_node_record_update(v4, None, Some(4));
+        discovery.on_node_record_update(v6, None, Some(3));
+        assert!(discovery.queued_events.is_empty());
+
+        discovery.on_discv4_update(DiscoveryUpdate::Added(v6));
+        let fork_id = ForkId { hash: ForkHash([1, 2, 3, 4]), next: 0 };
+        discovery.on_discv4_update(DiscoveryUpdate::EnrForkId(v4, fork_id));
+        discovery.queued_events.clear();
+        discovery.on_node_record_update(v6, None, Some(3));
+        assert!(discovery.queued_events.is_empty());
+
+        // One ENR may advertise both families at the same sequence number.
+        discovery.on_node_record_update(v6, None, Some(4));
+        assert_eq!(discovery.queued_events.len(), 1);
+        assert_eq!(discovery.discovered_nodes.peek(&peer_id).unwrap().enr_seq, Some(4));
+        discovery.queued_events.clear();
+
+        // A newer ENR can disable TCP for the session's family. Its sequence still matters
+        // for the usable address previously learned on the other family.
+        discovery.on_node_record_update(NodeRecord { tcp_port: 0, ..v4 }, None, Some(5));
+        discovery.on_node_record_update(v4, None, Some(4));
+        assert!(discovery.queued_events.is_empty());
+        assert_eq!(discovery.discovered_nodes.peek(&peer_id).unwrap().enr_seq, Some(5));
+    }
+
+    #[test]
+    fn delayed_discv4_updates_preserve_enr_address() {
+        let mut discovery = Discovery::noop();
+        discovery.discovered_nodes = LruMap::new(DEFAULT_MAX_CAPACITY_DISCOVERED_PEERS_CACHE);
+        let peer_id = PeerId::random();
+        let old = NodeRecord::new((Ipv4Addr::LOCALHOST, 30303).into(), peer_id);
+        let fresh = NodeRecord { tcp_port: 30304, ..old };
+        discovery.on_node_record_update(old, None, Some(1));
+        discovery.on_node_record_update(fresh, None, Some(2));
+        discovery.queued_events.clear();
+
+        // A successful pong can still carry the record that started an older DNS lookup.
+        discovery.on_discv4_update(DiscoveryUpdate::Added(old));
+        assert!(discovery.queued_events.is_empty());
+        let fork_id = ForkId { hash: ForkHash([1, 2, 3, 4]), next: 0 };
+        discovery.on_discv4_update(DiscoveryUpdate::EnrForkId(old, fork_id));
+        assert_eq!(discovery.queued_events, [DiscoveryEvent::EnrForkId(fresh, fork_id)]);
+        assert_eq!(discovery.discovered_nodes.peek(&peer_id).unwrap().addr.tcp(), fresh.tcp_addr());
     }
 }
