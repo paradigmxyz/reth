@@ -118,6 +118,9 @@ pub struct RayonConfig {
     /// Number of threads for the proof account worker pool (trie account proof workers).
     /// If `None` or zero, uses four times the resolved CPU pool thread count.
     pub proof_account_worker_threads: Option<usize>,
+    /// Niceness of the proof storage and account worker threads.
+    /// If `None`, they inherit the niceness of the thread that first uses each pool.
+    pub proof_worker_niceness: Option<i32>,
     /// Number of threads for the prewarming pool (execution prewarming workers).
     /// If `None`, derived from available parallelism.
     pub prewarming_threads: Option<usize>,
@@ -140,6 +143,7 @@ impl Default for RayonConfig {
             max_blocking_tasks: DEFAULT_MAX_BLOCKING_TASKS,
             proof_storage_worker_threads: None,
             proof_account_worker_threads: None,
+            proof_worker_niceness: None,
             prewarming_threads: None,
             bal_streaming_threads: None,
             state_trie_overlay_worker_threads: None,
@@ -188,6 +192,12 @@ impl RayonConfig {
         proof_account_worker_threads: usize,
     ) -> Self {
         self.proof_account_worker_threads = Some(proof_account_worker_threads);
+        self
+    }
+
+    /// Set the niceness of the proof storage and account worker threads.
+    pub const fn with_proof_worker_niceness(mut self, proof_worker_niceness: i32) -> Self {
+        self.proof_worker_niceness = Some(proof_worker_niceness);
         self
     }
 
@@ -491,6 +501,7 @@ impl Runtime {
                 max_blocking_tasks: 16,
                 proof_storage_worker_threads: Some(2),
                 proof_account_worker_threads: Some(2),
+                proof_worker_niceness: None,
                 prewarming_threads: Some(2),
                 bal_streaming_threads: Some(2),
                 state_trie_overlay_worker_threads: Some(2),
@@ -1018,14 +1029,16 @@ impl RuntimeBuilder {
                 .proof_storage_worker_threads_override()
                 .unwrap_or(default_proof_worker_threads);
             let proof_storage_worker_pool =
-                WorkerPool::new(proof_storage_worker_threads, "proof-strg");
+                WorkerPool::new(proof_storage_worker_threads, "proof-strg")
+                    .with_niceness(config.rayon.proof_worker_niceness);
 
             let proof_account_worker_threads = config
                 .rayon
                 .proof_account_worker_threads_override()
                 .unwrap_or(default_proof_worker_threads);
             let proof_account_worker_pool =
-                WorkerPool::new(proof_account_worker_threads, "proof-acct");
+                WorkerPool::new(proof_account_worker_threads, "proof-acct")
+                    .with_niceness(config.rayon.proof_worker_niceness);
 
             let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
             let prewarming_pool = Arc::new(WorkerPool::new(prewarming_threads, "prewarm"));
@@ -1047,6 +1060,7 @@ impl RuntimeBuilder {
                 storage_threads,
                 proof_storage_worker_threads,
                 proof_account_worker_threads,
+                proof_worker_niceness = ?config.rayon.proof_worker_niceness,
                 prewarming_threads,
                 bal_streaming_threads,
                 state_trie_overlay_worker_threads,
