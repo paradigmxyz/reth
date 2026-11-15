@@ -4,17 +4,20 @@
 //! still come from the real serving peer and go through production validation.
 
 use crate::{wait::poll_until, E2ETestSetupBuilder};
+use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_eth_wire_types::snap::{
     GetAccountRangeMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
     GetStorageRangesMessage, SnapProtocolMessage,
 };
+use reth_ethereum_primitives::EthPrimitives;
 use reth_network_p2p::{
     download::DownloadClient,
     error::PeerRequestResult,
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
     snap::client::{SnapClient, SnapResponse},
+    BalRequirement, BlockAccessListsClient,
 };
 use reth_network_peers::PeerId;
 use reth_node_builder::sync::{BackfillContext, BackfillSyncBuilder};
@@ -86,8 +89,8 @@ pub struct ControlledBackfill {
 
 impl<N, C> BackfillSyncBuilder<N, C> for ControlledBackfill
 where
-    N: ProviderNodeTypes,
-    C: SnapClient + HeadersClient + Clone + Unpin + 'static,
+    N: ProviderNodeTypes<Primitives = EthPrimitives>,
+    C: SnapClient + HeadersClient + BlockAccessListsClient + Clone + Unpin + 'static,
 {
     type Backfill = EthereumBackfillSync<N, ControlledSnapClient<C>>;
 
@@ -132,6 +135,23 @@ impl<C: HeadersClient> HeadersClient for ControlledSnapClient<C> {
         priority: Priority,
     ) -> Self::Output {
         self.inner.get_headers_with_priority(request, priority)
+    }
+}
+
+impl<C: BlockAccessListsClient> BlockAccessListsClient for ControlledSnapClient<C> {
+    type Output = C::Output;
+
+    fn get_block_access_lists_with_priority_and_requirement(
+        &self,
+        hashes: Vec<B256>,
+        priority: Priority,
+        requirement: BalRequirement,
+    ) -> Self::Output {
+        self.inner.get_block_access_lists_with_priority_and_requirement(
+            hashes,
+            priority,
+            requirement,
+        )
     }
 }
 

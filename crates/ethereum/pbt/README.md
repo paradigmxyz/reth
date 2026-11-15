@@ -1,26 +1,29 @@
 # PBT node integration
 
 Build with `cargo build --release --bin reth`. PBT support is included in the
-regular binary; `--pbt` enables it for a chain with `config.binaryTrieTime`.
+regular Ethereum node; `config.binaryTrieTime` schedules activation after
+Hegota/Bogota. No mainnet timestamp is assigned in this branch.
 
 Library users can enable `reth-node-pbt/cli` to reuse
-`cli::{PbtArgs, PbtChainSpecParser}`. The executable only parses these options and
-wires the configured PBT node into launch.
+`cli::PbtArgs` for performance, migration and storage settings. The normal Ethereum
+chain parser, add-ons and backfill select commitments from the chain schedule.
 
 ```sh
 reth init --chain /path/to/genesis.json --datadir /path/to/data
-reth node --chain /path/to/genesis.json --datadir /path/to/data --pbt
+reth node --chain /path/to/genesis.json --datadir /path/to/data
 ```
 
 Set `config.binaryTrieTime` in the genesis file to the activation timestamp.
-Use `0` for PBT from genesis. Amsterdam must be active at genesis for BAL replay.
-`--pbt` conflicts with `--snap.v2`.
+Use `0` for PBT from genesis in tests. Bogota must be active by the
+binary-tree fork. Replaying historical state from genesis still requires BALs
+for that replay range; otherwise use the finalized migration anchor described
+below. Snap/2 state synchronization is unsupported on binary-tree chains.
 
 Add `--pbt.parallel` for parallel hashing of dense execution and BAL batches.
 Sparse updates remain incremental. Hashing uses Reth's existing Rayon pool.
 
 ```sh
-reth node --chain /path/to/genesis.json --datadir /path/to/data --pbt --pbt.parallel \
+reth node --chain /path/to/genesis.json --datadir /path/to/data --pbt.parallel \
   --log.stdout.format json
 ```
 

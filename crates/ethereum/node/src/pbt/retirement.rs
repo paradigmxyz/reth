@@ -1,16 +1,14 @@
 //! Finality-gated MPT disposal, committed atomically with a permanent database marker.
 
 use alloy_primitives::B256;
+use reth_db_api::{
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_engine_tree::tree::state_root_strategy::pbt::PbtStateRootStrategy;
-use reth_ethereum::{
-    primitives::{AlloyBlockHeader, BlockHeader, SealedHeader},
-    provider::{
-        db::{
-            tables,
-            transaction::{DbTx, DbTxMut},
-        },
-        BlockIdReader, DBProvider, DatabaseProviderFactory, HeaderProvider, StageCheckpointReader,
-    },
+use reth_primitives_traits::{AlloyBlockHeader, BlockHeader, SealedHeader};
+use reth_provider::{
+    BlockIdReader, DBProvider, DatabaseProviderFactory, HeaderProvider, StageCheckpointReader,
 };
 use reth_stages::StageId;
 use reth_trie_pbt::TreeHasher;

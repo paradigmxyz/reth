@@ -2,10 +2,8 @@
 
 use alloy_primitives::{Bytes, B256};
 use eyre::WrapErr;
-use reth_ethereum::{
-    network::p2p::{BalRequirement, BlockAccessListsClient},
-    provider::RawBal,
-};
+use reth_network_p2p::{BalRequirement, BlockAccessListsClient};
+use reth_provider::RawBal;
 use std::time::Duration;
 
 /// Maximum wait for a network client or one BAL response.
@@ -65,15 +63,13 @@ pub(super) struct BalByteBudgetExceeded;
 mod tests {
     use super::*;
     use alloy_primitives::keccak256;
-    use reth_ethereum::network::{
-        api::PeerId,
-        p2p::{
-            download::DownloadClient,
-            error::{PeerRequestResult, RequestError},
-            priority::Priority,
-            test_utils::TestFullBlockClient,
-            BlockAccessLists,
-        },
+    use reth_network_api::PeerId;
+    use reth_network_p2p::{
+        download::DownloadClient,
+        error::{PeerRequestResult, RequestError},
+        priority::Priority,
+        test_utils::TestFullBlockClient,
+        BlockAccessLists,
     };
     use std::{
         collections::VecDeque,

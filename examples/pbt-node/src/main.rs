@@ -1,4 +1,4 @@
-//! PBT dev node using the same integration as `reth node --pbt`.
+//! Dev node scheduling binary-tree commitments through standard Ethereum setup.
 
 use reth_ethereum::{
     node::{
@@ -11,7 +11,7 @@ use reth_ethereum::{
     },
     tasks::Runtime,
 };
-use reth_node_pbt::PbtNode;
+use reth_node_pbt::configure_chain;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 #[tokio::main]
@@ -27,8 +27,12 @@ async fn main() -> eyre::Result<()> {
         Err(std::env::VarError::NotPresent) => 0,
         Err(error) => return Err(error.into()),
     };
-    let pbt = PbtNode::new(reth_ethereum::chainspec::DEV.clone(), &directory, activation)?;
-    let chain = pbt.chain_spec();
+    let mut chain =
+        reth_ethereum::chainspec::ChainSpecBuilder::from(&*reth_ethereum::chainspec::DEV)
+            .bogota_activated()
+            .build();
+    chain.genesis.config.extra_fields.insert("binaryTrieTime".into(), activation.into());
+    let chain = configure_chain(Arc::new(chain))?;
     let config = NodeConfig::test()
         .dev()
         .with_datadir_args(DatadirArgs { datadir: directory.into(), ..Default::default() })
@@ -41,21 +45,11 @@ async fn main() -> eyre::Result<()> {
     let runtime = Runtime::test();
     let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-    let backfill = pbt.backfill();
-    let methods = pbt.rpc_module()?;
+    let backfill = reth_ethereum::node::snap::EthereumBackfill::new(&config);
     let mut handle = NodeBuilder::new(config)
         .with_database(database)
         .with_launch_context(runtime.clone())
-        .with_types::<EthereumNode>()
-        .with_components(EthereumNode::components())
-        .with_add_ons(pbt.add_ons())
-        .extend_rpc_modules(move |ctx| {
-            // MPT proof responses cannot authenticate against a PBT header commitment.
-            ctx.modules.remove_method_from_configured("eth_getProof");
-            ctx.auth_module.remove_auth_method("eth_getProof");
-            ctx.auth_module.merge_auth_methods(methods)?;
-            Ok(())
-        })
+        .node(EthereumNode::default())
         .launch_with_debug_capabilities_and_backfill(backfill)
         .await?;
     println!(

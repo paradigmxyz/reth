@@ -1,19 +1,15 @@
 //! Reconstructs a finalized anchor's hashed-state view without mutating the live database.
 
 use alloy_primitives::B256;
-use reth_ethereum::{
-    primitives::{AlloyBlockHeader, SealedHeader},
-    provider::{
-        BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        DbTxProvider, HeaderProvider, LatestStateProviderRef, StageCheckpointReader,
-        StorageChangeSetReader,
-    },
-    trie::{
-        hashed_cursor::HashedPostStateCursorFactory, DatabaseHashedCursorFactory,
-        DatabaseHashedPostState, HashedPostStateSorted,
-    },
+use reth_primitives_traits::{AlloyBlockHeader, SealedHeader};
+use reth_provider::{
+    BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
+    DbTxProvider, HeaderProvider, LatestStateProviderRef, StageCheckpointReader,
+    StorageChangeSetReader,
 };
 use reth_stages::StageId;
+use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, HashedPostStateSorted};
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseHashedPostState};
 use reth_trie_pbt::persistence::SnapshotStore;
 use std::path::Path;
 

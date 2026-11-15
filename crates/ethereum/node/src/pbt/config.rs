@@ -1,10 +1,12 @@
 //! Explicit configuration for PBT execution and onboarding.
 
-use crate::{CatchupLimits, DecodeLimits, MigrationFiles, DEFAULT_CHECKPOINT_HISTORY};
+use super::{CatchupLimits, DecodeLimits, MigrationFiles, DEFAULT_CHECKPOINT_HISTORY};
 
 /// Node-owned PBT settings. Construct and validate CLI or service configuration before launch.
 #[derive(Clone, Debug)]
 pub struct PbtConfig {
+    /// Hash dense update batches in parallel; sparse batches remain incremental.
+    pub parallel: bool,
     /// Optional finalized migration anchor and its canonical artifact inputs.
     pub migration: Option<MigrationFiles>,
     /// Onboarding range limits and per-chunk staged replay budgets.
@@ -23,6 +25,7 @@ pub struct PbtConfig {
 impl Default for PbtConfig {
     fn default() -> Self {
         Self {
+            parallel: false,
             migration: None,
             catchup: CatchupLimits::default(),
             import_limits: DecodeLimits::default(),

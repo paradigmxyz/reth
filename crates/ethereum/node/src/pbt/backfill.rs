@@ -1,22 +1,20 @@
 //! Staged execution authenticates PBT commitments and retires MPT work after finality.
 
-use crate::{download, CatchupLimits, Startup};
+use super::{download, CatchupLimits, Startup};
 use alloy_primitives::{map::B256Map, B256};
+use reth_consensus::ConsensusError;
+use reth_db_api::transaction::DbTxMut;
 use reth_engine_tree::{
     backfill::PipelineSync, tree::state_root_strategy::pbt::PbtStateRootStrategy,
 };
-use reth_ethereum::{
-    consensus::ConsensusError,
-    network::p2p::BlockAccessListsClient,
-    node::builder::sync::{BackfillContext, BackfillSyncBuilder},
-    primitives::{AlloyBlockHeader, BlockHeader, GotExpected, SealedHeader},
-    provider::{
-        db::transaction::DbTxMut, providers::ProviderNodeTypes, BalProvider, ChangeSetReader,
-        DBProvider, HeaderProvider, ProviderError, ProviderFactory, StageCheckpointReader,
-        StageCheckpointWriter, StatsReader, StorageChangeSetReader, StorageSettingsCache,
-        TrieWriter,
-    },
-    EthPrimitives,
+use reth_ethereum_primitives::EthPrimitives;
+use reth_network_p2p::BlockAccessListsClient;
+use reth_node_builder::sync::{BackfillContext, BackfillSyncBuilder};
+use reth_primitives_traits::{AlloyBlockHeader, BlockHeader, GotExpected, SealedHeader};
+use reth_provider::{
+    providers::ProviderNodeTypes, BalProvider, ChangeSetReader, DBProvider, HeaderProvider,
+    ProviderError, ProviderFactory, StageCheckpointReader, StageCheckpointWriter, StatsReader,
+    StorageChangeSetReader, StorageSettingsCache, TrieWriter,
 };
 use reth_stages::{
     stages::MerkleStage, BlockErrorKind, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError,
@@ -40,7 +38,7 @@ pub struct PbtBackfill {
 }
 
 impl PbtBackfill {
-    pub(super) const fn new(strategy: Arc<PbtStateRootStrategy>, limits: CatchupLimits) -> Self {
+    pub(crate) const fn new(strategy: Arc<PbtStateRootStrategy>, limits: CatchupLimits) -> Self {
         Self { strategy, limits }
     }
 }
@@ -313,17 +311,14 @@ fn verify<H: BlockHeader>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::retirement;
+    use super::{super::retirement, *};
     use alloy_primitives::{keccak256, Address, Bytes};
-    use reth_ethereum::{
-        network::p2p::NoopFullBlockClient,
-        provider::{
-            db::{tables, transaction::DbTx},
-            test_utils::{create_test_provider_factory, insert_headers},
-            RawBal,
-        },
-        Block,
+    use reth_db_api::{tables, transaction::DbTx};
+    use reth_ethereum_primitives::Block;
+    use reth_network_p2p::NoopFullBlockClient;
+    use reth_provider::{
+        test_utils::{create_test_provider_factory, insert_headers},
+        RawBal,
     };
     use reth_trie_pbt::{
         migration::DecodeLimits, persistence::SnapshotStore, AccountData, StateTree,
