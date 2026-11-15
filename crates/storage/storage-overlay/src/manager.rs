@@ -1537,6 +1537,44 @@ mod tests {
 
     #[cfg(feature = "rayon")]
     #[test]
+    fn precomputes_state_trie_overlay_for_cached_parent_and_new_anchor() {
+        let manager = OverlayManager::new(Arc::new(WorkerPool::new(1, "state-trie-overlay-test")));
+        let blocks = test_blocks();
+        let anchor_hash = blocks[0].recovered_block().parent_hash();
+        let wait_ready = |key: OverlayCacheKey| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            loop {
+                if let Some(overlay) = manager.inner.state_trie_overlays.ready(&key) {
+                    break overlay
+                }
+                assert!(std::time::Instant::now() < deadline, "state trie overlay not precomputed");
+                thread::sleep(Duration::from_millis(10));
+            }
+        };
+
+        manager.insert_block(blocks[0].clone());
+        overlay_for_parent(&manager, blocks[0].recovered_block().hash(), anchor_hash).unwrap();
+
+        // Inserting a child of a cached parent extends the parent's overlay in the background.
+        manager.insert_block(blocks[1].clone());
+        let tip_hash = blocks[1].recovered_block().hash();
+        let precomputed = wait_ready(OverlayCacheKey { anchor_hash, tip_hash });
+        let (_, state) = overlay_for_parent(&manager, tip_hash, anchor_hash).unwrap();
+        assert!(Arc::ptr_eq(&precomputed.state, &state));
+
+        // After the frontier advances, the overlay is rebuilt against the new anchor.
+        manager.insert_block(blocks[2].clone());
+        let tip_hash = blocks[2].recovered_block().hash();
+        let new_anchor = blocks[0].recovered_block().hash();
+        manager.remove_blocks([new_anchor]);
+        manager.precompute_state_trie_overlay(tip_hash, new_anchor);
+        let precomputed = wait_ready(OverlayCacheKey { anchor_hash: new_anchor, tip_hash });
+        let (_, state) = overlay_for_parent(&manager, tip_hash, new_anchor).unwrap();
+        assert!(Arc::ptr_eq(&precomputed.state, &state));
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
     fn execution_overlay_precompute_does_not_wait_for_pending_entry() {
         let worker_pool = Arc::new(WorkerPool::new(1, "execution-overlay-pending-test"));
         let manager = OverlayManager::new(Arc::clone(&worker_pool));
