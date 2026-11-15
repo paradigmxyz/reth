@@ -318,6 +318,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 (key.tip_hash == parent_hash).then_some(key.anchor_hash)
             })
             .collect::<Vec<_>>();
+        // Only ready parents: extending one that is still computing would block a pool thread.
         let cached_parent_state_trie_overlays = self
             .inner
             .state_trie_overlays
@@ -325,7 +326,9 @@ impl<N: NodePrimitives> OverlayManager<N> {
             .iter()
             .filter_map(|entry| {
                 let key = *entry.key();
-                (key.tip_hash == parent_hash).then_some(key.anchor_hash)
+                (key.tip_hash == parent_hash &&
+                    matches!(entry.value(), OverlayCacheEntry::Ready(_)))
+                .then_some(key.anchor_hash)
             })
             .collect::<Vec<_>>();
 
@@ -385,10 +388,9 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
     /// Optimistically computes a state trie overlay from `anchor_hash` to `tip_hash`.
     ///
-    /// This returns without waiting for computation. When the parent's overlay for the same anchor
-    /// is still computing, the background task waits for it and extends it instead of merging
-    /// every block again. A concurrent persistence or reorg may make the requested range
-    /// unavailable, in which case the background task skips it.
+    /// This returns without waiting for computation, and the background task extends a ready
+    /// parent overlay when there is one. A concurrent persistence or reorg may make the requested
+    /// range unavailable, in which case the background task skips it.
     #[cfg(feature = "rayon")]
     pub fn precompute_state_trie_overlay(&self, tip_hash: B256, anchor_hash: B256) {
         if tip_hash == anchor_hash {
@@ -552,28 +554,14 @@ impl<N: NodePrimitives> OverlayManager<N> {
         let parent_state = self
             .block_state(parent_hash)
             .ok_or(StateTrieOverlayError { tip_hash: parent_hash, anchor_hash })?;
-        // Extending a computing parent overlay is far cheaper than merging the whole range again.
-        let grandparent_key = OverlayCacheKey {
-            anchor_hash,
-            tip_hash: parent_state.block_ref().recovered_block().parent_hash(),
-        };
-        let computing_parent =
-            self.inner.state_trie_overlays.entries.get(&grandparent_key).and_then(|entry| {
-                match entry.value() {
-                    OverlayCacheEntry::Computing(waiter) => Some(Arc::clone(waiter)),
-                    OverlayCacheEntry::Ready(_) => None,
-                }
-            });
-        if let Some(waiter) = computing_parent {
-            waiter.input.wait();
-        }
+        // This already runs on the worker pool, so compute here instead of queueing another job.
         self.get_or_compute_overlay(
             &self.inner.state_trie_overlays,
             &self.inner.metrics,
             anchor_hash,
             &parent_state,
             OverlayCacheConfig { precompute: true, write_to_cache: true },
-            |input, span| self.compute_state_trie_overlay(input, anchor_hash, span, true),
+            |input, _span| compute_overlay(input, anchor_hash, &self.inner.metrics),
         )
         .map(drop)
     }
@@ -706,12 +694,20 @@ impl<N: NodePrimitives> OverlayManager<N> {
             CacheAction::Compute(waiter) => {
                 let parent_input = blocks.first().and_then(|block| {
                     let parent_hash = block.recovered_block().parent_hash();
-                    (parent_hash != anchor_hash)
-                        .then(|| {
-                            cache
-                                .take_ready(&OverlayCacheKey { anchor_hash, tip_hash: parent_hash })
-                        })
-                        .flatten()
+                    if parent_hash == anchor_hash {
+                        return None
+                    }
+                    let parent_key = OverlayCacheKey { anchor_hash, tip_hash: parent_hash };
+                    // Extending a parent overlay that is still computing is far cheaper than
+                    // merging the whole range again. Best-effort fills run on the worker pool and
+                    // must not block it, so only required lookups wait.
+                    if !cache_config.precompute &&
+                        let Some(OverlayCacheEntry::Computing(parent_waiter)) =
+                            cache.entries.get(&parent_key).map(|entry| entry.value().clone())
+                    {
+                        parent_waiter.input.wait();
+                    }
+                    cache.take_ready(&parent_key)
                 });
                 span.record("parent_overlay_reused", parent_input.is_some());
                 let compute_input = match parent_input {
