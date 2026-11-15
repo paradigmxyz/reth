@@ -11,6 +11,7 @@ use crate::tree::{
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use parking_lot::Mutex;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
@@ -37,7 +38,7 @@ pub use reth_trie_parallel::{
 use std::{
     ops::Not,
     sync::{
-        atomic::{AtomicBool, AtomicUsize},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc, Arc, OnceLock,
     },
 };
@@ -238,30 +239,18 @@ where
     /// blocks.
     const SMALL_BLOCK_TX_THRESHOLD: usize = 30;
 
-    /// Number of leading transactions to convert sequentially before entering the rayon
-    /// parallel path.
+    /// Largest number of threads recovering an ordered block's transactions.
     ///
-    /// Rayon's work-stealing does not guarantee that index 0 is processed first, so the
-    /// ordered consumer can block for up to ~1ms waiting for the first slot. By converting
-    /// a small head sequentially and sending it immediately, execution can start without
-    /// waiting for rayon scheduling.
-    const PARALLEL_PREFETCH_COUNT: usize = 4;
-
-    /// Size of the first parallel tx batch in non-BAL path.
-    const FIRST_PARALLEL_TX_WINDOW_SIZE: usize = 64;
-
-    /// Largest parallel tx batch in non-BAL path.
-    ///
-    /// No transaction of a batch reaches execution before the whole batch is converted, so an
-    /// executor that keeps up with conversion would otherwise wait for most of a large block's
-    /// second half at once.
-    const MAX_PARALLEL_TX_WINDOW_SIZE: usize = 256;
+    /// Recovery runs on its own short-lived threads rather than the shared rayon pool, so it
+    /// does not queue behind sparse trie work, and claims transactions in block order, so the
+    /// executor's next transaction is always among the ones being recovered.
+    const MAX_ORDERED_CONVERSION_WORKERS: usize = 8;
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     ///
     /// For blocks with fewer than [`Self::SMALL_BLOCK_TX_THRESHOLD`] transactions, uses
-    /// sequential iteration to avoid rayon overhead. For larger blocks, uses rayon parallel
-    /// iteration to convert transactions in parallel while streaming results to execution.
+    /// sequential iteration to avoid rayon overhead. For larger blocks, converts transactions in
+    /// parallel while streaming results to execution.
     ///
     /// When `parallel_bal_execution` is disabled, preserves the original transaction order.
     /// Otherwise, streams results as they become available.
@@ -343,67 +332,43 @@ where
                             });
                     });
                 } else {
-                    // To avoid a ~1ms stall waiting for rayon to schedule index 0, the first
-                    // few transactions are recovered sequentially and sent immediately before
-                    // entering the parallel iterator for the remainder.
-                    let prefetch = Self::PARALLEL_PREFETCH_COUNT.min(transaction_count);
-                    let mut iter = transactions.into_iter();
-
-                    // Convert the first few transactions sequentially so execution can
-                    // start immediately without waiting for rayon work-stealing.
-                    if !convert_serial(
-                        iter.by_ref().take(prefetch),
-                        &convert,
-                        prewarm_tx.as_ref(),
-                        &execute_tx,
-                    ) {
-                        return
-                    }
-
-                    let mut iter = iter.enumerate();
-
-                    let mut batch_size = Self::FIRST_PARALLEL_TX_WINDOW_SIZE;
-
-                    // Without BALs, we need to preserve the initial order of transactions.
-                    // Process exponentially increasing windows to make sure that first transactions are prioritized.
+                    // Without BALs, transactions must reach execution in block order. Workers
+                    // claim transactions in order and each converted transaction is released as
+                    // soon as every earlier one is, so execution never waits on a whole batch.
+                    let workers = std::thread::available_parallelism()
+                        .map_or(1, |n| n.get() / 2)
+                        .clamp(1, Self::MAX_ORDERED_CONVERSION_WORKERS)
+                        .min(transaction_count);
+                    let queue = Mutex::new(transactions.into_iter().enumerate());
+                    let reorder = Mutex::new(OrderedTxSender {
+                        next: 0,
+                        pending: std::iter::repeat_with(|| None).take(transaction_count).collect(),
+                        prewarm_tx,
+                        execute_tx,
+                    });
+                    let done = AtomicBool::new(false);
                     let parent_span = Span::current();
-                    executor.cpu_pool().install(move || {
+                    // Claims the next transaction without holding the queue while converting it.
+                    let claim = || queue.lock().next();
+                    let convert_all = || {
                         let _parent = parent_span.enter();
-                        let span = debug_span!(target: "engine::tree::payload_processor", "convert_transactions").or_current();
-                        let _entered = span.enter();
-                        loop {
-                            let chunk = iter
-                                .by_ref()
-                                .take(batch_size)
-                                .collect::<Vec<_>>();
-                            if chunk.is_empty() {
-                                break;
-                            }
-
-                            batch_size = (batch_size * 2).min(Self::MAX_PARALLEL_TX_WINDOW_SIZE);
-
-                            let chunk = chunk
-                                .into_par_iter()
-                                .map(|(i, tx)| {
-                                    let idx = i + prefetch;
-                                    let _parent = span.enter();
-                                    let _span = trace_span!(target: "engine::tree::payload_processor", "convert_transaction", idx).entered();
-                                    let tx = convert.convert(tx).map(WithTxEnv::new);
-                                    (idx, tx)
-                                })
-                                .collect::<Vec<_>>();
-
-                            for (idx, tx) in chunk {
-                                let failed = tx.is_err();
-                                if let (Some(prewarm_tx), Ok(tx)) = (&prewarm_tx, &tx) {
-                                    let _ = prewarm_tx.send((idx, tx.clone()));
-                                }
-                                if execute_tx.send((idx, tx)).is_err() || failed {
-                                    return
-                                }
-                                trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                        while !done.load(Ordering::Relaxed) &&
+                            let Some((idx, tx)) = claim()
+                        {
+                            let _span = trace_span!(target: "engine::tree::payload_processor", "convert_transaction", idx).entered();
+                            let tx = convert.convert(tx).map(WithTxEnv::new);
+                            if !reorder.lock().insert(idx, tx) {
+                                done.store(true, Ordering::Relaxed);
                             }
                         }
+                    };
+                    std::thread::scope(|scope| {
+                        for _ in 1..workers {
+                            let _ = std::thread::Builder::new()
+                                .name("tx-convert".to_string())
+                                .spawn_scoped(scope, convert_all);
+                        }
+                        convert_all();
                     });
                 }
             });
@@ -616,6 +581,45 @@ where
         trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
     }
     true
+}
+
+/// Releases transactions converted out of order to execution and prewarming in block order.
+struct OrderedTxSender<TxEnv, Recovered, Err> {
+    /// Index of the next transaction to release.
+    next: usize,
+    /// Converted transactions waiting for an earlier one, by index.
+    pending: Vec<Option<Result<WithTxEnv<TxEnv, Recovered>, Err>>>,
+    /// Prewarm channel, if prewarming takes transactions.
+    prewarm_tx: Option<mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>>,
+    /// Execution channel.
+    execute_tx: ExecuteTxSender<TxEnv, Recovered, Err>,
+}
+
+impl<TxEnv: Clone, Recovered, Err> OrderedTxSender<TxEnv, Recovered, Err> {
+    /// Records the converted transaction at `idx` and releases every transaction it completes
+    /// the prefix for.
+    ///
+    /// Returns `false` once nothing more should be converted: a failed conversion was released,
+    /// or execution stopped listening.
+    fn insert(&mut self, idx: usize, tx: Result<WithTxEnv<TxEnv, Recovered>, Err>) -> bool {
+        // Slots are dropped once conversion stops, so late workers find none.
+        let Some(slot) = self.pending.get_mut(idx) else { return false };
+        *slot = Some(tx);
+        while let Some(tx) = self.pending.get_mut(self.next).and_then(Option::take) {
+            let idx = self.next;
+            self.next += 1;
+            let failed = tx.is_err();
+            if let (Some(prewarm_tx), Ok(tx)) = (&self.prewarm_tx, &tx) {
+                let _ = prewarm_tx.send((idx, tx.clone()));
+            }
+            if self.execute_tx.send((idx, tx)).is_err() || failed {
+                self.pending.clear();
+                return false
+            }
+            trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+        }
+        true
+    }
 }
 
 /// Handle to all the spawned tasks.
