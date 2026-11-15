@@ -19,6 +19,12 @@ use std::{
     },
 };
 
+#[cfg(feature = "execution")]
+use crate::execution::{ExecutionParent, ExecutionState};
+
+#[cfg(feature = "execution")]
+use pbt::persistence::SubtreeCache;
+
 const HASH_BYTES: usize = 32;
 const CHECKPOINT_LENGTH_BYTES: usize = 8;
 const LEGACY_CHECKPOINT_VERSION: u32 = 2;
@@ -29,6 +35,8 @@ const SNAPSHOT_TRAILER_BYTES: usize = 1 + HASH_BYTES;
 // Cold reconstructions retain independent full trees; keep only recent parents and payloads.
 const STATE_CACHE_CAPACITY: u32 = 8;
 const STATE_CACHE_BYTES: usize = 1024 * 1024 * 1024;
+#[cfg(feature = "execution")]
+const SUBTREE_CACHE_ENTRIES: usize = 16_384;
 const BLOCK_NUMBER_VERSION: u32 = 1;
 const BLOCK_NUMBER_BYTES: usize = 4 + 8 + HASH_BYTES;
 
@@ -42,6 +50,8 @@ pub struct SnapshotStore<H = Blake3Hasher> {
     path: PathBuf,
     database: Arc<NodeDatabase>,
     cache: Mutex<LruMap<B256, StateTree<H>>>,
+    #[cfg(feature = "execution")]
+    subtrees: Arc<SubtreeCache<H>>,
     shadow_mpt_roots: Mutex<LruMap<B256, B256>>,
     cache_generation: AtomicU64,
     cache_bytes: usize,
@@ -69,6 +79,8 @@ impl<H: TreeHasher> SnapshotStore<H> {
         let database = NodeDatabase::open(&path)?;
         Ok(Self {
             path,
+            #[cfg(feature = "execution")]
+            subtrees: Arc::new(SubtreeCache::new(database.clone(), SUBTREE_CACHE_ENTRIES)),
             database,
             cache: Mutex::new(LruMap::new(STATE_CACHE_CAPACITY)),
             shadow_mpt_roots: Mutex::new(LruMap::new(STATE_CACHE_CAPACITY)),
@@ -110,6 +122,69 @@ impl<H: TreeHasher> SnapshotStore<H> {
         Ok(state)
     }
 
+    /// Selects a parent for execution from a trusted PBT commitment or an accepted block
+    /// reference. Warm, legacy, and resource-limited checkpoints can use the full state.
+    #[cfg(feature = "execution")]
+    pub fn execution_parent(
+        &self,
+        block: B256,
+        expected_root: Option<B256>,
+    ) -> Result<ExecutionParent<H>, StoreError> {
+        if let Some(root) = expected_root &&
+            let Some(state) = self.cache()?.get(&root)
+        {
+            return Ok(ExecutionParent::Eager(state.clone()))
+        }
+        let writer = self.database.mutation.lock().map_err(|_| StoreError::Poisoned)?;
+        let root = match expected_root {
+            Some(root) => root,
+            None => self.block_root(block)?,
+        };
+        if let Some(state) = self.cache()?.get(&root) {
+            return Ok(ExecutionParent::Eager(state.clone()))
+        }
+        if self.native_limits.max_accounts == usize::MAX &&
+            self.native_limits.max_code_size == usize::MAX &&
+            self.native_limits.max_total_code_size == usize::MAX &&
+            self.native_count(root)?.is_some()
+        {
+            return Ok(ExecutionParent::Disk(self.subtrees.checkpoint(root)?))
+        }
+        drop(writer);
+        self.load(root).map(ExecutionParent::Eager)
+    }
+
+    /// Caches materialized payload candidates for later use. Disk candidates can be
+    /// dropped after deriving their root since their parent remains durable.
+    #[cfg(feature = "execution")]
+    pub fn cache_execution_candidate(&self, state: &ExecutionState<H>) -> Result<(), StoreError> {
+        if let ExecutionState::Eager(state) = state {
+            self.cache_candidate(state)?;
+        }
+        Ok(())
+    }
+
+    /// Saves an accepted execution result and then publishes its block reference.
+    #[cfg(feature = "execution")]
+    pub fn save_execution_block(
+        &self,
+        block: B256,
+        number: u64,
+        state: &ExecutionState<H>,
+    ) -> Result<B256, StoreError> {
+        match state {
+            ExecutionState::Eager(state) => self.save_block_with_number(block, number, state),
+            ExecutionState::Disk(overlay) => {
+                self.publish_block(block, Some(number), overlay.root(), || {
+                    overlay
+                        .save(&self.database, self.native_limits)
+                        .map_err(StoreError::Overlay)?;
+                    self.write_marker(overlay.root(), overlay.leaf_count())
+                })
+            }
+        }
+    }
+
     /// Persists a state before returning its root. No block reference is implied.
     pub fn save(&self, state: &StateTree<H>) -> Result<B256, StoreError> {
         let _writer = self.database.mutation.lock().map_err(|_| StoreError::Poisoned)?;
@@ -142,6 +217,16 @@ impl<H: TreeHasher> SnapshotStore<H> {
         number: Option<u64>,
         state: &StateTree<H>,
     ) -> Result<B256, StoreError> {
+        self.publish_block(block, number, state.root(), || self.save_state(state).map(|_| ()))
+    }
+
+    fn publish_block(
+        &self,
+        block: B256,
+        number: Option<u64>,
+        root: B256,
+        save: impl FnOnce() -> Result<(), StoreError>,
+    ) -> Result<B256, StoreError> {
         let _writer = self.database.mutation.lock().map_err(|_| StoreError::Poisoned)?;
         let reference = self.path.join("blocks").join(block.to_string());
         if reference
@@ -149,11 +234,11 @@ impl<H: TreeHasher> SnapshotStore<H> {
             .map_err(|error| reth_fs_util::FsPathError::metadata(error, &reference))?
         {
             let previous = self.block_root(block)?;
-            if previous != state.root() && self.database.is_pinned(previous)? {
+            if previous != root && self.database.is_pinned(previous)? {
                 return Err(StoreError::PinnedCheckpoint(previous));
             }
         }
-        let root = self.save_state(state)?;
+        save()?;
         let number_path = self.path.join("numbers").join(block.to_string());
         if let Some(number) = number {
             let encoded = number.to_be_bytes();
@@ -520,6 +605,24 @@ impl<H: TreeHasher> SnapshotStore<H> {
         Ok(())
     }
 
+    /// Prepares a PBT parent and its auxiliary MPT root during dual maintenance.
+    /// If the auxiliary root was evicted, reuse the state restored to compute it.
+    #[cfg(feature = "execution")]
+    pub fn execution_parent_with_shadow(
+        &self,
+        block: B256,
+        root: B256,
+    ) -> Result<(ExecutionParent<H>, B256), StoreError> {
+        let shadow =
+            self.shadow_mpt_roots.lock().map_err(|_| StoreError::Poisoned)?.get(&root).copied();
+        if let Some(shadow) = shadow {
+            return Ok((self.execution_parent(block, Some(root))?, shadow))
+        }
+        let state = self.load(root)?;
+        let shadow = self.shadow_mpt_root(&state)?;
+        Ok((ExecutionParent::Eager(state), shadow))
+    }
+
     /// Returns the auxiliary MPT root for an authenticated state during dual maintenance.
     /// Accepted blocks populate the bounded cache from their MPT job. A cold or evicted
     /// checkpoint reconstructs this auxiliary root once, outside the cache lock.
@@ -828,6 +931,10 @@ pub struct BlockProofs {
 /// Checkpoint read/write or verification failure.
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
+    /// Native execution overlay could not be saved.
+    #[cfg(feature = "execution")]
+    #[error(transparent)]
+    Overlay(pbt::persistence::OverlayError),
     /// Native trie database operation failed.
     #[error(transparent)]
     Database(#[from] rocksdb::Error),

@@ -243,7 +243,7 @@ fn malformed_preimages_and_mid_conversion_cancellation_are_rejected() {
 #[test]
 fn delegation_does_not_consume_contract_chunk_budgets() {
     let mut code = vec![0xef, 1, 0];
-    code.extend_from_slice(Address::ZERO.as_slice());
+    code.extend_from_slice(Address::repeat_byte(1).as_slice());
     let mut state = StateTree::<Blake3Hasher>::new();
     state
         .set_account(Address::ZERO, AccountData { code: code.into(), ..Default::default() })
