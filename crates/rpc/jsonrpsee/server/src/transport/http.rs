@@ -8,14 +8,19 @@ use jsonrpsee_core::{
 };
 
 /// Returns true if the `content_type` header indicates a valid JSON message.
+///
+/// Only the media type is compared. The parameter list after it may be spaced freely and may quote
+/// its values, so comparing the whole header would reject spellings that mean the same type, such
+/// as `application/json; charset="utf-8"`. The media type is matched as a prefix rather than split
+/// off and trimmed, so rejecting another type never walks the whitespace a client put after it.
 fn is_json(content_type: Option<&hyper::header::HeaderValue>) -> bool {
     content_type.and_then(|val| val.to_str().ok()).is_some_and(|content| {
-        content.eq_ignore_ascii_case("application/json") ||
-            content.eq_ignore_ascii_case("application/json; charset=utf-8") ||
-            content.eq_ignore_ascii_case("application/json;charset=utf-8") ||
-            content.eq_ignore_ascii_case("application/json-rpc") ||
-            content.eq_ignore_ascii_case("application/json-rpc;charset=utf-8") ||
-            content.eq_ignore_ascii_case("application/json-rpc; charset=utf-8")
+        ["application/json", "application/json-rpc"].into_iter().any(|media_type| {
+            content.split_at_checked(media_type.len()).is_some_and(|(prefix, params)| {
+                prefix.eq_ignore_ascii_case(media_type) &&
+                    matches!(params.trim_ascii_start().as_bytes(), [] | [b';', ..])
+            })
+        })
     })
 }
 
@@ -151,5 +156,42 @@ pub mod response {
     /// Create a response for when the server denied the request.
     pub fn denied() -> HttpResponse {
         from_template(hyper::StatusCode::FORBIDDEN, HttpBody::default(), TEXT)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hyper::header::HeaderValue;
+
+    #[test]
+    fn json_content_types_are_accepted_whatever_their_parameters() {
+        for accepted in [
+            "application/json",
+            "application/json-rpc",
+            "APPLICATION/JSON",
+            "application/json; charset=utf-8",
+            "application/json;charset=utf-8",
+            "application/json;  charset=UTF-8",
+            r#"application/json; charset="utf-8""#,
+            "application/json ; charset=utf-8",
+            "application/json-rpc; charset=utf-8",
+            "application/json;charset=utf-8;foo=bar",
+        ] {
+            assert!(is_json(Some(&HeaderValue::from_str(accepted).unwrap())), "{accepted}");
+        }
+
+        for rejected in [
+            "",
+            "text/plain",
+            "application/jsonx",
+            "application/json x",
+            "application/json-rpcx",
+            "application/octet-stream; charset=utf-8",
+        ] {
+            assert!(!is_json(Some(&HeaderValue::from_str(rejected).unwrap())), "{rejected}");
+        }
+
+        assert!(!is_json(None));
     }
 }
