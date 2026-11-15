@@ -42,7 +42,10 @@ use tokio_tungstenite::{
         error::{CapacityError, ProtocolError},
         handshake::derive_accept_key,
         protocol::{
-            frame::coding::{CloseCode, Control, Data, OpCode},
+            frame::{
+                coding::{CloseCode, Control, Data, OpCode},
+                Frame,
+            },
             Role, WebSocketConfig,
         },
         Message,
@@ -190,7 +193,11 @@ where
                             return None;
                         }
                     }
-                    Ok(Message::Close(_)) => return None,
+                    Ok(Message::Close(close)) => {
+                        // Preserve tungstenite's validated reply before dropping its queued close.
+                        *control.close_reply.lock() = Some(Frame::close(close).into_payload());
+                        return None;
+                    }
                     // Raw frames are only written, never read.
                     Ok(Message::Frame(_)) => {}
                     // `tungstenite` reads nothing more after an error, so the stream ends with it.
@@ -403,12 +410,17 @@ async fn send_task(
     // Send the close message, unless a write already timed out: the client isn't reading, so the
     // close frame would block on the same full socket. The receive half is dropped by the
     // connection task, which closes the socket.
-    // A close frame from the client is answered with this one too, so its status isn't echoed:
-    // nothing is read after it, which leaves the reply that `tungstenite` has queued unwritten.
+    // Use tungstenite's validated reply to a client close, or initiate a normal close.
     if !write_timed_out {
         let _ = timeout(write_timeout, async {
+            let close_reply = control.close_reply.lock().take();
             let code = u16::from(CloseCode::Normal).to_be_bytes();
-            ws_sender.write_frame(OpCode::Control(Control::Close), &code).await?;
+            ws_sender
+                .write_frame(
+                    OpCode::Control(Control::Close),
+                    close_reply.as_deref().unwrap_or(&code),
+                )
+                .await?;
             ws_sender.io.shutdown().await
         })
         .await;
@@ -524,6 +536,9 @@ struct ControlFrames {
     written: Notify,
     /// Whether the [`Sender`] has been dropped.
     closed: AtomicBool,
+    /// The validated close reply payload; `None` means no close was received from the client.
+    /// An empty payload preserves a close without a status code.
+    close_reply: Mutex<Option<Bytes>>,
 }
 
 impl ControlFrames {

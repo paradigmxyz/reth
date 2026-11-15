@@ -39,6 +39,7 @@ use jsonrpsee_test_utils::{
 };
 use jsonrpsee_types::SubscriptionResponse;
 use serde_json::Value as JsonValue;
+use test_case::test_case;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::helpers::{server, server_with_handles};
@@ -1810,20 +1811,24 @@ async fn ws_pings_do_not_restart_read_timeout() {
     handle.stopped().with_default_timeout().await.unwrap();
 }
 
+#[test_case(b"\x03\xe8", b"\x03\xe8"; "normal")]
+#[test_case(b"\x03\xe9bye", b"\x03\xe9bye"; "going away with reason")]
+#[test_case(b"", b""; "empty close")]
+#[test_case(b"\x03\xed", b"\x03\xeaProtocol violation"; "forbidden status code")]
 #[tokio::test]
-async fn ws_client_close_is_answered() {
+async fn ws_client_close_is_answered(payload: &[u8], reply: &[u8]) {
     init_logger();
 
     let (addr, handle) = server_with_handles().with_default_timeout().await.unwrap();
     let mut stream =
         WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap().into_inner();
 
-    // A close frame with status 1001, which the server answers with status 1000 before it closes
-    // the connection.
-    stream.write_all(&masked_frame(0x88, &[0x03, 0xe9])).await.unwrap();
+    stream.write_all(&masked_frame(0x88, payload)).await.unwrap();
     let mut received = Vec::new();
     stream.read_to_end(&mut received).with_default_timeout().await.unwrap().unwrap();
-    assert_eq!(received, [0x88, 0x02, 0x03, 0xe8]);
+    let mut expected = vec![0x88, reply.len() as u8];
+    expected.extend_from_slice(reply);
+    assert_eq!(received, expected);
 
     handle.stop().unwrap();
     handle.stopped().with_default_timeout().await.unwrap();
