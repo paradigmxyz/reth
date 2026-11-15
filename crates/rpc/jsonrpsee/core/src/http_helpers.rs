@@ -29,7 +29,7 @@
 use crate::{classify_message, BoxError};
 use bytes::{Buf, Bytes};
 use http_body::Frame;
-use http_body_util::{BodyExt, Limited};
+use http_body_util::{BodyExt, LengthLimitError, Limited};
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -159,7 +159,13 @@ where
     let mut is_single = None;
 
     while let Some(frame_or_err) = limited_body.frame().await {
-        let frame = frame_or_err.map_err(HttpError::Stream)?;
+        let frame = frame_or_err.map_err(|err| {
+            if err.is::<LengthLimitError>() {
+                HttpError::TooLarge
+            } else {
+                HttpError::Stream(err)
+            }
+        })?;
         let Some(data) = frame.data_ref() else {
             continue;
         };
