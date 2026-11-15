@@ -34,6 +34,7 @@ use reth_evm::{
     Evm as EvmInstance, EvmEnv, EvmEnvFor, EvmFor, EvmTypesFor, ExecutableTxFor, RecoveredTx,
     SpecFor,
 };
+use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -758,6 +759,8 @@ where
     pub disable_bal_batch_io: bool,
     /// Results of transaction prewarming that block execution may reuse, `None` if disabled.
     pub(crate) prewarm_results: Option<Arc<PrewarmResults<EvmTypesFor<Evm>>>>,
+    /// Cache hit and miss counts of transaction prewarming's state reads, `None` if not counted.
+    pub(crate) cache_stats: Option<Arc<CacheStats>>,
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
@@ -801,8 +804,14 @@ where
         if let Some(saved_cache) = &self.saved_cache {
             let caches = saved_cache.cache().clone();
             state_provider = Box::new(
-                CachedStateProvider::new_prewarm(state_provider, caches)
-                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+                CachedStateProvider::new_with_mode(
+                    state_provider,
+                    caches,
+                    CacheFillMode::FillOnMiss,
+                    None,
+                    self.cache_stats.clone(),
+                )
+                .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
             );
         }
 
@@ -1075,6 +1084,7 @@ mod tests {
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             prewarm_results: None,
+            cache_stats: None,
         };
         let (task, actions_tx) =
             PrewarmCacheTask::new(Runtime::test(), PayloadExecutionCache::default(), ctx);
@@ -1138,6 +1148,7 @@ mod tests {
                 disable_bal_parallel_state_root: false,
                 disable_bal_batch_io: false,
                 prewarm_results: Some(Arc::clone(&results)),
+                cache_stats: None,
             };
             let tx =
                 WithTxEnv { tx_env: ctx.evm_config.tx_env(tx.clone()), tx: Arc::new(tx.clone()) };
@@ -1230,6 +1241,7 @@ mod tests {
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             prewarm_results: None,
+            cache_stats: None,
         }
     }
 

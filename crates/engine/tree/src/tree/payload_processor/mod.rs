@@ -11,6 +11,7 @@ use crate::tree::{
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use parking_lot::Mutex;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
@@ -18,6 +19,7 @@ use reth_evm::{
     ExecutableTxFor, ExecutableTxIterator, ExecutableTxParts, ExecutableTxTuple, SpecFor, TxEnvFor,
     WithTxEnv,
 };
+use reth_execution_cache::CacheStats;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory, HistoryReader,
@@ -37,7 +39,7 @@ pub use reth_trie_parallel::{
 use std::{
     ops::Not,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize},
         mpsc, Arc, OnceLock,
     },
 };
@@ -53,13 +55,24 @@ pub(crate) mod reuse;
 /// prewarm workers exceeds the execution time saved.
 pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
 
-/// Number of blocks, after the processor is created, that the executor would execute in parallel
-/// but that execute sequentially with transaction prewarming instead, to warm the cross-block
-/// cache.
+/// Maximum number of blocks, after the processor is created, that the executor would execute in
+/// parallel but that execute sequentially with transaction prewarming instead, to warm the
+/// cross-block cache.
 ///
 /// Until the cache is warm, the parallel workers' base reads miss it, and such a block executes
-/// slower than sequentially with prewarming filling the cache ahead of execution.
+/// slower than sequentially with prewarming filling the cache ahead of execution. The warmup ends
+/// earlier once [`PARALLEL_EXECUTION_WARM_BLOCKS`] consecutive warmup blocks find the cache warm.
 pub const PARALLEL_EXECUTION_WARMUP_BLOCKS: usize = 64;
+
+/// Minimum number of warmup blocks before parallel execution may start.
+pub const PARALLEL_EXECUTION_MIN_WARMUP_BLOCKS: usize = 8;
+
+/// Number of consecutive warmup blocks that must find the cache warm to end the warmup.
+pub const PARALLEL_EXECUTION_WARM_BLOCKS: usize = 4;
+
+/// Highest share of a warmup block's prewarm state reads, in basis points, that may miss the
+/// cross-block cache for the block to count as warm.
+pub const PARALLEL_EXECUTION_WARM_MISS_BPS: usize = 200;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
@@ -125,9 +138,8 @@ where
     /// Dedicated blocking pool for warming the BAL read-set, created lazily on the first BAL block
     /// (see [`Self::bal_prewarm_pool`]). Its threads exit when the processor is dropped.
     bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
-    /// Number of blocks executed sequentially out of the first
-    /// [`PARALLEL_EXECUTION_WARMUP_BLOCKS`] the executor would execute in parallel.
-    parallel_warmup_blocks: AtomicUsize,
+    /// Warmup of the cross-block cache before blocks execute in parallel.
+    parallel_warmup: Mutex<ParallelWarmup>,
 }
 
 impl<Evm> PayloadProcessor<Evm>
@@ -158,7 +170,7 @@ where
             disable_bal_batch_io: config.disable_bal_batch_io(),
             reuse_prewarm_results: config.prewarm_reuse(),
             bal_prewarm_pool: OnceLock::new(),
-            parallel_warmup_blocks: AtomicUsize::new(0),
+            parallel_warmup: Default::default(),
         }
     }
 
@@ -175,18 +187,14 @@ where
     /// Returns whether to execute a block of `transaction_count` transactions in parallel, with
     /// [`BlockExecutor::execute_transactions_parallel`](reth_evm::execute::BlockExecutor::execute_transactions_parallel).
     ///
-    /// Call it once per block: while transaction prewarming and the state cache are on, each of
-    /// the first [`PARALLEL_EXECUTION_WARMUP_BLOCKS`] blocks the executor would execute in
-    /// parallel counts toward the warmup and executes sequentially with prewarming instead.
+    /// Call it once per block, before spawning its prewarming: while transaction prewarming and
+    /// the state cache are on, blocks the executor would execute in parallel execute sequentially
+    /// with prewarming instead until the cross-block cache is warm (see [`ParallelWarmup`]).
     pub fn executes_transactions_in_parallel(&self, transaction_count: usize) -> bool {
         self.evm_config.executes_transactions_in_parallel(transaction_count) &&
             (self.disable_transaction_prewarming ||
                 self.disable_state_cache ||
-                self.parallel_warmup_blocks
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |blocks| {
-                        (blocks < PARALLEL_EXECUTION_WARMUP_BLOCKS).then_some(blocks + 1)
-                    })
-                    .is_err())
+                self.parallel_warmup.lock().executes_in_parallel())
     }
 
     /// Returns the shared execution cache handle used for engine backpressure.
@@ -518,6 +526,9 @@ where
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
             disable_bal_batch_io: self.disable_bal_batch_io,
             prewarm_results: prewarm_results.clone(),
+            cache_stats: matches!(mode, PrewarmMode::Transactions { .. })
+                .then(|| self.parallel_warmup.lock().pending.take())
+                .flatten(),
         };
 
         let (prewarm_task, to_prewarm_task) =
@@ -781,6 +792,81 @@ impl<R, H: evm2::EvmTypes> Drop for CacheTaskHandle<R, H> {
                 valid_block_rx: mpsc::channel().1,
             });
         }
+    }
+}
+
+/// Warmup of the cross-block cache before blocks execute in parallel.
+///
+/// Each block the executor would execute in parallel executes sequentially with transaction
+/// prewarming instead, counting its prewarm state reads, until
+/// [`PARALLEL_EXECUTION_WARM_BLOCKS`] consecutive such blocks find the cache warm, after at
+/// least [`PARALLEL_EXECUTION_MIN_WARMUP_BLOCKS`] and at most
+/// [`PARALLEL_EXECUTION_WARMUP_BLOCKS`] blocks. Prewarm reads stand in for the parallel workers'
+/// base reads, which miss a cold cache.
+#[derive(Debug, Default)]
+struct ParallelWarmup {
+    /// Number of blocks executed sequentially for the warmup.
+    blocks: usize,
+    /// Number of consecutive warmup blocks, up to the latest evaluated one, that found the cache
+    /// warm.
+    warm_blocks: usize,
+    /// Whether the warmup ended.
+    done: bool,
+    /// Prewarm cache stats of the latest warmup block, evaluated at the next decision, once the
+    /// block executed.
+    last: Option<Arc<CacheStats>>,
+    /// Prewarm cache stats for the warmup block about to spawn its prewarming.
+    pending: Option<Arc<CacheStats>>,
+}
+
+impl ParallelWarmup {
+    /// Returns whether the next block the executor would execute in parallel executes in
+    /// parallel, or sequentially for the warmup.
+    fn executes_in_parallel(&mut self) -> bool {
+        if self.done {
+            return true
+        }
+
+        if let Some(stats) = self.last.take() {
+            let misses = stats.account_misses() + stats.storage_misses() + stats.code_misses();
+            let reads = misses +
+                stats.account_hits() +
+                stats.storage_hits() +
+                stats.code_hits() +
+                stats.txpool_snapshot_account_hits() +
+                stats.txpool_snapshot_storage_hits() +
+                stats.txpool_snapshot_code_hits();
+            let warm = reads > 0 && misses * 10_000 <= reads * PARALLEL_EXECUTION_WARM_MISS_BPS;
+            self.warm_blocks = if warm { self.warm_blocks + 1 } else { 0 };
+            debug!(
+                target: "engine::tree::payload_processor",
+                blocks = self.blocks,
+                reads,
+                misses,
+                warm_blocks = self.warm_blocks,
+                "Evaluated parallel execution warmup block"
+            );
+        }
+
+        if self.blocks >= PARALLEL_EXECUTION_WARMUP_BLOCKS ||
+            (self.blocks >= PARALLEL_EXECUTION_MIN_WARMUP_BLOCKS &&
+                self.warm_blocks >= PARALLEL_EXECUTION_WARM_BLOCKS)
+        {
+            debug!(
+                target: "engine::tree::payload_processor",
+                blocks = self.blocks,
+                "Finished parallel execution warmup"
+            );
+            self.done = true;
+            self.pending = None;
+            return true
+        }
+
+        self.blocks += 1;
+        let stats = Arc::new(CacheStats::default());
+        self.last = Some(Arc::clone(&stats));
+        self.pending = Some(stats);
+        false
     }
 }
 
@@ -1372,5 +1458,24 @@ mod tests {
             }
             assert_eq!(scope.iter().map(|(_, name)| *name).collect::<Vec<_>>(), expected);
         }
+    }
+    #[test]
+    fn parallel_warmup_ends_once_cache_is_warm() {
+        // A cold cache keeps every block sequential up to the maximum warmup.
+        let mut warmup = ParallelWarmup::default();
+        for _ in 0..PARALLEL_EXECUTION_WARMUP_BLOCKS {
+            assert!(!warmup.executes_in_parallel());
+            warmup.pending.take().unwrap().record_account_miss();
+        }
+        assert!(warmup.executes_in_parallel());
+        assert!(warmup.executes_in_parallel());
+
+        // A warm cache ends the warmup after the minimum number of blocks.
+        let mut warmup = ParallelWarmup::default();
+        for _ in 0..PARALLEL_EXECUTION_MIN_WARMUP_BLOCKS {
+            assert!(!warmup.executes_in_parallel());
+            warmup.pending.take().unwrap().record_account_hit();
+        }
+        assert!(warmup.executes_in_parallel());
     }
 }
