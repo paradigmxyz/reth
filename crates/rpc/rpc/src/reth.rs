@@ -169,9 +169,6 @@ where
             return Ok(Some(ExecutionOutcome::default()))
         }
 
-        let state_provider = self.provider().history_by_block_number(start_block - 1)?;
-        let db = StateProviderDatabase::new((&state_provider).into_evm_state_provider());
-
         let mut blocks = Vec::with_capacity(block_count as usize);
         for block_number in start_block..start_block + block_count {
             let Some(block) = self
@@ -185,6 +182,11 @@ where
             };
             blocks.push(block);
         }
+
+        // Opened once the start block is known to exist, so an unknown block returns `None`
+        // instead of failing on the missing state of its parent.
+        let state_provider = self.provider().history_by_block_number(start_block - 1)?;
+        let db = StateProviderDatabase::new((&state_provider).into_evm_state_provider());
 
         // stop between blocks once the request is dropped
         let blocks = blocks.iter().take_while(|_| !cancel.is_cancelled());
@@ -455,6 +457,7 @@ mod tests {
     use evm2::evm::AccountInfo;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_common::init::init_genesis;
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::Block as _;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
@@ -548,5 +551,26 @@ mod tests {
                 (Address::with_last_byte(6), U256::ZERO),
             ])
         );
+    }
+
+    #[test]
+    fn execution_outcome_of_unknown_block_is_none() {
+        let factory = create_test_provider_factory_with_chain_spec(
+            ChainSpecBuilder::mainnet().build().into(),
+        );
+        init_genesis(&factory).unwrap();
+        let api = RethApi::new(
+            BlockchainProvider::new(factory).unwrap(),
+            EthEvmConfig::mainnet(),
+            BlockingTaskGuard::new(1),
+            Runtime::test(),
+        );
+
+        // Only genesis exists: block 1 has a known parent, block 2 does not.
+        for number in [1u64, 2, 100] {
+            let outcome =
+                api.try_block_execution_outcome(number.into(), 1, &CancelOnDrop::default());
+            assert!(matches!(outcome, Ok(None)), "block {number}: {outcome:?}");
+        }
     }
 }
