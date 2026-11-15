@@ -183,6 +183,7 @@ pub struct WorkerPool {
     metrics: OnceLock<WorkerPoolMetrics>,
     num_threads: usize,
     thread_name_prefix: &'static str,
+    niceness: Option<i32>,
 }
 
 impl WorkerPool {
@@ -191,19 +192,36 @@ impl WorkerPool {
     /// The underlying rayon pool is not created until the first method that requires it is called.
     /// Thread names follow the pattern `"{prefix}-{index:02}"`.
     pub const fn new(num_threads: usize, thread_name_prefix: &'static str) -> Self {
-        Self { pool: OnceLock::new(), metrics: OnceLock::new(), num_threads, thread_name_prefix }
+        Self {
+            pool: OnceLock::new(),
+            metrics: OnceLock::new(),
+            num_threads,
+            thread_name_prefix,
+            niceness: None,
+        }
+    }
+
+    /// Sets the niceness of the pool's threads, applied as each thread starts.
+    ///
+    /// `None` leaves the threads with the niceness of the thread that first uses the pool.
+    pub const fn with_niceness(mut self, niceness: Option<i32>) -> Self {
+        self.niceness = niceness;
+        self
     }
 
     /// Returns a reference to the underlying rayon pool, creating it on first access.
     fn pool(&self) -> &rayon::ThreadPool {
         self.pool.get_or_init(|| {
             let prefix = self.thread_name_prefix;
-            build_pool_with_panic_handler(
-                rayon::ThreadPoolBuilder::new()
-                    .num_threads(self.num_threads)
-                    .thread_name(move |i| format!("{prefix}-{i:02}")),
-            )
-            .unwrap_or_else(|err| panic!("failed to build {prefix} worker pool: {err}"))
+            let mut builder = rayon::ThreadPoolBuilder::new()
+                .num_threads(self.num_threads)
+                .thread_name(move |i| format!("{prefix}-{i:02}"));
+            if let Some(niceness) = self.niceness {
+                builder = builder
+                    .start_handler(move |_| crate::utils::set_current_thread_niceness(niceness));
+            }
+            build_pool_with_panic_handler(builder)
+                .unwrap_or_else(|err| panic!("failed to build {prefix} worker pool: {err}"))
         })
     }
 
@@ -850,5 +868,18 @@ mod tests {
 
     fn stateful_pool() -> Arc<WorkerStatefulPool> {
         WorkerStatefulPool::new(Arc::new(WorkerPool::new(1, "state-test")))
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn worker_pool_sets_niceness() {
+        let niceness = |pool: &WorkerPool| {
+            pool.install_fn(|| {
+                // SAFETY: `gettid` and `getpriority` take no pointers.
+                unsafe { libc::getpriority(libc::PRIO_PROCESS, libc::gettid() as libc::id_t) }
+            })
+        };
+        let pool = WorkerPool::new(1, "nice-test").with_niceness(Some(19));
+        assert_eq!(niceness(&pool), 19);
     }
 }

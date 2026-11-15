@@ -105,3 +105,31 @@ fn _deprioritize_background_threads() {
         tracing::debug!(tid, comm, "deprioritized background thread (SCHED_IDLE)");
     }
 }
+
+/// Sets the niceness of the current thread, from -20 (highest priority) to 19 (lowest).
+///
+/// Raising a thread's niceness needs no privileges, so this can always deprioritize a thread;
+/// lowering it below the current value needs `CAP_SYS_NICE`. Failures are logged at `debug`
+/// level.
+///
+/// No-op on non-Linux platforms.
+#[allow(clippy::missing_const_for_fn)]
+pub fn set_current_thread_niceness(niceness: i32) {
+    #[cfg(target_os = "linux")]
+    {
+        // On Linux, `PRIO_PROCESS` with a thread ID sets the niceness of that thread only.
+        // SAFETY: `gettid` and `setpriority` take no pointers.
+        let res = unsafe {
+            libc::setpriority(libc::PRIO_PROCESS, libc::gettid() as libc::id_t, niceness)
+        };
+        if res != 0 {
+            tracing::debug!(
+                niceness,
+                err = %std::io::Error::last_os_error(),
+                "failed to set thread niceness"
+            );
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = niceness;
+}

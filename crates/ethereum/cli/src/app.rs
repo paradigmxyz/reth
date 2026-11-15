@@ -113,6 +113,7 @@ where
                             proof_storage_worker_threads: command.engine.storage_worker_count,
                             proof_account_worker_threads: command.engine.account_worker_count,
                             prewarming_threads: command.engine.prewarming_threads,
+                            proof_worker_niceness: command.engine.proof_worker_niceness,
                             ..Default::default()
                         });
                         if let Some(cpu_cores) = command.engine.cpu_cores {

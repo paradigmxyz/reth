@@ -476,6 +476,18 @@ pub struct EngineArgs {
     #[arg(long = "engine.prewarming-threads", default_value = Resettable::from(DefaultEngineValues::get_global().prewarming_threads.map(|v| v.to_string().into())))]
     pub prewarming_threads: Option<usize>,
 
+    /// Niceness of the proof worker threads, from -20 (highest priority) to 19 (lowest).
+    /// A higher niceness than block execution's lets execution preempt proof workers when CPUs
+    /// are oversubscribed, while proof workers still use idle CPUs.
+    /// If not specified, proof workers inherit the niceness of the thread that starts them.
+    #[arg(
+        long = "engine.proof-worker-niceness",
+        value_name = "NICENESS",
+        allow_hyphen_values = true,
+        value_parser = clap::value_parser!(i32).range(-20..=19)
+    )]
+    pub proof_worker_niceness: Option<i32>,
+
     /// Disable cache metrics recording, which can take up to 50ms with large cached state.
     #[arg(long = "engine.disable-cache-metrics", default_value_t = DefaultEngineValues::get_global().cache_metrics_disabled)]
     pub cache_metrics_disabled: bool,
@@ -649,6 +661,7 @@ impl Default for EngineArgs {
             storage_worker_count,
             account_worker_count,
             prewarming_threads,
+            proof_worker_niceness: None,
             cache_metrics_disabled,
             slow_block_threshold,
             disable_sparse_trie_cache_pruning,
@@ -972,6 +985,7 @@ mod tests {
             storage_worker_count: Some(16),
             account_worker_count: Some(8),
             prewarming_threads: Some(4),
+            proof_worker_niceness: None,
             cache_metrics_disabled: true,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: true,
