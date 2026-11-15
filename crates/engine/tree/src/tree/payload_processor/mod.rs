@@ -59,7 +59,7 @@ pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
 ///
 /// Until the cache is warm, the parallel workers' base reads miss it, and such a block executes
 /// slower than sequentially with prewarming filling the cache ahead of execution.
-pub const PARALLEL_EXECUTION_WARMUP_BLOCKS: usize = 64;
+pub const PARALLEL_EXECUTION_WARMUP_BLOCKS: usize = 8;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
