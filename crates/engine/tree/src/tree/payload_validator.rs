@@ -758,7 +758,7 @@ where
             self.runtime.spawn_blocking_named("hash-post-state", move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",
-                    parent: parent_span,
+                    parent: &parent_span,
                     "hashed_post_state",
                 )
                 .entered();
@@ -943,7 +943,7 @@ where
         self.runtime.spawn_blocking_named("payload-convert", move || {
             let _span = debug_span!(
                 target: "engine::tree::payload_validator",
-                parent: parent_span,
+                parent: &parent_span,
                 "convert_and_validate",
             )
             .entered();
@@ -1929,7 +1929,8 @@ where
         let execution_cache = self
             .config
             .share_execution_cache_with_payload_builder()
-            .then(|| self.payload_processor.cache_for(parent_hash));
+            .then(|| self.payload_processor.cache_for(parent_hash))
+            .flatten();
         let state_root_handle =
             self.payload_state_root_handle_for(parent_hash, parent_header, timestamp, state);
         let mut resources = PayloadBuilderResources::new(execution_cache, state_root_handle)

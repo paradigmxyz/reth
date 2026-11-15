@@ -22,6 +22,8 @@ jobs:
     env:
       # Include the system trust store containing Aegis's CA for Bun and Node.
       NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
+      # Read by build-cargo-docs.sh, which `bun run build` also invokes.
+      RUST_NIGHTLY: nightly-2026-10-31
     steps:
       - name: Secure runner
         uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
@@ -47,7 +49,7 @@ jobs:
       - name: Install Rust nightly
         uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
         with:
-          toolchain: nightly
+          toolchain: ${{ env.RUST_NIGHTLY }}
 
       - name: Build docs
         run: cd docs/vocs && bash scripts/build-cargo-docs.sh

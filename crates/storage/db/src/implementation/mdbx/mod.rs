@@ -267,6 +267,8 @@ pub struct DatabaseEnv {
     dbis: Arc<TableDbis>,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
+    /// Disables long-lived read safety on transactions opened through this handle.
+    disable_long_read_transaction_safety: bool,
     /// Write lock for when dealing with a read-write environment.
     _lock_file: Option<StorageLock>,
 }
@@ -314,21 +316,29 @@ impl Database for DatabaseEnv {
     type TXMut = tx::Tx<RW>;
 
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
-        Tx::new(
+        let mut tx = Tx::new(
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.dbis.clone(),
             self.metrics.clone(),
         )
-        .map_err(|e| DatabaseError::InitTx(e.into()))
+        .map_err(|e| DatabaseError::InitTx(e.into()))?;
+        if self.disable_long_read_transaction_safety {
+            tx.disable_long_read_transaction_safety();
+        }
+        Ok(tx)
     }
 
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
-        Tx::new(
+        let mut tx = Tx::new(
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.dbis.clone(),
             self.metrics.clone(),
         )
-        .map_err(|e| DatabaseError::InitTx(e.into()))
+        .map_err(|e| DatabaseError::InitTx(e.into()))?;
+        if self.disable_long_read_transaction_safety {
+            tx.disable_long_read_transaction_safety();
+        }
+        Ok(tx)
     }
 
     fn path(&self) -> PathBuf {
@@ -591,6 +601,7 @@ impl DatabaseEnv {
             path: path.to_path_buf(),
             dbis: Arc::default(),
             metrics: None,
+            disable_long_read_transaction_safety: false,
             _lock_file,
         };
 
@@ -721,6 +732,15 @@ impl DatabaseEnv {
         }
 
         Ok(())
+    }
+
+    /// Disables timeouts and long-read backtrace reporting for transactions opened through this
+    /// handle. Existing transactions and other previously cloned handles are unaffected.
+    ///
+    /// Use for offline work that intentionally holds transactions open.
+    pub const fn with_disable_long_read_transaction_safety(mut self) -> Self {
+        self.disable_long_read_transaction_safety = true;
+        self
     }
 }
 

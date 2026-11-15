@@ -5,9 +5,12 @@ use crate::{
     Case, Error, Suite,
 };
 use alloy_eip7928::bal::Bal;
+use alloy_eips::{
+    eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, eip7251::CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS,
+};
 use alloy_rlp::Decodable;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
@@ -79,6 +82,18 @@ impl BlockchainTestCase {
                 ForkSpec::MergeMeterInitCode |
                 ForkSpec::MergePush0
         )
+    }
+
+    /// Returns `true` if the case runs Prague blocks without the EIP-7002 and EIP-7251 request
+    /// contracts, which makes them invalid. Legacy fixtures predate those predeploys, and their
+    /// state roots rule out adding them.
+    fn lacks_request_contracts(case: &BlockchainTest) -> bool {
+        case.network.to_chain_spec().is_prague_active_at_timestamp(u64::MAX) &&
+            [WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS]
+                .into_iter()
+                .any(|address| {
+                    case.pre.get(&address).is_none_or(|account| account.code.is_empty())
+                })
     }
 
     /// Checks if the test case is a particular test called `UncleFromSideChain`
@@ -179,7 +194,9 @@ impl Case for BlockchainTestCase {
         // Iterate through test cases, filtering by the network type to exclude specific forks.
         self.tests
             .into_iter()
-            .filter(|(_, case)| !Self::excluded_fork(case.network))
+            .filter(|(_, case)| {
+                !Self::excluded_fork(case.network) && !Self::lacks_request_contracts(case)
+            })
             .par_bridge_buffered()
             .with_min_len(64)
             .try_for_each(|(name, case)| Self::run_single_case(&name, &case).map(|_| ()))

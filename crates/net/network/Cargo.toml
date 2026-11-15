@@ -36,6 +36,7 @@ reth-tokio-util.workspace = true
 reth-consensus.workspace = true
 reth-network-peers = { workspace = true, features = ["net"] }
 reth-network-types = { workspace = true, features = ["serde"] }
+reth-lru.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true
@@ -72,10 +73,8 @@ thiserror.workspace = true
 parking_lot.workspace = true
 rayon.workspace = true
 rand.workspace = true
-rand_08.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 derive_more.workspace = true
-schnellru.workspace = true
 itertools.workspace = true
 smallvec.workspace = true
 
@@ -130,7 +129,7 @@ serde = [
     "reth-transaction-pool/serde",
     "reth-ethereum-primitives/serde",
     "reth-network-api/serde",
-    "rand_08/serde",
+    "rand/serde",
     "reth-storage-api/serde",
     "reth-network-types/serde",
     "reth-stages-types/serde",

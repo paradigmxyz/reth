@@ -14,6 +14,8 @@ ignore = [
     "RUSTSEC-2026-0173",
     # https://rustsec.org/advisories/RUSTSEC-2026-0387 crypto-bigint 0.5.5 timing variability, only patched in 0.7.6 and pinned by elliptic-curve 0.13 (k256/p256)
     "RUSTSEC-2026-0387",
+    # https://rustsec.org/advisories/RUSTSEC-2026-0441 pin-utils is unmaintained, transitive dep via wasmtimer (alloy-contract)
+    "RUSTSEC-2026-0441",
 ]
 
 # This section is considered when running `cargo deny check bans`.

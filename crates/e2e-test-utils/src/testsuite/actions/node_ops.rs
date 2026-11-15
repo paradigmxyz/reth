@@ -1,12 +1,10 @@
 //! Node-specific operations for multi-node testing.
 
 use crate::testsuite::{Action, Environment};
-use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
+use alloy_rpc_types_eth::Block;
 use eyre::Result;
 use futures_util::future::BoxFuture;
-use reth_ethereum_primitives::TransactionSigned;
 use reth_node_api::EngineTypes;
-use reth_rpc_api::clients::EthApiClient;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
 use tracing::debug;
@@ -75,31 +73,27 @@ where
             let node_b_client = &env.node_clients[self.node_b];
 
             // Get latest block from each node
-            let block_a = EthApiClient::<
-                TransactionRequest,
-                Transaction,
-                Block,
-                Receipt,
-                Header,
-                TransactionSigned,
-            >::block_by_number(
-                &node_a_client.rpc, alloy_eips::BlockNumberOrTag::Latest, false
-            )
-            .await?
-            .ok_or_else(|| eyre::eyre!("Failed to get latest block from node {}", self.node_a))?;
+            let block_a = node_a_client
+                .rpc
+                .request::<_, Option<Block>>(
+                    "eth_getBlockByNumber",
+                    (alloy_eips::BlockNumberOrTag::Latest, false),
+                )
+                .await?
+                .ok_or_else(|| {
+                    eyre::eyre!("Failed to get latest block from node {}", self.node_a)
+                })?;
 
-            let block_b = EthApiClient::<
-                TransactionRequest,
-                Transaction,
-                Block,
-                Receipt,
-                Header,
-                TransactionSigned,
-            >::block_by_number(
-                &node_b_client.rpc, alloy_eips::BlockNumberOrTag::Latest, false
-            )
-            .await?
-            .ok_or_else(|| eyre::eyre!("Failed to get latest block from node {}", self.node_b))?;
+            let block_b = node_b_client
+                .rpc
+                .request::<_, Option<Block>>(
+                    "eth_getBlockByNumber",
+                    (alloy_eips::BlockNumberOrTag::Latest, false),
+                )
+                .await?
+                .ok_or_else(|| {
+                    eyre::eyre!("Failed to get latest block from node {}", self.node_b)
+                })?;
 
             let tips_equal = block_a.header.hash == block_b.header.hash;
 
@@ -283,39 +277,27 @@ where
                     let node_b_client = &env.node_clients[self.node_b];
 
                     // Get latest block from each node
-                    let block_a = EthApiClient::<
-                        TransactionRequest,
-                        Transaction,
-                        Block,
-                        Receipt,
-                        Header,
-                        TransactionSigned,
-                    >::block_by_number(
-                        &node_a_client.rpc,
-                        alloy_eips::BlockNumberOrTag::Latest,
-                        false,
-                    )
-                    .await?
-                    .ok_or_else(|| {
-                        eyre::eyre!("Failed to get latest block from node {}", self.node_a)
-                    })?;
+                    let block_a = node_a_client
+                        .rpc
+                        .request::<_, Option<Block>>(
+                            "eth_getBlockByNumber",
+                            (alloy_eips::BlockNumberOrTag::Latest, false),
+                        )
+                        .await?
+                        .ok_or_else(|| {
+                            eyre::eyre!("Failed to get latest block from node {}", self.node_a)
+                        })?;
 
-                    let block_b = EthApiClient::<
-                        TransactionRequest,
-                        Transaction,
-                        Block,
-                        Receipt,
-                        Header,
-                        TransactionSigned,
-                    >::block_by_number(
-                        &node_b_client.rpc,
-                        alloy_eips::BlockNumberOrTag::Latest,
-                        false,
-                    )
-                    .await?
-                    .ok_or_else(|| {
-                        eyre::eyre!("Failed to get latest block from node {}", self.node_b)
-                    })?;
+                    let block_b = node_b_client
+                        .rpc
+                        .request::<_, Option<Block>>(
+                            "eth_getBlockByNumber",
+                            (alloy_eips::BlockNumberOrTag::Latest, false),
+                        )
+                        .await?
+                        .ok_or_else(|| {
+                            eyre::eyre!("Failed to get latest block from node {}", self.node_b)
+                        })?;
 
                     debug!(
                         "Sync check: Node {} tip: {} (block {}), Node {} tip: {} (block {})",

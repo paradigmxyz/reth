@@ -108,7 +108,7 @@ jobs:
             rustflags: ""
             native: true
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-15
             profile: maxperf
             allow_fail: false
             rustflags: ""

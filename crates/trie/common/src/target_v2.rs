@@ -327,6 +327,7 @@ mod tests {
             current,
             created: true,
             selfdestructed,
+            touched: false,
             code: None,
             storage,
         }

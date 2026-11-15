@@ -535,7 +535,12 @@ pub fn build_evm_config<C: EthereumHardforks>(
     dump_dir: Option<std::path::PathBuf>,
 ) -> eyre::Result<(EthEvmConfig<C, RethEvmFactory>, Option<Arc<JitMetrics>>)> {
     if !jit.enabled {
-        let factory = RethEvmFactory::disabled();
+        // Keep the configured mode and tuning so `reth_jit enable` starts the backend with them.
+        // Blocking mode would start the backend immediately, so it only applies with `--jit`.
+        let config = RuntimeConfig { blocking: false, ..jit_runtime_config(jit) };
+        #[cfg(not(unix))]
+        let config = RuntimeConfig { jit_mode: JitMode::InProcess, ..config };
+        let factory = RethEvmFactory::new(JitBackend::new(config)?);
         return Ok((EthEvmConfig::new_with_evm_factory(chain_spec, factory), None));
     }
 

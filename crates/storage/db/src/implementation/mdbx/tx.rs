@@ -221,7 +221,7 @@ struct MetricsHandler<K: TransactionKind> {
     env_metrics: Arc<DatabaseEnvMetrics>,
     /// Backtrace of the location where the transaction has been opened. Reported only with debug
     /// assertions outside DST, because capturing every transaction opening is expensive.
-    #[cfg(all(debug_assertions, not(feature = "dst")))]
+    #[cfg(all(debug_assertions, not(feature = "fuzz")))]
     open_backtrace: Backtrace,
     _marker: PhantomData<K>,
 }
@@ -236,7 +236,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
             close_recorded: false,
             record_backtrace: true,
             backtrace_recorded: AtomicBool::new(false),
-            #[cfg(all(debug_assertions, not(feature = "dst")))]
+            #[cfg(all(debug_assertions, not(feature = "fuzz")))]
             open_backtrace: Backtrace::force_capture(),
             env_metrics,
             _marker: PhantomData,
@@ -278,9 +278,9 @@ impl<K: TransactionKind> MetricsHandler<K> {
             if now >= self.long_transaction_deadline {
                 let open_duration = now - self.start;
                 self.backtrace_recorded.store(true, Ordering::Relaxed);
-                #[cfg(all(debug_assertions, not(feature = "dst")))]
+                #[cfg(all(debug_assertions, not(feature = "fuzz")))]
                 let open_backtrace = format_args!("{}", self.open_backtrace);
-                #[cfg(not(all(debug_assertions, not(feature = "dst"))))]
+                #[cfg(not(all(debug_assertions, not(feature = "fuzz"))))]
                 let open_backtrace = tracing::field::Empty;
                 warn!(
                     target: "storage::db::mdbx",
@@ -502,12 +502,14 @@ mod tests {
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(
                 MAX_DURATION,
             )));
-        let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
+        let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args)
+            .unwrap()
+            .with_metrics()
+            .with_disable_long_read_transaction_safety();
 
         let mut tx = db.tx().unwrap();
         let metrics_handler = tx.metrics_handler.as_mut().unwrap();
         metrics_handler.long_transaction_deadline = metrics_handler.start + MAX_DURATION;
-        tx.disable_long_read_transaction_safety();
         // Give the `TxnManager` some time to time out the transaction.
         sleep(MAX_DURATION + Duration::from_millis(100));
 

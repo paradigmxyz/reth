@@ -168,7 +168,7 @@ pub trait SpawnBlocking: EthApiTypes + 'static {
         let this = self.clone();
         let cancel = CancelOnDrop::default();
         let request = cancel.clone();
-        self.io_task_spawner().spawn_blocking_task(async move {
+        self.io_task_spawner().spawn_blocking_task_fn(move || {
             if tx.is_closed() {
                 return
             }

@@ -3,8 +3,7 @@ use clap::{builder::Resettable, Args};
 use reth_rpc_server_types::constants::cache::{
     DEFAULT_BAL_CACHE_MAX_BYTES, DEFAULT_BAL_CACHE_MAX_LEN, DEFAULT_BLOCK_CACHE_MAX_BYTES,
     DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_CACHE_IDLE_TIMEOUT, DEFAULT_CONCURRENT_DB_REQUESTS,
-    DEFAULT_HEADER_CACHE_MAX_LEN, DEFAULT_MAX_CACHED_TX_HASHES, DEFAULT_RECEIPT_CACHE_MAX_BYTES,
-    DEFAULT_RECEIPT_CACHE_MAX_LEN,
+    DEFAULT_MAX_CACHED_TX_HASHES, DEFAULT_RECEIPT_CACHE_MAX_BYTES, DEFAULT_RECEIPT_CACHE_MAX_LEN,
 };
 use std::time::Duration;
 
@@ -25,15 +24,6 @@ pub struct RpcStateCacheArgs {
         default_value_t = DefaultRpcServerArgs::get_global().rpc_state_cache.max_receipts,
     )]
     pub max_receipts: u32,
-
-    /// Legacy no-op retained for CLI compatibility.
-    #[arg(
-        long = "rpc-cache.max-headers",
-        alias = "rpc-cache.max-envs",
-        default_value_t = DefaultRpcServerArgs::get_global().rpc_state_cache.max_headers,
-        hide = true,
-    )]
-    pub max_headers: u32,
 
     /// Max number of block access lists in cache.
     #[arg(
@@ -102,7 +92,6 @@ impl RpcStateCacheArgs {
     pub const fn set_zero_lengths(&mut self) {
         self.max_blocks = 0;
         self.max_receipts = 0;
-        self.max_headers = 0;
         self.max_bals = 0;
         self.max_blocks_bytes = 0;
         self.max_receipts_bytes = 0;
@@ -118,7 +107,6 @@ impl Default for RpcStateCacheArgs {
         Self {
             max_blocks: DEFAULT_BLOCK_CACHE_MAX_LEN,
             max_receipts: DEFAULT_RECEIPT_CACHE_MAX_LEN,
-            max_headers: DEFAULT_HEADER_CACHE_MAX_LEN,
             max_bals: DEFAULT_BAL_CACHE_MAX_LEN,
             max_blocks_bytes: DEFAULT_BLOCK_CACHE_MAX_BYTES,
             max_receipts_bytes: DEFAULT_RECEIPT_CACHE_MAX_BYTES,
@@ -148,11 +136,6 @@ mod tests {
     fn rpc_cache_defaults() {
         let args = CommandParser::parse_from(["reth"]).args;
         assert_eq!(args, RpcStateCacheArgs::default());
-
-        for flag in ["--rpc-cache.max-headers", "--rpc-cache.max-envs"] {
-            let args = CommandParser::parse_from(["reth", flag, "123"]).args;
-            assert_eq!(args.max_headers, 123);
-        }
     }
 
     #[test]

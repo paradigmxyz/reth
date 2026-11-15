@@ -2,20 +2,23 @@
 //! a cache miss.
 
 use super::metrics::CacheMetrics;
+use alloy_primitives::map::DefaultHashBuilder;
+use reth_lru::LruMap;
 use reth_primitives_traits::InMemorySize;
-use schnellru::{ByLength, LruMap};
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt::{self, Debug, Formatter},
-    hash::Hash,
+    hash::{BuildHasher, Hash},
     time::Duration,
 };
 use tokio::time::Instant;
 
 /// A multi-consumer LRU cache bounded by entry count and estimated payload size.
-pub struct MultiConsumerLruCache<K: Hash + Eq, V, S> {
+///
+/// `H` hashes the keys of the cached values.
+pub struct MultiConsumerLruCache<K: Hash + Eq, V, S, H = DefaultHashBuilder> {
     /// The LRU cache.
-    cache: LruMap<K, CachedValue<V>>,
+    cache: LruMap<K, CachedValue<V>, H>,
     /// All queued consumers.
     queued: HashMap<K, Vec<S>>,
     /// Cache metrics.
@@ -28,7 +31,7 @@ pub struct MultiConsumerLruCache<K: Hash + Eq, V, S> {
     metrics_dirty: bool,
 }
 
-impl<K: Hash + Eq, V, S> Debug for MultiConsumerLruCache<K, V, S> {
+impl<K: Hash + Eq, V, S, H> Debug for MultiConsumerLruCache<K, V, S, H> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("MultiConsumerLruCache")
             .field("cache_length", &self.cache.len())
@@ -39,13 +42,16 @@ impl<K: Hash + Eq, V, S> Debug for MultiConsumerLruCache<K, V, S> {
     }
 }
 
-impl<K: Hash + Eq, V, S> MultiConsumerLruCache<K, V, S> {
+impl<K: Hash + Eq, V, S, H: BuildHasher> MultiConsumerLruCache<K, V, S, H> {
     /// Creates an empty cache with entry and payload byte limits and a metric label.
     ///
     /// Setting either limit to zero disables caching, but consumers can still queue requests.
-    pub fn new(max_len: u32, max_bytes: usize, cache_id: &str) -> Self {
+    pub fn new(max_len: u32, max_bytes: usize, cache_id: &str) -> Self
+    where
+        H: Default,
+    {
         Self {
-            cache: LruMap::new(ByLength::new(max_len)),
+            cache: LruMap::with_hasher(max_len, H::default()),
             queued: Default::default(),
             metrics: CacheMetrics::new_with_labels(&[("cache", cache_id.to_string())]),
             memory_usage: 0,
@@ -125,7 +131,7 @@ impl<K: Hash + Eq, V, S> MultiConsumerLruCache<K, V, S> {
     where
         V: InMemorySize,
     {
-        if self.cache.limiter().max_length() == 0 || self.max_bytes == 0 {
+        if self.cache.max_length() == 0 || self.max_bytes == 0 {
             return false
         }
         let size = value.size();
@@ -138,24 +144,18 @@ impl<K: Hash + Eq, V, S> MultiConsumerLruCache<K, V, S> {
             self.memory_usage -= previous.size;
             self.metrics_dirty = true;
         }
-        while self.cache.len() >= self.cache.limiter().max_length() as usize ||
+        while self.cache.len() >= self.cache.max_length() as usize ||
             self.memory_usage > self.max_bytes - size
         {
             self.pop_oldest();
         }
 
-        let previous_len = self.cache.len();
-        let inserted = self.cache.insert(key, CachedValue { value, size, last_access: now });
-        if inserted {
-            self.memory_usage += size;
-            self.metrics_dirty = true;
-        }
-        if self.cache.len() != previous_len + usize::from(inserted) {
-            // A failed allocation can make the LRU evict internally while trying to insert.
-            self.memory_usage = self.cache.iter().map(|(_, entry)| entry.size).sum();
-            self.metrics_dirty = true;
-        }
-        inserted
+        // The loop above made room, so this never evicts.
+        let evicted = self.cache.insert(key, CachedValue { value, size, last_access: now });
+        debug_assert!(evicted.is_none());
+        self.memory_usage += size;
+        self.metrics_dirty = true;
+        true
     }
 
     /// Shrinks the capacity of the queue with a lower limit.
@@ -288,7 +288,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn idle_eviction_preserves_hits_and_queued_consumers() {
-        let mut cache = MultiConsumerLruCache::new(3, 10, "test");
+        let mut cache = MultiConsumerLruCache::<_, _, _>::new(3, 10, "test");
         let timeout = Duration::from_secs(10);
         for key in 0..3 {
             assert!(cache.insert(key, Weighted(3)));
@@ -369,7 +369,7 @@ mod tests {
 
     #[test]
     fn idle_eviction_is_bounded_and_preserves_renewed_entries() {
-        let mut cache = MultiConsumerLruCache::new(12, 36, "test");
+        let mut cache = MultiConsumerLruCache::<_, _, _>::new(12, 36, "test");
         let start = Instant::now();
         let timeout = Duration::from_secs(10);
         for key in 0..12 {

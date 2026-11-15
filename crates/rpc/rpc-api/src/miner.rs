@@ -2,8 +2,7 @@ use alloy_primitives::{Bytes, U128};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
 /// Miner namespace rpc interface that can control miner/builder settings
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "miner"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "miner"))]
+#[rpc(server, namespace = "miner")]
 pub trait MinerApi {
     /// Sets the extra data string that is included when this miner mines a block.
     ///

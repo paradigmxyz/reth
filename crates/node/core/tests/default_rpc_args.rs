@@ -26,7 +26,6 @@ fn custom_rpc_defaults_apply_to_cli() {
         .with_rpc_state_cache(RpcStateCacheArgs {
             max_blocks: 1,
             max_receipts: 2,
-            max_headers: 3,
             max_bals: 4,
             max_blocks_bytes: 1024,
             max_receipts_bytes: 2048,

@@ -11,7 +11,6 @@ use alloy_rpc_types_trace::{
     },
     parity::{Action, CreateAction, CreateOutput, LocalizedTransactionTrace, TraceOutput},
 };
-use async_trait::async_trait;
 use evm2::interpreter::InstrStop;
 use evm2_inspectors::{
     otterscan::InternalOperationsInspector,
@@ -105,7 +104,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Eth> OtterscanServer<RpcTransaction<Eth::NetworkTypes>, RpcHeader<Eth::NetworkTypes>>
     for OtterscanApi<Eth>
 where
@@ -493,7 +491,9 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::Recovered;
     use reth_provider::test_utils::MockEthProvider;
+    use reth_rpc_eth_api::helpers::SpawnBlocking;
     use reth_transaction_pool::test_utils::testing_pool;
+    use std::time::Duration;
 
     #[test]
     fn block_transaction_pages_match_frontend_index_navigation() {
@@ -703,9 +703,6 @@ mod tests {
 
     #[tokio::test]
     async fn trace_methods_wait_for_tracing_permit() {
-        use reth_rpc_eth_api::helpers::SpawnBlocking;
-        use std::time::Duration;
-
         let api = OtterscanApi::new(
             crate::eth::EthApiBuilder::new(
                 MockEthProvider::default(),

@@ -53,7 +53,6 @@ test-fuzz.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
-rand_08.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
@@ -64,6 +63,7 @@ alloy-eips.workspace = true
 
 [features]
 arbitrary = [
+    "secp256k1/arbitrary",
     "reth-eth-wire-types/arbitrary",
     "dep:arbitrary",
     "alloy-eips/arbitrary",
@@ -87,7 +87,7 @@ serde = [
     "reth-primitives-traits/serde",
     "reth-ethereum-forks/serde",
     "alloy-consensus/serde",
-    "rand_08/serde",
+    "rand/serde",
 ]
 
 [[test]]

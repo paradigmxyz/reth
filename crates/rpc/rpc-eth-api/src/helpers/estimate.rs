@@ -122,7 +122,8 @@ pub trait EstimateCall: Call {
 
         // Check funds of the sender (only useful to check if transaction gas price is more than 0).
         //
-        // The caller allowance is check by doing `(account.balance - tx.value) / tx.gas_price`
+        // The caller allowance reserves the value and maximum blob fee before funding execution
+        // gas at the transaction's gas price.
         if request_gas_price > 0 {
             let allowance = self.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
             highest_gas_limit = highest_gas_limit.min(allowance);
