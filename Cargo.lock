@@ -6937,6 +6937,7 @@ dependencies = [
 [[package]]
 name = "pbt"
 version = "0.1.0"
+source = "git+https://github.com/Rimeeeeee/pbtree?rev=967be95e51f45fc9f343faa205731e5fb2699eed#967be95e51f45fc9f343faa205731e5fb2699eed"
 dependencies = [
  "alloy-eip7928",
  "alloy-primitives",

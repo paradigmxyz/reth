@@ -1,8 +1,7 @@
 # PBT adapters for Reth
 
 Adapters for execution bundles, retained-state conversion, and durable PBT
-checkpoints. The lazy-execution branch uses `pbt` from the sibling `pbtree`
-checkout through the workspace dependency.
+checkpoints.
 
 Features: `execution`, `migration`, `bal`, `conversion`, `persistence`, and
 `parallel`. The parallel feature enables `execution::apply_bundle_parallel`;
