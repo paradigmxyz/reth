@@ -1260,20 +1260,6 @@ impl ArenaParallelSparseTrie {
             rlp_buf.clear();
             let rlp_node = BranchNodeRef::new(rlp_node_buf, state_mask).rlp(rlp_buf);
 
-            #[cfg(feature = "fuzz")]
-            {
-                let branch = branch_data(arena, head_idx);
-                let (revealed, leaf) = coverage_branch_masks(arena, branch, &[]);
-                let depth = cursor.head_logical_branch_path_len(arena);
-                sparse_guidance::observe_branch_shape(
-                    depth,
-                    depth == 0,
-                    branch.state_mask.get(),
-                    revealed,
-                    leaf,
-                );
-            }
-
             let rlp_node = if short_key.is_empty() {
                 rlp_node
             } else {
