@@ -3085,66 +3085,59 @@ mod tests {
 
     #[test]
     fn unsupported_root_preserves_update_retention_and_allows_valid_root() {
-        Runtime::new().run(move || {
-            let mut trie = ArenaParallelSparseTrie::default();
-            let root = TrieNodeV2::Extension(reth_trie_common::ExtensionNode::new(
-                Nibbles::from_nibbles([1]),
-                RlpNode::word_rlp(&B256::ZERO),
-            ));
-            let error = trie.set_root(root, None, true).unwrap_err();
-            assert!(
-                matches!(error.kind(), SparseTrieErrorKind::Reveal { path, .. } if path.is_empty())
-            );
-            assert!(trie.buffers.updates.is_none());
+        let mut trie = ArenaParallelSparseTrie::default();
+        let root = TrieNodeV2::Extension(reth_trie_common::ExtensionNode::new(
+            Nibbles::from_nibbles([1]),
+            RlpNode::word_rlp(&B256::ZERO),
+        ));
+        let error = trie.set_root(root, None, true).unwrap_err();
+        assert!(
+            matches!(error.kind(), SparseTrieErrorKind::Reveal { path, .. } if path.is_empty())
+        );
+        assert!(trie.buffers.updates.is_none());
 
-            trie.set_root(TrieNodeV2::EmptyRoot, None, true).unwrap();
-            assert_eq!(trie.root(epoch(1)), EMPTY_ROOT_HASH);
-            assert!(trie.buffers.updates.is_some());
-        });
+        trie.set_root(TrieNodeV2::EmptyRoot, None, true).unwrap();
+        assert_eq!(trie.root(epoch(1)), EMPTY_ROOT_HASH);
+        assert!(trie.buffers.updates.is_some());
     }
 
     #[test]
     fn pruning_pops_cursor_before_reusing_node_slot() {
-        Runtime::new().run(move || {
-            let mut arena = NodeArena::new();
-            let rlp = RlpNode::word_rlp(&B256::repeat_byte(1));
-            let state = ArenaSparseNodeState::Cached { rlp_node: rlp.clone(), epoch: epoch(0) };
-            let leaf = ArenaSparseNode::Leaf {
-                state: state.clone(),
-                key: Default::default(),
-                value: vec![1],
-            };
-            let first = arena.insert(leaf.clone());
-            let second = arena.insert(leaf);
-            let root = arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-                state: state.clone(),
-                children: [BranchChild::revealed(first), BranchChild::revealed(second)]
-                    .into_iter()
-                    .collect(),
-                state_mask: alloy_trie::TrieMask::new(3),
-                branch_masks: Default::default(),
-            }));
-            let mut cursor = ArenaCursor::default();
-            cursor.reset(&arena, root, Default::default());
-            assert!(matches!(cursor.next(&mut arena, |_, _| true), NextResult::NonBranch));
-            assert_eq!(cursor.head().unwrap().index, first);
+        let mut arena = NodeArena::new();
+        let rlp = RlpNode::word_rlp(&B256::repeat_byte(1));
+        let state = ArenaSparseNodeState::Cached { rlp_node: rlp.clone(), epoch: epoch(0) };
+        let leaf =
+            ArenaSparseNode::Leaf { state: state.clone(), key: Default::default(), value: vec![1] };
+        let first = arena.insert(leaf.clone());
+        let second = arena.insert(leaf);
+        let root = arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+            state: state.clone(),
+            children: [BranchChild::revealed(first), BranchChild::revealed(second)]
+                .into_iter()
+                .collect(),
+            state_mask: alloy_trie::TrieMask::new(3),
+            branch_masks: Default::default(),
+        }));
+        let mut cursor = ArenaCursor::default();
+        cursor.reset(&arena, root, Default::default());
+        assert!(matches!(cursor.next(&mut arena, |_, _| true), NextResult::NonBranch));
+        assert_eq!(cursor.head().unwrap().index, first);
 
-            ArenaParallelSparseTrie::remove_pruned_node(&mut arena, &mut cursor);
-            assert_eq!(cursor.head().unwrap().index, root);
-            let reused = arena.insert(ArenaSparseNode::Leaf {
-                state: ArenaSparseNodeState::Dirty,
-                key: Default::default(),
-                value: vec![2],
-            });
-            assert_eq!(reused, first);
-
-            assert!(matches!(cursor.next(&mut arena, |_, _| true), NextResult::NonBranch));
-            assert_eq!(cursor.head().unwrap().index, second);
-            assert!(matches!(cursor.next(&mut arena, |_, _| true), NextResult::Branch));
-            assert_eq!(arena[root].state_ref(), Some(&state));
-            assert_eq!(arena.blinded(arena[root].branch_ref().children[0]), &rlp);
-            assert!(matches!(cursor.next(&mut arena, |_, _| true), NextResult::Done));
+        ArenaParallelSparseTrie::remove_pruned_node(&mut arena, &mut cursor);
+        assert_eq!(cursor.head().unwrap().index, root);
+        let reused = arena.insert(ArenaSparseNode::Leaf {
+            state: ArenaSparseNodeState::Dirty,
+            key: Default::default(),
+            value: vec![2],
         });
+        assert_eq!(reused, first);
+
+        assert!(matches!(cursor.next(&mut arena, |_, _| true), NextResult::NonBranch));
+        assert_eq!(cursor.head().unwrap().index, second);
+        assert!(matches!(cursor.next(&mut arena, |_, _| true), NextResult::Branch));
+        assert_eq!(arena[root].state_ref(), Some(&state));
+        assert_eq!(arena.blinded(arena[root].branch_ref().children[0]), &rlp);
+        assert!(matches!(cursor.next(&mut arena, |_, _| true), NextResult::Done));
     }
 
     /// Test harness for proptest-based arena sparse trie testing.

@@ -197,10 +197,11 @@ mod tests {
 
     #[test]
     fn test_chain_info() {
-        // Create a random header
-        let mut rng = generators::rng();
-        let header = random_header(&mut rng, 10, None);
-        Runtime::new().run(move || {
+        Runtime::new().run(|| {
+            // Create a random header
+            let mut rng = generators::rng();
+            let header = random_header(&mut rng, 10, None);
+
             // Create a new chain info tracker with the header
             let tracker: ChainInfoTracker<EthPrimitives> =
                 ChainInfoTracker::new(header.clone(), None, None);
@@ -216,10 +217,11 @@ mod tests {
 
     #[test]
     fn test_on_forkchoice_update_received() {
-        // Create a random block header
-        let mut rng = generators::rng();
-        let header = random_header(&mut rng, 10, None);
-        Runtime::new().run(move || {
+        Runtime::new().run(|| {
+            // Create a random block header
+            let mut rng = generators::rng();
+            let header = random_header(&mut rng, 10, None);
+
             // Create a new chain info tracker with the header
             let tracker: ChainInfoTracker<EthPrimitives> =
                 ChainInfoTracker::new(header, None, None);
@@ -238,12 +240,13 @@ mod tests {
 
     #[test]
     fn test_set_canonical_head() {
-        // Create a random number generator
-        let mut rng = generators::rng();
-        // Generate two random headers for testing
-        let header1 = random_header(&mut rng, 10, None);
-        let header2 = random_header(&mut rng, 20, None);
-        Runtime::new().run(move || {
+        Runtime::new().run(|| {
+            // Create a random number generator
+            let mut rng = generators::rng();
+            // Generate two random headers for testing
+            let header1 = random_header(&mut rng, 10, None);
+            let header2 = random_header(&mut rng, 20, None);
+
             // Create a new chain info tracker with the first header
             let tracker: ChainInfoTracker<EthPrimitives> =
                 ChainInfoTracker::new(header1, None, None);
@@ -259,15 +262,15 @@ mod tests {
 
     #[test]
     fn test_set_safe() {
-        // Create a random number generator
-        let mut rng = generators::rng();
+        Runtime::new().run(|| {
+            // Create a random number generator
+            let mut rng = generators::rng();
 
-        // Case 1: basic test
-        // Generate three random headers for the test
-        let header1 = random_header(&mut rng, 10, None);
-        let header2 = random_header(&mut rng, 20, None);
-        let header3 = random_header(&mut rng, 30, None);
-        Runtime::new().run(move || {
+            // Case 1: basic test
+            // Generate two random headers for the test
+            let header1 = random_header(&mut rng, 10, None);
+            let header2 = random_header(&mut rng, 20, None);
+
             // Create a new chain info tracker with the first header (header1)
             let tracker: ChainInfoTracker<EthPrimitives> =
                 ChainInfoTracker::new(header1, None, None);
@@ -292,6 +295,9 @@ mod tests {
             assert_eq!(same_safe_header, header2);
 
             // Case 3: call with a different (new) header
+            // Generate a third header with a higher block number
+            let header3 = random_header(&mut rng, 30, None);
+
             // Call set_safe with this new header (header3)
             tracker.set_safe(header3.clone());
 
@@ -305,14 +311,15 @@ mod tests {
 
     #[test]
     fn test_set_finalized() {
-        // Create a random number generator
-        let mut rng = generators::rng();
+        Runtime::new().run(|| {
+            // Create a random number generator
+            let mut rng = generators::rng();
 
-        // Generate random headers for testing
-        let header1 = random_header(&mut rng, 10, None);
-        let header2 = random_header(&mut rng, 20, None);
-        let header3 = random_header(&mut rng, 30, None);
-        Runtime::new().run(move || {
+            // Generate random headers for testing
+            let header1 = random_header(&mut rng, 10, None);
+            let header2 = random_header(&mut rng, 20, None);
+            let header3 = random_header(&mut rng, 30, None);
+
             // Create a new chain info tracker with the first header
             let tracker: ChainInfoTracker<EthPrimitives> =
                 ChainInfoTracker::new(header1, None, None);
@@ -348,10 +355,11 @@ mod tests {
 
     #[test]
     fn test_get_finalized_num_hash() {
-        // Create a random header
-        let mut rng = generators::rng();
-        let finalized_header = random_header(&mut rng, 10, None);
-        Runtime::new().run(move || {
+        Runtime::new().run(|| {
+            // Create a random header
+            let mut rng = generators::rng();
+            let finalized_header = random_header(&mut rng, 10, None);
+
             // Create a new chain info tracker with the finalized header
             let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(
                 finalized_header.clone(),
@@ -366,10 +374,11 @@ mod tests {
 
     #[test]
     fn test_get_safe_num_hash() {
-        // Create a random header
-        let mut rng = generators::rng();
-        let safe_header = random_header(&mut rng, 10, None);
-        Runtime::new().run(move || {
+        Runtime::new().run(|| {
+            // Create a random header
+            let mut rng = generators::rng();
+            let safe_header = random_header(&mut rng, 10, None);
+
             // Create a new chain info tracker with the safe header
             let tracker: ChainInfoTracker<EthPrimitives> =
                 ChainInfoTracker::new(safe_header.clone(), None, None);
@@ -382,11 +391,9 @@ mod tests {
 
     #[test]
     fn test_set_persisted() {
-        let mut rng = generators::rng();
-        let header = random_header(&mut rng, 10, None);
-        let num_hash1 = BlockNumHash::new(10, B256::random());
-        let num_hash2 = BlockNumHash::new(20, B256::random());
-        Runtime::new().run(move || {
+        Runtime::new().run(|| {
+            let mut rng = generators::rng();
+            let header = random_header(&mut rng, 10, None);
             let tracker: ChainInfoTracker<EthPrimitives> =
                 ChainInfoTracker::new(header, None, None);
 
@@ -394,6 +401,7 @@ mod tests {
             assert!(tracker.get_persisted_num_hash().is_none());
 
             // Set a persisted block
+            let num_hash1 = BlockNumHash::new(10, B256::random());
             tracker.set_persisted(num_hash1);
             assert_eq!(tracker.get_persisted_num_hash(), Some(num_hash1));
 
@@ -402,6 +410,7 @@ mod tests {
             assert_eq!(tracker.get_persisted_num_hash(), Some(num_hash1));
 
             // Set a different block
+            let num_hash2 = BlockNumHash::new(20, B256::random());
             tracker.set_persisted(num_hash2);
             assert_eq!(tracker.get_persisted_num_hash(), Some(num_hash2));
         });

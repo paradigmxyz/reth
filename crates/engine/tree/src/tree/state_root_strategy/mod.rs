@@ -1513,79 +1513,67 @@ mod tests {
 
     #[test]
     fn sparse_trie_prune_target_uses_requested_range() {
-        let mut block_builder = TestBlockBuilder::seeded(42);
-        reth_tasks::executor::Runtime::new().run(move || {
-            let parent = alloy_eips::BlockNumHash { hash: B256::with_last_byte(9), number: 9 };
-            assert_eq!(
-                sparse_trie_prune_target::<EthPrimitives>(B256::ZERO, false, parent, None),
-                None
-            );
-            assert_eq!(
-                sparse_trie_prune_target::<EthPrimitives>(B256::ZERO, false, parent, Some(&[])),
-                Some((TrieNodeEpoch::new(10), parent.hash))
-            );
+        let parent = alloy_eips::BlockNumHash { hash: B256::with_last_byte(9), number: 9 };
+        assert_eq!(
+            sparse_trie_prune_target::<EthPrimitives>(B256::ZERO, false, parent, None),
+            None
+        );
+        assert_eq!(
+            sparse_trie_prune_target::<EthPrimitives>(B256::ZERO, false, parent, Some(&[])),
+            Some((TrieNodeEpoch::new(10), parent.hash))
+        );
 
-            let mut blocks: Vec<_> = block_builder.get_executed_blocks(7..10).collect();
-            blocks.reverse();
+        let mut blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(7..10).collect();
+        blocks.reverse();
 
-            let anchor = blocks[0].recovered_block().hash();
-            assert_eq!(
-                sparse_trie_prune_target(anchor, true, parent, Some(&blocks)),
-                Some((TrieNodeEpoch::new(7), anchor))
-            );
-        });
+        let anchor = blocks[0].recovered_block().hash();
+        assert_eq!(
+            sparse_trie_prune_target(anchor, true, parent, Some(&blocks)),
+            Some((TrieNodeEpoch::new(7), anchor))
+        );
     }
 
     #[test]
     fn sparse_trie_prune_target_advances_to_prune_anchor() {
-        let mut block_builder = TestBlockBuilder::seeded(42);
-        reth_tasks::executor::Runtime::new().run(move || {
-            let blocks: Vec<_> = block_builder.get_executed_blocks(1..5).collect();
-            let reused_anchor_hash = blocks[0].recovered_block().hash();
-            let expected_prune_anchor = blocks[1].recovered_block().hash();
-            let parent = blocks[3].recovered_block().num_hash();
-            let prune_blocks: Vec<_> = blocks.into_iter().skip(2).rev().collect();
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..5).collect();
+        let reused_anchor_hash = blocks[0].recovered_block().hash();
+        let expected_prune_anchor = blocks[1].recovered_block().hash();
+        let parent = blocks[3].recovered_block().num_hash();
+        let prune_blocks: Vec<_> = blocks.into_iter().skip(2).rev().collect();
 
-            assert_eq!(
-                sparse_trie_prune_target(reused_anchor_hash, true, parent, Some(&prune_blocks),),
-                Some((TrieNodeEpoch::new(3), expected_prune_anchor))
-            );
-        });
+        assert_eq!(
+            sparse_trie_prune_target(reused_anchor_hash, true, parent, Some(&prune_blocks),),
+            Some((TrieNodeEpoch::new(3), expected_prune_anchor))
+        );
     }
 
     #[test]
     fn sparse_trie_prune_target_keeps_parent_for_fresh_trie() {
-        let mut block_builder = TestBlockBuilder::seeded(42);
-        reth_tasks::executor::Runtime::new().run(move || {
-            let mut blocks: Vec<_> = block_builder.get_executed_blocks(1..3).collect();
-            blocks.reverse();
-            let parent_hash = B256::with_last_byte(0xaa);
+        let mut blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..3).collect();
+        blocks.reverse();
+        let parent_hash = B256::with_last_byte(0xaa);
 
-            assert_eq!(
-                sparse_trie_prune_target(
-                    parent_hash,
-                    false,
-                    blocks[0].recovered_block().num_hash(),
-                    Some(&blocks),
-                ),
-                Some((TrieNodeEpoch::new(1), parent_hash))
-            );
-        });
+        assert_eq!(
+            sparse_trie_prune_target(
+                parent_hash,
+                false,
+                blocks[0].recovered_block().num_hash(),
+                Some(&blocks),
+            ),
+            Some((TrieNodeEpoch::new(1), parent_hash))
+        );
     }
 
     #[test]
     fn sparse_trie_prune_target_advances_reused_anchor_when_parent_becomes_durable() {
-        let mut block_builder = TestBlockBuilder::seeded(42);
-        reth_tasks::executor::Runtime::new().run(move || {
-            let blocks: Vec<_> = block_builder.get_executed_blocks(1..4).collect();
-            let old_anchor = blocks[1].recovered_block().hash();
-            let parent = blocks[2].recovered_block().num_hash();
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+        let old_anchor = blocks[1].recovered_block().hash();
+        let parent = blocks[2].recovered_block().num_hash();
 
-            assert_eq!(
-                sparse_trie_prune_target::<EthPrimitives>(old_anchor, true, parent, Some(&[])),
-                Some((TrieNodeEpoch::new(4), parent.hash))
-            );
-        });
+        assert_eq!(
+            sparse_trie_prune_target::<EthPrimitives>(old_anchor, true, parent, Some(&[])),
+            Some((TrieNodeEpoch::new(4), parent.hash))
+        );
     }
 
     fn create_mock_state_updates(
@@ -1637,12 +1625,13 @@ mod tests {
 
     #[test]
     fn payload_builder_trie_matches_serial_root_and_can_be_reused() {
-        reth_tracing::init_test_tracing();
-        let state_updates = create_mock_state_updates(10, 10);
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_tasks::executor::Runtime::new().run(|| {
+            reth_tracing::init_test_tracing();
+
             let factory =
                 create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
             let genesis_hash = init_genesis(&factory).unwrap();
+            let state_updates = create_mock_state_updates(10, 10);
             let mut accumulated_state: HashMap<Address, (Account, HashMap<B256, U256>)> =
                 HashMap::default();
 

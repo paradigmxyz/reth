@@ -1049,16 +1049,11 @@ mod tests {
 
     #[test]
     fn root_on_blind_trie_returns_blind_error() {
-        Runtime::new().run(move || {
-            let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
-            let err = sparse.root(epoch(0)).unwrap_err();
+        let err = sparse.root(epoch(0)).unwrap_err();
 
-            assert!(matches!(
-                err.kind(),
-                SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)
-            ));
-        });
+        assert!(matches!(err.kind(), SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)));
     }
 
     #[test]

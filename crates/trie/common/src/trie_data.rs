@@ -286,14 +286,12 @@ mod tests {
 
     #[test]
     fn test_lazy_clone_shares_state() {
-        Runtime::new().run(move || {
-            let lazy1 = LazyTrieData::ready(SortedTrieData::default());
-            let lazy2 = lazy1.clone();
+        let lazy1 = LazyTrieData::ready(SortedTrieData::default());
+        let lazy2 = lazy1.clone();
 
-            // Both point to the same data
-            assert!(Arc::ptr_eq(&lazy1.hashed_state(), &lazy2.hashed_state()));
-            assert!(Arc::ptr_eq(&lazy1.trie_updates(), &lazy2.trie_updates()));
-        });
+        // Both point to the same data
+        assert!(Arc::ptr_eq(&lazy1.hashed_state(), &lazy2.hashed_state()));
+        assert!(Arc::ptr_eq(&lazy1.trie_updates(), &lazy2.trie_updates()));
     }
 
     #[test]

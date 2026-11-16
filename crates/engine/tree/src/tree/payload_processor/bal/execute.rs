@@ -524,27 +524,23 @@ mod tests {
 
     #[test]
     fn invalid_bal_bytecode_is_validation_error() {
-        reth_tasks::executor::Runtime::new().run(|| {
-            let bal = vec![AccountChanges {
-                address: Address::ZERO,
-                code_changes: vec![CodeChange::new(
-                    BlockAccessIndex::new(1),
-                    vec![0xef, 0x01, 0xde].into(),
-                )],
-                ..Default::default()
-            }];
-            let error =
-                <BlockExecutorFor<'_, EthEvmConfig> as BlockExecutor>::convert_block_access_list(
-                    &bal,
-                )
+        let bal = vec![AccountChanges {
+            address: Address::ZERO,
+            code_changes: vec![CodeChange::new(
+                BlockAccessIndex::new(1),
+                vec![0xef, 0x01, 0xde].into(),
+            )],
+            ..Default::default()
+        }];
+        let error =
+            <BlockExecutorFor<'_, EthEvmConfig> as BlockExecutor>::convert_block_access_list(&bal)
                 .unwrap_err();
-            let error = BalExecutionError::from(BlockAccessListDecodeError::new(error));
-            let error = InsertBlockErrorKind::from(error);
-            assert!(matches!(
-                error.ensure_validation_error(),
-                Ok(InsertBlockValidationError::BlockAccessListDecode(_))
-            ));
-        });
+        let error = BalExecutionError::from(BlockAccessListDecodeError::new(error));
+        let error = InsertBlockErrorKind::from(error);
+        assert!(matches!(
+            error.ensure_validation_error(),
+            Ok(InsertBlockValidationError::BlockAccessListDecode(_))
+        ));
     }
 
     #[test]
@@ -576,9 +572,7 @@ mod tests {
 
     #[test]
     fn multi_tx_happy_path_round_trip() {
-        let alice_kp = generate_key(&mut rng());
-        let bob_kp = generate_key(&mut rng());
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_tasks::executor::Runtime::new().run(|| {
             // End-to-end with two value transfers from distinct senders to the same recipient.
             //
             // 1. Fund alice and bob in a fresh canonical DB.
@@ -590,9 +584,11 @@ mod tests {
             let carol = Address::repeat_byte(0xca);
             let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
-            // Derive sender addresses from the pregenerated keypairs.
+            // Generate keypairs + derive sender addresses.
+            let alice_kp = generate_key(&mut rng());
             let alice =
                 Address::from_raw_public_key(&alice_kp.public_key().serialize_uncompressed()[1..]);
+            let bob_kp = generate_key(&mut rng());
             let bob =
                 Address::from_raw_public_key(&bob_kp.public_key().serialize_uncompressed()[1..]);
 
@@ -646,16 +642,16 @@ mod tests {
 
     #[test]
     fn shadow_multi_value_transfer() {
-        let alice_kp = generate_key(&mut rng());
-        let bob_kp = generate_key(&mut rng());
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_tasks::executor::Runtime::new().run(|| {
             // Two senders → same recipient. Byte-equal across paths means: worker-produced
             // diffs commit identically to a directly-executed serial path.
             let evm_config = test_evm_config();
             let carol = Address::repeat_byte(0xca);
             let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+            let alice_kp = generate_key(&mut rng());
             let alice =
                 Address::from_raw_public_key(&alice_kp.public_key().serialize_uncompressed()[1..]);
+            let bob_kp = generate_key(&mut rng());
             let bob =
                 Address::from_raw_public_key(&bob_kp.public_key().serialize_uncompressed()[1..]);
             let mut db = system_contracts_db();
@@ -671,17 +667,17 @@ mod tests {
 
     #[test]
     fn rejects_tx_gas_limit_that_exceeds_remaining_block_gas() {
-        let alice_kp = generate_key(&mut rng());
-        let bob_kp = generate_key(&mut rng());
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_tasks::executor::Runtime::new().run(|| {
             // Each worker sees an empty block, so both transactions fit individually. The ordered
             // commit loop must still reject tx2 because tx1's committed gas leaves too little
             // block gas for tx2's gas limit.
             let evm_config = test_evm_config();
             let carol = Address::repeat_byte(0xca);
             let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+            let alice_kp = generate_key(&mut rng());
             let alice =
                 Address::from_raw_public_key(&alice_kp.public_key().serialize_uncompressed()[1..]);
+            let bob_kp = generate_key(&mut rng());
             let bob =
                 Address::from_raw_public_key(&bob_kp.public_key().serialize_uncompressed()[1..]);
             let txs = vec![
@@ -725,8 +721,7 @@ mod tests {
 
     #[test]
     fn shadow_tx_with_revert() {
-        let key = generate_key(&mut rng());
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_tasks::executor::Runtime::new().run(|| {
             // A tx that reverts in a deployed contract. Both paths must produce identical receipts
             // (success = false, gas charged, state rolled back except for gas payment + nonce
             // bump).
@@ -735,6 +730,7 @@ mod tests {
             // call reverts; fees + nonce still apply.
             let evm_config = test_evm_config();
             let contract = Address::repeat_byte(0xde);
+            let key = generate_key(&mut rng());
             let signer =
                 Address::from_raw_public_key(&key.public_key().serialize_uncompressed()[1..]);
             let mut db = system_contracts_db();
@@ -752,8 +748,7 @@ mod tests {
 
     #[test]
     fn shadow_tx_with_sstore() {
-        let key = generate_key(&mut rng());
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_tasks::executor::Runtime::new().run(|| {
             // Tx calls a deployed contract that does `SSTORE(0, 0x42)`. The storage write must
             // commit identically across serial and BAL paths even though the canonical state
             // applies a diff produced by a worker EVM.
@@ -761,6 +756,7 @@ mod tests {
             // Bytecode: PUSH1 0x42, PUSH1 0x00, SSTORE, STOP → `0x60 0x42 0x60 0x00 0x55 0x00`.
             let evm_config = test_evm_config();
             let contract = Address::repeat_byte(0x55);
+            let key = generate_key(&mut rng());
             let signer =
                 Address::from_raw_public_key(&key.public_key().serialize_uncompressed()[1..]);
             let mut db = system_contracts_db();
@@ -871,16 +867,16 @@ mod tests {
 
     #[test]
     fn gas_tracker_non_amsterdam_uses_cumulative_gas() {
-        let alice_key = generate_key(&mut rng());
-        let bob_key = generate_key(&mut rng());
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_tasks::executor::Runtime::new().run(|| {
             // tx2's gas limit fits the block gas limit on its own but not the gas left after tx1,
             // so non-Amsterdam admission, which budgets by cumulative gas, must reject it.
             let evm_config = non_amsterdam_evm_config();
             let recipient = Address::repeat_byte(0xca);
             let balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+            let alice_key = generate_key(&mut rng());
             let alice =
                 Address::from_raw_public_key(&alice_key.public_key().serialize_uncompressed()[1..]);
+            let bob_key = generate_key(&mut rng());
             let bob =
                 Address::from_raw_public_key(&bob_key.public_key().serialize_uncompressed()[1..]);
             let txs = vec![
@@ -915,8 +911,7 @@ mod tests {
 
     #[test]
     fn gas_tracker_caps_oversized_tx_gas_limit_at_tx_gas_limit_cap() {
-        let key = generate_key(&mut rng());
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_tasks::executor::Runtime::new().run(|| {
             // A tx with gas_limit above the tx gas limit cap (EIP-7825) is admitted when the
             // capped value fits in the remaining block gas.
             const TX_GAS_LIMIT_CAP: u64 = 1 << 24;
@@ -924,6 +919,7 @@ mod tests {
             let evm_config = test_evm_config();
             let loop_contract = Address::repeat_byte(0x44);
             let recipient = Address::repeat_byte(0xca);
+            let key = generate_key(&mut rng());
             let signer =
                 Address::from_raw_public_key(&key.public_key().serialize_uncompressed()[1..]);
             let mut db = system_contracts_db();
@@ -1021,12 +1017,12 @@ mod tests {
 
     #[test]
     fn default_tx_gas_limit_cap_matches_serial_execution() {
-        let (db, tx1, tx2) = two_transfers(100_000, 19_990_000, true);
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_tasks::executor::Runtime::new().run(|| {
             let evm_config = test_evm_config();
             let block_gas_limit = 20_000_000;
             // The uncapped second limit exceeds the remaining regular budget. EIP-7825's
             // default cap makes its regular part fit; the funded recipient consumes no state gas.
+            let (db, tx1, tx2) = two_transfers(100_000, 19_990_000, true);
             let txs = vec![tx1, tx2];
             let (serial, bal) = run_serial_path(
                 &evm_config,
@@ -1053,11 +1049,11 @@ mod tests {
 
     #[test]
     fn propagates_bal_miss_of_admitted_transaction_as_block_verdict() {
-        let (pre_block_db, reference_bal, tx1, tx2) =
-            two_transfers_with_reference_bal(&test_evm_config(), 100_000, false);
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_tasks::executor::Runtime::new().run(|| {
             // The BAL covers neither transaction: the first slot's speculative failure is
             // adjudicated in block order and becomes the block's verdict.
+            let (pre_block_db, reference_bal, tx1, tx2) =
+                two_transfers_with_reference_bal(&test_evm_config(), 100_000, false);
             let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
             let block = empty_amsterdam_block(bal_hash);
 
@@ -1091,11 +1087,11 @@ mod tests {
 
     #[test]
     fn admission_rejects_before_speculative_worker_failure_surfaces() {
-        let (pre_block_db, reference_bal, tx1, tx2) =
-            two_transfers_with_reference_bal(&test_evm_config(), 990_000, true);
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_tasks::executor::Runtime::new().run(|| {
             // tx2 exceeds the remaining block gas AND misses the BAL; block-gas admission is
             // adjudicated first, so the verdict is the gas error, not tx2's BAL failure.
+            let (pre_block_db, reference_bal, tx1, tx2) =
+                two_transfers_with_reference_bal(&test_evm_config(), 990_000, true);
             let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
             let low_gas_block = empty_amsterdam_block_with_gas_limit(bal_hash, 1_000_000);
 
@@ -1124,10 +1120,10 @@ mod tests {
 
     #[test]
     fn worker_reuses_provider_after_failure_and_finishes_earlier_transactions() {
-        let (pre_block_db, reference_bal, tx1, tx2) =
-            two_transfers_with_reference_bal(&test_evm_config(), 100_000, true);
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_tasks::executor::Runtime::new().run(|| {
             let evm_config = test_evm_config();
+            let (pre_block_db, reference_bal, tx1, tx2) =
+                two_transfers_with_reference_bal(&evm_config, 100_000, true);
             let block = empty_amsterdam_block(B256::ZERO);
             let received_bal = Arc::new(
                 <BlockExecutorFor<'_, EthEvmConfig> as BlockExecutor>::convert_block_access_list(
@@ -1203,20 +1199,14 @@ mod tests {
 
     #[test]
     fn amsterdam_state_gas_admission_matches_serial_execution() {
-        let evm_config = EthEvmConfig::new(Arc::new(
-            reth_chainspec::ChainSpecBuilder::mainnet().amsterdam_activated().build(),
-        ));
-        let fixtures = [(500_000, true), (990_000, true), (990_000, false)].map(
-            |(tx_gas_limit, complete_bal)| {
-                (
-                    tx_gas_limit,
-                    complete_bal,
-                    two_transfers_with_reference_bal(&evm_config, tx_gas_limit, true),
-                )
-            },
-        );
-        reth_tasks::executor::Runtime::new().run(move || {
-            for (tx_gas_limit, complete_bal, (pre_block_db, partial_bal, tx1, tx2)) in fixtures {
+        reth_tasks::executor::Runtime::new().run(|| {
+            let evm_config = EthEvmConfig::new(Arc::new(
+                reth_chainspec::ChainSpecBuilder::mainnet().amsterdam_activated().build(),
+            ));
+            for (tx_gas_limit, complete_bal) in [(500_000, true), (990_000, true), (990_000, false)]
+            {
+                let (pre_block_db, partial_bal, tx1, tx2) =
+                    two_transfers_with_reference_bal(&evm_config, tx_gas_limit, true);
                 let reference_block = empty_amsterdam_block(B256::ZERO);
                 let reference_bal = if complete_bal {
                     reference_bal_for_block(

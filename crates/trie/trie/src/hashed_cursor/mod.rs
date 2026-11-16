@@ -120,25 +120,21 @@ pub fn zero_destroyed_account_storage<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_tasks::executor::Runtime;
     use reth_trie_common::bundle_state::AccountStatus;
 
     #[test]
     fn zero_destroyed_storage_skips_new_accounts() {
-        Runtime::new().run(move || {
-            let address = Address::with_last_byte(1);
-            let account =
-                BundleAccount::new(None, None, Default::default(), AccountStatus::Destroyed);
-            let mut hashed_state = HashedPostState::default();
+        let address = Address::with_last_byte(1);
+        let account = BundleAccount::new(None, None, Default::default(), AccountStatus::Destroyed);
+        let mut hashed_state = HashedPostState::default();
 
-            zero_destroyed_account_storage(
-                &mock::MockHashedCursorFactory::default(),
-                [(&address, &account)],
-                &mut hashed_state,
-            )
-            .unwrap();
+        zero_destroyed_account_storage(
+            &mock::MockHashedCursorFactory::default(),
+            [(&address, &account)],
+            &mut hashed_state,
+        )
+        .unwrap();
 
-            assert!(hashed_state.storages.is_empty());
-        });
+        assert!(hashed_state.storages.is_empty());
     }
 }

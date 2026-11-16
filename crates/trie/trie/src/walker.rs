@@ -718,22 +718,16 @@ mod tests {
 
     #[test]
     fn state_trie_initial_read_timeout_returns_error() {
-        Runtime::new().run(move || {
         let error =
             TrieWalker::<_>::state_trie(TimedOutTrieCursor, PrefixSet::default()).unwrap_err();
         assert_matches::assert_matches!(error, DatabaseError::Read(info) if info == timeout_error());
-
-        });
     }
 
     #[test]
     fn storage_trie_initial_read_timeout_returns_error() {
-        Runtime::new().run(move || {
         let error =
             TrieWalker::<_>::storage_trie(TimedOutTrieCursor, PrefixSet::default()).unwrap_err();
         assert_matches::assert_matches!(error, DatabaseError::Read(info) if info == timeout_error());
-
-        });
     }
 
     fn timeout_error() -> DatabaseErrorInfo {

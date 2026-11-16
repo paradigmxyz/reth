@@ -820,8 +820,7 @@ mod tests {
         reth_tasks::executor::Runtime::new().run(|| {
             let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
             let factory = create_test_provider_factory();
-            let blocks =
-                TestBlockBuilder::seeded(42).get_executed_blocks(0..11).collect::<Vec<_>>();
+            let blocks = TestBlockBuilder::eth().get_executed_blocks(0..11).collect::<Vec<_>>();
             let provider = factory.provider_rw().unwrap();
             for block in &blocks {
                 provider.insert_block(block.recovered_block()).unwrap();
@@ -902,7 +901,7 @@ mod tests {
     fn calculated_reverts_preserve_deletions_across_frontiers() {
         reth_tasks::executor::Runtime::new().run(|| {
             let factory = create_test_provider_factory();
-            let blocks = TestBlockBuilder::seeded(42).get_executed_blocks(0..4).collect::<Vec<_>>();
+            let blocks = TestBlockBuilder::eth().get_executed_blocks(0..4).collect::<Vec<_>>();
             let address = Address::with_last_byte(1);
             let hashed_address = keccak256(address);
             let removed = Nibbles::from_nibbles([1]);

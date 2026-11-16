@@ -462,11 +462,11 @@ mod tests {
 
     #[test]
     fn test_pruner_prunes_bal_store() {
-        let old_hash = B256::random();
-        let retained_hash = B256::random();
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_tasks::executor::Runtime::new().run(|| {
             reth_tracing::init_test_tracing();
 
+            let old_hash = B256::random();
+            let retained_hash = B256::random();
             let old_bal = Bytes::from_static(b"old");
             let retained_bal = Bytes::from_static(b"retained");
             let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
@@ -575,12 +575,13 @@ mod tests {
 
     #[test]
     fn test_save_blocks_single_block() {
-        let mut test_block_builder = TestBlockBuilder::seeded(42);
-        let parent_hash = B256::random();
-        reth_tasks::executor::Runtime::new().run(move || {
-            let executed = test_block_builder.get_executed_block_with_number(1, parent_hash);
+        reth_tasks::executor::Runtime::new().run(|| {
             reth_tracing::init_test_tracing();
             let handle = default_persistence_handle();
+            let block_number = 1;
+            let mut test_block_builder = TestBlockBuilder::eth();
+            let executed =
+                test_block_builder.get_executed_block_with_number(block_number, B256::random());
             let block_hash = executed.recovered_block().hash();
 
             let blocks = full_save_input(vec![executed]);
@@ -598,16 +599,15 @@ mod tests {
 
     #[test]
     fn test_save_blocks_flushes_bal_store() {
-        let mut test_block_builder = TestBlockBuilder::seeded(42);
-        let parent_hash = B256::random();
-        reth_tasks::executor::Runtime::new().run(move || {
-            let executed = test_block_builder.get_executed_block_with_number(1, parent_hash);
+        reth_tasks::executor::Runtime::new().run(|| {
             reth_tracing::init_test_tracing();
             let provider = create_test_provider_factory();
             let bal_store = BalStoreHandle::new(RocksDBBalStore::new(provider.rocksdb_provider()));
             let provider = provider.with_bal_store(bal_store);
             init_genesis(&provider).unwrap();
 
+            let mut test_block_builder = TestBlockBuilder::eth();
+            let executed = test_block_builder.get_executed_block_with_number(1, B256::random());
             let num_hash = executed.recovered_block().num_hash();
             let raw_bal = Bytes::from_static(&[0xc0]);
 
@@ -643,12 +643,12 @@ mod tests {
 
     #[test]
     fn test_save_blocks_multiple_blocks() {
-        let mut test_block_builder = TestBlockBuilder::seeded(42);
-        reth_tasks::executor::Runtime::new().run(move || {
-            let blocks = test_block_builder.get_executed_blocks(1..6).collect::<Vec<_>>();
+        reth_tasks::executor::Runtime::new().run(|| {
             reth_tracing::init_test_tracing();
             let handle = default_persistence_handle();
 
+            let mut test_block_builder = TestBlockBuilder::eth();
+            let blocks = test_block_builder.get_executed_blocks(1..6).collect::<Vec<_>>();
             let last_hash = blocks.last().unwrap().recovered_block().hash();
             let (tx, rx) = channel::bounded(1);
 
@@ -660,12 +660,13 @@ mod tests {
 
     #[test]
     fn test_save_blocks_multiple_calls() {
-        let mut test_block_builder = TestBlockBuilder::seeded(42);
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_tasks::executor::Runtime::new().run(|| {
             reth_tracing::init_test_tracing();
             let handle = default_persistence_handle();
 
-            for range in [1..2, 2..3, 3..5, 5..6] {
+            let ranges = [1..2, 2..3, 3..5, 5..6];
+            let mut test_block_builder = TestBlockBuilder::eth();
+            for range in ranges {
                 let blocks = test_block_builder.get_executed_blocks(range).collect::<Vec<_>>();
                 let last_hash = blocks.last().unwrap().recovered_block().hash();
                 let (tx, rx) = channel::bounded(1);

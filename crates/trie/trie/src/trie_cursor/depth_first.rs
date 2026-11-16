@@ -186,105 +186,99 @@ mod tests {
 
     #[test]
     fn test_depth_first_cmp() {
-        Runtime::new().run(move || {
-            // Test case 1: Child comes before parent
-            let child = Nibbles::from_nibbles([0x1, 0x1]);
-            let parent = Nibbles::from_nibbles([0x1]);
-            assert_eq!(cmp(&child, &parent), Ordering::Less);
-            assert_eq!(cmp(&parent, &child), Ordering::Greater);
+        // Test case 1: Child comes before parent
+        let child = Nibbles::from_nibbles([0x1, 0x1]);
+        let parent = Nibbles::from_nibbles([0x1]);
+        assert_eq!(cmp(&child, &parent), Ordering::Less);
+        assert_eq!(cmp(&parent, &child), Ordering::Greater);
 
-            // Test case 2: Deeper descendant comes before ancestor
-            let deep = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
-            let ancestor = Nibbles::from_nibbles([0x1, 0x2]);
-            assert_eq!(cmp(&deep, &ancestor), Ordering::Less);
-            assert_eq!(cmp(&ancestor, &deep), Ordering::Greater);
+        // Test case 2: Deeper descendant comes before ancestor
+        let deep = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
+        let ancestor = Nibbles::from_nibbles([0x1, 0x2]);
+        assert_eq!(cmp(&deep, &ancestor), Ordering::Less);
+        assert_eq!(cmp(&ancestor, &deep), Ordering::Greater);
 
-            // Test case 3: Siblings use lexicographical ordering
-            let sibling1 = Nibbles::from_nibbles([0x1, 0x2]);
-            let sibling2 = Nibbles::from_nibbles([0x1, 0x3]);
-            assert_eq!(cmp(&sibling1, &sibling2), Ordering::Less);
-            assert_eq!(cmp(&sibling2, &sibling1), Ordering::Greater);
+        // Test case 3: Siblings use lexicographical ordering
+        let sibling1 = Nibbles::from_nibbles([0x1, 0x2]);
+        let sibling2 = Nibbles::from_nibbles([0x1, 0x3]);
+        assert_eq!(cmp(&sibling1, &sibling2), Ordering::Less);
+        assert_eq!(cmp(&sibling2, &sibling1), Ordering::Greater);
 
-            // Test case 4: Different branches use lexicographical ordering
-            let branch1 = Nibbles::from_nibbles([0x1]);
-            let branch2 = Nibbles::from_nibbles([0x2]);
-            assert_eq!(cmp(&branch1, &branch2), Ordering::Less);
-            assert_eq!(cmp(&branch2, &branch1), Ordering::Greater);
+        // Test case 4: Different branches use lexicographical ordering
+        let branch1 = Nibbles::from_nibbles([0x1]);
+        let branch2 = Nibbles::from_nibbles([0x2]);
+        assert_eq!(cmp(&branch1, &branch2), Ordering::Less);
+        assert_eq!(cmp(&branch2, &branch1), Ordering::Greater);
 
-            // Test case 5: Empty path comes after everything
-            let empty = Nibbles::new();
-            let non_empty = Nibbles::from_nibbles([0x0]);
-            assert_eq!(cmp(&non_empty, &empty), Ordering::Less);
-            assert_eq!(cmp(&empty, &non_empty), Ordering::Greater);
+        // Test case 5: Empty path comes after everything
+        let empty = Nibbles::new();
+        let non_empty = Nibbles::from_nibbles([0x0]);
+        assert_eq!(cmp(&non_empty, &empty), Ordering::Less);
+        assert_eq!(cmp(&empty, &non_empty), Ordering::Greater);
 
-            // Test case 6: Same paths are equal
-            let same1 = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
-            let same2 = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
-            assert_eq!(cmp(&same1, &same2), Ordering::Equal);
-        });
+        // Test case 6: Same paths are equal
+        let same1 = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+        let same2 = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+        assert_eq!(cmp(&same1, &same2), Ordering::Equal);
     }
 
     #[test]
     fn test_depth_first_ordering_complex() {
-        Runtime::new().run(move || {
-            // Test the example from the conversation: 0x11, 0x12, 0x1, 0x2
-            let mut paths = [
-                Nibbles::from_nibbles([0x1]),      // 0x1
-                Nibbles::from_nibbles([0x2]),      // 0x2
-                Nibbles::from_nibbles([0x1, 0x1]), // 0x11
-                Nibbles::from_nibbles([0x1, 0x2]), // 0x12
-            ];
+        // Test the example from the conversation: 0x11, 0x12, 0x1, 0x2
+        let mut paths = [
+            Nibbles::from_nibbles([0x1]),      // 0x1
+            Nibbles::from_nibbles([0x2]),      // 0x2
+            Nibbles::from_nibbles([0x1, 0x1]), // 0x11
+            Nibbles::from_nibbles([0x1, 0x2]), // 0x12
+        ];
 
-            // Shuffle to ensure sorting works regardless of input order
-            paths.reverse();
+        // Shuffle to ensure sorting works regardless of input order
+        paths.reverse();
 
-            // Sort using depth-first ordering
-            paths.sort_by(cmp);
+        // Sort using depth-first ordering
+        paths.sort_by(cmp);
 
-            // Expected order: 0x11, 0x12, 0x1, 0x2
-            assert_eq!(paths[0], Nibbles::from_nibbles([0x1, 0x1])); // 0x11
-            assert_eq!(paths[1], Nibbles::from_nibbles([0x1, 0x2])); // 0x12
-            assert_eq!(paths[2], Nibbles::from_nibbles([0x1])); // 0x1
-            assert_eq!(paths[3], Nibbles::from_nibbles([0x2])); // 0x2
-        });
+        // Expected order: 0x11, 0x12, 0x1, 0x2
+        assert_eq!(paths[0], Nibbles::from_nibbles([0x1, 0x1])); // 0x11
+        assert_eq!(paths[1], Nibbles::from_nibbles([0x1, 0x2])); // 0x12
+        assert_eq!(paths[2], Nibbles::from_nibbles([0x1])); // 0x1
+        assert_eq!(paths[3], Nibbles::from_nibbles([0x2])); // 0x2
     }
 
     #[test]
     fn test_depth_first_ordering_tree() {
-        Runtime::new().run(move || {
-            // Test a more complex tree structure
-            let mut paths = vec![
-                Nibbles::new(),                         // root (empty)
-                Nibbles::from_nibbles([0x1]),           // 0x1
-                Nibbles::from_nibbles([0x1, 0x1]),      // 0x11
-                Nibbles::from_nibbles([0x1, 0x1, 0x1]), // 0x111
-                Nibbles::from_nibbles([0x1, 0x1, 0x2]), // 0x112
-                Nibbles::from_nibbles([0x1, 0x2]),      // 0x12
-                Nibbles::from_nibbles([0x2]),           // 0x2
-                Nibbles::from_nibbles([0x2, 0x1]),      // 0x21
-            ];
+        // Test a more complex tree structure
+        let mut paths = vec![
+            Nibbles::new(),                         // root (empty)
+            Nibbles::from_nibbles([0x1]),           // 0x1
+            Nibbles::from_nibbles([0x1, 0x1]),      // 0x11
+            Nibbles::from_nibbles([0x1, 0x1, 0x1]), // 0x111
+            Nibbles::from_nibbles([0x1, 0x1, 0x2]), // 0x112
+            Nibbles::from_nibbles([0x1, 0x2]),      // 0x12
+            Nibbles::from_nibbles([0x2]),           // 0x2
+            Nibbles::from_nibbles([0x2, 0x1]),      // 0x21
+        ];
 
-            // Shuffle
-            paths.reverse();
+        // Shuffle
+        paths.reverse();
 
-            // Sort using depth-first ordering
-            paths.sort_by(cmp);
+        // Sort using depth-first ordering
+        paths.sort_by(cmp);
 
-            // Expected depth-first order:
-            // All descendants come before ancestors
-            // Within the same level, lexicographical order
-            assert_eq!(paths[0], Nibbles::from_nibbles([0x1, 0x1, 0x1])); // 0x111 (deepest in 0x1
-                                                                          // branch)
-            assert_eq!(paths[1], Nibbles::from_nibbles([0x1, 0x1, 0x2])); // 0x112 (sibling of
-                                                                          // 0x111)
-            assert_eq!(paths[2], Nibbles::from_nibbles([0x1, 0x1])); // 0x11 (parent of 0x111,
-                                                                     // 0x112)
-            assert_eq!(paths[3], Nibbles::from_nibbles([0x1, 0x2])); // 0x12 (sibling of 0x11)
-            assert_eq!(paths[4], Nibbles::from_nibbles([0x1])); // 0x1 (parent of 0x11, 0x12)
-            assert_eq!(paths[5], Nibbles::from_nibbles([0x2, 0x1])); // 0x21 (child of 0x2)
-            assert_eq!(paths[6], Nibbles::from_nibbles([0x2])); // 0x2 (parent of 0x21)
-            assert_eq!(paths[7], Nibbles::new()); // root (empty, parent of all)
-        });
+        // Expected depth-first order:
+        // All descendants come before ancestors
+        // Within the same level, lexicographical order
+        assert_eq!(paths[0], Nibbles::from_nibbles([0x1, 0x1, 0x1])); // 0x111 (deepest in 0x1
+                                                                      // branch)
+        assert_eq!(paths[1], Nibbles::from_nibbles([0x1, 0x1, 0x2])); // 0x112 (sibling of
+                                                                      // 0x111)
+        assert_eq!(paths[2], Nibbles::from_nibbles([0x1, 0x1])); // 0x11 (parent of 0x111,
+                                                                 // 0x112)
+        assert_eq!(paths[3], Nibbles::from_nibbles([0x1, 0x2])); // 0x12 (sibling of 0x11)
+        assert_eq!(paths[4], Nibbles::from_nibbles([0x1])); // 0x1 (parent of 0x11, 0x12)
+        assert_eq!(paths[5], Nibbles::from_nibbles([0x2, 0x1])); // 0x21 (child of 0x2)
+        assert_eq!(paths[6], Nibbles::from_nibbles([0x2])); // 0x2 (parent of 0x21)
+        assert_eq!(paths[7], Nibbles::new()); // root (empty, parent of all)
     }
 
     #[test]
@@ -424,13 +418,11 @@ mod tests {
 
     #[test]
     fn test_iterator_terminates_on_error() {
-        Runtime::new().run(move || {
-            let mut iter = DepthFirstTrieIterator::new(FailingTrieCursor);
+        let mut iter = DepthFirstTrieIterator::new(FailingTrieCursor);
 
-            // First call should return the error.
-            assert!(iter.next().unwrap().is_err());
-            // Iterator must be fused after the error — no infinite error loop.
-            assert!(iter.next().is_none());
-        });
+        // First call should return the error.
+        assert!(iter.next().unwrap().is_err());
+        // Iterator must be fused after the error — no infinite error loop.
+        assert!(iter.next().is_none());
     }
 }

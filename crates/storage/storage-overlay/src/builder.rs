@@ -912,7 +912,7 @@ mod tests {
     }
 
     fn test_blocks() -> Vec<ExecutedBlock<EthPrimitives>> {
-        TestBlockBuilder::seeded(42)
+        TestBlockBuilder::eth()
             .get_executed_blocks(0..5)
             .enumerate()
             .map(|(index, block)| with_unique_trie_data(&block, index as u8 + 1))
@@ -1185,7 +1185,7 @@ mod tests {
             let provider = factory.provider().unwrap();
             let parent_hash = B256::with_last_byte(100);
             assert_ne!(parent_hash, blocks[1].recovered_block().hash());
-            let block = TestBlockBuilder::seeded(42)
+            let block = TestBlockBuilder::eth()
                 .get_executed_block_with_number(blocks[2].block_number(), parent_hash);
             let builder =
                 OverlayManager::default().overlay_builder(parent_hash).with_appended_block(block);
@@ -1219,7 +1219,7 @@ mod tests {
             provider_rw.commit().unwrap();
 
             // The fork changes keys distinct from those reverted on disk.
-            let fork = TestBlockBuilder::seeded(42)
+            let fork = TestBlockBuilder::eth()
                 .get_executed_block_with_number(2, blocks[1].recovered_block().hash());
             let fork = with_unique_trie_data(&fork, 2);
             let provider = factory.provider().unwrap();
@@ -1366,7 +1366,7 @@ mod tests {
             }
             provider_rw.commit().unwrap();
 
-            let mut side_chain_builder = TestBlockBuilder::seeded(43);
+            let mut side_chain_builder = TestBlockBuilder::eth();
             let side_block_two = side_chain_builder.get_executed_block_with_number(
                 blocks[2].block_number(),
                 blocks[1].recovered_block().hash(),
@@ -1436,7 +1436,7 @@ mod tests {
                 manager.insert_block(block.clone());
             }
 
-            let block = TestBlockBuilder::seeded(42).get_executed_block_with_number(
+            let block = TestBlockBuilder::eth().get_executed_block_with_number(
                 blocks[4].recovered_block().number() + 1,
                 blocks[4].recovered_block().hash(),
             );

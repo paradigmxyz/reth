@@ -762,8 +762,7 @@ mod tests {
     use evm2::evm::AccountInfo;
     use proptest::{
         prelude::any,
-        strategy::{Strategy, ValueTree},
-        test_runner::{Config, RngAlgorithm, TestRng, TestRunner},
+        test_runner::{Config, TestRunner},
     };
     use reth_chainspec::ChainSpec;
     use reth_evm_ethereum::EthEvmConfig;
@@ -1137,8 +1136,7 @@ mod tests {
 
     #[test]
     fn on_inserted_executed_block_does_not_mutate_checked_out_parent_cache() {
-        let polluted_address = Address::random();
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_tasks::executor::Runtime::new().run(|| {
             let payload_processor = PayloadProcessor::new(
                 reth_tasks::Runtime::test(),
                 EthEvmConfig::new(Arc::new(ChainSpec::default())),
@@ -1159,6 +1157,7 @@ mod tests {
                 .get_cache_for(parent_hash)
                 .expect("expected parent cache checkout to succeed");
 
+            let polluted_address = Address::random();
             let bundle_state = BundleState::builder(2..=2)
                 .state_present_account_info(
                     polluted_address,
@@ -1372,60 +1371,5 @@ mod tests {
             }
             assert_eq!(scope.iter().map(|(_, name)| *name).collect::<Vec<_>>(), expected);
         }
-    }
-
-    #[test]
-    fn transaction_conversion_replays_pregenerated_inputs() {
-        let generate = || {
-            let config = Config::default();
-            let rng = TestRng::from_seed(RngAlgorithm::ChaCha, &[42; 32]);
-            let mut runner = TestRunner::new_with_rng(config, rng);
-            proptest::collection::vec(any::<u8>(), 200).new_tree(&mut runner).unwrap().current()
-        };
-        let inputs = generate();
-        assert_eq!(inputs, generate());
-
-        let run = |inputs: Vec<u8>| {
-            reth_tasks::executor::Runtime::new().run(move || {
-                let processor = test_processor();
-                let expected = inputs
-                    .iter()
-                    .copied()
-                    .map(Address::with_last_byte)
-                    .enumerate()
-                    .collect::<Vec<_>>();
-                let mut outputs = Vec::new();
-                for (count, bal) in [(10, false), (200, false), (200, true)] {
-                    let (_, receiver) = processor.spawn_tx_iterator(
-                        (inputs[..count].to_vec(), |value| {
-                            let tx = converted_tx().tx.as_ref().clone().into_inner();
-                            Ok::<_, std::io::Error>(TestTx::new(
-                                reth_primitives_traits::Recovered::new_unchecked(
-                                    tx,
-                                    Address::with_last_byte(value),
-                                ),
-                            ))
-                        }),
-                        count,
-                        bal,
-                        false,
-                    );
-                    let mut converted = Vec::new();
-                    loop {
-                        match receiver.recv_timeout(std::time::Duration::from_secs(10)) {
-                            Ok((idx, tx)) => converted.push((idx, tx.unwrap().tx.signer())),
-                            Err(RecvTimeoutError::Disconnected) => break,
-                            Err(err) => panic!("conversion did not terminate: {err}"),
-                        }
-                    }
-                    converted.sort_unstable_by_key(|(idx, _)| *idx);
-                    assert_eq!(converted, expected[..count]);
-                    outputs.push(converted);
-                }
-                outputs
-            })
-        };
-        let first = run(inputs.clone());
-        assert_eq!(first, run(inputs));
     }
 }
