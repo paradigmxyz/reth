@@ -67,6 +67,11 @@ mod task_manager;
 pub use task_manager::{
     spawn_blocking, spawn_scoped_thread, spawn_thread, PanickedTaskError, TaskExecutor, TaskManager,
 };
+// Preserve the original native thread helper names.
+#[cfg(all(not(target_family = "wasm"), not(feature = "fuzz")))]
+pub use task_manager::{
+    spawn_scoped_thread as spawn_scoped_os_thread, spawn_thread as spawn_os_thread,
+};
 #[cfg(not(target_family = "wasm"))]
 pub(crate) use task_manager::{wait_for_shutdown_progress, TaskEvent};
 

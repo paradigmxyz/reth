@@ -20,12 +20,15 @@ use reth_provider::{
     PruneCheckpointReader, SaveBlocksInput, StageCheckpointReader, StateProviderFactory,
     StateReader, StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_tasks::executor::{
-    channel::{self, TryRecvError},
-    time::Instant,
-};
+use reth_tasks::executor::channel::{self, TryRecvError};
 use std::time::Duration;
 use tracing::debug;
+
+#[cfg(not(feature = "fuzz"))]
+use reth_primitives_traits::FastInstant as Instant;
+
+#[cfg(feature = "fuzz")]
+use reth_tasks::executor::time::Instant;
 
 impl<N, P, T, V, C> EngineApiTreeHandler<N, P, T, V, C>
 where

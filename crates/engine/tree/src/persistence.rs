@@ -13,13 +13,18 @@ use reth_tasks::{
     executor::{
         channel::{mpsc, Sender},
         thread::JoinHandle,
-        time::Instant,
     },
     spawn_thread,
 };
 use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 use tracing::{debug, error, instrument, warn};
+
+#[cfg(not(feature = "fuzz"))]
+use reth_primitives_traits::FastInstant as Instant;
+
+#[cfg(feature = "fuzz")]
+use reth_tasks::executor::time::Instant;
 
 /// Unified result of any persistence operation.
 #[derive(Debug)]

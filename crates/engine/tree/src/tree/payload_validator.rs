@@ -121,7 +121,6 @@ use reth_tasks::{
     executor::{
         channel,
         channel::{mpsc, Sender},
-        time::Instant,
     },
     LazyHandle,
 };
@@ -171,6 +170,12 @@ use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, LazyTrie
 use reth_trie_common::bundle_state::BundleAccount;
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, debug_span, error, info, instrument, trace, warn, Level, Span};
+
+#[cfg(not(feature = "fuzz"))]
+use reth_primitives_traits::FastInstant as Instant;
+
+#[cfg(feature = "fuzz")]
+use reth_tasks::executor::time::Instant;
 
 pub use crate::tree::types::ValidationOutcome;
 

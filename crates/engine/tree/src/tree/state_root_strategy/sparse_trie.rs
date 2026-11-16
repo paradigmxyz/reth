@@ -1,6 +1,6 @@
 //! Sparse Trie task related functionality.
 
-use reth_tasks::executor::{channel, rayon, time::Instant};
+use reth_tasks::executor::{channel, rayon};
 use std::{
     any::Any,
     panic::{self, AssertUnwindSafe},
@@ -37,6 +37,12 @@ use reth_trie_sparse::{
     SparseTrie, TrieNodeEpoch,
 };
 use tracing::{debug, debug_span, error, instrument, trace_span};
+
+#[cfg(not(feature = "fuzz"))]
+use reth_primitives_traits::FastInstant as Instant;
+
+#[cfg(feature = "fuzz")]
+use reth_tasks::executor::time::Instant;
 
 /// Computes a block's state root by applying streamed updates to an in-memory [`SparseStateTrie`].
 /// Updates that reach a blinded node stay pending while the task fetches the missing proof. The

@@ -16,9 +16,10 @@ workspace = true
 crossbeam-channel.workspace = true
 either = { workspace = true, optional = true }
 rayon.workspace = true
+parking_lot.workspace = true
 shuttle = { workspace = true, optional = true }
-shuttle-sync.workspace = true
-shuttle-parking_lot.workspace = true
+shuttle-sync = { workspace = true, optional = true }
+shuttle-parking_lot = { workspace = true, optional = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 # async
@@ -31,7 +32,6 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-parking_lot.workspace = true
 dashmap.workspace = true
 thread-priority.workspace = true
 tracing.workspace = true

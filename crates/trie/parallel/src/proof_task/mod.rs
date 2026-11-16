@@ -33,7 +33,6 @@ use reth_tasks::{
     executor::{
         channel::{unbounded, Receiver, Sender},
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-        time::Instant,
     },
     Runtime, WorkerPool,
 };
@@ -47,6 +46,12 @@ use tracing::{debug, debug_span, error, instrument, trace};
 
 #[cfg(feature = "metrics")]
 use self::metrics::ProofWorkerIdleMetrics;
+
+#[cfg(not(feature = "fuzz"))]
+use reth_primitives_traits::FastInstant as Instant;
+
+#[cfg(feature = "fuzz")]
+use reth_tasks::executor::time::Instant;
 
 /// Tracks worker availability counts.
 ///

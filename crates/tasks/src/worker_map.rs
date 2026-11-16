@@ -22,6 +22,9 @@ type BoxedTask = Box<dyn FnOnce() + Send + 'static>;
 /// A single-thread worker that processes closures sequentially on a dedicated OS thread.
 struct WorkerThread {
     /// Sender to submit work to this worker's thread.
+    #[cfg(not(feature = "fuzz"))]
+    tx: mpsc::UnboundedSender<BoxedTask>,
+    #[cfg(feature = "fuzz")]
     tx: Option<mpsc::UnboundedSender<BoxedTask>>,
     /// Metrics labeled with this worker's name.
     metrics: WorkerThreadMetrics,
@@ -45,6 +48,9 @@ impl WorkerThread {
             .unwrap_or_else(|e| panic!("failed to spawn worker thread {name:?}: {e}"));
 
         Self {
+            #[cfg(not(feature = "fuzz"))]
+            tx,
+            #[cfg(feature = "fuzz")]
             tx: Some(tx),
             metrics: WorkerThreadMetrics::new(name),
             pending: Arc::new(AtomicUsize::new(0)),
@@ -76,7 +82,11 @@ impl WorkerThread {
             let _ = result_tx.send(result);
         });
 
-        if self.tx.as_ref().expect("live worker retains its sender").send(task).is_err() {
+        #[cfg(not(feature = "fuzz"))]
+        let tx = &self.tx;
+        #[cfg(feature = "fuzz")]
+        let tx = self.tx.as_ref().expect("live worker retains its sender");
+        if tx.send(task).is_err() {
             self.pending.fetch_sub(1, Ordering::AcqRel);
         }
 
@@ -107,7 +117,11 @@ impl WorkerThread {
             let _ = result_tx.send(result);
         });
 
-        if self.tx.as_ref().expect("live worker retains its sender").send(task).is_err() {
+        #[cfg(not(feature = "fuzz"))]
+        let tx = &self.tx;
+        #[cfg(feature = "fuzz")]
+        let tx = self.tx.as_ref().expect("live worker retains its sender");
+        if tx.send(task).is_err() {
             self.pending.fetch_sub(1, Ordering::AcqRel);
             return None
         }
@@ -148,6 +162,9 @@ impl Drop for RecordTaskDurationOnDrop {
 /// Each unique name gets a dedicated OS thread that is reused for all tasks submitted under
 /// that name. Workers are created lazily on first use.
 pub(crate) struct WorkerMap {
+    #[cfg(not(feature = "fuzz"))]
+    workers: DashMap<&'static str, WorkerThread>,
+    #[cfg(feature = "fuzz")]
     workers: DashMap<&'static str, Arc<WorkerThread>>,
 }
 
@@ -164,6 +181,7 @@ impl WorkerMap {
     }
 
     /// Returns the canonical worker without retaining map locks across scheduled operations.
+    #[cfg(feature = "fuzz")]
     fn worker(&self, name: &'static str) -> Arc<WorkerThread> {
         if let Some(worker) = self.workers.get(name) {
             return Arc::clone(worker.value());
@@ -186,6 +204,9 @@ impl WorkerMap {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
+        #[cfg(not(feature = "fuzz"))]
+        let worker = self.workers.entry(name).or_insert_with(|| WorkerThread::new(name));
+        #[cfg(feature = "fuzz")]
         let worker = self.worker(name);
         worker.spawn(f)
     }
@@ -202,11 +223,32 @@ impl WorkerMap {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
+        #[cfg(not(feature = "fuzz"))]
+        let worker = self.workers.entry(name).or_insert_with(|| WorkerThread::new(name));
+        #[cfg(feature = "fuzz")]
         let worker = self.worker(name);
         worker.try_spawn(f)
     }
 }
 
+#[cfg(not(feature = "fuzz"))]
+impl Drop for WorkerMap {
+    fn drop(&mut self) {
+        for (_, mut w) in std::mem::take(&mut self.workers) {
+            // Drop sender so the thread's recv loop exits, then join.
+            drop(w.tx);
+            // A task can own the last reference to this map and drop it on its own worker, which
+            // cannot join itself. That thread exits on its own once the task returns.
+            if let Some(handle) = w.handle.take() &&
+                handle.thread().id() != thread::current().id()
+            {
+                let _ = handle.join();
+            }
+        }
+    }
+}
+
+#[cfg(feature = "fuzz")]
 impl Drop for WorkerThread {
     fn drop(&mut self) {
         // Close the queue before joining so an idle worker can exit.

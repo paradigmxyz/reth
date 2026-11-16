@@ -22,8 +22,14 @@
 
 use crate::persistence::PersistenceResult;
 use alloy_eips::BlockNumHash;
-use reth_tasks::executor::{channel::Receiver, time::Instant};
+use reth_tasks::executor::channel::Receiver;
 use tracing::trace;
+
+#[cfg(not(feature = "fuzz"))]
+use reth_primitives_traits::FastInstant as Instant;
+
+#[cfg(feature = "fuzz")]
+use reth_tasks::executor::time::Instant;
 
 /// The state of the persistence task.
 #[derive(Debug)]

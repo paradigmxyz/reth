@@ -701,8 +701,8 @@ impl Runtime {
     where
         F: FnOnce() + Send + 'static,
     {
-        // The caller may be native even in fuzz builds. The lock only transfers ownership;
-        // logical accesses yield before locking and never hold the guard across user work.
+        // The caller may be native even in fuzz builds. Under fuzz, the lock only transfers
+        // ownership; logical accesses yield before locking and release it before user work.
         #[cfg_attr(
             feature = "fuzz",
             allow(
@@ -715,13 +715,19 @@ impl Runtime {
 
         if self
             .try_spawn_blocking_named(name, move || {
-                #[cfg(feature = "fuzz")]
-                if shuttle::current::try_get_current_task().is_some() {
-                    crate::thread::yield_now();
-                }
-                let func = named_func.lock().take();
-                if let Some(func) = func {
+                #[cfg(not(feature = "fuzz"))]
+                if let Some(func) = named_func.lock().take() {
                     func();
+                }
+                #[cfg(feature = "fuzz")]
+                {
+                    if shuttle::current::try_get_current_task().is_some() {
+                        crate::thread::yield_now();
+                    }
+                    let func = named_func.lock().take();
+                    if let Some(func) = func {
+                        func();
+                    }
                 }
             })
             .is_some()
@@ -729,13 +735,19 @@ impl Runtime {
             return true
         }
 
-        #[cfg(feature = "fuzz")]
-        if shuttle::current::try_get_current_task().is_some() {
-            crate::thread::yield_now();
-        }
-        let func = func.lock().take();
-        if let Some(func) = func {
+        #[cfg(not(feature = "fuzz"))]
+        if let Some(func) = func.lock().take() {
             self.spawn_blocking(func);
+        }
+        #[cfg(feature = "fuzz")]
+        {
+            if shuttle::current::try_get_current_task().is_some() {
+                crate::thread::yield_now();
+            }
+            let func = func.lock().take();
+            if let Some(func) = func {
+                self.spawn_blocking(func);
+            }
         }
         false
     }

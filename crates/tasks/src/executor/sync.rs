@@ -1,14 +1,20 @@
 //! Synchronization primitives belonging to the selected backend.
 
+#[cfg(feature = "fuzz")]
 pub use shuttle_sync::sync::*;
+#[cfg(not(feature = "fuzz"))]
+pub use std::sync::*;
 
 #[cfg(feature = "fuzz")]
 mod deterministic;
 #[cfg(feature = "fuzz")]
 pub use deterministic::{LazyLock, OnceLock};
 
-/// Non-poisoning locks selected by the official Shuttle wrapper.
+/// Native non-poisoning locks, or their Shuttle equivalents under `fuzz`.
 pub mod parking_lot {
+    #[cfg(not(feature = "fuzz"))]
+    pub use ::parking_lot::*;
+    #[cfg(feature = "fuzz")]
     pub use shuttle_parking_lot::*;
 }
 

@@ -1,7 +1,6 @@
 //! Additional helpers for executing tracing calls
 
 use crate::{
-    channel,
     executor::sync::{
         atomic::{AtomicUsize, Ordering},
         OnceLock,
@@ -14,7 +13,6 @@ use std::{
     any::Any,
     cell::RefCell,
     future::Future,
-    mem,
     ops::Deref,
     panic::{catch_unwind, AssertUnwindSafe},
     pin::Pin,
@@ -22,6 +20,11 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
+
+#[cfg(feature = "fuzz")]
+use crate::channel;
+#[cfg(feature = "fuzz")]
+use std::mem;
 
 /// RPC Tracing call guard semaphore.
 ///
@@ -385,6 +388,9 @@ impl WorkerPool {
             return f()
         }
 
+        #[cfg(not(feature = "fuzz"))]
+        let (tx, rx) = sync::mpsc::sync_channel(1);
+        #[cfg(feature = "fuzz")]
         let (tx, rx) = channel::bounded(1);
         self.spawn(move || {
             let _ = tx.send(catch_unwind(AssertUnwindSafe(f)));
@@ -665,11 +671,15 @@ impl Deref for WorkerStatefulPool {
 impl Drop for WorkerStatefulPool {
     fn drop(&mut self) {
         if let Some(pool) = self.pool.pool.get() {
+            #[cfg(feature = "fuzz")]
             let unwinding = thread::panicking();
             pool.broadcast(|_| {
                 let clear = || {
                     with_current_worker(|worker| worker.borrow_mut().clear(&self.owner));
                 };
+                #[cfg(not(feature = "fuzz"))]
+                clear();
+                #[cfg(feature = "fuzz")]
                 if unwinding {
                     if let Err(panic) = catch_unwind(AssertUnwindSafe(clear)) {
                         // Dropping an arbitrary secondary panic payload could panic again.
@@ -687,7 +697,7 @@ impl Drop for WorkerStatefulPool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{rayon::prelude::*, test_utils};
+    use crate::{channel, rayon::prelude::*, test_utils};
     use std::{mem, time::Duration};
 
     #[test]
