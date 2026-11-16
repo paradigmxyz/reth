@@ -477,7 +477,7 @@ impl ResponseSink {
     /// Fails once the response was dropped or `part` would exceed the response size limit, so the
     /// producer can stop.
     pub fn send(&self, part: Bytes) -> Result<(), mpsc::error::SendError<Bytes>> {
-        let fits = self.remaining.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
+        let fits = self.remaining.try_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
             left.checked_sub(part.len()).filter(|&left| left > 0)
         });
         if fits.is_err() {
