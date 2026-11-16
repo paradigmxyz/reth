@@ -30,9 +30,9 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderROFactory, NodePrimitivesProvider, RangeEnd,
-    RangeResponse, RangeResult, StateRangeProvider, StateRangeProviderFactory, StateRangeView,
-    StorageChangeSetReader, StorageRangeResult,
+    BlockBodyIndicesProvider, DatabaseProviderROFactory, GetBlockAccessListLimit,
+    NodePrimitivesProvider, RangeEnd, RangeResponse, RangeResult, StateRangeProvider,
+    StateRangeProviderFactory, StateRangeView, StorageChangeSetReader, StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::{OverlayStateProvider, OverlayStateProviderFactory, OwnedProvider};
@@ -165,6 +165,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     }
 
     /// Returns a historical state provider using an existing database snapshot.
+    ///
+    /// Callers such as RPC choose the block, so the trie reverts it accumulates stay out of the
+    /// changeset cache the engine shares.
     pub fn state_provider_from_database(
         &self,
         provider: StateRangeDbProvider<N>,
@@ -172,7 +175,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     ) -> StateProviderBox {
         Box::new(OverlayStateProvider::new(
             provider,
-            self.database.overlay_manager().overlay_builder(block_hash),
+            self.database
+                .overlay_manager()
+                .overlay_builder(block_hash)
+                .without_trie_revert_caching(),
         ))
     }
 
@@ -238,6 +244,40 @@ impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {
 impl<N: ProviderNodeTypes> BalProvider for BlockchainProvider<N> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
+    }
+
+    fn get_bal_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<Bytes>> {
+        Ok(self.get_bals_by_hashes(&[block_hash])?.pop().flatten())
+    }
+
+    fn get_bals_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+        self.get_bals_by_hashes_with_limit(block_hashes, GetBlockAccessListLimit::None)
+    }
+
+    /// Falls back to the blocks the engine tree holds, because the store only buffers side chain
+    /// BALs briefly and never persists them.
+    fn get_bals_by_hashes_with_limit(
+        &self,
+        block_hashes: &[BlockHash],
+        limit: GetBlockAccessListLimit,
+    ) -> ProviderResult<Vec<Option<Bytes>>> {
+        let mut bals = self.bal_store.get_by_hashes_with_limit(block_hashes, limit)?;
+        for (bal, hash) in bals.iter_mut().zip(block_hashes).filter(|(bal, _)| bal.is_none()) {
+            *bal = self
+                .database
+                .overlay_manager()
+                .executed_block_by_hash(hash)
+                .and_then(|block| block.bal().map(|bal| bal.as_raw_bal().as_raw().clone()));
+        }
+        // Filled BALs only grow the response, so the limit can only cut it shorter.
+        let mut size = 0;
+        if let Some(last) = bals.iter().position(|bal| {
+            size += bal.as_ref().map_or(1, |bytes| bytes.len());
+            limit.exceeds(size)
+        }) {
+            bals.truncate(last + 1);
+        }
+        Ok(bals)
     }
 }
 
@@ -632,6 +672,13 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
         self.consistent_provider()?.transaction_by_hash_with_meta(tx_hash)
+    }
+
+    fn transaction_by_hash_with_meta_and_sender(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta, Option<Address>)>> {
+        self.consistent_provider()?.transaction_by_hash_with_meta_and_sender(tx_hash)
     }
 
     fn transactions_by_block(
@@ -1125,8 +1172,8 @@ mod tests {
         BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksInput,
     };
     use alloy_consensus::constants::EMPTY_ROOT_HASH;
-    use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
-    use alloy_primitives::{keccak256, Address, BlockNumber, TxNumber, B256, U256};
+    use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
+    use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, TxNumber, B256, U256};
     use evm2::evm::AccountInfo;
     use itertools::Itertools;
     use rand::Rng;
@@ -1139,20 +1186,20 @@ mod tests {
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
-        BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
+        BlockExecutionOutput, BlockExecutionResult, Chain, DecodedEvmBal, ExecutionOutcome,
     };
     use reth_primitives_traits::{
         Account, Block as _, RecoveredBlock, SealedBlock, SignerRecoverable, StorageEntry,
     };
     use reth_stages_types::{StageCheckpoint, StageId};
     use reth_storage_api::{
-        BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
-        BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HashingWriter, HeaderProvider, MetadataWriter, RangeEnd, ReceiptProvider,
-        ReceiptProviderIdExt, StageCheckpointWriter, StateProviderFactory, StateRangeProvider,
-        StateRangeProviderFactory, StateRootProvider, StateWriteConfig, StateWriter,
-        StorageRootProvider, StorageSettings, StorageSettingsCache, TransactionVariant,
-        TransactionsProvider, TrieWriter,
+        BalProvider, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
+        BlockReader, BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider,
+        DatabaseProviderFactory, HashingWriter, HeaderProvider, MetadataWriter, RangeEnd,
+        ReceiptProvider, ReceiptProviderIdExt, StageCheckpointWriter, StateProviderFactory,
+        StateRangeProvider, StateRangeProviderFactory, StateRootProvider, StateWriteConfig,
+        StateWriter, StorageRootProvider, StorageSettings, StorageSettingsCache,
+        TransactionVariant, TransactionsProvider, TrieWriter,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -1723,6 +1770,74 @@ mod tests {
         let pending = provider.pending_block_and_receipts()?.unwrap();
         assert!(Arc::ptr_eq(&pending_block, pending.block()));
         assert!(pending.execution_output().receipts.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_reader_side_chain_block_by_hash() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // A fork of the first in-memory block that the engine tree holds but is not canonical.
+        let canonical = in_memory_blocks.first().unwrap();
+        let fork = random_block(
+            &mut rng,
+            canonical.number,
+            BlockParams { parent: Some(canonical.parent_hash), ..Default::default() },
+        );
+        let fork_hash = fork.hash();
+        let recovered = RecoveredBlock::new_sealed(fork.clone(), fork.senders().unwrap());
+        let bal = Bytes::from_static(&[0xc2, 0xc0, 0xc0]);
+        provider.database.overlay_manager().insert_block(
+            ExecutedBlock { recovered_block: Arc::new(recovered.clone()), ..Default::default() }
+                .with_bal(Some(Arc::new(DecodedEvmBal::new(Arc::default(), bal.clone())))),
+        );
+
+        assert_eq!(provider.block(fork_hash.into())?, Some(fork.into_block()));
+        assert_eq!(
+            provider.recovered_block(fork_hash.into(), TransactionVariant::WithHash)?,
+            Some(recovered.clone())
+        );
+        assert_eq!(
+            provider.sealed_block_with_senders(fork_hash.into(), TransactionVariant::WithHash)?,
+            Some(recovered)
+        );
+        assert_eq!(provider.get_bal_by_hash(fork_hash)?, Some(bal.clone()));
+        assert_eq!(provider.get_bals_by_hashes(&[fork_hash])?, vec![Some(bal.clone())]);
+        // The store counts each missing BAL as one byte, the filled BAL exceeds the limit.
+        assert_eq!(
+            provider.get_bals_by_hashes_with_limit(
+                &[fork_hash, fork_hash],
+                GetBlockAccessListLimit::ResponseSizeSoftLimit(2)
+            )?,
+            vec![Some(bal)]
+        );
+
+        // Canonical lookups still only see the canonical chain.
+        assert_eq!(provider.block(canonical.number.into())?, Some(canonical.clone().into_block()));
+        assert_eq!(provider.block_number(fork_hash)?, None);
+        let fork_canonical_id = BlockId::hash_canonical(fork_hash);
+        assert_eq!(provider.block_by_id(fork_canonical_id)?, None);
+        assert_eq!(provider.block_hash_for_id(fork_canonical_id)?, None);
+        assert_eq!(
+            provider.block_with_senders_by_id(fork_canonical_id, TransactionVariant::WithHash)?,
+            None
+        );
+        assert_eq!(
+            provider.block_hash_for_id(BlockId::hash_canonical(canonical.hash()))?,
+            Some(canonical.hash())
+        );
+
+        // Once the tree drops the fork, its hash is unknown again.
+        provider.database.overlay_manager().remove_blocks([fork_hash]);
+        assert_eq!(provider.block(fork_hash.into())?, None);
+        assert_eq!(provider.get_bals_by_hashes(&[fork_hash])?, vec![None]);
 
         Ok(())
     }
@@ -3032,6 +3147,25 @@ mod tests {
                     tx_hash,
                     Some(block.body().transactions[test_tx_index].clone())
                 ),
+                B256::random()
+            ),
+            (
+                ONE,
+                transaction_by_hash_with_meta_and_sender,
+                |block: &SealedBlock<Block>, _: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| {
+                    let tx = block.body().transactions[test_tx_index].clone();
+                    let sender = tx.recover_signer().ok();
+                    let meta = TransactionMeta {
+                        tx_hash,
+                        index: test_tx_index as u64,
+                        block_hash: block.hash(),
+                        block_number: block.number,
+                        base_fee: block.base_fee_per_gas,
+                        excess_blob_gas: block.excess_blob_gas,
+                        timestamp: block.timestamp,
+                    };
+                    (tx_hash, Some((tx, meta, sender)))
+                },
                 B256::random()
             ),
             (

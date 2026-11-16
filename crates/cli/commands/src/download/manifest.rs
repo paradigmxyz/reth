@@ -6,7 +6,7 @@ use reth_db::static_file::iter_static_files;
 use reth_static_file_types::StaticFileSegment;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     io::Read,
     path::{Component, Path, PathBuf},
 };
@@ -19,9 +19,10 @@ fn is_zero(value: &u64) -> bool {
 
 /// A snapshot manifest describes available components for a snapshot at a given block height.
 ///
-/// Each component is either a single archive (state) or a set of chunked archives (static file
-/// segments like transactions, receipts, etc). Chunked components use `blocks_per_file` to
-/// define the block range per archive, matching reth's static file segment boundaries.
+/// Each component is either a single archive (state), a set of chunked archives (static file
+/// segments like transactions, receipts, etc), or a set of per-file archives (RocksDB indices).
+/// Chunked components use `blocks_per_file` to define the block range per archive, matching
+/// reth's static file segment boundaries.
 ///
 /// Archive paths are resolved relative to [`SnapshotManifest::base_url`] via URL joining.
 /// Single archives use [`SingleArchive::file`]; chunked archives default to
@@ -71,6 +72,8 @@ pub enum ComponentManifest {
     Single(SingleArchive),
     /// A set of chunked archives split by block range (used for static file segments).
     Chunked(ChunkedArchive),
+    /// A set of independent archives (used for RocksDB indices).
+    Files(ArchiveSet),
 }
 
 /// A single, non-chunked archive.
@@ -140,8 +143,20 @@ pub struct ChunkedArchive {
     pub chunk_output_files: Vec<Vec<OutputFileChecksum>>,
 }
 
+/// A set of archives that are downloaded, verified, and reused independently.
+///
+/// RocksDB SST files are immutable once written, and consecutive snapshots of the same database
+/// share almost all of them. Packaging each SST in its own archive, named after the file and its
+/// BLAKE3 checksum, lets publishers upload an archive once and reference it from later
+/// manifests, and lets downloads resume per file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveSet {
+    /// Archives in this set, each with its own path relative to [`SnapshotManifest::base_url`].
+    pub archives: Vec<SingleArchive>,
+}
+
 /// Expected metadata for one extracted plain file.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OutputFileChecksum {
     /// Relative path under the target datadir where this file is extracted.
     pub path: String,
@@ -230,7 +245,8 @@ pub enum SnapshotComponentType {
     AccountChangesets,
     /// Storage changeset static files. Chunked.
     StorageChangesets,
-    /// RocksDB index files. Single archive. Optional and archive-only.
+    /// RocksDB index files. A single archive, or one archive per SST or blob file plus one for the
+    /// remaining files. Optional and archive-only.
     RocksdbIndices,
 }
 
@@ -313,6 +329,11 @@ impl SnapshotManifest {
             ComponentManifest::Single(single) => {
                 vec![resolve_archive_url(self.base_url_or_empty(), &single.file)]
             }
+            ComponentManifest::Files(set) => set
+                .archives
+                .iter()
+                .map(|archive| resolve_archive_url(self.base_url_or_empty(), &archive.file))
+                .collect(),
             ComponentManifest::Chunked(chunked) => {
                 let key = ty.key();
                 let num_chunks = chunked.num_chunks();
@@ -343,6 +364,11 @@ impl SnapshotManifest {
             ComponentManifest::Single(single) => {
                 vec![resolve_archive_url(self.base_url_or_empty(), &single.file)]
             }
+            ComponentManifest::Files(set) => set
+                .archives
+                .iter()
+                .map(|archive| resolve_archive_url(self.base_url_or_empty(), &archive.file))
+                .collect(),
             ComponentManifest::Chunked(chunked) => {
                 let key = ty.key();
                 let num_chunks = chunked.num_chunks();
@@ -374,14 +400,13 @@ impl SnapshotManifest {
 
         match component {
             ComponentManifest::Single(single) => {
-                vec![SnapshotArchive {
-                    url: resolve_archive_url(self.base_url_or_empty(), &single.file),
-                    file_name: single.file.clone(),
-                    size: single.size,
-                    blake3: single.blake3.clone(),
-                    output_files: single.output_files.clone(),
-                }]
+                vec![single.snapshot_archive(self.base_url_or_empty())]
             }
+            ComponentManifest::Files(set) => set
+                .archives
+                .iter()
+                .map(|archive| archive.snapshot_archive(self.base_url_or_empty()))
+                .collect(),
             ComponentManifest::Chunked(chunked) => {
                 let key = ty.key();
                 let num_chunks = chunked.num_chunks();
@@ -419,6 +444,9 @@ impl SnapshotManifest {
                 ComponentManifest::Chunked(chunked) => {
                     Box::new(chunked.chunk_output_files.iter().flatten())
                 }
+                ComponentManifest::Files(set) => {
+                    Box::new(set.archives.iter().flat_map(|archive| &archive.output_files))
+                }
             };
             for output in outputs {
                 output.relative_path().wrap_err_with(|| format!("In component `{key}`"))?;
@@ -429,14 +457,14 @@ impl SnapshotManifest {
 
     /// Returns the exact download size for a component given a distance ending at [`Self::block`].
     ///
-    /// For single archives, returns the full size. For chunked archives, sums the
-    /// sizes of the selected tail chunks from [`ChunkedArchive::chunk_sizes`].
+    /// For single archives and archive sets, returns the full size. For chunked archives, sums
+    /// the sizes of the selected tail chunks from [`ChunkedArchive::chunk_sizes`].
     pub fn size_for_distance(&self, ty: SnapshotComponentType, distance: Option<u64>) -> u64 {
         let Some(component) = self.component(ty) else {
             return 0;
         };
         match component {
-            ComponentManifest::Single(s) => s.size,
+            ComponentManifest::Single(_) | ComponentManifest::Files(_) => component.total_size(),
             ComponentManifest::Chunked(chunked) => {
                 if chunked.chunk_sizes.is_empty() {
                     return 0;
@@ -459,7 +487,9 @@ impl SnapshotManifest {
         };
 
         match component {
-            ComponentManifest::Single(single) => single.output_size(),
+            ComponentManifest::Single(_) | ComponentManifest::Files(_) => {
+                component.total_output_size()
+            }
             ComponentManifest::Chunked(chunked) => {
                 let num_chunks = chunked.num_chunks();
                 let start_chunk = self.start_chunk_for_distance(chunked, distance);
@@ -471,13 +501,17 @@ impl SnapshotManifest {
         }
     }
 
-    /// Returns the number of chunks that would be downloaded for a distance ending at
+    /// Returns the number of archives that would be downloaded for a distance ending at
     /// [`Self::block`].
     pub fn chunks_for_distance(&self, ty: SnapshotComponentType, distance: Option<u64>) -> u64 {
-        let Some(ComponentManifest::Chunked(chunked)) = self.component(ty) else {
-            return if self.component(ty).is_some() { 1 } else { 0 };
-        };
-        chunked.num_chunks() - self.start_chunk_for_distance(chunked, distance)
+        match self.component(ty) {
+            None => 0,
+            Some(ComponentManifest::Single(_)) => 1,
+            Some(ComponentManifest::Files(set)) => set.archives.len() as u64,
+            Some(ComponentManifest::Chunked(chunked)) => {
+                chunked.num_chunks() - self.start_chunk_for_distance(chunked, distance)
+            }
+        }
     }
 
     /// Returns the first chunk needed for a distance measured from the declared snapshot block.
@@ -514,6 +548,7 @@ impl ComponentManifest {
         match self {
             Self::Single(s) => s.size,
             Self::Chunked(c) => c.chunk_sizes.iter().sum(),
+            Self::Files(set) => set.archives.iter().map(|archive| archive.size).sum(),
         }
     }
 
@@ -522,6 +557,7 @@ impl ComponentManifest {
         match self {
             Self::Single(single) => single.output_size(),
             Self::Chunked(chunked) => chunked.total_output_size(),
+            Self::Files(set) => set.archives.iter().map(SingleArchive::output_size).sum(),
         }
     }
 }
@@ -633,6 +669,17 @@ impl SingleArchive {
             self.output_files.iter().map(|file| file.size).sum()
         }
     }
+
+    /// Returns the concrete download for this archive, resolved against `base_url`.
+    fn snapshot_archive(&self, base_url: &str) -> SnapshotArchive {
+        SnapshotArchive {
+            url: resolve_archive_url(base_url, &self.file),
+            file_name: self.file.clone(),
+            size: self.size,
+            blake3: self.blake3.clone(),
+            output_files: self.output_files.clone(),
+        }
+    }
 }
 
 /// Fetches a snapshot manifest from a URL, rejecting zero blocks per archive.
@@ -653,6 +700,13 @@ pub async fn fetch_manifest(manifest_url: &str) -> Result<SnapshotManifest> {
 /// manifest is not packaged again: its source files are hashed and must match the previous
 /// manifest's `chunk_output_files`, and the new manifest points `chunk_files` at the
 /// previously published archive. A mismatch is an error, since sealed history must not change.
+///
+/// RocksDB indices are packaged into one archive unless `rocksdb_archive_per_file` is set, in
+/// which case each SST and blob file gets its own archive. A file whose path and checksum match
+/// such an archive in the previous manifest is not packaged again and points at the previously
+/// published archive. Files that are new or changed are packaged, since compaction replaces them
+/// between snapshots.
+#[expect(clippy::too_many_arguments)]
 pub fn generate_manifest(
     source_datadir: &Path,
     output_dir: &Path,
@@ -661,6 +715,7 @@ pub fn generate_manifest(
     chain_id: u64,
     blocks_per_file: u64,
     previous: Option<&SnapshotManifest>,
+    rocksdb_archive_per_file: bool,
 ) -> Result<SnapshotManifest> {
     eyre::ensure!(blocks_per_file > 0, "blocks_per_file must be greater than zero");
     if let Some(previous) = previous {
@@ -739,7 +794,7 @@ pub fn generate_manifest(
                 .filter(|_| planned_chunks.len() as u64 == num_chunks)
                 .and_then(|manifest| match manifest.component(*ty)? {
                     ComponentManifest::Chunked(chunked) => Some((manifest, chunked)),
-                    ComponentManifest::Single(_) => None,
+                    ComponentManifest::Single(_) | ComponentManifest::Files(_) => None,
                 })
                 // The width check comes first: the other checks divide by the previous width.
                 .filter(|(_, chunked)| {
@@ -841,18 +896,28 @@ pub fn generate_manifest(
 
     let rocksdb_files = rocksdb_source_files(source_datadir)?;
     if !rocksdb_files.is_empty() {
-        let (rocksdb_size, rocksdb_output_files) =
-            package_single_component(output_dir, "rocksdb_indices.tar.zst", &rocksdb_files)?;
-        components.insert(
-            SnapshotComponentType::RocksdbIndices.key().to_string(),
+        let rocksdb = if rocksdb_archive_per_file {
+            let archives = package_rocksdb_archives(output_dir, rocksdb_files, previous)?;
+            info!(target: "reth::cli",
+                archives = archives.len(),
+                size = %super::DownloadProgress::format_size(
+                    archives.iter().map(|archive| archive.size).sum()
+                ),
+                "Found RocksDB indices"
+            );
+            ComponentManifest::Files(ArchiveSet { archives })
+        } else {
+            let (rocksdb_size, rocksdb_output_files) =
+                package_single_component(output_dir, "rocksdb_indices.tar.zst", &rocksdb_files)?;
             ComponentManifest::Single(SingleArchive {
                 file: "rocksdb_indices.tar.zst".to_string(),
                 size: rocksdb_size,
                 decompressed_size: rocksdb_output_files.iter().map(|file| file.size).sum(),
                 blake3: None,
                 output_files: rocksdb_output_files,
-            }),
-        );
+            })
+        };
+        components.insert(SnapshotComponentType::RocksdbIndices.key().to_string(), rocksdb);
     }
 
     let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
@@ -1028,24 +1093,116 @@ fn package_single_component(
     Ok((size, output_files))
 }
 
+/// Packages each RocksDB SST and blob file into its own archive and the remaining files into one.
+///
+/// SST archives are written to `rocksdb_indices/{file_stem}-{blake3}.tar.zst`, so an unchanged SST
+/// gets the same archive name in every snapshot and publishers can upload it once. The file stem
+/// keeps the final path segment unique, since downloads are cached by that segment.
+///
+/// An SST file that matches a single-file archive in the `previous` manifest's RocksDB indices is
+/// not packaged; its archive entry points at the previously published archive instead.
+fn package_rocksdb_archives(
+    output_dir: &Path,
+    files: Vec<PlannedFile>,
+    previous: Option<&SnapshotManifest>,
+) -> Result<Vec<SingleArchive>> {
+    // Only immutable table and blob files directly under the RocksDB directory get their own
+    // archive: their file numbers are unique there, while nested directories may repeat them.
+    let (sst_files, other_files): (Vec<_>, Vec<_>) = files.into_iter().partition(|file| {
+        file.relative_path.parent() == Some(Path::new("rocksdb")) &&
+            file.relative_path.extension().is_some_and(|ext| ext == "sst" || ext == "blob")
+    });
+
+    // Published SST archives by the file they extract, with absolute URLs.
+    let mut published = HashMap::new();
+    if let Some(previous) = previous &&
+        let Some(ComponentManifest::Files(set)) =
+            previous.component(SnapshotComponentType::RocksdbIndices)
+    {
+        for archive in &set.archives {
+            if let [output] = archive.output_files.as_slice() {
+                published.insert(
+                    output.clone(),
+                    SingleArchive {
+                        file: resolve_archive_url(previous.base_url_or_empty(), &archive.file),
+                        ..archive.clone()
+                    },
+                );
+            }
+        }
+    }
+
+    let sst_dir = output_dir.join("rocksdb_indices");
+    std::fs::create_dir_all(&sst_dir)?;
+    let mut archives = sst_files
+        .into_par_iter()
+        .map(|planned| -> Result<SingleArchive> {
+            if !published.is_empty() &&
+                let Some(archive) = published.get(&hash_planned_file(&planned)?)
+            {
+                return Ok(archive.clone());
+            }
+
+            let stem = planned
+                .relative_path
+                .file_stem()
+                .ok_or_else(|| {
+                    eyre::eyre!("Invalid RocksDB file path: {}", planned.relative_path.display())
+                })?
+                .to_string_lossy()
+                .to_string();
+            // The archive name depends on the checksum, which is known once the file is read.
+            let temp_path = sst_dir.join(format!("{stem}.tar.zst.tmp"));
+            let output_files =
+                write_archive_from_planned_files(&temp_path, std::slice::from_ref(&planned))?;
+            let output = &output_files[0];
+            let file = format!("rocksdb_indices/{stem}-{}.tar.zst", output.blake3);
+            std::fs::rename(&temp_path, output_dir.join(&file))?;
+            Ok(SingleArchive {
+                size: std::fs::metadata(output_dir.join(&file))?.len(),
+                decompressed_size: output.size,
+                file,
+                blake3: None,
+                output_files,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    // Reused archives are absolute URLs, so order by the SST each archive extracts.
+    archives.sort_unstable_by(|a, b| a.output_files[0].path.cmp(&b.output_files[0].path));
+
+    if !other_files.is_empty() {
+        let file = "rocksdb_indices.tar.zst";
+        let (size, output_files) = package_single_component(output_dir, file, &other_files)?;
+        archives.push(SingleArchive {
+            file: file.to_string(),
+            size,
+            decompressed_size: output_files.iter().map(|file| file.size).sum(),
+            blake3: None,
+            output_files,
+        });
+    }
+
+    Ok(archives)
+}
+
 fn write_chunk_archive(path: &Path, source_files: &[PathBuf]) -> Result<Vec<OutputFileChecksum>> {
     write_archive_from_planned_files(path, &chunk_planned_files(source_files)?)
 }
 
 /// Computes the output checksums a chunk archive of these files would record, without packaging.
 fn hash_chunk_files(source_files: &[PathBuf]) -> Result<Vec<OutputFileChecksum>> {
-    chunk_planned_files(source_files)?
-        .into_iter()
-        .map(|planned| {
-            let mut reader = HashingReader::new(reth_fs_util::open(&planned.source_path)?);
-            std::io::copy(&mut reader, &mut std::io::sink())?;
-            Ok(OutputFileChecksum {
-                path: planned.relative_path.to_string_lossy().to_string(),
-                size: reader.bytes_read,
-                blake3: reader.finalize(),
-            })
-        })
-        .collect()
+    chunk_planned_files(source_files)?.iter().map(hash_planned_file).collect()
+}
+
+/// Computes the output checksum an archive would record for this file, without packaging.
+fn hash_planned_file(planned: &PlannedFile) -> Result<OutputFileChecksum> {
+    let mut reader = HashingReader::new(reth_fs_util::open(&planned.source_path)?);
+    std::io::copy(&mut reader, &mut std::io::sink())?;
+    Ok(OutputFileChecksum {
+        path: planned.relative_path.to_string_lossy().to_string(),
+        size: reader.bytes_read,
+        blake3: reader.finalize(),
+    })
 }
 
 fn chunk_planned_files(source_files: &[PathBuf]) -> Result<Vec<PlannedFile>> {
@@ -1287,6 +1444,176 @@ mod tests {
         assert_eq!(urls.len(), 1);
         assert_eq!(urls[0], "https://example.com/rocksdb_indices.tar.zst");
         assert_eq!(m.size_for_distance(SnapshotComponentType::RocksdbIndices, Some(10)), 777);
+    }
+
+    #[test]
+    fn generate_manifest_reuses_unchanged_rocksdb_ssts_from_previous_manifest() {
+        let source = tempdir().unwrap();
+        let db_dir = source.path().join("db");
+        std::fs::create_dir_all(&db_dir).unwrap();
+        std::fs::write(db_dir.join("mdbx.dat"), b"state-data").unwrap();
+        let rocksdb_dir = source.path().join("rocksdb");
+        std::fs::create_dir_all(&rocksdb_dir).unwrap();
+        std::fs::write(rocksdb_dir.join("CURRENT"), b"MANIFEST-000001").unwrap();
+        std::fs::write(rocksdb_dir.join("000007.sst"), b"sst-7").unwrap();
+        std::fs::write(rocksdb_dir.join("000009.sst"), b"sst-9").unwrap();
+        let hash = |contents: &[u8]| blake3::hash(contents).to_hex().to_string();
+        let rocksdb_archives = |manifest: &SnapshotManifest| {
+            let Some(ComponentManifest::Files(set)) =
+                manifest.component(SnapshotComponentType::RocksdbIndices)
+            else {
+                panic!("rocksdb indices should be an archive set")
+            };
+            set.archives.clone()
+        };
+
+        let previous = generate_manifest(
+            source.path(),
+            tempdir().unwrap().path(),
+            Some("https://example.com/previous"),
+            0,
+            1,
+            500_000,
+            None,
+            true,
+        )
+        .unwrap();
+        let previous_archives = rocksdb_archives(&previous);
+
+        // 000007 is unchanged, 000009 is rewritten in place, and 000011 is new.
+        std::fs::write(rocksdb_dir.join("000009.sst"), b"sst-9-compacted").unwrap();
+        std::fs::write(rocksdb_dir.join("000011.sst"), b"sst-11").unwrap();
+        let output = tempdir().unwrap();
+        let mut next = generate_manifest(
+            source.path(),
+            output.path(),
+            None,
+            0,
+            1,
+            500_000,
+            Some(&previous),
+            true,
+        )
+        .unwrap();
+        let archives = rocksdb_archives(&next);
+
+        let reused_sst = format!("rocksdb_indices/000007-{}.tar.zst", hash(b"sst-7"));
+        let files = archives.iter().map(|archive| archive.file.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            files,
+            [
+                format!("https://example.com/previous/{reused_sst}"),
+                format!("rocksdb_indices/000009-{}.tar.zst", hash(b"sst-9-compacted")),
+                format!("rocksdb_indices/000011-{}.tar.zst", hash(b"sst-11")),
+                "rocksdb_indices.tar.zst".to_string(),
+            ]
+        );
+        assert_eq!(archives[0].size, previous_archives[0].size);
+        assert_eq!(archives[0].output_files, previous_archives[0].output_files);
+        assert!(!output.path().join(&reused_sst).exists());
+        for archive in &archives[1..] {
+            assert!(output.path().join(&archive.file).exists(), "{}", archive.file);
+        }
+
+        // An archive reused from an older manifest keeps its absolute URL in later manifests.
+        next.base_url = Some("https://example.com/next".to_string());
+        let later = generate_manifest(
+            source.path(),
+            tempdir().unwrap().path(),
+            None,
+            0,
+            1,
+            500_000,
+            Some(&next),
+            true,
+        )
+        .unwrap();
+        let later_archives = rocksdb_archives(&later);
+        assert_eq!(later_archives[0].file, format!("https://example.com/previous/{reused_sst}"));
+        assert_eq!(
+            later_archives[2].file,
+            format!("https://example.com/next/rocksdb_indices/000011-{}.tar.zst", hash(b"sst-11"))
+        );
+    }
+
+    #[test]
+    fn generate_manifest_into_source_datadir_does_not_package_its_own_archives() {
+        let source = tempdir().unwrap();
+        let db_dir = source.path().join("db");
+        std::fs::create_dir_all(&db_dir).unwrap();
+        std::fs::write(db_dir.join("mdbx.dat"), b"state-data").unwrap();
+        let rocksdb_dir = source.path().join("rocksdb");
+        std::fs::create_dir_all(&rocksdb_dir).unwrap();
+        std::fs::write(rocksdb_dir.join("CURRENT"), b"MANIFEST-000001").unwrap();
+        std::fs::write(rocksdb_dir.join("000007.sst"), b"sst-7").unwrap();
+
+        for _ in 0..2 {
+            let manifest =
+                generate_manifest(source.path(), source.path(), None, 0, 1, 500_000, None, true)
+                    .unwrap();
+            let Some(ComponentManifest::Files(set)) =
+                manifest.component(SnapshotComponentType::RocksdbIndices)
+            else {
+                panic!("rocksdb indices should be an archive set")
+            };
+            let outputs = set
+                .archives
+                .iter()
+                .flat_map(|archive| &archive.output_files)
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(outputs, ["rocksdb/000007.sst", "rocksdb/CURRENT"]);
+        }
+    }
+
+    #[test]
+    fn rocksdb_archive_set_resolves_every_archive() {
+        let json = r#"{
+            "block": 1,
+            "chain_id": 1,
+            "storage_version": 2,
+            "timestamp": 0,
+            "base_url": "https://example.com/1700000",
+            "components": {
+                "rocksdb_indices": {
+                    "archives": [
+                        {
+                            "file": "../rocksdb_indices/000007-aa.tar.zst",
+                            "size": 10,
+                            "decompressed_size": 100,
+                            "output_files": [
+                                {"path": "rocksdb/000007.sst", "size": 100, "blake3": "aa"}
+                            ]
+                        },
+                        {
+                            "file": "rocksdb_indices.tar.zst",
+                            "size": 2,
+                            "output_files": [
+                                {"path": "rocksdb/CURRENT", "size": 15, "blake3": "bb"}
+                            ]
+                        }
+                    ]
+                }
+            }
+        }"#;
+        let m: SnapshotManifest = serde_json::from_str(json).unwrap();
+        let ty = SnapshotComponentType::RocksdbIndices;
+        assert!(matches!(m.component(ty), Some(ComponentManifest::Files(_))));
+        m.validate_output_paths().unwrap();
+
+        let urls = [
+            "https://example.com/rocksdb_indices/000007-aa.tar.zst",
+            "https://example.com/1700000/rocksdb_indices.tar.zst",
+        ];
+        assert_eq!(m.archive_urls(ty), urls);
+        assert_eq!(m.archive_urls_for_distance(ty, Some(10)), urls);
+        let archives = m.snapshot_archives_for_distance(ty, Some(10));
+        assert_eq!(archives.iter().map(|archive| archive.url.as_str()).collect::<Vec<_>>(), urls);
+        assert_eq!(archives[0].output_files[0].path, "rocksdb/000007.sst");
+        assert_eq!(m.chunks_for_distance(ty, Some(10)), 2);
+        assert_eq!(m.size_for_distance(ty, Some(10)), 12);
+        assert_eq!(m.total_size(&[ty]), 12);
+        assert_eq!(m.output_size_for_distance(ty, Some(10)), 115);
     }
 
     #[test]
@@ -1642,7 +1969,8 @@ mod tests {
         std::fs::write(db_dir.join("mdbx.dat"), b"state-data").unwrap();
 
         let manifest =
-            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000, None).unwrap();
+            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000, None, false)
+                .unwrap();
 
         let state = manifest.component(SnapshotComponentType::State).unwrap();
         let ComponentManifest::Single(state) = state else {
@@ -1667,7 +1995,8 @@ mod tests {
         std::fs::write(rocksdb_dir.join("CURRENT"), b"MANIFEST-000001").unwrap();
 
         let manifest =
-            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000, None).unwrap();
+            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000, None, false)
+                .unwrap();
 
         let rocksdb = manifest.component(SnapshotComponentType::RocksdbIndices).unwrap();
         let ComponentManifest::Single(rocksdb) = rocksdb else {
@@ -1678,6 +2007,86 @@ mod tests {
         assert!(!rocksdb.output_files.is_empty());
         assert_eq!(rocksdb.output_files[0].path, "rocksdb/CURRENT");
         assert!(output.path().join("rocksdb_indices.tar.zst").exists());
+    }
+
+    #[test]
+    fn generate_manifest_packages_each_rocksdb_sst_separately() {
+        let source = tempdir().unwrap();
+        let db_dir = source.path().join("db");
+        std::fs::create_dir_all(&db_dir).unwrap();
+        std::fs::write(db_dir.join("mdbx.dat"), b"state-data").unwrap();
+        let rocksdb_dir = source.path().join("rocksdb");
+        std::fs::create_dir_all(&rocksdb_dir).unwrap();
+        std::fs::write(rocksdb_dir.join("CURRENT"), b"MANIFEST-000001").unwrap();
+        std::fs::write(rocksdb_dir.join("MANIFEST-000001"), b"manifest").unwrap();
+        std::fs::write(rocksdb_dir.join("000007.sst"), b"sst-7").unwrap();
+        std::fs::write(rocksdb_dir.join("000009.sst"), b"sst-9").unwrap();
+        std::fs::write(rocksdb_dir.join("000010.blob"), b"blob-10").unwrap();
+        // A nested SST with a top-level file name stays in the shared archive.
+        std::fs::create_dir_all(rocksdb_dir.join("checkpoint")).unwrap();
+        std::fs::write(rocksdb_dir.join("checkpoint/000007.sst"), b"sst-7").unwrap();
+        let sst_7_hash = blake3::hash(b"sst-7").to_hex().to_string();
+        let sst_9_hash = blake3::hash(b"sst-9").to_hex().to_string();
+
+        let output = tempdir().unwrap();
+        let manifest =
+            generate_manifest(source.path(), output.path(), None, 0, 1, 500_000, None, true)
+                .unwrap();
+
+        let rocksdb = manifest.component(SnapshotComponentType::RocksdbIndices).unwrap();
+        let ComponentManifest::Files(set) = rocksdb else {
+            panic!("rocksdb indices should be an archive set")
+        };
+        let files = set.archives.iter().map(|archive| archive.file.clone()).collect::<Vec<_>>();
+        assert_eq!(
+            files,
+            [
+                format!("rocksdb_indices/000007-{sst_7_hash}.tar.zst"),
+                format!("rocksdb_indices/000009-{sst_9_hash}.tar.zst"),
+                format!("rocksdb_indices/000010-{}.tar.zst", blake3::hash(b"blob-10").to_hex()),
+                "rocksdb_indices.tar.zst".to_string(),
+            ]
+        );
+        for archive in &set.archives {
+            assert!(output.path().join(&archive.file).exists(), "{}", archive.file);
+            assert_eq!(
+                archive.size,
+                std::fs::metadata(output.path().join(&archive.file)).unwrap().len()
+            );
+        }
+        assert_eq!(
+            set.archives[0].output_files,
+            [OutputFileChecksum {
+                path: "rocksdb/000007.sst".to_string(),
+                size: 5,
+                blake3: sst_7_hash
+            }]
+        );
+        assert_eq!(set.archives[0].decompressed_size, 5);
+        assert_eq!(
+            set.archives[3].output_files.iter().map(|file| file.path.as_str()).collect::<Vec<_>>(),
+            ["rocksdb/CURRENT", "rocksdb/MANIFEST-000001", "rocksdb/checkpoint/000007.sst"]
+        );
+        assert!(!output.path().join("rocksdb_indices/000007.tar.zst.tmp").exists());
+        assert_eq!(manifest.chunks_for_distance(SnapshotComponentType::RocksdbIndices, None), 4);
+
+        // An unchanged SST keeps its archive name in a later snapshot, so publishers can reuse it.
+        std::fs::remove_file(rocksdb_dir.join("000009.sst")).unwrap();
+        std::fs::write(rocksdb_dir.join("000011.sst"), b"sst-11").unwrap();
+        let later_output = tempdir().unwrap();
+        let later =
+            generate_manifest(source.path(), later_output.path(), None, 0, 1, 500_000, None, true)
+                .unwrap();
+        let Some(ComponentManifest::Files(later_set)) =
+            later.component(SnapshotComponentType::RocksdbIndices)
+        else {
+            panic!("rocksdb indices should be an archive set")
+        };
+        assert_eq!(later_set.archives[0].file, set.archives[0].file);
+        assert_eq!(
+            later_set.archives[2].file,
+            format!("rocksdb_indices/000011-{}.tar.zst", blake3::hash(b"sst-11").to_hex())
+        );
     }
 
     #[test]
@@ -1855,7 +2264,7 @@ mod tests {
 
         // The declared height is beyond both components' actual tips, within the same chunk.
         let manifest =
-            generate_manifest(source.path(), output.path(), None, 29, 1, 10, None).unwrap();
+            generate_manifest(source.path(), output.path(), None, 29, 1, 10, None, false).unwrap();
         assert_eq!(manifest.block, 29);
         for (component, expected_blocks) in
             [(SnapshotComponentType::Headers, 25), (SnapshotComponentType::Transactions, 22)]
@@ -1885,7 +2294,8 @@ mod tests {
             write_test_static_files(source.path(), StaticFileSegment::Headers, tip);
 
             let manifest =
-                generate_manifest(source.path(), output.path(), None, tip, 1, 10, None).unwrap();
+                generate_manifest(source.path(), output.path(), None, tip, 1, 10, None, false)
+                    .unwrap();
             let ComponentManifest::Chunked(chunked) =
                 manifest.component(SnapshotComponentType::Headers).unwrap()
             else {
@@ -1907,7 +2317,8 @@ mod tests {
         for (block, expected_blocks) in [(9, 10), (10, 20), (20, 25), (39, 25)] {
             let output = tempdir().unwrap();
             let manifest =
-                generate_manifest(source.path(), output.path(), None, block, 1, 10, None).unwrap();
+                generate_manifest(source.path(), output.path(), None, block, 1, 10, None, false)
+                    .unwrap();
 
             let ComponentManifest::Chunked(chunked) =
                 manifest.component(SnapshotComponentType::Headers).unwrap()
@@ -1933,15 +2344,24 @@ mod tests {
             1,
             10,
             None,
+            false,
         )
         .unwrap();
 
         let source = snapshot_source();
         let output = tempdir().unwrap();
         write_test_static_files(source.path(), StaticFileSegment::Headers, 34);
-        let manifest =
-            generate_manifest(source.path(), output.path(), None, 34, 1, 10, Some(&previous))
-                .unwrap();
+        let manifest = generate_manifest(
+            source.path(),
+            output.path(),
+            None,
+            34,
+            1,
+            10,
+            Some(&previous),
+            false,
+        )
+        .unwrap();
 
         let ComponentManifest::Chunked(previous_headers) =
             previous.component(SnapshotComponentType::Headers).unwrap()
@@ -1990,6 +2410,7 @@ mod tests {
             1,
             10,
             Some(&manifest),
+            false,
         )
         .unwrap();
         assert_eq!(
@@ -2016,6 +2437,7 @@ mod tests {
             1,
             10,
             None,
+            false,
         )
         .unwrap();
         let Some(ComponentManifest::Chunked(headers)) =
@@ -2034,6 +2456,7 @@ mod tests {
             1,
             10,
             Some(&previous),
+            false,
         )
         .unwrap_err();
         assert!(err.to_string().contains("differs from the previous manifest"), "{err}");
@@ -2051,6 +2474,7 @@ mod tests {
             1,
             10,
             None,
+            false,
         )
         .unwrap();
 
@@ -2064,6 +2488,7 @@ mod tests {
                 1,
                 10,
                 Some(&previous),
+                false,
             )
             .unwrap_err();
             assert_eq!(
@@ -2085,6 +2510,7 @@ mod tests {
             1,
             10,
             None,
+            false,
         )
         .unwrap();
         let Some(ComponentManifest::Chunked(headers)) =
@@ -2096,9 +2522,17 @@ mod tests {
         headers.chunk_files.truncate(1);
 
         let output = tempdir().unwrap();
-        let manifest =
-            generate_manifest(source.path(), output.path(), None, 24, 1, 10, Some(&previous))
-                .unwrap();
+        let manifest = generate_manifest(
+            source.path(),
+            output.path(),
+            None,
+            24,
+            1,
+            10,
+            Some(&previous),
+            false,
+        )
+        .unwrap();
         assert_eq!(
             manifest.archive_urls(SnapshotComponentType::Headers),
             vec!["headers-0-9.tar.zst", "headers-10-19.tar.zst", "headers-20-29.tar.zst"]
@@ -2118,6 +2552,7 @@ mod tests {
             1,
             10,
             None,
+            false,
         )
         .unwrap();
         let Some(ComponentManifest::Chunked(headers)) =
@@ -2129,9 +2564,17 @@ mod tests {
         headers.blocks_per_file = 0;
 
         let output = tempdir().unwrap();
-        let manifest =
-            generate_manifest(source.path(), output.path(), None, 24, 1, 10, Some(&previous))
-                .unwrap();
+        let manifest = generate_manifest(
+            source.path(),
+            output.path(),
+            None,
+            24,
+            1,
+            10,
+            Some(&previous),
+            false,
+        )
+        .unwrap();
         assert_eq!(
             manifest.archive_urls(SnapshotComponentType::Headers),
             vec!["headers-0-9.tar.zst", "headers-10-19.tar.zst", "headers-20-29.tar.zst"]

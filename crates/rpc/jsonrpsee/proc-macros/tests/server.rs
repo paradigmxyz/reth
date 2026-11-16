@@ -111,13 +111,11 @@ async fn rejects_invalid_params() {
     // Parameters are positional, so objects are rejected even if every parameter is optional.
     assert_eq!(
         call(&module, "test_add", Some(r#"{"a":1,"b":2}"#)).await,
-        invalid_params(
-            r#"Invalid params. Expected one of '[', ']' or ',' but found \"{\\\"a\\\":1,\\\"b\\\":2}\""#
-        )
+        invalid_params("Invalid params. Expected one of '[', ']' or ',' but found '{'")
     );
     assert_eq!(
         call(&module, "test_optional", Some("{}")).await,
-        invalid_params(r#"Invalid params. Expected one of '[', ']' or ',' but found \"{}\""#)
+        invalid_params("Invalid params. Expected one of '[', ']' or ',' but found '{'")
     );
 }
 

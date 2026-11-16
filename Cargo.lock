@@ -5713,15 +5713,15 @@ dependencies = [
  "jsonrpsee-core",
  "jsonrpsee-test-utils",
  "jsonrpsee-types",
+ "parking_lot",
  "pin-project",
  "serde",
  "serde_json",
- "soketto",
  "test-case",
  "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
- "tokio-util",
+ "tokio-tungstenite",
  "tower",
  "tracing",
  "tracing-subscriber",
@@ -5737,9 +5737,8 @@ dependencies = [
  "hyper-util",
  "serde",
  "serde_json",
- "soketto",
  "tokio",
- "tokio-util",
+ "tokio-tungstenite",
 ]
 
 [[package]]
@@ -6852,7 +6851,6 @@ dependencies = [
  "arrayvec",
  "bitvec",
  "byte-slice-cast",
- "bytes",
  "const_format",
  "impl-trait-for-tuples",
  "parity-scale-codec-derive",
@@ -7912,6 +7910,7 @@ dependencies = [
  "reth-node-core",
  "reth-node-ethereum",
  "reth-node-metrics",
+ "reth-node-version-build",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-primitives-traits",
@@ -7987,6 +7986,7 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-node-ethereum",
+ "reth-node-version-build",
  "reth-primitives-traits",
  "reth-provider",
  "reth-storage-api",
@@ -8176,7 +8176,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.8.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=275ce4cf5befeb9f1e8acd935ff2882d2d25fc61#275ce4cf5befeb9f1e8acd935ff2882d2d25fc61"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=5dabd396f4b041b0bde4104e449bbaa39ff1d99e#5dabd396f4b041b0bde4104e449bbaa39ff1d99e"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8186,7 +8186,6 @@ dependencies = [
  "arbitrary",
  "bytes",
  "modular-bitfield",
- "parity-scale-codec",
  "reth-codecs-derive",
  "reth-zstd-compressors",
  "serde",
@@ -8196,7 +8195,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.8.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=275ce4cf5befeb9f1e8acd935ff2882d2d25fc61#275ce4cf5befeb9f1e8acd935ff2882d2d25fc61"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=5dabd396f4b041b0bde4104e449bbaa39ff1d99e#5dabd396f4b041b0bde4104e449bbaa39ff1d99e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9703,7 +9702,6 @@ dependencies = [
  "reth-transaction-pool",
  "secp256k1 0.33.1",
  "serde",
- "smolgen",
  "strum 0.27.2",
  "thiserror 2.0.21",
  "tokio",
@@ -9888,6 +9886,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-node-version-build"
+version = "2.11.0"
+dependencies = [
+ "smolgen",
+]
+
+[[package]]
 name = "reth-payload-builder"
 version = "2.11.0"
 dependencies = [
@@ -9966,7 +9971,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.8.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=275ce4cf5befeb9f1e8acd935ff2882d2d25fc61#275ce4cf5befeb9f1e8acd935ff2882d2d25fc61"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=5dabd396f4b041b0bde4104e449bbaa39ff1d99e#5dabd396f4b041b0bde4104e449bbaa39ff1d99e"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -9989,7 +9994,6 @@ dependencies = [
  "quanta 0.13.0",
  "rayon",
  "reth-codecs",
- "secp256k1 0.30.0",
  "serde",
  "thiserror 2.0.21",
 ]
@@ -10379,7 +10383,6 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "reth-trie-common",
- "serde_json",
  "tokio",
  "tracing",
 ]
@@ -10476,7 +10479,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-traits"
 version = "0.8.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=275ce4cf5befeb9f1e8acd935ff2882d2d25fc61#275ce4cf5befeb9f1e8acd935ff2882d2d25fc61"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=5dabd396f4b041b0bde4104e449bbaa39ff1d99e#5dabd396f4b041b0bde4104e449bbaa39ff1d99e"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -11063,7 +11066,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.8.2"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=275ce4cf5befeb9f1e8acd935ff2882d2d25fc61#275ce4cf5befeb9f1e8acd935ff2882d2d25fc61"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=5dabd396f4b041b0bde4104e449bbaa39ff1d99e#5dabd396f4b041b0bde4104e449bbaa39ff1d99e"
 dependencies = [
  "zstd",
 ]
@@ -12016,22 +12019,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "soketto"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e859df029d160cb88608f5d7df7fb4753fd20fdfb4de5644f3d8b8440841721"
-dependencies = [
- "base64 0.22.1",
- "bytes",
- "futures",
- "http",
- "httparse",
- "log",
- "rand 0.8.8",
- "sha1",
-]
-
-[[package]]
 name = "spin"
 version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12628,7 +12615,6 @@ checksum = "494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52"
 dependencies = [
  "bytes",
  "futures-core",
- "futures-io",
  "futures-sink",
  "futures-util",
  "libc",

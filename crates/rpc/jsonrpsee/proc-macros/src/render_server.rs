@@ -131,17 +131,36 @@ impl RpcDescription {
                 let rust_method_name = &method.signature.sig.ident;
                 // Name of the RPC method (e.g. `foo_makeSpam`).
                 let rpc_method_name = self.rpc_identifier(&method.name);
+                // Async methods decode their params before the future exists, so the future
+                // doesn't need its own copy of them, unless an argument may borrow from them.
+                let decode_before_future = method.signature.sig.asyncness.is_some() &&
+                    !method.params.iter().any(|arg| may_borrow(&arg.ty));
+                let error_ret = if decode_before_future {
+                    quote! { return Err(e); }
+                } else {
+                    let response_payload = self.jrps_server_item(quote! { ResponsePayload });
+                    quote! { return #response_payload::error(e); }
+                };
                 // `parsing` is the code associated with parsing structure from the
                 // provided `Params` object.
                 // `params_seq` is the comma-delimited sequence of parameters we're passing to the
                 // rust function called..
-                let (parsing, params_seq) = self.render_params_decoding(&method.params, None);
+                let (parsing, params_seq) = self.render_params_decoding(&method.params, error_ret);
 
                 let into_response = self.jrps_server_item(quote! { IntoResponse });
 
                 check_name(&rpc_method_name, rust_method_name.span());
 
-                if method.signature.sig.asyncness.is_some() {
+                if decode_before_future {
+                    self.handle_register_result(quote! {
+                        rpc.register_async_method_raw(#rpc_method_name, |params, context| {
+                            #parsing
+                            Ok(move || async move {
+                                #into_response::into_response(context.as_ref().#rust_method_name(#params_seq).await)
+                            })
+                        })
+                    })
+                } else if method.signature.sig.asyncness.is_some() {
                     self.handle_register_result(quote! {
                         rpc.register_async_method(#rpc_method_name, |params, context| async move {
                             #parsing
@@ -182,8 +201,13 @@ impl RpcDescription {
                 // provided `Params` object.
                 // `params_seq` is the comma-delimited sequence of parameters.
                 let pending = proc_macro2::Ident::new("pending", rust_method_name.span());
-                let (parsing, params_seq) = self.render_params_decoding(&sub.params, Some(pending));
                 let sub_err = self.jrps_server_item(quote! { SubscriptionCloseResponse });
+                let reexports = self.jrps_server_item(quote! { core::__reexports });
+                let reject = quote! {
+                    #reexports::tokio::spawn(#pending.reject(e));
+                    return #sub_err::None;
+                };
+                let (parsing, params_seq) = self.render_params_decoding(&sub.params, reject);
                 let into_sub_response = self.jrps_server_item(quote! { IntoSubscriptionCloseResponse });
 
                 check_name(&rpc_sub_name, rust_method_name.span());
@@ -300,10 +324,11 @@ impl RpcDescription {
         })
     }
 
+    /// `error_ret` is the code that handles an argument that fails to decode, as `e`.
     fn render_params_decoding(
         &self,
         params: &[RpcFnArg],
-        sub: Option<proc_macro2::Ident>,
+        error_ret: TokenStream2,
     ) -> (TokenStream2, TokenStream2) {
         if params.is_empty() {
             return (TokenStream2::default(), TokenStream2::default());
@@ -313,20 +338,6 @@ impl RpcDescription {
         let params_fields = quote! { #(#params_fields_seq),* };
 
         let reexports = self.jrps_server_item(quote! { core::__reexports });
-
-        let error_ret = if let Some(pending) = &sub {
-            let tokio = quote! { #reexports::tokio };
-            let sub_err = self.jrps_server_item(quote! { SubscriptionCloseResponse });
-            quote! {
-                #tokio::spawn(#pending.reject(e));
-                return #sub_err::None;
-            }
-        } else {
-            let response_payload = self.jrps_server_item(quote! { ResponsePayload });
-            quote! {
-                return #response_payload::error(e);
-            }
-        };
 
         // Code to decode sequence of parameters from a JSON array.
         let decode_array = {
@@ -345,7 +356,7 @@ impl RpcDescription {
             });
 
             // Move the raw params into the decoding block so they are freed once decoded, instead
-            // of living as long as an async method or subscription future. Arguments that may
+            // of living as long as a blocking call or subscription future. Arguments that may
             // borrow from the params need them to outlive the call.
             let free_params = (!params.iter().any(|arg| may_borrow(&arg.ty)))
                 .then(|| quote! { let params = params; });
