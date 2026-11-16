@@ -1,14 +1,10 @@
 #![allow(missing_docs)]
 
-use smolgen::{Build, Cargo, Emitter, Gitcl};
+use smolgen::{Cargo, Emitter, Gitcl};
 use std::{env, error::Error};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut emitter = Emitter::default();
-
-    let build_builder = Build::builder().build_timestamp(true).build();
-
-    emitter.add_instructions(&build_builder)?;
 
     let cargo_builder = Cargo::builder().features(true).target_triple(true).build();
 
@@ -79,14 +75,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rustc-env=RETH_LONG_VERSION_0=Version: {pkg_version}{version_suffix}");
     println!("cargo:rustc-env=RETH_LONG_VERSION_1=Commit SHA: {sha}");
     println!(
-        "cargo:rustc-env=RETH_LONG_VERSION_2=Build Timestamp: {}",
-        env::var("VERGEN_BUILD_TIMESTAMP")?
-    );
-    println!(
-        "cargo:rustc-env=RETH_LONG_VERSION_3=Build Features: {}",
+        "cargo:rustc-env=RETH_LONG_VERSION_2=Build Features: {}",
         env::var("VERGEN_CARGO_FEATURES")?
     );
-    println!("cargo:rustc-env=RETH_LONG_VERSION_4=Build Profile: {profile}");
+    println!("cargo:rustc-env=RETH_LONG_VERSION_3=Build Profile: {profile}");
 
     // The version information for reth formatted for P2P (devp2p).
     // - The latest version from Cargo.toml

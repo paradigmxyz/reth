@@ -86,6 +86,9 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 toml.workspace = true
 zstd.workspace = true
 
+[build-dependencies]
+smolgen = { workspace = true, features = ["build"] }
+
 [features]
 default = [
     "jemalloc",
