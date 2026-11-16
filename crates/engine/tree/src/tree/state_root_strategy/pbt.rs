@@ -3,7 +3,7 @@
 use super::*;
 use reth_evm::EvmEnv as _;
 use reth_trie_pbt::{
-    execution::{apply_bundle, apply_bundle_parallel},
+    execution::{ExecutionParent, ExecutionState},
     migration::mpt_root,
     persistence::SnapshotStore,
     replay::{replay, replay_parallel},
@@ -78,6 +78,23 @@ impl<H: TreeHasher> PbtStateRootStrategy<H> {
         Ok(state)
     }
 
+    fn execution_parent(
+        &self,
+        hash: B256,
+        root: B256,
+        parent_timestamp: u64,
+        active: bool,
+    ) -> ProviderResult<ExecutionParent<H>> {
+        if parent_timestamp >= self.activation_timestamp {
+            self.store.execution_parent(hash, Some(root)).map_err(ProviderError::other)
+        } else if active {
+            // The activation parent still commits to the MPT and needs dual-state authentication.
+            self.restore_parent(hash, root, parent_timestamp).map(ExecutionParent::Eager)
+        } else {
+            self.store.execution_parent(hash, None).map_err(ProviderError::other)
+        }
+    }
+
     /// Returns the timestamp at which headers start committing to PBT roots.
     pub const fn activation_timestamp(&self) -> u64 {
         self.activation_timestamp
@@ -102,7 +119,7 @@ impl<H: TreeHasher> PbtStateRootStrategy<H> {
         Ok(())
     }
 
-    /// Enables parallel hashing for dense block and BAL state-update batches.
+    /// Enables parallel hashing for dense eager state updates and BAL replay batches.
     /// Small or sparse changes retain incremental updates; commitment rules stay identical.
     pub const fn with_parallel(mut self, parallel: bool) -> Self {
         self.parallel = parallel;
@@ -160,22 +177,22 @@ where
         self.validate_retired_parent(parent.header(), retired)?;
         let active = ctx.env().evm_env.block_env().timestamp.saturating_to::<u64>() >=
             self.activation_timestamp;
-        let state = if !active && parent.timestamp() < self.activation_timestamp {
-            // These checkpoints derive from an authenticated anchor and locally accepted
-            // execution. Re-authenticate at startup and activation, not every warm read.
-            self.store.load_block(parent.hash()).map_err(ProviderError::other)?
-        } else {
-            self.restore_parent(parent.hash(), parent.state_root(), parent.timestamp())?
-        };
-        let mpt_parent = if retired.is_none() {
-            Some(if parent.timestamp() < self.activation_timestamp {
-                parent.state_root()
+        let (state, mpt_parent) =
+            if retired.is_none() && parent.timestamp() >= self.activation_timestamp {
+                let (state, shadow) = self
+                    .store
+                    .execution_parent_with_shadow(parent.hash(), parent.state_root())
+                    .map_err(ProviderError::other)?;
+                (state, Some(shadow))
             } else {
-                self.store.shadow_mpt_root(&state).map_err(ProviderError::other)?
-            })
-        } else {
-            None
-        };
+                let state = self.execution_parent(
+                    parent.hash(),
+                    parent.state_root(),
+                    parent.timestamp(),
+                    active,
+                )?;
+                (state, retired.is_none().then(|| parent.state_root()))
+            };
         let job = PbtStateRootJob {
             state_provider_factory: ctx.state_provider_factory.clone(),
             mpt: None,
@@ -217,10 +234,11 @@ where
         let parent = retired
             .and_then(|retired| {
                 self.validate_retired_parent(ctx.parent_header(), retired)?;
-                self.restore_parent(
+                self.execution_parent(
                     ctx.parent_hash(),
                     ctx.parent_state_root(),
                     ctx.parent_header().timestamp(),
+                    timestamp >= self.activation_timestamp,
                 )
             })
             .map_err(Arc::new);
@@ -232,12 +250,9 @@ where
                 .as_ref()
                 .map_err(|error| StateRootTaskError::Other(Box::new(error.clone())))?;
             let update_started = Instant::now();
-            let state = if parallel {
-                apply_bundle_parallel(parent, bundle)
-            } else {
-                apply_bundle(parent, bundle)
-            }
-            .map_err(|err| StateRootTaskError::Other(err.into()))?;
+            let state = parent
+                .apply_bundle(bundle, parallel)
+                .map_err(|err| StateRootTaskError::Other(err.into()))?;
             let update_elapsed = update_started.elapsed();
             let provider = factory.database_provider_ro()?;
             let retired = provider.mpt_retired_at()?;
@@ -257,17 +272,21 @@ where
             let mpt_ms =
                 if retired.is_none() { mpt_started.elapsed().as_secs_f64() * 1000.0 } else { 0.0 };
             let checkpoint_started = Instant::now();
-            store.cache_candidate(&state).map_err(|err| StateRootTaskError::Other(err.into()))?;
+            store
+                .cache_execution_candidate(&state)
+                .map_err(|err| StateRootTaskError::Other(err.into()))?;
             let checkpoint_elapsed = checkpoint_started.elapsed();
             info!(
                 target: "engine::pbt",
                 phase = "payload",
                 parent_number,
                 timestamp,
-                parallel,
+                parallel_requested = parallel,
+                parallel = state.uses_parallel_batch(parallel),
+                disk_overlay = matches!(&state, ExecutionState::Disk(_)),
                 maintain_mpt = retired.is_none(),
                 accounts = bundle.state().len(),
-                leaves = state.tree().len(),
+                leaves = state.leaf_count(),
                 pbt_root = ?state.root(),
                 pbt_update_ms = update_elapsed.as_secs_f64() * 1000.0,
                 mpt_ms,
@@ -292,7 +311,7 @@ where
 struct PbtStateRootJob<N: NodePrimitives, P, H> {
     state_provider_factory: OverlayStateProviderFactory<P, N>,
     mpt: Option<Box<dyn StateRootJob<N>>>,
-    parent: StateTree<H>,
+    parent: ExecutionParent<H>,
     store: Arc<SnapshotStore<H>>,
     active: bool,
     parallel: bool,
@@ -324,12 +343,8 @@ where
         let accounts = output.state.state().len();
         let started = Instant::now();
         let update_started = Instant::now();
-        let state = if self.parallel {
-            apply_bundle_parallel(&self.parent, &output.state)
-        } else {
-            apply_bundle(&self.parent, &output.state)
-        }
-        .map_err(ProviderError::other)?;
+        let state =
+            self.parent.apply_bundle(&output.state, self.parallel).map_err(ProviderError::other)?;
         let update_elapsed = update_started.elapsed();
         let retired = self.state_provider_factory.database_provider_ro()?.mpt_retired_at()?;
         if retired.is_some_and(|number| block.number() <= number || !self.active) {
@@ -360,7 +375,7 @@ where
                 mpt.on_validated(block.hash(), auxiliary_root);
             }
             self.store
-                .save_block_with_number(block.hash(), block.number(), &state)
+                .save_execution_block(block.hash(), block.number(), &state)
                 .map_err(ProviderError::other)?;
         }
         let checkpoint_ms =
@@ -371,11 +386,13 @@ where
             block_number = block.number(),
             block_hash = ?block.hash(),
             pbt_root = ?state.root(),
-            parallel = self.parallel,
+            parallel_requested = self.parallel,
+            parallel = state.uses_parallel_batch(self.parallel),
+            disk_overlay = matches!(&state, ExecutionState::Disk(_)),
             maintain_mpt,
             active = self.active,
             accounts,
-            leaves = state.tree().len(),
+            leaves = state.leaf_count(),
             pbt_update_ms = update_elapsed.as_secs_f64() * 1000.0,
             mpt_ms,
             checkpoint_ms,

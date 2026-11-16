@@ -12,6 +12,13 @@ use reth_trie_pbt::{
 #[cfg(feature = "parallel")]
 use reth_trie_pbt::execution::apply_bundle_parallel;
 
+#[cfg(feature = "persistence")]
+use reth_trie_pbt::{
+    execution::{ExecutionParent, ExecutionState},
+    migration::{mpt_root, DecodeLimits},
+    persistence::SnapshotStore,
+};
+
 #[test]
 fn transfer_and_storage_output_matches_direct_encoding() {
     let a = Address::repeat_byte(1);
@@ -218,4 +225,134 @@ fn dense_parallel_execution_matches_serial_and_preserves_failed_parent() {
         Err(ExecutionError::State(StateError::BalanceOverflow))
     ));
     assert_eq!(parallel.root(), before);
+}
+
+#[cfg(all(feature = "parallel", feature = "persistence"))]
+#[test]
+fn cold_dense_execution_uses_serial_overlay_and_matches_both_eager_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut parent = StateTree::<Blake3Hasher>::new();
+    let mut bundle = BundleState::default();
+    for index in 0u64..4096 {
+        let address = Address::from_word(B256::from(U256::from(index)));
+        parent.set_account(address, AccountData { nonce: 1, ..Default::default() }).unwrap();
+        parent.set_storage(address, U256::from(64), B256::repeat_byte(1)).unwrap();
+        let mut account = BundleAccount::new(
+            None,
+            Some(Default::default()),
+            Default::default(),
+            AccountStatus::Changed,
+        );
+        account.info.as_mut().unwrap().nonce = 2;
+        account.storage.insert(
+            U256::from(64),
+            StorageSlot::new_changed(U256::from_be_bytes([1; 32]), U256::from(index + 1)),
+        );
+        bundle.state.insert(address, account);
+    }
+    let anchor = B256::repeat_byte(1);
+    let child = B256::repeat_byte(2);
+    let limits = DecodeLimits::default();
+    let native = DecodeLimits::native();
+    let mut store = SnapshotStore::open_with_limits(dir.path(), limits, native).unwrap();
+    store.set_cache_budget(0).unwrap();
+    store.save_block_with_number(anchor, 0, &parent).unwrap();
+    let disk = store.execution_parent(anchor, Some(parent.root())).unwrap();
+    assert!(matches!(&disk, ExecutionParent::Disk(_)));
+
+    let eager = ExecutionParent::Eager(parent);
+    let serial = eager.apply_bundle(&bundle, false).unwrap();
+    let parallel = eager.apply_bundle(&bundle, true).unwrap();
+    let overlay = disk.apply_bundle(&bundle, true).unwrap();
+    assert!(matches!(&overlay, ExecutionState::Disk(_)));
+    assert!(!overlay.uses_parallel_batch(true));
+    assert!(!serial.uses_parallel_batch(false));
+    assert!(parallel.uses_parallel_batch(true));
+    assert_eq!(overlay.root(), serial.root());
+    assert_eq!(overlay.root(), parallel.root());
+    assert_eq!(overlay.leaf_count(), serial.leaf_count());
+    assert_eq!(overlay.leaf_count(), parallel.leaf_count());
+
+    store.save_execution_block(child, 1, &overlay).unwrap();
+    drop((disk, overlay, store));
+    let reopened = SnapshotStore::<Blake3Hasher>::open_with_limits(dir.path(), limits, native)
+        .unwrap()
+        .load_block(child)
+        .unwrap();
+    assert_eq!(reopened.root(), serial.root());
+    let ExecutionState::Eager(serial) = serial else { panic!("expected eager execution") };
+    assert!(reopened.tree().entries().eq(serial.tree().entries()));
+}
+
+#[cfg(feature = "persistence")]
+#[test]
+fn cold_execution_publishes_only_accepted_overlays_and_reopens() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = Address::repeat_byte(1);
+    let b = Address::repeat_byte(2);
+    let code = alloy_primitives::Bytes::from_static(&[0x60, 0x01, 0x00]);
+    let mut parent = StateTree::<Blake3Hasher>::new();
+    for address in [a, b] {
+        parent
+            .set_account(
+                address,
+                AccountData { code: code.clone(), nonce: 1, ..Default::default() },
+            )
+            .unwrap();
+        parent.set_storage(address, U256::from(256), B256::repeat_byte(1)).unwrap();
+    }
+    let anchor = B256::repeat_byte(1);
+    let child = B256::repeat_byte(2);
+    let discarded = B256::repeat_byte(3);
+    let limits = DecodeLimits::default();
+    let native = DecodeLimits::native();
+    let store = SnapshotStore::open_with_limits(dir.path(), limits, native).unwrap();
+    store.save_block_with_number(anchor, 0, &parent).unwrap();
+    drop(store);
+
+    let mut store =
+        SnapshotStore::<Blake3Hasher>::open_with_limits(dir.path(), limits, native).unwrap();
+    store.set_cache_budget(0).unwrap();
+    let (restored, shadow) = store.execution_parent_with_shadow(anchor, parent.root()).unwrap();
+    assert!(matches!(restored, ExecutionParent::Eager(_)));
+    assert_eq!(shadow, mpt_root(&parent));
+    drop(restored);
+    let (lazy, cached_shadow) = store.execution_parent_with_shadow(anchor, parent.root()).unwrap();
+    assert!(matches!(lazy, ExecutionParent::Disk(_)));
+    assert_eq!(cached_shadow, shadow);
+    let mut bundle = BundleState::default();
+    let mut account = BundleAccount::new(
+        None,
+        Some(Default::default()),
+        Default::default(),
+        AccountStatus::Changed,
+    );
+    let info = account.info.as_mut().unwrap();
+    info.nonce = 2;
+    info.balance = U256::from(5);
+    info.code_hash = keccak256(&code);
+    info.code = None;
+    account.storage.insert(U256::from(256), StorageSlot::new_changed(U256::from(1), U256::ZERO));
+    bundle.state.insert(a, account);
+    let expected = apply_bundle(&parent, &bundle).unwrap();
+    let state = lazy.apply_bundle(&bundle, true).unwrap();
+    assert!(matches!(state, ExecutionState::Disk(_)));
+    assert_eq!(state.root(), expected.root());
+    assert_eq!(state.leaf_count(), expected.tree().len());
+    store.cache_execution_candidate(&state).unwrap();
+    assert!(!store.contains_block(child).unwrap());
+    assert!(!store.contains_block(discarded).unwrap());
+    store.save_execution_block(child, 1, &state).unwrap();
+    assert_eq!(store.block_number(child).unwrap(), Some(1));
+
+    bundle.state.get_mut(&a).unwrap().info = None;
+    let removal = lazy.apply_bundle(&bundle, false).unwrap();
+    assert!(matches!(removal, ExecutionState::Eager(_)));
+    assert_eq!(removal.root(), apply_bundle(&parent, &bundle).unwrap().root());
+    drop((lazy, state, store));
+    let reopened =
+        SnapshotStore::<Blake3Hasher>::open_with_limits(dir.path(), limits, native).unwrap();
+    assert_eq!(reopened.load_block(child).unwrap().root(), expected.root());
+    assert_eq!(reopened.load_block(anchor).unwrap().root(), parent.root());
+    assert!(!reopened.contains_block(discarded).unwrap());
 }
