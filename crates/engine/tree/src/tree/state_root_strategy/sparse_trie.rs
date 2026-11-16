@@ -1829,6 +1829,9 @@ mod tests {
                 task.updates.try_recv(),
                 Ok(SparseTrieTaskMessage::FinishedStateUpdates)
             ));
+
+            drop(task);
+            drain_sparse_trie_tasks(&runtime);
         });
     }
 

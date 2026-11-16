@@ -1676,6 +1676,17 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
                 .collect()
         }
     }
+
+    fn lowest_storage_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        // Only storage v2 keeps changesets in static files.
+        if !self.cached_storage_settings().storage_v2 {
+            return Ok(None)
+        }
+        Ok(self
+            .static_file_provider
+            .get_lowest_range_start(StaticFileSegment::StorageChangeSets)
+            .filter(|&block| block > 0))
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
@@ -1730,6 +1741,17 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
                 .map(|r| r.map_err(Into::into))
                 .collect()
         }
+    }
+
+    fn lowest_account_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        // Only storage v2 keeps changesets in static files.
+        if !self.cached_storage_settings().storage_v2 {
+            return Ok(None)
+        }
+        Ok(self
+            .static_file_provider
+            .get_lowest_range_start(StaticFileSegment::AccountChangeSets)
+            .filter(|&block| block > 0))
     }
 }
 
