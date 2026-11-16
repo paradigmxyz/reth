@@ -232,7 +232,7 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
             Self::Blind(_) => {
                 // Nothing is revealed - emit proof targets for all keys without a known parent.
                 for key in updates.keys() {
-                    #[cfg(feature = "fuzz")]
+                    #[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
                     crate::arena::observe_blind_root_proof_target();
                     proof_required_fn(*key, ProofV2TargetParent::NONE);
                 }
