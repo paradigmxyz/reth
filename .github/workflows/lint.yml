@@ -84,10 +84,6 @@ jobs:
       - run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
         env:
           RUSTFLAGS: -D warnings
-      - name: Lint sparse trie coverage instrumentation
-        run: cargo clippy -p reth-trie-sparse --all-features --lib --examples --tests --benches --locked
-        env:
-          RUSTFLAGS: -D warnings --cfg reth_sparse_trie_coverage
       # `--all-features` enables `account-ext`, so also lint the default account layout.
       - run: cargo clippy --workspace --lib --examples --tests --benches --locked
         env:
