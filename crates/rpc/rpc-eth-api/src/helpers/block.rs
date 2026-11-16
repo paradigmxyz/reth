@@ -17,7 +17,7 @@ use reth_primitives_traits::{
     TransactionMeta,
 };
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
-use reth_rpc_eth_types::{block::SharedReceipts, CachedBlockLookup, EthApiError};
+use reth_rpc_eth_types::{block::SharedReceipts, EthApiError};
 use reth_storage_api::{
     BlockIdReader, BlockReader, BlockSource, ProviderHeader, ProviderReceipt, ProviderTx,
 };
@@ -362,10 +362,9 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
 
     /// Returns the block for the given block id without recovering its transaction senders.
     ///
-    /// Uses the pending or cached block if there is one. A block that is not cached is read
-    /// without senders, so one-off lookups, like historical scans, stay cheap on nodes that prune
-    /// senders and don't evict hot blocks. A block that misses again is loaded into the cache like
-    /// [`LoadBlock::recovered_block`] does, so repeated requests don't hit the database every time.
+    /// Uses the pending or cached block if there is one. Otherwise the block is read without
+    /// senders and not cached, so lookups that don't need senders stay cheap on nodes that prune
+    /// them and don't evict cached blocks.
     #[expect(clippy::type_complexity)]
     fn sealed_or_recovered_block(
         &self,
@@ -390,24 +389,10 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
                 return Ok(None)
             };
 
-            match self
-                .cache()
-                .get_block_or_record_miss(block_hash)
-                .await
-                .map_err(Self::Error::from_eth_err)?
+            if let Some(block) =
+                self.cache().get_maybe_block(block_hash).await.map_err(Self::Error::from_eth_err)?
             {
-                CachedBlockLookup::Cached(block) => {
-                    return Ok(Some(SealedOrRecoveredBlock::recovered_arc(block)))
-                }
-                CachedBlockLookup::RepeatedMiss => {
-                    return Ok(self
-                        .cache()
-                        .get_recovered_block(block_hash)
-                        .await
-                        .map_err(Self::Error::from_eth_err)?
-                        .map(SealedOrRecoveredBlock::recovered_arc))
-                }
-                CachedBlockLookup::FirstMiss => {}
+                return Ok(Some(SealedOrRecoveredBlock::recovered_arc(block)))
             }
 
             // The cache's database request limit doesn't cover this read, so it takes a blocking
@@ -415,7 +400,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
             let permit = self
                 .acquire_owned_blocking_io()
                 .await
-                .map_err(|_| Self::Error::from_eth_err(EthApiError::InternalEthError))?;
+                .map_err(|_| EthApiError::InternalEthError)?;
             self.spawn_blocking_io(move |this| {
                 let _permit = permit;
                 this.provider()

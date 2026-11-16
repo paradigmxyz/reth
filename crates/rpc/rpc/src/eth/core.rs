@@ -1682,43 +1682,11 @@ mod tests {
                 api.converter().convert_header(header, Some(size))
             })
             .unwrap();
-        let block = EthBlocks::rpc_block(&api, BlockId::hash(expected.header.hash), false)
-            .await
-            .unwrap()
-            .unwrap();
+        let hash = expected.header.hash;
+        let block = EthBlocks::rpc_block(&api, BlockId::hash(hash), false).await.unwrap().unwrap();
         assert_eq!(block, expected);
-    }
-
-    #[tokio::test]
-    async fn hashes_only_block_is_cached_on_second_request() {
-        let mut rng = generators::rng();
-        let block = generators::random_block(
-            &mut rng,
-            1,
-            generators::BlockParams { tx_count: Some(2), ..Default::default() },
-        );
-        let hash = block.hash();
-        let provider = MockEthProvider::default();
-        provider.add_block(hash, block.clone_block());
-        let api = build_test_eth_api(provider);
-
-        let expected = block
-            .try_recover()
-            .unwrap()
-            .into_rpc_block_with_tx_hashes(|header, size| {
-                api.converter().convert_header(header, Some(size))
-            })
-            .unwrap();
-
-        // The first request reads the block without caching it.
-        let first = EthBlocks::rpc_block(&api, BlockId::hash(hash), false).await.unwrap().unwrap();
-        assert_eq!(first, expected);
+        // The block was read without senders, so it isn't cached.
         assert!(api.cache().get_maybe_block(hash).await.unwrap().is_none());
-
-        // Requesting it again loads it into the cache.
-        let second = EthBlocks::rpc_block(&api, BlockId::hash(hash), false).await.unwrap().unwrap();
-        assert_eq!(second, expected);
-        assert!(api.cache().get_maybe_block(hash).await.unwrap().is_some());
     }
 
     #[tokio::test]
