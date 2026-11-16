@@ -386,3 +386,34 @@ fn version_two_markers_upgrade_only_after_native_authentication() {
         }
     }
 }
+
+#[test]
+fn deferred_collection_keeps_nodes_until_the_durable_threshold() {
+    let directory = tempfile::tempdir().unwrap();
+    let first = account_state(1);
+    let retained = account_state(2);
+    let a = B256::repeat_byte(1);
+    let b = B256::repeat_byte(2);
+    let store =
+        SnapshotStore::<Blake3Hasher>::open(directory.path(), DecodeLimits::default()).unwrap();
+    store.save_block_with_number(a, 1, &first).unwrap();
+    store.save_block_with_number(b, 2, &retained).unwrap();
+    store.prune_finalized_with_orphans(b, &[a]).unwrap();
+    assert!(!store.contains_block(a).unwrap());
+    assert!(!store.collect_if_needed(2).unwrap());
+    drop(store);
+    let node_key = |root: B256| [b"n".as_slice(), root.as_slice()].concat();
+    {
+        let database = DB::open_default(directory.path().join("nodes")).unwrap();
+        assert!(database.get(node_key(first.root())).unwrap().is_some());
+    }
+    let store =
+        SnapshotStore::<Blake3Hasher>::open(directory.path(), DecodeLimits::default()).unwrap();
+    assert!(!store.collect_if_needed(2).unwrap());
+    assert_eq!(store.verify_block(b).unwrap(), retained.root());
+    assert!(store.collect_if_needed(1).unwrap());
+    drop(store);
+    let database = DB::open_default(directory.path().join("nodes")).unwrap();
+    assert!(database.get(node_key(first.root())).unwrap().is_none());
+    assert!(database.get(node_key(retained.root())).unwrap().is_some());
+}

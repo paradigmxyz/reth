@@ -733,6 +733,14 @@ impl<H: TreeHasher> SnapshotStore<H> {
         Ok(self.database.collect_cooperatively::<H>()?)
     }
 
+    /// Amortizes collection over registered-root removals without delaying reference pruning.
+    /// The durable counter survives restart. Interrupted sweeps recover regardless of the
+    /// threshold. Zero forces collection, like [`Self::collect`]. Returns false below
+    /// the threshold or while another collector is active. Prune references separately.
+    pub fn collect_if_needed(&self, minimum_removed_roots: u64) -> Result<bool, StoreError> {
+        Ok(self.database.collect_cooperatively_if_needed::<H>(minimum_removed_roots)?)
+    }
+
     fn native_count(&self, root: B256) -> Result<Option<usize>, StoreError> {
         let Some(native) = self.database.leaf_count(root)? else { return Ok(None) };
         let path = self.state_path(root);

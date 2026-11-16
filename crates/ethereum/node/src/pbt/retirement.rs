@@ -12,6 +12,7 @@ use reth_provider::{
 };
 use reth_stages::StageId;
 use reth_trie_pbt::TreeHasher;
+use std::time::Instant;
 
 pub(super) fn validate_startup<P>(strategy: &PbtStateRootStrategy, provider: &P) -> eyre::Result<()>
 where
@@ -167,6 +168,10 @@ fn persisted_state(checkpoint: &reth_stages::StageCheckpoint) -> u64 {
         .unwrap_or(checkpoint.block_number)
 }
 
+// Bound deferred garbage in removed-root units without scanning the complete state
+// at every finality update. Explicit store collection remains available to callers.
+const COLLECTION_ROOT_INTERVAL: u64 = 256;
+
 pub(super) fn prune_finalized<P>(
     strategy: &PbtStateRootStrategy,
     provider: &P,
@@ -245,8 +250,11 @@ where
         }
     }
     let outcome = strategy.store().prune_finalized_with_orphans(hash, &obsolete)?;
-    if outcome.state_files != 0 {
-        strategy.store().collect()?;
+    // Root/reference pruning is immediate; amortize the full native scan across
+    // finalized updates. The library persists debt and retries interrupted sweeps.
+    let collection_started = Instant::now();
+    if strategy.store().collect_if_needed(COLLECTION_ROOT_INTERVAL)? {
+        tracing::info!(target: "pbt::persistence", phase = "collection", elapsed_ms = collection_started.elapsed().as_secs_f64() * 1000.0, "Collected unreachable PBT nodes");
     }
     tracing::debug!(target: "pbt::persistence", finalized = finalized.number(), outcome = ?outcome, "Pruned obsolete PBT checkpoints");
     Ok(Some(hash))

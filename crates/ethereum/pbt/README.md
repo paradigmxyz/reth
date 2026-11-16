@@ -57,6 +57,11 @@ retirement checkpoint and unfinalized branches remain available. Legacy referenc
 whose headers and recorded heights are both unavailable are retained.
 Native collection yields between sweep batches; cold readers and retirement
 verification pin roots instead of holding the checkpoint writer lock throughout.
+Checkpoint references and root records are pruned immediately. Full native-node
+collection is deferred until 256 registered roots have been removed, amortizing
+its whole-state scan. This counter survives restart; interrupted sweeps bypass
+the threshold. Unreachable nodes use disk space until collection. Library callers
+can force reclamation with `SnapshotStore::collect`.
 
 `--pbt.cache-max-bytes` bounds estimated full-state cache bytes (default 1 GiB, zero
 disables caching). Shared nodes are counted separately in each cached snapshot.
@@ -65,13 +70,18 @@ Untrusted imports keep their own budgets: `--pbt.import-max-accounts` (1,000,000
 `--pbt.import-max-leaves` (10,000,000), `--pbt.import-max-code-size` (16 MiB) and
 `--pbt.import-max-total-code-size` (256 MiB). Byte limits are specified in bytes.
 
-Cold execution-state restoration still materializes the complete in-memory state.
-Native proof reads load only authenticated search paths. This backend remains
-intended for reference execution and devnets.
+Steady-state cold execution updates can use authenticated disk paths. Startup
+verification, BAL catch-up, migration and global code-ownership fallbacks still
+materialize the complete in-memory state. Native proof reads load only their
+search paths. This backend remains intended for reference execution and devnets.
 
-`eth_getProof` is disabled with PBT. `pbt_getProof` is available on authenticated
-RPC. See the [dev node](../../../examples/pbt-node/README.md) for migration
-and checkpoint options.
+MPT-only RPCs are disabled on a PBT-configured chain: `eth_getProof`,
+`eth_getMultiProof`, `eth_getAccount`, `debug_accountAt`, `debug_executionWitness`,
+`debug_executionWitnessByBlockHash`, `debug_intermediateRoots`, and
+`debug_stateRootWithUpdates`. The binary Engine API does not advertise or generate
+MPT execution witnesses. Ordinary state reads, tracing and binary payload methods
+remain available. `pbt_getProof` is available on authenticated RPC. See the
+[dev node](../../../examples/pbt-node/README.md) for migration and checkpoint options.
 
 `--rpc.compute-state-root-for-eth-simulate` is rejected with PBT because that option
 uses the MPT root provider. Ordinary simulation remains available.
@@ -99,3 +109,9 @@ instead of rebuilding the complete MPT for every warm parent read.
 ```sh
 docker build -t reth-pbt:local .
 ```
+
+Root timing logs include `prepare_ms` (parent selection, cold restoration and
+auxiliary MPT preparation), `finish_ms` (root updates and checkpoint publication),
+and their sum as `total_ms`. These measure commitment work; EVM execution and the
+wait between preparation and finishing are excluded. The previous finishing-only
+total is now exposed as `finish_ms`.

@@ -9,6 +9,7 @@ use reth_trie_pbt::{
     replay::{replay, replay_parallel},
     Blake3Hasher, StateTree, TreeHasher,
 };
+use std::time::Duration;
 use tracing::info;
 
 pub use alloy_eip7928::AccountChanges;
@@ -172,6 +173,7 @@ where
         &self,
         ctx: StateRootJobContext<'_, N, P, Evm>,
     ) -> ProviderResult<PreparedStateRootJob<N>> {
+        let preparation_started = Instant::now();
         let parent = ctx.parent_header();
         let retired = ctx.state_provider_factory.database_provider_ro()?.mpt_retired_at()?;
         self.validate_retired_parent(parent.header(), retired)?;
@@ -193,24 +195,25 @@ where
                 )?;
                 (state, retired.is_none().then(|| parent.state_root()))
             };
-        let job = PbtStateRootJob {
+        let mut job = PbtStateRootJob {
             state_provider_factory: ctx.state_provider_factory.clone(),
             mpt: None,
             parent: state,
             store: self.store.clone(),
             active,
             parallel: self.parallel,
+            preparation_elapsed: Duration::ZERO,
         };
         if let Some(root) = mpt_parent {
             let prepared = <DefaultStateRootStrategy as StateRootStrategy<N, P, Evm>>::prepare(
                 &self.default,
                 if active { ctx.with_parent_state_root(root) } else { ctx },
             )?;
-            Ok(PreparedStateRootJob {
-                job: Box::new(PbtStateRootJob { mpt: Some(prepared.job), ..job }),
-                ..prepared
-            })
+            job.mpt = Some(prepared.job);
+            job.preparation_elapsed = preparation_started.elapsed();
+            Ok(PreparedStateRootJob { job: Box::new(job), ..prepared })
         } else {
+            job.preparation_elapsed = preparation_started.elapsed();
             Ok(PreparedStateRootJob::new(Box::new(job), None))
         }
     }
@@ -219,6 +222,7 @@ where
         &self,
         ctx: PayloadStateRootJobContext<'_, N, P>,
     ) -> ProviderResult<Option<PayloadStateRootHandle>> {
+        let preparation_started = Instant::now();
         let retired = ctx
             .state_provider_factory
             .database_provider_ro()
@@ -244,6 +248,7 @@ where
             .map_err(Arc::new);
         let store = self.store.clone();
         let factory = ctx.state_provider_factory;
+        let preparation_elapsed = preparation_started.elapsed();
         Ok(Some(PayloadStateRootHandle::from_output("pbt", move |bundle| {
             let started = Instant::now();
             let parent = parent
@@ -276,6 +281,7 @@ where
                 .cache_execution_candidate(&state)
                 .map_err(|err| StateRootTaskError::Other(err.into()))?;
             let checkpoint_elapsed = checkpoint_started.elapsed();
+            let finish_elapsed = started.elapsed();
             info!(
                 target: "engine::pbt",
                 phase = "payload",
@@ -292,7 +298,9 @@ where
                 mpt_ms,
                 checkpoint_ms = 0.0,
                 candidate_cache_ms = checkpoint_elapsed.as_secs_f64() * 1000.0,
-                total_ms = started.elapsed().as_secs_f64() * 1000.0,
+                prepare_ms = preparation_elapsed.as_secs_f64() * 1000.0,
+                finish_ms = finish_elapsed.as_secs_f64() * 1000.0,
+                total_ms = (preparation_elapsed + finish_elapsed).as_secs_f64() * 1000.0,
                 "PBT state root timings"
             );
             Ok(StateRootComputeOutcome {
@@ -315,6 +323,7 @@ struct PbtStateRootJob<N: NodePrimitives, P, H> {
     store: Arc<SnapshotStore<H>>,
     active: bool,
     parallel: bool,
+    preparation_elapsed: Duration,
 }
 
 impl<N, P, H> StateRootJob<N> for PbtStateRootJob<N, P, H>
@@ -380,6 +389,7 @@ where
         }
         let checkpoint_ms =
             if checkpointed { checkpoint_started.elapsed().as_secs_f64() * 1000.0 } else { 0.0 };
+        let finish_elapsed = started.elapsed();
         info!(
             target: "engine::pbt",
             phase = "validation",
@@ -397,7 +407,9 @@ where
             mpt_ms,
             checkpoint_ms,
             checkpointed,
-            total_ms = started.elapsed().as_secs_f64() * 1000.0,
+            prepare_ms = self.preparation_elapsed.as_secs_f64() * 1000.0,
+            finish_ms = finish_elapsed.as_secs_f64() * 1000.0,
+            total_ms = (self.preparation_elapsed + finish_elapsed).as_secs_f64() * 1000.0,
             "PBT state root timings"
         );
         Ok(outcome)
