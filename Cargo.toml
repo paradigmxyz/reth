@@ -442,9 +442,9 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "66687c18b34d3bdbb899f5eb7605070615c03475", default-features = false }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "66687c18b34d3bdbb899f5eb7605070615c03475", default-features = false }
-evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "66687c18b34d3bdbb899f5eb7605070615c03475", default-features = false }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "7cff82aa5ef41c328bc5557767e498a2134a57c3", default-features = false }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "7cff82aa5ef41c328bc5557767e498a2134a57c3", default-features = false }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "7cff82aa5ef41c328bc5557767e498a2134a57c3", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -682,9 +682,9 @@ ipnet = "2.11"
 # evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
 # rejects a patch from the same source.
 [patch."https://github.com/alloy-rs/evm2"]
-evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "66687c18b34d3bdbb899f5eb7605070615c03475" }
-evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "66687c18b34d3bdbb899f5eb7605070615c03475" }
-evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "66687c18b34d3bdbb899f5eb7605070615c03475" }
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "7cff82aa5ef41c328bc5557767e498a2134a57c3" }
+evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "7cff82aa5ef41c328bc5557767e498a2134a57c3" }
+evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "7cff82aa5ef41c328bc5557767e498a2134a57c3" }
 
 [patch.crates-io]
 # reth-core

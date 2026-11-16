@@ -8,12 +8,14 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{
     state::EvmOverrides, Account, AccountInfo, BlockError, Bundle, Index, StateContext,
 };
-use alloy_rpc_types_trace::geth::{
-    ChainBlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
-    TraceResult,
+use alloy_rpc_types_trace::{
+    common::TraceResult,
+    geth::{GethDebugTracingCallOptions, GethDebugTracingOptions},
 };
 use evm2::evm::StateChangeSource;
-use evm2_inspectors::tracing::{DebugInspector, TransactionContext};
+use evm2_inspectors::tracing::{
+    DebugInspector, DebugInspectorError, DebugTrace, StructLogMode, TransactionContext,
+};
 use futures::Stream;
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage};
 use parking_lot::RwLock;
@@ -131,7 +133,7 @@ where
         evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
         permit: Option<OwnedSemaphorePermit>,
-    ) -> Result<Vec<TraceResult>, Eth::Error> {
+    ) -> Result<Vec<TraceResult<DebugTrace, String>>, Eth::Error> {
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let _permit = permit;
@@ -142,7 +144,7 @@ where
                 let block_env = *evm_env.block_env();
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
+                let mut inspector = new_debug_inspector(opts).map_err(Eth::Error::from_eth_err)?;
                 let mut executor = eth_api.block_executor(&block, &mut db, evm_env)?;
                 while let Some((index, tx)) = transactions.next() {
                     if is_cancelled() {
@@ -156,7 +158,7 @@ where
                         .map_err(Eth::Error::from_evm_err)?;
                     inspector = next_inspector;
                     let result = inspector
-                        .get_result(
+                        .get_trace(
                             Some(TransactionContext {
                                 block_hash: Some(block.hash()),
                                 tx_hash: Some(tx_hash),
@@ -189,7 +191,7 @@ where
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
         opts: GethDebugTracingOptions,
-    ) -> Result<Vec<Option<TraceResult>>, Eth::Error> {
+    ) -> Result<Vec<Option<TraceResult<DebugTrace, String>>>, Eth::Error> {
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.eth_api()
@@ -201,7 +203,7 @@ where
 
                 let block_env = *evm_env.block_env();
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let mut inspector = match DebugInspector::new(opts) {
+                let mut inspector = match new_debug_inspector(opts) {
                     Ok(inspector) => inspector,
                     Err(err) => {
                         if let Some((_, tx)) = transactions.peek() {
@@ -233,7 +235,7 @@ where
                         }
                     };
 
-                    let result = match inspector.get_result(
+                    let result = match inspector.get_trace(
                         Some(TransactionContext {
                             block_hash: Some(block.hash()),
                             tx_hash: Some(tx_hash),
@@ -293,7 +295,7 @@ where
         &self,
         rlp_block: Bytes,
         opts: GethDebugTracingOptions,
-    ) -> Result<Vec<TraceResult>, Eth::Error> {
+    ) -> Result<Vec<TraceResult<DebugTrace, String>>, Eth::Error> {
         let permit =
             self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let block: ProviderBlock<Eth::Provider> = Decodable::decode(&mut rlp_block.as_ref())
@@ -337,7 +339,7 @@ where
         &self,
         block_id: BlockId,
         opts: GethDebugTracingOptions,
-    ) -> Result<Vec<TraceResult>, Eth::Error> {
+    ) -> Result<Vec<TraceResult<DebugTrace, String>>, Eth::Error> {
         let block = self
             .eth_api()
             .recovered_block(block_id)
@@ -359,7 +361,7 @@ where
         &self,
         tx_hash: B256,
         opts: GethDebugTracingOptions,
-    ) -> Result<GethTrace, Eth::Error> {
+    ) -> Result<DebugTrace, Eth::Error> {
         let (transaction, block, bal) =
             match self.eth_api().transaction_and_block_and_maybe_bal(tx_hash).await? {
                 None => return Err(EthApiError::TracingTransactionNotFound.into()),
@@ -382,7 +384,7 @@ where
                         as usize;
 
                 let inspector = tracer_interrupt
-                    .attach(DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?);
+                    .attach(new_debug_inspector(opts).map_err(Eth::Error::from_eth_err)?);
                 let tx_env = eth_api.evm_config().tx_env(tx);
                 let (mut inspector, res, evm_env) = eth_api.inspect_transaction_in_block(
                     &block,
@@ -392,7 +394,7 @@ where
                     bal.as_deref(),
                 )?;
                 let trace = inspector
-                    .get_result(
+                    .get_trace(
                         Some(TransactionContext {
                             block_hash: Some(block.hash()),
                             tx_index: Some(index),
@@ -425,7 +427,7 @@ where
         call: RpcTxReq<Eth::NetworkTypes>,
         block_id: Option<BlockId>,
         opts: GethDebugTracingCallOptions,
-    ) -> Result<GethTrace, Eth::Error> {
+    ) -> Result<DebugTrace, Eth::Error> {
         let at = block_id.unwrap_or_default();
         let GethDebugTracingCallOptions {
             tracing_options,
@@ -448,12 +450,12 @@ where
         let trace =
             self.eth_api().spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
                 let inspector = tracer_interrupt.attach(
-                    DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?,
+                    new_debug_inspector(tracing_options).map_err(Eth::Error::from_eth_err)?,
                 );
                 let (mut inspector, res) =
                     this.eth_api().inspect(&mut *db, evm_env.clone(), &tx_env, inspector)?;
                 let trace = inspector
-                    .get_result(None, &tx_env, evm_env.block_env(), &res, db)
+                    .get_trace(None, &tx_env, evm_env.block_env(), &res, db)
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace)
             });
@@ -476,7 +478,7 @@ where
         tx_index: usize,
         tracing_options: GethDebugTracingOptions,
         overrides: EvmOverrides,
-    ) -> Result<GethTrace, Eth::Error> {
+    ) -> Result<DebugTrace, Eth::Error> {
         // Get the target block to check transaction count
         let (block, bal) = self
             .eth_api()
@@ -513,12 +515,12 @@ where
                     eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 
                 let inspector = tracer_interrupt.attach(
-                    DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?,
+                    new_debug_inspector(tracing_options).map_err(Eth::Error::from_eth_err)?,
                 );
                 let (mut inspector, res) =
                     eth_api.inspect(&mut db, evm_env.clone(), &tx_env, inspector)?;
                 let trace = inspector
-                    .get_result(None, &tx_env, evm_env.block_env(), &res, &mut db)
+                    .get_trace(None, &tx_env, evm_env.block_env(), &res, &mut db)
                     .map_err(Eth::Error::from_eth_err)?;
 
                 Ok(trace)
@@ -535,7 +537,7 @@ where
         bundles: Vec<Bundle<RpcTxReq<Eth::NetworkTypes>>>,
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> Result<Vec<Vec<GethTrace>>, Eth::Error> {
+    ) -> Result<Vec<Vec<DebugTrace>>, Eth::Error> {
         if bundles.is_empty() {
             return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into())
         }
@@ -588,7 +590,7 @@ where
 
                 // Trace all bundles
                 let mut bundles = bundles.into_iter().peekable();
-                let mut inspector = DebugInspector::new(tracing_options.clone())
+                let mut inspector = new_debug_inspector(tracing_options.clone())
                     .map_err(Eth::Error::from_eth_err)?;
                 while let Some(bundle) = bundles.next() {
                     let mut results = Vec::with_capacity(bundle.transactions.len());
@@ -615,7 +617,7 @@ where
                         budget.charge(&res.result)?;
                         inspector = next_inspector;
                         let trace = inspector
-                            .get_result(None, &tx_env, evm_env.block_env(), &res, &mut db)
+                            .get_trace(None, &tx_env, evm_env.block_env(), &res, &mut db)
                             .map_err(Eth::Error::from_eth_err)?;
 
                         // If there is more transactions, commit the database
@@ -911,6 +913,16 @@ where
     }
 }
 
+/// Creates the inspector of a trace request.
+///
+/// The default struct logger writes its struct logs as JSON, which only
+/// [`DebugInspector::get_trace`] returns.
+fn new_debug_inspector(
+    opts: GethDebugTracingOptions,
+) -> Result<DebugInspector, DebugInspectorError> {
+    DebugInspector::new_with_struct_log_mode(opts, StructLogMode::Raw)
+}
+
 impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
     Eth: EthTransactions + TraceExt,
@@ -1137,11 +1149,8 @@ where
                 if traces.is_empty() && number != end_number {
                     continue
                 }
-                let result = ChainBlockTraceResult {
-                    block: U256::from(number),
-                    hash: block.hash(),
-                    traces,
-                };
+                let result =
+                    ChainBlockTraces { block: U256::from(number), hash: block.hash(), traces };
                 let message = match SubscriptionMessage::new(
                     sink.method_name(),
                     sink.subscription_id(),
@@ -1172,7 +1181,7 @@ where
         &self,
         rlp_block: Bytes,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<Vec<TraceResult>> {
+    ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>> {
         Self::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1183,7 +1192,7 @@ where
         &self,
         block: B256,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<Vec<TraceResult>> {
+    ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>> {
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
             .await
@@ -1195,7 +1204,7 @@ where
         &self,
         block: BlockNumberOrTag,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<Vec<TraceResult>> {
+    ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>> {
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
             .await
@@ -1207,7 +1216,7 @@ where
         &self,
         tx_hash: B256,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<GethTrace> {
+    ) -> RpcResult<DebugTrace> {
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default())
             .await
@@ -1220,7 +1229,7 @@ where
         request: RpcTxReq<Eth::NetworkTypes>,
         block_id: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<GethTrace> {
+    ) -> RpcResult<DebugTrace> {
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_call(self, request, block_id, opts.unwrap_or_default())
             .await
@@ -1232,7 +1241,7 @@ where
         bundles: Vec<Bundle<RpcTxReq<Eth::NetworkTypes>>>,
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<Vec<Vec<GethTrace>>> {
+    ) -> RpcResult<Vec<Vec<DebugTrace>>> {
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_call_many(self, bundles, state_context, opts).await.map_err(Into::into)
     }
@@ -1467,7 +1476,7 @@ where
         &self,
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<Vec<TraceResult>> {
+    ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>> {
         let _permit = self.acquire_trace_permit().await;
         let entry = self
             .inner
@@ -1662,6 +1671,18 @@ impl JsTraceInterrupt {
             trace.await
         }
     }
+}
+
+/// The message of a `traceChain` subscription.
+///
+/// Serializes like a
+/// [`ChainBlockTraceResult`](alloy_rpc_types_trace::geth::ChainBlockTraceResult), whose traces
+/// can't hold raw struct logs.
+#[derive(Debug, Serialize)]
+struct ChainBlockTraces {
+    block: U256,
+    hash: B256,
+    traces: Vec<Option<TraceResult<DebugTrace, String>>>,
 }
 
 #[cfg(test)]

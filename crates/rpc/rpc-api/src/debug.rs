@@ -4,9 +4,11 @@ use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, U64};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{Account, AccountInfo, Bundle, Index, StateContext};
-use alloy_rpc_types_trace::geth::{
-    GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
+use alloy_rpc_types_trace::{
+    common::TraceResult,
+    geth::{GethDebugTracingCallOptions, GethDebugTracingOptions},
 };
+use evm2_inspectors::tracing::DebugTrace;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
 
@@ -74,7 +76,7 @@ pub trait DebugApi<TxReq: RpcObject> {
         &self,
         rlp_block: Bytes,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<Vec<TraceResult>>;
+    ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>>;
 
     /// Similar to `debug_traceBlock`, `debug_traceBlockByHash` accepts a block hash and will replay
     /// the block that is already present in the database. For the second parameter see
@@ -84,7 +86,7 @@ pub trait DebugApi<TxReq: RpcObject> {
         &self,
         block: B256,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<Vec<TraceResult>>;
+    ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>>;
 
     /// Similar to `debug_traceBlockByHash`, `debug_traceBlockByNumber` accepts a block number
     /// [`BlockNumberOrTag`] and will replay the block that is already present in the database.
@@ -94,7 +96,7 @@ pub trait DebugApi<TxReq: RpcObject> {
         &self,
         block: BlockNumberOrTag,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<Vec<TraceResult>>;
+    ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>>;
 
     /// The `debug_traceTransaction` debugging method will attempt to run the transaction in the
     /// exact same manner as it was executed on the network. It will replay any transaction that
@@ -105,7 +107,7 @@ pub trait DebugApi<TxReq: RpcObject> {
         &self,
         tx_hash: B256,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<GethTrace>;
+    ) -> RpcResult<DebugTrace>;
 
     /// The `debug_traceCall` method lets you run an `eth_call` within the context of the given
     /// block execution using the final state of parent block as the base.
@@ -122,7 +124,7 @@ pub trait DebugApi<TxReq: RpcObject> {
         request: TxReq,
         block_id: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<GethTrace>;
+    ) -> RpcResult<DebugTrace>;
 
     /// The `debug_traceCallMany` method lets you run an `eth_callMany` within the context of the
     /// given block execution using the final state of parent block as the base followed by n
@@ -138,14 +140,14 @@ pub trait DebugApi<TxReq: RpcObject> {
     ///
     /// This methods is similar to many `eth_callMany`, hence this returns nested lists of traces.
     /// Where the length of the outer list is the number of bundles and the length of the inner list
-    /// (`Vec<GethTrace>`) is the number of transactions in the bundle.
+    /// (`Vec<DebugTrace>`) is the number of transactions in the bundle.
     #[method(name = "traceCallMany")]
     async fn debug_trace_call_many(
         &self,
         bundles: Vec<Bundle<TxReq>>,
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<Vec<Vec<GethTrace>>>;
+    ) -> RpcResult<Vec<Vec<DebugTrace>>>;
 
     /// The `debug_executionWitness` method allows for re-execution of a block with the purpose of
     /// generating an execution witness. The witness comprises of a map of all hashed trie nodes
@@ -378,5 +380,5 @@ pub trait DebugApi<TxReq: RpcObject> {
         &self,
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<Vec<TraceResult>>;
+    ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>>;
 }
