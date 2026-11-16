@@ -583,10 +583,17 @@ mod tests {
         BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
         StorageSettings, TransactionsProvider,
     };
-    use reth_tasks::cancel::{is_cancelled, CancelOnDrop};
+    use reth_tasks::{
+        cancel::{is_cancelled, CancelOnDrop},
+        RayonConfig, RuntimeBuilder, RuntimeConfig, TokioConfig,
+    };
     use reth_testing_utils::generators::{self, random_block, random_receipt, BlockParams};
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction, TestPool};
-    use std::time::{Duration, Instant};
+    use std::{
+        sync::atomic::{AtomicBool, Ordering},
+        time::{Duration, Instant},
+    };
+    use tokio::runtime::Handle;
 
     type FakeEthApi<P = MockEthProvider> = EthApi<
         RpcNodeCoreAdapter<P, TestPool, NoopNetwork, EthEvmConfig>,
@@ -654,6 +661,73 @@ mod tests {
         }
 
         assert!(cancelled_rx.await.unwrap());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn blocking_task_skips_closure_dropped_before_start() {
+        // A single RPC thread, so a closure queued behind a running one has not started yet.
+        let runtime = RuntimeBuilder::new(
+            RuntimeConfig::default()
+                .with_tokio(TokioConfig::existing_handle(Handle::current()))
+                .with_rayon(RayonConfig::default().with_rpc_threads(1)),
+        )
+        .build()
+        .unwrap();
+        let provider = MockEthProvider::default();
+        let api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .task_spawner(runtime)
+        .build();
+
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let running = api.spawn_blocking_io(move |_| {
+            started_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            Ok(())
+        });
+        started_rx.await.unwrap();
+
+        let ran = Arc::new(AtomicBool::new(false));
+        // Closes once the pool has dealt with the queued closure, whether it ran or was skipped.
+        let (processed_tx, processed_rx) = tokio::sync::oneshot::channel::<()>();
+        let queued = api.spawn_blocking_io({
+            let ran = Arc::clone(&ran);
+            move |_| {
+                ran.store(true, Ordering::SeqCst);
+                drop(processed_tx);
+                Ok(())
+            }
+        });
+        drop(queued);
+
+        release_tx.send(()).unwrap();
+        running.await.unwrap();
+        processed_rx.await.unwrap_err();
+        assert!(!ran.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn blocking_task_resolves_on_shutdown() {
+        let api = build_test_eth_api(MockEthProvider::default());
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let request = api.spawn_blocking_io(move |_| {
+            started_tx.send(()).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !is_cancelled() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Ok(())
+        });
+        started_rx.await.unwrap();
+
+        api.io_task_spawner().graceful_shutdown();
+        let err = request.await.unwrap_err();
+        assert!(matches!(err, EthApiError::InternalEthError));
     }
 
     #[tokio::test(flavor = "multi_thread")]
