@@ -362,20 +362,33 @@ fn format_eta(eta: Option<Duration>) -> String {
 /// Global request limit for the blocking downloader.
 ///
 /// This uses `Mutex + Condvar` because the segmented path runs blocking reqwest
-/// clients on OS threads.
+/// clients on OS threads. Slots are granted in arrival order: otherwise a worker that
+/// releases a slot takes it straight back before a woken waiter runs, and the waiter's
+/// piece can starve while it holds back an archive's contiguous downloaded prefix.
 pub(crate) struct DownloadRequestLimiter {
     /// Maximum number of in-flight HTTP requests.
     limit: usize,
-    /// Current number of acquired request slots.
-    active: Mutex<usize>,
+    /// Acquired slots and the arrival queue.
+    state: Mutex<RequestLimiterState>,
     /// Wakes blocked threads when a slot is released.
     notify: Condvar,
+}
+
+/// Slot accounting and FIFO tickets for [`DownloadRequestLimiter`].
+#[derive(Default)]
+struct RequestLimiterState {
+    /// Current number of acquired request slots.
+    active: usize,
+    /// Ticket handed to the next caller of `acquire`.
+    next_ticket: u64,
+    /// Ticket allowed to take the next free slot.
+    serving: u64,
 }
 
 impl DownloadRequestLimiter {
     /// Creates the shared request limiter.
     pub(crate) fn new(limit: usize) -> Arc<Self> {
-        Arc::new(Self { limit: limit.max(1), active: Mutex::new(0), notify: Condvar::new() })
+        Arc::new(Self { limit: limit.max(1), state: Mutex::default(), notify: Condvar::new() })
     }
 
     /// Returns the configured request limit.
@@ -388,14 +401,22 @@ impl DownloadRequestLimiter {
         progress: Option<&'a Arc<SharedProgress>>,
         cancel_token: &CancellationToken,
     ) -> Result<DownloadRequestPermit<'a>> {
-        let mut active = self.active.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
+        let ticket = state.next_ticket;
+        state.next_ticket += 1;
         loop {
+            // A cancelled waiter never takes its turn, which blocks later tickets. That is
+            // fine because cancellation is command-wide, so every waiter returns here too.
             if cancel_token.is_cancelled() {
                 return Err(eyre::eyre!("Download cancelled"));
             }
 
-            if *active < self.limit {
-                *active += 1;
+            if state.serving == ticket && state.active < self.limit {
+                state.active += 1;
+                state.serving += 1;
+                drop(state);
+                // The next ticket may also fit under the limit.
+                self.notify.notify_all();
                 if let Some(progress) = progress {
                     progress.request_started();
                 }
@@ -404,9 +425,9 @@ impl DownloadRequestLimiter {
 
             // Wake periodically so cancellation can interrupt waiters even if
             // no request finishes.
-            let (next_active, _) =
-                self.notify.wait_timeout(active, Duration::from_millis(100)).unwrap();
-            active = next_active;
+            let (next_state, _) =
+                self.notify.wait_timeout(state, Duration::from_millis(100)).unwrap();
+            state = next_state;
         }
     }
 }
@@ -425,10 +446,11 @@ pub(crate) struct DownloadRequestPermit<'a> {
 impl Drop for DownloadRequestPermit<'_> {
     /// Releases the request slot and updates shared progress counters.
     fn drop(&mut self) {
-        let mut active = self.limiter.active.lock().unwrap();
-        *active = active.saturating_sub(1);
-        drop(active);
-        self.limiter.notify.notify_one();
+        let mut state = self.limiter.state.lock().unwrap();
+        state.active = state.active.saturating_sub(1);
+        drop(state);
+        // Only the waiter holding the serving ticket may proceed, so wake all of them.
+        self.limiter.notify.notify_all();
 
         if let Some(progress) = self.progress {
             progress.request_finished();
@@ -853,5 +875,30 @@ mod tests {
 
         // The task must exit right away instead of on its next 3s progress tick.
         tokio::time::timeout(Duration::from_secs(1), handle).await.unwrap().unwrap();
+    }
+
+    #[test]
+    fn request_limiter_serves_waiters_before_a_releasing_caller() {
+        let limiter = DownloadRequestLimiter::new(1);
+        let token = CancellationToken::new();
+        let order = Mutex::new(Vec::new());
+
+        std::thread::scope(|scope| {
+            let held = limiter.acquire(None, &token).unwrap();
+            scope.spawn(|| {
+                let _permit = limiter.acquire(None, &token).unwrap();
+                order.lock().unwrap().push("waiter");
+            });
+            while limiter.state.lock().unwrap().next_ticket < 2 {
+                std::thread::yield_now();
+            }
+
+            // Re-acquiring right after a release must not jump ahead of the queued waiter.
+            drop(held);
+            let _permit = limiter.acquire(None, &token).unwrap();
+            order.lock().unwrap().push("releaser");
+        });
+
+        assert_eq!(*order.lock().unwrap(), ["waiter", "releaser"]);
     }
 }

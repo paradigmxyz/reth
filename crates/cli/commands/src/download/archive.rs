@@ -1,6 +1,6 @@
 use super::{
     extract::{extract_archive_raw, streaming_download_and_extract, CompressionFormat},
-    fetch::ArchiveFetcher,
+    fetch::{ArchiveAvailability, ArchiveAvailabilityReader, ArchiveFetcher},
     manifest::SnapshotArchive,
     planning::{CheckedDownloads, PlannedArchive},
     progress::{
@@ -15,10 +15,14 @@ use eyre::Result;
 use futures::stream::{self, StreamExt};
 use reth_cli_util::cancellation::CancellationToken;
 use reth_fs_util as fs;
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{io::BufReader, path::Path, sync::Arc, thread, time::Duration};
 use tracing::{debug, info, warn};
 
 const DOWNLOAD_CACHE_DIR: &str = ".download-cache";
+
+/// Read buffer between the cached archive and the decompressor, so each read of the growing
+/// archive takes the availability lock once per MiB instead of once per decoder read.
+const EXTRACTION_READ_BUFFER_SIZE: usize = 1 << 20;
 
 /// Runs all planned modular archive downloads for one command invocation.
 pub(crate) async fn run_modular_downloads(
@@ -234,7 +238,8 @@ impl ArchiveProcessor {
         mode.execute(self, format)
     }
 
-    /// Downloads the archive into the cache, then extracts from the cached file.
+    /// Downloads the archive into the cache while extracting the downloaded prefix of the cached
+    /// file.
     fn run_cached_attempt(&self, format: CompressionFormat) -> Result<()> {
         let cache_dir =
             self.ctx.cache_dir().ok_or_else(|| eyre::eyre!("Missing download cache directory"))?;
@@ -245,35 +250,48 @@ impl ArchiveProcessor {
             debug!(target: "reth::cli", url = %self.archive().url, "Downloading state snapshot archive");
         }
 
-        let download_result = {
-            let mut download_progress = ArchiveDownloadProgress::new(self.ctx.session().progress());
-            let result = fetcher.download(Some(&mut download_progress));
-            if let Ok(ref downloaded) = result &&
-                download_progress.has_tracked_bytes()
-            {
-                download_progress.complete(downloaded.size);
-            }
-            result
-        };
+        let availability = ArchiveAvailability::default();
+        let (download_result, extraction) = thread::scope(|scope| {
+            let extraction = scope.spawn(|| {
+                let result = self.extract_cached_archive(&availability, format);
+                // Stops the download, which no longer has a reader.
+                let stopped_download = result.is_err() && availability.abort();
+                (result, stopped_download)
+            });
 
-        let downloaded = match download_result {
-            Ok(downloaded) => downloaded,
-            Err(error) => {
-                fetcher.cleanup_downloaded_files();
-                return Err(error);
-            }
-        };
+            let download_result = {
+                let _abort_guard = availability.abort_on_drop();
+                let mut download_progress =
+                    ArchiveDownloadProgress::new(self.ctx.session().progress());
+                let result = fetcher.download(Some(&mut download_progress), Some(&availability));
+                if let Ok(ref downloaded) = result &&
+                    download_progress.has_tracked_bytes()
+                {
+                    download_progress.complete(downloaded.size);
+                }
+                result
+            };
+            let extraction = extraction
+                .join()
+                .unwrap_or_else(|_| (Err(eyre::eyre!("Archive extraction panicked")), false));
+            (download_result, extraction)
+        });
+        fetcher.cleanup_downloaded_files();
 
+        // Report the side that failed first: an aborted download fails extraction and vice versa.
+        let (extract_result, extraction_stopped_download) = extraction;
+        if extraction_stopped_download {
+            return extract_result
+        }
+        let downloaded = download_result?;
+        extract_result?;
         info!(target: "reth::cli",
             file = %self.archive().file_name,
             component = %self.archive.component,
             size = %super::progress::DownloadProgress::format_size(downloaded.size),
             "Archive download complete"
         );
-
-        let extract_result = self.extract_cached_archive(&downloaded.path, format);
-        fetcher.cleanup_downloaded_files();
-        extract_result
+        Ok(())
     }
 
     /// Streams the archive directly into extraction without keeping a cached copy.
@@ -288,12 +306,20 @@ impl ArchiveProcessor {
         )
     }
 
-    /// Extracts a cached archive file while updating shared extraction activity.
-    fn extract_cached_archive(&self, archive_path: &Path, format: CompressionFormat) -> Result<()> {
+    /// Extracts the cached archive as its download publishes it, while updating shared extraction
+    /// activity.
+    fn extract_cached_archive(
+        &self,
+        availability: &ArchiveAvailability,
+        format: CompressionFormat,
+    ) -> Result<()> {
         let mut extraction_progress = ArchiveExtractionProgress::new(self.ctx.session().progress());
-        let file = fs::open(archive_path)?;
+        let reader = BufReader::with_capacity(
+            EXTRACTION_READ_BUFFER_SIZE,
+            ArchiveAvailabilityReader::new(availability),
+        );
         let result = extract_archive_raw(
-            file,
+            reader,
             format,
             self.ctx.target_dir(),
             self.ctx.static_files_dir(),
