@@ -184,8 +184,8 @@ const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 /// Receipts a parallel execution sends to the receipt root task at once.
 const RECEIPT_BATCH_SIZE: usize = 32;
 
-/// State updates a parallel execution sends to the state root task at once.
-const STATE_UPDATE_BATCH_SIZE: usize = 16;
+/// Most state updates a parallel execution holds for the state root task while it is busy.
+const STATE_UPDATE_BATCH_SIZE: usize = 4;
 
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;

@@ -374,6 +374,9 @@ trait StateRootSink: Send + Sync + 'static {
 
     /// Signals that no more authoritative state updates are expected.
     fn on_updates_finished(&self);
+
+    /// Returns `true` if the consumer has taken every message sent so far.
+    fn is_drained(&self) -> bool;
 }
 
 /// Hint-only view of a state-root stream.
@@ -470,8 +473,10 @@ impl StateRootUpdateHook {
     /// Forwards updates in batches of `batch_size` instead of one at a time.
     ///
     /// Each forwarded message can wake the idle state-root task, which costs the executing
-    /// thread more than a small update itself. A batch delays the updates it holds until it is
-    /// full or the hook is dropped. A `batch_size` of 0 or 1 forwards each update at once.
+    /// thread more than a small update itself. Updates are held only while the task is still
+    /// working through earlier messages: the batch is forwarded as soon as the task has taken
+    /// every message sent so far, when it is full, or when the hook is dropped, so the task never
+    /// waits on a held update. A `batch_size` of 0 or 1 forwards each update at once.
     pub fn batched(mut self, batch_size: usize) -> Self {
         self.batch_size = batch_size;
         self.batch = Vec::with_capacity(batch_size);
@@ -492,7 +497,14 @@ impl OnStateHook for StateRootUpdateHook {
             return
         }
         self.batch.push(state);
-        if self.batch.len() == self.batch_size {
+        if self.batch.len() < self.batch_size && !self.inner.is_drained() {
+            return
+        }
+        if self.batch.len() == 1 &&
+            let Some(state) = self.batch.pop()
+        {
+            self.inner.on_state_update(state);
+        } else {
             let batch = core::mem::replace(&mut self.batch, Vec::with_capacity(self.batch_size));
             self.inner.on_state_updates(batch);
         }
@@ -548,13 +560,17 @@ impl StateRootSink for SparseTrieStateRootSink {
     fn on_updates_finished(&self) {
         let _ = self.sender.send(StateRootMessage::FinishedStateUpdates);
     }
+
+    fn is_drained(&self) -> bool {
+        self.sender.is_empty()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::{
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
         time::Duration,
     };
 
@@ -563,6 +579,7 @@ mod tests {
         state_updates: AtomicUsize,
         state_update_batches: AtomicUsize,
         finished_updates: AtomicUsize,
+        busy: AtomicBool,
     }
 
     impl StateRootSink for CountingSink {
@@ -582,6 +599,10 @@ mod tests {
 
         fn on_updates_finished(&self) {
             self.finished_updates.fetch_add(1, Ordering::Relaxed);
+        }
+
+        fn is_drained(&self) -> bool {
+            !self.busy.load(Ordering::Relaxed)
         }
     }
 
@@ -630,6 +651,7 @@ mod tests {
     #[test]
     fn batched_hook_forwards_all_updates_before_finishing() {
         let sink = Arc::new(CountingSink::default());
+        sink.busy.store(true, Ordering::Relaxed);
         let mut hook = StateRootUpdateStream::new(sink.clone()).into_state_hook().batched(2);
 
         for _ in 0..3 {
@@ -641,6 +663,31 @@ mod tests {
         drop(hook);
         assert_eq!(sink.state_updates.load(Ordering::Relaxed), 3);
         assert_eq!(sink.state_update_batches.load(Ordering::Relaxed), 2);
+        assert_eq!(sink.finished_updates.load(Ordering::Relaxed), 1);
+    }
+
+    /// A batched hook forwards held updates at once when the consumer has drained the stream.
+    #[test]
+    fn batched_hook_flushes_when_drained() {
+        let sink = Arc::new(CountingSink::default());
+        let mut hook = StateRootUpdateStream::new(sink.clone()).into_state_hook().batched(4);
+
+        hook.on_state(StateUpdate::default());
+        assert_eq!(sink.state_updates.load(Ordering::Relaxed), 1);
+        assert_eq!(sink.state_update_batches.load(Ordering::Relaxed), 0);
+
+        sink.busy.store(true, Ordering::Relaxed);
+        hook.on_state(StateUpdate::default());
+        hook.on_state(StateUpdate::default());
+        assert_eq!(sink.state_updates.load(Ordering::Relaxed), 1);
+
+        sink.busy.store(false, Ordering::Relaxed);
+        hook.on_state(StateUpdate::default());
+        assert_eq!(sink.state_updates.load(Ordering::Relaxed), 4);
+        assert_eq!(sink.state_update_batches.load(Ordering::Relaxed), 1);
+
+        drop(hook);
+        assert_eq!(sink.state_update_batches.load(Ordering::Relaxed), 1);
         assert_eq!(sink.finished_updates.load(Ordering::Relaxed), 1);
     }
 
