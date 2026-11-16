@@ -2,11 +2,12 @@
 //!
 //! Each worker is a dedicated OS thread that processes closures sent to it via a channel.
 //! This is a substitute for `spawn_blocking` that reuses the same OS thread for the same
-//! named task, like a 1-thread thread pool keyed by name. Under `fuzz`, workers and
-//! their queues belong to the deterministic executor instead of the OS.
+//! named task, like a 1-thread thread pool keyed by name. Under `fuzz`, workers
+//! use the deterministic executor, but their Tokio channels remain native for now.
+//! Native waits do not yield to Shuttle and can stall an execution when another
+//! logical task must produce the awaited message.
 
 use crate::{
-    channel,
     executor::sync::atomic::{AtomicUsize, Ordering},
     metrics::WorkerThreadMetrics,
     thread,
@@ -14,13 +15,14 @@ use crate::{
 };
 use dashmap::DashMap;
 use std::{panic::AssertUnwindSafe, sync::Arc};
+use tokio::sync::{mpsc, oneshot};
 
 type BoxedTask = Box<dyn FnOnce() + Send + 'static>;
 
 /// A single-thread worker that processes closures sequentially on a dedicated OS thread.
 struct WorkerThread {
     /// Sender to submit work to this worker's thread.
-    tx: Option<channel::Sender<BoxedTask>>,
+    tx: Option<mpsc::UnboundedSender<BoxedTask>>,
     /// Metrics labeled with this worker's name.
     metrics: WorkerThreadMetrics,
     /// Number of tasks currently running or queued on this worker.
@@ -32,11 +34,11 @@ struct WorkerThread {
 impl WorkerThread {
     /// Spawns a new worker thread with the given name.
     fn new(name: &'static str) -> Self {
-        let (tx, rx) = channel::unbounded::<BoxedTask>();
+        let (tx, mut rx) = mpsc::unbounded_channel::<BoxedTask>();
         let handle = thread::Builder::new()
             .name(name.to_string())
             .spawn(move || {
-                while let Ok(task) = rx.recv() {
+                while let Some(task) = rx.blocking_recv() {
                     let _ = std::panic::catch_unwind(AssertUnwindSafe(task));
                 }
             })
@@ -51,14 +53,14 @@ impl WorkerThread {
     }
 
     /// Spawns a closure on this worker.
-    fn spawn<F, R>(&self, f: F) -> channel::Receiver<R>
+    fn spawn<F, R>(&self, f: F) -> oneshot::Receiver<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
         self.pending.fetch_add(1, Ordering::AcqRel);
 
-        let (result_tx, result_rx) = channel::bounded(1);
+        let (result_tx, result_rx) = oneshot::channel();
         let pending = self.pending.clone();
         let metrics = self.metrics.clone();
         let queued_at = Instant::now();
@@ -82,14 +84,14 @@ impl WorkerThread {
     }
 
     /// Attempts to spawn a closure if this worker has no task running or queued.
-    fn try_spawn<F, R>(&self, f: F) -> Option<channel::Receiver<R>>
+    fn try_spawn<F, R>(&self, f: F) -> Option<oneshot::Receiver<R>>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
         self.pending.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire).ok()?;
 
-        let (result_tx, result_rx) = channel::bounded(1);
+        let (result_tx, result_rx) = oneshot::channel();
         let pending = self.pending.clone();
         let metrics = self.metrics.clone();
         let queued_at = Instant::now();
@@ -179,7 +181,7 @@ impl WorkerMap {
     /// If no worker thread exists for this name yet, one is created with the given name as
     /// the OS thread name. The closure executes on the worker's OS thread and the returned
     /// receiver resolves with the result.
-    pub(crate) fn spawn_on<F, R>(&self, name: &'static str, f: F) -> channel::Receiver<R>
+    pub(crate) fn spawn_on<F, R>(&self, name: &'static str, f: F) -> oneshot::Receiver<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
@@ -195,7 +197,7 @@ impl WorkerMap {
         &self,
         name: &'static str,
         f: F,
-    ) -> Option<channel::Receiver<R>>
+    ) -> Option<oneshot::Receiver<R>>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
@@ -224,119 +226,105 @@ impl std::fmt::Debug for WorkerMap {
     }
 }
 
-#[cfg(test)]
+// Native Tokio waits do not yield to Shuttle while a simulated worker is parked.
+#[cfg(all(test, not(feature = "fuzz")))]
 mod tests {
     use super::*;
-    use crate::test_utils;
 
-    #[test]
-    fn worker_map_basic() {
-        test_utils::run(|| {
-            let map = WorkerMap::new();
+    #[tokio::test]
+    async fn worker_map_basic() {
+        let map = WorkerMap::new();
 
-            let result = map.spawn_on("test", || 42).recv().unwrap();
-            assert_eq!(result, 42);
-        });
+        let result = map.spawn_on("test", || 42).await.unwrap();
+        assert_eq!(result, 42);
     }
 
-    #[test]
-    fn worker_map_same_thread() {
-        test_utils::run(|| {
-            let map = WorkerMap::new();
+    #[tokio::test]
+    async fn worker_map_same_thread() {
+        let map = WorkerMap::new();
 
-            let id1 = map.spawn_on("test", || thread::current().id()).recv().unwrap();
-            let id2 = map.spawn_on("test", || thread::current().id()).recv().unwrap();
-            assert_eq!(id1, id2, "same name should run on the same thread");
-        });
+        let id1 = map.spawn_on("test", || thread::current().id()).await.unwrap();
+        let id2 = map.spawn_on("test", || thread::current().id()).await.unwrap();
+        assert_eq!(id1, id2, "same name should run on the same thread");
     }
 
-    #[test]
-    fn worker_map_different_names_different_threads() {
-        test_utils::run(|| {
-            let map = WorkerMap::new();
+    #[tokio::test]
+    async fn worker_map_different_names_different_threads() {
+        let map = WorkerMap::new();
 
-            let id1 = map.spawn_on("worker-a", || thread::current().id()).recv().unwrap();
-            let id2 = map.spawn_on("worker-b", || thread::current().id()).recv().unwrap();
-            assert_ne!(id1, id2, "different names should run on different threads");
-        });
+        let id1 = map.spawn_on("worker-a", || thread::current().id()).await.unwrap();
+        let id2 = map.spawn_on("worker-b", || thread::current().id()).await.unwrap();
+        assert_ne!(id1, id2, "different names should run on different threads");
     }
 
-    #[test]
-    fn worker_map_sequential_execution() {
-        test_utils::run(|| {
-            let map = WorkerMap::new();
-            let counter = Arc::new(AtomicUsize::new(0));
+    #[tokio::test]
+    async fn worker_map_sequential_execution() {
+        let map = WorkerMap::new();
+        let counter = Arc::new(AtomicUsize::new(0));
 
-            let mut receivers = Vec::new();
-            for i in 0..10 {
-                let c = counter.clone();
-                let rx = map.spawn_on("sequential", move || {
-                    let val = c.fetch_add(1, Ordering::SeqCst);
-                    assert_eq!(val, i, "tasks should execute in order");
-                    val
-                });
-                receivers.push(rx);
-            }
-
-            for (i, rx) in receivers.into_iter().enumerate() {
-                let val = rx.recv().unwrap();
-                assert_eq!(val, i);
-            }
-        });
-    }
-
-    #[test]
-    fn worker_map_thread_name() {
-        test_utils::run(|| {
-            let map = WorkerMap::new();
-
-            let name = map
-                .spawn_on("custom-worker", || thread::current().name().unwrap().to_string())
-                .recv()
-                .unwrap();
-            assert_eq!(name, "custom-worker");
-        });
-    }
-
-    #[test]
-    fn worker_map_try_spawn_busy() {
-        test_utils::run(|| {
-            let map = WorkerMap::new();
-            let (release_tx, release_rx) = channel::unbounded();
-
-            let first = map.try_spawn_on("busy-worker", move || {
-                release_rx.recv().unwrap();
-                1
+        let mut receivers = Vec::new();
+        for i in 0..10 {
+            let c = counter.clone();
+            let rx = map.spawn_on("sequential", move || {
+                let val = c.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(val, i, "tasks should execute in order");
+                val
             });
-            assert!(first.is_some());
+            receivers.push(rx);
+        }
 
-            let second = map.try_spawn_on("busy-worker", || 2);
-            assert!(second.is_none(), "busy worker should reject queued work");
+        for (i, rx) in receivers.into_iter().enumerate() {
+            let val = rx.await.unwrap();
+            assert_eq!(val, i);
+        }
+    }
 
-            release_tx.send(()).unwrap();
-            assert_eq!(first.unwrap().recv().unwrap(), 1);
+    #[tokio::test]
+    async fn worker_map_thread_name() {
+        let map = WorkerMap::new();
 
-            let third = map.try_spawn_on("busy-worker", || 3).expect("worker should be idle");
-            assert_eq!(third.recv().unwrap(), 3);
+        let name = map
+            .spawn_on("custom-worker", || thread::current().name().unwrap().to_string())
+            .await
+            .unwrap();
+        assert_eq!(name, "custom-worker");
+    }
+
+    #[tokio::test]
+    async fn worker_map_try_spawn_busy() {
+        let map = WorkerMap::new();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+
+        let first = map.try_spawn_on("busy-worker", move || {
+            release_rx.recv().unwrap();
+            1
         });
+        assert!(first.is_some());
+
+        let second = map.try_spawn_on("busy-worker", || 2);
+        assert!(second.is_none(), "busy worker should reject queued work");
+
+        release_tx.send(()).unwrap();
+        assert_eq!(first.unwrap().await.unwrap(), 1);
+
+        let third = map.try_spawn_on("busy-worker", || 3).expect("worker should be idle");
+        assert_eq!(third.await.unwrap(), 3);
     }
 
     #[test]
     fn worker_map_last_owner_dropped_on_worker() {
-        test_utils::run(|| {
-            let map = Arc::new(WorkerMap::new());
-            let owner = Arc::clone(&map);
-            let (release_tx, release_rx) = channel::unbounded();
+        let map = Arc::new(WorkerMap::new());
+        let owner = Arc::clone(&map);
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
 
-            let done = map.spawn_on("last-owner", move || {
-                release_rx.recv().unwrap();
-                // Drops the last reference to the map on the worker it would join.
-                drop(owner);
-            });
-
-            drop(map);
-            release_tx.send(()).unwrap();
-            done.recv().expect("dropping the map on its own worker should not panic");
+        let done = map.spawn_on("last-owner", move || {
+            release_rx.recv().unwrap();
+            // Drops the last reference to the map on the worker it would join.
+            drop(owner);
         });
+
+        drop(map);
+        release_tx.send(()).unwrap();
+        done.blocking_recv().expect("dropping the map on its own worker should not panic");
     }
 }

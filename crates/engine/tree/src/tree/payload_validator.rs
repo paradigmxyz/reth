@@ -120,7 +120,7 @@ use alloy_primitives::{map::B256Set, B256};
 use reth_tasks::{
     executor::{
         channel,
-        channel::{mpsc, Receiver, Sender},
+        channel::{mpsc, Sender},
         time::Instant,
     },
     LazyHandle,
@@ -182,7 +182,7 @@ const MAX_EXPECTED_GAS_LIMIT_MULTIPLIER: u64 = 2;
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 
 type ReceiptRootSender<N> = Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
-type ReceiptRootReceiver = Receiver<(B256, alloy_primitives::Bloom)>;
+type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
 
 /// Context providing access to tree state during validation.
 ///
@@ -784,7 +784,7 @@ where
             .entered();
 
             receipt_root_rx
-                .recv()
+                .blocking_recv()
                 .inspect_err(|_| {
                     tracing::error!(
                         target: "engine::tree::payload_validator",
@@ -1190,7 +1190,7 @@ where
     ) -> (ReceiptRootSender<N>, ReceiptRootReceiver) {
         // Unbounded channel is used since tx count bounds capacity anyway.
         let (receipt_tx, receipt_rx) = channel::unbounded();
-        let (result_tx, result_rx) = channel::bounded(1);
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let task_handle = ReceiptRootTaskHandle::new(receipt_rx, result_tx);
         self.runtime.spawn_blocking_named("receipt-root", move || task_handle.run(receipts_len));
 

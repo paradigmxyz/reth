@@ -17,6 +17,9 @@ doc-valid-idents = [
 allow-dbg-in-tests = true
 
 # Used only by scripts/lint-fuzz-primitives.py, never by native builds.
+# Tokio channels are temporarily exempt in all builds; retain their existing
+# async/blocking APIs instead of replacing them with selected sync channels.
+# These native waits are not controlled by the fuzz scheduler.
 
 disallowed-types = [
     { path = "std::sync::Mutex", reason = "Use reth_tasks::executor selected primitives; native operations escape the fuzz scheduler." },

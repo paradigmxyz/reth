@@ -10,7 +10,7 @@ use reth_tasks::executor::{
     thread::{Builder, JoinHandle},
 };
 use std::sync::Arc;
-
+use tokio::sync::oneshot;
 use tracing::trace;
 
 /// Builds a fresh EVM provider over the block's parent state. Type-erased so the pool is not
@@ -108,9 +108,10 @@ impl BalPrewarmPool {
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
     /// requests queued ahead of this message.
     ///
-    /// Blocks until all workers processed the end block message.
+    /// Blocks until all workers processed the end block message. Completion uses native Tokio in
+    /// all builds, so this wait does not yield to the fuzz scheduler.
     pub fn end_block(&self) {
-        let (tx, rx) = channel::bounded(1);
+        let (tx, rx) = oneshot::channel();
         let tx = Arc::new(SendOnDrop { sender: Some(tx) });
 
         for worker in &self.workers {
@@ -118,7 +119,7 @@ impl BalPrewarmPool {
         }
 
         drop(tx);
-        rx.recv().expect("BAL prewarm pool dropped without signaling completion");
+        rx.blocking_recv().expect("BAL prewarm pool dropped without signaling completion");
     }
 
     fn send_warm(&self, target: PrewarmTarget) {
@@ -201,7 +202,7 @@ fn prewarm_loop(rx: Receiver<PrewarmMsg>) {
 }
 
 struct SendOnDrop {
-    sender: Option<Sender<()>>,
+    sender: Option<oneshot::Sender<()>>,
 }
 
 impl Drop for SendOnDrop {

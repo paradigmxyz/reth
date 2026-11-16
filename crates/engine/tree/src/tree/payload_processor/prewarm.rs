@@ -44,7 +44,6 @@ use reth_provider::{
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{
     executor::{
-        channel,
         channel::mpsc::{self, channel, Receiver, Sender},
         rayon::prelude::*,
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -55,6 +54,7 @@ use reth_tasks::{
 };
 use reth_trie_common::MultiProofTargetsV2;
 use std::{sync::Arc, time::Duration};
+use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
 /// Maximum number of consecutive rounds that execute stale prewarm results again.
@@ -535,6 +535,8 @@ where
     ///    state-root job before account reads finish.
     /// 2. Storage prefetch on the prewarming pool to populate the execution cache, unless BAL batch
     ///    I/O is disabled.
+    ///
+    /// Completion uses native Tokio in all builds and does not yield to the fuzz scheduler.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn run_bal_prewarm(
         &self,
@@ -563,7 +565,7 @@ where
         let stream_parent_span = parent_span;
         let prefetch_bal = Arc::clone(&decoded_bal);
         let stream_bal = Arc::clone(&decoded_bal);
-        let (stream_tx, stream_rx) = channel::bounded(1);
+        let (stream_tx, stream_rx) = oneshot::channel();
 
         if let Some(hashed_update_stream) = hashed_update_stream {
             let ctx = ctx.clone();
@@ -634,7 +636,7 @@ where
         }
 
         stream_rx
-            .recv()
+            .blocking_recv()
             .expect("BAL hashed-state streaming task dropped without signaling completion");
 
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
@@ -1051,7 +1053,10 @@ mod tests {
     use reth_stages_api::{StageCheckpoint, StageId};
     use reth_storage_overlay::OverlayManager;
     use reth_tasks::{
-        executor::thread::{JoinHandle, ThreadId},
+        executor::{
+            channel,
+            thread::{JoinHandle, ThreadId},
+        },
         WorkerPool,
     };
     use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};

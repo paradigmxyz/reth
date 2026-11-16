@@ -7,7 +7,8 @@
 //! # Feature Flags
 //!
 //! - `rayon`: Enable native task-management helpers for rayon thread pools.
-//! - `fuzz`: Use deterministic executor threads, channels, pools, and time.
+//! - `fuzz`: Use deterministic executor threads, selected channels, pools, and time. Existing Tokio
+//!   channels remain native and are not controlled by Shuttle.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",

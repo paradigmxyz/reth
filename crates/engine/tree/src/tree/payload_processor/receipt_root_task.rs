@@ -9,8 +9,9 @@
 use alloy_eips::Encodable2718;
 use alloy_primitives::{map::HashMap, Bloom, B256};
 use reth_primitives_traits::Receipt;
-use reth_tasks::executor::channel::{Receiver, Sender};
+use reth_tasks::executor::channel::Receiver;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
+use tokio::sync::oneshot;
 use tracing::debug_span;
 
 const RECEIPT_ENCODE_BUF_INITIAL_CAPACITY: usize = 512;
@@ -41,14 +42,14 @@ pub struct ReceiptRootTaskHandle<R> {
     /// Receiver for indexed receipts.
     receipt_rx: Receiver<IndexedReceipt<R>>,
     /// Sender for the computed result.
-    result_tx: Sender<(B256, Bloom)>,
+    result_tx: oneshot::Sender<(B256, Bloom)>,
 }
 
 impl<R: Receipt> ReceiptRootTaskHandle<R> {
     /// Creates a new handle from the receipt receiver and result sender channels.
     pub const fn new(
         receipt_rx: Receiver<IndexedReceipt<R>>,
-        result_tx: Sender<(B256, Bloom)>,
+        result_tx: oneshot::Sender<(B256, Bloom)>,
     ) -> Self {
         Self { receipt_rx, result_tx }
     }
@@ -57,12 +58,14 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     ///
     /// This method receives indexed receipts from the channel, encodes them,
     /// and builds the trie incrementally. When all receipts have been received
-    /// (channel closed), it sends the result through the completion channel.
+    /// (channel closed), it sends the result through the oneshot channel.
     ///
     /// With the native backend, run this inside a blocking task, for example via
     /// `executor.spawn_blocking(move || handle.run(receipts_len))`. With `fuzz`, create the
-    /// channels and run this computation in the same [`reth_tasks::executor::Runtime::run`]
-    /// execution, using its selected threads or pools rather than Tokio blocking tasks.
+    /// receipt input channel and run this computation in the same
+    /// [`reth_tasks::executor::Runtime::run`] execution, using its selected threads or pools rather
+    /// than Tokio blocking tasks. The result channel remains native Tokio in all builds and is not
+    /// controlled by the fuzz scheduler.
     ///
     /// # Arguments
     ///
@@ -132,7 +135,8 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     }
 }
 
-#[cfg(test)]
+// These tests combine native Tokio tasks with receipt channels, not the synchronous fuzz executor.
+#[cfg(all(test, not(feature = "fuzz")))]
 mod tests {
 
     use super::*;
@@ -144,13 +148,13 @@ mod tests {
     #[tokio::test]
     async fn test_receipt_root_task_empty() {
         let (_tx, rx) = bounded::<IndexedReceipt<Receipt>>(1);
-        let (result_tx, result_rx) = bounded(1);
+        let (result_tx, result_rx) = oneshot::channel();
         drop(_tx);
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
         tokio::task::spawn_blocking(move || handle.run(0)).await.unwrap();
 
-        let (root, bloom) = result_rx.recv().unwrap();
+        let (root, bloom) = result_rx.await.unwrap();
 
         // Empty trie root
         assert_eq!(root, reth_trie_common::EMPTY_ROOT_HASH);
@@ -162,7 +166,7 @@ mod tests {
         let receipts: Vec<Receipt> = vec![Receipt::default()];
 
         let (tx, rx) = bounded(1);
-        let (result_tx, result_rx) = bounded(1);
+        let (result_tx, result_rx) = oneshot::channel();
         let receipts_len = receipts.len();
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
@@ -174,7 +178,7 @@ mod tests {
         drop(tx);
 
         join_handle.await.unwrap();
-        let (root, _bloom) = result_rx.recv().unwrap();
+        let (root, _bloom) = result_rx.await.unwrap();
 
         // Verify against the standard calculation
         let receipts_with_bloom: Vec<_> = receipts.iter().map(|r| r.with_bloom_ref()).collect();
@@ -188,7 +192,7 @@ mod tests {
         let receipts: Vec<Receipt> = vec![Receipt::default(); 5];
 
         let (tx, rx) = bounded(4);
-        let (result_tx, result_rx) = bounded(1);
+        let (result_tx, result_rx) = oneshot::channel();
         let receipts_len = receipts.len();
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
@@ -200,7 +204,7 @@ mod tests {
         drop(tx);
 
         join_handle.await.unwrap();
-        let (root, bloom) = result_rx.recv().unwrap();
+        let (root, bloom) = result_rx.await.unwrap();
 
         // Verify against expected values from existing test
         assert_eq!(
@@ -245,7 +249,7 @@ mod tests {
 
         // Calculate using the task
         let (tx, rx) = bounded(4);
-        let (result_tx, result_rx) = bounded(1);
+        let (result_tx, result_rx) = oneshot::channel();
         let receipts_len = receipts.len();
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
@@ -257,7 +261,7 @@ mod tests {
         drop(tx);
 
         join_handle.await.unwrap();
-        let (task_root, task_bloom) = result_rx.recv().unwrap();
+        let (task_root, task_bloom) = result_rx.await.unwrap();
 
         assert_eq!(task_root, expected_root);
         assert_eq!(task_bloom, expected_bloom);
@@ -272,7 +276,7 @@ mod tests {
         let expected_root = calculate_receipt_root(&receipts_with_bloom);
 
         let (tx, rx) = bounded(4);
-        let (result_tx, result_rx) = bounded(1);
+        let (result_tx, result_rx) = oneshot::channel();
         let receipts_len = receipts.len();
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
@@ -285,7 +289,7 @@ mod tests {
         drop(tx);
 
         join_handle.await.unwrap();
-        let (root, _bloom) = result_rx.recv().unwrap();
+        let (root, _bloom) = result_rx.await.unwrap();
 
         assert_eq!(root, expected_root);
     }
