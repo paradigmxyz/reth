@@ -1,5 +1,11 @@
 //! Private virtual-time driver around Shuttle's fixed scheduler.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "Native TLS shares scheduler state across logical tasks; native locks only hand work and results across the runner boundary."
+)]
+
 use crate::executor::time::{Duration, Instant};
 use shuttle::{
     scheduler::{RoundRobinScheduler, Schedule, Scheduler, Task, TaskId},

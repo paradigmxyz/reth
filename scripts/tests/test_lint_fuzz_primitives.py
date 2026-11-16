@@ -159,7 +159,7 @@ class GuardTests(unittest.TestCase):
         with patch.object(guard, "ROOT", self.root), patch.dict(os.environ, {"CARGO": "/custom/cargo"}), patch.object(guard.subprocess, "run", return_value=completed) as run, contextlib.redirect_stdout(io.StringIO()):
             result = guard.main(["--config-dir", str(config), "--toolchain", "+nightly"])
         self.assertEqual(result, 0)
-        self.assertEqual(run.call_args.args[0], ["/custom/cargo", "+nightly", "clippy", "--workspace", "--all-targets", "--features", "fuzz", "--locked", "--message-format=json", "--", "--force-warn", guard.LINTS[0], "--force-warn", guard.LINTS[1], "--force-warn", guard.LINTS[2]])
+        self.assertEqual(run.call_args.args[0], ["/custom/cargo", "+nightly", "clippy", "--workspace", "--all-targets", "--features", "fuzz", "--locked", "--message-format=json", "--", "--warn", guard.LINTS[0], "--warn", guard.LINTS[1], "--warn", guard.LINTS[2]])
         self.assertEqual(run.call_args.kwargs["env"]["CLIPPY_CONF_DIR"], str(config.resolve()))
         self.assertEqual(run.call_args.kwargs["cwd"], self.root)
 

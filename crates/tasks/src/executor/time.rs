@@ -111,6 +111,10 @@ pub fn sleep(duration: Duration) {
 /// [`Self::now`] reads only the virtual clock, never the host wall clock.
 #[cfg(feature = "fuzz")]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "Native timestamp representation only; now reads the scheduler virtual clock."
+)]
 pub struct SystemTime(std::time::SystemTime);
 
 /// The fixed origin of the simulated system clock.

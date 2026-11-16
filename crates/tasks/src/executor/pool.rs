@@ -24,7 +24,17 @@ mod deterministic {
         },
     };
 
+    #[allow(
+        clippy::disallowed_types,
+        clippy::disallowed_methods,
+        reason = "Native identities outlive executions; pool occupancy and waiters are execution-local."
+    )]
     static NEXT_POOL: AtomicUsize = AtomicUsize::new(1);
+    #[allow(
+        clippy::disallowed_types,
+        clippy::disallowed_methods,
+        reason = "Native storage retains only pool configuration; scheduling state is execution-local."
+    )]
     static GLOBAL_POOL: OnceLock<ThreadPool> = OnceLock::new();
 
     thread_local! {
@@ -179,6 +189,10 @@ mod deterministic {
             CONTEXT.with(|context| context.borrow().as_ref().map(|context| context.pool.clone()))
         }
 
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "Global pool configuration is shared across executions, not used to schedule or wait for work."
+        )]
         fn global() -> Self {
             GLOBAL_POOL
                 .get_or_init(|| {
@@ -228,6 +242,10 @@ mod deterministic {
         }
         /// Configures the process-wide logical pool, returning an error if it is already
         /// configured.
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "Only process-wide pool configuration is stored here; scheduling state is execution-local."
+        )]
         pub fn build_global(self) -> Result<(), ThreadPoolBuildError> {
             GLOBAL_POOL
                 .set(self.build()?)

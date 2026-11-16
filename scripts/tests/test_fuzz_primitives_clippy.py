@@ -204,6 +204,9 @@ class ClippyPolicyTests(unittest.TestCase):
             parking_lot = "0.12"
             crossbeam-channel = "0.5.13"
             tls-macro = {{ path = "tls-macro" }}
+
+            [patch.crates-io]
+            metrics = {{ path = {json.dumps(str(ROOT / "crates/metrics/vendor"))} }}
         '''))
         cls.policy = cls.fixture / "policy"
         cls.normal = cls.fixture / "normal"

@@ -4,6 +4,8 @@
 Run both the default fuzz profile and --all-features on CI's pinned toolchain.
 Normal/native Clippy never loads this separate policy. Tokio is deliberately
 not forbidden; shared native I/O and metadata boundaries are not simulation.
+Documented local lint exemptions cover native storage and bookkeeping used to
+implement the deterministic backend, not workload-side scheduling operations.
 
 Clippy sees resolved local references and macro expansions, not operations
 hidden inside dependencies or backend-specialized methods on generic lock_api
@@ -22,6 +24,10 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 LINTS = tuple(f"clippy::disallowed_{kind}" for kind in ("types", "methods", "macros"))
 FIELDS = ("path", "lint", "source", "message")
+
+# Clippy can report expanded macros at crate scope, ignoring local lint attributes.
+# This private driver shares host TLS across logical tasks; workload TLS stays guarded.
+SCHEDULER_MACRO_MODULES = {"crates/tasks/src/executor/deterministic.rs"}
 
 
 def workspace_path(name, root):
@@ -83,6 +89,8 @@ def read_diagnostics(lines, root):
                     path, span = workspace_spans[-1]
                     evidence = True
                     if lint not in LINTS:
+                        continue
+                    if lint == "clippy::disallowed_macros" and path in SCHEDULER_MACRO_MODULES:
                         continue
                     highlighted = []
                     for part in span["text"]:
@@ -150,7 +158,7 @@ def main(argv=None):
             command += ["--all-features"] if args.all_features else ["--features", "fuzz"]
             command += ["--locked", "--message-format=json", "--"]
             for lint in LINTS:
-                command += ["--force-warn", lint]
+                command += ["--warn", lint]
             completed = subprocess.run(command, cwd=ROOT, env={**os.environ, "CLIPPY_CONF_DIR": str(config)}, stdout=subprocess.PIPE, text=True)
             returncode = completed.returncode
             counts, errors, success = read_diagnostics(io.StringIO(completed.stdout), ROOT)

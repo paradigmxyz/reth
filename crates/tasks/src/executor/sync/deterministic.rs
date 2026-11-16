@@ -1,5 +1,11 @@
 //! Scheduler-managed synchronization primitives.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "Native cells own values and poisoning; Shuttle primitives control initialization and waiting."
+)]
+
 use shuttle_sync::sync;
 use std::ops::Deref;
 
