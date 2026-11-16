@@ -93,4 +93,3 @@ min-trace-logs = ["tracing/release_max_level_trace"]
 
 # Debug recording for sparse trie mutations
 trie-debug = ["reth-engine-primitives/trie-debug"]
-
