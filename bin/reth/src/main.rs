@@ -39,10 +39,8 @@ fn main() {
 
     reth_cli_util::sigsegv_handler::install();
 
-    reth_node_core::version::try_init_version_metadata(
-        reth_node_core::version::default_reth_version_metadata(env!("VERGEN_BUILD_TIMESTAMP")),
-    )
-    .expect("version metadata is set once, before anything reads it");
+    reth_node_core::version::try_init_version_metadata(reth_node_core::reth_version_metadata!())
+        .expect("version metadata is set once, before anything reads it");
 
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
     if std::env::var_os("RUST_BACKTRACE").is_none() {

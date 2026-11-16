@@ -87,7 +87,7 @@ toml.workspace = true
 zstd.workspace = true
 
 [build-dependencies]
-smolgen = { workspace = true, features = ["build", "gitcl"] }
+reth-node-version-build.workspace = true
 
 [features]
 default = [

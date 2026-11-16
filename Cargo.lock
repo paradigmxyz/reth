@@ -7910,6 +7910,7 @@ dependencies = [
  "reth-node-core",
  "reth-node-ethereum",
  "reth-node-metrics",
+ "reth-node-version-build",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-primitives-traits",
@@ -7923,7 +7924,6 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "serde_json",
- "smolgen",
  "tar",
  "tempfile",
  "tokio",
@@ -7986,6 +7986,7 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-node-ethereum",
+ "reth-node-version-build",
  "reth-primitives-traits",
  "reth-provider",
  "reth-storage-api",
@@ -9701,7 +9702,6 @@ dependencies = [
  "reth-transaction-pool",
  "secp256k1 0.33.1",
  "serde",
- "smolgen",
  "strum 0.27.2",
  "thiserror 2.0.21",
  "tokio",
@@ -9883,6 +9883,13 @@ dependencies = [
  "reth-engine-primitives",
  "reth-payload-primitives",
  "reth-primitives-traits",
+]
+
+[[package]]
+name = "reth-node-version-build"
+version = "2.11.0"
+dependencies = [
+ "smolgen",
 ]
 
 [[package]]
