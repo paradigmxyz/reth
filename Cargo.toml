@@ -73,6 +73,7 @@ members = [
     "crates/node/events/",
     "crates/node/metrics",
     "crates/node/types",
+    "crates/node/version-build",
     "crates/payload/basic/",
     "crates/payload/builder/",
     "crates/payload/builder-primitives/",
@@ -399,6 +400,7 @@ reth-node-ethstats = { path = "crates/node/ethstats" }
 reth-node-events = { path = "crates/node/events" }
 reth-node-metrics = { path = "crates/node/metrics" }
 reth-node-types = { path = "crates/node/types" }
+reth-node-version-build = { path = "crates/node/version-build" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-builder-primitives = { path = "crates/payload/builder-primitives" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
