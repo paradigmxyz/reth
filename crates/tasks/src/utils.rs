@@ -20,6 +20,13 @@ macro_rules! once {
 /// Tries [`ThreadPriority::Max`] first. If that fails (e.g. missing `CAP_SYS_NICE`),
 /// falls back to a moderate bump via [`ThreadPriority::Crossplatform`] (~5 nice points
 /// on unix). Failures are logged at `debug` level.
+#[cfg_attr(
+    feature = "fuzz",
+    allow(
+        clippy::disallowed_methods,
+        reason = "OS priority changes and diagnostic names apply to the native thread, not logical workers."
+    )
+)]
 pub fn increase_thread_priority() {
     let thread_name = std::thread::current().name().unwrap_or("unnamed").to_string();
     if let Err(err) = ThreadPriority::Max.set_for_current() {

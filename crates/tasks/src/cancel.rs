@@ -3,7 +3,7 @@
 use std::{
     cell::RefCell,
     sync::{
-        atomic::{AtomicBool, AtomicU8, Ordering},
+        atomic::{AtomicU8, Ordering},
         Arc,
     },
 };
@@ -22,34 +22,29 @@ const CANCELLED: u8 = 2;
 /// This is most useful when a spawned job should stop once its owner goes away, e.g. a payload
 /// job or a blocking RPC call whose caller disconnected.
 #[derive(Default, Clone, Debug)]
-pub struct CancelOnDrop(Arc<AtomicU8>);
+pub struct CancelOnDrop(Arc<CancellationState>);
 
 // === impl CancelOnDrop ===
 
 impl CancelOnDrop {
     /// Returns true if the current work should be interrupted.
     pub fn is_interrupted(&self) -> bool {
-        self.0.load(Ordering::Relaxed) != RUNNING
+        self.0.load() != RUNNING
     }
 
     /// Returns true if the job was cancelled.
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Relaxed) == CANCELLED
+        self.0.load() == CANCELLED
     }
 
     /// Requests that the current work be finalized without cancelling it.
     pub fn request_finalization(&self) {
-        let _ = self.0.compare_exchange(
-            RUNNING,
-            FINALIZATION_REQUESTED,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        );
+        self.0.request_finalization();
     }
 
     /// Returns true if finalization was requested.
     pub fn is_finalization_requested(&self) -> bool {
-        self.0.load(Ordering::Relaxed) == FINALIZATION_REQUESTED
+        self.0.load() == FINALIZATION_REQUESTED
     }
 
     /// Runs `f` with this as the cancellation state of the current thread, see [`is_cancelled`].
@@ -58,7 +53,7 @@ impl CancelOnDrop {
     /// without threading the [`CancelOnDrop`] through every call. The previous state of the
     /// thread is restored once `f` returns or unwinds. Leaving the scope does not cancel.
     pub fn scope<R>(&self, f: impl FnOnce() -> R) -> R {
-        struct Restore(Option<Arc<AtomicU8>>);
+        struct Restore(Option<Arc<CancellationState>>);
 
         impl Drop for Restore {
             fn drop(&mut self) {
@@ -73,7 +68,7 @@ impl CancelOnDrop {
 
 impl Drop for CancelOnDrop {
     fn drop(&mut self) {
-        self.0.store(CANCELLED, Ordering::Relaxed);
+        self.0.cancel();
     }
 }
 
@@ -84,19 +79,19 @@ impl Drop for CancelOnDrop {
 ///
 /// This is useful when an external signal should cancel many tasks at once.
 #[derive(Default, Clone, Debug)]
-pub struct ManualCancel(Arc<AtomicBool>);
+pub struct ManualCancel(Arc<CancellationState>);
 
 // === impl ManualCancel ===
 
 impl ManualCancel {
     /// Returns true if the job was cancelled.
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
+        self.0.load() == CANCELLED
     }
 
     /// Drops the [`ManualCancel`], setting the cancelled flag to true.
     pub fn cancel(self) {
-        self.0.store(true, Ordering::Relaxed);
+        self.0.cancel();
     }
 }
 
@@ -109,28 +104,81 @@ impl ManualCancel {
 ///
 /// Always returns `false` outside of a [`CancelOnDrop::scope`].
 pub fn is_cancelled() -> bool {
-    with_current(|state| {
-        state.borrow().as_ref().is_some_and(|state| state.load(Ordering::Relaxed) == CANCELLED)
-    })
-}
-
-std::thread_local! {
-    /// Cancellation state of the innermost [`CancelOnDrop::scope`] on this thread.
-    static CURRENT: RefCell<Option<Arc<AtomicU8>>> = const { RefCell::new(None) };
+    let state = with_current(|state| state.borrow().clone());
+    state.is_some_and(|state| state.load() == CANCELLED)
 }
 
 #[cfg(feature = "fuzz")]
 crate::executor::thread_local! {
-    static LOGICAL_CURRENT: RefCell<Option<Arc<AtomicU8>>> = const { RefCell::new(None) };
+    static LOGICAL_CURRENT: RefCell<Option<Arc<CancellationState>>> = const { RefCell::new(None) };
 }
 
-fn with_current<R>(f: impl FnOnce(&RefCell<Option<Arc<AtomicU8>>>) -> R) -> R {
+fn with_current<R>(f: impl FnOnce(&RefCell<Option<Arc<CancellationState>>>) -> R) -> R {
     // Native Tokio blocking-I/O callers remain outside the selected executor.
     #[cfg(feature = "fuzz")]
     if shuttle::current::try_get_current_task().is_some() {
         return LOGICAL_CURRENT.with(f)
     }
+    with_native_current(f)
+}
+
+#[allow(
+    clippy::disallowed_methods,
+    reason = "Native cancellation TLS is only used outside logical workers; with_current selects logical TLS inside simulation."
+)]
+fn with_native_current<R>(f: impl FnOnce(&RefCell<Option<Arc<CancellationState>>>) -> R) -> R {
+    std::thread_local! {
+        #[allow(
+            clippy::disallowed_types,
+            reason = "Only native callers use this host-local cancellation scope."
+        )]
+        static CURRENT: RefCell<Option<Arc<CancellationState>>> = const { RefCell::new(None) };
+    }
+
     CURRENT.with(f)
+}
+
+// Cancellation handles cross the native Tokio boundary, so one atomic owns their state even in
+// fuzz builds. Every logical-worker access yields before the atomic operation; native callers do
+// not require an active simulation.
+#[derive(Debug, Default)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "Native storage is shared with Tokio; CancellationState schedules every logical-worker access."
+)]
+struct CancellationState(AtomicU8);
+
+#[allow(
+    clippy::disallowed_methods,
+    reason = "These native atomic operations are preceded by a logical-worker scheduling point."
+)]
+impl CancellationState {
+    fn load(&self) -> u8 {
+        Self::schedule();
+        self.0.load(Ordering::Relaxed)
+    }
+
+    fn cancel(&self) {
+        Self::schedule();
+        self.0.store(CANCELLED, Ordering::Relaxed);
+    }
+
+    fn request_finalization(&self) {
+        Self::schedule();
+        let _ = self.0.compare_exchange(
+            RUNNING,
+            FINALIZATION_REQUESTED,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        );
+    }
+
+    fn schedule() {
+        #[cfg(feature = "fuzz")]
+        if shuttle::current::try_get_current_task().is_some() {
+            crate::executor::thread::yield_now();
+        }
+    }
 }
 
 #[cfg(test)]

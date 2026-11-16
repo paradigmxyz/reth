@@ -54,9 +54,23 @@ impl Clone for GracefulShutdown {
 /// [`GracefulShutdown`] has completed.
 #[derive(Debug)]
 #[must_use = "if unused the task will not be gracefully shutdown"]
+#[cfg_attr(
+    feature = "fuzz",
+    allow(
+        clippy::disallowed_types,
+        reason = "Native counter tracks Tokio future lifetimes across OS threads outside synchronous simulation."
+    )
+)]
 pub struct GracefulShutdownGuard(Arc<AtomicUsize>);
 
 impl GracefulShutdownGuard {
+    #[cfg_attr(
+        feature = "fuzz",
+        allow(
+            clippy::disallowed_types,
+            reason = "Native counter tracks Tokio future lifetimes across OS threads outside synchronous simulation."
+        )
+    )]
     pub(crate) fn new(counter: Arc<AtomicUsize>) -> Self {
         counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Self(counter)

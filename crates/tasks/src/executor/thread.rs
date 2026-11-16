@@ -3,7 +3,7 @@
 use std::{io, num::NonZeroUsize};
 
 #[cfg(feature = "fuzz")]
-use shuttle::thread;
+use shuttle::{sync::atomic::AtomicBool, thread};
 #[cfg(feature = "fuzz")]
 use std::{
     convert::identity,
@@ -11,7 +11,7 @@ use std::{
     panic::{catch_unwind, resume_unwind, AssertUnwindSafe},
     ptr,
     sync::{
-        atomic::{AtomicBool, AtomicPtr, Ordering},
+        atomic::{AtomicPtr, Ordering},
         Arc, Mutex,
     },
 };
@@ -51,10 +51,12 @@ impl Builder {
         T: Send + 'static,
     {
         let finished = Arc::new(AtomicBool::new(false));
-        let completion = Completion(finished.clone());
+        // Publish completion inside the logical task, not from a destructor during teardown.
+        let completed = finished.clone();
         let handle = self.0.spawn(move || {
-            let _completion = completion;
-            catch_unwind(AssertUnwindSafe(work))
+            let result = catch_unwind(AssertUnwindSafe(work));
+            completed.store(true, Ordering::Release);
+            result
         })?;
         Ok(JoinHandle { handle, finished })
     }
@@ -104,7 +106,16 @@ impl<T> JoinHandle<T> {
 #[cfg(feature = "fuzz")]
 #[derive(Debug)]
 pub struct Scope<'scope, 'env> {
+    // Published before children can access it and unchanged until every child has drained.
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Native pointer publishes the borrowed Shuttle scope."
+    )]
     inner: AtomicPtr<()>,
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Native storage is never locked across a scheduler operation."
+    )]
     child_panics: Mutex<Vec<Arc<AtomicBool>>>,
     // Both lifetimes are invariant, as on the underlying borrowing scope.
     lifetimes: PhantomData<&'scope mut &'scope &'env mut &'env ()>,
@@ -113,13 +124,17 @@ pub struct Scope<'scope, 'env> {
 #[cfg(feature = "fuzz")]
 impl<'scope, 'env> Scope<'scope, 'env> {
     /// Spawns a borrowing thread; an unjoined panic propagates after the scope drains.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "The bookkeeping lock only appends a flag before spawning."
+    )]
     pub fn spawn<F, T>(&'scope self, work: F) -> ScopedJoinHandle<'scope, T>
     where
         F: FnOnce() -> T + Send + 'scope,
         T: Send + 'scope,
     {
         let finished = Arc::new(AtomicBool::new(false));
-        let completion = Completion(finished.clone());
+        let completed = finished.clone();
         let panicked = Arc::new(AtomicBool::new(false));
         self.child_panics.lock().unwrap_or_else(|error| error.into_inner()).push(panicked.clone());
         let child_panicked = panicked.clone();
@@ -129,9 +144,9 @@ impl<'scope, 'env> Scope<'scope, 'env> {
         let inner =
             unsafe { &*self.inner.load(Ordering::Acquire).cast::<thread::Scope<'scope, 'env>>() };
         let handle = inner.spawn(move || {
-            let _completion = completion;
             let result = catch_unwind(AssertUnwindSafe(work));
             child_panicked.store(result.is_err(), Ordering::Release);
+            completed.store(true, Ordering::Release);
             result
         });
         ScopedJoinHandle { handle, finished, panicked, lifetime: PhantomData }
@@ -179,16 +194,6 @@ unsafe impl<T: Send> Send for ScopedJoinHandle<'_, T> {}
 #[cfg(feature = "fuzz")]
 unsafe impl<T: Send> Sync for ScopedJoinHandle<'_, T> {}
 
-#[cfg(feature = "fuzz")]
-struct Completion(Arc<AtomicBool>);
-
-#[cfg(feature = "fuzz")]
-impl Drop for Completion {
-    fn drop(&mut self) {
-        self.0.store(true, Ordering::Release);
-    }
-}
-
 /// Returns available native parallelism, or one logical execution thread in simulation.
 #[cfg_attr(
     feature = "fuzz",
@@ -219,6 +224,11 @@ where
 ///
 /// Unjoined child panics propagate after draining. A callback panic takes precedence.
 #[cfg(feature = "fuzz")]
+#[allow(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "Native scope pointer and panic-list storage are initialized before spawning and read after children drain."
+)]
 pub fn scope<'env, F, T>(work: F) -> T
 where
     F: for<'scope> FnOnce(&'scope Scope<'scope, 'env>) -> T,
@@ -236,13 +246,11 @@ where
     match result {
         Err(panic) => resume_unwind(panic),
         Ok(value) => {
+            let child_panics = std::mem::take(
+                &mut *scope.child_panics.lock().unwrap_or_else(|error| error.into_inner()),
+            );
             assert!(
-                !scope
-                    .child_panics
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .iter()
-                    .any(|panicked| panicked.load(Ordering::Acquire)),
+                !child_panics.iter().any(|panicked| panicked.load(Ordering::Acquire)),
                 "a scoped thread panicked"
             );
             value

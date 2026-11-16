@@ -171,6 +171,10 @@ crate::executor::thread_local! {
 #[cfg(feature = "fuzz")]
 std::thread_local! {
     // Shuttle tasks share one runner thread, but jobs retain their logical pool worker's state.
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Host-local storage retains non-Send worker values; access is serialized by the selected Mutex."
+    )]
     static WORKERS: RefCell<std::collections::BTreeMap<(usize, usize), std::rc::Rc<WorkerSlot>>> =
         const { RefCell::new(std::collections::BTreeMap::new()) };
 }
@@ -187,6 +191,10 @@ fn with_current_worker<R>(f: impl FnOnce(&RefCell<Worker>) -> R) -> R {
     #[cfg(feature = "fuzz")]
     if let Some(pool) = rayon::current_pool_id() {
         let index = rayon::current_thread_index().expect("pool context has a worker index");
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "Only finds worker storage in host TLS; the borrow ends before scheduler-managed locking."
+        )]
         let worker =
             WORKERS.with(|workers| workers.borrow_mut().entry((pool, index)).or_default().clone());
         // Reentrant calls keep native RefCell semantics instead of locking this task against
@@ -230,6 +238,10 @@ fn with_current_worker<R>(f: impl FnOnce(&RefCell<Worker>) -> R) -> R {
 #[derive(Debug)]
 pub struct WorkerPool {
     // Pool configuration and thread counts can be accessed before entering the selected runtime.
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Only immutable pool configuration is retained; logical occupancy and waiters are execution-local."
+    )]
     pool: sync::OnceLock<rayon::ThreadPool>,
     metrics: OnceLock<WorkerPoolMetrics>,
     num_threads: usize,
@@ -241,6 +253,11 @@ impl WorkerPool {
     ///
     /// The underlying rayon pool is not created until the first method that requires it is called.
     /// Thread names follow the pattern `"{prefix}-{index:02}"`.
+    #[allow(
+        clippy::disallowed_types,
+        clippy::disallowed_methods,
+        reason = "Constructs empty native configuration storage without scheduling or waiting."
+    )]
     pub const fn new(num_threads: usize, thread_name_prefix: &'static str) -> Self {
         Self {
             pool: sync::OnceLock::new(),
@@ -251,6 +268,10 @@ impl WorkerPool {
     }
 
     /// Returns a reference to the underlying rayon pool, creating it on first access.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "Logical pool construction only records names and an identity; it cannot yield or wait on workload code."
+    )]
     fn pool(&self) -> &rayon::ThreadPool {
         self.pool.get_or_init(|| {
             let prefix = self.thread_name_prefix;
@@ -446,6 +467,10 @@ impl Drop for WorkerPool {
     fn drop(&mut self) {
         if let Some(pool) = self.pool.get() {
             let id = pool.id();
+            #[allow(
+                clippy::disallowed_methods,
+                reason = "Removes this pool's non-Send worker storage on its host runner during teardown."
+            )]
             WORKERS.with(|workers| workers.borrow_mut().retain(|(pool, _), _| *pool != id));
         }
     }

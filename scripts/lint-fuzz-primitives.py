@@ -26,8 +26,12 @@ LINTS = tuple(f"clippy::disallowed_{kind}" for kind in ("types", "methods", "mac
 FIELDS = ("path", "lint", "source", "message")
 
 # Clippy can report expanded macros at crate scope, ignoring local lint attributes.
-# This private driver shares host TLS across logical tasks; workload TLS stays guarded.
-SCHEDULER_MACRO_MODULES = {"crates/tasks/src/executor/deterministic.rs"}
+# Only these backend storage declarations need host TLS; workload TLS stays guarded.
+SCHEDULER_TLS = {
+    "crates/tasks/src/executor/deterministic.rs": "CLOCK",
+    "crates/tasks/src/pool.rs": "WORKERS",
+    "crates/tasks/src/cancel.rs": "CURRENT",
+}
 
 
 def workspace_path(name, root):
@@ -90,8 +94,6 @@ def read_diagnostics(lines, root):
                     evidence = True
                     if lint not in LINTS:
                         continue
-                    if lint == "clippy::disallowed_macros" and path in SCHEDULER_MACRO_MODULES:
-                        continue
                     highlighted = []
                     for part in span["text"]:
                         text, begin, end = part["text"], part["highlight_start"], part["highlight_end"]
@@ -101,6 +103,13 @@ def read_diagnostics(lines, root):
                     source = "\n".join(highlighted).strip()
                     if not source or not message.strip():
                         raise ValueError("target lint is missing highlighted source text or message")
+                    if (lint == "clippy::disallowed_macros"
+                            and message == "use of a disallowed macro `std::thread_local`"
+                            and path in SCHEDULER_TLS
+                            and source.startswith(("thread_local! {", "std::thread_local! {"))
+                            and any(line.strip().startswith(f"static {SCHEDULER_TLS[path]}:")
+                                    for line in source.splitlines())):
+                        continue
                     start, end = span["byte_start"], span["byte_end"]
                     if type(start) is not int or type(end) is not int or not 0 <= start <= end:
                         raise ValueError("invalid primary span byte range")

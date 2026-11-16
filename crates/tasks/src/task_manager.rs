@@ -113,6 +113,13 @@ pub struct TaskManager {
     signal: Option<Signal>,
     /// How many [`GracefulShutdown`](crate::shutdown::GracefulShutdown) tasks are currently
     /// active.
+    #[cfg_attr(
+        feature = "fuzz",
+        allow(
+            clippy::disallowed_types,
+            reason = "Native counter tracks Tokio future lifetimes across OS threads outside synchronous simulation."
+        )
+    )]
     graceful_tasks: Arc<AtomicUsize>,
 }
 
@@ -121,6 +128,13 @@ pub struct TaskManager {
 impl TaskManager {
     /// Create a new [`TaskManager`] without an associated [`Runtime`], returning
     /// the shutdown/event primitives for [`crate::RuntimeBuilder`] to wire up.
+    #[cfg_attr(
+        feature = "fuzz",
+        allow(
+            clippy::disallowed_types,
+            reason = "Native counter tracks Tokio future lifetimes across OS threads outside synchronous simulation."
+        )
+    )]
     pub(crate) fn new_parts(
         _handle: Handle,
     ) -> (Self, Shutdown, UnboundedSender<TaskEvent>, Arc<AtomicUsize>) {
