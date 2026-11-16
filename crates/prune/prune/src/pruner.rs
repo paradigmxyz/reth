@@ -386,6 +386,7 @@ mod tests {
     use crate::segments::AccountHistory;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_prune_types::{PruneMode, PruneSegment, MINIMUM_UNWIND_SAFE_DISTANCE};
+    use test_case::test_case;
 
     #[test]
     fn is_pruning_needed() {
@@ -436,36 +437,33 @@ mod tests {
         assert_eq!(pruner.previous_tip_block_number, Some(0));
     }
 
-    #[test]
-    fn exex_height_preserves_pruning_distance() {
+    #[test_case(15_000, 15_000 ; "below_tip")]
+    #[test_case(20_000, 20_000 ; "at_tip")]
+    #[test_case(40_000, 20_000 ; "above_tip")]
+    fn exex_height_preserves_pruning_distance(finished_height: u64, expected_tip: u64) {
         let tip = 20_000;
-        for (finished_height, expected_tip) in [(15_000, 15_000), (tip, tip), (40_000, tip)] {
-            let factory = create_test_provider_factory();
-            let provider = factory.database_provider_rw().unwrap();
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
 
-            let (_, finished_height_rx) =
-                watch::channel(FinishedExExHeight::Height(finished_height));
-            let mut pruner = Pruner::new(
-                vec![Box::new(AccountHistory::new(PruneMode::Distance(
-                    MINIMUM_UNWIND_SAFE_DISTANCE,
-                )))],
-                5,
-                usize::MAX,
-                None,
-                finished_height_rx,
-            );
-            pruner.run_with_provider(&provider, tip).unwrap();
+        let (_, finished_height_rx) = watch::channel(FinishedExExHeight::Height(finished_height));
+        let mut pruner = Pruner::new(
+            vec![Box::new(AccountHistory::new(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)))],
+            5,
+            usize::MAX,
+            None,
+            finished_height_rx,
+        );
+        pruner.run_with_provider(&provider, tip).unwrap();
 
-            assert_eq!(
-                provider
-                    .get_prune_checkpoint(PruneSegment::AccountHistory)
-                    .unwrap()
-                    .unwrap()
-                    .block_number,
-                Some(expected_tip - MINIMUM_UNWIND_SAFE_DISTANCE),
-                "finished height {finished_height}"
-            );
-            assert_eq!(pruner.previous_tip_block_number, Some(expected_tip));
-        }
+        assert_eq!(
+            provider
+                .get_prune_checkpoint(PruneSegment::AccountHistory)
+                .unwrap()
+                .unwrap()
+                .block_number,
+            Some(expected_tip - MINIMUM_UNWIND_SAFE_DISTANCE),
+            "finished height {finished_height}"
+        );
+        assert_eq!(pruner.previous_tip_block_number, Some(expected_tip));
     }
 }

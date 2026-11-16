@@ -877,18 +877,22 @@ const fn clamp_backfill_run_threshold(threshold: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
+
+    #[test_case(0, 0, 64)]
+    #[test_case(500, 500, 1000)]
+    #[test_case(1024, 1024, 2048)]
+    #[test_case(u64::MAX, 1024, 2048)]
+    fn backfill_threshold_grows_block_buffer(threshold: u64, expected: u64, buffer_limit: u32) {
+        let config = TreeConfig::default().with_backfill_run_threshold(threshold);
+        assert_eq!(config.backfill_run_threshold(), expected);
+        assert_eq!(config.block_buffer_limit(), buffer_limit);
+    }
 
     #[test]
-    fn backfill_threshold_grows_block_buffer() {
-        let default = TreeConfig::default();
-        for (threshold, expected, buffer_limit) in
-            [(0, 0, 64), (500, 500, 1000), (1024, 1024, 2048), (u64::MAX, 1024, 2048)]
-        {
-            let config = default.clone().with_backfill_run_threshold(threshold);
-            assert_eq!(config.backfill_run_threshold(), expected);
-            assert_eq!(config.block_buffer_limit(), buffer_limit);
-        }
-        let config = default.with_block_buffer_limit(2000).with_backfill_run_threshold(500);
+    fn explicit_block_buffer_limit_survives_backfill_threshold() {
+        let config =
+            TreeConfig::default().with_block_buffer_limit(2000).with_backfill_run_threshold(500);
         assert_eq!(config.block_buffer_limit(), 2000);
     }
 

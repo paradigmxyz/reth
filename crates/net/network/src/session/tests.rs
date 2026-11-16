@@ -20,6 +20,7 @@ use reth_eth_wire_types::message::MAX_MESSAGE_SIZE;
 use reth_ethereum_forks::EthereumHardfork;
 use reth_network_peers::pk2id;
 use std::{sync::Mutex, task::Waker};
+use test_case::test_case;
 use tokio::{net::TcpListener, sync::Notify};
 
 /// Extra `RLPx` protocol that records which identity the session hands to it.
@@ -318,103 +319,102 @@ async fn matching_identity_establishes_session() {
 
 /// A remote that completes `Hello` but never sends `Status` must not reach an extra protocol,
 /// even if it already sends messages of that protocol.
+#[test_case(2, 2, 1 ; "disconnect_before_status")]
+#[test_case(1, 2, 1 ; "frame_too_big")]
+#[test_case(102_400, 102_400, 3 ; "inbound_buffer_full_large_frames")]
+#[test_case(2, 2, 65 ; "inbound_buffer_full_many_frames")]
 #[tokio::test(flavor = "multi_thread")]
-async fn extra_protocol_waits_for_status_handshake() {
-    for (max_frame_bytes, frame_bytes, frame_count) in
-        [(2, 2, 1), (1, 2, 1), (102_400, 102_400, 3), (2, 2, 65)]
-    {
-        let (local_key, local_id) = new_peer();
-        let (remote_key, remote_id) = new_peer();
+async fn extra_protocol_waits_for_status_handshake(
+    max_frame_bytes: usize,
+    frame_bytes: usize,
+    frame_count: usize,
+) {
+    let (local_key, local_id) = new_peer();
+    let (remote_key, remote_id) = new_peer();
 
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_addr = listener.local_addr().unwrap();
-        let spy = ProtocolSpy {
-            limits: ProtocolIngressLimits::new(max_frame_bytes),
-            ..Default::default()
-        };
-        let handlers = spy_handlers(&spy);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let local_addr = listener.local_addr().unwrap();
+    let spy =
+        ProtocolSpy { limits: ProtocolIngressLimits::new(max_frame_bytes), ..Default::default() };
+    let handlers = spy_handlers(&spy);
 
-        let (events_tx, mut events_rx) = mpsc::channel(1);
-        let (_disconnect_tx, disconnect_rx) = oneshot::channel();
+    let (events_tx, mut events_rx) = mpsc::channel(1);
+    let (_disconnect_tx, disconnect_rx) = oneshot::channel();
 
-        tokio::spawn(async move {
-            let (incoming, remote_addr) = listener.accept().await.unwrap();
-            start_pending_incoming_session::<EthNetworkPrimitives>(
-                Arc::new(EthHandshake::default()),
-                MAX_MESSAGE_SIZE,
-                MAX_PAYLOAD_SIZE,
-                disconnect_rx,
-                SessionId(0),
-                incoming,
-                events_tx,
-                remote_addr,
-                local_key,
-                HelloMessageWithProtocols::builder(local_id).build(),
-                status(),
-                fork_filter(),
-                handlers,
-            )
-            .await
-        });
+    tokio::spawn(async move {
+        let (incoming, remote_addr) = listener.accept().await.unwrap();
+        start_pending_incoming_session::<EthNetworkPrimitives>(
+            Arc::new(EthHandshake::default()),
+            MAX_MESSAGE_SIZE,
+            MAX_PAYLOAD_SIZE,
+            disconnect_rx,
+            SessionId(0),
+            incoming,
+            events_tx,
+            remote_addr,
+            local_key,
+            HelloMessageWithProtocols::builder(local_id).build(),
+            status(),
+            fork_filter(),
+            handlers,
+        )
+        .await
+    });
 
-        let (keep_alive_tx, keep_alive_rx) = oneshot::channel();
-        let remote = tokio::spawn(async move {
-            let outgoing = TcpStream::connect(local_addr).await.unwrap();
-            let ecies = ECIESStream::connect(outgoing, remote_key, local_id).await.unwrap();
-            let (mut p2p_stream, _) =
-                UnauthedP2PStream::new(ecies).handshake(remote_hello(remote_id)).await.unwrap();
+    let (keep_alive_tx, keep_alive_rx) = oneshot::channel();
+    let remote = tokio::spawn(async move {
+        let outgoing = TcpStream::connect(local_addr).await.unwrap();
+        let ecies = ECIESStream::connect(outgoing, remote_key, local_id).await.unwrap();
+        let (mut p2p_stream, _) =
+            UnauthedP2PStream::new(ecies).handshake(remote_hello(remote_id)).await.unwrap();
 
-            let offset = p2p_stream
-                .shared_capabilities()
-                .find(&spy_protocol().cap)
-                .unwrap()
-                .relative_message_id_offset();
-            for _ in 0..frame_count {
-                let mut frame = vec![0x80; frame_bytes];
-                frame[0] = offset;
-                p2p_stream.send(Bytes::from(frame)).await.unwrap();
-            }
-            if max_frame_bytes == 2 && frame_count == 1 {
-                p2p_stream.disconnect(DisconnectReason::ClientQuitting).await.unwrap();
-            } else {
-                // Keep unread Status data from causing an early TCP reset before the local
-                // handshake reports the ingress-limit error.
-                let _ = keep_alive_rx.await;
-            }
-        });
-
-        let event = events_rx.recv().await.unwrap();
-        let PendingSessionEvent::Disconnected {
-            error: Some(PendingSessionHandshakeError::Eth(error)),
-            ..
-        } = event
-        else {
-            panic!("unexpected event {event:?}")
-        };
-        if max_frame_bytes == 1 {
-            assert!(matches!(
-                error,
-                EthStreamError::P2PStreamError(P2PStreamError::SubprotocolMessageTooBig {
-                    message_size: 2,
-                    max_size: 1,
-                    ..
-                })
-            ));
+        let offset = p2p_stream
+            .shared_capabilities()
+            .find(&spy_protocol().cap)
+            .unwrap()
+            .relative_message_id_offset();
+        for _ in 0..frame_count {
+            let mut frame = vec![0x80; frame_bytes];
+            frame[0] = offset;
+            p2p_stream.send(Bytes::from(frame)).await.unwrap();
         }
-        if frame_count > 1 {
-            assert!(matches!(
-                error,
-                EthStreamError::P2PStreamError(P2PStreamError::SubprotocolInboundBufferFull { .. })
-            ));
+        if max_frame_bytes == 2 && frame_count == 1 {
+            p2p_stream.disconnect(DisconnectReason::ClientQuitting).await.unwrap();
+        } else {
+            // Keep unread Status data from causing an early TCP reset before the local
+            // handshake reports the ingress-limit error.
+            let _ = keep_alive_rx.await;
         }
-        let _ = keep_alive_tx.send(());
-        remote.await.unwrap();
+    });
 
-        assert!(
-            spy.connected().is_empty(),
-            "the extra protocol must wait for the status handshake"
-        );
+    let event = events_rx.recv().await.unwrap();
+    let PendingSessionEvent::Disconnected {
+        error: Some(PendingSessionHandshakeError::Eth(error)),
+        ..
+    } = event
+    else {
+        panic!("unexpected event {event:?}")
+    };
+    if max_frame_bytes == 1 {
+        assert!(matches!(
+            error,
+            EthStreamError::P2PStreamError(P2PStreamError::SubprotocolMessageTooBig {
+                message_size: 2,
+                max_size: 1,
+                ..
+            })
+        ));
     }
+    if frame_count > 1 {
+        assert!(matches!(
+            error,
+            EthStreamError::P2PStreamError(P2PStreamError::SubprotocolInboundBufferFull { .. })
+        ));
+    }
+    let _ = keep_alive_tx.send(());
+    remote.await.unwrap();
+
+    assert!(spy.connected().is_empty(), "the extra protocol must wait for the status handshake");
 }
 
 fn session_manager() -> SessionManager<EthNetworkPrimitives> {

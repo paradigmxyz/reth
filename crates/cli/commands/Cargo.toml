@@ -109,6 +109,7 @@ proptest-arbitrary-interop = { workspace = true, optional = true }
 reth-ethereum-cli.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 tempfile.workspace = true
+test-case.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [features]

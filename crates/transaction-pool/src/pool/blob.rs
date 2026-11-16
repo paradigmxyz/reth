@@ -469,6 +469,7 @@ impl Ord for BlobOrd {
 mod tests {
     use super::*;
     use crate::test_utils::{MockTransaction, MockTransactionFactory};
+    use test_case::test_case;
 
     /// Represents the fees for a single transaction, which will be built inside of a test.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -685,26 +686,20 @@ mod tests {
         }
     }
 
-    #[test]
-    fn priority_tests() {
-        // Test vectors from:
-        // <https://github.com/ethereum/go-ethereum/blob/e91cdb49beb4b2a3872b5f2548bf2d6559e4f561/core/txpool/blobpool/priority_test.go#L27-L49>
-        let vectors = vec![
-            (7u128, 10u128, 2i64),
-            (17_200_000_000, 17_200_000_000, 0),
-            (9_853_941_692, 11_085_092_510, 0),
-            (11_544_106_391, 10_356_781_100, 0),
-            (17_200_000_000, 7, -7),
-            (7, 17_200_000_000, 7),
-        ];
-
-        for (base_fee, tx_fee, expected) in vectors {
-            let actual = fee_delta(tx_fee, base_fee);
-            assert_eq!(
-                actual, expected,
-                "fee_delta({tx_fee}, {base_fee}) = {actual}, expected: {expected}"
-            );
-        }
+    // Test vectors from:
+    // <https://github.com/ethereum/go-ethereum/blob/e91cdb49beb4b2a3872b5f2548bf2d6559e4f561/core/txpool/blobpool/priority_test.go#L27-L49>
+    #[test_case(7, 10, 2)]
+    #[test_case(17_200_000_000, 17_200_000_000, 0)]
+    #[test_case(9_853_941_692, 11_085_092_510, 0)]
+    #[test_case(11_544_106_391, 10_356_781_100, 0)]
+    #[test_case(17_200_000_000, 7, -7)]
+    #[test_case(7, 17_200_000_000, 7)]
+    fn priority_tests(base_fee: u128, tx_fee: u128, expected: i64) {
+        let actual = fee_delta(tx_fee, base_fee);
+        assert_eq!(
+            actual, expected,
+            "fee_delta({tx_fee}, {base_fee}) = {actual}, expected: {expected}"
+        );
     }
 
     #[test]

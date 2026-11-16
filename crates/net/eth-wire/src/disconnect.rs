@@ -54,6 +54,7 @@ mod tests {
     use crate::{p2pstream::P2PMessage, DisconnectReason};
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable};
+    use test_case::test_case;
 
     fn all_reasons() -> Vec<DisconnectReason> {
         vec![
@@ -121,27 +122,46 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_decode_known_reasons() {
-        let all_reasons = vec![
-            // encoding the disconnect reason as a single byte
-            "0100", // 0x00 case
-            "0180", // second 0x00 case
-            "0101", "0102", "0103", "0104", "0105", "0106", "0107", "0108", "0109", "010a", "010b",
-            "0110",   // encoding the disconnect reason in a list
-            "01c100", // 0x00 case
-            "01c180", // second 0x00 case
-            "01c101", "01c102", "01c103", "01c104", "01c105", "01c106", "01c107", "01c108",
-            "01c109", "01c10a", "01c10b", "01c110",
-        ];
-
-        for reason in all_reasons {
-            let reason = hex::decode(reason).unwrap();
-            let message = P2PMessage::decode(&mut &reason[..]).unwrap();
-            let P2PMessage::Disconnect(_) = message else {
-                panic!("expected a disconnect message");
-            };
-        }
+    // encoding the disconnect reason as a single byte
+    // 0x00 case
+    #[test_case("0100")]
+    // second 0x00 case
+    #[test_case("0180")]
+    #[test_case("0101")]
+    #[test_case("0102")]
+    #[test_case("0103")]
+    #[test_case("0104")]
+    #[test_case("0105")]
+    #[test_case("0106")]
+    #[test_case("0107")]
+    #[test_case("0108")]
+    #[test_case("0109")]
+    #[test_case("010a")]
+    #[test_case("010b")]
+    #[test_case("0110")]
+    // encoding the disconnect reason in a list
+    // 0x00 case
+    #[test_case("01c100")]
+    // second 0x00 case
+    #[test_case("01c180")]
+    #[test_case("01c101")]
+    #[test_case("01c102")]
+    #[test_case("01c103")]
+    #[test_case("01c104")]
+    #[test_case("01c105")]
+    #[test_case("01c106")]
+    #[test_case("01c107")]
+    #[test_case("01c108")]
+    #[test_case("01c109")]
+    #[test_case("01c10a")]
+    #[test_case("01c10b")]
+    #[test_case("01c110")]
+    fn test_decode_known_reasons(reason: &str) {
+        let reason = hex::decode(reason).unwrap();
+        let message = P2PMessage::decode(&mut &reason[..]).unwrap();
+        let P2PMessage::Disconnect(_) = message else {
+            panic!("expected a disconnect message");
+        };
     }
 
     #[test]

@@ -494,6 +494,7 @@ mod tests {
     use reth_rpc_eth_api::helpers::SpawnBlocking;
     use reth_transaction_pool::test_utils::testing_pool;
     use std::time::Duration;
+    use test_case::test_case;
 
     #[test]
     fn block_transaction_pages_match_frontend_index_navigation() {
@@ -518,21 +519,25 @@ mod tests {
         assert_eq!(block_transaction_page_range(25, 0, 0), 25..25);
     }
 
+    #[test_case(
+        true,
+        evm2::interpreter::InstrStop::Return,
+        Bytes::from_static(b"successful return data") ;
+        "successful_return"
+    )]
+    #[test_case(false, evm2::interpreter::InstrStop::OutOfGas, Bytes::new() ; "out_of_gas")]
+    #[test_case(false, evm2::interpreter::InstrStop::Revert, Bytes::new() ; "empty_revert")]
+    fn transaction_error_returns_only_revert_data(
+        status: bool,
+        stop: evm2::interpreter::InstrStop,
+        output: Bytes,
+    ) {
+        let result = evm2::evm::TxResultExt::<()> { status, stop, output, ..Default::default() };
+        assert_eq!(serde_json::to_value(Some(transaction_error(result))).unwrap(), "0x");
+    }
+
     #[test]
-    fn transaction_error_returns_only_revert_data() {
-        for (status, stop, output) in [
-            (
-                true,
-                evm2::interpreter::InstrStop::Return,
-                Bytes::from_static(b"successful return data"),
-            ),
-            (false, evm2::interpreter::InstrStop::OutOfGas, Bytes::new()),
-            (false, evm2::interpreter::InstrStop::Revert, Bytes::new()),
-        ] {
-            let result =
-                evm2::evm::TxResultExt::<()> { status, stop, output, ..Default::default() };
-            assert_eq!(serde_json::to_value(Some(transaction_error(result))).unwrap(), "0x");
-        }
+    fn transaction_error_returns_revert_data() {
         let output = Bytes::from_static(b"revert data");
         assert_eq!(
             transaction_error(evm2::evm::TxResultExt::<()> {

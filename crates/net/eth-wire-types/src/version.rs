@@ -249,6 +249,7 @@ mod tests {
     use super::EthVersion;
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use bytes::BytesMut;
+    use test_case::test_case;
 
     #[test]
     fn test_eth_version_try_from_str() {
@@ -283,46 +284,34 @@ mod tests {
         assert!(EthVersion::Eth72.has_eth68_metadata());
     }
 
-    #[test]
-    fn test_eth_version_rlp_encode() {
-        let versions = [
-            EthVersion::Eth66,
-            EthVersion::Eth67,
-            EthVersion::Eth68,
-            EthVersion::Eth69,
-            EthVersion::Eth70,
-            EthVersion::Eth71,
-            EthVersion::Eth72,
-        ];
+    #[test_case(EthVersion::Eth66)]
+    #[test_case(EthVersion::Eth67)]
+    #[test_case(EthVersion::Eth68)]
+    #[test_case(EthVersion::Eth69)]
+    #[test_case(EthVersion::Eth70)]
+    #[test_case(EthVersion::Eth71)]
+    #[test_case(EthVersion::Eth72)]
+    fn test_eth_version_rlp_encode(version: EthVersion) {
+        let mut encoded = BytesMut::new();
+        version.encode(&mut encoded);
 
-        for version in versions {
-            let mut encoded = BytesMut::new();
-            version.encode(&mut encoded);
-
-            assert_eq!(encoded.len(), 1);
-            assert_eq!(encoded[0], version as u8);
-        }
+        assert_eq!(encoded.len(), 1);
+        assert_eq!(encoded[0], version as u8);
     }
-    #[test]
-    fn test_eth_version_rlp_decode() {
-        let test_cases = [
-            (66_u8, Ok(EthVersion::Eth66)),
-            (67_u8, Ok(EthVersion::Eth67)),
-            (68_u8, Ok(EthVersion::Eth68)),
-            (69_u8, Ok(EthVersion::Eth69)),
-            (70_u8, Ok(EthVersion::Eth70)),
-            (71_u8, Ok(EthVersion::Eth71)),
-            (72_u8, Ok(EthVersion::Eth72)),
-            (65_u8, Err(RlpError::Custom("invalid eth version"))),
-        ];
+    #[test_case(66_u8, Ok(EthVersion::Eth66) ; "eth66")]
+    #[test_case(67_u8, Ok(EthVersion::Eth67) ; "eth67")]
+    #[test_case(68_u8, Ok(EthVersion::Eth68) ; "eth68")]
+    #[test_case(69_u8, Ok(EthVersion::Eth69) ; "eth69")]
+    #[test_case(70_u8, Ok(EthVersion::Eth70) ; "eth70")]
+    #[test_case(71_u8, Ok(EthVersion::Eth71) ; "eth71")]
+    #[test_case(72_u8, Ok(EthVersion::Eth72) ; "eth72")]
+    #[test_case(65_u8, Err(RlpError::Custom("invalid eth version")) ; "invalid")]
+    fn test_eth_version_rlp_decode(input: u8, expected: Result<EthVersion, RlpError>) {
+        let mut encoded = BytesMut::new();
+        input.encode(&mut encoded);
 
-        for (input, expected) in test_cases {
-            let mut encoded = BytesMut::new();
-            input.encode(&mut encoded);
-
-            let mut slice = encoded.as_ref();
-            let result = EthVersion::decode(&mut slice);
-            assert_eq!(result, expected);
-        }
+        let mut slice = encoded.as_ref();
+        let result = EthVersion::decode(&mut slice);
+        assert_eq!(result, expected);
     }
 }

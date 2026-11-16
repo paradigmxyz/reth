@@ -50,3 +50,4 @@ rayon.workspace = true
 
 [dev-dependencies]
 reth-tracing.workspace = true
+test-case.workspace = true

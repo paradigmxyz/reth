@@ -1017,6 +1017,7 @@ mod tests {
         thread,
         time::Duration,
     };
+    use test_case::test_case;
 
     #[derive(Default)]
     struct WakeCounter(AtomicUsize);
@@ -1406,32 +1407,36 @@ mod tests {
         assert!(CachedBal::new(DecodedBal::new(Arc::new(bal), raw)).size() > previous_estimate);
     }
 
+    #[test_case(usize::MAX, 1 ; "unbounded")]
+    #[test_case(1, 2 ; "one_byte")]
+    #[test_case(0, 2 ; "zero_bytes")]
     #[tokio::test]
-    async fn get_bal_only_caches_results_within_budget() {
-        for (max_bals_bytes, expected_fetches) in [(usize::MAX, 1), (1, 2), (0, 2)] {
-            let fetches = Arc::new(AtomicUsize::default());
-            let cache = EthStateCache::<EthPrimitives>::spawn_with(
-                TestBalProvider::new(fetches.clone()),
-                EthStateCacheConfig {
-                    max_blocks: 0,
-                    max_receipts: 0,
-                    max_bals: 4,
-                    max_bals_bytes,
-                    cache_computed_bals: false,
-                    prewarm_bals: None,
-                    max_concurrent_db_requests: 1,
-                    max_cached_tx_hashes: 0,
-                    ..Default::default()
-                },
-                Runtime::test(),
-            );
-            let block_hash = B256::repeat_byte(0x66);
+    async fn get_bal_only_caches_results_within_budget(
+        max_bals_bytes: usize,
+        expected_fetches: usize,
+    ) {
+        let fetches = Arc::new(AtomicUsize::default());
+        let cache = EthStateCache::<EthPrimitives>::spawn_with(
+            TestBalProvider::new(fetches.clone()),
+            EthStateCacheConfig {
+                max_blocks: 0,
+                max_receipts: 0,
+                max_bals: 4,
+                max_bals_bytes,
+                cache_computed_bals: false,
+                prewarm_bals: None,
+                max_concurrent_db_requests: 1,
+                max_cached_tx_hashes: 0,
+                ..Default::default()
+            },
+            Runtime::test(),
+        );
+        let block_hash = B256::repeat_byte(0x66);
 
-            assert!(cache.get_bal(block_hash).await.unwrap().is_some());
-            assert!(cache.get_bal(block_hash).await.unwrap().is_some());
+        assert!(cache.get_bal(block_hash).await.unwrap().is_some());
+        assert!(cache.get_bal(block_hash).await.unwrap().is_some());
 
-            assert_eq!(fetches.load(Ordering::SeqCst), expected_fetches);
-        }
+        assert_eq!(fetches.load(Ordering::SeqCst), expected_fetches);
     }
 
     #[tokio::test]

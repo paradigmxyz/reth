@@ -29,6 +29,7 @@ http-body = "1"
 reqwest.workspace = true
 tokio = { workspace = true, features = ["macros", "test-util"] }
 jsonrpsee = { workspace = true, features = ["server"] }
+test-case.workspace = true
 
 flate2.workspace = true
 brotli.workspace = true

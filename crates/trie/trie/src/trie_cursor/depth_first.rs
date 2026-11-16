@@ -133,6 +133,7 @@ mod tests {
     use crate::trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory};
     use alloy_trie::TrieMask;
     use std::{collections::BTreeMap, sync::Arc};
+    use test_case::test_case;
 
     /// A trie cursor that always returns an error on seek/next.
     struct FailingTrieCursor;
@@ -183,42 +184,17 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_depth_first_cmp() {
-        // Test case 1: Child comes before parent
-        let child = Nibbles::from_nibbles([0x1, 0x1]);
-        let parent = Nibbles::from_nibbles([0x1]);
-        assert_eq!(cmp(&child, &parent), Ordering::Less);
-        assert_eq!(cmp(&parent, &child), Ordering::Greater);
-
-        // Test case 2: Deeper descendant comes before ancestor
-        let deep = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
-        let ancestor = Nibbles::from_nibbles([0x1, 0x2]);
-        assert_eq!(cmp(&deep, &ancestor), Ordering::Less);
-        assert_eq!(cmp(&ancestor, &deep), Ordering::Greater);
-
-        // Test case 3: Siblings use lexicographical ordering
-        let sibling1 = Nibbles::from_nibbles([0x1, 0x2]);
-        let sibling2 = Nibbles::from_nibbles([0x1, 0x3]);
-        assert_eq!(cmp(&sibling1, &sibling2), Ordering::Less);
-        assert_eq!(cmp(&sibling2, &sibling1), Ordering::Greater);
-
-        // Test case 4: Different branches use lexicographical ordering
-        let branch1 = Nibbles::from_nibbles([0x1]);
-        let branch2 = Nibbles::from_nibbles([0x2]);
-        assert_eq!(cmp(&branch1, &branch2), Ordering::Less);
-        assert_eq!(cmp(&branch2, &branch1), Ordering::Greater);
-
-        // Test case 5: Empty path comes after everything
-        let empty = Nibbles::new();
-        let non_empty = Nibbles::from_nibbles([0x0]);
-        assert_eq!(cmp(&non_empty, &empty), Ordering::Less);
-        assert_eq!(cmp(&empty, &non_empty), Ordering::Greater);
-
-        // Test case 6: Same paths are equal
-        let same1 = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
-        let same2 = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
-        assert_eq!(cmp(&same1, &same2), Ordering::Equal);
+    #[test_case(&[0x1, 0x1], &[0x1], Ordering::Less ; "child_before_parent")]
+    #[test_case(&[0x1, 0x2, 0x3, 0x4], &[0x1, 0x2], Ordering::Less ; "descendant_before_ancestor")]
+    #[test_case(&[0x1, 0x2], &[0x1, 0x3], Ordering::Less ; "siblings_lexicographical")]
+    #[test_case(&[0x1], &[0x2], Ordering::Less ; "branches_lexicographical")]
+    #[test_case(&[0x0], &[], Ordering::Less ; "empty_path_last")]
+    #[test_case(&[0x1, 0x2, 0x3], &[0x1, 0x2, 0x3], Ordering::Equal ; "same_paths_equal")]
+    fn test_depth_first_cmp(a: &[u8], b: &[u8], expected: Ordering) {
+        let a = Nibbles::from_nibbles(a);
+        let b = Nibbles::from_nibbles(b);
+        assert_eq!(cmp(&a, &b), expected);
+        assert_eq!(cmp(&b, &a), expected.reverse());
     }
 
     #[test]

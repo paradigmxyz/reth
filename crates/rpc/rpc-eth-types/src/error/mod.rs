@@ -1144,6 +1144,7 @@ mod tests {
     use alloy_primitives::b256;
     use alloy_sol_types::{Revert, SolError};
     use reth_errors::ProviderError;
+    use test_case::test_case;
 
     #[test]
     fn gas_limit_handler_errors_map_to_gas_errors() {
@@ -1169,22 +1170,17 @@ mod tests {
         assert_eq!(err.to_string(), "execution aborted (timeout = 10s)");
     }
 
-    #[test]
-    fn tracing_lookup_errors_use_call_execution_failed_code() {
-        let cases = [
-            (EthApiError::TracingTransactionNotFound, "transaction not found"),
-            (
-                EthApiError::TracingBlockNotFound(BlockId::hash(B256::with_last_byte(1))),
-                "block 0x0000000000000000000000000000000000000000000000000000000000000001 not found",
-            ),
-            (EthApiError::GenesisNotTraceable, "genesis is not traceable"),
-        ];
-
-        for (error, message) in cases {
-            let error: jsonrpsee_types::error::ErrorObject<'static> = error.into();
-            assert_eq!(error.code(), -32000);
-            assert_eq!(error.message(), message);
-        }
+    #[test_case(EthApiError::TracingTransactionNotFound, "transaction not found" ; "transaction")]
+    #[test_case(
+        EthApiError::TracingBlockNotFound(BlockId::hash(B256::with_last_byte(1))),
+        "block 0x0000000000000000000000000000000000000000000000000000000000000001 not found" ;
+        "block"
+    )]
+    #[test_case(EthApiError::GenesisNotTraceable, "genesis is not traceable" ; "genesis")]
+    fn tracing_lookup_errors_use_call_execution_failed_code(error: EthApiError, message: &str) {
+        let error: jsonrpsee_types::error::ErrorObject<'static> = error.into();
+        assert_eq!(error.code(), -32000);
+        assert_eq!(error.message(), message);
     }
 
     #[test]

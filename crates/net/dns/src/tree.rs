@@ -373,6 +373,7 @@ fn ensure_strip_key(input: &mut &str, key: &str, err: &'static str) -> ParseEntr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
 
     #[test]
     fn parse_root_entry() {
@@ -461,16 +462,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn parse_root_entry_whitespace() {
-        for (whitespace, value) in [(" ", "ä"), ("\u{a0}", "a")] {
-            let input = format!(
-                "enrtree-root:v1 e={whitespace}{value} l={whitespace}{value} seq={whitespace}1 sig={whitespace}AA"
-            );
-            assert_eq!(
-                input.parse::<TreeRootEntry>().unwrap().to_string(),
-                format!("enrtree-root:v1 e={value} l={value} seq=1 sig=AA")
-            );
-        }
+    #[test_case(" ", "ä" ; "space")]
+    #[test_case("\u{a0}", "a" ; "nbsp")]
+    fn parse_root_entry_whitespace(whitespace: &str, value: &str) {
+        let input = format!(
+            "enrtree-root:v1 e={whitespace}{value} l={whitespace}{value} seq={whitespace}1 sig={whitespace}AA"
+        );
+        assert_eq!(
+            input.parse::<TreeRootEntry>().unwrap().to_string(),
+            format!("enrtree-root:v1 e={value} l={value} seq=1 sig=AA")
+        );
     }
 }

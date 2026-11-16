@@ -56,6 +56,7 @@ use std::{
     },
     time::Duration,
 };
+use test_case::test_case;
 use tokio::sync::oneshot;
 use tracing::{span::Attributes, Id, Subscriber};
 use tracing_subscriber::{layer::Context, prelude::*, registry::LookupSpan, Layer};
@@ -666,25 +667,27 @@ fn on_new_persisted_block_queues_sparse_trie_prune_request() {
     assert!(test_harness.tree.state.pending_sparse_trie_prune());
 }
 
-#[test]
-fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled() {
+#[test_case(TreeConfig::default().with_has_enough_parallelism(false) ; "no_parallelism")]
+#[test_case(
+    TreeConfig::default().with_has_enough_parallelism(true).with_state_root_fallback(true);
+    "state_root_fallback"
+)]
+#[test_case(
+    TreeConfig::default().with_has_enough_parallelism(true).with_skip_state_root(true);
+    "skip_state_root"
+)]
+fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled(
+    config: TreeConfig,
+) {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
-    let configs = [
-        TreeConfig::default().with_has_enough_parallelism(false),
-        TreeConfig::default().with_has_enough_parallelism(true).with_state_root_fallback(true),
-        TreeConfig::default().with_has_enough_parallelism(true).with_skip_state_root(true),
-    ];
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness.tree.config = config;
+    let persisted = blocks[0].recovered_block().num_hash();
+    test_harness.tree.persistence_state.finish(persisted, persisted);
 
-    for config in configs {
-        let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
-        test_harness.tree.config = config;
-        let persisted = blocks[0].recovered_block().num_hash();
-        test_harness.tree.persistence_state.finish(persisted, persisted);
+    test_harness.tree.on_new_persisted_block().unwrap();
 
-        test_harness.tree.on_new_persisted_block().unwrap();
-
-        assert!(!test_harness.tree.state.pending_sparse_trie_prune());
-    }
+    assert!(!test_harness.tree.state.pending_sparse_trie_prune());
 }
 
 #[test]
@@ -1319,25 +1322,24 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
     assert_eq!(test_harness.tree.incoming.len(), 0);
 }
 
-#[test]
-fn test_backpressure_excludes_in_memory_buffer() {
-    for (canonical_tip, expected_backpressure) in [(14_u64, false), (15, true)] {
-        let blocks: Vec<_> =
-            TestBlockBuilder::eth().get_executed_blocks(1..canonical_tip + 1).collect();
-        let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
-        test_harness.tree.config = test_harness
-            .tree
-            .config
-            .with_persistence_threshold(0)
-            .with_memory_block_buffer_target(5)
-            .with_persistence_backpressure_threshold(10);
+#[test_case(14, false)]
+#[test_case(15, true)]
+fn test_backpressure_excludes_in_memory_buffer(canonical_tip: u64, expected_backpressure: bool) {
+    let blocks: Vec<_> =
+        TestBlockBuilder::eth().get_executed_blocks(1..canonical_tip + 1).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness.tree.config = test_harness
+        .tree
+        .config
+        .with_persistence_threshold(0)
+        .with_memory_block_buffer_target(5)
+        .with_persistence_backpressure_threshold(10);
 
-        let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
-        let persisted = blocks.last().unwrap().recovered_block().num_hash();
-        test_harness.tree.persistence_state.start_save(persisted, persist_rx);
+    let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+    let persisted = blocks.last().unwrap().recovered_block().num_hash();
+    test_harness.tree.persistence_state.start_save(persisted, persist_rx);
 
-        assert_eq!(test_harness.tree.should_backpressure(), expected_backpressure);
-    }
+    assert_eq!(test_harness.tree.should_backpressure(), expected_backpressure);
 }
 
 #[tokio::test]

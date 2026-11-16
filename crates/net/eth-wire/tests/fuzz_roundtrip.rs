@@ -58,20 +58,16 @@ pub mod fuzz_rlp {
         NodeData, P2PMessage, PooledTransactions, Receipts, Status, Transactions,
     };
     use serde::{Deserialize, Serialize};
+    use test_case::test_case;
     use test_fuzz::test_fuzz;
 
     // manually test Ping and Pong which are not covered by the above
 
-    /// Tests the round-trip encoding of Ping
-    #[test]
-    fn roundtrip_ping() {
-        roundtrip_encoding::<P2PMessage>(P2PMessage::Ping)
-    }
-
-    /// Tests the round-trip encoding of Pong
-    #[test]
-    fn roundtrip_pong() {
-        roundtrip_encoding::<P2PMessage>(P2PMessage::Pong)
+    /// Tests the round-trip encoding of Ping and Pong
+    #[test_case(P2PMessage::Ping ; "ping")]
+    #[test_case(P2PMessage::Pong ; "pong")]
+    fn roundtrip_ping_pong(message: P2PMessage) {
+        roundtrip_encoding::<P2PMessage>(message)
     }
 
     // p2p subprotocol messages

@@ -1052,6 +1052,7 @@ mod tests {
     use reth_tasks::WorkerPool;
     use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
     use std::time::Duration;
+    use test_case::test_case;
 
     #[test]
     fn terminate_event_stops_transaction_execution() {
@@ -1433,7 +1434,15 @@ mod tests {
         assert_ne!(drop_thread, prewarm_thread);
     }
 
-    fn assert_save_cache_drops_removed_caches(slot: CacheSlot, valid: bool, insert_error: bool) {
+    #[test_case(CacheSlot::Distinct, true, false ; "replaced_allocation_after_unlock")]
+    #[test_case(CacheSlot::Distinct, false, false ; "invalid_allocations_after_unlock")]
+    #[test_case(CacheSlot::Distinct, true, true ; "allocations_after_unlock_on_insert_error")]
+    #[test_case(CacheSlot::Shared, false, false ; "shared_after_unlock_on_invalid_block")]
+    #[test_case(CacheSlot::Shared, true, true ; "shared_after_unlock_on_insert_error")]
+    #[test_case(CacheSlot::Empty, true, false ; "empty_slot_valid")]
+    #[test_case(CacheSlot::Empty, false, false ; "empty_slot_invalid")]
+    #[test_case(CacheSlot::Empty, true, true ; "empty_slot_insert_error")]
+    fn save_cache_drops_removed_caches(slot: CacheSlot, valid: bool, insert_error: bool) {
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
         let cache_to_save =
@@ -1496,37 +1505,5 @@ mod tests {
             expect_saved_cache
         );
         drop(release_tx);
-    }
-
-    #[test]
-    fn save_cache_drops_replaced_allocation_after_unlock() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, false);
-    }
-
-    #[test]
-    fn save_cache_drops_invalid_allocations_after_unlock() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, false, false);
-    }
-
-    #[test]
-    fn save_cache_drops_allocations_after_unlock_on_insert_error() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, true);
-    }
-
-    #[test]
-    fn save_cache_drops_shared_allocation_after_unlock_on_invalid_block() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Shared, false, false);
-    }
-
-    #[test]
-    fn save_cache_drops_shared_allocation_after_unlock_on_insert_error() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Shared, true, true);
-    }
-
-    #[test]
-    fn save_cache_handles_empty_slot() {
-        for (valid, insert_error) in [(true, false), (false, false), (true, true)] {
-            assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid, insert_error);
-        }
     }
 }

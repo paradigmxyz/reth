@@ -133,23 +133,18 @@ pub enum WsHttpSamePortError {
 mod tests {
     use super::*;
     use std::net::{Ipv4Addr, SocketAddrV4};
-    #[test]
-    fn test_address_in_use_message() {
+    use test_case::test_case;
+
+    #[test_case(ServerKind::Http ; "http")]
+    #[test_case(ServerKind::WS ; "ws")]
+    #[test_case(ServerKind::WsHttp ; "ws_http")]
+    #[test_case(ServerKind::Auth ; "auth")]
+    fn test_address_in_use_message(server_kind: fn(SocketAddr) -> ServerKind) {
         let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234));
-        let kinds = [
-            ServerKind::Http(addr),
-            ServerKind::WS(addr),
-            ServerKind::WsHttp(addr),
-            ServerKind::Auth(addr),
-        ];
+        let kind = server_kind(addr);
+        let err =
+            RpcError::AddressAlreadyInUse { kind, error: io::Error::from(ErrorKind::AddrInUse) };
 
-        for kind in &kinds {
-            let err = RpcError::AddressAlreadyInUse {
-                kind: *kind,
-                error: io::Error::from(ErrorKind::AddrInUse),
-            };
-
-            assert!(err.to_string().contains(kind.flags()));
-        }
+        assert!(err.to_string().contains(kind.flags()));
     }
 }

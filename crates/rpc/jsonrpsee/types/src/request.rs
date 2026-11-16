@@ -144,6 +144,7 @@ fn deserialize_borrowed_params<'de, D: Deserializer<'de>>(
 mod test {
     use super::{Cow, Id, InvalidRequest, Notification, Request, TwoPointZero};
     use serde_json::value::RawValue;
+    use test_case::test_case;
 
     fn assert_request<'a>(request: Request<'a>, id: Id<'a>, method: &str, params: Option<&str>) {
         assert_eq!(request.jsonrpc, TwoPointZero);
@@ -154,29 +155,33 @@ mod test {
     }
 
     /// Checks that we can deserialize the object with or without non-mandatory fields.
-    #[test]
-    fn deserialize_call() {
-        let method = "subtract";
-        let params = "[42, 23]";
-
-        let test_vector = vec![
-            // With all fields set.
-            (
-                r#"{"jsonrpc":"2.0", "method":"subtract", "params":[42, 23], "id":1}"#,
-                Id::Number(1),
-                Some(params),
-                method,
-            ),
-            // Without params field
-            (r#"{"jsonrpc":"2.0", "method":"subtract", "id":null}"#, Id::Null, None, method),
-            // Escaped method name.
-            (r#"{"jsonrpc":"2.0", "method":"\"m", "id":null}"#, Id::Null, None, "\"m"),
-        ];
-
-        for (ser, id, params, method) in test_vector.into_iter() {
-            let request = serde_json::from_str(ser).unwrap();
-            assert_request(request, id, method, params);
-        }
+    // With all fields set.
+    #[test_case(
+        r#"{"jsonrpc":"2.0", "method":"subtract", "params":[42, 23], "id":1}"#,
+        Id::Number(1),
+        Some("[42, 23]"),
+        "subtract" ;
+        "all_fields"
+    )]
+    // Without params field
+    #[test_case(
+        r#"{"jsonrpc":"2.0", "method":"subtract", "id":null}"#,
+        Id::Null,
+        None,
+        "subtract" ;
+        "without_params"
+    )]
+    // Escaped method name.
+    #[test_case(
+        r#"{"jsonrpc":"2.0", "method":"\"m", "id":null}"#,
+        Id::Null,
+        None,
+        "\"m" ;
+        "escaped_method"
+    )]
+    fn deserialize_call(ser: &str, id: Id<'_>, params: Option<&str>, method: &str) {
+        let request = serde_json::from_str(ser).unwrap();
+        assert_request(request, id, method, params);
     }
 
     #[test]

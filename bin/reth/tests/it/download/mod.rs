@@ -9,6 +9,7 @@ use std::{
     path::Path,
     process::{Command, Output},
 };
+use test_case::test_case;
 
 /// Tiny transport fixtures: real tar/zstd archives and checksums, with distinct payloads
 /// standing in for database/static files. These test download preparation, not node sync.
@@ -175,37 +176,36 @@ async fn plan_does_not_download_or_create_datadir() {
     assert_eq!(server.requests(), vec![("/snapshot/manifest.json".into(), None)]);
 }
 
+#[test_case(false, false ; "streaming")]
+#[test_case(true, true ; "resume_with_ranges")]
+#[test_case(true, false ; "resume_without_ranges")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn legacy_streaming_and_resume() {
-    for (resumable, ranges) in [(false, false), (true, true), (true, false)] {
-        let bytes = archive_bytes("db/snapshot", b"snapshot contents");
-        let offset = bytes.len() / 2;
-        let server = SnapshotServer::start(
-            BTreeMap::from([("/state.tar.zst".into(), bytes.clone())]),
-            ranges,
-        )
-        .await;
-        let dir = tempfile::tempdir().unwrap();
-        if resumable {
-            fs::write(dir.path().join("state.tar.zst.part"), &bytes[..offset]).unwrap();
-        }
-        reth_ok(&[
-            "download",
-            "--url",
-            &format!("{}/state.tar.zst", server.url),
-            "--datadir",
-            dir.path().to_str().unwrap(),
-            if resumable { "--resumable=true" } else { "--resumable=false" },
-        ]);
-        assert_eq!(fs::read(dir.path().join("db/snapshot")).unwrap(), b"snapshot contents");
-        assert!(!dir.path().join("state.tar.zst.part").exists());
-        assert!(!dir.path().join("state.tar.zst").exists());
-        if resumable {
-            assert!(server
-                .requests()
-                .iter()
-                .any(|(_, range)| range.as_deref() == Some(&format!("bytes={offset}-"))));
-        }
+async fn legacy_streaming_and_resume(resumable: bool, ranges: bool) {
+    let bytes = archive_bytes("db/snapshot", b"snapshot contents");
+    let offset = bytes.len() / 2;
+    let server =
+        SnapshotServer::start(BTreeMap::from([("/state.tar.zst".into(), bytes.clone())]), ranges)
+            .await;
+    let dir = tempfile::tempdir().unwrap();
+    if resumable {
+        fs::write(dir.path().join("state.tar.zst.part"), &bytes[..offset]).unwrap();
+    }
+    reth_ok(&[
+        "download",
+        "--url",
+        &format!("{}/state.tar.zst", server.url),
+        "--datadir",
+        dir.path().to_str().unwrap(),
+        if resumable { "--resumable=true" } else { "--resumable=false" },
+    ]);
+    assert_eq!(fs::read(dir.path().join("db/snapshot")).unwrap(), b"snapshot contents");
+    assert!(!dir.path().join("state.tar.zst.part").exists());
+    assert!(!dir.path().join("state.tar.zst").exists());
+    if resumable {
+        assert!(server
+            .requests()
+            .iter()
+            .any(|(_, range)| range.as_deref() == Some(&format!("bytes={offset}-"))));
     }
 }
 
@@ -296,33 +296,31 @@ async fn bad_output_checksum_prevents_finalization() {
     assert!(!dir.path().join("db/mdbx.dat").exists());
 }
 
+#[test_case(1, " Run `reth node` to start syncing." ; "matching_chain")]
+#[test_case(42431, "" ; "other_chain")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn completion_only_suggests_startup_for_matching_chain() {
-    for (chain_id, expected_suffix) in [(1, " Run `reth node` to start syncing."), (42431, "")] {
-        let mut snapshot = Snapshot::new();
-        snapshot.manifest["chain_id"] = json!(chain_id);
-        let server = snapshot.serve(true).await;
-        let dir = tempfile::tempdir().unwrap();
-        let output = Command::new(RETH)
-            .env("RUST_LOG", "reth::cli=info")
-            .args(["download", "--color", "never", "--archive", "--non-interactive"])
-            .args(["--manifest-url", &format!("{}/snapshot/manifest.json", server.url)])
-            .arg("--datadir")
-            .arg(dir.path())
-            .output()
-            .unwrap();
-        let logs = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        success(output);
-        let suffix = logs
-            .lines()
-            .find_map(|line| {
-                line.split_once("Snapshot download complete.").map(|(_, suffix)| suffix)
-            })
-            .unwrap();
-        assert_eq!(suffix, expected_suffix);
-    }
+async fn completion_only_suggests_startup_for_matching_chain(chain_id: u64, expected_suffix: &str) {
+    let mut snapshot = Snapshot::new();
+    snapshot.manifest["chain_id"] = json!(chain_id);
+    let server = snapshot.serve(true).await;
+    let dir = tempfile::tempdir().unwrap();
+    let output = Command::new(RETH)
+        .env("RUST_LOG", "reth::cli=info")
+        .args(["download", "--color", "never", "--archive", "--non-interactive"])
+        .args(["--manifest-url", &format!("{}/snapshot/manifest.json", server.url)])
+        .arg("--datadir")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let logs = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    success(output);
+    let suffix = logs
+        .lines()
+        .find_map(|line| line.split_once("Snapshot download complete.").map(|(_, suffix)| suffix))
+        .unwrap();
+    assert_eq!(suffix, expected_suffix);
 }

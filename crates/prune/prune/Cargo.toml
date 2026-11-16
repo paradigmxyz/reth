@@ -47,3 +47,4 @@ reth-testing-utils.workspace = true
 reth-tracing.workspace = true
 
 assert_matches.workspace = true
+test-case.workspace = true

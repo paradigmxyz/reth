@@ -1142,6 +1142,7 @@ where
 mod tests {
     use super::*;
     use clap::{Args, Parser};
+    use test_case::test_case;
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]
@@ -1150,17 +1151,13 @@ mod tests {
         args: T,
     }
 
-    #[test]
-    fn parse_bal_cache_modes() {
-        for (flag, cache_computed, prewarm) in [
-            ("--rpc-cache.cache-computed-bals", true, None),
-            ("--rpc-cache.prewarm-bals", false, Some(0)),
-            ("--rpc-cache.prewarm-bals=10", false, Some(10)),
-        ] {
-            let args = CommandParser::<RpcServerArgs>::parse_from(["reth", flag]).args;
-            assert_eq!(args.rpc_state_cache.cache_computed_bals, cache_computed);
-            assert_eq!(args.rpc_state_cache.prewarm_bals, prewarm);
-        }
+    #[test_case("--rpc-cache.cache-computed-bals", true, None ; "cache_computed_bals")]
+    #[test_case("--rpc-cache.prewarm-bals", false, Some(0) ; "prewarm_bals")]
+    #[test_case("--rpc-cache.prewarm-bals=10", false, Some(10) ; "prewarm_bals_10")]
+    fn parse_bal_cache_modes(flag: &str, cache_computed: bool, prewarm: Option<usize>) {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth", flag]).args;
+        assert_eq!(args.rpc_state_cache.cache_computed_bals, cache_computed);
+        assert_eq!(args.rpc_state_cache.prewarm_bals, prewarm);
     }
 
     #[test]

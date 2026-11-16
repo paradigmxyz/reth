@@ -1871,6 +1871,7 @@ mod tests {
         EMPTY_ROOT_HASH,
     };
     use std::collections::BTreeMap;
+    use test_case::test_case;
 
     /// Converts legacy proofs to V2 proofs by combining extension nodes with their child branch
     /// nodes.
@@ -2949,7 +2950,9 @@ mod tests {
     }
 
     /// Checks collapsing a cached branch after removing one of its two direct branch children.
-    fn assert_branch_collapse(remaining_nibble: u8, removed_nibble: u8) {
+    #[test_case(1, 0 ; "removed_child_before_remaining")]
+    #[test_case(4, 9 ; "removed_child_after_remaining")]
+    fn test_branch_collapse(remaining_nibble: u8, removed_nibble: u8) {
         reth_tracing::init_test_tracing();
 
         let val = U256::ONE;
@@ -3007,16 +3010,6 @@ mod tests {
             calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap().unwrap();
 
         pretty_assertions::assert_eq!(expected_root, root);
-    }
-
-    #[test]
-    fn test_branch_collapse_removed_child_before_remaining() {
-        assert_branch_collapse(1, 0);
-    }
-
-    #[test]
-    fn test_branch_collapse_removed_child_after_remaining() {
-        assert_branch_collapse(4, 9);
     }
 
     #[test]

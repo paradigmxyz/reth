@@ -257,6 +257,7 @@ mod tests {
         convert::Infallible,
         sync::atomic::{AtomicUsize, Ordering},
     };
+    use test_case::test_case;
 
     fn test_evm_config() -> EthEvmConfig {
         EthEvmConfig::new(Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build()))
@@ -1155,72 +1156,75 @@ mod tests {
         assert_eq!(setups.load(Ordering::Relaxed), 1);
     }
 
-    #[test]
-    fn amsterdam_state_gas_admission_matches_serial_execution() {
+    #[test_case(500_000, true)]
+    #[test_case(990_000, true)]
+    #[test_case(990_000, false)]
+    fn amsterdam_state_gas_admission_matches_serial_execution(
+        tx_gas_limit: u64,
+        complete_bal: bool,
+    ) {
         let evm_config = EthEvmConfig::new(Arc::new(
             reth_chainspec::ChainSpecBuilder::mainnet().amsterdam_activated().build(),
         ));
-        for (tx_gas_limit, complete_bal) in [(500_000, true), (990_000, true), (990_000, false)] {
-            let (pre_block_db, partial_bal, tx1, tx2) =
-                two_transfers_with_reference_bal(&evm_config, tx_gas_limit, true);
-            let reference_block = empty_amsterdam_block(B256::ZERO);
-            let reference_bal = if complete_bal {
-                reference_bal_for_block(
-                    &evm_config,
-                    pre_block_db.clone(),
-                    &reference_block,
-                    &[tx1.clone(), tx2.clone()],
-                )
-            } else {
-                // State-gas admission must also precede a speculative BAL miss at this slot.
-                partial_bal
-            };
-            let block = empty_amsterdam_block_with_gas_limit(
-                compute_block_access_list_hash(&reference_bal),
-                1_000_000,
-            );
-            let mut evm_env = evm_config.evm_env(block.header()).unwrap();
-            assert!(evm_env.version.feature(evm2::EvmFeatures::EIP8037));
-            // Both capped regular limits fit. The full limit of the second transaction
-            // must still fit the state budget consumed by the first account creation.
-            evm_env.version.tx_gas_limit_cap = 400_000;
-            let ctx = evm_config.context_for_block(&block).unwrap();
-            let evm = evm_config.evm_with_env(pre_block_db.clone(), evm_env.clone());
-            let mut serial = evm_config.block_executor_factory().create_executor(evm, ctx.clone());
-            serial.apply_pre_execution_changes().unwrap();
-            serial.execute_transaction(tx1.clone()).unwrap();
-            let serial_result = serial.execute_transaction(tx2.clone());
-
-            let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
-            let parallel_result = execute_block(
-                &Runtime::test(),
+        let (pre_block_db, partial_bal, tx1, tx2) =
+            two_transfers_with_reference_bal(&evm_config, tx_gas_limit, true);
+        let reference_block = empty_amsterdam_block(B256::ZERO);
+        let reference_bal = if complete_bal {
+            reference_bal_for_block(
                 &evm_config,
-                &|_: bool| Ok(pre_block_db.clone()),
-                to_arc_decoded(reference_bal),
-                evm_env,
-                ctx,
-                2,
-                tx_stream(vec![tx1, tx2]),
-                receipt_tx,
-            );
-            if tx_gas_limit == 500_000 {
-                serial_result.unwrap();
-                assert_eq!(parallel_result.unwrap().0.receipts, serial.receipts());
-            } else {
-                let serial_error = serial_result.unwrap_err();
-                let Some(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    block_available_gas,
-                    ..
-                }) = serial_error.as_validation()
-                else {
-                    panic!("expected serial state-gas admission error, got {serial_error:?}");
-                };
-                assert!(*block_available_gas < 990_000);
-                let Err(BalExecutionError::Execution(parallel_error)) = parallel_result else {
-                    panic!("expected parallel state-gas admission error");
-                };
-                assert_eq!(parallel_error.to_string(), serial_error.to_string());
-            }
+                pre_block_db.clone(),
+                &reference_block,
+                &[tx1.clone(), tx2.clone()],
+            )
+        } else {
+            // State-gas admission must also precede a speculative BAL miss at this slot.
+            partial_bal
+        };
+        let block = empty_amsterdam_block_with_gas_limit(
+            compute_block_access_list_hash(&reference_bal),
+            1_000_000,
+        );
+        let mut evm_env = evm_config.evm_env(block.header()).unwrap();
+        assert!(evm_env.version.feature(evm2::EvmFeatures::EIP8037));
+        // Both capped regular limits fit. The full limit of the second transaction
+        // must still fit the state budget consumed by the first account creation.
+        evm_env.version.tx_gas_limit_cap = 400_000;
+        let ctx = evm_config.context_for_block(&block).unwrap();
+        let evm = evm_config.evm_with_env(pre_block_db.clone(), evm_env.clone());
+        let mut serial = evm_config.block_executor_factory().create_executor(evm, ctx.clone());
+        serial.apply_pre_execution_changes().unwrap();
+        serial.execute_transaction(tx1.clone()).unwrap();
+        let serial_result = serial.execute_transaction(tx2.clone());
+
+        let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
+        let parallel_result = execute_block(
+            &Runtime::test(),
+            &evm_config,
+            &|_: bool| Ok(pre_block_db.clone()),
+            to_arc_decoded(reference_bal),
+            evm_env,
+            ctx,
+            2,
+            tx_stream(vec![tx1, tx2]),
+            receipt_tx,
+        );
+        if tx_gas_limit == 500_000 {
+            serial_result.unwrap();
+            assert_eq!(parallel_result.unwrap().0.receipts, serial.receipts());
+        } else {
+            let serial_error = serial_result.unwrap_err();
+            let Some(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                block_available_gas,
+                ..
+            }) = serial_error.as_validation()
+            else {
+                panic!("expected serial state-gas admission error, got {serial_error:?}");
+            };
+            assert!(*block_available_gas < 990_000);
+            let Err(BalExecutionError::Execution(parallel_error)) = parallel_result else {
+                panic!("expected parallel state-gas admission error");
+            };
+            assert_eq!(parallel_error.to_string(), serial_error.to_string());
         }
     }
 }

@@ -55,6 +55,7 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
+use test_case::test_case;
 
 alloy_sol_types::sol! {
     #[sol(rpc, bytecode = "6080604052348015600f57600080fd5b5060405160db38038060db833981016040819052602a91607a565b60005b818110156074576040805143602082015290810182905260009060600160408051601f19818403018152919052805160209091012080555080606d816092565b915050602d565b505060b8565b600060208284031215608b57600080fd5b5051919050565b60006001820160b157634e487b7160e01b600052601160045260246000fd5b5060010190565b60168060c56000396000f3fe6080604052600080fdfea164736f6c6343000810000a")]
@@ -126,68 +127,66 @@ async fn test_block_access_list_lookup_semantics() -> eyre::Result<()> {
     Ok(())
 }
 
+#[test_case(false, false ; "no_bal_caching")]
+#[test_case(true, false ; "cache_computed_bals")]
+#[test_case(false, true ; "prewarm_bals")]
 #[tokio::test(flavor = "multi_thread")]
-async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
-    for (cache_computed, prewarm) in [(false, false), (true, false), (false, true)] {
-        let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
-            .with_node_config_modifier(move |mut config| {
-                config.rpc.rpc_state_cache.cache_computed_bals = cache_computed;
-                config.rpc.rpc_state_cache.prewarm_bals = prewarm.then_some(0);
-                config
-            })
-            .build_single()
-            .await?;
-        let provider = node.rpc_provider_with_wallet(wallet.signer(0));
-        let first = provider
-            .send_transaction(TransactionRequest::default().to(Address::ZERO).value(U256::ONE))
-            .await?;
-        let second = provider
-            .send_transaction(TransactionRequest::default().to(Address::ZERO).value(U256::from(2)))
-            .await?;
-        node.advance_block().await?;
-        let receipt = second.get_receipt().await?;
-        assert_eq!(receipt.transaction_index, Some(1));
-        let block_hash = receipt.block_hash.unwrap();
-        let client = node.rpc_client().unwrap();
-        let cache = node.rpc.inner.eth_api().cache();
-        let opts =
-            serde_json::json!({"tracer": "prestateTracer", "tracerConfig": {"diffMode": true}});
-        let hashes = [*first.tx_hash(), receipt.transaction_hash];
-        let mut expected = Vec::new();
-        if prewarm {
-            poll_until(format!("prewarmed block access list of block {block_hash}"), || async {
-                let (_, bal) = cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap();
-                Ok(bal.is_some().then_some(()))
-            })
-            .await?;
-        } else {
-            assert!(cache
-                .get_recovered_block_and_maybe_bal(block_hash)
-                .await?
-                .unwrap()
-                .1
-                .is_none());
-            for hash in hashes {
-                expected.push(
-                    client
-                        .request::<_, serde_json::Value>("debug_traceTransaction", (hash, &opts))
-                        .await?,
-                );
-            }
+async fn test_bal_prewarming_for_transaction_replay(
+    cache_computed: bool,
+    prewarm: bool,
+) -> eyre::Result<()> {
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_node_config_modifier(move |mut config| {
+            config.rpc.rpc_state_cache.cache_computed_bals = cache_computed;
+            config.rpc.rpc_state_cache.prewarm_bals = prewarm.then_some(0);
+            config
+        })
+        .build_single()
+        .await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+    let first = provider
+        .send_transaction(TransactionRequest::default().to(Address::ZERO).value(U256::ONE))
+        .await?;
+    let second = provider
+        .send_transaction(TransactionRequest::default().to(Address::ZERO).value(U256::from(2)))
+        .await?;
+    node.advance_block().await?;
+    let receipt = second.get_receipt().await?;
+    assert_eq!(receipt.transaction_index, Some(1));
+    let block_hash = receipt.block_hash.unwrap();
+    let client = node.rpc_client().unwrap();
+    let cache = node.rpc.inner.eth_api().cache();
+    let opts = serde_json::json!({"tracer": "prestateTracer", "tracerConfig": {"diffMode": true}});
+    let hashes = [*first.tx_hash(), receipt.transaction_hash];
+    let mut expected = Vec::new();
+    if prewarm {
+        poll_until(format!("prewarmed block access list of block {block_hash}"), || async {
+            let (_, bal) = cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap();
+            Ok(bal.is_some().then_some(()))
+        })
+        .await?;
+    } else {
+        assert!(cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap().1.is_none());
+        for hash in hashes {
+            expected.push(
+                client
+                    .request::<_, serde_json::Value>("debug_traceTransaction", (hash, &opts))
+                    .await?,
+            );
         }
-        let bal: BlockAccessList = client.request("eth_getBlockAccessList", (block_hash,)).await?;
-        assert!(!bal.is_empty());
-        let raw: Bytes = client.request("debug_getRawBlockAccessList", (block_hash,)).await?;
-        assert_eq!(raw.as_ref(), alloy_rlp::encode(&bal));
-        let (_, cached_bal) = cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap();
-        assert_eq!(cached_bal.is_some(), cache_computed || prewarm);
+    }
+    let bal: BlockAccessList = client.request("eth_getBlockAccessList", (block_hash,)).await?;
+    assert!(!bal.is_empty());
+    let raw: Bytes = client.request("debug_getRawBlockAccessList", (block_hash,)).await?;
+    assert_eq!(raw.as_ref(), alloy_rlp::encode(&bal));
+    let (_, cached_bal) = cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap();
+    assert_eq!(cached_bal.is_some(), cache_computed || prewarm);
 
-        for (index, hash) in hashes.into_iter().enumerate() {
-            let actual: serde_json::Value =
-                client.request("debug_traceTransaction", (hash, &opts)).await?;
-            if !prewarm {
-                assert_eq!(actual, expected[index]);
-            }
+    for (index, hash) in hashes.into_iter().enumerate() {
+        let actual: serde_json::Value =
+            client.request("debug_traceTransaction", (hash, &opts)).await?;
+        if !prewarm {
+            assert_eq!(actual, expected[index]);
         }
     }
     Ok(())

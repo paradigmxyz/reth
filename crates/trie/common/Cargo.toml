@@ -65,6 +65,7 @@ bincode.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
+test-case.workspace = true
 
 [features]
 default = ["std"]

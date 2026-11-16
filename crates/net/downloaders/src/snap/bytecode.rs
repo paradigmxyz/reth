@@ -180,6 +180,7 @@ mod tests {
     use reth_network_p2p::{error::PeerRequestResult, priority::Priority};
     use reth_network_peers::WithPeerId;
     use std::sync::Arc;
+    use test_case::test_case;
 
     fn code(byte: u8) -> Bytes {
         Bytes::from(vec![byte; 4])
@@ -290,26 +291,22 @@ mod tests {
         assert_eq!(*client.priorities(), [Priority::Normal, Priority::High]);
     }
 
+    // reversed, so the second hash is already behind the cursor
+    #[test_case(vec![code(2), code(1)] ; "reversed")]
+    // the same code twice, which only one hash was requested for
+    #[test_case(vec![code(1), code(1)] ; "repeated")]
+    // more blobs than hashes requested
+    #[test_case(vec![code(1), code(2), code(3)] ; "oversized")]
     #[tokio::test]
-    async fn out_of_order_repeated_and_oversized_responses_are_rejected() {
+    async fn out_of_order_repeated_and_oversized_responses_are_rejected(served: Vec<Bytes>) {
         let codes = vec![code(1), code(2)];
         let peer = PeerId::random();
-        for served in [
-            // reversed, so the second hash is already behind the cursor
-            vec![codes[1].clone(), codes[0].clone()],
-            // the same code twice, which only one hash was requested for
-            vec![codes[0].clone(), codes[0].clone()],
-            // more blobs than hashes requested
-            vec![codes[0].clone(), codes[1].clone(), code(3)],
-        ] {
-            let client = Arc::new(TestSnapClient::new(always(peer, 1, served)));
+        let client = Arc::new(TestSnapClient::new(always(peer, 1, served)));
 
-            let error =
-                downloader(Arc::clone(&client), request(&codes)).unwrap().await.unwrap_err();
+        let error = downloader(Arc::clone(&client), request(&codes)).unwrap().await.unwrap_err();
 
-            assert_eq!(error, RequestError::BadResponse);
-            assert_eq!(client.reported().len(), usize::from(MAX_RETRIES) + 1);
-        }
+        assert_eq!(error, RequestError::BadResponse);
+        assert_eq!(client.reported().len(), usize::from(MAX_RETRIES) + 1);
     }
 
     #[tokio::test]

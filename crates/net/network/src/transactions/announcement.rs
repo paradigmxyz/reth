@@ -138,6 +138,7 @@ mod tests {
     use super::*;
     use alloy_primitives::B256;
     use reth_eth_wire::{NewPooledTransactionHashes68, NewPooledTransactionHashes72};
+    use test_case::test_case;
 
     #[test]
     fn dedup_preserves_first_metadata_order_and_version() {
@@ -191,27 +192,29 @@ mod tests {
         }
     }
 
-    #[test]
-    fn rejects_misaligned_metadata_in_locally_constructed_messages() {
-        for (hashes_len, types_len, sizes_len) in
-            [(2, 1, 2), (2, 2, 1), (1, 2, 1), (1, 1, 2), (0, 1, 1)]
-        {
-            let hashes = vec![B256::ZERO; hashes_len];
-            let types = vec![2; types_len];
-            let sizes = vec![100; sizes_len];
-            for msg in [
-                NewPooledTransactionHashes68 {
-                    hashes: hashes.clone(),
-                    types: types.clone(),
-                    sizes: sizes.clone(),
-                }
-                .into(),
-                NewPooledTransactionHashes72 { hashes, types, sizes, cell_mask: None }.into(),
-            ] {
-                assert!(
-                    TransactionAnnouncement::from_message(&msg, &mut B256Set::default()).is_err()
-                );
+    #[test_case(2, 1, 2)]
+    #[test_case(2, 2, 1)]
+    #[test_case(1, 2, 1)]
+    #[test_case(1, 1, 2)]
+    #[test_case(0, 1, 1)]
+    fn rejects_misaligned_metadata_in_locally_constructed_messages(
+        hashes_len: usize,
+        types_len: usize,
+        sizes_len: usize,
+    ) {
+        let hashes = vec![B256::ZERO; hashes_len];
+        let types = vec![2; types_len];
+        let sizes = vec![100; sizes_len];
+        for msg in [
+            NewPooledTransactionHashes68 {
+                hashes: hashes.clone(),
+                types: types.clone(),
+                sizes: sizes.clone(),
             }
+            .into(),
+            NewPooledTransactionHashes72 { hashes, types, sizes, cell_mask: None }.into(),
+        ] {
+            assert!(TransactionAnnouncement::from_message(&msg, &mut B256Set::default()).is_err());
         }
     }
 

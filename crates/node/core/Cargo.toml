@@ -73,6 +73,7 @@ futures.workspace = true
 [dev-dependencies]
 # test vectors generation
 proptest.workspace = true
+test-case.workspace = true
 tokio.workspace = true
 
 [features]

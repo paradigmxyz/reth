@@ -60,6 +60,7 @@ proptest-arbitrary-interop.workspace = true
 async-stream.workspace = true
 serde.workspace = true
 alloy-eips.workspace = true
+test-case.workspace = true
 
 [features]
 arbitrary = [

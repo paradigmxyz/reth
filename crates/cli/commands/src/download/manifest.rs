@@ -1291,6 +1291,7 @@ mod tests {
     use reth_node_api::NodeTypes;
     use reth_provider::{test_utils::MockNodeTypes, StaticFileProviderBuilder, StaticFileWriter};
     use tempfile::tempdir;
+    use test_case::test_case;
 
     fn test_manifest() -> SnapshotManifest {
         let mut components = BTreeMap::new();
@@ -2308,27 +2309,28 @@ mod tests {
         }
     }
 
-    #[test]
-    fn generate_manifest_counts_whole_selected_chunks() {
+    // Selecting a chunk copies its whole file, including blocks beyond the declared height.
+    #[test_case(9, 10)]
+    #[test_case(10, 20)]
+    #[test_case(20, 25)]
+    #[test_case(39, 25)]
+    fn generate_manifest_counts_whole_selected_chunks(block: u64, expected_blocks: u64) {
         let source = snapshot_source();
         write_test_static_files(source.path(), StaticFileSegment::Headers, 24);
 
-        // Selecting a chunk copies its whole file, including blocks beyond the declared height.
-        for (block, expected_blocks) in [(9, 10), (10, 20), (20, 25), (39, 25)] {
-            let output = tempdir().unwrap();
-            let manifest =
-                generate_manifest(source.path(), output.path(), None, block, 1, 10, None, false)
-                    .unwrap();
+        let output = tempdir().unwrap();
+        let manifest =
+            generate_manifest(source.path(), output.path(), None, block, 1, 10, None, false)
+                .unwrap();
 
-            let ComponentManifest::Chunked(chunked) =
-                manifest.component(SnapshotComponentType::Headers).unwrap()
-            else {
-                panic!("headers should be chunked");
-            };
+        let ComponentManifest::Chunked(chunked) =
+            manifest.component(SnapshotComponentType::Headers).unwrap()
+        else {
+            panic!("headers should be chunked");
+        };
 
-            assert_eq!(chunked.total_blocks, expected_blocks);
-            assert_eq!(chunked.chunk_sizes.len() as u64, chunked.num_chunks());
-        }
+        assert_eq!(chunked.total_blocks, expected_blocks);
+        assert_eq!(chunked.chunk_sizes.len() as u64, chunked.num_chunks());
     }
 
     #[test]

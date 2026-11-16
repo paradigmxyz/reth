@@ -50,4 +50,5 @@ reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 tempfile.workspace = true
+test-case.workspace = true
 tokio = { workspace = true, features = ["macros", "time"] }

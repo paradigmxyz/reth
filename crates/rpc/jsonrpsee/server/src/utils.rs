@@ -353,41 +353,39 @@ fn poll_write_timeout(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
     use tokio::time::Instant;
 
+    #[test_case(
+        r#"{"jsonrpc":"2.0","method":"example","params":[1],"extra":{"id":true}}"#,
+        Some("[1]") ;
+        "params_and_extra"
+    )]
+    #[test_case(r#"{"jsonrpc":"2.0","method":"example"}"#, None ; "no_params")]
+    fn notification_id_classification_notification_metadata(raw: &str, expected: Option<&str>) {
+        let notification = deserialize_notification(raw.as_bytes()).unwrap();
+        assert_eq!(notification.method_name(), "example");
+        assert_eq!(notification.params().as_ref().map(|p| p.get()), expected);
+        assert!(!matches!(notification.params(), Some(Cow::Owned(_))));
+    }
+
     #[test]
-    fn notification_id_classification_notification_metadata() {
-        for (raw, expected) in [
-            (
-                r#"{"jsonrpc":"2.0","method":"example","params":[1],"extra":{"id":true}}"#,
-                Some("[1]"),
-            ),
-            (r#"{"jsonrpc":"2.0","method":"example"}"#, None),
-        ] {
-            let notification = deserialize_notification(raw.as_bytes()).unwrap();
-            assert_eq!(notification.method_name(), "example");
-            assert_eq!(notification.params().as_ref().map(|p| p.get()), expected);
-            assert!(!matches!(notification.params(), Some(Cow::Owned(_))));
-        }
+    fn notification_id_classification_rejects_ids() {
         for id in ["true", "false", "{}", "[]", "null", "0", "\"valid\""] {
             let raw = format!(r#"{{"jsonrpc":"2.0","method":"example","id":{id}}}"#);
             assert!(deserialize_notification(raw.as_bytes()).is_err());
         }
     }
 
+    #[test_case(io::ErrorKind::ConnectionRefused ; "connection_refused")]
+    #[test_case(io::ErrorKind::ConnectionAborted ; "connection_aborted")]
+    #[test_case(io::ErrorKind::ConnectionReset ; "connection_reset")]
     #[tokio::test(start_paused = true)]
-    async fn accept_error_backoff_skips_connection_errors() {
-        for kind in [
-            io::ErrorKind::ConnectionRefused,
-            io::ErrorKind::ConnectionAborted,
-            io::ErrorKind::ConnectionReset,
-        ] {
-            let start = Instant::now();
-            let stopped =
-                accept_error_backoff(&io::Error::from(kind), future::pending::<()>()).await;
-            assert!(stopped.is_some());
-            assert_eq!(start.elapsed(), Duration::ZERO);
-        }
+    async fn accept_error_backoff_skips_connection_errors(kind: io::ErrorKind) {
+        let start = Instant::now();
+        let stopped = accept_error_backoff(&io::Error::from(kind), future::pending::<()>()).await;
+        assert!(stopped.is_some());
+        assert_eq!(start.elapsed(), Duration::ZERO);
     }
 
     #[tokio::test(start_paused = true)]

@@ -251,6 +251,7 @@ mod tests {
     use super::*;
     use alloy_rpc_types_engine::ForkchoiceUpdateError;
     use reth_payload_primitives::InvalidPayloadAttributesError;
+    use test_case::test_case;
     #[track_caller]
     fn ensure_engine_rpc_error(
         code: i32,
@@ -392,23 +393,17 @@ mod tests {
         );
     }
 
-    #[test]
-    fn payload_job_failing_on_this_node_is_an_internal_error() {
-        let node_local = [
-            PayloadBuilderError::MissingParentHeader(B256::ZERO),
-            PayloadBuilderError::ChannelClosed,
-            PayloadBuilderError::other(std::io::Error::other("other")),
-        ];
-
-        for payload_job in node_local {
-            let message = payload_job.to_string();
-            let err = payload_job_error(payload_job);
-            assert_eq!(err.code(), INTERNAL_ERROR_CODE, "{message}");
-            assert_eq!(err.message(), SERVER_ERROR_MSG, "{message}");
-            assert_eq!(
-                err.data().unwrap().get(),
-                format!(r#"{{"err":"failed to start payload job: {message}"}}"#)
-            );
-        }
+    #[test_case(PayloadBuilderError::MissingParentHeader(B256::ZERO) ; "missing_parent_header")]
+    #[test_case(PayloadBuilderError::ChannelClosed ; "channel_closed")]
+    #[test_case(PayloadBuilderError::other(std::io::Error::other("other")) ; "other")]
+    fn payload_job_failing_on_this_node_is_an_internal_error(payload_job: PayloadBuilderError) {
+        let message = payload_job.to_string();
+        let err = payload_job_error(payload_job);
+        assert_eq!(err.code(), INTERNAL_ERROR_CODE, "{message}");
+        assert_eq!(err.message(), SERVER_ERROR_MSG, "{message}");
+        assert_eq!(
+            err.data().unwrap().get(),
+            format!(r#"{{"err":"failed to start payload job: {message}"}}"#)
+        );
     }
 }

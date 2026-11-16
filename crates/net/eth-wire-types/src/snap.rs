@@ -983,16 +983,18 @@ mod tests {
         assert_eq!(input, &[0x80]);
     }
 
-    #[test]
-    fn account_data_rejects_missing_truncated_and_extra_body_items() {
-        for wire in [
-            "e1a00101010101010101010101010101010101010101010101010101010101010101",
-            "e4a00101010101010101010101010101010101010101010101010101010101010101c4072a",
-            "e7a00101010101010101010101010101010101010101010101010101010101010101c4072a808080",
-        ] {
-            let bytes = alloy_primitives::hex::decode(wire).unwrap();
-            assert!(alloy_rlp::decode_exact::<AccountData>(&bytes).is_err());
-        }
+    #[test_case("e1a00101010101010101010101010101010101010101010101010101010101010101" ; "missing")]
+    #[test_case(
+        "e4a00101010101010101010101010101010101010101010101010101010101010101c4072a" ;
+        "truncated"
+    )]
+    #[test_case(
+        "e7a00101010101010101010101010101010101010101010101010101010101010101c4072a808080" ;
+        "extra"
+    )]
+    fn account_data_rejects_missing_truncated_and_extra_body_items(wire: &str) {
+        let bytes = alloy_primitives::hex::decode(wire).unwrap();
+        assert!(alloy_rlp::decode_exact::<AccountData>(&bytes).is_err());
     }
 
     #[test]

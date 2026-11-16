@@ -107,6 +107,7 @@ reth-stages-api = { workspace = true, features = ["test-utils"] }
 reth-prune.workspace = true
 reth-static-file.workspace = true
 reth-consensus.workspace = true
+test-case.workspace = true
 
 [features]
 default = []

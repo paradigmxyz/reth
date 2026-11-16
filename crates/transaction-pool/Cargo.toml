@@ -76,6 +76,7 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 futures.workspace = true
 criterion.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
+test-case.workspace = true
 
 [features]
 serde = [

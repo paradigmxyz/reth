@@ -134,6 +134,7 @@ pub fn prepare_error(data: &[u8]) -> (Id<'_>, ErrorCode) {
 mod tests {
     use super::prepare_error;
     use jsonrpsee_types::{ErrorCode, Id};
+    use test_case::test_case;
 
     #[test]
     fn error_classification_invalid_envelopes_without_id() {
@@ -155,39 +156,27 @@ mod tests {
         }
     }
 
-    #[test]
-    fn error_classification_recoverable_ids() {
-        for (data, id) in [
-            (r#"{"jsonrpc":"1.0","method":"example","id":0}"#, Id::Number(0)),
-            (r#"{"jsonrpc":"1.0","id":18446744073709551615}"#, Id::Number(u64::MAX)),
-            (" \n {\"id\":\"keep-id\"} \t ", Id::Str("keep-id".into())),
-            (r#"{"id":"escaped\u002did"}"#, Id::Str("escaped-id".into())),
-            (r#"{"id":null}"#, Id::Null),
-        ] {
-            assert_eq!(prepare_error(data.as_bytes()), (id, ErrorCode::InvalidRequest), "{data}");
-        }
+    #[test_case(r#"{"jsonrpc":"1.0","method":"example","id":0}"#, Id::Number(0) ; "zero")]
+    #[test_case(r#"{"jsonrpc":"1.0","id":18446744073709551615}"#, Id::Number(u64::MAX) ; "max")]
+    #[test_case(" \n {\"id\":\"keep-id\"} \t ", Id::Str("keep-id".into()) ; "whitespace")]
+    #[test_case(r#"{"id":"escaped\u002did"}"#, Id::Str("escaped-id".into()) ; "escaped")]
+    #[test_case(r#"{"id":null}"#, Id::Null ; "null")]
+    fn error_classification_recoverable_ids(data: &str, id: Id<'_>) {
+        assert_eq!(prepare_error(data.as_bytes()), (id, ErrorCode::InvalidRequest), "{data}");
     }
 
-    #[test]
-    fn error_classification_unrecoverable_ids_and_nonobjects() {
-        for data in [
-            r#"{"id":true}"#,
-            r#"{"id":{}}"#,
-            r#"{"id":[]}"#,
-            r#"{"id":-1}"#,
-            r#"["not-an-object-id"]"#,
-            "[1]",
-            "[]",
-            "true",
-            "null",
-            "42",
-            r#""text""#,
-        ] {
-            assert_eq!(
-                prepare_error(data.as_bytes()),
-                (Id::Null, ErrorCode::InvalidRequest),
-                "{data}"
-            );
-        }
+    #[test_case(r#"{"id":true}"# ; "bool_id")]
+    #[test_case(r#"{"id":{}}"# ; "object_id")]
+    #[test_case(r#"{"id":[]}"# ; "array_id")]
+    #[test_case(r#"{"id":-1}"# ; "negative_id")]
+    #[test_case(r#"["not-an-object-id"]"# ; "string_array")]
+    #[test_case("[1]" ; "number_array")]
+    #[test_case("[]" ; "empty_array")]
+    #[test_case("true" ; "bool")]
+    #[test_case("null" ; "null")]
+    #[test_case("42" ; "number")]
+    #[test_case(r#""text""# ; "string")]
+    fn error_classification_unrecoverable_ids_and_nonobjects(data: &str) {
+        assert_eq!(prepare_error(data.as_bytes()), (Id::Null, ErrorCode::InvalidRequest), "{data}");
     }
 }

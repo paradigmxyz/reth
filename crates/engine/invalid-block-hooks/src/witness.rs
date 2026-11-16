@@ -457,6 +457,7 @@ mod tests {
     use reth_provider::test_utils::MockEthProvider;
     use reth_trie::bundle_state::{AccountRevert, BundleAccount};
     use tempfile::TempDir;
+    use test_case::test_case;
     use tokio::{sync::Notify, time::timeout};
 
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};
@@ -708,13 +709,12 @@ mod tests {
         assert!(diff_file.exists());
     }
 
-    #[test]
-    fn test_save_diff() {
+    #[test_case(1, "" ; "unchanged")]
+    #[test_case(2, "--- original\n+++ new\n@@ -1 +1 @@\n-1\n+2\n" ; "changed")]
+    fn test_save_diff(new: i32, expected: &str) {
         let (hook, _output_dir, _temp_dir) = create_test_hook();
-        for (new, expected) in [(1, ""), (2, "--- original\n+++ new\n@@ -1 +1 @@\n-1\n+2\n")] {
-            let path = hook.save_diff("diff".to_string(), &1, &new).unwrap();
-            assert_eq!(std::fs::read_to_string(path).unwrap(), expected);
-        }
+        let path = hook.save_diff("diff".to_string(), &1, &new).unwrap();
+        assert_eq!(std::fs::read_to_string(path).unwrap(), expected);
     }
 
     #[test]

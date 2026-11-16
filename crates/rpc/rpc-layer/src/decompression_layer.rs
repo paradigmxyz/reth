@@ -245,6 +245,7 @@ mod tests {
         pin::Pin,
         task::{Context, Poll},
     };
+    use test_case::test_case;
     use tokio::sync::Notify;
 
     const TEST_DATA: &str = r#"{"method":"test","params":["test data"],"id":1}"#;
@@ -350,23 +351,21 @@ mod tests {
         (request, polled)
     }
 
+    #[test_case("zstd", compress_zstd ; "zstd")]
+    #[test_case("gzip", compress_gzip ; "gzip")]
+    #[test_case("deflate", compress_deflate ; "deflate")]
+    #[test_case("br", compress_brotli ; "br")]
     #[tokio::test]
-    async fn configured_algorithms_are_decompressed_without_content_length() {
-        let cases: [(&str, Compressor); 4] = [
-            ("zstd", compress_zstd),
-            ("gzip", compress_gzip),
-            ("deflate", compress_deflate),
-            ("br", compress_brotli),
-        ];
+    async fn configured_algorithms_are_decompressed_without_content_length(
+        algorithm: &str,
+        compress: Compressor,
+    ) {
+        let mut service = setup_service(&[algorithm], DEFAULT_MAX_SIZE);
+        let request = build_compressed_request(algorithm, compress(TEST_DATA.as_bytes()));
+        let response = service.call(request).await.unwrap();
 
-        for (algorithm, compress) in cases {
-            let mut service = setup_service(&[algorithm], DEFAULT_MAX_SIZE);
-            let request = build_compressed_request(algorithm, compress(TEST_DATA.as_bytes()));
-            let response = service.call(request).await.unwrap();
-
-            assert_eq!(response.status(), StatusCode::OK, "algorithm: {algorithm}");
-            assert_eq!(get_response_body(response).await, TEST_DATA.as_bytes());
-        }
+        assert_eq!(response.status(), StatusCode::OK, "algorithm: {algorithm}");
+        assert_eq!(get_response_body(response).await, TEST_DATA.as_bytes());
     }
 
     #[tokio::test]
@@ -426,20 +425,18 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
     }
 
+    #[test_case("GZip", compress_gzip ; "gzip")]
+    #[test_case("ZSTD", compress_zstd ; "zstd")]
+    #[test_case("Br", compress_brotli ; "br")]
     #[tokio::test]
-    async fn mixed_case_content_codings_are_accepted() {
-        let cases: [(&str, Compressor); 3] =
-            [("GZip", compress_gzip), ("ZSTD", compress_zstd), ("Br", compress_brotli)];
+    async fn mixed_case_content_codings_are_accepted(encoding: &str, compress: Compressor) {
+        let mut service =
+            setup_service(&[encoding.to_ascii_lowercase().as_str()], DEFAULT_MAX_SIZE);
+        let request = build_compressed_request(encoding, compress(TEST_DATA.as_bytes()));
+        let response = service.call(request).await.unwrap();
 
-        for (encoding, compress) in cases {
-            let mut service =
-                setup_service(&[encoding.to_ascii_lowercase().as_str()], DEFAULT_MAX_SIZE);
-            let request = build_compressed_request(encoding, compress(TEST_DATA.as_bytes()));
-            let response = service.call(request).await.unwrap();
-
-            assert_eq!(response.status(), StatusCode::OK, "encoding: {encoding}");
-            assert_eq!(get_response_body(response).await, TEST_DATA.as_bytes());
-        }
+        assert_eq!(response.status(), StatusCode::OK, "encoding: {encoding}");
+        assert_eq!(get_response_body(response).await, TEST_DATA.as_bytes());
     }
 
     #[tokio::test]

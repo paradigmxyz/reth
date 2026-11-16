@@ -2258,81 +2258,95 @@ mod tests {
         assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::UnsupportedCapability);
     }
 
+    #[test_case(
+        SnapResponse::BlockAccessLists(BlockAccessListsMessage {
+            request_id: 1,
+            block_access_lists: BlockAccessLists(vec![None, None]),
+        }) ;
+        "all_missing_access_lists"
+    )]
+    #[test_case(
+        SnapResponse::AccountRange(AccountRangeMessage {
+            request_id: 1,
+            accounts: vec![],
+            proof: vec![],
+        }) ;
+        "empty_account_range"
+    )]
+    #[test_case(
+        SnapResponse::StorageRanges(StorageRangesMessage {
+            request_id: 1,
+            slots: vec![],
+            proof: vec![],
+        }) ;
+        "empty_storage_ranges"
+    )]
+    #[test_case(
+        SnapResponse::ByteCodes(ByteCodesMessage { request_id: 1, codes: vec![] }) ;
+        "empty_byte_codes"
+    )]
+    #[test_case(
+        SnapResponse::BlockAccessLists(BlockAccessListsMessage {
+            request_id: 1,
+            block_access_lists: BlockAccessLists(vec![]),
+        }) ;
+        "no_access_lists"
+    )]
+    #[test_case(
+        SnapResponse::BlockAccessLists(BlockAccessListsMessage {
+            request_id: 1,
+            block_access_lists: BlockAccessLists(vec![
+                None,
+                Some(Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE])),
+            ]),
+        }) ;
+        "partially_missing_access_lists"
+    )]
     #[tokio::test]
-    async fn unavailable_snap_responses_yield_to_another_peer() {
-        let responses = [
-            SnapResponse::BlockAccessLists(BlockAccessListsMessage {
-                request_id: 1,
-                block_access_lists: BlockAccessLists(vec![None, None]),
-            }),
-            SnapResponse::AccountRange(AccountRangeMessage {
-                request_id: 1,
-                accounts: vec![],
-                proof: vec![],
-            }),
-            SnapResponse::StorageRanges(StorageRangesMessage {
-                request_id: 1,
-                slots: vec![],
-                proof: vec![],
-            }),
-            SnapResponse::ByteCodes(ByteCodesMessage { request_id: 1, codes: vec![] }),
-            SnapResponse::BlockAccessLists(BlockAccessListsMessage {
-                request_id: 1,
-                block_access_lists: BlockAccessLists(vec![]),
-            }),
-            SnapResponse::BlockAccessLists(BlockAccessListsMessage {
-                request_id: 1,
-                block_access_lists: BlockAccessLists(vec![
-                    None,
-                    Some(Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE])),
-                ]),
-            }),
-        ];
-        for response in responses {
-            let manager = PeersManager::new(PeersConfig::default());
-            let mut fetcher =
-                StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
-            let fast = B512::random();
-            let other = B512::random();
-            for (peer_id, timeout) in [(fast, 10), (other, 50)] {
-                fetcher.new_active_peer(NewPeerInfo {
-                    peer_id,
-                    best_hash: B256::random(),
-                    best_number: 100,
-                    capabilities: Arc::new(Capabilities::new(vec![])),
-                    timeout: Arc::new(AtomicU64::new(timeout)),
-                    range_info: None,
-                    supports_snap: true,
-                });
-            }
-            assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), Some(fast));
-            let (tx, rx) = oneshot::channel();
-            fetcher.inflight_snap_requests.insert(fast, Request { request: (), response: tx });
-            fetcher.peers.get_mut(&fast).unwrap().state = PeerState::GetSnap;
-            let (followup_tx, _followup_rx) = oneshot::channel();
-            fetcher.queued_requests.push_back(DownloadRequest::GetSnap {
-                request: SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
-                    request_id: 2,
-                    root_hash: B256::random(),
-                    starting_hash: B256::ZERO,
-                    limit_hash: B256::repeat_byte(0xff),
-                    response_bytes: 1024,
-                }),
-                response: followup_tx,
-                priority: Priority::Normal,
+    async fn unavailable_snap_responses_yield_to_another_peer(response: SnapResponse) {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+        let fast = B512::random();
+        let other = B512::random();
+        for (peer_id, timeout) in [(fast, 10), (other, 50)] {
+            fetcher.new_active_peer(NewPeerInfo {
+                peer_id,
+                best_hash: B256::random(),
+                best_number: 100,
+                capabilities: Arc::new(Capabilities::new(vec![])),
+                timeout: Arc::new(AtomicU64::new(timeout)),
+                range_info: None,
+                supports_snap: true,
             });
-
-            assert_eq!(fetcher.on_snap_response(fast, Ok(response.clone())), None);
-            assert_eq!(rx.await.unwrap().unwrap().1, response);
-            assert_eq!(
-                fetcher.next_best_peer(BestPeerRequirements::SupportsSnap),
-                Some(other),
-                "an unavailable response must not monopolize requests: {response:?}"
-            );
-            assert!(matches!(
-                fetcher.poll_action(),
-                PollAction::Ready(FetchAction::BlockRequest { peer_id, .. }) if peer_id == other
-            ));
         }
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), Some(fast));
+        let (tx, rx) = oneshot::channel();
+        fetcher.inflight_snap_requests.insert(fast, Request { request: (), response: tx });
+        fetcher.peers.get_mut(&fast).unwrap().state = PeerState::GetSnap;
+        let (followup_tx, _followup_rx) = oneshot::channel();
+        fetcher.queued_requests.push_back(DownloadRequest::GetSnap {
+            request: SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+                request_id: 2,
+                root_hash: B256::random(),
+                starting_hash: B256::ZERO,
+                limit_hash: B256::repeat_byte(0xff),
+                response_bytes: 1024,
+            }),
+            response: followup_tx,
+            priority: Priority::Normal,
+        });
+
+        assert_eq!(fetcher.on_snap_response(fast, Ok(response.clone())), None);
+        assert_eq!(rx.await.unwrap().unwrap().1, response);
+        assert_eq!(
+            fetcher.next_best_peer(BestPeerRequirements::SupportsSnap),
+            Some(other),
+            "an unavailable response must not monopolize requests: {response:?}"
+        );
+        assert!(matches!(
+            fetcher.poll_action(),
+            PollAction::Ready(FetchAction::BlockRequest { peer_id, .. }) if peer_id == other
+        ));
     }
 }

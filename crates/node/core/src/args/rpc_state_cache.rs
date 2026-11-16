@@ -125,6 +125,7 @@ mod tests {
     use super::*;
     use crate::node_config::NodeConfig;
     use clap::Parser;
+    use test_case::test_case;
 
     #[derive(Parser)]
     struct CommandParser {
@@ -138,50 +139,42 @@ mod tests {
         assert_eq!(args, RpcStateCacheArgs::default());
     }
 
-    #[test]
-    fn rpc_cache_byte_limits_reject_invalid_values() {
+    #[test_case("--rpc-cache.max-blocks-bytes" ; "max_blocks_bytes")]
+    #[test_case("--rpc-cache.max-receipts-bytes" ; "max_receipts_bytes")]
+    #[test_case("--rpc-cache.max-bals-bytes" ; "max_bals_bytes")]
+    fn rpc_cache_byte_limits_reject_invalid_values(flag: &str) {
         let overflow = format!("{}0", usize::MAX);
         let unit_overflow = format!("{}GB", usize::MAX);
-        for flag in [
-            "--rpc-cache.max-blocks-bytes",
-            "--rpc-cache.max-receipts-bytes",
-            "--rpc-cache.max-bals-bytes",
-        ] {
-            for value in ["-1", "-1GB", "1XB", "1.5GB", &overflow, &unit_overflow] {
-                assert!(
-                    CommandParser::try_parse_from(["reth", &format!("{flag}={value}")]).is_err(),
-                    "accepted {flag}={value}"
-                );
-            }
+        for value in ["-1", "-1GB", "1XB", "1.5GB", &overflow, &unit_overflow] {
+            assert!(
+                CommandParser::try_parse_from(["reth", &format!("{flag}={value}")]).is_err(),
+                "accepted {flag}={value}"
+            );
         }
     }
 
-    #[test]
-    fn rpc_cache_byte_limits_accept_units() {
-        for (value, expected) in [
-            ("0GB", 0),
-            ("1024B", 1024),
-            ("1KB", 1024),
-            ("500MB", 500 * 1024 * 1024),
-            ("1GB", 1024 * 1024 * 1024),
-            ("1gb", 1024 * 1024 * 1024),
-            (" 500 MB ", 500 * 1024 * 1024),
-            ("1TB", 1024usize.pow(4)),
-        ] {
-            let args = CommandParser::parse_from([
-                "reth",
-                "--rpc-cache.max-blocks-bytes",
-                value,
-                "--rpc-cache.max-receipts-bytes",
-                value,
-                "--rpc-cache.max-bals-bytes",
-                value,
-            ])
-            .args;
-            assert_eq!(args.max_blocks_bytes, expected);
-            assert_eq!(args.max_receipts_bytes, expected);
-            assert_eq!(args.max_bals_bytes, expected);
-        }
+    #[test_case("0GB", 0 ; "zero_gb")]
+    #[test_case("1024B", 1024 ; "bytes")]
+    #[test_case("1KB", 1024 ; "kb")]
+    #[test_case("500MB", 500 * 1024 * 1024 ; "mb")]
+    #[test_case("1GB", 1024 * 1024 * 1024 ; "gb")]
+    #[test_case("1gb", 1024 * 1024 * 1024 ; "lowercase_gb")]
+    #[test_case(" 500 MB ", 500 * 1024 * 1024 ; "mb_with_spaces")]
+    #[test_case("1TB", 1024usize.pow(4) ; "tb")]
+    fn rpc_cache_byte_limits_accept_units(value: &str, expected: usize) {
+        let args = CommandParser::parse_from([
+            "reth",
+            "--rpc-cache.max-blocks-bytes",
+            value,
+            "--rpc-cache.max-receipts-bytes",
+            value,
+            "--rpc-cache.max-bals-bytes",
+            value,
+        ])
+        .args;
+        assert_eq!(args.max_blocks_bytes, expected);
+        assert_eq!(args.max_receipts_bytes, expected);
+        assert_eq!(args.max_bals_bytes, expected);
     }
 
     #[test]

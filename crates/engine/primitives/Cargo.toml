@@ -43,6 +43,7 @@ tracing = { workspace = true, optional = true }
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["getrandom"] }
 alloy-rlp.workspace = true
+test-case.workspace = true
 
 [features]
 default = ["std"]

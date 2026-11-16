@@ -1314,6 +1314,7 @@ mod tests {
         atomic::{AtomicU64, Ordering as AtomicOrdering},
         Mutex,
     };
+    use test_case::test_case;
 
     #[derive(Clone, Debug)]
     struct CappedHeadersClient {
@@ -1376,62 +1377,30 @@ mod tests {
     }
 
     /// Tests that `replace_number` works the same way as `Option::replace`
-    #[test]
-    fn test_replace_number_semantics() {
-        struct Fixture {
-            // input fields (both SyncTargetBlock and Option<u64>)
-            sync_target_block: SyncTargetBlock,
-            sync_target_option: Option<u64>,
+    ///
+    /// Each row is the `SyncTargetBlock` and the equivalent `Option<u64>` input, the number to
+    /// replace, the expected method result and the expected output state.
+    // Hash maps to None here, all other variants map to Some
+    #[test_case(SyncTargetBlock::Hash(B256::random()), None, 1, None, 1 ; "hash")]
+    #[test_case(SyncTargetBlock::Number(1), Some(1), 2, Some(1), 2 ; "number")]
+    #[test_case(
+        SyncTargetBlock::HashAndNumber { hash: B256::random(), number: 1 }, Some(1), 2, Some(1), 2 ;
+        "hash_and_number"
+    )]
+    fn test_replace_number_semantics(
+        mut sync_target_block: SyncTargetBlock,
+        mut sync_target_option: Option<u64>,
+        replace_number: u64,
+        expected_result: Option<u64>,
+        new_number: u64,
+    ) {
+        let result = sync_target_block.replace_number(replace_number);
+        assert_eq!(result, expected_result);
+        assert_eq!(sync_target_block.number(), Some(new_number));
 
-            // option to replace
-            replace_number: u64,
-
-            // expected method result
-            expected_result: Option<u64>,
-
-            // output state
-            new_number: u64,
-        }
-
-        let fixtures = vec![
-            Fixture {
-                sync_target_block: SyncTargetBlock::Hash(B256::random()),
-                // Hash maps to None here, all other variants map to Some
-                sync_target_option: None,
-                replace_number: 1,
-                expected_result: None,
-                new_number: 1,
-            },
-            Fixture {
-                sync_target_block: SyncTargetBlock::Number(1),
-                sync_target_option: Some(1),
-                replace_number: 2,
-                expected_result: Some(1),
-                new_number: 2,
-            },
-            Fixture {
-                sync_target_block: SyncTargetBlock::HashAndNumber {
-                    hash: B256::random(),
-                    number: 1,
-                },
-                sync_target_option: Some(1),
-                replace_number: 2,
-                expected_result: Some(1),
-                new_number: 2,
-            },
-        ];
-
-        for fixture in fixtures {
-            let mut sync_target_block = fixture.sync_target_block;
-            let result = sync_target_block.replace_number(fixture.replace_number);
-            assert_eq!(result, fixture.expected_result);
-            assert_eq!(sync_target_block.number(), Some(fixture.new_number));
-
-            let mut sync_target_option = fixture.sync_target_option;
-            let option_result = sync_target_option.replace(fixture.replace_number);
-            assert_eq!(option_result, fixture.expected_result);
-            assert_eq!(sync_target_option, Some(fixture.new_number));
-        }
+        let option_result = sync_target_option.replace(replace_number);
+        assert_eq!(option_result, expected_result);
+        assert_eq!(sync_target_option, Some(new_number));
     }
 
     /// Tests that request calc works

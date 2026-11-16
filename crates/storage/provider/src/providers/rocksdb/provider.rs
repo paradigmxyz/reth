@@ -3186,6 +3186,7 @@ mod tests {
         statistics::{Histogram, Ticker},
     };
     use tempfile::TempDir;
+    use test_case::test_case;
 
     /// Number of deleted keys `RocksDB` skipped on this thread while running `f`.
     fn deleted_keys_skipped<R>(f: impl FnOnce() -> R) -> (R, u64) {
@@ -4785,105 +4786,98 @@ mod tests {
         assert_eq!(shards2[0].1.iter().collect::<Vec<_>>(), vec![30, 40]);
     }
 
-    #[test]
-    fn test_prune_invariants() {
+    // Test cases that exercise invariants.
+    // Account: shards where middle becomes empty
+    #[test_case(&[(10, &[5, 10]), (20, &[15, 20]), (u64::MAX, &[25, 30])], 20 ; "middle empties")]
+    // Account: non-sentinel shard only, partial prune -> must become sentinel
+    #[test_case(&[(100, &[50, 100])], 60 ; "partial prune")]
+    fn test_prune_invariants(initial_shards: &[(u64, &[u64])], prune_to: u64) {
         // Test invariants: no empty shards, sentinel is always last
         let address = Address::repeat_byte(0x42);
         let storage_key = B256::repeat_byte(0x01);
 
-        // Test cases that exercise invariants
-        #[expect(clippy::type_complexity)]
-        let invariant_cases: &[(&[(u64, &[u64])], u64)] = &[
-            // Account: shards where middle becomes empty
-            (&[(10, &[5, 10]), (20, &[15, 20]), (u64::MAX, &[25, 30])], 20),
-            // Account: non-sentinel shard only, partial prune -> must become sentinel
-            (&[(100, &[50, 100])], 60),
-        ];
+        // Test account history invariants
+        {
+            let temp_dir = TempDir::new().unwrap();
+            let provider =
+                RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        for (initial_shards, prune_to) in invariant_cases {
-            // Test account history invariants
-            {
-                let temp_dir = TempDir::new().unwrap();
-                let provider =
-                    RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+            let mut batch = provider.batch();
+            for (highest, blocks) in initial_shards {
+                let shard = BlockNumberList::new_pre_sorted(blocks.iter().copied());
+                batch
+                    .put::<tables::AccountsHistory>(ShardedKey::new(address, *highest), &shard)
+                    .unwrap();
+            }
+            batch.commit().unwrap();
 
-                let mut batch = provider.batch();
-                for (highest, blocks) in *initial_shards {
-                    let shard = BlockNumberList::new_pre_sorted(blocks.iter().copied());
-                    batch
-                        .put::<tables::AccountsHistory>(ShardedKey::new(address, *highest), &shard)
-                        .unwrap();
-                }
-                batch.commit().unwrap();
+            let mut batch = provider.batch();
+            batch.prune_account_history_to(address, prune_to).unwrap();
+            batch.commit().unwrap();
 
-                let mut batch = provider.batch();
-                batch.prune_account_history_to(address, *prune_to).unwrap();
-                batch.commit().unwrap();
+            let shards = provider.account_history_shards(address).unwrap();
 
-                let shards = provider.account_history_shards(address).unwrap();
-
-                // Invariant 1: no empty shards
-                for (key, blocks) in &shards {
-                    assert!(
-                        !blocks.is_empty(),
-                        "Account: empty shard at key {}",
-                        key.highest_block_number
-                    );
-                }
-
-                // Invariant 2: last shard is sentinel
-                if !shards.is_empty() {
-                    let last = shards.last().unwrap();
-                    assert_eq!(
-                        last.0.highest_block_number,
-                        u64::MAX,
-                        "Account: last shard must be sentinel"
-                    );
-                }
+            // Invariant 1: no empty shards
+            for (key, blocks) in &shards {
+                assert!(
+                    !blocks.is_empty(),
+                    "Account: empty shard at key {}",
+                    key.highest_block_number
+                );
             }
 
-            // Test storage history invariants
-            {
-                let temp_dir = TempDir::new().unwrap();
-                let provider =
-                    RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+            // Invariant 2: last shard is sentinel
+            if !shards.is_empty() {
+                let last = shards.last().unwrap();
+                assert_eq!(
+                    last.0.highest_block_number,
+                    u64::MAX,
+                    "Account: last shard must be sentinel"
+                );
+            }
+        }
 
-                let mut batch = provider.batch();
-                for (highest, blocks) in *initial_shards {
-                    let shard = BlockNumberList::new_pre_sorted(blocks.iter().copied());
-                    let key = if *highest == u64::MAX {
-                        StorageShardedKey::last(address, storage_key)
-                    } else {
-                        StorageShardedKey::new(address, storage_key, *highest)
-                    };
-                    batch.put::<tables::StoragesHistory>(key, &shard).unwrap();
-                }
-                batch.commit().unwrap();
+        // Test storage history invariants
+        {
+            let temp_dir = TempDir::new().unwrap();
+            let provider =
+                RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-                let mut batch = provider.batch();
-                batch.prune_storage_history_to(address, storage_key, *prune_to).unwrap();
-                batch.commit().unwrap();
+            let mut batch = provider.batch();
+            for (highest, blocks) in initial_shards {
+                let shard = BlockNumberList::new_pre_sorted(blocks.iter().copied());
+                let key = if *highest == u64::MAX {
+                    StorageShardedKey::last(address, storage_key)
+                } else {
+                    StorageShardedKey::new(address, storage_key, *highest)
+                };
+                batch.put::<tables::StoragesHistory>(key, &shard).unwrap();
+            }
+            batch.commit().unwrap();
 
-                let shards = provider.storage_history_shards(address, storage_key).unwrap();
+            let mut batch = provider.batch();
+            batch.prune_storage_history_to(address, storage_key, prune_to).unwrap();
+            batch.commit().unwrap();
 
-                // Invariant 1: no empty shards
-                for (key, blocks) in &shards {
-                    assert!(
-                        !blocks.is_empty(),
-                        "Storage: empty shard at key {}",
-                        key.sharded_key.highest_block_number
-                    );
-                }
+            let shards = provider.storage_history_shards(address, storage_key).unwrap();
 
-                // Invariant 2: last shard is sentinel
-                if !shards.is_empty() {
-                    let last = shards.last().unwrap();
-                    assert_eq!(
-                        last.0.sharded_key.highest_block_number,
-                        u64::MAX,
-                        "Storage: last shard must be sentinel"
-                    );
-                }
+            // Invariant 1: no empty shards
+            for (key, blocks) in &shards {
+                assert!(
+                    !blocks.is_empty(),
+                    "Storage: empty shard at key {}",
+                    key.sharded_key.highest_block_number
+                );
+            }
+
+            // Invariant 2: last shard is sentinel
+            if !shards.is_empty() {
+                let last = shards.last().unwrap();
+                assert_eq!(
+                    last.0.sharded_key.highest_block_number,
+                    u64::MAX,
+                    "Storage: last shard must be sentinel"
+                );
             }
         }
     }

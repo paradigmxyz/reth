@@ -1274,6 +1274,7 @@ mod tests {
     use reth_testing_utils::generators;
     use reth_trie::test_utils::state_root;
     use reth_trie_common::bundle_state::StorageSlot;
+    use test_case::test_case;
 
     #[test]
     fn proof_worker_count_scales_with_block_gas() {
@@ -1300,21 +1301,6 @@ mod tests {
         assert_eq!(count(Some(1_000), Some(15_000_000)), 32);
         assert_eq!(count(None, None), 32);
 
-        // An explicitly configured count is used verbatim for every block.
-        for (transaction_count, gas_used) in
-            [(Some(30), Some(1_000_000)), (Some(1_000), Some(300_000_000)), (None, None)]
-        {
-            assert_eq!(
-                DefaultStateRootStrategy::proof_worker_count(
-                    48,
-                    Some(48),
-                    transaction_count,
-                    gas_used
-                ),
-                48
-            );
-        }
-
         // Pools smaller than two threads, and a pinned count of zero, still get a worker.
         assert_eq!(
             DefaultStateRootStrategy::proof_worker_count(1, None, Some(1), Some(1_000_000)),
@@ -1322,6 +1308,20 @@ mod tests {
         );
         assert_eq!(DefaultStateRootStrategy::proof_worker_count(1, None, None, None), 1);
         assert_eq!(DefaultStateRootStrategy::proof_worker_count(1, Some(0), None, None), 1);
+    }
+
+    // An explicitly configured count is used verbatim for every block.
+    #[test_case(Some(30), Some(1_000_000))]
+    #[test_case(Some(1_000), Some(300_000_000))]
+    #[test_case(None, None)]
+    fn proof_worker_count_uses_configured_count(
+        transaction_count: Option<usize>,
+        gas_used: Option<u64>,
+    ) {
+        assert_eq!(
+            DefaultStateRootStrategy::proof_worker_count(48, Some(48), transaction_count, gas_used),
+            48
+        );
     }
 
     #[test]

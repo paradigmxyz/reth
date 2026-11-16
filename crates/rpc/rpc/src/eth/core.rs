@@ -587,6 +587,7 @@ mod tests {
     use reth_testing_utils::generators::{self, random_block, random_receipt, BlockParams};
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction, TestPool};
     use std::time::{Duration, Instant};
+    use test_case::test_case;
 
     type FakeEthApi<P = MockEthProvider> = EthApi<
         RpcNodeCoreAdapter<P, TestPool, NoopNetwork, EthEvmConfig>,
@@ -1426,43 +1427,36 @@ mod tests {
         }
     }
 
-    #[test]
-    fn execution_errors_distinguish_reverts_from_failed_calls() {
-        for stop in [
-            evm2::interpreter::InstrStop::OutOfFunds,
-            evm2::interpreter::InstrStop::CallTooDeep,
-            evm2::interpreter::InstrStop::Revert,
-        ] {
-            let output = Bytes::from_static(b"revert payload");
-            let result = evm2::TxResult::<evm2::BaseEvmTypes> {
-                status: false,
-                stop,
-                output: output.clone(),
-                ..Default::default()
-            };
-            let err = <EthApiError as reth_rpc_eth_types::error::FromEvmError<EthEvmConfig>>::ensure_success::<evm2::BaseEvmTypes>(result)
-                .unwrap_err();
-            match err.as_invalid_transaction().unwrap() {
-                RpcInvalidTransactionError::Revert(_) => {
-                    assert_eq!(stop, evm2::interpreter::InstrStop::Revert);
-                }
-                RpcInvalidTransactionError::EvmHalt(reason) => {
-                    assert_ne!(stop, evm2::interpreter::InstrStop::Revert);
-                    assert_eq!(reason, &format!("{stop:?}"));
-                }
-                other => panic!("unexpected error: {other}"),
+    #[test_case(evm2::interpreter::InstrStop::OutOfFunds ; "out_of_funds")]
+    #[test_case(evm2::interpreter::InstrStop::CallTooDeep ; "call_too_deep")]
+    #[test_case(evm2::interpreter::InstrStop::Revert ; "revert")]
+    fn execution_errors_distinguish_reverts_from_failed_calls(stop: evm2::interpreter::InstrStop) {
+        let output = Bytes::from_static(b"revert payload");
+        let result = evm2::TxResult::<evm2::BaseEvmTypes> {
+            status: false,
+            stop,
+            output: output.clone(),
+            ..Default::default()
+        };
+        let err = <EthApiError as reth_rpc_eth_types::error::FromEvmError<EthEvmConfig>>::ensure_success::<evm2::BaseEvmTypes>(result)
+            .unwrap_err();
+        match err.as_invalid_transaction().unwrap() {
+            RpcInvalidTransactionError::Revert(_) => {
+                assert_eq!(stop, evm2::interpreter::InstrStop::Revert);
             }
-            let rpc: jsonrpsee::types::ErrorObjectOwned = err.into();
-            if stop == evm2::interpreter::InstrStop::Revert {
-                assert_eq!(rpc.code(), 3);
-                assert_eq!(
-                    serde_json::from_str::<Bytes>(rpc.data().unwrap().get()).unwrap(),
-                    output
-                );
-            } else {
-                assert_eq!(rpc.code(), -32003);
-                assert!(rpc.data().is_none());
+            RpcInvalidTransactionError::EvmHalt(reason) => {
+                assert_ne!(stop, evm2::interpreter::InstrStop::Revert);
+                assert_eq!(reason, &format!("{stop:?}"));
             }
+            other => panic!("unexpected error: {other}"),
+        }
+        let rpc: jsonrpsee::types::ErrorObjectOwned = err.into();
+        if stop == evm2::interpreter::InstrStop::Revert {
+            assert_eq!(rpc.code(), 3);
+            assert_eq!(serde_json::from_str::<Bytes>(rpc.data().unwrap().get()).unwrap(), output);
+        } else {
+            assert_eq!(rpc.code(), -32003);
+            assert!(rpc.data().is_none());
         }
     }
 

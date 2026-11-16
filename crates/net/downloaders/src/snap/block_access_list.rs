@@ -335,6 +335,7 @@ mod tests {
     use reth_network_p2p::{error::PeerRequestResult, priority::Priority};
     use reth_network_peers::WithPeerId;
     use std::sync::Arc;
+    use test_case::test_case;
 
     fn bal() -> Bytes {
         Bytes::from(alloy_rlp::encode(Bal::default()))
@@ -579,28 +580,28 @@ mod tests {
         assert_eq!(client.reported().len(), usize::from(MAX_RETRIES) + 1);
     }
 
+    // undecodable payload
+    #[test_case(1, vec![Some(Bytes::from_static(&[0xff, 0xff]))] ; "malformed")]
+    // answers a different request
+    #[test_case(7, vec![Some(bal())] ; "wrong_id")]
+    // more entries than blocks requested
+    #[test_case(1, vec![Some(bal()), Some(bal())] ; "oversized")]
     #[tokio::test]
-    async fn malformed_wrong_id_and_oversized_responses_are_rejected() {
+    async fn malformed_wrong_id_and_oversized_responses_are_rejected(
+        request_id: u64,
+        entries: Vec<Option<Bytes>>,
+    ) {
         let headers = headers(&[Some(bal())]);
         let peer = PeerId::random();
-        for (request_id, entries) in [
-            // undecodable payload
-            (1, vec![Some(Bytes::from_static(&[0xff, 0xff]))]),
-            // answers a different request
-            (7, vec![Some(bal())]),
-            // more entries than blocks requested
-            (1, vec![Some(bal()), Some(bal())]),
-        ] {
-            let client = Arc::new(TestSnapClient::new(always(peer, request_id, entries)));
+        let client = Arc::new(TestSnapClient::new(always(peer, request_id, entries)));
 
-            let error = downloader(Arc::clone(&client), request(&headers), &headers)
-                .unwrap()
-                .await
-                .unwrap_err();
+        let error = downloader(Arc::clone(&client), request(&headers), &headers)
+            .unwrap()
+            .await
+            .unwrap_err();
 
-            assert_eq!(error, RequestError::BadResponse);
-            assert_eq!(client.reported().len(), usize::from(MAX_RETRIES) + 1);
-        }
+        assert_eq!(error, RequestError::BadResponse);
+        assert_eq!(client.reported().len(), usize::from(MAX_RETRIES) + 1);
     }
 
     #[tokio::test]

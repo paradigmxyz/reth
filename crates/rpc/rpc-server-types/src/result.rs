@@ -152,6 +152,7 @@ pub fn rpc_err(
 mod tests {
     use super::*;
     use reth_errors::{RethError, RethResult};
+    use test_case::test_case;
 
     const fn assert_rpc_result<T, E, TRR: ToRpcResult<T, E>>() {}
 
@@ -165,15 +166,11 @@ mod tests {
         assert_eq!(val, 100);
     }
 
-    #[test]
-    fn rpc_error_data_is_a_hex_string() {
-        for (data, expected) in [
-            (None, None),
-            (Some(&[][..]), Some(r#""0x""#)),
-            (Some(&[0, 1, 255][..]), Some(r#""0x0001ff""#)),
-        ] {
-            let err = rpc_err(jsonrpsee_types::error::INTERNAL_ERROR_CODE, "test error", data);
-            assert_eq!(err.data().map(|data| data.get()), expected);
-        }
+    #[test_case(None, None ; "no_data")]
+    #[test_case(Some(&[][..]), Some(r#""0x""#) ; "empty_data")]
+    #[test_case(Some(&[0, 1, 255][..]), Some(r#""0x0001ff""#) ; "some_data")]
+    fn rpc_error_data_is_a_hex_string(data: Option<&[u8]>, expected: Option<&str>) {
+        let err = rpc_err(jsonrpsee_types::error::INTERNAL_ERROR_CODE, "test error", data);
+        assert_eq!(err.data().map(|data| data.get()), expected);
     }
 }

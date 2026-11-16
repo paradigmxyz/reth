@@ -179,6 +179,7 @@ mod tests {
     use super::*;
     use alloy_primitives::b512;
     use std::net::Ipv6Addr;
+    use test_case::test_case;
 
     #[test]
     fn test_url_parse() {
@@ -223,86 +224,80 @@ mod tests {
         assert_eq!(url, &format!("{node}"));
     }
 
-    #[test]
-    fn test_node_serialize() {
-        let cases = vec![
-            // IPv4
-            (
-                TrustedPeer {
-                    host: Host::Ipv4([10, 3, 58, 6].into()),
-                    tcp_port: 30303u16,
-                    udp_port: 30301u16,
-                    id: b512!("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0"),
-                },
-                "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301\""
-            ),
-            // IPv6
-            (
-                TrustedPeer {
-                    host: Host::Ipv6(Ipv6Addr::new(0x2001, 0xdb8, 0x3c4d, 0x15, 0x0, 0x0, 0xabcd, 0xef12)),
-                    tcp_port: 52150u16,
-                    udp_port: 52151u16,
-                    id: b512!("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439"),
-                },
-                "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@[2001:db8:3c4d:15::abcd:ef12]:52150?discport=52151\""
-            ),
-            // URL
-            (
-                TrustedPeer {
-                    host: Host::Domain("my-domain".to_string()),
-                    tcp_port: 52150u16,
-                    udp_port: 52151u16,
-                    id: b512!("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439"),
-                },
-                "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@my-domain:52150?discport=52151\""
-            ),
-        ];
-
-        for (node, expected) in cases {
-            let ser = serde_json::to_string::<TrustedPeer>(&node).expect("couldn't serialize");
-            assert_eq!(ser, expected);
-        }
+    // IPv4
+    #[test_case(
+        TrustedPeer {
+            host: Host::Ipv4([10, 3, 58, 6].into()),
+            tcp_port: 30303u16,
+            udp_port: 30301u16,
+            id: b512!("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0"),
+        },
+        "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301\"" ;
+        "ipv4"
+    )]
+    // IPv6
+    #[test_case(
+        TrustedPeer {
+            host: Host::Ipv6(Ipv6Addr::new(0x2001, 0xdb8, 0x3c4d, 0x15, 0x0, 0x0, 0xabcd, 0xef12)),
+            tcp_port: 52150u16,
+            udp_port: 52151u16,
+            id: b512!("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439"),
+        },
+        "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@[2001:db8:3c4d:15::abcd:ef12]:52150?discport=52151\"" ;
+        "ipv6"
+    )]
+    // URL
+    #[test_case(
+        TrustedPeer {
+            host: Host::Domain("my-domain".to_string()),
+            tcp_port: 52150u16,
+            udp_port: 52151u16,
+            id: b512!("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439"),
+        },
+        "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@my-domain:52150?discport=52151\"" ;
+        "url"
+    )]
+    fn test_node_serialize(node: TrustedPeer, expected: &str) {
+        let ser = serde_json::to_string::<TrustedPeer>(&node).expect("couldn't serialize");
+        assert_eq!(ser, expected);
     }
 
-    #[test]
-    fn test_node_deserialize() {
-        let cases = vec![
-            // IPv4
-            (
-                "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:80?discport=30301\"",
-                TrustedPeer {
-                    host: Host::Ipv4([10, 3, 58, 6].into()),
-                    tcp_port: 80u16,
-                    udp_port: 30301u16,
-                    id: b512!("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0"),
-                }
-            ),
-            // IPv6
-            (
-                "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@[2001:db8:3c4d:15::abcd:ef12]:52150?discport=52151\"",
-                TrustedPeer {
-                    host: Host::Ipv6(Ipv6Addr::new(0x2001, 0xdb8, 0x3c4d, 0x15, 0x0, 0x0, 0xabcd, 0xef12)),
-                    tcp_port: 52150u16,
-                    udp_port: 52151u16,
-                    id: b512!("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439"),
-                }
-            ),
-            // URL
-            (
-                "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@my-domain:80?discport=52151\"",
-                TrustedPeer {
-                    host: Host::Domain("my-domain".to_string()),
-                    tcp_port: 80u16,
-                    udp_port: 52151u16,
-                    id: b512!("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439"),
-                }
-            ),
-        ];
-
-        for (url, expected) in cases {
-            let node: TrustedPeer = serde_json::from_str(url).expect("couldn't deserialize");
-            assert_eq!(node, expected);
-        }
+    // IPv4
+    #[test_case(
+        "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:80?discport=30301\"",
+        TrustedPeer {
+            host: Host::Ipv4([10, 3, 58, 6].into()),
+            tcp_port: 80u16,
+            udp_port: 30301u16,
+            id: b512!("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0"),
+        } ;
+        "ipv4"
+    )]
+    // IPv6
+    #[test_case(
+        "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@[2001:db8:3c4d:15::abcd:ef12]:52150?discport=52151\"",
+        TrustedPeer {
+            host: Host::Ipv6(Ipv6Addr::new(0x2001, 0xdb8, 0x3c4d, 0x15, 0x0, 0x0, 0xabcd, 0xef12)),
+            tcp_port: 52150u16,
+            udp_port: 52151u16,
+            id: b512!("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439"),
+        } ;
+        "ipv6"
+    )]
+    // URL
+    #[test_case(
+        "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@my-domain:80?discport=52151\"",
+        TrustedPeer {
+            host: Host::Domain("my-domain".to_string()),
+            tcp_port: 80u16,
+            udp_port: 52151u16,
+            id: b512!("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439"),
+        } ;
+        "url"
+    )]
+    fn test_node_deserialize(url: &str, expected: TrustedPeer) {
+        let node: TrustedPeer = serde_json::from_str(url).expect("couldn't deserialize");
+        assert_eq!(node, expected);
     }
 
     #[tokio::test]

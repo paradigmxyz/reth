@@ -631,6 +631,7 @@ mod tests {
     use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::{b256, Bytes, U256};
     use reth_ethereum_primitives::{Receipt, TxType};
+    use test_case::test_case;
 
     #[test]
     fn test_header_conversion_roundtrip() {
@@ -876,16 +877,16 @@ mod tests {
         assert!(Accumulator::from_header_records(&records).is_err());
     }
 
+    #[test_case(ProofType::BlockProofHistoricalHashesAccumulator)]
+    #[test_case(ProofType::BlockProofHistoricalRoots)]
+    #[test_case(ProofType::BlockProofHistoricalSummariesCapella)]
+    #[test_case(ProofType::BlockProofHistoricalSummariesDeneb)]
+    fn test_proof_type_byte_roundtrip(ty: ProofType) {
+        assert_eq!(ProofType::from_byte(ty.as_byte()), Some(ty));
+    }
+
     #[test]
-    fn test_proof_type_byte_roundtrip() {
-        for ty in [
-            ProofType::BlockProofHistoricalHashesAccumulator,
-            ProofType::BlockProofHistoricalRoots,
-            ProofType::BlockProofHistoricalSummariesCapella,
-            ProofType::BlockProofHistoricalSummariesDeneb,
-        ] {
-            assert_eq!(ProofType::from_byte(ty.as_byte()), Some(ty));
-        }
+    fn test_proof_type_rejects_unknown_byte() {
         assert_eq!(ProofType::from_byte(4), None);
     }
 

@@ -45,6 +45,7 @@ assert_matches.workspace = true
 rand.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 reth-tracing.workspace = true
+test-case.workspace = true
 
 [features]
 default = ["serde"]

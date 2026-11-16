@@ -785,6 +785,7 @@ impl EngineArgs {
 mod tests {
     use super::*;
     use clap::Parser;
+    use test_case::test_case;
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]
@@ -793,18 +794,16 @@ mod tests {
         args: T,
     }
 
-    #[test]
-    fn cpu_cores_override_controls_parallel_state_root() {
-        for (cores, enabled) in [(1, false), (4, false), (5, true), (8, true)] {
-            let args = CommandParser::<EngineArgs>::parse_from([
-                "reth",
-                "--cpu-cores",
-                &cores.to_string(),
-            ])
-            .args;
-            assert_eq!(args.cpu_cores.unwrap().get(), cores);
-            assert_eq!(args.tree_config().use_state_root_task(), enabled);
-        }
+    #[test_case(1, false)]
+    #[test_case(4, false)]
+    #[test_case(5, true)]
+    #[test_case(8, true)]
+    fn cpu_cores_override_controls_parallel_state_root(cores: usize, enabled: bool) {
+        let args =
+            CommandParser::<EngineArgs>::parse_from(["reth", "--cpu-cores", &cores.to_string()])
+                .args;
+        assert_eq!(args.cpu_cores.unwrap().get(), cores);
+        assert_eq!(args.tree_config().use_state_root_task(), enabled);
     }
 
     #[test]
@@ -1070,16 +1069,18 @@ mod tests {
         let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
         let config = args.tree_config();
         assert_eq!(config.backfill_run_threshold(), DEFAULT_BACKFILL_RUN_THRESHOLD);
+    }
 
-        for (threshold, expected) in [("500", 500), ("2048", 1024)] {
-            let args = CommandParser::<EngineArgs>::parse_from([
-                "reth",
-                "--engine.backfill-threshold",
-                threshold,
-            ])
-            .args;
-            assert_eq!(args.tree_config().backfill_run_threshold(), expected);
-        }
+    #[test_case("500", 500)]
+    #[test_case("2048", 1024)]
+    fn test_parse_backfill_threshold_override(threshold: &str, expected: u64) {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.backfill-threshold",
+            threshold,
+        ])
+        .args;
+        assert_eq!(args.tree_config().backfill_run_threshold(), expected);
     }
 
     #[test]

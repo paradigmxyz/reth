@@ -354,6 +354,7 @@ mod tests {
     use alloy_primitives::{Address, U256};
     use metrics::atomics::AtomicU64;
     use std::sync::atomic::Ordering;
+    use test_case::test_case;
 
     #[tokio::test]
     async fn validation_send_metrics_track_cancellation_and_completion() {
@@ -538,21 +539,25 @@ mod tests {
         .expect("concurrent producers and workers must drain and shut down");
     }
 
+    #[test_case(0, 2)]
+    #[test_case(1, 4)]
+    #[test_case(8, 18)]
     #[tokio::test]
-    async fn configured_workers_have_bounded_handoff_capacity() {
+    async fn configured_workers_have_bounded_handoff_capacity(
+        additional_tasks: usize,
+        expected_capacity: usize,
+    ) {
         let runtime = Runtime::test();
-        for (additional_tasks, expected_capacity) in [(0, 2), (1, 4), (8, 18)] {
-            let executor =
-                TransactionValidationTaskExecutor::spawn(NoopValidator, &runtime, additional_tasks);
-            assert_eq!(executor.to_validation_task.tx.max_capacity(), expected_capacity);
-            let outcome = tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                executor.validate_transaction(TransactionOrigin::Local, MockTransaction::legacy()),
-            )
-            .await
-            .expect("configured validation workers must process jobs");
-            assert!(outcome.is_valid());
-        }
+        let executor =
+            TransactionValidationTaskExecutor::spawn(NoopValidator, &runtime, additional_tasks);
+        assert_eq!(executor.to_validation_task.tx.max_capacity(), expected_capacity);
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            executor.validate_transaction(TransactionOrigin::Local, MockTransaction::legacy()),
+        )
+        .await
+        .expect("configured validation workers must process jobs");
+        assert!(outcome.is_valid());
     }
 
     #[derive(Debug)]

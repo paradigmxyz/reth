@@ -571,6 +571,7 @@ mod tests {
         net::{Ipv4Addr, Ipv6Addr, SocketAddrV4},
         time::Duration,
     };
+    use test_case::test_case;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_discovery_setup() {
@@ -686,23 +687,24 @@ mod tests {
         assert_eq!(discv5.node_record().unwrap(), NodeRecord { udp_port: 30310, ..record });
     }
 
+    #[test_case(false, None ; "enr_update_disabled")]
+    #[test_case(true, Some(Duration::from_secs(300)) ; "auto_nat_listen")]
     #[tokio::test]
-    async fn discv5_only_respects_enr_update_policy() {
-        for (enr_update, auto_nat_listen_duration) in
-            [(false, None), (true, Some(Duration::from_secs(300)))]
-        {
-            let mut config = reth_discv5::Config::builder((Ipv4Addr::LOCALHOST, 0).into()).build();
-            let discv5_config = config.discv5_config_mut();
-            discv5_config.listen_config =
-                discv5::ListenConfig::Ipv4 { ip: Ipv4Addr::LOCALHOST, port: 0 };
-            discv5_config.enr_update = enr_update;
-            // Set this after building: the upstream builder clears the reachability timer.
-            discv5_config.auto_nat_listen_duration = auto_nat_listen_duration;
-            let discovery = start_discv5_only(config, Some(NatResolver::Any)).await;
+    async fn discv5_only_respects_enr_update_policy(
+        enr_update: bool,
+        auto_nat_listen_duration: Option<Duration>,
+    ) {
+        let mut config = reth_discv5::Config::builder((Ipv4Addr::LOCALHOST, 0).into()).build();
+        let discv5_config = config.discv5_config_mut();
+        discv5_config.listen_config =
+            discv5::ListenConfig::Ipv4 { ip: Ipv4Addr::LOCALHOST, port: 0 };
+        discv5_config.enr_update = enr_update;
+        // Set this after building: the upstream builder clears the reachability timer.
+        discv5_config.auto_nat_listen_duration = auto_nat_listen_duration;
+        let discovery = start_discv5_only(config, Some(NatResolver::Any)).await;
 
-            // No automatic lookup may overwrite a pinned address or bypass reachability checks.
-            assert!(discovery.nat_resolver.is_none());
-        }
+        // No automatic lookup may overwrite a pinned address or bypass reachability checks.
+        assert!(discovery.nat_resolver.is_none());
     }
 
     #[test]

@@ -453,6 +453,7 @@ mod tests {
         fs::OpenOptions,
         io::{Read, Seek, SeekFrom},
     };
+    use test_case::test_case;
 
     type ColumnResults<T> = Vec<ColumnResult<T>>;
     type ColumnValues = Vec<Vec<u8>>;
@@ -822,26 +823,24 @@ mod tests {
         test_append_consistency_partial_commit(file_path.path(), &col1, &col2);
     }
 
-    #[test]
-    fn test_pruner() {
+    // (missing_offsets, expected number of rows)
+    // If a row wasn't fully pruned, then it should clear it up as well
+    #[test_case(1, 1)]
+    #[test_case(2, 1)]
+    #[test_case(3, 0)]
+    fn test_pruner(missing_offsets: u64, expected_rows: usize) {
         let (col1, col2) = test_data(None);
         let num_columns = 2;
         let num_rows = 2;
 
-        // (missing_offsets, expected number of rows)
-        // If a row wasn't fully pruned, then it should clear it up as well
-        let missing_offsets_scenarios = [(1, 1), (2, 1), (3, 0)];
+        let file_path = tempfile::NamedTempFile::new().unwrap();
 
-        for (missing_offsets, expected_rows) in missing_offsets_scenarios {
-            let file_path = tempfile::NamedTempFile::new().unwrap();
+        append_two_rows(num_columns, file_path.path(), &col1, &col2);
 
-            append_two_rows(num_columns, file_path.path(), &col1, &col2);
+        simulate_interrupted_prune(num_columns, file_path.path(), num_rows, missing_offsets);
 
-            simulate_interrupted_prune(num_columns, file_path.path(), num_rows, missing_offsets);
-
-            let nippy = NippyJar::load_without_header(file_path.path()).unwrap();
-            assert_eq!(nippy.rows, expected_rows);
-        }
+        let nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        assert_eq!(nippy.rows, expected_rows);
     }
 
     #[test]

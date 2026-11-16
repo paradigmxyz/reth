@@ -33,3 +33,4 @@ serde.workspace = true
 reth-tracing.workspace = true
 rand.workspace = true
 serde_json.workspace = true
+test-case.workspace = true

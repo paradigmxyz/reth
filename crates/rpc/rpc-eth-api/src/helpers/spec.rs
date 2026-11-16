@@ -191,6 +191,7 @@ pub type SignersForRpc<Provider, Rpc> = parking_lot::RwLock<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
 
     #[test]
     fn full_prune_segment_without_retention_disables_resource() {
@@ -227,8 +228,27 @@ mod tests {
         );
     }
 
-    #[test]
-    fn retained_receipts_preserve_resource_limits() {
+    #[test_case(vec![PruneSegment::Receipts], EthCapabilitiesResource::window(0, 100) ; "receipts")]
+    #[test_case(
+        vec![PruneSegment::Receipts, PruneSegment::ContractLogs],
+        EthCapabilitiesResource::window(20, 50) ;
+        "receipts_and_contract_logs"
+    )]
+    #[test_case(
+        vec![PruneSegment::Receipts, PruneSegment::TransactionLookup, PruneSegment::Bodies],
+        EthCapabilitiesResource::window(40, 100) ;
+        "receipts_lookup_and_bodies"
+    )]
+    #[test_case(vec![PruneSegment::Bodies], EthCapabilitiesResource::available_from(30) ; "bodies")]
+    #[test_case(
+        vec![PruneSegment::AccountHistory],
+        EthCapabilitiesResource::available_from(0) ;
+        "account_history"
+    )]
+    fn retained_receipts_preserve_resource_limits(
+        segments: Vec<PruneSegment>,
+        expected: EthCapabilitiesResource,
+    ) {
         let checkpoints = [
             (
                 PruneSegment::Receipts,
@@ -248,20 +268,6 @@ mod tests {
             (PruneSegment::TransactionLookup, PruneCheckpoint::pruned_through(39)),
             (PruneSegment::Bodies, PruneCheckpoint::pruned_through(29)),
         ];
-        for (segments, expected) in [
-            (vec![PruneSegment::Receipts], EthCapabilitiesResource::window(0, 100)),
-            (
-                vec![PruneSegment::Receipts, PruneSegment::ContractLogs],
-                EthCapabilitiesResource::window(20, 50),
-            ),
-            (
-                vec![PruneSegment::Receipts, PruneSegment::TransactionLookup, PruneSegment::Bodies],
-                EthCapabilitiesResource::window(40, 100),
-            ),
-            (vec![PruneSegment::Bodies], EthCapabilitiesResource::available_from(30)),
-            (vec![PruneSegment::AccountHistory], EthCapabilitiesResource::available_from(0)),
-        ] {
-            assert_eq!(effective_resource(&checkpoints, &segments), expected, "{segments:?}");
-        }
+        assert_eq!(effective_resource(&checkpoints, &segments), expected, "{segments:?}");
     }
 }

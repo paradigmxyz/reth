@@ -1186,6 +1186,7 @@ mod tests {
         fs,
         time::{SystemTime, UNIX_EPOCH},
     };
+    use test_case::test_case;
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]
@@ -1603,29 +1604,28 @@ mod tests {
         assert!(args.ip_filter().is_err());
     }
 
-    #[test]
-    fn snap_v2_flag_controls_advertisement() {
-        for (cli, enabled) in [(vec!["reth"], false), (vec!["reth", "--snap.v2"], true)] {
-            let args = CommandParser::<NetworkArgs>::parse_from(cli).args;
-            assert_eq!(args.snap_v2, enabled);
-            let config = args
-                .network_config::<EthNetworkPrimitives>(
-                    &Config::default(),
-                    MAINNET.clone(),
-                    SecretKey::from_secret_bytes([1u8; 32]).unwrap(),
-                    PathBuf::new(),
-                    Runtime::test(),
-                )
-                .build_with_noop_provider(MAINNET.clone());
-            let versions = config
-                .hello_message
-                .protocols
-                .iter()
-                .filter(|protocol| protocol.cap.name == "snap")
-                .map(|protocol| protocol.cap.version)
-                .collect::<Vec<_>>();
-            assert_eq!(versions, if enabled { vec![2] } else { vec![] });
-        }
+    #[test_case(vec!["reth"], false ; "default")]
+    #[test_case(vec!["reth", "--snap.v2"], true ; "snap_v2")]
+    fn snap_v2_flag_controls_advertisement(cli: Vec<&str>, enabled: bool) {
+        let args = CommandParser::<NetworkArgs>::parse_from(cli).args;
+        assert_eq!(args.snap_v2, enabled);
+        let config = args
+            .network_config::<EthNetworkPrimitives>(
+                &Config::default(),
+                MAINNET.clone(),
+                SecretKey::from_secret_bytes([1u8; 32]).unwrap(),
+                PathBuf::new(),
+                Runtime::test(),
+            )
+            .build_with_noop_provider(MAINNET.clone());
+        let versions = config
+            .hello_message
+            .protocols
+            .iter()
+            .filter(|protocol| protocol.cap.name == "snap")
+            .map(|protocol| protocol.cap.version)
+            .collect::<Vec<_>>();
+        assert_eq!(versions, if enabled { vec![2] } else { vec![] });
     }
 
     #[test]

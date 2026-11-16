@@ -1695,6 +1695,7 @@ mod tests {
         task::{Context, Poll, Waker},
         time::Duration,
     };
+    use test_case::test_case;
     use url::Host;
 
     use crate::{
@@ -4514,54 +4515,63 @@ mod tests {
         }
     }
 
+    #[test_case(PendingSessionHandshakeError::Timeout ; "session_timeout")]
+    #[test_case(
+        PendingSessionHandshakeError::Eth(EthStreamError::P2PStreamError(
+            P2PStreamError::HandshakeError(P2PHandshakeError::Timeout),
+        )) ;
+        "p2p_handshake_timeout"
+    )]
+    #[test_case(
+        PendingSessionHandshakeError::Eth(EthStreamError::P2PStreamError(
+            P2PStreamError::HandshakeError(P2PHandshakeError::NoResponse),
+        )) ;
+        "p2p_handshake_no_response"
+    )]
+    #[test_case(
+        PendingSessionHandshakeError::Ecies(ECIESErrorImpl::InvalidAckData.into()) ;
+        "ecies_invalid_ack_data"
+    )]
+    #[test_case(
+        PendingSessionHandshakeError::Ecies(ECIESErrorImpl::TagCheckDecryptFailed.into()) ;
+        "ecies_tag_check_decrypt_failed"
+    )]
+    #[test_case(
+        PendingSessionHandshakeError::Eth(EthStreamError::P2PStreamError(P2PStreamError::Io(
+            io::Error::other("invalid frame MAC"),
+        ))) ;
+        "invalid_frame_mac"
+    )]
     #[tokio::test]
-    async fn test_unauthenticated_outbound_errors_do_not_ban_identity() {
-        for error in [
-            PendingSessionHandshakeError::Timeout,
-            PendingSessionHandshakeError::Eth(EthStreamError::P2PStreamError(
-                P2PStreamError::HandshakeError(P2PHandshakeError::Timeout),
-            )),
-            PendingSessionHandshakeError::Eth(EthStreamError::P2PStreamError(
-                P2PStreamError::HandshakeError(P2PHandshakeError::NoResponse),
-            )),
-            PendingSessionHandshakeError::Ecies(ECIESErrorImpl::InvalidAckData.into()),
-            PendingSessionHandshakeError::Ecies(ECIESErrorImpl::TagCheckDecryptFailed.into()),
-            PendingSessionHandshakeError::Eth(EthStreamError::P2PStreamError(P2PStreamError::Io(
-                io::Error::other("invalid frame MAC"),
-            ))),
-        ] {
-            let mut peers = PeersManager::new(PeersConfig::test());
-            let peer_id = PeerId::random();
-            let addr = "8.8.8.8:30303".parse::<SocketAddr>().unwrap();
+    async fn test_unauthenticated_outbound_errors_do_not_ban_identity(
+        error: PendingSessionHandshakeError,
+    ) {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let peer_id = PeerId::random();
+        let addr = "8.8.8.8:30303".parse::<SocketAddr>().unwrap();
+        peers.add_and_connect_kind(peer_id, PeerKind::Basic, PeerAddr::from_tcp(addr), None);
+        peers.queued_actions.clear();
+        let reputation = peers.peers[&peer_id].reputation;
+        for _ in 0..=peers.max_backoff_count + 1 {
             peers.add_and_connect_kind(peer_id, PeerKind::Basic, PeerAddr::from_tcp(addr), None);
             peers.queued_actions.clear();
-            let reputation = peers.peers[&peer_id].reputation;
-            for _ in 0..=peers.max_backoff_count + 1 {
-                peers.add_and_connect_kind(
-                    peer_id,
-                    PeerKind::Basic,
-                    PeerAddr::from_tcp(addr),
-                    None,
-                );
-                peers.queued_actions.clear();
-                peers.on_outgoing_pending_session_dropped(&addr, &peer_id, &error);
-                assert_eq!(peers.peers[&peer_id].reputation, reputation);
-            }
-            let peer = &peers.peers[&peer_id];
-            assert_eq!(peer.state, PeerConnectionState::Idle);
-            assert_eq!(peer.reputation, reputation);
-            assert_eq!(peer.severe_backoff_counter, 0);
-            assert!(peer.backed_off);
-            assert!(!peers.ban_list.is_banned_peer(&peer_id));
-            assert!(peers.queued_actions.is_empty());
-            assert_eq!(peers.connection_info.num_pending_out, 0);
+            peers.on_outgoing_pending_session_dropped(&addr, &peer_id, &error);
+            assert_eq!(peers.peers[&peer_id].reputation, reputation);
+        }
+        let peer = &peers.peers[&peer_id];
+        assert_eq!(peer.state, PeerConnectionState::Idle);
+        assert_eq!(peer.reputation, reputation);
+        assert_eq!(peer.severe_backoff_counter, 0);
+        assert!(peer.backed_off);
+        assert!(!peers.ban_list.is_banned_peer(&peer_id));
+        assert!(peers.queued_actions.is_empty());
+        assert_eq!(peers.connection_info.num_pending_out, 0);
 
-            // Inbound errors remain attributable to the actual remote IP.
-            if matches!(&error, PendingSessionHandshakeError::Ecies(_)) {
-                peers.connection_info.inc_pending_in();
-                peers.on_incoming_pending_session_dropped(addr, &error);
-                assert!(peers.ban_list.is_banned_ip(&addr.ip()));
-            }
+        // Inbound errors remain attributable to the actual remote IP.
+        if matches!(&error, PendingSessionHandshakeError::Ecies(_)) {
+            peers.connection_info.inc_pending_in();
+            peers.on_incoming_pending_session_dropped(addr, &error);
+            assert!(peers.ban_list.is_banned_ip(&addr.ip()));
         }
     }
 

@@ -41,6 +41,7 @@ tracing.workspace = true
 [dev-dependencies]
 reth-ethereum-primitives.workspace = true
 reth-node-ethereum.workspace = true
+test-case.workspace = true
 
 [features]
 serde = [

@@ -53,6 +53,7 @@ mod tests {
     use reth_primitives_traits::RecoveredBlock;
     use reth_trie_common::{HashedPostState, KeccakKeyHasher};
     use std::sync::{mpsc, Arc};
+    use test_case::test_case;
 
     sol! {
         event DepositEvent(
@@ -354,40 +355,25 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_calc_base_block_reward() {
-        // ((block number, td), reward)
-        let cases = [
-            // Pre-byzantium
-            ((0, U256::ZERO), Some(ETH_TO_WEI * 5)),
-            // Byzantium
-            ((4370000, U256::ZERO), Some(ETH_TO_WEI * 3)),
-            // Petersburg
-            ((7280000, U256::ZERO), Some(ETH_TO_WEI * 2)),
-            // Merge
-            ((15537394, U256::from(58_750_000_000_000_000_000_000_u128)), None),
-        ];
-
-        for ((block_number, _td), expected_reward) in cases {
-            assert_eq!(base_block_reward(&*MAINNET, block_number), expected_reward);
-        }
+    // Pre-byzantium.
+    #[test_case(0, U256::ZERO, Some(ETH_TO_WEI * 5) ; "pre_byzantium")]
+    // Byzantium.
+    #[test_case(4370000, U256::ZERO, Some(ETH_TO_WEI * 3) ; "byzantium")]
+    // Petersburg.
+    #[test_case(7280000, U256::ZERO, Some(ETH_TO_WEI * 2) ; "petersburg")]
+    // Merge.
+    #[test_case(15537394, U256::from(58_750_000_000_000_000_000_000_u128), None ; "merge")]
+    fn test_calc_base_block_reward(block_number: u64, _td: U256, expected_reward: Option<u128>) {
+        assert_eq!(base_block_reward(&*MAINNET, block_number), expected_reward);
     }
 
-    #[test]
-    fn test_calc_full_block_reward() {
+    #[test_case(0, ETH_TO_WEI ; "no_ommers")]
+    #[test_case(1, ETH_TO_WEI + (ETH_TO_WEI >> 5) ; "one_ommer")]
+    #[test_case(2, ETH_TO_WEI + (ETH_TO_WEI >> 5) * 2 ; "two_ommers")]
+    fn test_calc_full_block_reward(num_ommers: usize, expected_reward: u128) {
         let base_reward = ETH_TO_WEI;
-        let one_thirty_twoth_reward = base_reward >> 5;
 
-        // (num_ommers, reward)
-        let cases = [
-            (0, base_reward),
-            (1, base_reward + one_thirty_twoth_reward),
-            (2, base_reward + one_thirty_twoth_reward * 2),
-        ];
-
-        for (num_ommers, expected_reward) in cases {
-            assert_eq!(block_reward(base_reward, num_ommers), expected_reward);
-        }
+        assert_eq!(block_reward(base_reward, num_ommers), expected_reward);
     }
 
     #[test]
@@ -475,45 +461,43 @@ mod tests {
         );
     }
 
-    #[test]
-    fn system_call_failures_follow_contract_policy() {
-        for address in [
-            BEACON_ROOTS_ADDRESS,
-            HISTORY_STORAGE_ADDRESS,
-            WITHDRAWAL_REQUEST_ADDRESS,
-            CONSOLIDATION_REQUEST_ADDRESS,
-        ] {
-            for code in [
-                Bytes::from_static(&[op::PUSH0, op::PUSH0, op::REVERT]),
-                Bytes::from_static(&[op::INVALID]),
-            ] {
-                let mut database = InMemoryDB::default();
-                for request_contract in [WITHDRAWAL_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS]
-                {
-                    database.insert_account_info(
-                        &request_contract,
-                        AccountInfo::default()
-                            .with_code(Bytecode::new_legacy(Bytes::from_static(&[op::STOP]))),
-                    );
-                }
-                database.insert_account_info(
-                    &address,
-                    AccountInfo::default().with_code(Bytecode::new_legacy(code)),
-                );
-                let result = execute_block(
-                    SpecId::PRAGUE,
-                    BlockEnv { number: U256::from(1), ..Default::default() },
-                    database,
-                    core::iter::empty::<Recovered<TransactionSigned>>(),
-                    None,
-                );
-                if matches!(address, BEACON_ROOTS_ADDRESS | HISTORY_STORAGE_ADDRESS) {
-                    result.unwrap();
-                } else {
-                    let error = result.unwrap_err();
-                    assert!(error.as_validation().is_some(), "{error:?}");
-                }
-            }
+    const REVERT_CODE: &[u8] = &[op::PUSH0, op::PUSH0, op::REVERT];
+    const INVALID_CODE: &[u8] = &[op::INVALID];
+
+    #[test_case(BEACON_ROOTS_ADDRESS, REVERT_CODE ; "beacon_roots_revert")]
+    #[test_case(BEACON_ROOTS_ADDRESS, INVALID_CODE ; "beacon_roots_invalid")]
+    #[test_case(HISTORY_STORAGE_ADDRESS, REVERT_CODE ; "history_storage_revert")]
+    #[test_case(HISTORY_STORAGE_ADDRESS, INVALID_CODE ; "history_storage_invalid")]
+    #[test_case(WITHDRAWAL_REQUEST_ADDRESS, REVERT_CODE ; "withdrawal_request_revert")]
+    #[test_case(WITHDRAWAL_REQUEST_ADDRESS, INVALID_CODE ; "withdrawal_request_invalid")]
+    #[test_case(CONSOLIDATION_REQUEST_ADDRESS, REVERT_CODE ; "consolidation_request_revert")]
+    #[test_case(CONSOLIDATION_REQUEST_ADDRESS, INVALID_CODE ; "consolidation_request_invalid")]
+    fn system_call_failures_follow_contract_policy(address: Address, code: &'static [u8]) {
+        let code = Bytes::from_static(code);
+        let mut database = InMemoryDB::default();
+        for request_contract in [WITHDRAWAL_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS] {
+            database.insert_account_info(
+                &request_contract,
+                AccountInfo::default()
+                    .with_code(Bytecode::new_legacy(Bytes::from_static(&[op::STOP]))),
+            );
+        }
+        database.insert_account_info(
+            &address,
+            AccountInfo::default().with_code(Bytecode::new_legacy(code)),
+        );
+        let result = execute_block(
+            SpecId::PRAGUE,
+            BlockEnv { number: U256::from(1), ..Default::default() },
+            database,
+            core::iter::empty::<Recovered<TransactionSigned>>(),
+            None,
+        );
+        if matches!(address, BEACON_ROOTS_ADDRESS | HISTORY_STORAGE_ADDRESS) {
+            result.unwrap();
+        } else {
+            let error = result.unwrap_err();
+            assert!(error.as_validation().is_some(), "{error:?}");
         }
     }
 

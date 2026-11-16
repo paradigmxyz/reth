@@ -163,35 +163,34 @@ pub mod response {
 mod tests {
     use super::*;
     use hyper::header::HeaderValue;
+    use test_case::test_case;
+
+    #[test_case("application/json" ; "json")]
+    #[test_case("application/json-rpc" ; "json_rpc")]
+    #[test_case("APPLICATION/JSON" ; "uppercase")]
+    #[test_case("application/json; charset=utf-8" ; "charset")]
+    #[test_case("application/json;charset=utf-8" ; "charset_no_space")]
+    #[test_case("application/json;  charset=UTF-8" ; "charset_two_spaces_uppercase")]
+    #[test_case(r#"application/json; charset="utf-8""# ; "quoted_charset")]
+    #[test_case("application/json ; charset=utf-8" ; "space_before_semicolon")]
+    #[test_case("application/json-rpc; charset=utf-8" ; "json_rpc_charset")]
+    #[test_case("application/json;charset=utf-8;foo=bar" ; "extra_parameter")]
+    fn json_content_types_are_accepted_whatever_their_parameters(accepted: &str) {
+        assert!(is_json(Some(&HeaderValue::from_str(accepted).unwrap())), "{accepted}");
+    }
+
+    #[test_case("" ; "empty")]
+    #[test_case("text/plain" ; "text_plain")]
+    #[test_case("application/jsonx" ; "json_suffix")]
+    #[test_case("application/json x" ; "json_space_suffix")]
+    #[test_case("application/json-rpcx" ; "json_rpc_suffix")]
+    #[test_case("application/octet-stream; charset=utf-8" ; "octet_stream")]
+    fn non_json_content_types_are_rejected(rejected: &str) {
+        assert!(!is_json(Some(&HeaderValue::from_str(rejected).unwrap())), "{rejected}");
+    }
 
     #[test]
-    fn json_content_types_are_accepted_whatever_their_parameters() {
-        for accepted in [
-            "application/json",
-            "application/json-rpc",
-            "APPLICATION/JSON",
-            "application/json; charset=utf-8",
-            "application/json;charset=utf-8",
-            "application/json;  charset=UTF-8",
-            r#"application/json; charset="utf-8""#,
-            "application/json ; charset=utf-8",
-            "application/json-rpc; charset=utf-8",
-            "application/json;charset=utf-8;foo=bar",
-        ] {
-            assert!(is_json(Some(&HeaderValue::from_str(accepted).unwrap())), "{accepted}");
-        }
-
-        for rejected in [
-            "",
-            "text/plain",
-            "application/jsonx",
-            "application/json x",
-            "application/json-rpcx",
-            "application/octet-stream; charset=utf-8",
-        ] {
-            assert!(!is_json(Some(&HeaderValue::from_str(rejected).unwrap())), "{rejected}");
-        }
-
+    fn missing_content_type_is_rejected() {
         assert!(!is_json(None));
     }
 }

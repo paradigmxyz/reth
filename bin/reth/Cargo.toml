@@ -82,6 +82,7 @@ hyper-util = { workspace = true, features = ["tokio"] }
 serde_json.workspace = true
 tar.workspace = true
 tempfile.workspace = true
+test-case.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 toml.workspace = true
 zstd.workspace = true

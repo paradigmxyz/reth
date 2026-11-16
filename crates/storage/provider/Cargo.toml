@@ -84,6 +84,7 @@ evm2.workspace = true
 tempfile.workspace = true
 assert_matches.workspace = true
 rand.workspace = true
+test-case.workspace = true
 
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 

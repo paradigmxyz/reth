@@ -459,6 +459,7 @@ mod tests {
         proof::ProofRetainer, HashBuilder, Nibbles, TrieAccount, EMPTY_ROOT_HASH,
     };
     use std::sync::Arc;
+    use test_case::test_case;
 
     fn key(value: u64) -> B256 {
         B256::left_padding_from(&value.to_be_bytes())
@@ -656,28 +657,27 @@ mod tests {
         assert_eq!(*client.priorities(), [Priority::Normal]);
     }
 
+    #[test_case(vec![(key(100), account(B256::repeat_byte(0xbb)))] ; "one_account")]
+    #[test_case(
+        vec![
+            (key(100), account(B256::repeat_byte(0xaa))),
+            (key(200), account(B256::repeat_byte(0xbb))),
+        ] ;
+        "two_accounts"
+    )]
     #[tokio::test]
-    async fn a_response_without_slots_or_proof_reports_the_state_unavailable() {
-        let batches = [
-            vec![(key(100), account(B256::repeat_byte(0xbb)))],
-            vec![
-                (key(100), account(B256::repeat_byte(0xaa))),
-                (key(200), account(B256::repeat_byte(0xbb))),
-            ],
-        ];
-        for accounts in batches {
-            let peer = PeerId::random();
-            let client = Arc::new(TestSnapClient::new([response(peer, 1, Vec::new(), Vec::new())]));
+    async fn a_response_without_slots_or_proof_reports_the_state_unavailable(
+        accounts: Vec<(B256, TrieAccount)>,
+    ) {
+        let peer = PeerId::random();
+        let client = Arc::new(TestSnapClient::new([response(peer, 1, Vec::new(), Vec::new())]));
 
-            let outcome = downloader(Arc::clone(&client), request(&accounts), &accounts)
-                .unwrap()
-                .await
-                .unwrap();
+        let outcome =
+            downloader(Arc::clone(&client), request(&accounts), &accounts).unwrap().await.unwrap();
 
-            assert_eq!(outcome, StorageRangeOutcome::Unavailable { peer_id: peer });
-            // Lacking the state is not misbehaviour.
-            assert!(client.reported().is_empty());
-        }
+        assert_eq!(outcome, StorageRangeOutcome::Unavailable { peer_id: peer });
+        // Lacking the state is not misbehaviour.
+        assert!(client.reported().is_empty());
     }
 
     #[tokio::test]

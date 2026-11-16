@@ -390,6 +390,7 @@ mod tests {
         CompressedBody, CompressedHeader, CompressedSlimReceipts, TotalDifficulty,
     };
     use alloy_primitives::{B256, U256};
+    use test_case::test_case;
 
     /// Build an `ere` block tuple from uncompressed sample bytes; the index/group tests only care
     /// about the tuple's presence, not its decoded contents.
@@ -422,18 +423,17 @@ mod tests {
         assert_eq!(recovered.block_count(), 2);
     }
 
-    #[test]
-    fn test_dynamic_block_index_negative_offsets_roundtrip() {
+    #[test_case(2, vec![-2048, -1024, -512, -256] ; "two_components")]
+    #[test_case(5, vec![-50, -40, -30, -20, -10, -9, -8, -7, -6, -5] ; "five_components")]
+    fn test_dynamic_block_index_negative_offsets_roundtrip(
+        component_count: u64,
+        offsets: Vec<i64>,
+    ) {
         // Offsets point backward from the index to earlier entries, so they are negative in real
         // files. Cover the full component-count range (2 and 5) to exercise the `i64` LE encoding.
-        for (component_count, offsets) in [
-            (2u64, vec![-2048, -1024, -512, -256]),
-            (5u64, vec![-50, -40, -30, -20, -10, -9, -8, -7, -6, -5]),
-        ] {
-            let index = DynamicBlockIndex::new(1000, component_count, offsets);
-            let recovered = DynamicBlockIndex::from_entry(&index.to_entry()).unwrap();
-            assert_eq!(recovered, index);
-        }
+        let index = DynamicBlockIndex::new(1000, component_count, offsets);
+        let recovered = DynamicBlockIndex::from_entry(&index.to_entry()).unwrap();
+        assert_eq!(recovered, index);
     }
 
     #[test]

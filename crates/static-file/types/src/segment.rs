@@ -690,64 +690,76 @@ mod tests {
     use alloy_primitives::Bytes;
     use reth_nippy_jar::NippyJar;
     use std::env::temp_dir;
+    use test_case::test_case;
 
-    #[test]
-    fn test_filename() {
-        let test_vectors = [
-            (StaticFileSegment::Headers, 2..=30, "static_file_headers_2_30", None),
-            (StaticFileSegment::Receipts, 30..=300, "static_file_receipts_30_300", None),
-            (
-                StaticFileSegment::Transactions,
-                1_123_233..=11_223_233,
-                "static_file_transactions_1123233_11223233",
-                None,
-            ),
-            (
-                StaticFileSegment::AccountChangeSets,
-                1_123_233..=11_223_233,
-                "static_file_account-change-sets_1123233_11223233",
-                None,
-            ),
-            (
-                StaticFileSegment::StorageChangeSets,
-                1_123_233..=11_223_233,
-                "static_file_storage-change-sets_1123233_11223233",
-                None,
-            ),
-            (
-                StaticFileSegment::Headers,
-                2..=30,
-                "static_file_headers_2_30_none_lz4",
-                Some(Compression::Lz4),
-            ),
-            (
-                StaticFileSegment::Headers,
-                2..=30,
-                "static_file_headers_2_30_none_zstd",
-                Some(Compression::Zstd),
-            ),
-            (
-                StaticFileSegment::Headers,
-                2..=30,
-                "static_file_headers_2_30_none_zstd-dict",
-                Some(Compression::ZstdWithDictionary),
-            ),
-        ];
-
-        for (segment, block_range, filename, compression) in test_vectors {
-            let block_range: SegmentRangeInclusive = block_range.into();
-            if let Some(compression) = compression {
-                assert_eq!(
-                    segment.filename_with_configuration(compression, &block_range),
-                    filename
-                );
-            } else {
-                assert_eq!(segment.filename(&block_range), filename);
-            }
-
-            assert_eq!(StaticFileSegment::parse_filename(filename), Some((segment, block_range)));
+    #[test_case(StaticFileSegment::Headers, 2..=30, "static_file_headers_2_30", None ; "headers")]
+    #[test_case(
+        StaticFileSegment::Receipts,
+        30..=300,
+        "static_file_receipts_30_300",
+        None
+        ; "receipts"
+    )]
+    #[test_case(
+        StaticFileSegment::Transactions,
+        1_123_233..=11_223_233,
+        "static_file_transactions_1123233_11223233",
+        None
+        ; "transactions"
+    )]
+    #[test_case(
+        StaticFileSegment::AccountChangeSets,
+        1_123_233..=11_223_233,
+        "static_file_account-change-sets_1123233_11223233",
+        None
+        ; "account_change_sets"
+    )]
+    #[test_case(
+        StaticFileSegment::StorageChangeSets,
+        1_123_233..=11_223_233,
+        "static_file_storage-change-sets_1123233_11223233",
+        None
+        ; "storage_change_sets"
+    )]
+    #[test_case(
+        StaticFileSegment::Headers,
+        2..=30,
+        "static_file_headers_2_30_none_lz4",
+        Some(Compression::Lz4)
+        ; "headers_lz4"
+    )]
+    #[test_case(
+        StaticFileSegment::Headers,
+        2..=30,
+        "static_file_headers_2_30_none_zstd",
+        Some(Compression::Zstd)
+        ; "headers_zstd"
+    )]
+    #[test_case(
+        StaticFileSegment::Headers,
+        2..=30,
+        "static_file_headers_2_30_none_zstd-dict",
+        Some(Compression::ZstdWithDictionary)
+        ; "headers_zstd_dict"
+    )]
+    fn test_filename(
+        segment: StaticFileSegment,
+        block_range: RangeInclusive<u64>,
+        filename: &str,
+        compression: Option<Compression>,
+    ) {
+        let block_range: SegmentRangeInclusive = block_range.into();
+        if let Some(compression) = compression {
+            assert_eq!(segment.filename_with_configuration(compression, &block_range), filename);
+        } else {
+            assert_eq!(segment.filename(&block_range), filename);
         }
 
+        assert_eq!(StaticFileSegment::parse_filename(filename), Some((segment, block_range)));
+    }
+
+    #[test]
+    fn test_filename_parsing() {
         assert_eq!(StaticFileSegment::parse_filename("static_file_headers_2"), None);
         assert_eq!(StaticFileSegment::parse_filename("static_file_headers_"), None);
 

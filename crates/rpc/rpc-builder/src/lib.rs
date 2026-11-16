@@ -2409,6 +2409,7 @@ impl RpcServerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
 
     #[test]
     fn parse_eth_call_bundle_selection() {
@@ -2817,27 +2818,27 @@ mod tests {
         assert!(!closure_called, "Closure should NOT be called when module is not configured");
     }
 
+    #[test_case(RpcServerConfig::http(Default::default()) ; "http")]
+    #[test_case(RpcServerConfig::ws(Default::default()) ; "ws")]
+    #[test_case(
+        RpcServerConfig::http(Default::default()).with_ws(Default::default()) ;
+        "http_and_ws"
+    )]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_stop_rpc_servers() {
+    async fn test_stop_rpc_servers(config: RpcServerConfig) {
         let modules = TransportRpcModules::default()
             .with_http(create_test_module())
             .with_ws(create_test_module());
-        for config in [
-            RpcServerConfig::http(Default::default()),
-            RpcServerConfig::ws(Default::default()),
-            RpcServerConfig::http(Default::default()).with_ws(Default::default()),
-        ] {
-            let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, 0));
-            let handle =
-                config.with_http_address(addr).with_ws_address(addr).start(&modules).await.unwrap();
-            let servers = handle.http.iter().chain(handle.ws.iter()).cloned().collect::<Vec<_>>();
-            let cloned = handle.clone();
+        let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, 0));
+        let handle =
+            config.with_http_address(addr).with_ws_address(addr).start(&modules).await.unwrap();
+        let servers = handle.http.iter().chain(handle.ws.iter()).cloned().collect::<Vec<_>>();
+        let cloned = handle.clone();
 
-            handle.stop().unwrap();
-            for server in servers {
-                tokio::time::timeout(Duration::from_secs(5), server.stopped()).await.unwrap();
-            }
-            assert!(matches!(cloned.stop(), Err(AlreadyStoppedError)));
+        handle.stop().unwrap();
+        for server in servers {
+            tokio::time::timeout(Duration::from_secs(5), server.stopped()).await.unwrap();
         }
+        assert!(matches!(cloned.stop(), Err(AlreadyStoppedError)));
     }
 }

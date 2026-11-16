@@ -3,6 +3,7 @@
 
 use ef_tests::{cases::blockchain_test::BlockchainTests, suite::Suite};
 use std::path::PathBuf;
+use test_case::test_case;
 
 macro_rules! general_state_test {
     ($test_name:ident, $dir:ident) => {
@@ -84,22 +85,15 @@ mod general_state_tests {
     general_state_test!(vm_tests, VMTests);
 }
 
-macro_rules! blockchain_test {
-    ($test_name:ident, $dir:ident) => {
-        #[test]
-        fn $test_name() {
-            reth_tracing::init_test_tracing();
-            let suite_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("ethereum-tests")
-                .join("BlockchainTests");
+#[test_case("ValidBlocks" ; "valid_blocks")]
+#[test_case("InvalidBlocks" ; "invalid_blocks")]
+fn blockchain_test(dir: &str) {
+    reth_tracing::init_test_tracing();
+    let suite_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ethereum-tests").join("BlockchainTests");
 
-            BlockchainTests::new(suite_path).run_only(stringify!($dir));
-        }
-    };
+    BlockchainTests::new(suite_path).run_only(dir);
 }
-
-blockchain_test!(valid_blocks, ValidBlocks);
-blockchain_test!(invalid_blocks, InvalidBlocks);
 
 #[test]
 fn eest_fixtures() {

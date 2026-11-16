@@ -99,6 +99,7 @@ reth-db-common.workspace = true
 reth-storage-overlay.workspace = true
 
 rand.workspace = true
+test-case.workspace = true
 
 jsonrpsee = { workspace = true, features = ["server"] }
 

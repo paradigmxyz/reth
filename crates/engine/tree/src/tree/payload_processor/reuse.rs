@@ -1117,6 +1117,7 @@ mod tests {
     use reth_evm::{BlockExecutor, BlockExecutorFactory, ConfigureEvm, Evm, EvmFor};
     use reth_evm_ethereum::{EthBlockExecutionCtx, EthEvmConfig, EthEvmEnv};
     use reth_trie_common::bundle_state::BundleState;
+    use test_case::test_case;
 
     const BENEFICIARY: Address = Address::repeat_byte(0xbe);
     /// Does nothing.
@@ -1814,25 +1815,21 @@ mod tests {
     }
 
     #[test]
-    fn rejects_rebasing_unbounded_or_zero_balances() {
+    fn rebases_bounded_balance_reads() {
         let rebased = [tx(1, 0, sender(4), 1), tx(2, 0, sender(4), 1)];
         assert_eq!(reuse_in(&rebased, &[1], false), [Err(ReuseMiss::Missing), Ok(())]);
-        for txs in [
-            [tx(1, 0, RICH, 1), tx(2, 0, RICH, 1)],
-            [tx(1, 0, ZERO_BALANCE, 1), tx(2, 0, ZERO_BALANCE, 1)],
-            // Any unbounded balance read makes every balance exact.
-            [tx(1, 0, sender(4), 1), tx(4, 0, RICH, 1)],
-        ] {
-            assert_eq!(
-                reuse_in(&txs, &[1], false),
-                [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]
-            );
-        }
     }
 
-    #[test]
-    fn preserves_account_lifecycle_and_rejects_rebasing_it() {
-        let creation = Recovered::new_unchecked(
+    #[test_case([tx(1, 0, RICH, 1), tx(2, 0, RICH, 1)] ; "rich")]
+    #[test_case([tx(1, 0, ZERO_BALANCE, 1), tx(2, 0, ZERO_BALANCE, 1)] ; "zero_balance")]
+    // Any unbounded balance read makes every balance exact.
+    #[test_case([tx(1, 0, sender(4), 1), tx(4, 0, RICH, 1)] ; "any_unbounded_read")]
+    fn rejects_rebasing_unbounded_or_zero_balances(txs: [Recovered<TransactionSigned>; 2]) {
+        assert_eq!(reuse_in(&txs, &[1], false), [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]);
+    }
+
+    fn creation_tx() -> Recovered<TransactionSigned> {
+        Recovered::new_unchecked(
             TransactionSigned::new_unhashed(
                 Transaction::Legacy(TxLegacy {
                     chain_id: Some(1),
@@ -1845,33 +1842,37 @@ mod tests {
                 Signature::test_signature(),
             ),
             sender(1),
+        )
+    }
+
+    #[test_case(creation_tx(), sender(1).create(0) ; "creation")]
+    #[test_case(tx(1, 0, SELFDESTRUCTER, 0), SELFDESTRUCTER ; "selfdestruct")]
+    fn preserves_account_lifecycle_and_rejects_rebasing_it(
+        transaction: Recovered<TransactionSigned>,
+        address: Address,
+    ) {
+        let txs = [transaction];
+        assert_eq!(reuse(&txs), [Ok(())]);
+        let prewarm = Prewarm::new(&txs, &[0]);
+        // An observed SELFDESTRUCT balance is exact; creation also cannot have its
+        // lifecycle flags reset by metadata replacement during rebasing.
+        let mut db = parent_state();
+        let mut info = DynDatabase::get_account(&mut db, &address).unwrap().unwrap();
+        info.balance += U256::ONE;
+        db.insert_account_info(&address, info);
+        assert_eq!(
+            prewarm.results.take_valid(0, &mut db).unwrap().map(drop),
+            Err(ReuseMiss::Stale)
         );
-        for (transaction, address) in
-            [(creation, sender(1).create(0)), (tx(1, 0, SELFDESTRUCTER, 0), SELFDESTRUCTER)]
-        {
-            let txs = [transaction];
-            assert_eq!(reuse(&txs), [Ok(())]);
-            let prewarm = Prewarm::new(&txs, &[0]);
-            // An observed SELFDESTRUCT balance is exact; creation also cannot have its
-            // lifecycle flags reset by metadata replacement during rebasing.
-            let mut db = parent_state();
-            let mut info = DynDatabase::get_account(&mut db, &address).unwrap().unwrap();
-            info.balance += U256::ONE;
-            db.insert_account_info(&address, info);
-            assert_eq!(
-                prewarm.results.take_valid(0, &mut db).unwrap().map(drop),
-                Err(ReuseMiss::Stale)
-            );
-            let result = prewarm.results.take_valid(0, &mut parent_state()).unwrap().unwrap();
-            let account =
-                result.pending_state.account_changes().find(|a| a.address == address).unwrap();
-            if address == sender(1).create(0) {
-                assert!(account.created);
-                assert_eq!(account.storage.slots[&U256::ZERO].value.current, U256::ONE);
-            } else {
-                // EIP-6780 retains pre-existing contracts after SELFDESTRUCT.
-                assert_eq!(account.current.unwrap().balance, U256::ZERO);
-            }
+        let result = prewarm.results.take_valid(0, &mut parent_state()).unwrap().unwrap();
+        let account =
+            result.pending_state.account_changes().find(|a| a.address == address).unwrap();
+        if address == sender(1).create(0) {
+            assert!(account.created);
+            assert_eq!(account.storage.slots[&U256::ZERO].value.current, U256::ONE);
+        } else {
+            // EIP-6780 retains pre-existing contracts after SELFDESTRUCT.
+            assert_eq!(account.current.unwrap().balance, U256::ZERO);
         }
     }
 

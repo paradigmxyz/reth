@@ -295,6 +295,7 @@ mod tests {
         net::{Ipv4Addr, SocketAddr, SocketAddrV4},
         time::Duration,
     };
+    use test_case::test_case;
 
     use crate::config::RethRpcServerConfig;
 
@@ -306,45 +307,45 @@ mod tests {
     }
 
     #[test]
-    fn rpc_cache_limits_reach_eth_config() {
+    fn default_rpc_cache_limits_reach_eth_config() {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
         assert_eq!(args.eth_config().cache, EthStateCacheConfig::default());
+    }
 
-        for (timeout, expected_timeout) in
-            [("0s", Duration::ZERO), ("2500ms", Duration::from_millis(2500))]
-        {
-            let args = CommandParser::<RpcServerArgs>::parse_from([
-                "reth",
-                "--rpc-cache.max-blocks",
-                "10",
-                "--rpc-cache.max-receipts",
-                "20",
-                "--rpc-cache.max-bals",
-                "30",
-                "--rpc-cache.max-blocks-bytes",
-                "1024",
-                "--rpc-cache.max-receipts-bytes",
-                "0",
-                "--rpc-cache.max-bals-bytes",
-                "4096",
-                "--rpc-cache.idle-timeout",
-                timeout,
-            ])
-            .args;
-            assert_eq!(
-                args.eth_config().cache,
-                EthStateCacheConfig {
-                    max_blocks: 10,
-                    max_receipts: 20,
-                    max_bals: 30,
-                    max_blocks_bytes: 1024,
-                    max_receipts_bytes: 0,
-                    max_bals_bytes: 4096,
-                    idle_timeout: expected_timeout,
-                    ..Default::default()
-                }
-            );
-        }
+    #[test_case("0s", Duration::ZERO ; "zero_timeout")]
+    #[test_case("2500ms", Duration::from_millis(2500) ; "millis_timeout")]
+    fn rpc_cache_limits_reach_eth_config(timeout: &str, expected_timeout: Duration) {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--rpc-cache.max-blocks",
+            "10",
+            "--rpc-cache.max-receipts",
+            "20",
+            "--rpc-cache.max-bals",
+            "30",
+            "--rpc-cache.max-blocks-bytes",
+            "1024",
+            "--rpc-cache.max-receipts-bytes",
+            "0",
+            "--rpc-cache.max-bals-bytes",
+            "4096",
+            "--rpc-cache.idle-timeout",
+            timeout,
+        ])
+        .args;
+        assert_eq!(
+            args.eth_config().cache,
+            EthStateCacheConfig {
+                max_blocks: 10,
+                max_receipts: 20,
+                max_bals: 30,
+                max_blocks_bytes: 1024,
+                max_receipts_bytes: 0,
+                max_bals_bytes: 4096,
+                idle_timeout: expected_timeout,
+                ..Default::default()
+            }
+        );
     }
 
     #[test]

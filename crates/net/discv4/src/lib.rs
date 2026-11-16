@@ -2719,6 +2719,7 @@ mod tests {
     use reth_ethereum_forks::{EnrForkIdEntry, ForkHash};
     use reth_network_peers::mainnet_nodes;
     use std::{future::poll_fn, net::Ipv6Addr};
+    use test_case::test_case;
 
     #[tokio::test]
     async fn test_duplicate_packet_rejected_without_decoding() {
@@ -2988,73 +2989,74 @@ mod tests {
         assert_eq!(rotator.next(&id), id);
     }
 
+    #[test_case("127.0.0.1:30303", "[::1]:30303", false ; "ipv4_then_ipv6")]
+    #[test_case("127.0.0.1:30303", "[::1]:30303", true ; "ipv4_then_ipv6_initial_ping_pending")]
+    #[test_case("[::1]:30303", "127.0.0.1:30303", false ; "ipv6_then_ipv4")]
+    #[test_case("[::1]:30303", "127.0.0.1:30303", true ; "ipv6_then_ipv4_initial_ping_pending")]
     #[tokio::test]
-    async fn test_ping_establishes_bond_per_ip() {
-        for (primary, secondary) in
-            [("127.0.0.1:30303", "[::1]:30303"), ("[::1]:30303", "127.0.0.1:30303")]
-        {
-            for initial_ping_pending in [false, true] {
-                let (_, mut service) = create_discv4().await;
-                let (egress, mut packets) = mpsc::channel(16);
-                service.egress = egress;
-                let primary = NodeRecord::new(primary.parse().unwrap(), PeerId::random());
-                let secondary = NodeRecord::new(secondary.parse().unwrap(), primary.id);
-                service.add_node(primary);
-                let pong = Pong {
-                    to: service.local_node_record.into(),
-                    echo: service.pending_pings[&primary.id].echo_hash,
-                    expire: service.ping_expiration(),
-                    enr_sq: None,
-                };
-                if !initial_ping_pending {
-                    service.on_pong(pong.clone(), primary.udp_addr(), primary.id);
-                }
-
-                let ping = Ping {
-                    from: secondary.into(),
-                    to: service.local_node_record.into(),
-                    expire: service.ping_expiration(),
-                    enr_sq: None,
-                };
-                service.on_ping(ping.clone(), secondary.udp_addr(), secondary.id, B256::random());
-                if initial_ping_pending {
-                    assert_eq!(service.queued_pings.len(), 1);
-                    service.ping_buffered();
-                    assert_eq!(service.queued_pings.len(), 1);
-                    service.on_pong(pong, primary.udp_addr(), primary.id);
-                    service.ping_buffered();
-                }
-
-                assert!(service.has_bond(primary.id, primary.address));
-                assert!(!service.has_bond(secondary.id, secondary.address));
-                let request = &service.pending_pings[&secondary.id];
-                assert_eq!(request.node.address, secondary.address);
-                assert!(matches!(request.reason, PingReason::EstablishBond));
-                let pong = Pong {
-                    to: service.local_node_record.into(),
-                    echo: request.echo_hash,
-                    expire: service.ping_expiration(),
-                    enr_sq: None,
-                };
-                while packets.try_recv().is_ok() {}
-                let find_node =
-                    FindNode { id: PeerId::random(), expire: service.ping_expiration() };
-                service.on_find_node(find_node, secondary.udp_addr(), secondary.id);
-                assert!(packets.try_recv().is_err());
-
-                service.on_pong(pong, secondary.udp_addr(), secondary.id);
-                assert!(service.has_bond(primary.id, primary.address));
-                assert!(service.has_bond(secondary.id, secondary.address));
-                service.on_find_node(find_node, secondary.udp_addr(), secondary.id);
-                let (packet, to) = packets.try_recv().unwrap();
-                assert_eq!(to, secondary.udp_addr());
-                assert!(matches!(Message::decode(&packet).unwrap().msg, Message::Neighbours(_)));
-
-                service.on_ping(ping, secondary.udp_addr(), secondary.id, B256::random());
-                assert!(service.pending_pings.is_empty());
-                assert!(service.queued_pings.is_empty());
-            }
+    async fn test_ping_establishes_bond_per_ip(
+        primary: &str,
+        secondary: &str,
+        initial_ping_pending: bool,
+    ) {
+        let (_, mut service) = create_discv4().await;
+        let (egress, mut packets) = mpsc::channel(16);
+        service.egress = egress;
+        let primary = NodeRecord::new(primary.parse().unwrap(), PeerId::random());
+        let secondary = NodeRecord::new(secondary.parse().unwrap(), primary.id);
+        service.add_node(primary);
+        let pong = Pong {
+            to: service.local_node_record.into(),
+            echo: service.pending_pings[&primary.id].echo_hash,
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        if !initial_ping_pending {
+            service.on_pong(pong.clone(), primary.udp_addr(), primary.id);
         }
+
+        let ping = Ping {
+            from: secondary.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping.clone(), secondary.udp_addr(), secondary.id, B256::random());
+        if initial_ping_pending {
+            assert_eq!(service.queued_pings.len(), 1);
+            service.ping_buffered();
+            assert_eq!(service.queued_pings.len(), 1);
+            service.on_pong(pong, primary.udp_addr(), primary.id);
+            service.ping_buffered();
+        }
+
+        assert!(service.has_bond(primary.id, primary.address));
+        assert!(!service.has_bond(secondary.id, secondary.address));
+        let request = &service.pending_pings[&secondary.id];
+        assert_eq!(request.node.address, secondary.address);
+        assert!(matches!(request.reason, PingReason::EstablishBond));
+        let pong = Pong {
+            to: service.local_node_record.into(),
+            echo: request.echo_hash,
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        while packets.try_recv().is_ok() {}
+        let find_node = FindNode { id: PeerId::random(), expire: service.ping_expiration() };
+        service.on_find_node(find_node, secondary.udp_addr(), secondary.id);
+        assert!(packets.try_recv().is_err());
+
+        service.on_pong(pong, secondary.udp_addr(), secondary.id);
+        assert!(service.has_bond(primary.id, primary.address));
+        assert!(service.has_bond(secondary.id, secondary.address));
+        service.on_find_node(find_node, secondary.udp_addr(), secondary.id);
+        let (packet, to) = packets.try_recv().unwrap();
+        assert_eq!(to, secondary.udp_addr());
+        assert!(matches!(Message::decode(&packet).unwrap().msg, Message::Neighbours(_)));
+
+        service.on_ping(ping, secondary.udp_addr(), secondary.id, B256::random());
+        assert!(service.pending_pings.is_empty());
+        assert!(service.queued_pings.is_empty());
     }
 
     #[tokio::test]

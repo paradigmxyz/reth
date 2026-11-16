@@ -689,37 +689,39 @@ mod tests {
 
     #[cfg(unix)]
     use std::{os::unix::net::UnixListener, path::Path};
-
-    #[tokio::test]
     #[cfg(unix)]
-    async fn test_ipc_socket_permissions() {
-        for (permissions, mode) in
-            [("0777", 0o777), ("600", 0o600), ("0600", 0o600), ("0o600", 0o600)]
-        {
-            let endpoint = dummy_name();
-            let server = Builder::default()
-                .set_ipc_socket_permissions(Some(permissions.to_string()))
-                .build(endpoint.clone());
-            match server.start(RpcModule::new(())).await {
-                Ok(handle) if !cfg!(target_os = "macos") => {
-                    let actual = std::fs::metadata(&endpoint).unwrap().permissions().mode();
-                    assert_eq!(actual & 0o777, mode);
-                    handle.stop().unwrap();
-                    tokio::time::timeout(Duration::from_secs(5), handle.stopped()).await.unwrap();
-                }
-                Err(error)
-                    if !cfg!(any(
-                        target_os = "linux",
-                        target_os = "android",
-                        target_os = "openbsd"
-                    )) =>
-                {
-                    assert_eq!(error.source.kind(), io::ErrorKind::Unsupported, "{mode:o}");
-                    assert_eq!(error.endpoint, endpoint);
-                    assert!(!Path::new(&endpoint).exists());
-                }
-                result => panic!("Unexpected IPC startup result: {result:?}"),
+    use test_case::test_case;
+
+    #[cfg(unix)]
+    #[test_case("0777", 0o777 ; "mode_0777")]
+    #[test_case("600", 0o600 ; "mode_600")]
+    #[test_case("0600", 0o600 ; "mode_0600")]
+    #[test_case("0o600", 0o600 ; "mode_0o600")]
+    #[tokio::test]
+    async fn test_ipc_socket_permissions(permissions: &str, mode: u32) {
+        let endpoint = dummy_name();
+        let server = Builder::default()
+            .set_ipc_socket_permissions(Some(permissions.to_string()))
+            .build(endpoint.clone());
+        match server.start(RpcModule::new(())).await {
+            Ok(handle) if !cfg!(target_os = "macos") => {
+                let actual = std::fs::metadata(&endpoint).unwrap().permissions().mode();
+                assert_eq!(actual & 0o777, mode);
+                handle.stop().unwrap();
+                tokio::time::timeout(Duration::from_secs(5), handle.stopped()).await.unwrap();
             }
+            Err(error)
+                if !cfg!(any(
+                    target_os = "linux",
+                    target_os = "android",
+                    target_os = "openbsd"
+                )) =>
+            {
+                assert_eq!(error.source.kind(), io::ErrorKind::Unsupported, "{mode:o}");
+                assert_eq!(error.endpoint, endpoint);
+                assert!(!Path::new(&endpoint).exists());
+            }
+            result => panic!("Unexpected IPC startup result: {result:?}"),
         }
     }
 

@@ -764,6 +764,7 @@ mod tests {
         process::Command,
         sync::{atomic::Ordering, Arc, Mutex},
     };
+    use test_case::test_case;
     use tracing_subscriber::{
         filter::LevelFilter, layer::SubscriberExt, registry::LookupSpan, Registry,
     };
@@ -795,62 +796,62 @@ mod tests {
         )
     }
 
-    #[test]
-    fn transaction_conversion_preserves_results() {
-        for (count, bal) in [(10, false), (200, false), (200, true)] {
-            let processor = test_processor();
-            let (prewarm, receiver) = processor.spawn_tx_iterator(
-                ((0..count).collect::<Vec<_>>(), |_| Ok::<_, std::io::Error>(converted_tx())),
-                count,
-                bal,
-                true,
-            );
-            let mut indices = Vec::new();
-            for _ in 0..count {
-                let (idx, tx) = receiver.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
-                assert!(tx.is_ok());
-                indices.push(idx);
-            }
-            if bal {
-                indices.sort_unstable();
-            }
-            assert_eq!(indices, (0..count).collect::<Vec<_>>());
-            assert_eq!(prewarm.unwrap().iter().count(), count);
+    #[test_case(10, false)]
+    #[test_case(200, false)]
+    #[test_case(200, true)]
+    fn transaction_conversion_preserves_results(count: usize, bal: bool) {
+        let processor = test_processor();
+        let (prewarm, receiver) = processor.spawn_tx_iterator(
+            ((0..count).collect::<Vec<_>>(), |_| Ok::<_, std::io::Error>(converted_tx())),
+            count,
+            bal,
+            true,
+        );
+        let mut indices = Vec::new();
+        for _ in 0..count {
+            let (idx, tx) = receiver.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+            assert!(tx.is_ok());
+            indices.push(idx);
         }
+        if bal {
+            indices.sort_unstable();
+        }
+        assert_eq!(indices, (0..count).collect::<Vec<_>>());
+        assert_eq!(prewarm.unwrap().iter().count(), count);
     }
 
-    #[test]
-    fn transaction_conversion_stops_on_error() {
-        for (count, bal, fail_at) in
-            [(10, false, 0), (10, true, 0), (200, false, 0), (200, false, 4), (200, false, 20)]
-        {
-            let processor = test_processor();
-            let (_, receiver) = processor.spawn_tx_iterator(
-                ((0..count).collect::<Vec<_>>(), move |idx| {
-                    if idx >= fail_at {
-                        Err(std::io::Error::other("invalid transaction"))
-                    } else {
-                        Ok(converted_tx())
-                    }
-                }),
-                count,
-                bal,
-                false,
-            );
-            let mut results = Vec::new();
-            loop {
-                match receiver.recv_timeout(std::time::Duration::from_secs(10)) {
-                    Ok(tx) => results.push(tx),
-                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
-                    Err(err) => panic!("conversion did not terminate: {err}"),
+    #[test_case(10, false, 0)]
+    #[test_case(10, true, 0)]
+    #[test_case(200, false, 0)]
+    #[test_case(200, false, 4)]
+    #[test_case(200, false, 20)]
+    fn transaction_conversion_stops_on_error(count: usize, bal: bool, fail_at: usize) {
+        let processor = test_processor();
+        let (_, receiver) = processor.spawn_tx_iterator(
+            ((0..count).collect::<Vec<_>>(), move |idx| {
+                if idx >= fail_at {
+                    Err(std::io::Error::other("invalid transaction"))
+                } else {
+                    Ok(converted_tx())
                 }
+            }),
+            count,
+            bal,
+            false,
+        );
+        let mut results = Vec::new();
+        loop {
+            match receiver.recv_timeout(std::time::Duration::from_secs(10)) {
+                Ok(tx) => results.push(tx),
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                Err(err) => panic!("conversion did not terminate: {err}"),
             }
-            assert!(results.iter().any(|(_, tx)| tx.is_err()));
-            assert!(results.len() < count);
-            if !bal {
-                assert_eq!(results.len(), fail_at + 1);
-                assert!(results.last().unwrap().1.is_err());
-            }
+        }
+        assert!(results.iter().any(|(_, tx)| tx.is_err()));
+        assert!(results.len() < count);
+        if !bal {
+            assert_eq!(results.len(), fail_at + 1);
+            assert!(results.last().unwrap().1.is_err());
         }
     }
 
@@ -880,54 +881,57 @@ mod tests {
         assert_eq!(indices, (0..count).collect::<Vec<_>>());
     }
 
-    #[test]
-    fn dropping_payload_handle_stops_transaction_conversion() {
-        for (count, bal, pause_at) in
-            [(10, false, 0), (1000, false, 0), (1000, false, 4), (1000, true, 0)]
-        {
-            let processor = test_processor();
-            let calls = Arc::new(super::AtomicUsize::new(0));
-            let converted = calls.clone();
-            let (started_tx, started_rx) = crossbeam_channel::unbounded();
-            let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(0);
-            let (_, receiver) = processor.spawn_tx_iterator(
-                ((0..count).collect::<Vec<_>>(), move |idx| {
-                    converted.fetch_add(1, Ordering::Relaxed);
-                    if idx >= pause_at {
-                        started_tx.send(()).unwrap();
-                        let _ = release_rx.recv_timeout(std::time::Duration::from_secs(10));
-                    }
-                    Ok::<_, std::io::Error>(converted_tx())
-                }),
-                count,
-                bal,
-                false,
-            );
-            let handle = super::PayloadHandle {
-                prewarm_handle: super::CacheTaskHandle::<(), evm2::BaseEvmTypes> {
-                    saved_cache: None,
-                    to_prewarm_task: None,
-                    executed_tx_index: Default::default(),
-                    prewarm_results: None,
-                    cache_metrics: None,
-                },
-                transactions: receiver,
-                _span: tracing::Span::none(),
-            };
-            started_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
-            drop(handle);
-            drop(release_tx);
-
-            // The converter owns the last sender, so disconnection confirms recovery exited.
-            loop {
-                match started_rx.recv_timeout(std::time::Duration::from_secs(10)) {
-                    Ok(()) => {}
-                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
-                    Err(err) => panic!("conversion did not terminate: {err}"),
+    #[test_case(10, false, 0)]
+    #[test_case(1000, false, 0)]
+    #[test_case(1000, false, 4)]
+    #[test_case(1000, true, 0)]
+    fn dropping_payload_handle_stops_transaction_conversion(
+        count: usize,
+        bal: bool,
+        pause_at: usize,
+    ) {
+        let processor = test_processor();
+        let calls = Arc::new(super::AtomicUsize::new(0));
+        let converted = calls.clone();
+        let (started_tx, started_rx) = crossbeam_channel::unbounded();
+        let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(0);
+        let (_, receiver) = processor.spawn_tx_iterator(
+            ((0..count).collect::<Vec<_>>(), move |idx| {
+                converted.fetch_add(1, Ordering::Relaxed);
+                if idx >= pause_at {
+                    started_tx.send(()).unwrap();
+                    let _ = release_rx.recv_timeout(std::time::Duration::from_secs(10));
                 }
+                Ok::<_, std::io::Error>(converted_tx())
+            }),
+            count,
+            bal,
+            false,
+        );
+        let handle = super::PayloadHandle {
+            prewarm_handle: super::CacheTaskHandle::<(), evm2::BaseEvmTypes> {
+                saved_cache: None,
+                to_prewarm_task: None,
+                executed_tx_index: Default::default(),
+                prewarm_results: None,
+                cache_metrics: None,
+            },
+            transactions: receiver,
+            _span: tracing::Span::none(),
+        };
+        started_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        drop(handle);
+        drop(release_tx);
+
+        // The converter owns the last sender, so disconnection confirms recovery exited.
+        loop {
+            match started_rx.recv_timeout(std::time::Duration::from_secs(10)) {
+                Ok(()) => {}
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                Err(err) => panic!("conversion did not terminate: {err}"),
             }
-            assert!(calls.load(Ordering::Relaxed) < count);
         }
+        assert!(calls.load(Ordering::Relaxed) < count);
     }
 
     fn make_saved_cache(hash: B256) -> SavedCache {

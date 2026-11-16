@@ -1060,6 +1060,7 @@ mod tests {
     use proptest::prelude::*;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use std::str::FromStr;
+    use test_case::test_case;
 
     /// Takes as input a struct / encoded hex message pair, ensuring that we encode to the exact hex
     /// message, and decode to the exact struct.
@@ -1198,107 +1199,109 @@ mod tests {
         assert_eq!(latest.number, 100);
     }
 
-    #[test]
-    fn eth_68_tx_hash_roundtrip() {
-        let vectors = vec![
-            (
-                NewPooledTransactionHashes68 { types: vec![], sizes: vec![], hashes: vec![] },
-                &hex!("c380c0c0")[..],
-            ),
-            (
-                NewPooledTransactionHashes68 {
-                    types: vec![0x00],
-                    sizes: vec![0x00],
-                    hashes: vec![
-                        B256::ZERO,
-                    ],
-                },
-                &hex!(
-                    "e500c180e1a00000000000000000000000000000000000000000000000000000000000000000"
-                )[..],
-            ),
-            (
-                NewPooledTransactionHashes68 {
-                    types: vec![0x00, 0x00],
-                    sizes: vec![0x00, 0x00],
-                    hashes: vec![
-                        B256::ZERO,
-                        B256::ZERO,
-                    ],
-                },
-                &hex!(
-                    "f84a820000c28080f842a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000"
-                )[..],
-            ),
-            (
-                NewPooledTransactionHashes68 {
-                    types: vec![0x02],
-                    sizes: vec![0xb6],
-                    hashes: vec![
-                        b256!("0xfecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124"),
-                    ],
-                },
-                &hex!(
-                    "e602c281b6e1a0fecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124"
-                )[..],
-            ),
-            (
-                NewPooledTransactionHashes68 {
-                    types: vec![0xff, 0xff],
-                    sizes: vec![0xffffffff, 0xffffffff],
-                    hashes: vec![
-                        B256::repeat_byte(0xff),
-                        B256::repeat_byte(0xff),
-                    ],
-                },
-                &hex!(
-                    "f85282ffffca84ffffffff84fffffffff842a0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-                )[..],
-            ),
-            (
-                NewPooledTransactionHashes68 {
-                    types: vec![0xff, 0xff],
-                    sizes: vec![0xffffffff, 0xffffffff],
-                    hashes: vec![
-                        b256!("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe"),
-                        b256!("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe"),
-                    ],
-                },
-                &hex!(
-                    "f85282ffffca84ffffffff84fffffffff842a0beefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafea0beefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe"
-                )[..],
-            ),
-            (
-                NewPooledTransactionHashes68 {
-                    types: vec![0x10, 0x10],
-                    sizes: vec![0xdeadc0de, 0xdeadc0de],
-                    hashes: vec![
-                        b256!("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2"),
-                        b256!("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2"),
-                    ],
-                },
-                &hex!(
-                    "f852821010ca84deadc0de84deadc0def842a03b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2a03b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2"
-                )[..],
-            ),
-            (
-                NewPooledTransactionHashes68 {
-                    types: vec![0x6f, 0x6f],
-                    sizes: vec![0x7fffffff, 0x7fffffff],
-                    hashes: vec![
-                        B256::with_last_byte(2),
-                        B256::with_last_byte(2),
-                    ],
-                },
-                &hex!(
-                    "f852826f6fca847fffffff847ffffffff842a00000000000000000000000000000000000000000000000000000000000000002a00000000000000000000000000000000000000000000000000000000000000002"
-                )[..],
-            ),
-        ];
-
-        for vector in vectors {
-            test_encoding_vector(vector);
-        }
+    #[test_case(
+        NewPooledTransactionHashes68 { types: vec![], sizes: vec![], hashes: vec![] },
+        &hex!("c380c0c0")[..] ;
+        "empty"
+    )]
+    #[test_case(
+        NewPooledTransactionHashes68 {
+            types: vec![0x00],
+            sizes: vec![0x00],
+            hashes: vec![
+                B256::ZERO,
+            ],
+        },
+        &hex!(
+            "e500c180e1a00000000000000000000000000000000000000000000000000000000000000000"
+        )[..] ;
+        "one_zero_hash"
+    )]
+    #[test_case(
+        NewPooledTransactionHashes68 {
+            types: vec![0x00, 0x00],
+            sizes: vec![0x00, 0x00],
+            hashes: vec![
+                B256::ZERO,
+                B256::ZERO,
+            ],
+        },
+        &hex!(
+            "f84a820000c28080f842a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000"
+        )[..] ;
+        "two_zero_hashes"
+    )]
+    #[test_case(
+        NewPooledTransactionHashes68 {
+            types: vec![0x02],
+            sizes: vec![0xb6],
+            hashes: vec![
+                b256!("0xfecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124"),
+            ],
+        },
+        &hex!(
+            "e602c281b6e1a0fecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124"
+        )[..] ;
+        "one_eip1559_hash"
+    )]
+    #[test_case(
+        NewPooledTransactionHashes68 {
+            types: vec![0xff, 0xff],
+            sizes: vec![0xffffffff, 0xffffffff],
+            hashes: vec![
+                B256::repeat_byte(0xff),
+                B256::repeat_byte(0xff),
+            ],
+        },
+        &hex!(
+            "f85282ffffca84ffffffff84fffffffff842a0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        )[..] ;
+        "max_types_and_sizes"
+    )]
+    #[test_case(
+        NewPooledTransactionHashes68 {
+            types: vec![0xff, 0xff],
+            sizes: vec![0xffffffff, 0xffffffff],
+            hashes: vec![
+                b256!("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe"),
+                b256!("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe"),
+            ],
+        },
+        &hex!(
+            "f85282ffffca84ffffffff84fffffffff842a0beefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafea0beefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe"
+        )[..] ;
+        "repeated_hash"
+    )]
+    #[test_case(
+        NewPooledTransactionHashes68 {
+            types: vec![0x10, 0x10],
+            sizes: vec![0xdeadc0de, 0xdeadc0de],
+            hashes: vec![
+                b256!("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2"),
+                b256!("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2"),
+            ],
+        },
+        &hex!(
+            "f852821010ca84deadc0de84deadc0def842a03b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2a03b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2"
+        )[..] ;
+        "repeated_type_0x10"
+    )]
+    #[test_case(
+        NewPooledTransactionHashes68 {
+            types: vec![0x6f, 0x6f],
+            sizes: vec![0x7fffffff, 0x7fffffff],
+            hashes: vec![
+                B256::with_last_byte(2),
+                B256::with_last_byte(2),
+            ],
+        },
+        &hex!(
+            "f852826f6fca847fffffff847ffffffff842a00000000000000000000000000000000000000000000000000000000000000002a00000000000000000000000000000000000000000000000000000000000000002"
+        )[..] ;
+        "repeated_type_0x6f"
+    )]
+    fn eth_68_tx_hash_roundtrip(hashes: NewPooledTransactionHashes68, encoded: &[u8]) {
+        test_encoding_vector((hashes, encoded));
     }
 
     #[test]
@@ -1321,34 +1324,30 @@ mod tests {
         assert_eq!(encoded, hex!("d480c0c09000000000000000000000000000000000"));
     }
 
-    #[test]
-    fn eth_72_tx_hash_roundtrip() {
-        let vectors = vec![
-            // `None` is always encoded as a zero-filled 16 byte mask, matching go-ethereum's
-            // non-optional `[16]byte` field.
-            (
-                NewPooledTransactionHashes72 {
-                    types: vec![],
-                    sizes: vec![],
-                    hashes: vec![],
-                    cell_mask: None,
-                },
-                &hex!("d480c0c09000000000000000000000000000000000")[..],
-            ),
-            (
-                NewPooledTransactionHashes72 {
-                    types: vec![],
-                    sizes: vec![],
-                    hashes: vec![],
-                    cell_mask: Some(B128::repeat_byte(0x11)),
-                },
-                &hex!("d480c0c09011111111111111111111111111111111")[..],
-            ),
-        ];
-
-        for vector in vectors {
-            test_encoding_vector(vector);
-        }
+    // `None` is always encoded as a zero-filled 16 byte mask, matching go-ethereum's
+    // non-optional `[16]byte` field.
+    #[test_case(
+        NewPooledTransactionHashes72 {
+            types: vec![],
+            sizes: vec![],
+            hashes: vec![],
+            cell_mask: None,
+        },
+        &hex!("d480c0c09000000000000000000000000000000000")[..] ;
+        "no_mask"
+    )]
+    #[test_case(
+        NewPooledTransactionHashes72 {
+            types: vec![],
+            sizes: vec![],
+            hashes: vec![],
+            cell_mask: Some(B128::repeat_byte(0x11)),
+        },
+        &hex!("d480c0c09011111111111111111111111111111111")[..] ;
+        "mask"
+    )]
+    fn eth_72_tx_hash_roundtrip(hashes: NewPooledTransactionHashes72, encoded: &[u8]) {
+        test_encoding_vector((hashes, encoded));
     }
 
     #[test]

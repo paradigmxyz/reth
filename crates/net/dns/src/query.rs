@@ -247,6 +247,7 @@ mod tests {
     use super::*;
     use crate::{resolver::TimeoutResolver, DnsDiscoveryConfig, MapResolver};
     use std::future::poll_fn;
+    use test_case::test_case;
 
     fn entry_hash(entry_txt: &str) -> String {
         BASE32_NOPAD.encode(&keccak256(entry_txt.as_bytes()).as_slice()[..16])
@@ -311,26 +312,23 @@ mod tests {
         }
     }
 
-    #[test]
-    fn verify_entry_hash_accepts_eip_1459_vectors() {
-        let entries = [
-            (
-                "C7HRFPF3BLGF3YR4DY5KX3SMBE",
-                "enrtree://AM5FCQLWIZX2QFPNJAP7VUERCCRNGRHWZG3YYHIUV7BVDQ5FDPRT2@morenodes.example.org",
-            ),
-            (
-                "JWXYDBPXYWG6FX3GMDIBFA6CJ4",
-                "enrtree-branch:2XS2367YHAXJFGLZHVAWLQD4ZY,H4FHT4B454P6UXFD7JCYQ5PWDY,MHTDO6TMUBRIA2XWG5LUDACK24",
-            ),
-            (
-                "2XS2367YHAXJFGLZHVAWLQD4ZY",
-                "enr:-HW4QOFzoVLaFJnNhbgMoDXPnOvcdVuj7pDpqRvh6BRDO68aVi5ZcjB3vzQRZH2IcLBGHzo8uUN3snqmgTiE56CH3AMBgmlkgnY0iXNlY3AyNTZrMaECC2_24YYkYHEgdzxlSNKQEnHhuNAbNlMlWJxrJxbAFvA",
-            ),
-        ];
-
-        for (hash, entry) in entries {
-            verify_entry_hash(hash, entry).unwrap();
-        }
+    #[test_case(
+        "C7HRFPF3BLGF3YR4DY5KX3SMBE",
+        "enrtree://AM5FCQLWIZX2QFPNJAP7VUERCCRNGRHWZG3YYHIUV7BVDQ5FDPRT2@morenodes.example.org" ;
+        "link"
+    )]
+    #[test_case(
+        "JWXYDBPXYWG6FX3GMDIBFA6CJ4",
+        "enrtree-branch:2XS2367YHAXJFGLZHVAWLQD4ZY,H4FHT4B454P6UXFD7JCYQ5PWDY,MHTDO6TMUBRIA2XWG5LUDACK24" ;
+        "branch"
+    )]
+    #[test_case(
+        "2XS2367YHAXJFGLZHVAWLQD4ZY",
+        "enr:-HW4QOFzoVLaFJnNhbgMoDXPnOvcdVuj7pDpqRvh6BRDO68aVi5ZcjB3vzQRZH2IcLBGHzo8uUN3snqmgTiE56CH3AMBgmlkgnY0iXNlY3AyNTZrMaECC2_24YYkYHEgdzxlSNKQEnHhuNAbNlMlWJxrJxbAFvA" ;
+        "enr"
+    )]
+    fn verify_entry_hash_accepts_eip_1459_vectors(hash: &str, entry: &str) {
+        verify_entry_hash(hash, entry).unwrap();
     }
 
     #[test]

@@ -1791,82 +1791,80 @@ mod tests {
     use reth_rpc::EthApiBuilder;
     use reth_rpc_eth_types::EthStateCacheConfig;
     use reth_transaction_pool::noop::NoopTransactionPool;
+    use test_case::test_case;
 
+    #[test_case(0, false, false)]
+    #[test_case(2, false, false)]
+    #[test_case(10, false, false)]
+    #[test_case(2, true, false)]
+    #[test_case(10, false, true)]
     #[tokio::test]
-    async fn bal_prewarming_startup_range_and_native_stop() {
-        for (count, native, native_event) in [
-            (0, false, false),
-            (2, false, false),
-            (10, false, false),
-            (2, true, false),
-            (10, false, true),
-        ] {
-            let provider = MockEthProvider::default();
-            let blocks: Vec<_> = (0..=3)
-                .map(|number| {
-                    let block = RecoveredBlock::new_unhashed(
-                        Block {
-                            header: Header {
-                                number,
-                                block_access_list_hash: (native && number == 3)
-                                    .then_some(B256::ZERO),
-                                ..Default::default()
-                            },
-                            body: BlockBody::default(),
+    async fn bal_prewarming_startup_range_and_native_stop(
+        count: usize,
+        native: bool,
+        native_event: bool,
+    ) {
+        let provider = MockEthProvider::default();
+        let blocks: Vec<_> = (0..=3)
+            .map(|number| {
+                let block = RecoveredBlock::new_unhashed(
+                    Block {
+                        header: Header {
+                            number,
+                            block_access_list_hash: (native && number == 3).then_some(B256::ZERO),
+                            ..Default::default()
                         },
-                        Vec::new(),
-                    );
-                    provider.add_block(block.hash(), block.clone_block());
-                    block
-                })
-                .collect();
-            let api = EthApiBuilder::new(
-                provider,
-                NoopTransactionPool::default(),
-                NoopNetwork::default(),
-                EthEvmConfig::mainnet(),
-            )
-            .eth_state_cache_config(EthStateCacheConfig {
-                prewarm_bals: Some(count),
-                ..Default::default()
-            })
-            .build();
-
-            let chain = Chain::new(
-                blocks.clone(),
-                ExecutionOutcome::default().with_receipts(vec![vec![]; blocks.len()]),
-                Default::default(),
-            );
-            cache_new_blocks_task(
-                api.cache().clone(),
-                futures::stream::iter([reth_chain_state::CanonStateNotification::Commit {
-                    new: Arc::new(chain),
-                }]),
-            )
-            .await;
-            let events = futures::stream::iter(native_event.then(|| {
-                let mut block = blocks.last().unwrap().clone_block();
-                block.header.number += 1;
-                block.header.block_access_list_hash = Some(B256::ZERO);
-                CanonStateNotification::Commit {
-                    new: Arc::new(Chain::<reth_chain_state::EthPrimitives>::new(
-                        [RecoveredBlock::new_unhashed(block, Vec::new())],
-                        Default::default(),
-                        Default::default(),
-                    )),
-                }
-            }));
-            prewarm_new_block_bals_task(api.clone(), events, count).await;
-            for (number, block) in blocks.iter().enumerate() {
-                assert_eq!(
-                    api.cache().get_bal(block.hash()).await.unwrap().is_some(),
-                    !native &&
-                        !native_event &&
-                        number != 0 &&
-                        number > 3_usize.saturating_sub(count),
-                    "count={count}, native={native}, native_event={native_event}, block={number}",
+                        body: BlockBody::default(),
+                    },
+                    Vec::new(),
                 );
+                provider.add_block(block.hash(), block.clone_block());
+                block
+            })
+            .collect();
+        let api = EthApiBuilder::new(
+            provider,
+            NoopTransactionPool::default(),
+            NoopNetwork::default(),
+            EthEvmConfig::mainnet(),
+        )
+        .eth_state_cache_config(EthStateCacheConfig {
+            prewarm_bals: Some(count),
+            ..Default::default()
+        })
+        .build();
+
+        let chain = Chain::new(
+            blocks.clone(),
+            ExecutionOutcome::default().with_receipts(vec![vec![]; blocks.len()]),
+            Default::default(),
+        );
+        cache_new_blocks_task(
+            api.cache().clone(),
+            futures::stream::iter([reth_chain_state::CanonStateNotification::Commit {
+                new: Arc::new(chain),
+            }]),
+        )
+        .await;
+        let events = futures::stream::iter(native_event.then(|| {
+            let mut block = blocks.last().unwrap().clone_block();
+            block.header.number += 1;
+            block.header.block_access_list_hash = Some(B256::ZERO);
+            CanonStateNotification::Commit {
+                new: Arc::new(Chain::<reth_chain_state::EthPrimitives>::new(
+                    [RecoveredBlock::new_unhashed(block, Vec::new())],
+                    Default::default(),
+                    Default::default(),
+                )),
             }
+        }));
+        prewarm_new_block_bals_task(api.clone(), events, count).await;
+        for (number, block) in blocks.iter().enumerate() {
+            assert_eq!(
+                api.cache().get_bal(block.hash()).await.unwrap().is_some(),
+                !native && !native_event && number != 0 && number > 3_usize.saturating_sub(count),
+                "count={count}, native={native}, native_event={native_event}, block={number}",
+            );
         }
     }
 }

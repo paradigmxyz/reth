@@ -57,6 +57,7 @@ mod tests {
     use alloy_primitives::hex;
     use reth_chainspec::ChainInfo;
     use reth_provider::BlockHashReader;
+    use test_case::test_case;
 
     use super::*;
 
@@ -107,26 +108,28 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_canonical_head() {
-        let hash1 = B256::from_slice(&hex!(
-            "1111111111111111111111111111111111111111111111111111111111111111"
-        ));
-        let hash2 = B256::from_slice(&hex!(
-            "2222222222222222222222222222222222222222222222222222222222222222"
-        ));
+    const HASH1: B256 =
+        B256::new(hex!("1111111111111111111111111111111111111111111111111111111111111111"));
+    const HASH2: B256 =
+        B256::new(hex!("2222222222222222222222222222222222222222222222222222222222222222"));
 
-        let test_cases = [
-            ((hash1, 2, 1, hash2), hash1), // Higher block wins
-            ((hash1, 1, 2, hash2), hash2), // Lower block stays
-            ((hash1, 1, 1, hash2), hash1), // Same height, lower hash wins
-            ((hash2, 1, 1, hash1), hash1), // Same height, lower hash stays
-        ];
-
-        for ((curr_hash, curr_num, head_num, head_hash), expected) in test_cases {
-            let provider = MockProvider::new(head_num, head_hash);
-            let consensus = ParliaConsensus::new(provider);
-            assert_eq!(consensus.canonical_head(curr_hash, curr_num).unwrap(), expected);
-        }
+    // Higher block wins.
+    #[test_case(HASH1, 2, 1, HASH2, HASH1 ; "higher_block_wins")]
+    // Lower block stays.
+    #[test_case(HASH1, 1, 2, HASH2, HASH2 ; "lower_block_stays")]
+    // Same height, lower hash wins.
+    #[test_case(HASH1, 1, 1, HASH2, HASH1 ; "same_height_lower_hash_wins")]
+    // Same height, lower hash stays.
+    #[test_case(HASH2, 1, 1, HASH1, HASH1 ; "same_height_lower_hash_stays")]
+    fn test_canonical_head(
+        curr_hash: B256,
+        curr_num: BlockNumber,
+        head_num: BlockNumber,
+        head_hash: B256,
+        expected: B256,
+    ) {
+        let provider = MockProvider::new(head_num, head_hash);
+        let consensus = ParliaConsensus::new(provider);
+        assert_eq!(consensus.canonical_head(curr_hash, curr_num).unwrap(), expected);
     }
 }

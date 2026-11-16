@@ -4219,6 +4219,7 @@ mod tests {
         StoredNibbles, StoredNibblesSubKey,
     };
     use std::{sync::mpsc, time::Duration};
+    use test_case::test_case;
 
     /// Seeds block zero through the writer core because [`SaveBlocksInput`] only describes
     /// advancing an existing persistence frontier.
@@ -5666,7 +5667,9 @@ mod tests {
         V2,
     }
 
-    fn run_save_blocks_and_verify(mode: StorageMode) {
+    #[test_case(StorageMode::V1 ; "v1")]
+    #[test_case(StorageMode::V2 ; "v2")]
+    fn test_save_blocks_table_assertions(mode: StorageMode) {
         use alloy_primitives::map::{FbBuildHasher, HashMap};
 
         let factory = create_test_provider_factory();
@@ -5928,16 +5931,6 @@ mod tests {
     }
 
     #[test]
-    fn test_save_blocks_v1_table_assertions() {
-        run_save_blocks_and_verify(StorageMode::V1);
-    }
-
-    #[test]
-    fn test_save_blocks_v2_table_assertions() {
-        run_save_blocks_and_verify(StorageMode::V2);
-    }
-
-    #[test]
     fn test_write_and_remove_state_roundtrip_v2() {
         let factory = create_test_provider_factory();
         let storage_settings = StorageSettings::v2();
@@ -6137,27 +6130,29 @@ mod tests {
         assert!(!all_blocks.contains(&10), "block 10 should be unwound");
     }
 
-    #[test]
-    fn test_chain_state_block_numbers_are_read_by_exact_key() {
-        for (finalized, safe) in
-            [(None, None), (None, Some(100)), (Some(90), None), (Some(90), Some(100))]
-        {
-            let factory = create_test_provider_factory();
-            let provider = factory.provider_rw().unwrap();
-            if let Some(block_number) = finalized {
-                provider.save_finalized_block_number(block_number).unwrap();
-            }
-            if let Some(block_number) = safe {
-                provider.save_safe_block_number(block_number).unwrap();
-            }
-
-            assert_eq!(provider.last_finalized_block_number().unwrap(), finalized);
-            assert_eq!(provider.last_safe_block_number().unwrap(), safe);
-            provider.commit().unwrap();
-
-            let provider = factory.provider().unwrap();
-            assert_eq!(provider.last_finalized_block_number().unwrap(), finalized);
-            assert_eq!(provider.last_safe_block_number().unwrap(), safe);
+    #[test_case(None, None)]
+    #[test_case(None, Some(100))]
+    #[test_case(Some(90), None)]
+    #[test_case(Some(90), Some(100))]
+    fn test_chain_state_block_numbers_are_read_by_exact_key(
+        finalized: Option<BlockNumber>,
+        safe: Option<BlockNumber>,
+    ) {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        if let Some(block_number) = finalized {
+            provider.save_finalized_block_number(block_number).unwrap();
         }
+        if let Some(block_number) = safe {
+            provider.save_safe_block_number(block_number).unwrap();
+        }
+
+        assert_eq!(provider.last_finalized_block_number().unwrap(), finalized);
+        assert_eq!(provider.last_safe_block_number().unwrap(), safe);
+        provider.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        assert_eq!(provider.last_finalized_block_number().unwrap(), finalized);
+        assert_eq!(provider.last_safe_block_number().unwrap(), safe);
     }
 }

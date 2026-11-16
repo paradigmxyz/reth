@@ -95,6 +95,7 @@ assert_matches.workspace = true
 eyre.workspace = true
 proptest.workspace = true
 rand.workspace = true
+test-case.workspace = true
 tracing-subscriber = { workspace = true, features = ["registry"] }
 
 [features]

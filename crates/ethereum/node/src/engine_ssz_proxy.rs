@@ -1264,6 +1264,7 @@ mod tests {
     use reth_tasks::Runtime;
     use reth_transaction_pool::noop::NoopTransactionPool;
     use ssz::Encode;
+    use test_case::test_case;
     use tokio::sync::mpsc::unbounded_channel;
 
     #[tokio::test]
@@ -1494,44 +1495,49 @@ mod tests {
         );
     }
 
+    #[test_case(EngineApiError::UnknownPayload, 404, "unknown-payload" ; "unknown_payload")]
+    #[test_case(
+        EngineApiError::BlobRequestTooLarge { len: 129 },
+        413,
+        "request-too-large" ;
+        "request_too_large"
+    )]
+    #[test_case(
+        EngineApiError::ForkChoiceUpdate(BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
+            ForkchoiceUpdateError::InvalidState,
+        )),
+        409,
+        "invalid-forkchoice" ;
+        "invalid_forkchoice"
+    )]
+    #[test_case(
+        EngineApiError::ForkChoiceUpdate(BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
+            ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes,
+        )),
+        422,
+        "invalid-attributes" ;
+        "invalid_attributes"
+    )]
+    #[test_case(
+        EngineApiError::ForkChoiceUpdate(BeaconForkChoiceUpdateError::PayloadJob(
+            PayloadBuilderError::MissingParentHeader(B256::ZERO),
+        )),
+        500,
+        "internal" ;
+        "internal"
+    )]
     #[tokio::test]
-    async fn engine_errors_preserve_validation_semantics() {
-        for (error, status, kind) in [
-            (EngineApiError::UnknownPayload, 404, "unknown-payload"),
-            (EngineApiError::BlobRequestTooLarge { len: 129 }, 413, "request-too-large"),
-            (
-                EngineApiError::ForkChoiceUpdate(
-                    BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
-                        ForkchoiceUpdateError::InvalidState,
-                    ),
-                ),
-                409,
-                "invalid-forkchoice",
-            ),
-            (
-                EngineApiError::ForkChoiceUpdate(
-                    BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
-                        ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes,
-                    ),
-                ),
-                422,
-                "invalid-attributes",
-            ),
-            (
-                EngineApiError::ForkChoiceUpdate(BeaconForkChoiceUpdateError::PayloadJob(
-                    PayloadBuilderError::MissingParentHeader(B256::ZERO),
-                )),
-                500,
-                "internal",
-            ),
-        ] {
-            let response = engine_error_response(error);
-            assert_eq!(response.status(), status);
-            assert_eq!(response.headers()[CONTENT_TYPE], PROBLEM_JSON);
-            let body = response.into_body().collect().await.unwrap().to_bytes();
-            let problem: serde_json::Value = serde_json::from_slice(&body).unwrap();
-            assert_eq!(problem["type"], format!("/engine-api/errors/{kind}"));
-        }
+    async fn engine_errors_preserve_validation_semantics(
+        error: EngineApiError,
+        status: u16,
+        kind: &str,
+    ) {
+        let response = engine_error_response(error);
+        assert_eq!(response.status(), status);
+        assert_eq!(response.headers()[CONTENT_TYPE], PROBLEM_JSON);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let problem: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(problem["type"], format!("/engine-api/errors/{kind}"));
     }
 
     #[test]
@@ -1546,9 +1552,8 @@ mod tests {
         assert_eq!(parse_bodies_range_query("from=1&count=33").unwrap_err().status(), 413);
     }
 
-    #[test]
-    fn payload_bodies_are_filtered_at_fork_boundaries() {
-        let chain_spec = ChainSpecBuilder::default()
+    fn fork_boundary_chain_spec() -> reth_chainspec::ChainSpec {
+        ChainSpecBuilder::default()
             .chain(1.into())
             .genesis(Default::default())
             .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(10))
@@ -1556,38 +1561,44 @@ mod tests {
             .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(30))
             .with_fork(EthereumHardfork::Osaka, ForkCondition::Timestamp(40))
             .with_fork(EthereumHardfork::Amsterdam, ForkCondition::Timestamp(50))
-            .build();
-        for (fork, start, end) in [
-            (EngineSszFork::Shanghai, 10, 20),
-            (EngineSszFork::Cancun, 20, 30),
-            (EngineSszFork::Prague, 30, 40),
-            (EngineSszFork::Osaka, 40, 50),
-        ] {
-            let body = ExecutionPayloadBodyV1 {
-                transactions: vec![Bytes::from_static(&[1, 2, 3])],
-                withdrawals: Some(vec![]),
-            };
-            let response = payload_bodies_response(
-                Ok(vec![
-                    Some((start - 1, body.clone())),
-                    Some((start, body.clone())),
-                    Some((end - 1, body.clone())),
-                    Some((end, body)),
-                    None,
-                ]),
-                |body| ExecutionPayloadBodyShanghai::try_from(body).ok(),
-                fork,
-                &chain_spec,
-            )
-            .unwrap();
-            assert_eq!(
-                response.entries.iter().map(|entry| entry.available).collect::<Vec<_>>(),
-                [false, true, true, false, false]
-            );
-            for index in [0, 3, 4] {
-                assert_eq!(response.entries[index].body, ExecutionPayloadBodyShanghai::default());
-            }
+            .build()
+    }
+
+    #[test_case(EngineSszFork::Shanghai, 10, 20)]
+    #[test_case(EngineSszFork::Cancun, 20, 30)]
+    #[test_case(EngineSszFork::Prague, 30, 40)]
+    #[test_case(EngineSszFork::Osaka, 40, 50)]
+    fn payload_bodies_are_filtered_at_fork_boundaries(fork: EngineSszFork, start: u64, end: u64) {
+        let chain_spec = fork_boundary_chain_spec();
+        let body = ExecutionPayloadBodyV1 {
+            transactions: vec![Bytes::from_static(&[1, 2, 3])],
+            withdrawals: Some(vec![]),
+        };
+        let response = payload_bodies_response(
+            Ok(vec![
+                Some((start - 1, body.clone())),
+                Some((start, body.clone())),
+                Some((end - 1, body.clone())),
+                Some((end, body)),
+                None,
+            ]),
+            |body| ExecutionPayloadBodyShanghai::try_from(body).ok(),
+            fork,
+            &chain_spec,
+        )
+        .unwrap();
+        assert_eq!(
+            response.entries.iter().map(|entry| entry.available).collect::<Vec<_>>(),
+            [false, true, true, false, false]
+        );
+        for index in [0, 3, 4] {
+            assert_eq!(response.entries[index].body, ExecutionPayloadBodyShanghai::default());
         }
+    }
+
+    #[test]
+    fn timestamps_match_fork_boundaries() {
+        let chain_spec = fork_boundary_chain_spec();
         assert!(timestamp_matches_fork(&chain_spec, EngineSszFork::Paris, 9));
         assert!(!timestamp_matches_fork(&chain_spec, EngineSszFork::Paris, 10));
         assert!(!timestamp_matches_fork(&chain_spec, EngineSszFork::Amsterdam, 49));

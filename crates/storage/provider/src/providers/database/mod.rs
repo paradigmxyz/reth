@@ -1047,6 +1047,7 @@ mod tests {
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
     use std::{ops::RangeInclusive, sync::Arc};
+    use test_case::test_case;
 
     #[test]
     fn common_history_provider() {
@@ -1433,44 +1434,49 @@ mod tests {
         assert!(factory.database_provider_ro().unwrap().ensure_sync_mode(true).is_ok());
     }
 
+    const MOVED: PruneCheckpoint = PruneCheckpoint {
+        block_number: Some(7),
+        tx_number: Some(15),
+        prune_mode: PruneMode::Before(8),
+    };
+    const AVAILABLE: PruneCheckpoint =
+        PruneCheckpoint { block_number: None, tx_number: None, ..MOVED };
+    const PRUNED: PruneCheckpoint =
+        PruneCheckpoint { block_number: Some(4), tx_number: Some(9), ..MOVED };
+    const COVERED: PruneCheckpoint =
+        PruneCheckpoint { block_number: Some(2), tx_number: Some(5), ..MOVED };
+    const ANCHOR: PruneCheckpoint = PruneCheckpoint { tx_number: None, ..MOVED };
+
+    #[test_case(3, &[(0, 9)], [MOVED; 2], [AVAILABLE; 2] ; "continuous")]
+    #[test_case(10, &[(5, 9)], [PRUNED; 2], [PRUNED; 2] ; "pruned prefix")]
+    #[test_case(10, &[(5, 9)], [MOVED; 2], [PRUNED; 2] ; "padded prefix")]
+    #[test_case(3, &[(0, 4)], [MOVED; 2], [MOVED; 2] ; "above tip")]
+    #[test_case(3, &[(0, 2), (4, 9)], [MOVED; 2], [MOVED; 2] ; "gap")]
+    #[test_case(3, &[(0, 2), (6, 9)], [MOVED; 2], [MOVED; 2] ; "empty file gap")]
+    #[test_case(3, &[(0, 2), (4, 9)], [COVERED, MOVED], [AVAILABLE, MOVED] ; "covered receipts")]
+    #[test_case(3, &[(0, 2), (4, 9)], [MOVED, COVERED], [MOVED, AVAILABLE] ; "covered logs")]
+    #[test_case(3, &[(0, 9)], [ANCHOR; 2], [ANCHOR; 2] ; "snap anchor")]
+    #[test_case(3, &[(5, 9)], [MOVED; 2], [MOVED; 2] ; "empty first file")]
+    #[test_case(3, &[], [MOVED; 2], [MOVED; 2] ; "no files")]
+    fn receipt_availability_preserves_prune_checkpoints(
+        blocks_per_file: u64,
+        receipt_blocks: &[(u64, u64)],
+        stored: [PruneCheckpoint; 2],
+        expected: [PruneCheckpoint; 2],
+    ) {
+        let factory = receipt_availability_test_factory(blocks_per_file, receipt_blocks, stored);
+        let before = factory.get_prune_checkpoints().unwrap();
+        assert_eq!(
+            factory.get_prune_checkpoints_for_availability().unwrap(),
+            [(PruneSegment::Receipts, expected[0]), (PruneSegment::ContractLogs, expected[1])],
+        );
+        assert_eq!(factory.get_prune_checkpoints().unwrap(), before);
+    }
+
     #[test]
-    fn receipt_availability_preserves_prune_checkpoints() {
-        let moved = PruneCheckpoint {
-            block_number: Some(7),
-            tx_number: Some(15),
-            prune_mode: PruneMode::Before(8),
-        };
-        let available = PruneCheckpoint { block_number: None, tx_number: None, ..moved };
-        let pruned = PruneCheckpoint { block_number: Some(4), tx_number: Some(9), ..moved };
-        let covered = PruneCheckpoint { block_number: Some(2), tx_number: Some(5), ..moved };
-        let anchor = PruneCheckpoint { tx_number: None, ..moved };
-
-        for (case, blocks_per_file, receipt_blocks, stored, expected) in [
-            ("continuous", 3, vec![(0, 9)], [moved; 2], [available; 2]),
-            ("pruned prefix", 10, vec![(5, 9)], [pruned; 2], [pruned; 2]),
-            ("padded prefix", 10, vec![(5, 9)], [moved; 2], [pruned; 2]),
-            ("above tip", 3, vec![(0, 4)], [moved; 2], [moved; 2]),
-            ("gap", 3, vec![(0, 2), (4, 9)], [moved; 2], [moved; 2]),
-            ("empty file gap", 3, vec![(0, 2), (6, 9)], [moved; 2], [moved; 2]),
-            ("covered receipts", 3, vec![(0, 2), (4, 9)], [covered, moved], [available, moved]),
-            ("covered logs", 3, vec![(0, 2), (4, 9)], [moved, covered], [moved, available]),
-            ("snap anchor", 3, vec![(0, 9)], [anchor; 2], [anchor; 2]),
-            ("empty first file", 3, vec![(5, 9)], [moved; 2], [moved; 2]),
-            ("no files", 3, vec![], [moved; 2], [moved; 2]),
-        ] {
-            let factory =
-                receipt_availability_test_factory(blocks_per_file, &receipt_blocks, stored);
-            let before = factory.get_prune_checkpoints().unwrap();
-            assert_eq!(
-                factory.get_prune_checkpoints_for_availability().unwrap(),
-                [(PruneSegment::Receipts, expected[0]), (PruneSegment::ContractLogs, expected[1])],
-                "{case}",
-            );
-            assert_eq!(factory.get_prune_checkpoints().unwrap(), before);
-        }
-
+    fn receipt_availability_keeps_v1_prune_checkpoints() {
         // Storage v1 keeps new receipts in MDBX when receipt pruning is enabled.
-        let factory = receipt_availability_test_factory(3, &[(0, 9)], [moved; 2]);
+        let factory = receipt_availability_test_factory(3, &[(0, 9)], [MOVED; 2]);
         factory.set_storage_settings_cache(StorageSettings::v1());
         assert_eq!(
             factory.get_prune_checkpoints_for_availability().unwrap(),

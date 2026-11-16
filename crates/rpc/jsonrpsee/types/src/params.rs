@@ -481,6 +481,7 @@ mod test {
     };
     use crate::response::SubscriptionPayload;
     use serde::Deserialize;
+    use test_case::test_case;
 
     #[test]
     fn id_deserialization() {
@@ -513,21 +514,15 @@ mod test {
         );
     }
 
-    #[test]
-    fn id_deserialization_accepts_scalars() {
-        let test_vector = [
-            ("null", Id::Null),
-            ("0", Id::Number(0)),
-            ("18446744073709551615", Id::Number(u64::MAX)),
-            (r#""""#, Id::Str("".into())),
-            (r#""abc""#, Id::Str("abc".into())),
-        ];
-
-        for (ser, expected) in test_vector {
-            let id: Id = serde_json::from_str(ser).unwrap();
-            assert_eq!(id, expected);
-            assert_eq!(serde_json::to_string(&id).unwrap(), ser);
-        }
+    #[test_case("null", Id::Null ; "null")]
+    #[test_case("0", Id::Number(0) ; "zero")]
+    #[test_case("18446744073709551615", Id::Number(u64::MAX) ; "max")]
+    #[test_case(r#""""#, Id::Str("".into()) ; "empty_string")]
+    #[test_case(r#""abc""#, Id::Str("abc".into()) ; "string")]
+    fn id_deserialization_accepts_scalars(ser: &str, expected: Id<'_>) {
+        let id: Id = serde_json::from_str(ser).unwrap();
+        assert_eq!(id, expected);
+        assert_eq!(serde_json::to_string(&id).unwrap(), ser);
     }
 
     #[test]
@@ -544,20 +539,34 @@ mod test {
         assert!(matches!(id, Id::Str(Cow::Owned(_))));
     }
 
-    #[test]
-    fn id_deserialization_rejects_non_scalars() {
-        let test_vector = [
-            ("-1", "invalid value: integer `-1`, expected null, an unsigned integer or a string at line 1 column 2"),
-            ("1.5", "invalid type: floating point `1.5`, expected null, an unsigned integer or a string at line 1 column 3"),
-            ("true", "invalid type: boolean `true`, expected null, an unsigned integer or a string at line 1 column 4"),
-            ("[1]", "invalid type: sequence, expected null, an unsigned integer or a string at line 1 column 1"),
-            (r#"{"a":1}"#, "invalid type: map, expected null, an unsigned integer or a string at line 1 column 1"),
-        ];
-
-        for (ser, expected) in test_vector {
-            let err = serde_json::from_str::<Id>(ser).unwrap_err();
-            assert_eq!(err.to_string(), expected);
-        }
+    #[test_case(
+        "-1",
+        "invalid value: integer `-1`, expected null, an unsigned integer or a string at line 1 column 2" ;
+        "negative"
+    )]
+    #[test_case(
+        "1.5",
+        "invalid type: floating point `1.5`, expected null, an unsigned integer or a string at line 1 column 3" ;
+        "float"
+    )]
+    #[test_case(
+        "true",
+        "invalid type: boolean `true`, expected null, an unsigned integer or a string at line 1 column 4" ;
+        "bool"
+    )]
+    #[test_case(
+        "[1]",
+        "invalid type: sequence, expected null, an unsigned integer or a string at line 1 column 1" ;
+        "sequence"
+    )]
+    #[test_case(
+        r#"{"a":1}"#,
+        "invalid type: map, expected null, an unsigned integer or a string at line 1 column 1" ;
+        "map"
+    )]
+    fn id_deserialization_rejects_non_scalars(ser: &str, expected: &str) {
+        let err = serde_json::from_str::<Id>(ser).unwrap_err();
+        assert_eq!(err.to_string(), expected);
     }
 
     #[test]
@@ -638,17 +647,13 @@ mod test {
         assert_eq!(serialized, initial_ser);
     }
 
-    #[test]
-    fn subscription_id_serde_works() {
-        let test_vector =
-            &[("42", SubscriptionId::Num(42)), (r#""one""#, SubscriptionId::Str("one".into()))];
-
-        for (initial_ser, expected) in test_vector {
-            let id: SubscriptionId = serde_json::from_str(initial_ser).unwrap();
-            assert_eq!(&id, expected);
-            let serialized = serde_json::to_string(&id).unwrap();
-            assert_eq!(&serialized, initial_ser);
-        }
+    #[test_case("42", SubscriptionId::Num(42) ; "num")]
+    #[test_case(r#""one""#, SubscriptionId::Str("one".into()) ; "string")]
+    fn subscription_id_serde_works(initial_ser: &str, expected: SubscriptionId<'_>) {
+        let id: SubscriptionId = serde_json::from_str(initial_ser).unwrap();
+        assert_eq!(id, expected);
+        let serialized = serde_json::to_string(&id).unwrap();
+        assert_eq!(serialized, initial_ser);
     }
 
     #[test]
@@ -668,22 +673,43 @@ mod test {
         assert_eq!(id, SubscriptionId::Num(u64::MAX));
     }
 
+    #[test_case(
+        "null",
+        "invalid type: null, expected an unsigned integer or a string at line 1 column 4" ;
+        "null"
+    )]
+    #[test_case(
+        "-1",
+        "invalid value: integer `-1`, expected an unsigned integer or a string at line 1 column 2" ;
+        "negative"
+    )]
+    #[test_case(
+        "1.5",
+        "invalid type: floating point `1.5`, expected an unsigned integer or a string at line 1 column 3" ;
+        "float"
+    )]
+    #[test_case(
+        "true",
+        "invalid type: boolean `true`, expected an unsigned integer or a string at line 1 column 4" ;
+        "bool"
+    )]
+    #[test_case(
+        "[1]",
+        "invalid type: sequence, expected an unsigned integer or a string at line 1 column 1" ;
+        "sequence"
+    )]
+    #[test_case(
+        r#"{"a":1}"#,
+        "invalid type: map, expected an unsigned integer or a string at line 1 column 1" ;
+        "map"
+    )]
+    fn subscription_id_deserialization_rejects_non_scalars(ser: &str, expected: &str) {
+        let err = serde_json::from_str::<SubscriptionId>(ser).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+
     #[test]
-    fn subscription_id_deserialization_rejects_non_scalars() {
-        let test_vector = [
-            ("null", "invalid type: null, expected an unsigned integer or a string at line 1 column 4"),
-            ("-1", "invalid value: integer `-1`, expected an unsigned integer or a string at line 1 column 2"),
-            ("1.5", "invalid type: floating point `1.5`, expected an unsigned integer or a string at line 1 column 3"),
-            ("true", "invalid type: boolean `true`, expected an unsigned integer or a string at line 1 column 4"),
-            ("[1]", "invalid type: sequence, expected an unsigned integer or a string at line 1 column 1"),
-            (r#"{"a":1}"#, "invalid type: map, expected an unsigned integer or a string at line 1 column 1"),
-        ];
-
-        for (ser, expected) in test_vector {
-            let err = serde_json::from_str::<SubscriptionId>(ser).unwrap_err();
-            assert_eq!(err.to_string(), expected);
-        }
-
+    fn subscription_id_unsubscribe_params_rejects_non_scalars() {
         // The unsubscribe path parses the id out of the params.
         let params = Params::new(Some("[[0,0,0]]"));
         assert!(params.one::<SubscriptionId>().is_err());
