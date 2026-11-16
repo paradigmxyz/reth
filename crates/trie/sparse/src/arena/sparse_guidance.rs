@@ -2,8 +2,7 @@
 //!
 //! Each bucket has a non-inlined body with a distinct atomic counter address so coverage
 //! instrumentation can distinguish it after optimization. Keep LTO disabled when collecting
-//! sanitizer coverage. Regenerate the bank with `python3
-//! crates/trie/sparse/generate_sparse_buckets.py`. The bank contains 544 encoder, 28,672 local,
+//! sanitizer coverage. The bank contains 544 encoder, 28,672 local,
 //! 15,680 sandwich and two control buckets.
 
 use core::{
@@ -36,19 +35,99 @@ static SANDWICH_INDEX: [[[usize; 16]; 16]; 16] = {
     table
 };
 
-macro_rules! coverage_arm {
-    ($name:ident, $index:literal) => {
-        #[inline(never)]
-        fn $name() {
-            // A different address and immediate in every body prevent identical-code folding.
-            let counter = black_box(&COUNTERS[$index]);
-            let previous = counter.fetch_or(1, Ordering::Relaxed);
-            black_box(($index, previous));
-        }
+const ENCODER_COUNT: usize = 544;
+const INVALID_OBSERVATION: usize = ENCODER_COUNT - 1;
+const LOCAL_START: usize = ENCODER_COUNT;
+const SANDWICH_START: usize = LOCAL_START + 28672;
+const NO_PARENT: usize = SANDWICH_START + 15680;
+const INVALID_PROOF: usize = NO_PARENT + 1;
+const ARM_COUNT: usize = INVALID_PROOF + 1;
+
+#[inline(never)]
+fn coverage_arm<const ID: usize>() {
+    // A different address and immediate in every body prevent identical-code folding.
+    let counter = black_box(&COUNTERS[ID]);
+    let previous = counter.fetch_or(1, Ordering::Relaxed);
+    black_box((ID, previous));
+}
+
+// Double a contiguous list of IDs for each binary digit, appending one for a set digit.
+// Expanding expressions rather than const-loop assignments gives each pointer its own
+// const-generic instantiation on stable Rust, without generated source or a build script.
+macro_rules! coverage_arms {
+    (@expand [$($id:expr,)*]; $size:expr;) => {
+        [$(coverage_arm::<{ $id }> as fn(),)*]
+    };
+    (@expand [$($id:expr,)*]; $size:expr; 0 $($rest:tt)*) => {
+        coverage_arms!(@expand [$($id,)* $($id + $size,)*]; $size * 2; $($rest)*)
+    };
+    (@expand [$($id:expr,)*]; $size:expr; 1 $($rest:tt)*) => {
+        coverage_arms!(@expand [$($id,)* $($id + $size,)* $size * 2,];
+            $size * 2 + 1; $($rest)*)
+    };
+    (1 $($rest:tt)*) => {
+        coverage_arms!(@expand [0,]; 1; $($rest)*)
     };
 }
 
-include!("sparse_buckets_generated.rs");
+// 44898 in binary; the array length also checks the expansion's size.
+static ARMS: [fn(); ARM_COUNT] = coverage_arms!(1 0 1 0 1 1 1 1 0 1 1 0 0 0 1 0);
+
+// Every encoder family has a contiguous range in the stable bucket numbering.
+macro_rules! coverage_families {
+    ($($start:expr => $rank:expr),+ $(,)?) => {
+        $(ARMS[$rank.map_or(INVALID_OBSERVATION, |rank| $start + rank)]();)+
+    };
+}
+
+const fn count_shape_rank(count: usize, shape: usize) -> Option<usize> {
+    match (count, shape) {
+        (0, 0) => Some(0),
+        (1, 1) => Some(1),
+        (2, 2) => Some(2),
+        (2, 3) => Some(3),
+        (3, 2) => Some(4),
+        (3, 3) => Some(5),
+        (4, 2) => Some(6),
+        (4, 3) => Some(7),
+        (4, 4) => Some(8),
+        _ => None,
+    }
+}
+
+fn subset_count_rank(count: usize, subset: usize) -> Option<usize> {
+    (subset <= count).then_some(count * (count + 1) / 2 + subset)
+}
+
+fn dispatch(observation: &Observation) {
+    let depth = usize::from(depth_bucket(observation.branch_path_len));
+    let root = usize::from(observation.is_root);
+    let masks = observation.masks();
+    let counts = masks.map(|mask| usize::from(count_bucket(mask)));
+    let shapes = masks.map(|mask| usize::from(shape_bucket(mask)));
+    let count_shapes = core::array::from_fn::<_, 5, _>(|i| count_shape_rank(counts[i], shapes[i]));
+    coverage_families! { 0 => Some(depth), 7 => Some(root) }
+    for i in 0..5 {
+        coverage_families! {
+            9 + i * 19 => Some(counts[i]),
+            14 + i * 19 => Some(shapes[i]),
+            19 + i * 19 => count_shapes[i],
+        }
+    }
+    for (i, rank) in count_shapes.into_iter().enumerate() {
+        coverage_families! { 104 + i * 63 => rank.map(|rank| depth * 9 + rank) }
+    }
+    coverage_families! {
+        419 => subset_count_rank(counts[0], counts[1]),
+        434 => subset_count_rank(counts[1], counts[2]),
+        449 => (counts[3] != 4 || counts[4] != 4).then_some(counts[3] * 5 + counts[4]),
+        // Lexicographic triples with leaf <= revealed <= state, 35 per root kind.
+        473 => (counts[2] <= counts[1] && counts[1] <= counts[0]).then_some(
+            root * 35 + counts[0] * (counts[0] + 1) * (counts[0] + 2) / 6 +
+                counts[1] * (counts[1] + 1) / 2 + counts[2]
+        ),
+    }
+}
 
 struct Observation {
     branch_path_len: usize,
@@ -129,7 +208,7 @@ pub(super) fn observe_branch_shape(
     let observation =
         Observation { branch_path_len, is_root, state_mask, revealed_mask, leaf_mask };
     if !observation.valid() {
-        coverage_invalid_observation();
+        ARMS[INVALID_OBSERVATION]();
         return;
     }
     dispatch(&observation);
