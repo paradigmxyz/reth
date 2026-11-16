@@ -66,7 +66,7 @@ pub trait DatabaseStorageProof<'a, TX> {
     /// Create a new [`StorageProof`] from database transaction and account address.
     fn from_tx(tx: &'a TX, address: Address) -> Self;
 
-    /// Generates the storage proof for target slot based on [`TrieInput`].
+    /// Generates the storage proof for target slot based on [`HashedStorage`].
     fn overlay_storage_proof(
         tx: &'a TX,
         address: Address,
@@ -74,7 +74,7 @@ pub trait DatabaseStorageProof<'a, TX> {
         storage: HashedStorage,
     ) -> Result<reth_trie::StorageProof, StateProofError>;
 
-    /// Generates the storage multiproof for target slots based on [`TrieInput`].
+    /// Generates the storage multiproof for target slots based on [`TrieInputSorted`].
     fn overlay_storage_multiproof(
         tx: &'a TX,
         address: Address,
