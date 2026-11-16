@@ -27,6 +27,9 @@ use tracing::{info, warn};
 use url::Url;
 use zstd::stream::read::Decoder as ZstdDecoder;
 
+#[cfg(unix)]
+use std::{fs::Permissions, os::unix::fs::PermissionsExt};
+
 const EXTENSION_TAR_LZ4: &str = ".tar.lz4";
 const EXTENSION_TAR_ZSTD: &str = ".tar.zst";
 const STREAMING_EXTRACTION_PROGRESS_MIN_FILE_SIZE: u64 = 64 * 1024 * 1024;
@@ -138,6 +141,32 @@ fn unpack_archive<R: Read>(
             static_files_dir,
             progress.as_deref_mut(),
         )?;
+
+        #[cfg(unix)]
+        if entry.header().entry_type().is_dir() &&
+            let Some(dir) = entry_destination_path(&entry, target_dir, static_files_dir)? &&
+            static_files_dir != Some(dir.as_path())
+        {
+            make_dir_writable(&dir)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Gives the owner full access to a directory the archive made restrictive. tar applies a
+/// directory's archived mode as soon as it creates it, which would otherwise reject the entries
+/// inside it. The mode is not restored: reth must write into its datadir directories later, and a
+/// restore would race with other archives extracting into the same directory.
+#[cfg(unix)]
+fn make_dir_writable(dir: &Path) -> Result<()> {
+    let mode = std::fs::metadata(dir)
+        .wrap_err_with(|| format!("failed to read mode of `{}`", dir.display()))?
+        .permissions()
+        .mode();
+    if mode & 0o700 != 0o700 {
+        std::fs::set_permissions(dir, Permissions::from_mode(mode | 0o700))
+            .wrap_err_with(|| format!("failed to set mode of `{}`", dir.display()))?;
     }
 
     Ok(())
@@ -633,6 +662,55 @@ pub(crate) async fn stream_and_extract(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn read_only_directory_entries_extract_their_contents() {
+        for custom_static_files in [false, true] {
+            let target = tempfile::tempdir().unwrap();
+            let custom = target.path().join("custom");
+            let static_files = if custom_static_files {
+                custom.clone()
+            } else {
+                target.path().join("static_files")
+            };
+            let dirs = [("a", 0o555), ("a/b", 0o500), ("static_files/sub", 0o555)];
+            let mut archive = tar::Builder::new(Vec::new());
+            for (path, mode) in dirs {
+                let mut dir = tar::Header::new_gnu();
+                dir.set_entry_type(tar::EntryType::Directory);
+                dir.set_size(0);
+                dir.set_mode(mode);
+                dir.set_cksum();
+                archive.append_data(&mut dir, path, std::io::empty()).unwrap();
+            }
+            for path in ["a/b/file", "static_files/sub/headers"] {
+                let mut file = tar::Header::new_gnu();
+                file.set_size(4);
+                file.set_mode(0o644);
+                file.set_cksum();
+                archive.append_data(&mut file, path, b"data".as_slice()).unwrap();
+            }
+            let tar = archive.into_inner().unwrap();
+
+            unpack_archive(
+                Archive::new(tar.as_slice()),
+                target.path(),
+                custom_static_files.then_some(custom.as_path()),
+                None,
+            )
+            .unwrap();
+
+            assert_eq!(fs::read(target.path().join("a/b/file")).unwrap(), b"data");
+            assert_eq!(fs::read(static_files.join("sub/headers")).unwrap(), b"data");
+            for path in
+                [target.path().join("a"), target.path().join("a/b"), static_files.join("sub")]
+            {
+                let mode = std::fs::metadata(path).unwrap().permissions().mode();
+                assert_eq!(mode & 0o700, 0o700);
+            }
+        }
+    }
 
     #[test]
     fn custom_static_root_cannot_be_redirected_by_archive_symlinks() {
