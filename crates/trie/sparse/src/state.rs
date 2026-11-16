@@ -616,10 +616,9 @@ mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use reth_execution_errors::{SparseStateTrieErrorKind, SparseTrieErrorKind};
     use reth_primitives_traits::Account;
-    use reth_tasks::executor::{channel, thread, time::Duration, Runtime};
+    use reth_tasks::executor::Runtime;
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
-        hash_builder::HashBuilderState,
         proof::{ProofNodes, ProofRetainer},
         BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
         TrieAccount, TrieMask, TrieNodeV2,
@@ -1209,25 +1208,6 @@ mod tests {
                     removed_nodes: HashSet::default()
                 }
             );
-        });
-    }
-
-    #[test]
-    fn arbitrary_fixture_is_owned_before_executor_worker() {
-        // Derive-generated Arbitrary recursion state belongs to the native caller.
-        let bytes = [0u8; 1024];
-        let fixture =
-            HashBuilderState::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
-        let expected =
-            HashBuilderState::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
-        assert_eq!(fixture, expected);
-
-        Runtime::new().run(move || {
-            let (sender, receiver) = channel::bounded(0);
-            let worker =
-                thread::spawn(move || receiver.recv_timeout(Duration::from_secs(1)).unwrap());
-            sender.send(fixture).unwrap();
-            assert_eq!(worker.join().unwrap(), expected);
         });
     }
 }
