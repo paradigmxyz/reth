@@ -50,7 +50,14 @@ tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time",
 [features]
 rayon = ["dep:crossbeam-utils", "pin-project"]
 test-utils = []
-fuzz = ["reth-metrics/fuzz", "dep:either", "dep:shuttle", "shuttle-sync/shuttle", "shuttle-parking_lot/shuttle"]
+fuzz = [
+    "metrics/fuzz",
+    "reth-metrics/fuzz",
+    "dep:either",
+    "dep:shuttle",
+    "shuttle-sync/shuttle",
+    "shuttle-parking_lot/shuttle",
+]
 
 # The all-features udeps job selects fuzz, which replaces the native Rayon backend.
 [package.metadata.cargo-udeps.ignore]

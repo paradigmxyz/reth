@@ -31,5 +31,5 @@ tokio-util = { workspace = true, optional = true }
 libc.workspace = true
 
 [features]
-fuzz = ["dep:reth-metrics-derive"]
+fuzz = ["dep:reth-metrics-derive", "metrics/fuzz"]
 common = ["tokio", "futures", "tokio-util", "reth-primitives-traits"]

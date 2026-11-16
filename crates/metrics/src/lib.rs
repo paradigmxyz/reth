@@ -5,7 +5,10 @@
 //! - `common`: Common metrics utilities, such as wrappers around tokio senders and receivers. Pulls
 //!   in `tokio`.
 //! - `fuzz`: Derive inert metric handles without registering, describing, or caching metrics.
-//!   Direct calls to the `metrics` facade are unaffected.
+//!   Direct facade calls also use an inert recorder without reading recorder TLS or global state.
+//!   Macro arguments still evaluate normally; explicit recorder APIs remain available. External
+//!   fuzz workload workspaces must repeat the root `metrics` patch: Cargo does not inherit patches
+//!   from dependency workspaces.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",

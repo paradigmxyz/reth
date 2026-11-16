@@ -71,12 +71,7 @@ alloy-rlp.workspace = true
 itertools.workspace = true
 
 [features]
-fuzz = [
-    "reth-metrics/fuzz",
-    "reth-tasks/fuzz",
-    "reth-trie-common/fuzz",
-    "reth-provider/fuzz",
-]
+fuzz = ["metrics/fuzz", "reth-metrics/fuzz", "reth-tasks/fuzz", "reth-trie-common/fuzz", "reth-provider/fuzz"]
 default = []
 file-client = ["dep:async-compression", "dep:itertools"]
 test-utils = [

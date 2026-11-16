@@ -1,4 +1,4 @@
-//! Recorder-backed coverage of the native and fuzz metrics derive APIs.
+//! Recorder-backed coverage of native and fuzz metrics instrumentation.
 
 use metrics::{
     Counter, CounterFn, Gauge, GaugeFn, Histogram, HistogramFn, IntoLabels, Key, KeyName, Label,
@@ -156,10 +156,72 @@ fn derives_obey_fuzz_mode_without_changing_the_recorder() {
     );
     assert_eq!(counts, if cfg!(feature = "fuzz") { (0, 0, 0, 0) } else { (12, 15, 15, 2) });
 
-    // A derived constructor must not replace or disable the caller's recorder.
-    metrics::with_local_recorder(&recorder, || {
-        metrics::counter!("direct_metric").increment(1);
-    });
+    // Explicit recorder APIs remain usable; instrumentation does not replace the recorder.
+    recorder
+        .register_counter(
+            &Key::from_static_name("explicit_metric"),
+            &Metadata::new("test", metrics::Level::INFO, None),
+        )
+        .increment(1);
     assert_eq!(recorder.registrations.load(Ordering::Relaxed), counts.0 + 1);
     assert_eq!(recorder.updates.0.load(Ordering::Relaxed), counts.2 + 1);
+}
+
+#[test]
+fn facade_instrumentation_obeys_fuzz_mode_with_a_local_recorder() {
+    let recorder = ObservedRecorder::default();
+    let label_conversions = AtomicUsize::new(0);
+    metrics::with_local_recorder(&recorder, || {
+        metrics::counter!("static_counter").increment(1);
+        metrics::counter!(String::from("dynamic_counter"), "label" => String::from("value"))
+            .absolute(1);
+        metrics::gauge!("inline_gauge", "label" => "value").set(1.0);
+        metrics::gauge!("collection_gauge", ObservedLabels(&label_conversions)).increment(1.0);
+        reth_metrics::metrics::histogram!("reexported_histogram").record(1.0);
+        reth_metrics::metrics::histogram!(
+            target: "custom_target",
+            level: metrics::Level::DEBUG,
+            description: "Observed duration.",
+            unit: Unit::Seconds,
+            "described_histogram",
+        )
+        .record(1.0);
+        metrics::describe_counter!("static_counter", "Counted events.");
+        metrics::describe_gauge!("inline_gauge", Unit::Count, "Current value.");
+        reth_metrics::metrics::describe_histogram!("reexported_histogram", "Observed values.");
+    });
+    assert_eq!(
+        (
+            recorder.registrations.load(Ordering::Relaxed),
+            recorder.descriptions.load(Ordering::Relaxed),
+            recorder.updates.0.load(Ordering::Relaxed),
+        ),
+        if cfg!(feature = "fuzz") { (0, 0, 0) } else { (6, 4, 6) },
+    );
+    // Macro arguments keep their original evaluation semantics in both modes.
+    assert_eq!(label_conversions.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn facade_instrumentation_obeys_fuzz_mode_with_a_global_recorder() {
+    let recorder = Arc::new(ObservedRecorder::default());
+    assert!(metrics::set_global_recorder(recorder.clone()).is_ok());
+    std::thread::spawn(|| {
+        metrics::counter!("global_counter").increment(1);
+        metrics::gauge!("global_gauge").decrement(1.0);
+        metrics::histogram!("global_histogram").record(1.0);
+        metrics::describe_counter!("global_counter", "Counted events.");
+        metrics::describe_gauge!("global_gauge", "Current value.");
+        metrics::describe_histogram!("global_histogram", "Observed values.");
+    })
+    .join()
+    .unwrap();
+    assert_eq!(
+        (
+            recorder.registrations.load(Ordering::Relaxed),
+            recorder.descriptions.load(Ordering::Relaxed),
+            recorder.updates.0.load(Ordering::Relaxed),
+        ),
+        if cfg!(feature = "fuzz") { (0, 0, 0) } else { (3, 3, 3) },
+    );
 }
