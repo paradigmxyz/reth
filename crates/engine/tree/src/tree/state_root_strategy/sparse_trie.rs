@@ -302,6 +302,24 @@ where
                     let hashed = reth_execution_types::state_update_to_hashed_post_state(&state);
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
+                StateRootMessage::StateUpdates(states) => {
+                    let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_updates", len = states.len()).entered();
+                    // Each update is forwarded on its own, as if it had been sent alone.
+                    let mut hashed = states
+                        .iter()
+                        .map(reth_execution_types::state_update_to_hashed_post_state)
+                        .collect::<Vec<_>>();
+                    let Some(last) = hashed.pop() else {
+                        idle_start = Instant::now();
+                        continue
+                    };
+                    if hashed.into_iter().any(|hashed| {
+                        hashed_state_tx.send(SparseTrieTaskMessage::HashedState(hashed)).is_err()
+                    }) {
+                        break
+                    }
+                    SparseTrieTaskMessage::HashedState(last)
+                }
                 StateRootMessage::FinishedStateUpdates => {
                     SparseTrieTaskMessage::FinishedStateUpdates
                 }

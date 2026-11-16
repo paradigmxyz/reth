@@ -184,6 +184,9 @@ const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 /// Receipts a parallel execution sends to the receipt root task at once.
 const RECEIPT_BATCH_SIZE: usize = 32;
 
+/// State updates a parallel execution sends to the state root task at once.
+const STATE_UPDATE_BATCH_SIZE: usize = 16;
+
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
 type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
@@ -1075,7 +1078,14 @@ where
                 if input.has_block_access_list() {
                     executor.enable_block_access_list_builder();
                 }
-                if let Some(mut state_hook) = state_hook {
+                if let Some(state_hook) = state_hook {
+                    // A parallel execution commits on one thread, which would otherwise wake the
+                    // state root task once per transaction.
+                    let mut state_hook = if parallel_execution {
+                        state_hook.batched(STATE_UPDATE_BATCH_SIZE)
+                    } else {
+                        state_hook
+                    };
                     executor.set_state_hook(move |state| state_hook.on_state(state));
                 }
                 let senders = self.execute_transactions(
