@@ -42,6 +42,13 @@ pub(crate) const RPC_DEFAULT_MAX_REQUEST_SIZE_MB: u32 = 15;
 /// This is only relevant for very large trace responses.
 pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 160;
 
+/// Default trace byte limit per byte of the response limit.
+///
+/// Struct logs and `vmTrace` record about 1.5-5x their JSON size, since a 32-byte stack word
+/// serializes as short hex. Twice the response limit passes every mainnet block whose traces fit
+/// in the response, while keeping a block trace's memory bounded.
+const RPC_TRACE_BYTES_PER_RESPONSE_BYTE: u64 = 2;
+
 /// Default number of incoming connections.
 ///
 /// This restricts how many active connections (http, ws) the server accepts.
@@ -707,14 +714,10 @@ pub struct RpcServerArgs {
     )]
     pub rpc_max_simulate_blocks: u64,
 
-    /// Maximum bytes a single traced transaction may record before the request fails.
-    ///
-    /// Applies to the `debug_trace*` and `trace_*` tracers and counts recorded opcode steps,
-    /// stack snapshots, memory and call inputs. Unlimited by default.
+    /// Max bytes a traced tx may record, defaults to 2x `--rpc.max-response-size`, 0 is unlimited.
     #[arg(
         long = "rpc.max-trace-bytes",
         value_name = "BYTES",
-        value_parser = RangedU64ValueParser::<usize>::new().range(1..),
         default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_max_trace_bytes.map(|v| v.to_string().into()))
     )]
     pub rpc_max_trace_bytes: Option<usize>,
@@ -974,6 +977,23 @@ impl RpcServerArgs {
     /// If no explicit or instance-adjusted path is set, returns the global default.
     pub fn auth_ipc_path(&self) -> &str {
         self.auth_ipc_path.as_deref().unwrap_or(&DefaultRpcServerArgs::get_global().auth_ipc_path)
+    }
+
+    /// Returns the trace byte limit, `None` when `--rpc.max-trace-bytes 0` disables it.
+    ///
+    /// Without the flag, the limit is [`RPC_TRACE_BYTES_PER_RESPONSE_BYTE`] times the response
+    /// limit, so a trace stops recording once its response would no longer fit.
+    pub fn max_trace_bytes(&self) -> Option<usize> {
+        match self.rpc_max_trace_bytes {
+            Some(0) => None,
+            Some(bytes) => Some(bytes),
+            None => Some(
+                (u64::from(self.rpc_max_response_size.get()) * 1024 * 1024)
+                    .saturating_mul(RPC_TRACE_BYTES_PER_RESPONSE_BYTE)
+                    .try_into()
+                    .unwrap_or(usize::MAX),
+            ),
+        }
     }
 }
 
@@ -1336,18 +1356,23 @@ mod tests {
     }
 
     #[test]
-    fn test_rpc_max_trace_bytes_is_optional_and_nonzero() {
+    fn test_rpc_max_trace_bytes() {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
-        assert_eq!(args.rpc_max_trace_bytes, None);
+        assert_eq!(args.max_trace_bytes(), Some(320 * 1024 * 1024));
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.max-response-size", "10"])
+                .args;
+        assert_eq!(args.max_trace_bytes(), Some(20 * 1024 * 1024));
 
         let args =
             CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.max-trace-bytes", "1024"])
                 .args;
-        assert_eq!(args.rpc_max_trace_bytes, Some(1024));
+        assert_eq!(args.max_trace_bytes(), Some(1024));
 
-        let result =
-            CommandParser::<RpcServerArgs>::try_parse_from(["reth", "--rpc.max-trace-bytes", "0"]);
-        assert!(result.is_err());
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.max-trace-bytes", "0"]).args;
+        assert_eq!(args.max_trace_bytes(), None);
     }
 
     #[test]
