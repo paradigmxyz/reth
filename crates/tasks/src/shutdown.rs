@@ -103,7 +103,8 @@ pub fn signal() -> (Signal, Shutdown) {
     (Signal(sender), Shutdown(receiver.shared()))
 }
 
-#[cfg(test)]
+// These tests exercise native Tokio tasks and OS-thread shutdown, not logical workers.
+#[cfg(all(test, not(feature = "fuzz")))]
 mod tests {
     use super::*;
     use futures_util::future::join_all;

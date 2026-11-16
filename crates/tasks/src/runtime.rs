@@ -1148,7 +1148,10 @@ impl RuntimeBuilder {
 mod tests {
     use super::*;
     use crate::test_utils;
+
+    #[cfg(not(feature = "fuzz"))]
     use std::{future, sync::mpsc};
+    #[cfg(not(feature = "fuzz"))]
     use tokio::sync::oneshot;
 
     #[test]
@@ -1303,6 +1306,8 @@ mod tests {
         });
     }
 
+    // Exercises native Tokio runtime ownership or OS-thread behavior.
+    #[cfg(not(feature = "fuzz"))]
     #[test]
     fn last_runtime_clone_can_drop_on_its_worker() {
         test_utils::run(|| {
@@ -1320,6 +1325,8 @@ mod tests {
         });
     }
 
+    // Exercises native Tokio runtime ownership or OS-thread behavior.
+    #[cfg(not(feature = "fuzz"))]
     #[test]
     fn shutdown_with_live_runtime_clones() {
         test_utils::run(|| {
@@ -1345,6 +1352,8 @@ mod tests {
         });
     }
 
+    // Exercises native Tokio runtime ownership or OS-thread behavior.
+    #[cfg(not(feature = "fuzz"))]
     #[test]
     fn shutdown_preserves_external_runtime() {
         test_utils::run(|| {
@@ -1364,6 +1373,8 @@ mod tests {
         });
     }
 
+    // Exercises native Tokio runtime ownership or OS-thread behavior.
+    #[cfg(not(feature = "fuzz"))]
     #[test]
     fn critical_os_thread_uses_requested_name() {
         test_utils::run(|| {
@@ -1385,6 +1396,8 @@ mod tests {
         });
     }
 
+    // Exercises native Tokio runtime ownership or OS-thread behavior.
+    #[cfg(not(feature = "fuzz"))]
     #[test]
     fn critical_os_thread_panic_is_reported() {
         test_utils::run(|| {

@@ -230,7 +230,8 @@ pub(crate) enum TaskEvent {
     GracefulShutdown,
 }
 
-#[cfg(test)]
+// These tests exercise native Tokio tasks and OS-thread shutdown, not logical workers.
+#[cfg(all(test, not(feature = "fuzz")))]
 mod tests {
     use super::*;
     use crate::test_utils;

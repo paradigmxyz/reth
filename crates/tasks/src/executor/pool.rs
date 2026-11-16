@@ -486,7 +486,7 @@ mod deterministic {
         use super::*;
         use crate::executor::Runtime;
         use shuttle::sync::Barrier;
-        use std::{sync::Mutex, time::Duration};
+        use std::time::Duration;
 
         #[test]
         fn retained_pool_isolated_between_concurrent_executions() {
@@ -500,6 +500,11 @@ mod deterministic {
 
         #[test]
         fn retained_pool_reusable_between_executions() {
+            // This observation counter survives executions; explicit yields schedule the jobs.
+            #[allow(
+                clippy::disallowed_types,
+                reason = "Counts panic callbacks across separate simulations, not execution-local scheduling state."
+            )]
             let handled = Arc::new(AtomicUsize::new(0));
             let handler = handled.clone();
             let pool = ThreadPoolBuilder::new()
@@ -588,6 +593,11 @@ mod deterministic {
             });
         }
 
+        #[allow(
+            clippy::disallowed_types,
+            clippy::disallowed_methods,
+            reason = "Host channels and lock coordinate two independent simulations, not logical workers within one simulation."
+        )]
         fn assert_concurrent_executions(pool: ThreadPool) {
             let threads = pool.current_num_threads();
             let first_pool = pool.clone();
@@ -597,7 +607,7 @@ mod deterministic {
                 Runtime::new().run(move || {
                     let occupied = Barrier::new(threads);
                     let finished = Barrier::new(threads);
-                    let releasing = Mutex::new(releasing);
+                    let releasing = std::sync::Mutex::new(releasing);
                     first_pool.broadcast(|context| {
                         occupied.wait();
                         if context.index() == 0 {

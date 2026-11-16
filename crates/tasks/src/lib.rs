@@ -76,6 +76,10 @@ mod test_utils {
 
     // This lock is acquired before entering the selected runtime and serializes simulations.
     #[cfg(feature = "fuzz")]
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Host lock serializes separate simulations before either enters Shuttle."
+    )]
     use std::sync::Mutex;
 
     #[cfg(feature = "rayon")]
@@ -83,12 +87,24 @@ mod test_utils {
     #[cfg(feature = "rayon")]
     use futures_util::FutureExt;
     #[cfg(feature = "rayon")]
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Host watchdog bounds stalled simulations independently of virtual time."
+    )]
     use std::{
         future::Future,
         pin::pin,
         time::{Duration, Instant},
     };
 
+    #[cfg_attr(
+        feature = "fuzz",
+        allow(
+            clippy::disallowed_types,
+            clippy::disallowed_methods,
+            reason = "Host lock serializes separate simulations before either enters Shuttle."
+        )
+    )]
     pub(crate) fn run(work: impl FnOnce() + Send + 'static) {
         // Separate simulations cannot concurrently lease the process-global compute pool.
         #[cfg(feature = "fuzz")]
@@ -103,6 +119,11 @@ mod test_utils {
     }
 
     #[cfg(feature = "rayon")]
+    #[allow(
+        clippy::disallowed_types,
+        clippy::disallowed_methods,
+        reason = "Host watchdog bounds stalled simulations independently of virtual time."
+    )]
     pub(crate) fn block_on<F: Future>(future: F) -> F::Output {
         let mut future = pin!(future);
         // A native watchdog bounds Tokio work even while this runnable poller stalls virtual time.
