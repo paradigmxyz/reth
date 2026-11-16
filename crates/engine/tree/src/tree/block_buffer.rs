@@ -68,7 +68,13 @@ impl<B: Block> BlockBuffer<B> {
     }
 
     /// Insert a correct block inside the buffer.
+    ///
+    /// A buffer with a limit of zero retains no blocks.
     pub fn insert_block(&mut self, block: SealedBlockWithAccessList<B>) {
+        if self.max_blocks == 0 {
+            return
+        }
+
         let hash = block.hash();
 
         match self.blocks.entry(hash) {
@@ -608,5 +614,17 @@ mod tests {
 
         // And lowest ancestor for block2 becomes itself after its parent is evicted
         assert_eq!(buffer.lowest_ancestor(&block2.hash()), Some(&block2));
+    }
+
+    #[test]
+    fn zero_limit_retains_no_blocks() {
+        let mut rng = generators::rng();
+        let parent = rng.random();
+        let block = create_block(&mut rng, 10, parent);
+        let mut buffer = BlockBuffer::new(0);
+
+        buffer.insert_block(block.clone().into());
+        assert_buffer_lengths(&buffer, 0);
+        assert_eq!(buffer.block(&block.hash()), None);
     }
 }
