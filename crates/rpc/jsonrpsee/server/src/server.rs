@@ -38,7 +38,10 @@ use std::{
 use crate::{
     future::{ConnectionGuard, ConnectionPermit, ServerHandle, StopHandle},
     middleware::rpc::{catch_call_panic, RpcService},
-    transport::{http, ws, ws::BackgroundTaskParams},
+    transport::{
+        http, ws,
+        ws::{is_upgrade_request, upgrade_response, BackgroundTaskParams},
+    },
     utils::{
         accept_error_backoff, deserialize_notification, no_request_within, NotifyOnRequest,
         PermitBody, WriteTimeoutIo, DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_PING_INTERVAL,
@@ -47,13 +50,10 @@ use crate::{
     HttpBody, HttpRequest, HttpResponse, LOG_TARGET,
 };
 
-use futures_util::{
-    future::{Either, FutureExt},
-    io::{BufReader, BufWriter},
-};
+use futures_util::future::{Either, FutureExt};
 use hyper::body::{Bytes, Incoming};
 use hyper_util::{
-    rt::{TokioExecutor, TokioIo},
+    rt::{TokioExecutor, TokioIo, TokioTimer},
     service::TowerToHyperService,
 };
 use jsonrpsee_core::{
@@ -80,12 +80,11 @@ use serde::{
     },
     Deserialize,
 };
-use soketto::handshake::http::is_upgrade_request;
 use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
     sync::{mpsc, watch, Notify},
 };
-use tokio_util::compat::TokioAsyncReadCompatExt;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tower::{layer::util::Identity, Layer, Service, ServiceExt};
 use tracing::{instrument, Instrument};
 
@@ -224,7 +223,8 @@ pub struct ServerConfig {
     pub(crate) message_buffer_capacity: u32,
     /// ID provider.
     pub(crate) id_provider: Arc<dyn IdProvider>,
-    /// Timeout for receiving the first request of a connection.
+    /// Timeout for receiving the first request of a connection, and the next request head of an
+    /// HTTP/1 keep-alive connection.
     pub(crate) first_request_timeout: Option<Duration>,
     /// Timeout for writing a single message to a WebSocket connection and for a stalled HTTP
     /// response write.
@@ -427,7 +427,8 @@ impl ServerConfigBuilder {
     }
 
     /// Configure how long a connection may take to send its first request, e.g. the WebSocket
-    /// upgrade request, before it is closed. `None` disables the timeout.
+    /// upgrade request, before it is closed. An HTTP/1 keep-alive connection is closed as well
+    /// when it takes longer to send the head of its next request. `None` disables the timeout.
     ///
     /// Default is 30 seconds.
     pub fn set_first_request_timeout(mut self, first_request_timeout: Option<Duration>) -> Self {
@@ -710,7 +711,13 @@ where
         let conn_guard = &self.inner.conn_guard;
         let conn_id = self.inner.conn_id;
 
-        tracing::trace!(target: LOG_TARGET, "{:?}", request);
+        tracing::trace!(
+            target: LOG_TARGET,
+            "{} {} {:?}",
+            request.method(),
+            request.uri(),
+            request.version()
+        );
 
         let Some(conn_permit) = conn_guard.try_acquire() else {
             return async move { Ok(http::response::too_many_requests()) }.boxed();
@@ -727,9 +734,7 @@ where
             let conn = ConnectionState::new(this.stop_handle.clone(), conn_id, conn_permit);
             let server_cfg = this.server_cfg.clone();
 
-            let mut server = soketto::handshake::http::Server::new();
-
-            let response = match server.receive_request(&request) {
+            let response = match upgrade_response(&request) {
                 Ok(response) => {
                     let (tx, rx) = mpsc::channel(this.server_cfg.message_buffer_capacity as usize);
                     let sink =
@@ -761,12 +766,19 @@ where
                                 }
                             };
 
-                            let io = TokioIo::new(upgraded);
-
-                            let stream = BufReader::new(BufWriter::new(io.compat()));
-                            let mut ws_builder = server.into_builder(stream);
-                            ws_builder.set_max_message_size(server_cfg.max_request_body_size as usize);
-                            let (sender, receiver) = ws_builder.finish();
+                            let max_request_size = server_cfg.max_request_body_size as usize;
+                            // `tungstenite` reads a frame whole into its read buffer and never
+                            // shrinks it, so after a frame near the limit the connection keeps
+                            // that much allocated until it closes. An unfinished fragmented
+                            // message takes about twice its size: the collected fragments and the
+                            // read buffer that grew for them.
+                            // Frames that a client didn't mask have always been read.
+                            let ws_config = WebSocketConfig::default()
+                                .max_message_size(Some(max_request_size))
+                                .max_frame_size(Some(max_request_size))
+                                .accept_unmasked_frames(true);
+                            let (sender, receiver) =
+                                ws::split(TokioIo::new(upgraded), ws_config).await;
 
                             let params = BackgroundTaskParams {
                                 server_cfg,
@@ -785,11 +797,15 @@ where
                         .in_current_span(),
                     );
 
-                    response.map(|()| HttpBody::empty())
+                    response
                 }
                 Err(e) => {
                     tracing::debug!(target: LOG_TARGET, "Could not upgrade connection: {}", e);
-                    HttpResponse::new(HttpBody::from(format!("Could not upgrade connection: {e}")))
+                    let mut response = HttpResponse::new(HttpBody::from(format!(
+                        "Could not upgrade connection: {e}"
+                    )));
+                    *response.status_mut() = hyper::StatusCode::BAD_REQUEST;
+                    response
                 }
             };
 
@@ -902,7 +918,10 @@ fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
             request_received.clone(),
         );
         let io = TokioIo::new(WriteTimeoutIo::new(socket, write_timeout));
-        let builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+        let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+        // Also bounds how long an idle HTTP/1 keep-alive connection waits for its next request,
+        // which holds the socket without a connection permit.
+        builder.http1().timer(TokioTimer::new()).header_read_timeout(first_request_timeout);
         let conn = builder.serve_connection_with_upgrades(io, service);
         let stopped = stop_handle.shutdown();
 
