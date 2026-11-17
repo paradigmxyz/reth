@@ -33,6 +33,7 @@ use reth_ethereum::{
     },
     tasks::Runtime,
 };
+use reth_storage_overlay::OverlayManager;
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 
@@ -55,13 +56,15 @@ async fn main() -> eyre::Result<()> {
         spec.clone(),
         StaticFileProvider::read_only(db_path.join("static_files"))?,
         RocksDBProvider::builder(db_path.join("rocksdb")).build().unwrap(),
+        OverlayManager::default(),
         runtime.clone(),
     )?;
 
     // 2. Set up the blockchain provider using only the database provider and a noop for the tree to
     //    satisfy trait bounds. Tree is not used in this example since we are only operating on the
     //    disk and don't handle new blocks/live sync etc, which is done by the blockchain tree.
-    let provider = BlockchainProvider::new(factory)?;
+    let chain_info_headers = factory.chain_info_headers()?;
+    let provider = BlockchainProvider::new(factory, chain_info_headers);
 
     let rpc_builder = RpcModuleBuilder::default()
         .with_provider(provider.clone())

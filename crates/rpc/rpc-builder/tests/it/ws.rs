@@ -5,6 +5,7 @@ use crate::utils::{launch_ws, test_address, test_rpc_builder};
 use alloy_provider::{Provider, ProviderBuilder};
 use jsonrpsee::server::ServerConfigBuilder;
 use jsonrpsee_test_utils::mocks::WebSocketTestClient;
+use reth_chain_state::ChainInfoHeaders;
 use reth_consensus::noop::NoopConsensus;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
@@ -40,9 +41,10 @@ async fn launch_ws_eth() -> RpcServerHandle {
 /// With a live sender, subscription tasks block on the stream the same way they do on a running
 /// node.
 async fn launch_ws_eth_with_canon_state(max_subscriptions_per_connection: u32) -> RpcServerHandle {
-    let provider =
-        BlockchainProvider::with_latest(create_test_provider_factory(), SealedHeader::default())
-            .unwrap();
+    let provider = BlockchainProvider::new(
+        create_test_provider_factory(),
+        ChainInfoHeaders { canonical_head: SealedHeader::default(), safe: None, finalized: None },
+    );
     let pool: TestPool = TestPoolBuilder::default().into();
     let builder = RpcModuleBuilder::default()
         .with_provider(provider)
