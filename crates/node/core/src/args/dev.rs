@@ -3,7 +3,7 @@
 use std::{num::NonZeroUsize, sync::OnceLock, time::Duration};
 
 use clap::{builder::Resettable, Args};
-use humantime::{format_duration, parse_duration};
+use reth_cli_util::parsers::{format_duration, parse_duration};
 use reth_engine_local::DEFAULT_FINALITY_DEPTH;
 
 const DEFAULT_MNEMONIC: &str = "test test test test test test test test test test test junk";
@@ -36,14 +36,14 @@ pub struct DevArgs {
 
     /// Interval between blocks.
     ///
-    /// Parses strings using [`humantime::parse_duration`]
+    /// Accepts a duration such as `12s`, `450ms` or `1m 30s`, e.g.
     /// --dev.block-time 12s
     #[arg(
         long = "dev.block-time",
         help_heading = "Dev testnet",
         conflicts_with = "block_max_transactions",
         value_parser = parse_duration,
-        default_value = Resettable::from(DefaultDevArgs::get_global().block_time.map(|v| format_duration(v).to_string().into())),
+        default_value = Resettable::from(DefaultDevArgs::get_global().block_time.map(|v| format_duration(v).into())),
         verbatim_doc_comment
     )]
     pub block_time: Option<Duration>,
@@ -65,13 +65,13 @@ pub struct DevArgs {
     /// local miner, giving the payload job time for multiple rebuild attempts with
     /// new transactions from the pool.
     ///
-    /// Parses strings using [`humantime::parse_duration`]
+    /// Accepts a duration such as `12s`, `450ms` or `1m 30s`, e.g.
     /// --dev.payload-wait-time 450ms
     #[arg(
         long = "dev.payload-wait-time",
         help_heading = "Dev testnet",
         value_parser = parse_duration,
-        default_value = Resettable::from(DefaultDevArgs::get_global().payload_wait_time.map(|v| format_duration(v).to_string().into())),
+        default_value = Resettable::from(DefaultDevArgs::get_global().payload_wait_time.map(|v| format_duration(v).into())),
         verbatim_doc_comment
     )]
     pub payload_wait_time: Option<Duration>,

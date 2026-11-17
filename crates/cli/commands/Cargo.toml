@@ -50,6 +50,7 @@ reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-static-file.workspace = true
 reth-tasks.workspace = true
 reth-storage-api.workspace = true
+reth-storage-overlay.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-trie-common = { workspace = true, optional = true }
@@ -71,7 +72,6 @@ tokio = { workspace = true, features = ["net"] }
 socket2 = { workspace = true, features = ["all"] }
 
 # misc
-humantime.workspace = true
 human_bytes.workspace = true
 eyre.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }

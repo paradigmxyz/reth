@@ -1,5 +1,6 @@
 use super::{database::parse_byte_size, DefaultRpcServerArgs};
 use clap::{builder::Resettable, Args};
+use reth_cli_util::parsers::{format_duration, parse_duration};
 use reth_rpc_server_types::constants::cache::{
     DEFAULT_BAL_CACHE_MAX_BYTES, DEFAULT_BAL_CACHE_MAX_LEN, DEFAULT_BLOCK_CACHE_MAX_BYTES,
     DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_CACHE_IDLE_TIMEOUT, DEFAULT_CONCURRENT_DB_REQUESTS,
@@ -50,7 +51,7 @@ pub struct RpcStateCacheArgs {
     /// Evict blocks, receipts, and block access lists after this duration without a cache hit
     /// (e.g. 5m, 30s). Zero disables expiration. Cleanup starts every 1 to 60 seconds and removes
     /// at most five entries per cache per poll.
-    #[arg(long = "rpc-cache.idle-timeout", value_name = "DURATION", value_parser = humantime::parse_duration, default_value = humantime::format_duration(DefaultRpcServerArgs::get_global().rpc_state_cache.idle_timeout).to_string())]
+    #[arg(long = "rpc-cache.idle-timeout", value_name = "DURATION", value_parser = parse_duration, default_value = format_duration(DefaultRpcServerArgs::get_global().rpc_state_cache.idle_timeout))]
     pub idle_timeout: Duration,
 
     /// Cache block access lists computed by RPC requests for transaction tracing.

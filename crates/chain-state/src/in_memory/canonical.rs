@@ -3,7 +3,8 @@ use super::{
     BlockState, ExecutedBlock, NewCanonicalChain,
 };
 use crate::{
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, ChainInfoTracker,
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
+    ChainInfoHeaders, ChainInfoTracker,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockNumHash;
@@ -34,22 +35,23 @@ pub(crate) struct InMemoryStateMetrics {
     pub(crate) num_blocks: Gauge,
 }
 
-/// Container type for in memory state data of the canonical chain.
+/// Container type for in memory state data of the executed blocks that are not on disk yet.
 ///
-/// This tracks blocks and their state that haven't been persisted to disk yet but are part of the
-/// canonical chain that can be traced back to a canonical block on disk.
+/// This tracks blocks and their state that haven't been persisted to disk yet: the blocks that
+/// are part of the canonical chain that can be traced back to a canonical block on disk, and the
+/// executed blocks that are not canonical.
+///
+/// A node has one in-memory state. Clones are handles to the same blocks, pending block and
+/// metrics, and the default value is an empty state of its own.
 ///
 /// # Locking behavior on state updates
 ///
 /// Updates change the blocks, the numbers and the pending block under one write lock. This
 /// prevents readers from observing partially updated state where they are out of sync with each
-/// other.
-#[derive(Debug, Default)]
-pub(crate) struct InMemoryState<N: NodePrimitives = EthPrimitives> {
-    /// The canonical blocks that are not on disk yet and the pending block.
-    blocks: RwLock<InMemoryBlocks<N>>,
-    /// Metrics for the in-memory state.
-    metrics: InMemoryStateMetrics,
+/// other, or a block that is both canonical and not canonical, or neither.
+#[derive(Debug, Clone, Default)]
+pub struct InMemoryState<N: NodePrimitives = EthPrimitives> {
+    inner: Arc<InMemoryStateInner<N>>,
 }
 
 impl<N: NodePrimitives> InMemoryState<N> {
@@ -59,8 +61,10 @@ impl<N: NodePrimitives> InMemoryState<N> {
         pending: Option<BlockState<N>>,
     ) -> Self {
         let this = Self {
-            blocks: RwLock::new(InMemoryBlocks::new(blocks, numbers, pending)),
-            metrics: Default::default(),
+            inner: Arc::new(InMemoryStateInner {
+                blocks: RwLock::new(InMemoryBlocks::new(blocks, numbers, pending)),
+                metrics: Default::default(),
+            }),
         };
         this.update_metrics();
         this
@@ -72,7 +76,7 @@ impl<N: NodePrimitives> InMemoryState<N> {
     ///
     /// This tries to acquire a read lock. Drop any write locks before calling this.
     pub(crate) fn update_metrics(&self) {
-        let stats = self.blocks.read().stats();
+        let stats = self.inner.blocks.read().stats();
         self.record_metrics(stats);
     }
 
@@ -80,55 +84,70 @@ impl<N: NodePrimitives> InMemoryState<N> {
     fn record_metrics(&self, stats: InMemoryBlocksStats) {
         let InMemoryBlocksStats { count, earliest, latest } = stats;
         if let Some(earliest_block_number) = earliest {
-            self.metrics.earliest_block.set(earliest_block_number as f64);
+            self.inner.metrics.earliest_block.set(earliest_block_number as f64);
         }
         if let Some(latest_block_number) = latest {
-            self.metrics.latest_block.set(latest_block_number as f64);
+            self.inner.metrics.latest_block.set(latest_block_number as f64);
         }
-        self.metrics.num_blocks.set(count as f64);
+        self.inner.metrics.num_blocks.set(count as f64);
     }
 
     /// Returns the state for a given block hash.
     pub(crate) fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
-        self.blocks.read().canonical().get(&hash).cloned()
+        self.inner.blocks.read().canonical().get(&hash).cloned()
     }
 
     /// Returns the state for a given block number.
     pub(crate) fn state_by_number(&self, number: u64) -> Option<Arc<BlockState<N>>> {
-        self.blocks.read().canonical().by_number(number).cloned()
+        self.inner.blocks.read().canonical().by_number(number).cloned()
     }
 
     /// Returns the hash for a specific block number
     pub(crate) fn hash_by_number(&self, number: u64) -> Option<B256> {
-        self.blocks.read().canonical().hash_by_number(number)
+        self.inner.blocks.read().canonical().hash_by_number(number)
     }
 
     /// Returns the current chain head state.
     pub(crate) fn head_state(&self) -> Option<Arc<BlockState<N>>> {
-        self.blocks.read().canonical().head().cloned()
+        self.inner.blocks.read().canonical().head().cloned()
     }
 
     /// Returns the pending state corresponding to the current head plus one,
     /// from the payload received in newPayload that does not have a FCU yet.
-    pub(crate) fn pending_state(&self) -> Option<BlockState<N>> {
-        self.blocks.read().pending_state().cloned()
+    pub(crate) fn pending_state(&self) -> Option<Arc<BlockState<N>>> {
+        self.inner.blocks.read().pending_state().cloned()
     }
 
     #[cfg(test)]
     fn block_count(&self) -> usize {
-        self.blocks.read().canonical().len()
+        self.inner.blocks.read().canonical().len()
     }
 
     /// Applies `f` to the blocks under the write lock, and updates the metrics from the stats
     /// read under the same lock.
-    fn update(&self, f: impl FnOnce(&mut InMemoryBlocks<N>)) {
-        let stats = {
-            let mut blocks = self.blocks.write();
-            f(&mut blocks);
-            blocks.stats()
+    ///
+    /// Returns what `f` returns, so that the blocks it removed are dropped after the lock is
+    /// released.
+    fn update<R>(&self, f: impl FnOnce(&mut InMemoryBlocks<N>) -> R) -> R {
+        let (result, stats) = {
+            let mut blocks = self.inner.blocks.write();
+            let result = f(&mut blocks);
+            #[cfg(debug_assertions)]
+            blocks.assert_invariants();
+            (result, blocks.stats())
         };
         self.record_metrics(stats);
+        result
     }
+}
+
+/// The blocks of an [`InMemoryState`] with their lock, and the metrics recorded from them.
+#[derive(Debug, Default)]
+struct InMemoryStateInner<N: NodePrimitives> {
+    /// The executed blocks that are not on disk yet, canonical or not.
+    blocks: RwLock<InMemoryBlocks<N>>,
+    /// Metrics for the in-memory state.
+    metrics: InMemoryStateMetrics,
 }
 
 /// Inner type to provide in memory state. It includes a chain tracker to be
@@ -173,7 +192,8 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         let header = in_memory_state.head_state().map_or_else(SealedHeader::default, |state| {
             state.block_ref().recovered_block().clone_sealed_header()
         });
-        let chain_info_tracker = ChainInfoTracker::new(header, finalized, safe);
+        let chain_info_tracker =
+            ChainInfoTracker::new(ChainInfoHeaders { canonical_head: header, safe, finalized });
         let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
 
@@ -191,15 +211,17 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         Self::new(B256Map::default(), BTreeMap::new(), None, None, None)
     }
 
-    /// Create a new in memory state with the given local head and finalized header
-    /// if it exists.
+    /// Creates a canonical state over the blocks of `in_memory_state`, with the canonical head
+    /// and the safe and finalized blocks of `chain_info_headers`.
+    ///
+    /// The blocks are shared with every other handle of `in_memory_state`, so an update of the
+    /// blocks through the returned value is visible through all of them. The chain info and the
+    /// notifications belong to the returned value and its clones.
     pub fn with_head(
-        head: SealedHeader<N::BlockHeader>,
-        finalized: Option<SealedHeader<N::BlockHeader>>,
-        safe: Option<SealedHeader<N::BlockHeader>>,
+        chain_info_headers: ChainInfoHeaders<N::BlockHeader>,
+        in_memory_state: InMemoryState<N>,
     ) -> Self {
-        let chain_info_tracker = ChainInfoTracker::new(head, finalized, safe);
-        let in_memory_state = InMemoryState::default();
+        let chain_info_tracker = ChainInfoTracker::new(chain_info_headers);
         let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
         let inner = CanonicalInMemoryStateInner {
@@ -227,35 +249,45 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.inner.clear()
     }
 
-    /// Updates the pending block with the given block.
+    /// Tracks an executed block that is not canonical, unless it is already tracked.
+    ///
+    /// The block is connected to its parent block, canonical or not. It is not returned by the
+    /// canonical lookups until [`Self::update_chain`] makes it canonical. Does not change the
+    /// pending block.
+    pub fn insert_executed(&self, block: ExecutedBlock<N>) {
+        self.inner.in_memory_state.update(|blocks| blocks.insert_executed(block));
+    }
+
+    /// Updates the pending block with the given block, and tracks it like
+    /// [`Self::insert_executed`].
     ///
     /// Note: This assumes that the parent block of the pending block is canonical.
     pub fn set_pending_block(&self, pending: ExecutedBlock<N>) {
-        self.inner.in_memory_state.update(|blocks| blocks.set_pending_block(pending));
-    }
-
-    /// Append new blocks to the in memory state.
-    ///
-    /// This removes all reorged blocks and appends the new blocks to the tracked chain and connects
-    /// them to their parent blocks.
-    fn update_blocks<I, R>(&self, new_blocks: I, reorged: R)
-    where
-        I: IntoIterator<Item = ExecutedBlock<N>>,
-        R: IntoIterator<Item = ExecutedBlock<N>>,
-    {
-        self.inner.in_memory_state.update(|blocks| blocks.update_blocks(new_blocks, reorged));
+        self.inner.in_memory_state.update(|blocks| blocks.insert_pending(pending));
     }
 
     /// Update the in memory state with the given chain update.
+    ///
+    /// This appends the new blocks to the tracked chain and connects them to their parent blocks.
+    /// The blocks a reorg replaced stay tracked as executed blocks that are not canonical, and so
+    /// does the pending block, which is no longer pending.
     pub fn update_chain(&self, new_chain: NewCanonicalChain<N>) {
-        match new_chain {
-            NewCanonicalChain::Commit { new } => {
-                self.update_blocks(new, vec![]);
-            }
-            NewCanonicalChain::Reorg { new, old } => {
-                self.update_blocks(new, old);
-            }
-        }
+        self.inner.in_memory_state.update(|blocks| blocks.update_chain(new_chain));
+    }
+
+    /// Makes every canonical block an executed block that is not canonical. Afterwards there is
+    /// no pending block.
+    pub fn demote_canonical_chain(&self) {
+        self.inner.in_memory_state.update(InMemoryBlocks::demote_canonical_chain);
+    }
+
+    /// Removes the executed blocks that are not canonical and can no longer become canonical once
+    /// `finalized` is final: the ones below its height, the other ones at its height, and every
+    /// block built on such a block at its height.
+    pub fn prune_conflicting_with_finalized(&self, finalized: BlockNumHash) {
+        self.inner
+            .in_memory_state
+            .update(|blocks| blocks.prune_conflicting_with_finalized(finalized));
     }
 
     /// Removes blocks from the in memory state that are persisted to the given height.
@@ -299,7 +331,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Returns the in memory pending state.
-    pub fn pending_state(&self) -> Option<BlockState<N>> {
+    pub fn pending_state(&self) -> Option<Arc<BlockState<N>>> {
         self.inner.in_memory_state.pending_state()
     }
 
@@ -631,7 +663,7 @@ mod tests {
 
         // Check the pending state
         assert_eq!(
-            state.pending_state().unwrap(),
+            *state.pending_state().unwrap(),
             BlockState::with_parent(block2.clone(), Some(Arc::new(BlockState::new(block1))))
         );
 
@@ -661,6 +693,44 @@ mod tests {
         let pending = state.pending_block_and_receipts().unwrap();
         assert!(Arc::ptr_eq(pending.block(), &block2.recovered_block));
         assert!(Arc::ptr_eq(pending.execution_output(), &block2.execution_output));
+    }
+
+    #[test]
+    fn test_in_memory_state_executed_blocks_are_not_canonical() {
+        let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
+        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
+        let block1 = test_block_builder.get_executed_block_with_number(1, B256::random());
+        let block1_hash = block1.recovered_block().hash();
+        let block2 = test_block_builder.get_executed_block_with_number(2, block1_hash);
+        let block2_hash = block2.recovered_block().hash();
+        let fork2 = test_block_builder.get_executed_block_with_number(2, block1_hash);
+        let fork2_hash = fork2.recovered_block().hash();
+        let tracked = |hash| state.inner.in_memory_state.inner.blocks.read().contains(&hash);
+
+        // Executed blocks are tracked, but not canonical.
+        state.insert_executed(block1.clone());
+        state.insert_executed(block2.clone());
+        state.insert_executed(fork2.clone());
+        assert!(tracked(block1_hash) && tracked(block2_hash) && tracked(fork2_hash));
+        assert!(state.state_by_hash(block2_hash).is_none());
+        assert!(state.head_state().is_none());
+        assert!(state.pending_state().is_none());
+
+        // A chain update makes them canonical.
+        state.update_chain(NewCanonicalChain::Commit { new: vec![block1, block2.clone()] });
+        assert_eq!(state.head_state().unwrap().hash(), block2_hash);
+        assert!(state.state_by_hash(fork2_hash).is_none());
+
+        // A reorg keeps the replaced block tracked.
+        state.update_chain(NewCanonicalChain::Reorg { new: vec![fork2], old: vec![block2] });
+        assert_eq!(state.head_state().unwrap().hash(), fork2_hash);
+        assert!(state.state_by_hash(block2_hash).is_none());
+        assert!(tracked(block2_hash));
+
+        // The replaced block conflicts with the block that replaced it once that is finalized.
+        state.prune_conflicting_with_finalized(BlockNumHash::new(2, fork2_hash));
+        assert!(!tracked(block2_hash));
+        assert_eq!(state.inner.in_memory_state.block_count(), 2);
     }
 
     #[test]
@@ -695,7 +765,7 @@ mod tests {
         for i in 1..=3 {
             let block = block_builder.get_executed_block_with_number(i, parent_hash);
             let hash = block.recovered_block().hash();
-            state.update_blocks(Some(block), None);
+            state.update_chain(NewCanonicalChain::Commit { new: vec![block] });
             parent_hash = hash;
         }
 
@@ -717,7 +787,7 @@ mod tests {
         for i in 1..=2 {
             let block = block_builder.get_executed_block_with_number(i, parent_hash);
             let hash = block.recovered_block().hash();
-            state.update_blocks(Some(block), None);
+            state.update_chain(NewCanonicalChain::Commit { new: vec![block] });
             parent_hash = hash;
         }
 

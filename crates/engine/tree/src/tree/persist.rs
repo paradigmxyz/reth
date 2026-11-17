@@ -472,6 +472,14 @@ where
             None
         };
 
+        // The executed blocks that are not canonical are removed from the in-memory state like
+        // the tree state removes them: if the finalized block is ahead of the upper bound, the
+        // upper bound is used instead.
+        if let Some(finalized) = num {
+            self.canonical_in_memory_state.prune_conflicting_with_finalized(
+                if upper_bound.number < finalized.number { upper_bound } else { finalized },
+            );
+        }
         self.state.tree_state.remove_until(
             upper_bound,
             self.persistence_state.last_persisted_block.hash,
