@@ -171,8 +171,14 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
             .canonical
             .numbers
             .range(first_demoted..)
+            .filter(|(number, hash)| {
+                // The new blocks are a chain, so the one at a height is found by its offset.
+                number
+                    .checked_sub(first_number)
+                    .and_then(|offset| new.get(offset as usize))
+                    .is_none_or(|block| block.recovered_block().hash() != **hash)
+            })
             .map(|(_, hash)| *hash)
-            .filter(|hash| !new.iter().any(|block| block.recovered_block().hash() == *hash))
             .collect::<Vec<_>>();
         for hash in demoted {
             let state = self.canonical.remove(&hash);
