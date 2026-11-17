@@ -1112,6 +1112,13 @@ async fn eth_call_lifts_execution_gas_cap_under_amsterdam() -> eyre::Result<()> 
             .await?;
         assert_eq!(trace["output"], serde_json::json!(B256::with_last_byte(1)), "{fork}: {trace}");
 
+        // `eth_callMany` also goes through the per-request `CallManyBudget`.
+        let bundles = serde_json::json!([{ "transactions": [&heavy] }]);
+        let results: serde_json::Value =
+            provider.raw_request("eth_callMany".into(), (&bundles, None::<()>, &overrides)).await?;
+        assert!(results[0][0].get("error").is_none(), "{fork}: {results}");
+        assert_eq!(results[0][0]["value"], serde_json::json!(B256::with_last_byte(1)), "{fork}");
+
         let access_list: AccessListResult = provider
             .raw_request("eth_createAccessList".into(), (&heavy, "latest", &overrides))
             .await?;

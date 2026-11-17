@@ -487,7 +487,9 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                 EvmOverrides::state(state_override),
             )?;
             // The access list is used to send a transaction, so under EIP-8037 keep the execution
-            // gas cap that the transaction will run with, like geth does.
+            // gas cap that the transaction will run with, like geth does. The total gas cap stays
+            // lifted, also like geth, so with an RPC gas cap above `2^32 - 1` this can return an
+            // access list for a gas limit no transaction can have.
             if evm_env.version().feature(evm2::EvmFeatures::EIP8037) {
                 evm_env.version_mut().tx_gas_limit_cap = tx_gas_limit_cap;
             }
