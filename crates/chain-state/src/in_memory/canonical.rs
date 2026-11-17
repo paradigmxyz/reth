@@ -166,8 +166,7 @@ pub(crate) struct CanonicalInMemoryStateInner<N: NodePrimitives> {
 impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
     /// Clears all entries in the in memory state.
     fn clear(&self) {
-        // The removed blocks are dropped here, after the lock is released.
-        drop(self.in_memory_state.update(InMemoryBlocks::clear));
+        self.in_memory_state.update(InMemoryBlocks::clear);
     }
 }
 
@@ -286,12 +285,9 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// `finalized` is final: the ones below its height, the other ones at its height, and every
     /// block built on such a block at its height.
     pub fn prune_conflicting_with_finalized(&self, finalized: BlockNumHash) {
-        // The removed blocks are dropped here, after the lock is released.
-        drop(
-            self.inner
-                .in_memory_state
-                .update(|blocks| blocks.prune_conflicting_with_finalized(finalized)),
-        );
+        self.inner
+            .in_memory_state
+            .update(|blocks| blocks.prune_conflicting_with_finalized(finalized));
     }
 
     /// Removes blocks from the in memory state that are persisted to the given height.
@@ -314,12 +310,9 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         remove_until: BlockNumber,
     ) {
         self.set_persisted(persisted_num_hash);
-        // The removed blocks are dropped here, after the lock is released.
-        drop(
-            self.inner
-                .in_memory_state
-                .update(|blocks| blocks.remove_canonical_until(persisted_num_hash, remove_until)),
-        );
+        self.inner
+            .in_memory_state
+            .update(|blocks| blocks.remove_canonical_until(persisted_num_hash, remove_until));
     }
 
     /// Returns in memory state corresponding the given hash.

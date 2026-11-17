@@ -568,6 +568,17 @@ impl<N: NodePrimitives> InMemoryNonCanonicalBlocks<N> {
     }
 }
 
+/// The number of canonical blocks in memory and the lowest and highest of their numbers.
+#[derive(Debug)]
+pub(super) struct InMemoryBlocksStats {
+    /// The number of canonical blocks.
+    pub(super) count: usize,
+    /// The number of the earliest canonical block.
+    pub(super) earliest: Option<BlockNumber>,
+    /// The number of the latest canonical block.
+    pub(super) latest: Option<BlockNumber>,
+}
+
 /// Removes `hash` from `hashes`, the set an index of the non-canonical section holds for a block,
 /// and returns `true` if the set is empty afterwards and has to be removed from the index.
 fn remove_indexed(hashes: Option<&mut B256Set>, hash: &B256) -> bool {
@@ -578,17 +589,6 @@ fn remove_indexed(hashes: Option<&mut B256Set>, hash: &B256) -> bool {
     let removed = hashes.remove(hash);
     debug_assert!(removed, "non-canonical block {hash} is not indexed");
     hashes.is_empty()
-}
-
-/// The number of canonical blocks in memory and the lowest and highest of their numbers.
-#[derive(Debug)]
-pub(super) struct InMemoryBlocksStats {
-    /// The number of canonical blocks.
-    pub(super) count: usize,
-    /// The number of the earliest canonical block.
-    pub(super) earliest: Option<BlockNumber>,
-    /// The number of the latest canonical block.
-    pub(super) latest: Option<BlockNumber>,
 }
 
 #[cfg(test)]
@@ -750,6 +750,36 @@ mod tests {
         blocks.demote_canonical_chain();
         assert_eq!(counts(&blocks), (0, 4));
         assert_eq!(blocks.get(&hash(&chain[2])).unwrap().chain().count(), 3);
+        blocks.assert_invariants();
+    }
+
+    #[test]
+    fn prune_conflicting_with_finalized_removes_blocks_that_cannot_become_canonical() {
+        let mut builder = TestBlockBuilder::eth();
+        let mut blocks = InMemoryBlocks::<EthPrimitives>::default();
+        let canonical = builder.get_executed_blocks(1..5).collect::<Vec<_>>();
+        blocks.set_canonical_chain(canonical.clone());
+
+        let fork_a = builder.get_executed_block_with_number(2, hash(&canonical[0]));
+        let fork_a_child = builder.get_executed_block_with_number(3, hash(&fork_a));
+        let fork_b = builder.get_executed_block_with_number(3, hash(&canonical[1]));
+        let fork_b_child = builder.get_executed_block_with_number(4, hash(&fork_b));
+        let fork_c = builder.get_executed_block_with_number(4, hash(&canonical[2]));
+        for block in [&fork_a, &fork_a_child, &fork_b, &fork_c] {
+            assert!(blocks.insert_executed(block.clone()));
+        }
+        assert!(blocks.insert_pending(fork_b_child.clone()));
+
+        // With block 3 finalized, only the fork built on it can still become canonical.
+        let removed =
+            blocks.prune_conflicting_with_finalized(canonical[2].recovered_block().num_hash());
+        assert_eq!(removed.len(), 4);
+        for block in [&fork_a, &fork_a_child, &fork_b, &fork_b_child] {
+            assert!(!blocks.contains(&hash(block)));
+        }
+        assert!(blocks.contains(&hash(&fork_c)));
+        assert!(blocks.pending_state().is_none(), "the removed block is still pending");
+        assert_eq!(counts(&blocks), (4, 1), "canonical blocks are removed separately");
         blocks.assert_invariants();
     }
 }
