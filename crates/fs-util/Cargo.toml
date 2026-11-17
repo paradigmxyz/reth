@@ -16,3 +16,6 @@ workspace = true
 serde_json = { workspace = true, features = ["std"] }
 serde.workspace = true
 thiserror.workspace = true
+
+[target.'cfg(any(unix, windows))'.dependencies]
+fs4.workspace = true

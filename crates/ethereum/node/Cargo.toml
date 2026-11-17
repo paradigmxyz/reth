@@ -188,3 +188,6 @@ test-utils = [
     "reth-stages-api/test-utils",
     "reth-payload-builder/test-utils",
 ]
+
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+rocksdb.workspace = true

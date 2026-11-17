@@ -516,6 +516,7 @@ humantime-serde = "1.1"
 itertools = { version = "0.14", default-features = false }
 linked_hash_set = "0.1"
 libc = "0.2"
+fs4 = { version = "1.1.0", default-features = false }
 lz4 = "1.28.1"
 modular-bitfield = "0.13.1"
 notify = { version = "8.0.0", default-features = false, features = ["macos_fsevent"] }
@@ -544,7 +545,7 @@ fixed-cache = { version = "0.1.10", default-features = false, features = ["alloc
 moka = "0.12"
 chrono = "0.4.41"
 
-pbt = { git = "https://github.com/Rimeeeeee/pbtree", rev = "399e94e9e8e8410e6f7bc8559f7a2af08bb214f4", default-features = false }
+pbt = { git = "https://github.com/Rimeeeeee/pbtree", rev = "6580f58862f0f32ea3b4774c81ef78b644f7ca7d", default-features = false }
 
 # metrics
 metrics = "0.24.0"

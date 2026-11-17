@@ -60,7 +60,11 @@ verification pin roots instead of holding the checkpoint writer lock throughout.
 Checkpoint references and root records are pruned immediately. Full native-node
 collection is deferred until 256 registered roots have been removed, amortizing
 its whole-state scan. This counter survives restart; interrupted sweeps bypass
-the threshold. Unreachable nodes use disk space until collection. Library callers
+the threshold. Each maintenance tick also checks free space on the checkpoint
+filesystem, even when finality has not advanced. Below 10 GiB free, outstanding
+garbage is collected without waiting for 256 root removals; once that debt is
+cleared, low space alone does not trigger repeated scans. Unreachable nodes use
+disk space until collection. Library callers
 can force reclamation with `SnapshotStore::collect`.
 
 `--pbt.cache-max-bytes` bounds estimated full-state cache bytes (default 1 GiB, zero

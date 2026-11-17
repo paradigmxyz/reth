@@ -368,3 +368,11 @@ where
 
     Ok(())
 }
+
+/// Returns bytes available to this user on the filesystem containing `path`.
+/// The path may name any existing file or directory, including a mounted data directory.
+#[cfg(any(unix, windows))]
+pub fn available_space(path: impl AsRef<Path>) -> Result<u64> {
+    let path = path.as_ref();
+    fs4::available_space(path).map_err(|error| FsPathError::metadata(error, path))
+}
