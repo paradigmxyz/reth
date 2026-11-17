@@ -269,6 +269,11 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
         self.reader_txn_tracker = Some(Arc::new(reader_txn_tracker));
         self
     }
+
+    /// Returns the manager of the in-memory blocks the engine tree holds.
+    pub(crate) const fn overlay_manager(&self) -> &OverlayManager<N::Primitives> {
+        &self.overlay_manager
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -1671,6 +1676,17 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
                 .collect()
         }
     }
+
+    fn lowest_storage_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        // Only storage v2 keeps changesets in static files.
+        if !self.cached_storage_settings().storage_v2 {
+            return Ok(None)
+        }
+        Ok(self
+            .static_file_provider
+            .get_lowest_range_start(StaticFileSegment::StorageChangeSets)
+            .filter(|&block| block > 0))
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
@@ -1725,6 +1741,17 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
                 .map(|r| r.map_err(Into::into))
                 .collect()
         }
+    }
+
+    fn lowest_account_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        // Only storage v2 keeps changesets in static files.
+        if !self.cached_storage_settings().storage_v2 {
+            return Ok(None)
+        }
+        Ok(self
+            .static_file_provider
+            .get_lowest_range_start(StaticFileSegment::AccountChangeSets)
+            .filter(|&block| block > 0))
     }
 }
 
@@ -2116,34 +2143,21 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
-        if let Some(transaction_id) = self.transaction_id(tx_hash)? &&
-            let Some(transaction) = self.transaction_by_id_unhashed(transaction_id)? &&
-            let Some(block_number) = self.block_by_transaction_id(transaction_id)? &&
-            let Some(sealed_header) = self.sealed_header(block_number)?
-        {
-            let (header, block_hash) = sealed_header.split();
-            if let Some(block_body) = self.block_body_indices(block_number)? {
-                // the index of the tx in the block is the offset:
-                // len([start..tx_id])
-                // NOTE: `transaction_id` is always `>=` the block's first
-                // index
-                let index = transaction_id - block_body.first_tx_num();
+        Ok(self
+            .transaction_by_hash_with_meta_and_id(tx_hash)?
+            .map(|(transaction, meta, _)| (transaction, meta)))
+    }
 
-                let meta = TransactionMeta {
-                    tx_hash,
-                    index,
-                    block_hash,
-                    block_number,
-                    base_fee: header.base_fee_per_gas(),
-                    excess_blob_gas: header.excess_blob_gas(),
-                    timestamp: header.timestamp(),
-                };
-
-                return Ok(Some((transaction, meta)))
-            }
-        }
-
-        Ok(None)
+    fn transaction_by_hash_with_meta_and_sender(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta, Option<Address>)>> {
+        let Some((transaction, meta, transaction_id)) =
+            self.transaction_by_hash_with_meta_and_id(tx_hash)?
+        else {
+            return Ok(None)
+        };
+        Ok(Some((transaction, meta, self.transaction_sender(transaction_id)?)))
     }
 
     fn transactions_by_block(
@@ -2206,6 +2220,43 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         } else {
             Ok(self.tx.get::<tables::TransactionSenders>(id)?)
         }
+    }
+}
+
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+    /// Returns the transaction with the metadata of the block it was mined in, and its id.
+    fn transaction_by_hash_with_meta_and_id(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<Option<(TxTy<N>, TransactionMeta, TxNumber)>> {
+        if let Some(transaction_id) = self.transaction_id(tx_hash)? &&
+            let Some(transaction) = self.transaction_by_id_unhashed(transaction_id)? &&
+            let Some(block_number) = self.block_by_transaction_id(transaction_id)? &&
+            let Some(sealed_header) = self.sealed_header(block_number)?
+        {
+            let (header, block_hash) = sealed_header.split();
+            if let Some(block_body) = self.block_body_indices(block_number)? {
+                // the index of the tx in the block is the offset:
+                // len([start..tx_id])
+                // NOTE: `transaction_id` is always `>=` the block's first
+                // index
+                let index = transaction_id - block_body.first_tx_num();
+
+                let meta = TransactionMeta {
+                    tx_hash,
+                    index,
+                    block_hash,
+                    block_number,
+                    base_fee: header.base_fee_per_gas(),
+                    excess_blob_gas: header.excess_blob_gas(),
+                    timestamp: header.timestamp(),
+                };
+
+                return Ok(Some((transaction, meta, transaction_id)))
+            }
+        }
+
+        Ok(None)
     }
 }
 
@@ -4032,27 +4083,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> StatsReader for DatabaseProvid
 
 impl<TX: DbTx + 'static, N: NodeTypes> ChainStateBlockReader for DatabaseProvider<TX, N> {
     fn last_finalized_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
-        let mut finalized_blocks = self
-            .tx
-            .cursor_read::<tables::ChainState>()?
-            .walk(Some(tables::ChainStateKey::LastFinalizedBlock))?
-            .take(1)
-            .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
-
-        let last_finalized_block_number = finalized_blocks.pop_first().map(|pair| pair.1);
-        Ok(last_finalized_block_number)
+        Ok(self.tx.get::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock)?)
     }
 
     fn last_safe_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
-        let mut finalized_blocks = self
-            .tx
-            .cursor_read::<tables::ChainState>()?
-            .walk(Some(tables::ChainStateKey::LastSafeBlock))?
-            .take(1)
-            .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
-
-        let last_finalized_block_number = finalized_blocks.pop_first().map(|pair| pair.1);
-        Ok(last_finalized_block_number)
+        Ok(self.tx.get::<tables::ChainState>(tables::ChainStateKey::LastSafeBlock)?)
     }
 }
 
@@ -6100,5 +6135,29 @@ mod tests {
         assert!(all_blocks.contains(&3), "block 3 should remain");
         assert!(!all_blocks.contains(&7), "block 7 should be unwound");
         assert!(!all_blocks.contains(&10), "block 10 should be unwound");
+    }
+
+    #[test]
+    fn test_chain_state_block_numbers_are_read_by_exact_key() {
+        for (finalized, safe) in
+            [(None, None), (None, Some(100)), (Some(90), None), (Some(90), Some(100))]
+        {
+            let factory = create_test_provider_factory();
+            let provider = factory.provider_rw().unwrap();
+            if let Some(block_number) = finalized {
+                provider.save_finalized_block_number(block_number).unwrap();
+            }
+            if let Some(block_number) = safe {
+                provider.save_safe_block_number(block_number).unwrap();
+            }
+
+            assert_eq!(provider.last_finalized_block_number().unwrap(), finalized);
+            assert_eq!(provider.last_safe_block_number().unwrap(), safe);
+            provider.commit().unwrap();
+
+            let provider = factory.provider().unwrap();
+            assert_eq!(provider.last_finalized_block_number().unwrap(), finalized);
+            assert_eq!(provider.last_safe_block_number().unwrap(), safe);
+        }
     }
 }

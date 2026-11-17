@@ -282,6 +282,8 @@ sparse_trie_tests! {
     test_prune_then_update_no_panic,
     test_prune_only_descends_into_branch_root,
     test_prune_handles_small_subtrie_root_nodes,
+    test_prune_extension_roots_and_upper_children,
+    test_prune_rehash_preserves_cached_extension_epoch,
 
     // clear
     test_clear_resets_trie_but_preserves_update_tracking,

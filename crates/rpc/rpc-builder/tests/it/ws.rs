@@ -2,10 +2,9 @@
 //! `WebSocket` subscription tests for `eth_subscribe` / `eth_unsubscribe`
 
 use crate::utils::{launch_ws, test_address, test_rpc_builder};
-use jsonrpsee::{
-    core::client::{Subscription, SubscriptionClientT},
-    server::ServerConfigBuilder,
-};
+use alloy_provider::{Provider, ProviderBuilder};
+use jsonrpsee::server::ServerConfigBuilder;
+use jsonrpsee_test_utils::mocks::WebSocketTestClient;
 use reth_consensus::noop::NoopConsensus;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
@@ -25,10 +24,12 @@ use serde_json::Value;
 use std::time::Duration;
 use tokio::time::Instant;
 
-use reth_rpc_builder::{RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig};
+use reth_rpc_builder::{
+    RpcModuleBuilder, RpcServerConfig, RpcServerHandle, TransportRpcModuleConfig,
+};
 
 /// Helper to launch a WS server with the Eth module.
-async fn launch_ws_eth() -> reth_rpc_builder::RpcServerHandle {
+async fn launch_ws_eth() -> RpcServerHandle {
     launch_ws(vec![reth_rpc_server_types::RethRpcModule::Eth]).await
 }
 
@@ -38,9 +39,7 @@ async fn launch_ws_eth() -> reth_rpc_builder::RpcServerHandle {
 /// `NoopProvider` drops the sender immediately, which ends canonical state streams right away.
 /// With a live sender, subscription tasks block on the stream the same way they do on a running
 /// node.
-async fn launch_ws_eth_with_canon_state(
-    max_subscriptions_per_connection: u32,
-) -> reth_rpc_builder::RpcServerHandle {
+async fn launch_ws_eth_with_canon_state(max_subscriptions_per_connection: u32) -> RpcServerHandle {
     let provider =
         BlockchainProvider::with_latest(create_test_provider_factory(), SealedHeader::default())
             .unwrap();
@@ -63,11 +62,19 @@ async fn launch_ws_eth_with_canon_state(
     RpcServerConfig::ws(config).with_ws_address(test_address()).start(&server).await.unwrap()
 }
 
+/// Returns a provider connected to the handle's WS endpoint.
+async fn ws_provider(handle: &RpcServerHandle) -> impl Provider {
+    ProviderBuilder::new().connect_client(handle.ws_client().await.unwrap())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_subscribe_all_supported_kinds_accept() {
     reth_tracing::init_test_tracing();
 
     let handle = launch_ws_eth().await;
+    // Raw requests, because alloy's tracked subscriptions unsubscribe without waiting for the
+    // response and could mix it up with the next subscribe call. Unsubscribing is covered by
+    // `test_eth_subscribe_syncing_releases_permit_on_unsubscribe`.
     let client = handle.ws_client().await.unwrap();
 
     let cases: Vec<(&str, Vec<Value>)> = vec![
@@ -96,20 +103,13 @@ async fn test_eth_subscribe_all_supported_kinds_accept() {
     ];
 
     for (kind, params) in cases {
-        let mut rpc_params = jsonrpsee::core::params::ArrayParams::new();
-        rpc_params.insert(kind).unwrap();
-        for p in params {
-            rpc_params.insert(p).unwrap();
-        }
+        let rpc_params = std::iter::once(Value::from(kind)).chain(params).collect::<Vec<_>>();
 
-        let sub: Subscription<Value> = client
-            .subscribe("eth_subscribe", rpc_params, "eth_unsubscribe")
+        let sub_id: Value = client
+            .request("eth_subscribe", rpc_params)
             .await
             .unwrap_or_else(|e| panic!("subscribe({kind}) should succeed: {e}"));
-
-        sub.unsubscribe()
-            .await
-            .unwrap_or_else(|e| panic!("unsubscribe({kind}) should succeed: {e}"));
+        assert!(sub_id.is_string(), "subscribe({kind}) returned {sub_id}");
     }
 }
 
@@ -118,23 +118,19 @@ async fn test_eth_subscribe_syncing_delivers_initial_status() {
     reth_tracing::init_test_tracing();
 
     let handle = launch_ws_eth().await;
-    let client = handle.ws_client().await.unwrap();
+    let provider = ws_provider(&handle).await;
 
-    let mut sub: Subscription<Value> = client
-        .subscribe("eth_subscribe", jsonrpsee::rpc_params!["syncing"], "eth_unsubscribe")
-        .await
-        .unwrap();
+    let mut sub = provider.subscribe::<_, Value>(("syncing",)).await.unwrap();
 
-    let initial = tokio::time::timeout(Duration::from_secs(5), sub.next())
+    let initial = tokio::time::timeout(Duration::from_secs(5), sub.recv())
         .await
         .expect("timed out waiting for initial sync status")
-        .expect("subscription ended unexpectedly")
-        .expect("failed to deserialize sync status");
+        .expect("subscription ended unexpectedly");
 
     // NoopNetwork reports is_syncing = false
     assert_eq!(initial, serde_json::json!(false));
 
-    sub.unsubscribe().await.unwrap();
+    provider.unsubscribe(*sub.local_id()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -142,11 +138,9 @@ async fn test_eth_subscribe_invalid_kind_rejected() {
     reth_tracing::init_test_tracing();
 
     let handle = launch_ws_eth().await;
-    let client = handle.ws_client().await.unwrap();
+    let provider = ws_provider(&handle).await;
 
-    let result: Result<Subscription<Value>, _> = client
-        .subscribe("eth_subscribe", jsonrpsee::rpc_params!["invalidKind"], "eth_unsubscribe")
-        .await;
+    let result = provider.subscribe::<_, Value>(("invalidKind",)).await;
 
     assert!(result.is_err(), "invalid subscription kind must be rejected");
 }
@@ -158,22 +152,16 @@ async fn test_eth_subscribe_server_survives_client_disconnect() {
     let handle = launch_ws_eth().await;
 
     {
-        let client = handle.ws_client().await.unwrap();
-        let _sub: Subscription<Value> = client
-            .subscribe("eth_subscribe", jsonrpsee::rpc_params!["newHeads"], "eth_unsubscribe")
-            .await
-            .unwrap();
-        // client + subscription drop here
+        let provider = ws_provider(&handle).await;
+        let _sub = provider.subscribe::<_, Value>(("newHeads",)).await.unwrap();
+        // provider + subscription drop here
     }
 
     // Server must still accept new connections after a client disconnects
-    let client2 = handle.ws_client().await.unwrap();
-    let sub: Subscription<Value> = client2
-        .subscribe("eth_subscribe", jsonrpsee::rpc_params!["newHeads"], "eth_unsubscribe")
-        .await
-        .unwrap();
+    let provider2 = ws_provider(&handle).await;
+    let sub = provider2.subscribe::<_, Value>(("newHeads",)).await.unwrap();
 
-    sub.unsubscribe().await.unwrap();
+    provider2.unsubscribe(*sub.local_id()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -221,17 +209,10 @@ async fn test_eth_subscribe_pending_transactions_receives_tx() {
         .await
         .unwrap();
 
-    let client = handle.ws_client().await.unwrap();
+    let provider = ws_provider(&handle).await;
 
     // Subscribe to pending transaction hashes
-    let mut sub: Subscription<Value> = client
-        .subscribe(
-            "eth_subscribe",
-            jsonrpsee::rpc_params!["newPendingTransactions"],
-            "eth_unsubscribe",
-        )
-        .await
-        .unwrap();
+    let mut sub = provider.subscribe::<_, Value>(("newPendingTransactions",)).await.unwrap();
 
     // Insert a transaction into the pool
     let tx = reth_transaction_pool::test_utils::MockTransaction::eip1559();
@@ -239,16 +220,15 @@ async fn test_eth_subscribe_pending_transactions_receives_tx() {
     pool_clone.add_transaction(TransactionOrigin::External, tx).await.unwrap();
 
     // We should receive the tx hash via the subscription
-    let received = tokio::time::timeout(Duration::from_secs(5), sub.next())
+    let received = tokio::time::timeout(Duration::from_secs(5), sub.recv())
         .await
         .expect("timed out waiting for pending tx notification")
-        .expect("subscription ended unexpectedly")
-        .expect("failed to deserialize tx hash");
+        .expect("subscription ended unexpectedly");
 
     let received_hash: alloy_primitives::TxHash = serde_json::from_value(received).unwrap();
     assert_eq!(received_hash, expected_hash);
 
-    sub.unsubscribe().await.unwrap();
+    provider.unsubscribe(*sub.local_id()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -257,33 +237,43 @@ async fn test_eth_subscribe_syncing_releases_permit_on_unsubscribe() {
 
     // A single permit means each subscription must release it before the next one is accepted.
     let handle = launch_ws_eth_with_canon_state(1).await;
-    let client = handle.ws_client().await.unwrap();
+    // A raw client, because alloy unsubscribes without waiting for the server's answer.
+    let mut client = WebSocketTestClient::new(handle.ws_local_addr().unwrap()).await.unwrap();
 
     for i in 0..3 {
         // The previous subscription task releases its permit asynchronously after unsubscribe.
         let deadline = Instant::now() + Duration::from_secs(5);
-        let mut sub: Subscription<Value> = loop {
-            match client
-                .subscribe("eth_subscribe", jsonrpsee::rpc_params!["syncing"], "eth_unsubscribe")
-                .await
-            {
-                Ok(sub) => break sub,
-                Err(err) if Instant::now() >= deadline => {
-                    panic!("syncing subscription #{i} rejected after unsubscribe: {err}")
+        let sub_id = loop {
+            let response =
+                ws_call(&mut client, "eth_subscribe", serde_json::json!(["syncing"])).await;
+            match response.get("result") {
+                Some(sub_id) => break sub_id.clone(),
+                None if Instant::now() >= deadline => {
+                    panic!("syncing subscription #{i} rejected after unsubscribe: {response}")
                 }
-                Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
+                None => tokio::time::sleep(Duration::from_millis(50)).await,
             }
         };
 
-        let initial = tokio::time::timeout(Duration::from_secs(5), sub.next())
+        let initial = tokio::time::timeout(Duration::from_secs(5), client.receive())
             .await
             .expect("timed out waiting for initial syncing status")
-            .expect("subscription closed before initial status")
             .unwrap();
-        assert_eq!(initial, Value::Bool(false));
+        let initial: Value = serde_json::from_str(&initial).unwrap();
+        assert_eq!(initial["params"]["subscription"], sub_id);
+        assert_eq!(initial["params"]["result"], Value::Bool(false));
 
-        sub.unsubscribe().await.unwrap();
+        let response = ws_call(&mut client, "eth_unsubscribe", serde_json::json!([sub_id])).await;
+        assert_eq!(response["result"], Value::Bool(true), "{response}");
     }
+}
+
+/// Sends a call over a raw `WebSocket` connection and returns its response object.
+async fn ws_call(client: &mut WebSocketTestClient, method: &str, params: Value) -> Value {
+    let request =
+        serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
+    let response = client.send_request_text(request.to_string()).await.unwrap();
+    serde_json::from_str(&response).unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -300,21 +290,19 @@ async fn test_eth_subscribe_syncing_task_exits_on_disconnect() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     let baseline = metrics.num_alive_tasks();
 
+    // Raw `eth_subscribe` calls: alloy neither deduplicates nor unsubscribes them, so the server
+    // keeps one task per call until the connection closes.
     let client = handle.ws_client().await.unwrap();
-    let mut subs = Vec::with_capacity(SUBSCRIPTIONS);
     for _ in 0..SUBSCRIPTIONS {
-        let mut sub: Subscription<Value> = client
-            .subscribe("eth_subscribe", jsonrpsee::rpc_params!["syncing"], "eth_unsubscribe")
-            .await
-            .unwrap();
-        assert_eq!(sub.next().await.unwrap().unwrap(), Value::Bool(false));
-        subs.push(sub);
+        let _: Value = client.request("eth_subscribe", ("syncing",)).await.unwrap();
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while metrics.num_alive_tasks() < baseline + SUBSCRIPTIONS && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
     assert!(metrics.num_alive_tasks() >= baseline + SUBSCRIPTIONS);
 
-    // Close the connection before dropping the subscriptions so no `eth_unsubscribe` is sent.
     drop(client);
-    drop(subs);
 
     let deadline = Instant::now() + Duration::from_secs(5);
     while metrics.num_alive_tasks() > baseline && Instant::now() < deadline {

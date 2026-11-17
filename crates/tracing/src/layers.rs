@@ -51,7 +51,7 @@ pub(crate) type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
 /// 1. Disable high-frequency debug logs from dependencies such as `hyper`, `hickory-resolver`,
 ///    `hickory_proto`, `discv5`, `jsonrpsee-server`, and `hyper_util::client::legacy::pool`.
 /// 2. Set noisy crates like `opentelemetry_*`, `rustls`, and `tungstenite` to `WARN`.
-const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 11] = [
+pub(crate) const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 11] = [
     "hyper::proto::h1=off",
     "hickory_resolver=off",
     "hickory_proto=off",
