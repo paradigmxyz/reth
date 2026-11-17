@@ -7,6 +7,9 @@ use reth_network_peers::{NodeRecord, TrustedPeer};
 
 use crate::{peers::PersistedPeerInfo, BackoffKind, ReputationChangeWeights};
 
+#[cfg(feature = "serde")]
+use jiff::fmt::serde::unsigned_duration::friendly::compact;
+
 /// Maximum number of available slots for outbound sessions.
 pub const DEFAULT_MAX_COUNT_PEERS_OUTBOUND: u32 = 100;
 
@@ -29,17 +32,17 @@ pub const INBOUND_IP_THROTTLE_DURATION: Duration = Duration::from_secs(30);
 pub struct PeerBackoffDurations {
     /// Applies to connection problems where there is a chance that they will be resolved after the
     /// short duration.
-    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
+    #[cfg_attr(feature = "serde", serde(with = "compact::required"))]
     pub low: Duration,
     /// Applies to more severe connection problems where there is a lower chance that they will be
     /// resolved.
-    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
+    #[cfg_attr(feature = "serde", serde(with = "compact::required"))]
     pub medium: Duration,
     /// Intended for spammers, or bad peers in general.
-    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
+    #[cfg_attr(feature = "serde", serde(with = "compact::required"))]
     pub high: Duration,
     /// Maximum total backoff duration.
-    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
+    #[cfg_attr(feature = "serde", serde(with = "compact::required"))]
     pub max: Duration,
 }
 
@@ -127,7 +130,7 @@ pub const PEER_ROTATION_MIN_UPTIME: Duration = Duration::from_mins(10);
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct PeersConfig {
     /// How often to recheck free slots for outbound connections.
-    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
+    #[cfg_attr(feature = "serde", serde(with = "compact::required"))]
     pub refill_slots_interval: Duration,
     /// Trusted nodes to connect to or accept from
     pub trusted_nodes: Vec<TrustedPeer>,
@@ -135,7 +138,7 @@ pub struct PeersConfig {
     #[cfg_attr(feature = "serde", serde(alias = "connect_trusted_nodes_only"))]
     pub trusted_nodes_only: bool,
     /// Interval to update trusted nodes DNS resolution
-    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
+    #[cfg_attr(feature = "serde", serde(with = "compact::required"))]
     pub trusted_nodes_resolution_interval: Duration,
     /// Maximum number of backoff attempts before we give up on a peer and dropping.
     ///
@@ -154,7 +157,7 @@ pub struct PeersConfig {
     #[cfg_attr(feature = "serde", serde(skip))]
     pub persisted_peers: Vec<PersistedPeerInfo>,
     /// How long to ban bad peers.
-    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
+    #[cfg_attr(feature = "serde", serde(with = "compact::required"))]
     pub ban_duration: Duration,
     /// Restrictions on `PeerIds` and Ips.
     #[cfg_attr(feature = "serde", serde(skip))]
@@ -170,7 +173,7 @@ pub struct PeersConfig {
     /// How long to temporarily ban ips on incoming connection attempts.
     ///
     /// This acts as an IP based rate limit.
-    #[cfg_attr(feature = "serde", serde(default, with = "humantime_serde"))]
+    #[cfg_attr(feature = "serde", serde(default, with = "compact::required"))]
     pub incoming_ip_throttle_duration: Duration,
     /// IP address filter for restricting network connections to specific IP ranges.
     ///
@@ -185,7 +188,7 @@ pub struct PeersConfig {
     pub enforce_enr_fork_id: bool,
     /// How often to rotate a random non-protected peer (inbound or outbound) to open a slot for
     /// new nodes. Set to `None` to disable rotation.
-    #[cfg_attr(feature = "serde", serde(default, with = "humantime_serde"))]
+    #[cfg_attr(feature = "serde", serde(default, with = "compact::optional"))]
     pub peer_rotation_interval: Option<Duration>,
 }
 

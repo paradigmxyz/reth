@@ -24,6 +24,7 @@ reth-execution-types.workspace = true
 reth-fs-util.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
+reth-lru.workspace = true
 
 # ethereum
 alloy-eips = { workspace = true, features = ["kzg"] }
@@ -47,7 +48,6 @@ aquamarine.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 rustc-hash.workspace = true
-schnellru.workspace = true
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json.workspace = true
 bitflags.workspace = true

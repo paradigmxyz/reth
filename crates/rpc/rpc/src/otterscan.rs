@@ -11,7 +11,6 @@ use alloy_rpc_types_trace::{
     },
     parity::{Action, CreateAction, CreateOutput, LocalizedTransactionTrace, TraceOutput},
 };
-use async_trait::async_trait;
 use evm2::interpreter::InstrStop;
 use evm2_inspectors::{
     otterscan::InternalOperationsInspector,
@@ -105,7 +104,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Eth> OtterscanServer<RpcTransaction<Eth::NetworkTypes>, RpcHeader<Eth::NetworkTypes>>
     for OtterscanApi<Eth>
 where

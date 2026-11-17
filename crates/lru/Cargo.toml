@@ -1,0 +1,16 @@
+[package]
+name = "reth-lru"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Length-limited LRU map used by reth's caches"
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-primitives.workspace = true
+hashbrown.workspace = true

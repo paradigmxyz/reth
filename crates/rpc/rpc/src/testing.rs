@@ -26,7 +26,6 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadSidecar, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState,
     PayloadAttributes, PraguePayloadFields,
 };
-use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
@@ -191,6 +190,9 @@ where
                         ),
                     );
                     best_txs.no_updates();
+                    // Blob sidecars aren't attached to the response, so including blob
+                    // transactions would return a payload whose blobs bundle lacks their data.
+                    best_txs.skip_blobs();
                     best_txs.map(|tx| tx.to_consensus()).collect()
                 } else {
                     // Decode and recover all transactions in parallel
@@ -412,7 +414,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Eth, Evm, Payload> TestingApiServer for TestingApi<Eth, Evm, Payload>
 where
     Payload: PayloadTypes<

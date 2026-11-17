@@ -197,8 +197,8 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     no_reverts: bool,
     /// Cache behavior for the overlays this builder resolves.
     overlay_cache_config: OverlayCacheConfig,
-    /// Metrics for overlay construction.
-    metrics: OverlayBuilderMetrics,
+    /// Whether the trie reverts this builder accumulates are written to the changeset cache.
+    write_reverts_to_cache: bool,
 }
 
 impl<N: NodePrimitives> OverlayBuilder<N> {
@@ -215,7 +215,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             reused_sparse_trie_anchor_hash: None,
             no_reverts: false,
             overlay_cache_config: OverlayCacheConfig::default(),
-            metrics: OverlayBuilderMetrics::default(),
+            write_reverts_to_cache: true,
         }
     }
 
@@ -235,6 +235,21 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
+    /// Stops this builder from retaining the trie reverts it accumulates in the changeset cache.
+    ///
+    /// Use it for anchors a peer or RPC caller chooses: cached reverts are keyed by the anchor and
+    /// stay until their start block is evicted, so they would otherwise pile up in the cache the
+    /// engine shares.
+    pub const fn without_trie_revert_caching(mut self) -> Self {
+        self.write_reverts_to_cache = false;
+        self
+    }
+
+    /// Returns the manager this builder resolves overlays from.
+    pub(crate) const fn overlay_manager(&self) -> &OverlayManager<N> {
+        &self.overlay_manager
+    }
+
     /// Appends an executed block to this builder's in-memory parent state.
     pub fn with_appended_block(mut self, block: ExecutedBlock<N>) -> Self {
         debug_assert_eq!(block.recovered_block().parent_hash(), self.parent_hash);
@@ -250,7 +265,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     #[cfg(test)]
     fn anchor_at_parent<Provider>(&self, provider: &Provider) -> ProviderResult<AnchorForParent>
     where
-        Provider: StageCheckpointReader + BlockNumReader + PruneCheckpointReader,
+        Provider: StageCheckpointReader
+            + BlockNumReader
+            + PruneCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader,
     {
         let (partial_state_trie, finish) = database_state_frontiers(provider)?;
         self.anchor_at_parent_with_frontiers(provider, partial_state_trie, finish)
@@ -264,7 +283,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         finish: BlockNumHash,
     ) -> ProviderResult<AnchorForParent>
     where
-        Provider: BlockNumReader + PruneCheckpointReader,
+        Provider: BlockNumReader + PruneCheckpointReader + ChangeSetReader + StorageChangeSetReader,
     {
         let mut in_mem_chain = self
             .parent_state
@@ -341,13 +360,17 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         }
 
         // Otherwise reverts are required; we check the changesets to make sure they are actually
-        // available before signaling that they are required.
+        // available before signaling that they are required. The first block of the lowest
+        // changeset file bounds them like a prune checkpoint: a node bootstrapped without
+        // changesets from genesis has no checkpoint for the history it never had.
         let account_history = provider
             .get_prune_checkpoint(PruneSegment::AccountHistory)?
-            .and_then(|checkpoint| checkpoint.block_number);
+            .and_then(|checkpoint| checkpoint.block_number)
+            .max(provider.lowest_account_changeset_block()?);
         let storage_history = provider
             .get_prune_checkpoint(PruneSegment::StorageHistory)?
-            .and_then(|checkpoint| checkpoint.block_number);
+            .and_then(|checkpoint| checkpoint.block_number)
+            .max(provider.lowest_storage_changeset_block()?);
         let lower_bound = account_history.max(storage_history).unwrap_or_default();
         let available_range = lower_bound..=finish.number;
         if !available_range.contains(&anchor.number) {
@@ -454,6 +477,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                             revert_blocks.clone(),
                             state_trie_tip_block,
                             finish_tip_block,
+                            self.write_reverts_to_cache,
                         )?;
                     retrieve_trie_reverts_duration = start.elapsed();
                     accumulated_reverts
@@ -555,7 +579,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     state_trie_tip_block.hash,
                     finish_tip_block.hash,
                 ) {
-                    self.metrics.sparse_trie_overlay_skips.increment(1);
+                    self.overlay_manager.builder_metrics().sparse_trie_overlay_skips.increment(1);
 
                     return Ok(StateTrieOverlay::empty())
                 }
@@ -580,14 +604,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             }
         };
 
-        self.metrics
-            .retrieve_trie_reverts_duration
-            .record(retrieve_trie_reverts_duration.as_secs_f64());
-        self.metrics
+        let metrics = self.overlay_manager.builder_metrics();
+        metrics.retrieve_trie_reverts_duration.record(retrieve_trie_reverts_duration.as_secs_f64());
+        metrics
             .retrieve_hashed_state_reverts_duration
             .record(retrieve_hashed_state_reverts_duration.as_secs_f64());
-        self.metrics.trie_updates_size.record(trie_updates_total_len as f64);
-        self.metrics.hashed_state_size.record(hashed_state_updates_total_len as f64);
+        metrics.trie_updates_size.record(trie_updates_total_len as f64);
+        metrics.hashed_state_size.record(hashed_state_updates_total_len as f64);
 
         Ok(StateTrieOverlay::new(TrieInputSorted::new(
             trie_updates,
@@ -765,9 +788,9 @@ where
 }
 
 /// Metrics for overlay construction.
-#[derive(Clone, Metrics)]
+#[derive(Metrics)]
 #[metrics(scope = "storage.overlay.builder")]
-struct OverlayBuilderMetrics {
+pub(crate) struct OverlayBuilderMetrics {
     /// Duration of retrieving trie updates from the database.
     retrieve_trie_reverts_duration: Histogram,
     /// Duration of retrieving hashed state from the database.

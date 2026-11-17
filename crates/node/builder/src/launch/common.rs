@@ -552,18 +552,22 @@ where
             .map(|distance| {
                 RocksDBBalStore::with_buffer_retention_distance(rocksdb_provider.clone(), distance)
             })
-            .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()));
+            .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()))
+            .with_bodies_prune_mode(
+                prune_config.segments.bodies_history,
+                prune_config.minimum_pruning_distance,
+            );
         let bal_store = BalStoreHandle::new(bal_store);
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
             static_file_provider,
             rocksdb_provider,
+            overlay_manager,
             self.task_executor().clone(),
         )?
         .with_prune_modes(prune_config.segments)
         .with_minimum_pruning_distance(prune_config.minimum_pruning_distance)
-        .with_overlay_manager(overlay_manager)
         .with_bal_store(bal_store);
 
         recover(&factory)?;

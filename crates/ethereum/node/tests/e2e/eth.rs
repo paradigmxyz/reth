@@ -11,7 +11,6 @@ use alloy_rpc_types_engine::{
     },
     ClientVersionV1, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
 };
-use jsonrpsee_core::client::ClientT;
 use reth_chainspec::{EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
     eth_payload_attributes, test_chain_spec, transaction::TransactionTestContext, E2ETestSetupExt,
@@ -679,7 +678,7 @@ async fn test_engine_ssz_custom_engine_and_middleware() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn test_engine_ssz_witness_omitted_without_provider_parent_state() -> eyre::Result<()> {
+async fn test_engine_ssz_witness_requires_provider_parent_state() -> eyre::Result<()> {
     let (mut nodes, _) =
         EthereumNode::test_setup_for(EthereumHardfork::Amsterdam).with_num_nodes(2).build().await?;
     let target = nodes.pop().unwrap();
@@ -696,16 +695,26 @@ async fn test_engine_ssz_witness_omitted_without_provider_parent_state() -> eyre
         execution_requests: child.execution_requests,
     };
     let auth = target.auth_server_handle();
-    let response: PayloadStatusWithWitness = reqwest::Client::new()
-        .post(format!("{}/engine/v1/payloads/witness", auth.http_url()))
-        .jwt(&auth)
-        .fork("amsterdam")
-        .ssz(&request)
-        .send()
-        .await?
-        .ssz()
-        .await?;
+    let client = reqwest::Client::new();
+    let url = format!("{}/engine/v1/payloads/witness", auth.http_url());
+    let response = client.post(&url).jwt(&auth).fork("amsterdam").ssz(&request).send().await?;
+    assert_eq!(response.status(), reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.headers()[reqwest::header::CONTENT_TYPE], "application/problem+json");
+    assert_eq!(
+        response.json::<serde_json::Value>().await?,
+        serde_json::json!({
+            "type": "/engine-api/errors/internal",
+            "detail": format!(
+                "parent state {parent_hash} is unavailable through the provider: \
+                 no state found for block {parent_hash}"
+            ),
+        })
+    );
+
+    target.reorg_to(parent_hash).await?;
+    let response: PayloadStatusWithWitness =
+        client.post(&url).jwt(&auth).fork("amsterdam").ssz(&request).send().await?.ssz().await?;
     assert_eq!(response.payload_status.status, PayloadStatusKind::Valid);
-    assert!(response.witness.is_none());
+    assert!(response.witness.is_some());
     Ok(())
 }

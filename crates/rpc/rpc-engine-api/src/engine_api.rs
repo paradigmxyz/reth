@@ -17,7 +17,6 @@ use alloy_rpc_types_engine::{
     ForkchoiceUpdatedResponseV2, PayloadId, PayloadStatus, PayloadStatusV2, PraguePayloadFields,
     MAX_BYTES_PER_INCLUSION_LIST,
 };
-use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
@@ -1331,7 +1330,6 @@ where
 }
 
 // This is the concrete ethereum engine API implementation.
-#[async_trait]
 impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
@@ -1380,7 +1378,7 @@ where
             }),
         };
 
-        Ok(self.new_payload_v3_metered(payload).await?)
+        self.new_payload_v3_metered(payload).await
     }
 
     /// Handler for `engine_newPayloadV4`
@@ -1407,7 +1405,7 @@ where
             ),
         };
 
-        Ok(self.new_payload_v4_metered(payload).await?)
+        self.new_payload_v4_metered(payload).await
     }
 
     /// Handler for `engine_newPayloadV5`
@@ -1436,7 +1434,7 @@ where
             ),
         };
 
-        Ok(self.new_payload_v5_metered(payload).await?)
+        self.new_payload_v5_metered(payload).await
     }
 
     /// Handler for `engine_newPayloadV6`.
@@ -1829,12 +1827,14 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::UNSUPPORTED_FORK_CODE;
     use alloy_eips::{eip7685::Requests, Encodable2718, NumHash};
     use alloy_primitives::{Address, Bytes, B256};
     use alloy_rpc_types_engine::{
         ClientCode, ClientVersionV1, ExecutionPayloadV2, PayloadAttributes, PayloadStatusEnum,
     };
     use assert_matches::assert_matches;
+    use jsonrpsee_types::ErrorObject;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
     use reth_engine_primitives::{BeaconEngineMessage, OnForkChoiceUpdated};
     use reth_ethereum_engine_primitives::EthEngineTypes;
@@ -1844,6 +1844,7 @@ mod tests {
     };
     use reth_node_ethereum::EthereumEngineValidator;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
+    use reth_payload_primitives::EngineObjectValidationError;
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
     use reth_tasks::Runtime;
@@ -1853,7 +1854,8 @@ mod tests {
         test_utils::{OkValidator, TransactionBuilder},
         CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
     };
-    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+    use std::time::Duration;
+    use tokio::sync::mpsc::{error::TryRecvError, unbounded_channel, UnboundedReceiver};
 
     type EthTestPool = Pool<
         OkValidator<EthPooledTransaction>,
@@ -2314,6 +2316,166 @@ mod tests {
         });
 
         assert_matches!(engine_rx.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
+    }
+
+    /// Returns an engine API on an Osaka-active chain where Amsterdam is not scheduled.
+    fn setup_pre_amsterdam_engine_api() -> (
+        EngineApiTestHandle,
+        EngineApi<
+            Arc<MockEthProvider>,
+            EthEngineTypes,
+            NoopTransactionPool,
+            EthereumEngineValidator,
+            ChainSpec,
+        >,
+    ) {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().osaka_activated().build());
+        assert!(!chain_spec.is_amsterdam_active_at_timestamp(0));
+        let provider = Arc::new(MockEthProvider::default());
+        let (to_engine, engine_rx) = unbounded_channel();
+
+        let api = EngineApi::new(
+            provider.clone(),
+            chain_spec.clone(),
+            ConsensusEngineHandle::new(to_engine),
+            spawn_test_payload_service::<EthEngineTypes>().into(),
+            NoopTransactionPool::default(),
+            Runtime::test(),
+            ClientVersionV1 {
+                code: ClientCode::RH,
+                name: "Reth".to_string(),
+                version: "v0.0.0-test".to_string(),
+                commit: "test".to_string(),
+            },
+            EngineCapabilities::default(),
+            EthereumEngineValidator::new(chain_spec.clone()),
+            false,
+            NoopNetwork::default(),
+        );
+        (EngineApiTestHandle { chain_spec, provider, from_api: engine_rx }, api)
+    }
+
+    /// A complete `ExecutionPayloadV4` payload, including the block access list and slot number.
+    fn complete_amsterdam_execution_data() -> ExecutionData {
+        let payload_v1 = ExecutionPayloadV1::from_block_slow(&Block::default());
+        let payload = ExecutionPayloadV4 {
+            payload_inner: ExecutionPayloadV3 {
+                payload_inner: ExecutionPayloadV2 {
+                    payload_inner: payload_v1,
+                    withdrawals: Vec::new(),
+                },
+                blob_gas_used: 0,
+                excess_blob_gas: 0,
+            },
+            block_access_list: Bytes::from_static(b"bal"),
+            slot_number: 1,
+        };
+        ExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields {
+                    versioned_hashes: Vec::new(),
+                    parent_beacon_block_root: B256::ZERO,
+                },
+                PraguePayloadFields { requests: RequestsOrHash::Requests(Requests::default()) },
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn new_payload_v5_rejects_pre_amsterdam_payloads() {
+        let (mut handle, api) = setup_pre_amsterdam_engine_api();
+
+        let err = api
+            .new_payload_v5(complete_amsterdam_execution_data())
+            .await
+            .expect_err("pre-Amsterdam payload must be rejected");
+        assert_matches!(
+            err,
+            EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::UnsupportedFork
+            )
+        );
+        let err = ErrorObject::from(err);
+        assert_eq!(err.code(), UNSUPPORTED_FORK_CODE);
+
+        assert!(handle.from_api.try_recv().is_err(), "rejected payload must not reach the engine");
+    }
+
+    #[tokio::test]
+    async fn new_payload_v6_rejects_pre_amsterdam_payloads() {
+        let (mut handle, api) = setup_pre_amsterdam_engine_api();
+
+        let err = api
+            .new_payload_v6(complete_amsterdam_execution_data())
+            .await
+            .expect_err("pre-Amsterdam payload must be rejected");
+        assert_matches!(
+            err,
+            EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::UnsupportedFork
+            )
+        );
+        let err = ErrorObject::from(err);
+        assert_eq!(err.code(), UNSUPPORTED_FORK_CODE);
+
+        assert!(handle.from_api.try_recv().is_err(), "rejected payload must not reach the engine");
+    }
+
+    #[tokio::test]
+    async fn fcu_v4_rejects_pre_amsterdam_payload_attributes() {
+        let (mut handle, api) = setup_pre_amsterdam_engine_api();
+
+        let state = ForkchoiceState {
+            head_block_hash: B256::repeat_byte(0x55),
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+        let payload_attributes = PayloadAttributes {
+            timestamp: 1,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: Some(B256::ZERO),
+            slot_number: Some(1),
+            ..Default::default()
+        };
+
+        let api_task = tokio::spawn(async move {
+            api.fork_choice_updated_v4(state, Some(payload_attributes), None).await
+        });
+
+        // Invalid attributes never start a build, the forkchoice update is applied without them.
+        let request =
+            tokio::time::timeout(std::time::Duration::from_secs(1), handle.from_api.recv())
+                .await
+                .expect("timed out waiting for forkchoiceUpdated request")
+                .expect("expected forkchoiceUpdated request");
+        let response_tx = match request {
+            BeaconEngineMessage::ForkchoiceUpdated { payload_attrs, tx, .. } => {
+                assert!(payload_attrs.is_none());
+                tx
+            }
+            other => panic!("unexpected engine message: {other:?}"),
+        };
+        response_tx
+            .send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
+                PayloadStatusEnum::Valid,
+            ))))
+            .expect("send valid response");
+
+        let err = api_task
+            .await
+            .expect("api task should not panic")
+            .expect_err("pre-Amsterdam attributes must be rejected");
+        assert_matches!(
+            err,
+            EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::UnsupportedFork
+            )
+        );
+        let err = ErrorObject::from(err);
+        assert_eq!(err.code(), UNSUPPORTED_FORK_CODE);
     }
 
     #[derive(Clone)]
@@ -2805,6 +2967,86 @@ mod tests {
             let hashes = blocks.iter().map(|b| b.hash()).collect();
             let res = api.get_payload_bodies_by_hash_v1(hashes).await.unwrap();
             assert_eq!(res, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn new_payload_rejects_pre_shanghai_timestamps() {
+        let (mut handle, api) = setup_engine_api();
+        assert!(!handle.chain_spec.is_shanghai_active_at_timestamp(0));
+
+        let errors = tokio::time::timeout(Duration::from_secs(1), async {
+            [
+                api.new_payload_v5(complete_amsterdam_execution_data()).await.unwrap_err(),
+                api.new_payload_v6(complete_amsterdam_execution_data()).await.unwrap_err(),
+            ]
+        })
+        .await
+        .expect("payload validation must complete without reaching the engine");
+
+        for error in errors {
+            assert_matches!(
+                error,
+                EngineApiError::EngineObjectValidationError(
+                    EngineObjectValidationError::UnsupportedFork
+                )
+            );
+            assert_eq!(ErrorObject::from(error).code(), UNSUPPORTED_FORK_CODE);
+        }
+        assert_matches!(handle.from_api.try_recv(), Err(TryRecvError::Empty));
+    }
+
+    #[tokio::test]
+    async fn fcu_rejects_pre_shanghai_timestamps() {
+        for version in [EngineApiMessageVersion::V4, EngineApiMessageVersion::V5] {
+            let (mut handle, api) = setup_engine_api();
+            assert!(!handle.chain_spec.is_shanghai_active_at_timestamp(1));
+            let state = ForkchoiceState::same_hash(B256::repeat_byte(0x55));
+            let attributes = PayloadAttributes {
+                timestamp: 1,
+                withdrawals: Some(vec![]),
+                parent_beacon_block_root: Some(B256::ZERO),
+                slot_number: Some(1),
+                target_gas_limit: Some(30_000_000),
+                ..Default::default()
+            };
+            let api_task = tokio::spawn(async move {
+                match version {
+                    EngineApiMessageVersion::V4 => {
+                        api.fork_choice_updated_v4(state, Some(attributes), None).await.map(|_| ())
+                    }
+                    EngineApiMessageVersion::V5 => {
+                        api.fork_choice_updated_v5(state, Some(attributes), None).await.map(|_| ())
+                    }
+                    _ => unreachable!(),
+                }
+            });
+
+            let request = tokio::time::timeout(Duration::from_secs(1), handle.from_api.recv())
+                .await
+                .expect("timed out waiting for forkchoiceUpdated request")
+                .expect("expected forkchoiceUpdated request");
+            let BeaconEngineMessage::ForkchoiceUpdated { payload_attrs, tx, .. } = request else {
+                panic!("unexpected engine message: {request:?}");
+            };
+            assert!(payload_attrs.is_none());
+            tx.send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
+                PayloadStatusEnum::Valid,
+            ))))
+            .expect("send valid response");
+
+            let error = tokio::time::timeout(Duration::from_secs(1), api_task)
+                .await
+                .expect("forkchoiceUpdated must complete after the engine response")
+                .expect("api task should not panic")
+                .unwrap_err();
+            assert_matches!(
+                error,
+                EngineApiError::EngineObjectValidationError(
+                    EngineObjectValidationError::UnsupportedFork
+                )
+            );
+            assert_eq!(ErrorObject::from(error).code(), UNSUPPORTED_FORK_CODE);
         }
     }
 }

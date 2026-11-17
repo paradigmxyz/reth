@@ -76,4 +76,12 @@ pub trait StorageChangeSetReader: Send {
                 .collect()
         })
     }
+
+    /// Returns the first block of the lowest stored storage changeset file, if it is above
+    /// genesis.
+    ///
+    /// See [`crate::ChangeSetReader::lowest_account_changeset_block`].
+    fn lowest_storage_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        Ok(None)
+    }
 }

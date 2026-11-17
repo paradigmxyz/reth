@@ -12,6 +12,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use futures::{stream::FusedStream, stream_select, FutureExt, StreamExt};
+use reth_chain_state::InMemoryState;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_tree::{
@@ -34,6 +35,7 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_node_events::node;
+use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
     BlockNumReader, StorageSettingsCache,
@@ -107,8 +109,14 @@ impl<B> EngineNodeLauncher<B> {
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
-        // Create the overlay manager that will be shared across the provider and engine.
-        let overlay_manager = OverlayManager::<N::Primitives>::new(
+        // Install the recorder before creating anything that registers metrics: metrics registered
+        // earlier stay no-ops, and derived metrics cache their first instance for the process.
+        install_prometheus_recorder();
+
+        // Create the overlay manager that will be shared across the provider and engine, with the
+        // in-memory state of this node.
+        let overlay_manager = OverlayManager::<N::Primitives>::with_worker_pool(
+            InMemoryState::default(),
             ctx.task_executor.state_trie_overlay_worker_pool(),
         );
         let disabled_stages = N::disabled_stages();

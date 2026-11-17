@@ -4,9 +4,7 @@
 //!
 //! [EIP-8178]: https://eips.ethereum.org/EIPS/eip-8178
 
-use crate::engine_ssz_witness::{
-    EngineSszWitness, EngineSszWitnessError, PayloadStatusWithWitness,
-};
+use crate::engine_ssz_witness::{EngineSszWitness, PayloadStatusWithWitness};
 use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Bytes, B128, B256};
@@ -22,11 +20,11 @@ use alloy_rpc_types_engine::{
         ForkchoiceUpdateAmsterdam, ForkchoiceUpdateCancun, ForkchoiceUpdateOsaka,
         ForkchoiceUpdateParis, ForkchoiceUpdatePrague, ForkchoiceUpdateResponse,
         ForkchoiceUpdateShanghai, Optional, PayloadStatus as EngineSszPayloadStatus,
-        PayloadStatusKind, MAX_BLOBS_REQUEST, MAX_BODIES_REQUEST,
+        PayloadStatusKind, MAX_BLOBS_REQUEST, MAX_BODIES_REQUEST, MAX_ERROR_BYTES,
     },
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadBodyV1,
     ExecutionPayloadFieldV2, ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes,
-    PayloadId, PraguePayloadFields,
+    PayloadId, PayloadStatusEnum, PraguePayloadFields,
 };
 use futures::future::{BoxFuture, Either};
 use http_body_util::{BodyExt, LengthLimitError, Limited};
@@ -46,7 +44,6 @@ use std::{
 };
 use tokio::sync::RwLock;
 use tower::{BoxError, Layer, Service};
-use tracing::debug;
 
 const OCTET_STREAM: &str = "application/octet-stream";
 const APPLICATION_JSON: &str = "application/json";
@@ -407,18 +404,6 @@ where
         let witness = match status.status {
             PayloadStatusKind::Valid => match witness_handler.generate_witness(payload).await {
                 Ok(witness) => Some(witness),
-                // The block is valid but its parent is only known to the engine tree. The
-                // status stays authoritative; resubmitting once forkchoice has made the parent
-                // canonical yields the witness.
-                Err(EngineSszWitnessError::ParentStateUnavailable { parent, source }) => {
-                    debug!(
-                        target: "engine::ssz",
-                        %parent,
-                        %source,
-                        "witness omitted for valid payload"
-                    );
-                    None
-                }
                 Err(err) => {
                     return problem_response(
                         STATUS_INTERNAL_SERVER_ERROR,
@@ -812,7 +797,7 @@ where
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
-    let status = match fork.payloads_version() {
+    let mut status = match fork.payloads_version() {
         1 => engine_api.new_payload_v1(payload).await,
         2 => engine_api.new_payload_v2(payload).await,
         3 => engine_api.new_payload_v3(payload).await,
@@ -821,6 +806,10 @@ where
         _ => return Err(problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)),
     }
     .map_err(engine_error_response)?;
+    // The SSZ error string is bounded, truncate it rather than losing the INVALID verdict.
+    if let PayloadStatusEnum::Invalid { validation_error } = &mut status.status {
+        validation_error.truncate(validation_error.floor_char_boundary(MAX_ERROR_BYTES));
+    }
     EngineSszPayloadStatus::try_from(status).map_err(|error| {
         problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", Some(error.to_string()))
     })
@@ -1254,17 +1243,28 @@ fn problem_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{engine_ssz_witness::EngineSszWitnessError, EthereumEngineValidator};
     use alloy_rpc_types_engine::{
         ssz_engine_types::{
             PayloadAttributesAmsterdam, PayloadAttributesCancun, PayloadAttributesParis,
             PayloadAttributesShanghai,
         },
-        ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ForkchoiceUpdateError,
+        ClientCode, ClientVersionV1, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+        ForkchoiceUpdateError, PayloadStatus,
     };
-    use reth_chainspec::{ChainSpecBuilder, ForkCondition};
-    use reth_engine_primitives::BeaconForkChoiceUpdateError;
+    use reth_chainspec::{ChainSpecBuilder, ForkCondition, MAINNET};
+    use reth_engine_primitives::{
+        BeaconEngineMessage, BeaconForkChoiceUpdateError, ConsensusEngineHandle,
+    };
+    use reth_ethereum_primitives::Block;
+    use reth_network_api::noop::NoopNetwork;
+    use reth_payload_builder::PayloadBuilderHandle;
     use reth_payload_primitives::PayloadBuilderError;
+    use reth_storage_api::noop::NoopProvider;
+    use reth_tasks::Runtime;
+    use reth_transaction_pool::noop::NoopTransactionPool;
     use ssz::Encode;
+    use tokio::sync::mpsc::unbounded_channel;
 
     #[tokio::test]
     async fn witness_capabilities_follow_both_wiring_orders() {
@@ -1379,6 +1379,57 @@ mod tests {
             decode_new_payload_request(EngineSszFork::Paris, &paris.as_ssz_bytes()),
             Err(PayloadDecodeError::Ssz(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn new_payload_keeps_invalid_status_with_long_validation_error() {
+        let (to_engine, mut engine_rx) = unbounded_channel();
+        let chain_spec = MAINNET.clone();
+        let api = EngineApi::new(
+            NoopProvider::default(),
+            chain_spec.clone(),
+            ConsensusEngineHandle::new(to_engine),
+            PayloadBuilderHandle::new(unbounded_channel().0).into(),
+            NoopTransactionPool::default(),
+            Runtime::test(),
+            ClientVersionV1 {
+                code: ClientCode::RH,
+                name: "Reth".to_string(),
+                version: String::new(),
+                commit: String::new(),
+            },
+            Default::default(),
+            EthereumEngineValidator::new(chain_spec),
+            false,
+            NoopNetwork::default(),
+        );
+        let envelope = ExecutionPayloadEnvelopeParis {
+            payload: ExecutionPayloadV1::from_block_unchecked(B256::ZERO, &Block::default()),
+        };
+        // `€` is 3 bytes, so `MAX_ERROR_BYTES` falls inside a character.
+        let validation_error = "€".repeat(MAX_ERROR_BYTES);
+
+        let (response, ()) = tokio::join!(
+            api.new_payload(EngineSszFork::Paris, envelope.as_ssz_bytes().into()),
+            async {
+                let Some(BeaconEngineMessage::NewPayload { tx, .. }) = engine_rx.recv().await
+                else {
+                    panic!("engine did not receive the payload");
+                };
+                let status = PayloadStatusEnum::Invalid { validation_error };
+                tx.send(Ok(PayloadStatus::from_status(status))).unwrap();
+            }
+        );
+
+        assert_eq!(response.status(), STATUS_OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let status = EngineSszPayloadStatus::from_ssz_bytes(&body).unwrap();
+        assert_eq!(
+            PayloadStatus::from(status),
+            PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+                validation_error: "€".repeat(MAX_ERROR_BYTES / 3),
+            })
+        );
     }
 
     #[test]

@@ -342,7 +342,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>, RpcLog<Eth::NetworkTypes>>
     for EthFilter<Eth>
 where
