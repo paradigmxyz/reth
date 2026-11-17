@@ -52,7 +52,7 @@ pub trait RethRpcServerConfig {
     fn http_ws_server_builder(&self) -> ServerConfigBuilder;
 
     /// Returns the default ipc server builder
-    fn ipc_server_builder(&self) -> IpcServerBuilder<Identity, Identity>;
+    fn ipc_server_builder(&self) -> IpcServerBuilder<Identity>;
 
     /// Creates the [`RpcServerConfig`] from cli args.
     fn rpc_server_config(&self) -> RpcServerConfig;
@@ -117,7 +117,11 @@ impl RethRpcServerConfig for RpcServerArgs {
     fn flashbots_config(&self) -> ValidationApiConfig {
         ValidationApiConfig {
             disallow: self.builder_disallow.clone().unwrap_or_default(),
-            validation_window: self.rpc_eth_proof_window,
+            // the proof window defaults to 0, which would reject any submission whose parent is
+            // behind the tip, so it can only widen the default window
+            validation_window: self
+                .rpc_eth_proof_window
+                .max(ValidationApiConfig::DEFAULT_VALIDATION_WINDOW),
         }
     }
 
@@ -184,7 +188,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection.get())
     }
 
-    fn ipc_server_builder(&self) -> IpcServerBuilder<Identity, Identity> {
+    fn ipc_server_builder(&self) -> IpcServerBuilder<Identity> {
         IpcServerBuilder::default()
             .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection.get())
             .max_request_body_size(self.rpc_max_request_size_bytes())
@@ -283,6 +287,7 @@ impl RethRpcServerConfig for RpcServerArgs {
 mod tests {
     use clap::{Args, Parser};
     use reth_node_core::args::RpcServerArgs;
+    use reth_rpc::ValidationApiConfig;
     use reth_rpc_eth_types::{EthStateCacheConfig, RPC_DEFAULT_GAS_CAP};
     use reth_rpc_layer::JwtSecret;
     use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
@@ -340,6 +345,28 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn flashbots_validation_window() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(
+            args.flashbots_config().validation_window,
+            ValidationApiConfig::DEFAULT_VALIDATION_WINDOW
+        );
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.eth-proof-window", "1"])
+                .args;
+        assert_eq!(
+            args.flashbots_config().validation_window,
+            ValidationApiConfig::DEFAULT_VALIDATION_WINDOW
+        );
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.eth-proof-window", "100"])
+                .args;
+        assert_eq!(args.flashbots_config().validation_window, 100);
     }
 
     #[test]

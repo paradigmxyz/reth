@@ -11,6 +11,9 @@ use std::{
 use url::Url;
 
 #[cfg(feature = "serde")]
+use jiff::fmt::serde::unsigned_duration::friendly::compact;
+
+#[cfg(feature = "serde")]
 const EXTENSION: &str = "toml";
 
 /// The default prune block interval
@@ -285,7 +288,7 @@ pub struct ExecutionConfig {
     #[cfg_attr(
         feature = "serde",
         serde(
-            serialize_with = "humantime_serde::serialize",
+            serialize_with = "compact::optional::serialize",
             deserialize_with = "deserialize_duration"
         )
     )]
@@ -635,7 +638,7 @@ where
     #[derive(serde::Deserialize)]
     #[serde(untagged)]
     enum AnyDuration {
-        #[serde(deserialize_with = "humantime_serde::deserialize")]
+        #[serde(deserialize_with = "compact::optional::deserialize")]
         Human(Option<Duration>),
         Duration(Option<Duration>),
     }

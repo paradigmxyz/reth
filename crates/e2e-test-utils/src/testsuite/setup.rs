@@ -6,12 +6,11 @@ use crate::{
     E2ETestSetupExt, NodeBuilderHelper,
 };
 use alloy_eips::BlockNumberOrTag;
-use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
+use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadAttributes};
 use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_node_api::{EngineTypes, PayloadAttrTy, PayloadTypes, TreeConfig};
 use reth_node_core::args::StorageArgs;
-use reth_rpc_api::clients::EngineApiClient;
 #[cfg(feature = "chain-import")]
 use std::path::Path;
 use std::{marker::PhantomData, sync::Arc, time::Duration};
@@ -353,8 +352,12 @@ where
                 PollOpts { interval: Duration::from_millis(100), ..Default::default() },
                 format!("node {idx} to stop syncing to block {}", state.head_block_hash),
                 || async {
-                    let response =
-                        EngineApiClient::<I>::fork_choice_updated_v3(&engine, state, None).await?;
+                    let response = engine
+                        .request::<_, ForkchoiceUpdated>(
+                            "engine_forkchoiceUpdatedV3",
+                            (state, None::<PayloadAttributes>),
+                        )
+                        .await?;
                     Ok((!response.is_syncing()).then_some(response))
                 },
             )

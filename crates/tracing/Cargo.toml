@@ -17,7 +17,7 @@ reth-tracing-otlp = { workspace = true, optional = true }
 
 # obs
 tracing.workspace = true
-tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "ansi", "json"], optional = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "ansi", "json", "tracing-log"], optional = true }
 tracing-appender = { workspace = true, optional = true }
 tracing-chrome = { workspace = true, optional = true }
 tracing-journald = { workspace = true, optional = true }
@@ -29,7 +29,9 @@ tracy-client = { workspace = true, optional = true }
 # misc
 clap = { workspace = true, features = ["derive"], optional = true }
 eyre = { workspace = true, optional = true }
-rolling-file = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [features]
 default = ["std"]
@@ -42,7 +44,6 @@ std = [
     "tracing-samply",
     "clap",
     "eyre",
-    "rolling-file",
     "tracing/std",
     "tracing-subscriber?/std",
 ]

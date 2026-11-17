@@ -89,12 +89,21 @@ where
             .flatten() &&
             target_prunable_block > input.checkpoint().block_number
         {
+            let existing = provider.get_prune_checkpoint(PruneSegment::StorageHistory)?;
+
+            // On first sync, don't skip past a lower existing checkpoint (such as one a snapshot
+            // download wrote): changesets above it are on disk, so index them and leave them to
+            // the pruner. Skipping would leave blocks between the two unindexed.
+            let skip_to = match existing.and_then(|checkpoint| checkpoint.block_number) {
+                Some(block) if first_sync && block < target_prunable_block => block,
+                _ => target_prunable_block,
+            };
             prune_target_applied = true;
-            input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
+            input.checkpoint = Some(StageCheckpoint::new(skip_to));
 
             // Save prune checkpoint only if we don't have one already.
             // Otherwise, pruner may skip the unpruned range of blocks.
-            if provider.get_prune_checkpoint(PruneSegment::StorageHistory)?.is_none() {
+            if existing.is_none() {
                 provider.save_prune_checkpoint(
                     PruneSegment::StorageHistory,
                     PruneCheckpoint {
@@ -494,6 +503,60 @@ mod tests {
                 (shard(u64::MAX), vec![LAST_BLOCK_IN_FULL_SHARD + 1])
             ])
         );
+    }
+
+    #[tokio::test]
+    async fn first_sync_indexes_from_lower_prune_checkpoint() {
+        let db = TestStageDB::default();
+        db.commit(|tx| {
+            tx.put::<tables::BlockBodyIndices>(
+                0,
+                StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+            )
+            .unwrap();
+            tx.put::<tables::BlockBodyIndices>(
+                100,
+                StoredBlockBodyIndices { tx_count: 5, ..Default::default() },
+            )
+            .unwrap();
+            tx.put::<tables::StorageChangeSets>(block_number_address(36), storage(STORAGE_KEY))
+                .unwrap();
+            tx.put::<tables::StorageChangeSets>(block_number_address(20), storage(STORAGE_KEY))
+                .unwrap();
+            // A lower checkpoint, such as one written by a snapshot download.
+            tx.put::<tables::PruneCheckpoints>(
+                PruneSegment::StorageHistory,
+                PruneCheckpoint {
+                    block_number: Some(10),
+                    tx_number: None,
+                    prune_mode: PruneMode::Before(11),
+                },
+            )
+            .unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+        let input = ExecInput { target: Some(20000), ..Default::default() };
+        let mut stage = IndexStorageHistoryStage {
+            prune_mode: Some(PruneMode::Before(36)),
+            ..Default::default()
+        };
+        let provider = db.factory.database_provider_rw().unwrap();
+        stage.execute(&provider, input).unwrap();
+        provider.commit().unwrap();
+
+        // Changesets above the lower checkpoint are indexed and left to the pruner.
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![20, 36])]));
+        let checkpoint = db
+            .factory
+            .provider()
+            .unwrap()
+            .get_prune_checkpoint(PruneSegment::StorageHistory)
+            .unwrap()
+            .unwrap();
+        assert_eq!(checkpoint.block_number, Some(10));
     }
 
     #[tokio::test]

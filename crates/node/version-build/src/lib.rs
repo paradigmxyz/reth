@@ -1,29 +1,45 @@
-#![allow(missing_docs)]
+//! Stamps reth's version metadata into a binary from its build script.
+//!
+//! Version metadata changes with every commit, and the build timestamp with every build. A
+//! library that stamped it would rebuild with every crate that depends on it, so binaries stamp
+//! it in their own build script and read it with `reth_node_core::reth_version_metadata!`.
+//!
+//! ```ignore
+//! // build.rs
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     reth_node_version_build::emit_version_metadata()
+//! }
+//! ```
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use smolgen::{Build, Cargo, Emitter, Gitcl};
 use std::{env, error::Error};
 
-fn main() -> Result<(), Box<dyn Error>> {
+/// Emits the version metadata of the binary being built as `cargo:rustc-env` instructions.
+///
+/// Call it from the binary's build script. The package version, features and profile are the
+/// binary's own.
+pub fn emit_version_metadata() -> Result<(), Box<dyn Error>> {
     let mut emitter = Emitter::default();
 
-    let build_builder = Build::builder().build_timestamp(true).build();
+    emitter.add_instructions(&Build::builder().build_timestamp(true).build())?;
+    emitter.add_instructions(&Cargo::builder().features(true).target_triple(true).build())?;
 
-    emitter.add_instructions(&build_builder)?;
-
-    let cargo_builder = Cargo::builder().features(true).target_triple(true).build();
-
-    emitter.add_instructions(&cargo_builder)?;
-
-    // Tracking the git HEAD reruns this script, and rebuilds everything above this crate, on every
-    // commit and checkout. Debug builds skip it and keep the SHA from the last run of this script.
-    // Release profiles keep tracking HEAD, so their version always matches the checkout.
+    // Tracking the git HEAD reruns the build script on every commit and checkout. Debug builds
+    // skip it and keep the SHA from the script's last run. Release profiles keep tracking HEAD, so
+    // their version always matches the checkout.
     let git_builder = Gitcl::builder()
         .describe(false, true, None)
         .dirty(true)
         .sha(false)
         .rerun_on_head_change(env::var("PROFILE")? != "debug")
         .build();
-
     emitter.add_instructions(&git_builder)?;
 
     emitter.emit_and_set()?;
@@ -45,12 +61,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rustc-env=VERGEN_GIT_SHA_SHORT={}", &sha[..8]);
 
     // Set the build profile
-    let out_dir = env::var("OUT_DIR").unwrap();
-    let profile = out_dir.rsplit(std::path::MAIN_SEPARATOR).nth(3).unwrap();
+    let out_dir = env::var("OUT_DIR")?;
+    let profile = out_dir.rsplit(std::path::MAIN_SEPARATOR).nth(3).ok_or("unexpected OUT_DIR")?;
     println!("cargo:rustc-env=RETH_BUILD_PROFILE={profile}");
 
-    // Set formatted version strings
-    let pkg_version = env!("CARGO_PKG_VERSION");
+    // The binary's version from its Cargo.toml.
+    let pkg_version = env::var("CARGO_PKG_VERSION")?;
 
     // The short version information for reth.
     // - The latest version from Cargo.toml
@@ -59,13 +75,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rustc-env=RETH_SHORT_VERSION={pkg_version}{version_suffix} ({sha_short})");
 
     // LONG_VERSION
-    // The long version information for reth.
-    //
-    // - The latest version from Cargo.toml + version suffix (if any)
-    // - The full SHA of the latest commit
-    // - The build datetime
-    // - The build features
-    // - The build profile
+    // The long version information for reth, one line per variable since a variable can't hold a
+    // newline.
     //
     // Example:
     //

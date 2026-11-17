@@ -2,13 +2,13 @@ use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256, U64};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 
 // Required for the subscription attributes below
 use reth_chain_state as _;
 
 /// Reth API namespace for reth-specific methods
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "reth"))]
+#[rpc(server, namespace = "reth")]
 pub trait RethApi {
     /// Returns all ETH balance changes in a block
     #[method(name = "getBalanceChangesInBlock")]
@@ -22,12 +22,15 @@ pub trait RethApi {
     ///
     /// If `count` is provided, re-executes `count` consecutive blocks starting from `block_id`
     /// and returns the merged execution outcome.
+    ///
+    /// The receipt type depends on the node's network, which this trait cannot name, so the
+    /// outcome is returned serialized.
     #[method(name = "getBlockExecutionOutcome")]
     async fn reth_get_block_execution_outcome(
         &self,
         block_id: BlockId,
         count: Option<U64>,
-    ) -> RpcResult<Option<serde_json::Value>>;
+    ) -> RpcResult<Option<Box<RawValue>>>;
 
     /// Controls the JIT backend, if one is configured.
     #[method(name = "jit")]

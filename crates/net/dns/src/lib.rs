@@ -23,8 +23,8 @@ pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 pub use error::ParseDnsEntryError;
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
+use reth_lru::LruMap;
 use reth_network_peers::NodeRecord;
-use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
@@ -152,7 +152,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             node_record_listeners: Default::default(),
             trees: Default::default(),
             queries,
-            dns_record_cache: LruMap::new(ByLength::new(dns_record_cache_limit.get())),
+            dns_record_cache: LruMap::new(dns_record_cache_limit.get()),
             queued_events: Default::default(),
             recheck_interval,
             recheck_tick: recheck_tick(recheck_interval),

@@ -19,3 +19,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 
 # misc
 tracing.workspace = true
+
+[dev-dependencies]
+libc.workspace = true
+tokio = { workspace = true, features = ["time"] }
