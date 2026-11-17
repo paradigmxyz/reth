@@ -693,3 +693,7 @@ reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "
 reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
 reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
 reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
+
+# smolgen
+# TODO: swap for a smolgen release that includes alloy-rs/smolgen#2
+smolgen = { git = "https://github.com/alloy-rs/smolgen", rev = "99abe6c759b5674db76d10ba2ea07fbb7490d57b" }
