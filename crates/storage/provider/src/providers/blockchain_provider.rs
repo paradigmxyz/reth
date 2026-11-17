@@ -5,11 +5,11 @@ use crate::{
     },
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
-    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    HeaderProvider, MetadataProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
-    ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader,
-    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider,
+    CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
+    DatabaseProviderFactory, HeaderProvider, MetadataProvider, ProviderError, ProviderFactory,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory,
+    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
@@ -84,24 +84,43 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockchainProvider<N> {
-    /// Creates a provider over `storage` and the in-memory state of `storage`.
-    ///
-    /// The provider tracks the canonical chain starting from `chain_info_headers`, see
-    /// [`ProviderFactory::chain_info_headers`] for the headers stored in the database.
+    /// Creates a provider over `storage` and the in-memory state of `storage`, fetching the
+    /// latest, safe and finalized headers from the database to initialize the provider.
     ///
     /// The in-memory blocks are shared with every other handle of that in-memory state. The chain
     /// info and the canonical state notifications belong to the returned provider and its clones.
-    pub fn new(
-        storage: ProviderFactory<N>,
-        chain_info_headers: ChainInfoHeaders<HeaderTy<N>>,
-    ) -> Self {
+    pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
+        let provider = storage.provider()?;
+        let best = provider.chain_info()?;
+        let latest = provider
+            .header_by_number(best.best_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(best.best_number.into()))?;
+        let finalized_header = provider
+            .last_finalized_block_number()?
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
+        let safe_header = provider
+            .last_safe_block_number()?
+            .or_else(|| {
+                // for the purpose of this we can also use the finalized block if we don't have the
+                // safe block
+                provider.last_finalized_block_number().ok().flatten()
+            })
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
         let canonical_in_memory_state = CanonicalInMemoryState::with_head(
-            chain_info_headers,
+            ChainInfoHeaders {
+                canonical_head: SealedHeader::new(latest, best.best_hash),
+                safe: safe_header,
+                finalized: finalized_header,
+            },
             storage.in_memory_state().clone(),
         );
         let bal_store = storage.bal_store().clone();
 
-        Self { database: storage, canonical_in_memory_state, bal_store }
+        Ok(Self { database: storage, canonical_in_memory_state, bal_store })
     }
 
     /// Gets a clone of `canonical_in_memory_state`.
@@ -1298,8 +1317,7 @@ mod tests {
         writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 2, 1))?;
         writer.commit()?;
         factory.overlay_manager().insert_block(blocks[2].clone());
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
 
         for number in [1, 2] {
             let state = provider.history_by_block_hash(blocks[number].recovered_block().hash())?;
@@ -1420,8 +1438,7 @@ mod tests {
 
         provider_rw.commit()?;
 
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
 
         // Insert the rest of the blocks and receipts into the in-memory state
         let chain = NewCanonicalChain::Commit {
@@ -1556,8 +1573,7 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
 
         // Useful blocks
         let first_db_block = database_blocks.first().unwrap();
@@ -1655,8 +1671,7 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
 
         // First in memory block
         let first_in_mem_block = in_memory_blocks.first().unwrap();
@@ -1938,8 +1953,7 @@ mod tests {
         provider_rw.insert_block(&block_1)?;
         provider_rw.commit()?;
 
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
 
         // Subscribe twice for canonical state updates.
         let in_memory_state = provider.canonical_in_memory_state();
@@ -2381,8 +2395,7 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
 
         let in_memory_changesets = in_memory_changesets.into_iter().next().unwrap();
         let chain = NewCanonicalChain::Commit {
@@ -3305,7 +3318,7 @@ mod tests {
         (Address::random(), Account { nonce, balance: U256::from(nonce), ..Default::default() })
     }
 
-    /// [`ProviderFactory::chain_info_headers`] needs a genesis header.
+    /// [`BlockchainProvider::new`] needs a genesis header to initialize its chain tracker.
     fn test_provider_factory_with_genesis() -> eyre::Result<ProviderFactory<MockNodeTypesWithDB>> {
         let factory = create_test_provider_factory();
         let provider_rw = factory.provider_rw()?;
@@ -3330,8 +3343,7 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
 
         let mut expected: Vec<_> = accounts
             .iter()
@@ -3356,8 +3368,7 @@ mod tests {
     #[test]
     fn state_range_view_checks_snap_attempt_on_its_snapshot() -> eyre::Result<()> {
         let factory = test_provider_factory_with_genesis()?;
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory.clone(), chain_info_headers);
+        let provider = BlockchainProvider::new(factory.clone())?;
         let (address, account) = random_account(1);
         let mut attempt = SnapAttempt::start(None, BlockNumHash::default(), B256::ZERO);
 
@@ -3395,8 +3406,7 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
         let state = provider.state_range_provider(EMPTY_ROOT_HASH)?.unwrap();
 
         // Budget only fits a single account.
@@ -3422,8 +3432,7 @@ mod tests {
         provider_rw.insert_storage_for_hashing([(address, slots)])?;
         provider_rw.commit()?;
 
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
         let state = provider.state_range_provider(EMPTY_ROOT_HASH)?.unwrap();
 
         let expected_root = provider.latest()?.storage_root(address, HashedStorage::default())?;
@@ -3467,8 +3476,7 @@ mod tests {
         )])?;
         provider_rw.commit()?;
 
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
 
         // The first node of a sorted boundary proof is always the trie root, so this checks the
         // proof was generated against the real, current root rather than a stale or empty one.
@@ -3518,8 +3526,7 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory.clone(), chain_info_headers);
+        let provider = BlockchainProvider::new(factory.clone())?;
         assert!(provider.state_range_provider(recent_root)?.is_some());
         assert!(provider.state_range_provider(expired_root)?.is_none());
 
@@ -3620,8 +3627,7 @@ mod tests {
         provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2))?;
         provider_rw.commit()?;
 
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
 
         // An in-memory block on top of the head adds another account under a root of its own.
         let (memory_address, memory_account) = random_account(3);
@@ -3687,8 +3693,7 @@ mod tests {
 
         let mut rng = generators::rng();
         let factory = test_provider_factory_with_genesis()?;
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
         let genesis = provider.canonical_in_memory_state.get_canonical_head();
 
         let (address, account) = random_account(1);
@@ -3766,8 +3771,7 @@ mod tests {
     fn state_range_provider_reverts_database_advancement_past_anchor() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let factory = test_provider_factory_with_genesis()?;
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
         let genesis = provider.canonical_in_memory_state.get_canonical_head();
 
         // In-memory target block anchored on genesis, with a known account.
@@ -3926,8 +3930,7 @@ mod tests {
 
         // Resolving the anchor root must revert the later account and storage changes; state B
         // must not leak into the response.
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
         let state =
             provider.state_range_provider(anchor_root)?.expect("retained root must resolve");
         let range = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
@@ -3980,8 +3983,7 @@ mod tests {
         writer.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(5))?;
         writer.commit()?;
 
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
         assert!(provider.canonical_in_memory_state.head_state().is_none());
         assert!(provider.receipt(0)?.is_some());
         for (number, receipts) in expected.into_iter().enumerate() {
@@ -3994,13 +3996,12 @@ mod tests {
     #[test]
     fn providers_of_one_factory_share_in_memory_blocks() -> eyre::Result<()> {
         let factory = test_provider_factory_with_genesis()?;
-        let chain_info_headers = factory.chain_info_headers()?;
-        let block = TestBlockBuilder::eth()
-            .get_executed_block_with_number(1, chain_info_headers.canonical_head.hash());
+        let provider = BlockchainProvider::new(factory.clone())?;
+        let other = BlockchainProvider::new(factory)?;
+        let genesis = provider.canonical_in_memory_state.get_canonical_head();
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, genesis.hash());
         let hash = block.recovered_block().hash();
 
-        let provider = BlockchainProvider::new(factory.clone(), chain_info_headers.clone());
-        let other = BlockchainProvider::new(factory, chain_info_headers);
         provider
             .canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![block] });
