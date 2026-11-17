@@ -48,7 +48,7 @@ pub struct NodeData(pub Vec<Bytes>);
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::hex;
+    use alloy_primitives::{b256, hex};
 
     use crate::{message::RequestPair, GetNodeData, NodeData};
     use alloy_rlp::{Decodable, Encodable};
@@ -63,8 +63,8 @@ mod tests {
         let request = RequestPair {
             request_id: 1111,
             message: GetNodeData(vec![
-                hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
-                hex!("00000000000000000000000000000000000000000000000000000000feedbeef").into(),
+                b256!("00000000000000000000000000000000000000000000000000000000deadc0de"),
+                b256!("00000000000000000000000000000000000000000000000000000000feedbeef"),
             ]),
         };
         request.encode(&mut data);
@@ -83,8 +83,8 @@ mod tests {
             RequestPair {
                 request_id: 1111,
                 message: GetNodeData(vec![
-                    hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
-                    hex!("00000000000000000000000000000000000000000000000000000000feedbeef").into(),
+                    b256!("00000000000000000000000000000000000000000000000000000000deadc0de"),
+                    b256!("00000000000000000000000000000000000000000000000000000000feedbeef"),
                 ])
             }
         );

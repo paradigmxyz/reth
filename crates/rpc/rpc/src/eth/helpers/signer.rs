@@ -8,12 +8,16 @@ use alloy_signer_local::{coins_bip39::English, MnemonicBuilder, PrivateKeySigner
 use reth_rpc_convert::SignableTxRequest;
 use reth_rpc_eth_api::helpers::{signer::Result, EthSigner};
 use reth_rpc_eth_types::SignError;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// Holds developer keys
 #[derive(Debug, Clone)]
 pub struct DevSigner {
     addresses: Vec<Address>,
     accounts: AddressMap<PrivateKeySigner>,
+    /// Shared by all clones of this signer, see [`EthSigner::nonce_lock`].
+    nonce_lock: Arc<Mutex<()>>,
 }
 
 impl DevSigner {
@@ -30,7 +34,8 @@ impl DevSigner {
             let addresses = vec![address];
 
             let accounts = AddressMap::from_iter([(address, sk)]);
-            signers.push(Box::new(Self { addresses, accounts }) as Box<dyn EthSigner<T, TxReq>>);
+            signers.push(Box::new(Self { addresses, accounts, nonce_lock: Default::default() })
+                as Box<dyn EthSigner<T, TxReq>>);
         }
         signers
     }
@@ -55,7 +60,8 @@ impl DevSigner {
             let addresses = vec![address];
             let accounts = AddressMap::from_iter([(address, sk)]);
 
-            signers.push(Box::new(Self { addresses, accounts }) as Box<dyn EthSigner<T, TxReq>>);
+            signers.push(Box::new(Self { addresses, accounts, nonce_lock: Default::default() })
+                as Box<dyn EthSigner<T, TxReq>>);
         }
 
         signers
@@ -102,6 +108,10 @@ impl<T: Decodable2718, TxReq: SignableTxRequest<T>> EthSigner<T, TxReq> for DevS
         let encoded = payload.eip712_signing_hash().map_err(|_| SignError::InvalidTypedData)?;
         self.sign_hash(encoded, address)
     }
+
+    fn nonce_lock(&self) -> Option<Arc<Mutex<()>>> {
+        Some(self.nonce_lock.clone())
+    }
 }
 
 #[cfg(test)]
@@ -118,7 +128,7 @@ mod tests {
         let address = signer.address();
         let accounts = AddressMap::from_iter([(address, signer)]);
         let addresses = vec![address];
-        DevSigner { addresses, accounts }
+        DevSigner { addresses, accounts, nonce_lock: Default::default() }
     }
 
     #[tokio::test]
@@ -248,8 +258,8 @@ mod tests {
             gas_price: Some(1000u128),
             value: Some(U256::from(1000)),
             input: TransactionInput {
-                data: Some(Bytes::from(message.to_vec())),
-                input: Some(Bytes::from(message.to_vec())),
+                data: Some(Bytes::from(message)),
+                input: Some(Bytes::from(message)),
             },
             nonce: Some(0u64),
             ..Default::default()
@@ -258,6 +268,6 @@ mod tests {
             signer.sign_transaction(request, &from).await;
         assert!(txn_signed.is_ok());
 
-        assert_eq!(Bytes::from(message.to_vec()), txn_signed.unwrap().input().0);
+        assert_eq!(Bytes::from(message), txn_signed.unwrap().input().0);
     }
 }

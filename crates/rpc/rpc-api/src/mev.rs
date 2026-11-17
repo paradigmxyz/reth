@@ -2,8 +2,7 @@ use alloy_rpc_types_mev::{EthBundleHash, MevSendBundle, SimBundleOverrides, SimB
 use jsonrpsee::proc_macros::rpc;
 
 /// Mev rpc interface.
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "mev"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "mev"))]
+#[rpc(server, namespace = "mev")]
 pub trait MevSimApi {
     /// Similar to `mev_sendBundle` but instead of submitting a bundle to the relay, it returns
     /// a simulation result. Only fully matched bundles can be simulated.
@@ -16,8 +15,7 @@ pub trait MevSimApi {
 }
 
 /// Mev rpc interface.
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "mev"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "mev"))]
+#[rpc(server, namespace = "mev")]
 pub trait MevFullApi {
     /// Submitting bundles to the relay. It takes in a bundle and provides a bundle hash as a
     /// return value.

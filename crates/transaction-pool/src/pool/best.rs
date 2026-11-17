@@ -1225,9 +1225,7 @@ mod tests {
         let mut included_txs = 0u64;
 
         while let Some(tx) = best.next() {
-            if let Some(blob_hashes) = tx.transaction.blob_versioned_hashes() {
-                let tx_blob_count = blob_hashes.len() as u64;
-
+            if let Some(tx_blob_count) = tx.transaction.blob_count() {
                 if block_blob_count + tx_blob_count > max_blob_count {
                     crate::traits::BestTransactions::mark_invalid(
                         &mut best,

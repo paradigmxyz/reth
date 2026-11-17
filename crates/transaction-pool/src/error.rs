@@ -382,7 +382,10 @@ impl InvalidPoolTransactionError {
                 false
             }
             Self::ExceedsMaxInitCodeSize(_, _) => true,
-            Self::OversizedData { .. } => true,
+            Self::OversizedData { .. } => {
+                // local setting
+                false
+            }
             Self::Underpriced => {
                 // local setting
                 false
@@ -503,7 +506,7 @@ impl InvalidPoolTransactionError {
     /// Returns true if the this type is a [`InvalidPoolTransactionError::Other`] of that error
     /// type. Returns false otherwise.
     pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
-        self.as_other().map(|err| err.as_any().is::<T>()).unwrap_or(false)
+        self.as_other().is_some_and(|err| err.as_any().is::<T>())
     }
 }
 
@@ -559,5 +562,13 @@ mod tests {
         );
 
         assert!(!err.is_bad_blob_sidecar());
+    }
+
+    #[test]
+    fn oversized_data_is_not_bad_transaction() {
+        let err = InvalidPoolTransactionError::OversizedData { size: 2048, limit: 1024 };
+        assert!(err.is_oversized());
+        assert!(!err.is_bad_transaction());
+        assert!(!PoolError::new(TxHash::ZERO, err).is_bad_transaction());
     }
 }

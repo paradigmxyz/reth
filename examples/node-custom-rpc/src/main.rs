@@ -72,8 +72,7 @@ struct RethCliTxpoolExt {
 /// trait interface for a custom rpc namespace: `txpool`
 ///
 /// This defines an additional namespace where all methods are configured as trait functions.
-#[cfg_attr(not(test), rpc(server, namespace = "txpoolExt"))]
-#[cfg_attr(test, rpc(server, client, namespace = "txpoolExt"))]
+#[rpc(server, namespace = "txpoolExt")]
 pub trait TxpoolExtApi {
     /// Returns the number of transactions in the pool.
     #[method(name = "transactionCount")]
@@ -85,10 +84,7 @@ pub trait TxpoolExtApi {
 
     /// Creates a subscription that returns the number of transactions in the pool every 10s.
     #[subscription(name = "subscribeTransactionCount", item = usize)]
-    fn subscribe_transaction_count(
-        &self,
-        #[argument(rename = "delay")] delay: Option<u64>,
-    ) -> SubscriptionResult;
+    fn subscribe_transaction_count(&self, delay: Option<u64>) -> SubscriptionResult;
 }
 
 /// The type that implements the `txpoolExt` rpc namespace trait
@@ -99,7 +95,7 @@ pub struct TxpoolExt<Pool> {
 #[cfg(not(test))]
 impl<Pool> TxpoolExtApiServer for TxpoolExt<Pool>
 where
-    Pool: TransactionPool + Clone + 'static,
+    Pool: TransactionPool + 'static,
 {
     fn transaction_count(&self) -> RpcResult<usize> {
         Ok(self.pool.pool_size().total)
@@ -128,12 +124,18 @@ where
             };
 
             loop {
-                sleep(Duration::from_secs(delay)).await;
+                // stop once the client unsubscribes or disconnects
+                tokio::select! {
+                    _ = sink.closed() => break,
+                    _ = sleep(Duration::from_secs(delay)) => {}
+                }
 
                 let msg = SubscriptionMessage::from(
                     serde_json::value::to_raw_value(&pool.pool_size().total).expect("serialize"),
                 );
-                let _ = sink.send(msg).await;
+                if sink.send(msg).await.is_err() {
+                    break;
+                }
             }
         });
 
@@ -144,15 +146,16 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jsonrpsee::{
-        http_client::HttpClientBuilder, server::ServerBuilder, ws_client::WsClientBuilder,
-    };
+    use alloy_primitives::B256;
+    use alloy_provider::WsConnect;
+    use alloy_rpc_client::ClientBuilder;
+    use jsonrpsee::server::ServerBuilder;
     use reth_ethereum::pool::noop::NoopTransactionPool;
 
     #[cfg(test)]
     impl<Pool> TxpoolExtApiServer for TxpoolExt<Pool>
     where
-        Pool: TransactionPool + Clone + 'static,
+        Pool: TransactionPool + 'static,
     {
         fn transaction_count(&self) -> RpcResult<usize> {
             Ok(self.pool.pool_size().total)
@@ -183,14 +186,18 @@ mod tests {
 
                 // Send pool size repeatedly, with a 10-second delay
                 loop {
-                    sleep(Duration::from_millis(delay)).await;
+                    tokio::select! {
+                        _ = sink.closed() => break,
+                        _ = sleep(Duration::from_millis(delay)) => {}
+                    }
                     let message = SubscriptionMessage::from(
                         serde_json::value::to_raw_value(&pool.pool_size().total)
                             .expect("serialize usize"),
                     );
 
-                    // Just ignore errors if a client has dropped
-                    let _ = sink.send(message).await;
+                    if sink.send(message).await.is_err() {
+                        break;
+                    }
                 }
             });
             Ok(())
@@ -201,8 +208,8 @@ mod tests {
     async fn test_call_transaction_count_http() {
         let server_addr = start_server().await;
         let uri = format!("http://{server_addr}");
-        let client = HttpClientBuilder::default().build(&uri).unwrap();
-        let count = TxpoolExtApiClient::transaction_count(&client).await.unwrap();
+        let client = ClientBuilder::default().http(uri.parse().unwrap());
+        let count: usize = client.request_noparams("txpoolExt_transactionCount").await.unwrap();
         assert_eq!(count, 0);
     }
 
@@ -210,9 +217,9 @@ mod tests {
     async fn test_call_clear_txpool_http() {
         let server_addr = start_server().await;
         let uri = format!("http://{server_addr}");
-        let client = HttpClientBuilder::default().build(&uri).unwrap();
-        TxpoolExtApiClient::clear_txpool(&client).await.unwrap();
-        let count = TxpoolExtApiClient::transaction_count(&client).await.unwrap();
+        let client = ClientBuilder::default().http(uri.parse().unwrap());
+        let () = client.request_noparams("txpoolExt_clearTxpool").await.unwrap();
+        let count: usize = client.request_noparams("txpoolExt_transactionCount").await.unwrap();
         assert_eq!(count, 0);
     }
 
@@ -220,16 +227,18 @@ mod tests {
     async fn test_subscribe_transaction_count_ws() {
         let server_addr = start_server().await;
         let ws_url = format!("ws://{server_addr}");
-        let client = WsClientBuilder::default().build(&ws_url).await.unwrap();
+        let client = ClientBuilder::default().ws(WsConnect::new(ws_url)).await.unwrap();
 
-        let mut sub = TxpoolExtApiClient::subscribe_transaction_count(&client, None)
-            .await
-            .expect("failed to subscribe");
+        // Marking the call as a subscription makes the client track its notifications.
+        let mut call = client.request("txpoolExt_subscribeTransactionCount", (None::<u64>,));
+        call.set_is_subscription();
+        let sub_id: B256 = call.await.expect("failed to subscribe");
+        let mut sub = client.get_subscription::<usize>(sub_id).await;
 
-        let first = sub.next().await.unwrap().unwrap();
+        let first = sub.recv().await.unwrap();
         assert_eq!(first, 0, "expected initial count to be 0");
 
-        let second = sub.next().await.unwrap().unwrap();
+        let second = sub.recv().await.unwrap();
         assert_eq!(second, 0, "still expected 0 from our NoopTransactionPool");
     }
 

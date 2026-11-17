@@ -216,7 +216,7 @@ mod tests {
     #[test]
     fn test_address_retrieval() {
         let mut identifiers = SenderIdentifiers::default();
-        let address = Address::new([1; 20]);
+        let address = Address::repeat_byte(1);
         let id = identifiers.sender_id_or_create(address);
         assert_eq!(identifiers.address(&id), Some(&address));
     }
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn test_sender_id_retrieval() {
         let mut identifiers = SenderIdentifiers::default();
-        let address = Address::new([1; 20]);
+        let address = Address::repeat_byte(1);
         let id = identifiers.sender_id_or_create(address);
         assert_eq!(identifiers.sender_id(&address), Some(id));
     }
@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn test_sender_id_or_create_existing() {
         let mut identifiers = SenderIdentifiers::default();
-        let address = Address::new([1; 20]);
+        let address = Address::repeat_byte(1);
         let id1 = identifiers.sender_id_or_create(address);
         let id2 = identifiers.sender_id_or_create(address);
         assert_eq!(id1, id2);
@@ -241,8 +241,8 @@ mod tests {
     #[test]
     fn test_sender_id_or_create_new() {
         let mut identifiers = SenderIdentifiers::default();
-        let address1 = Address::new([1; 20]);
-        let address2 = Address::new([2; 20]);
+        let address1 = Address::repeat_byte(1);
+        let address2 = Address::repeat_byte(2);
         let id1 = identifiers.sender_id_or_create(address1);
         let id2 = identifiers.sender_id_or_create(address2);
         assert_ne!(id1, id2);

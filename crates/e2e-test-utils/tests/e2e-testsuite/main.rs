@@ -3,8 +3,9 @@
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::PayloadAttributes;
 use eyre::Result;
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
+    eth_payload_attributes, test_chain_spec,
     test_rlp_utils::{generate_test_blocks, write_blocks_to_rlp},
     testsuite::{
         actions::{
@@ -15,11 +16,11 @@ use reth_e2e_test_utils::{
         setup::{NetworkSetup, Setup},
         Environment, TestBuilder,
     },
-    E2ETestSetupBuilder,
+    E2ETestSetupBuilder, E2ETestSetupExt,
 };
 use reth_node_api::TreeConfig;
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
-use std::sync::Arc;
+use reth_provider::{DatabaseProviderFactory, MetadataProvider, StorageSettings};
 use tempfile::TempDir;
 use tracing::debug;
 
@@ -28,20 +29,7 @@ async fn test_apply_with_import() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     // Create test chain spec
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(
-                serde_json::from_str(include_str!(
-                    "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
-                ))
-                .unwrap(),
-            )
-            .london_activated()
-            .shanghai_activated()
-            .cancun_activated()
-            .build(),
-    );
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
 
     // Generate test blocks
     let test_blocks = generate_test_blocks(&chain_spec, 10);
@@ -71,40 +59,6 @@ async fn test_apply_with_import() -> Result<()> {
     let mut make_canonical = MakeCanonical::new();
     make_canonical.execute(&mut env).await?;
 
-    // Wait for the pipeline to finish processing all stages
-    debug!("Waiting for pipeline to finish processing imported blocks...");
-    let start = std::time::Instant::now();
-    loop {
-        // Check if we can get the block from RPC (indicates pipeline finished)
-        let client = &env.node_clients[0];
-        let block_result = reth_rpc_api::clients::EthApiClient::<
-            alloy_rpc_types_eth::TransactionRequest,
-            alloy_rpc_types_eth::Transaction,
-            alloy_rpc_types_eth::Block,
-            alloy_rpc_types_eth::Receipt,
-            alloy_rpc_types_eth::Header,
-            reth_ethereum_primitives::TransactionSigned,
-        >::block_by_number(
-            &client.rpc,
-            alloy_eips::BlockNumberOrTag::Number(10),
-            true, // Include full transaction details
-        )
-        .await;
-
-        if let Ok(Some(block)) = block_result &&
-            block.header.number == 10
-        {
-            debug!("Pipeline finished, block 10 is fully available");
-            break;
-        }
-
-        if start.elapsed() > std::time::Duration::from_secs(10) {
-            return Err(eyre::eyre!("Timeout waiting for pipeline to finish"));
-        }
-
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-
     // Update block info again after making canonical
     let mut update_block_info_2 = UpdateBlockInfo::default();
     update_block_info_2.execute(&mut env).await?;
@@ -131,18 +85,7 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     let setup = Setup::default()
-        .with_chain_spec(Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(
-                    serde_json::from_str(include_str!(
-                        "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
-                    ))
-                    .unwrap(),
-                )
-                .paris_activated()
-                .build(),
-        ))
+        .with_chain_spec(test_chain_spec(EthereumHardfork::Paris))
         .with_network(NetworkSetup::single_node());
 
     let test =
@@ -175,18 +118,7 @@ async fn test_testsuite_produce_blocks() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     let setup = Setup::default()
-        .with_chain_spec(Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(
-                    serde_json::from_str(include_str!(
-                        "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
-                    ))
-                    .unwrap(),
-                )
-                .cancun_activated()
-                .build(),
-        ))
+        .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
         .with_network(NetworkSetup::single_node());
 
     let test = TestBuilder::new()
@@ -205,18 +137,7 @@ async fn test_testsuite_create_fork() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     let setup = Setup::default()
-        .with_chain_spec(Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(
-                    serde_json::from_str(include_str!(
-                        "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
-                    ))
-                    .unwrap(),
-                )
-                .cancun_activated()
-                .build(),
-        ))
+        .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
         .with_network(NetworkSetup::single_node());
 
     let test = TestBuilder::new()
@@ -235,18 +156,7 @@ async fn test_testsuite_reorg_with_tagging() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     let setup = Setup::default()
-        .with_chain_spec(Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(
-                    serde_json::from_str(include_str!(
-                        "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
-                    ))
-                    .unwrap(),
-                )
-                .cancun_activated()
-                .build(),
-        ))
+        .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
         .with_network(NetworkSetup::single_node());
 
     let test = TestBuilder::new()
@@ -277,18 +187,7 @@ async fn test_testsuite_deep_reorg() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     let setup = Setup::default()
-        .with_chain_spec(Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(
-                    serde_json::from_str(include_str!(
-                        "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
-                    ))
-                    .unwrap(),
-                )
-                .cancun_activated()
-                .build(),
-        ))
+        .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
         .with_network(NetworkSetup::single_node())
         .with_tree_config(TreeConfig::default().with_state_root_fallback(true));
 
@@ -302,8 +201,10 @@ async fn test_testsuite_deep_reorg() -> Result<()> {
         .with_action(CreateFork::<EthEngineTypes>::new(1, 1))
         .with_action(CaptureBlock::new("blockA_height2"))
         .with_action(MakeCanonical::new())
-        // receive newPayload with block hash B and height 2
+        // send forkchoiceUpdated back to block 1. Building block A finalized block 1, and a
+        // canonical ancestor at the finalized block is accepted without unwinding the chain.
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("block1"))
+        // receive newPayload with block hash B and height 2
         .with_action(CreateFork::<EthEngineTypes>::new(1, 1))
         .with_action(CaptureBlock::new("blockB_height2"))
         // receive forkchoiceUpdated with block hash B as head
@@ -327,18 +228,7 @@ async fn test_testsuite_multinode_block_production() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     let setup = Setup::default()
-        .with_chain_spec(Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(
-                    serde_json::from_str(include_str!(
-                        "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
-                    ))
-                    .unwrap(),
-                )
-                .cancun_activated()
-                .build(),
-        ))
+        .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
         .with_network(NetworkSetup::multi_node(2)) // Create 2 nodes
         .with_tree_config(TreeConfig::default().with_state_root_fallback(true));
 
@@ -369,32 +259,60 @@ async fn test_testsuite_multinode_block_production() -> Result<()> {
 async fn test_setup_builder_with_custom_tree_config() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(
-                serde_json::from_str(include_str!(
-                    "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
-                ))
-                .unwrap(),
-            )
-            .cancun_activated()
-            .build(),
-    );
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_tree_config_modifier(|config| {
+            config.with_persistence_threshold(0).with_memory_block_buffer_target(5)
+        })
+        .build_single()
+        .await?;
 
-    let (nodes, _wallet) = E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, |_| {
-        PayloadAttributes::default()
-    })
-    .with_tree_config_modifier(|config| {
-        config.with_persistence_threshold(0).with_memory_block_buffer_target(5)
-    })
-    .build()
+    let genesis_hash = node.block_hash(0);
+    assert_ne!(genesis_hash, B256::ZERO);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_setup_builder_with_storage_v2() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+
+    for storage_v2 in [false, true] {
+        // A node config modifier set afterwards must not reset the storage mode.
+        let (node, _) = EthereumNode::test_setup(1, chain_spec.clone())
+            .with_storage_v2(storage_v2)
+            .with_node_config_modifier(|config| config.set_dev(true))
+            .build_single()
+            .await?;
+
+        let provider = node.inner.provider.database_provider_ro()?;
+        assert_eq!(provider.storage_settings()?, Some(StorageSettings { storage_v2 }));
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_setup_builder_with_attributes_generator() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+    let fee_recipient = Address::with_last_byte(0x42);
+    let attributes_chain_spec = chain_spec.clone();
+    let (mut node, _) = E2ETestSetupBuilder::<EthereumNode>::new_with_attributes_generator(
+        1,
+        chain_spec,
+        move |timestamp| PayloadAttributes {
+            suggested_fee_recipient: fee_recipient,
+            ..eth_payload_attributes(&attributes_chain_spec, timestamp)
+        },
+    )
+    .build_single()
     .await?;
 
-    assert_eq!(nodes.len(), 1);
-
-    let genesis_hash = nodes[0].block_hash(0);
-    assert_ne!(genesis_hash, B256::ZERO);
+    let payload = node.advance_block().await?;
+    assert_eq!(payload.block().header().beneficiary, fee_recipient);
 
     Ok(())
 }

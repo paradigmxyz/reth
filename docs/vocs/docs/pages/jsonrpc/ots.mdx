@@ -1,0 +1,86 @@
+# `ots` namespace
+
+Reth implements part of the [Otterscan API](https://docs.otterscan.io/api-docs/ots-api).
+Enable the namespace with `--http.api eth,ots` (or include `ots` in your existing
+HTTP or WebSocket API selection).
+
+`ots_getApiLevel` returns **8**, but this does **not** guarantee complete support
+for API level 8 or for every feature of the Otterscan frontend.
+
+## Supported methods
+
+| Method | Behavior |
+| --- | --- |
+| `ots_getApiLevel` | Returns `8`. |
+| `ots_getHeaderByNumber` | Returns a header, or `null` for an unknown block. Also exposed as `erigon_getHeaderByNumber` for frontend compatibility. |
+| `ots_hasCode` | Checks code at the requested block; defaults to latest state. |
+| `ots_getTransactionError` | Returns raw revert bytes. A known transaction with no revert data (including success and exceptional halt) returns `"0x"`. An unknown transaction returns `null`. Check the receipt status to distinguish success from failure. |
+| `ots_traceTransaction` | Returns call, creation and self-destruct entries, or `null` for an unknown transaction. Includes precompile calls. |
+| `ots_getInternalOperations` | Returns internal nonzero-value calls, creations (including zero endowment), and self-destructs. Excludes the transaction's top-level call or creation. An unknown transaction returns an empty array. |
+| `ots_getBlockDetails` | Returns block metadata, execution fees, and issuance using the chain's Ethereum hardfork schedule. |
+| `ots_getBlockDetailsByHash` | The same block details, selected by hash. |
+| `ots_getBlockTransactions` | Returns paginated transactions and matching receipts. |
+| `ots_getTransactionBySenderAndNonce` | Searches canonical transaction history for a sender and nonce; excludes pending transactions. Returns `null` if not found. |
+| `ots_getContractCreator` | Searches historical code and traces for a creation transaction, subject to the limitations below. Returns `null` if no creator is found. |
+
+Block details and block transaction methods return an RPC error when the block
+or required receipts are unavailable. They do not return an empty block.
+
+Block issuance includes the proof-of-work miner reward, the miner's ommer
+inclusion rewards, and the ommers' rewards. It is zero for genesis and from the
+Paris (Merge) activation configured in the chain specification. It does not
+include consensus-layer issuance or withdrawals. `totalFees` sums execution gas
+used times effective gas price, including the base fee; it excludes blob fees
+and is not the miner's fee income.
+
+Block transaction pages are zero-indexed **from the end of the block**, with
+transactions and receipts in ascending block order within each page. For 25
+transactions and a page size of 10, pages contain indices 15–24, 5–14, and 0–4.
+Out-of-range pages and a page size of zero return empty lists. The original
+block transaction count is retained. Transaction input is capped to the first
+four bytes; receipt logs and log blooms are `null`.
+
+Tracing reports attempted operations, including operations reverted by an
+enclosing call. These entries are not a list of committed balance changes.
+`SELFDESTRUCT` is represented separately from the call that executes it; after
+Cancun it does not necessarily delete the contract. `STATICCALL` and
+`DELEGATECALL` trace entries have a `null` value.
+
+## Unimplemented address history search
+
+`ots_searchTransactionsBefore` and `ots_searchTransactionsAfter` are registered
+but **unimplemented**. Both return this JSON-RPC error:
+
+```json
+{"code": -32603, "message": "unimplemented"}
+```
+
+Enabling `ots` or running an archive node does not enable these endpoints.
+Otterscan address transaction history therefore remains unavailable through
+these methods. Implementing them requires efficient address/call history
+indexing or another bounded search strategy; replaying arbitrary chain history
+per request is not a practical substitute.
+
+Earlier work is recorded in [closed issue #13499](https://github.com/paradigmxyz/reth/issues/13499).
+The [closed prototype PR #13621](https://github.com/paradigmxyz/reth/pull/13621)
+contains earlier implementation and indexing discussion. Cross-client response
+and specification alignment is discussed in
+[Otterscan #1081](https://github.com/otterscan/otterscan/issues/1081).
+
+## History and state requirements
+
+Historical code queries need state for the selected block. Tracing methods need
+the transaction, its block, and state sufficient to replay it, including preceding
+transactions when necessary. Pruned state, receipts, bodies, or transaction
+lookup data can prevent these methods from answering older queries. Archive
+state alone does not restore other pruned history. Replays and historical
+searches can be expensive.
+
+Contract creator lookup currently binary-searches code presence, assuming one
+transition from absent to present. Destruction and redeployment violate that
+assumption, so the result is not a reliable first-deployment record for such
+contracts. Contracts without code at latest state return `null`; genesis
+allocations and code set through EIP-7702 delegation have no corresponding
+`CREATE`/`CREATE2` transaction and may also return `null`. A complete solution
+needs creation history rather than code-presence binary search; address history
+work above is a related indexing follow-up.

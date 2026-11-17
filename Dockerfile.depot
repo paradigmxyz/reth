@@ -4,7 +4,7 @@
 # Usage:
 #   reth: --build-arg BINARY=reth
 
-FROM rust:1.95-trixie AS builder
+FROM rust:1.96-trixie AS builder
 WORKDIR /app
 
 LABEL org.opencontainers.image.source=https://github.com/paradigmxyz/reth
@@ -15,7 +15,7 @@ RUN /tmp/install_llvm.sh && rm /tmp/install_llvm.sh && \
     apt-get install -y --no-install-recommends libclang-dev m4 pkg-config
 
 # Install sccache for compilation caching
-RUN cargo install sccache --locked
+RUN cargo install sccache --version "=0.18.0" --locked
 ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_DIR=/sccache
 ENV SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev
@@ -49,10 +49,18 @@ ENV VERGEN_GIT_DIRTY=$VERGEN_GIT_DIRTY
 # Platform-specific RUSTFLAGS: amd64 uses x86-64-v3 (Haswell+) with pclmulqdq for rocksdb
 ARG TARGETPLATFORM
 COPY --exclude=.git . .
+# Cargo's own lock lives outside the cache mounts, so concurrent builds sharing one registry or git
+# cache race: fresh git clones delete each other's checkouts and crate unpacking collides on
+# .cargo-ok. Each platform and profile (e.g. the nightly ethereum and ethereum-profiling targets)
+# gets its own cargo and sccache caches, locked so only one build uses them at a time.
+# sccache is disabled in the fetch step because it has no access to the Depot token.
+RUN --mount=type=cache,id=cargo-registry-$TARGETPLATFORM-$BUILD_PROFILE,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=cargo-git-$TARGETPLATFORM-$BUILD_PROFILE,target=/usr/local/cargo/git,sharing=locked \
+    RUSTC_WRAPPER= cargo fetch --locked
 RUN --mount=type=secret,id=DEPOT_TOKEN,env=SCCACHE_WEBDAV_TOKEN \
-    --mount=type=cache,target=/usr/local/cargo/registry,sharing=shared \
-    --mount=type=cache,target=/usr/local/cargo/git,sharing=shared \
-    --mount=type=cache,target=$SCCACHE_DIR,sharing=shared \
+    --mount=type=cache,id=cargo-registry-$TARGETPLATFORM-$BUILD_PROFILE,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=cargo-git-$TARGETPLATFORM-$BUILD_PROFILE,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=sccache-$TARGETPLATFORM-$BUILD_PROFILE,target=$SCCACHE_DIR,sharing=locked \
     export RUSTC_WRAPPER=sccache SCCACHE_WEBDAV_ENDPOINT=https://cache.depot.dev SCCACHE_DIR=/sccache && \
     sccache --start-server && \
     if [ -n "$RUSTFLAGS" ]; then \
@@ -77,8 +85,10 @@ ARG BINARY=reth
 # Runtime defaults
 ARG RETH_ENGINE_TXPOOL_PREWARMING=false
 ENV RETH_ENGINE_TXPOOL_PREWARMING=$RETH_ENGINE_TXPOOL_PREWARMING
-ARG RETH_ENGINE_SENDER_RECOVERY_CACHE=false
-ENV RETH_ENGINE_SENDER_RECOVERY_CACHE=$RETH_ENGINE_SENDER_RECOVERY_CACHE
+ARG RETH_ENGINE_PREWARM_REUSE=false
+ENV RETH_ENGINE_PREWARM_REUSE=$RETH_ENGINE_PREWARM_REUSE
+ARG RETH_DB_SYNC_MODE=durable
+ENV RETH_DB_SYNC_MODE=$RETH_DB_SYNC_MODE
 
 # Install runtime dependencies
 RUN apt-get update && \

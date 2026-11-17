@@ -12,6 +12,8 @@ reth-bb extends the standard Ethereum node with:
 
 2. **Relaxed consensus** — the gas-limit bound-divisor check and blob gas validation are skipped, since merged blocks exceed single-block limits.
 
+BAL benchmarks use the big-block payload format so access lists are carried independently of historical block headers. When `bal` is enabled without big blocks, the workflow selects `big-blocks=1` for both comparison arms, including asymmetric BAL comparisons. This one-gas target uses the existing reth-bb replay path and does not require a single-block adapter in older baseline refs. Reorg and mempool benchmarks are not supported with BAL or big blocks.
+
 ## Quick start
 
 The full workflow has five steps: **build** reth-bb, **install** txgen tools, **extract** big-block payloads, **start** reth-bb, and **replay** the payloads.

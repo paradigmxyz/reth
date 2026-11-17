@@ -1,13 +1,12 @@
 use crate::utils::{test_address, test_rpc_builder};
-use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
+use alloy_primitives::U64;
 use jsonrpsee::{
     core::middleware::{Batch, Notification},
     server::middleware::rpc::RpcServiceT,
     types::Request,
+    MethodResponse,
 };
-use reth_ethereum_primitives::TransactionSigned;
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
-use reth_rpc_eth_api::EthApiClient;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tokio_util::EventSender;
 use std::{
@@ -42,11 +41,7 @@ impl<S> RpcServiceT for MyMiddlewareService<S>
 where
     S: RpcServiceT + Send + Sync + Clone + 'static,
 {
-    type MethodResponse = S::MethodResponse;
-    type NotificationResponse = S::NotificationResponse;
-    type BatchResponse = S::BatchResponse;
-
-    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
+    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
         tracing::info!("MyMiddleware processed call {}", req.method);
         let count = self.count.clone();
         let service = self.service.clone();
@@ -58,14 +53,14 @@ where
         }
     }
 
-    fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+    fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
         self.service.batch(req)
     }
 
     fn notification<'a>(
         &self,
         n: Notification<'a>,
-    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+    ) -> impl Future<Output = MethodResponse> + Send + 'a {
         self.service.notification(n)
     }
 }
@@ -90,11 +85,7 @@ async fn test_rpc_middleware() {
         .unwrap();
 
     let client = handle.http_client().unwrap();
-    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::protocol_version(
-        &client,
-    )
-    .await
-    .unwrap();
+    client.request_noparams::<U64>("eth_protocolVersion").await.unwrap();
     let count = mylayer.count.load(Ordering::Relaxed);
     assert_eq!(count, 1);
 }

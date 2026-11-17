@@ -2,10 +2,11 @@
 
 use crate::{is_database_empty, TableSet, Tables};
 use eyre::Context;
-use reth_tracing::tracing::{info, warn};
 use std::path::Path;
+use tracing::{info, warn};
 
 pub use crate::implementation::mdbx::*;
+use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
 pub use reth_libmdbx::*;
 
 /// Tables that have been removed from the schema but may still exist on disk from previous
@@ -76,8 +77,6 @@ fn is_zfs(_path: &Path) -> std::io::Result<bool> {
 /// Creates a new database at the specified path if it doesn't exist. Does NOT create tables. Check
 /// [`init_db`].
 pub fn create_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
-    use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
-
     let rpath = path.as_ref();
     warn_if_zfs(rpath);
 
@@ -125,7 +124,7 @@ fn drop_orphan_tables(db: &DatabaseEnv) {
             }
             Ok(false) => {}
             Err(e) => {
-                reth_tracing::tracing::warn!(
+                tracing::warn!(
                     target: "reth::db",
                     table = %table_name,
                     %e,

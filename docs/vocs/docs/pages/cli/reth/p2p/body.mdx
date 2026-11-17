@@ -78,6 +78,9 @@ Networking:
 
           [default: 200]
 
+      --snap.v2
+          Advertise and serve experimental snap/2. `reth node` also bootstraps a fresh database with it, and uses the staged pipeline while the chain head predates block access lists
+
       --trusted-peers <TRUSTED_PEERS>
           Comma separated enode URLs or ENRs of trusted peers for P2P connections.
 
@@ -393,9 +396,11 @@ Display:
 
 Tracing:
       --tracing-otlp[=<URL>]
-          Enable `Opentelemetry` tracing export to an OTLP endpoint.
+          Enable `Opentelemetry` tracing export to an OTLP endpoint or local file.
 
           If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/traces` - gRPC: `http://localhost:4317`
+
+          A `file:///absolute/path` endpoint appends length-delimited OTLP protobuf batches without a collector. Use a separate file per process. The network protocol is ignored for files.
 
           Example: --tracing-otlp=http://collector:4318/v1/traces
 

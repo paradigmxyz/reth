@@ -7,6 +7,7 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use alloy_eips::BlockNumHash;
+use futures::FutureExt;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
@@ -14,18 +15,17 @@ use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{
     handshake::{EthHandshake, EthRlpxHandshake},
     EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives,
-    UnifiedStatus,
+    UnifiedStatus, MAX_PAYLOAD_SIZE,
 };
-use reth_eth_wire_types::message::MAX_MESSAGE_SIZE;
+use reth_eth_wire_types::{message::MAX_MESSAGE_SIZE, SnapVersion};
 use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_storage_api::{
-    noop::NoopProvider, BalProvider, BlockNumReader, BlockReader, HeaderProvider,
-    StateProviderFactory, StateRangeProviderFactory,
+    noop::NoopProvider, BalProvider, BlockNumReader, BlockReader, StateProviderFactory,
+    StateRangeProviderFactory,
 };
 use reth_tasks::Runtime;
-use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
 // re-export for convenience
@@ -37,7 +37,7 @@ pub use secp256k1::SecretKey;
 
 /// Convenience function to create a new random [`SecretKey`]
 pub fn rng_secret_key() -> SecretKey {
-    SecretKey::new(&mut rand_08::thread_rng())
+    SecretKey::new(&mut rand::rng())
 }
 
 /// All network related initialization settings.
@@ -103,6 +103,9 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub handshake: Arc<dyn EthRlpxHandshake>,
     /// Maximum allowed ETH message size for post-handshake ETH/Snap streams.
     pub eth_max_message_size: usize,
+    /// Maximum uncompressed size of a message payload on the `p2p` stream, which carries every
+    /// subprotocol.
+    pub p2p_max_payload_size: usize,
     /// List of block number-hash pairs to check for required blocks.
     /// If non-empty, peers that don't have these blocks will be filtered out.
     pub required_block_hashes: Vec<BlockNumHash>,
@@ -167,7 +170,6 @@ where
         + StateProviderFactory
         + StateRangeProviderFactory
         + BlockReader<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
-        + HeaderProvider
         + Clone
         + Unpin
         + 'static,
@@ -180,8 +182,8 @@ where
             .request_handler::<C>(client)
             .split_with_handle();
 
-        tokio::task::spawn(network);
-        tokio::task::spawn(eth);
+        tokio::task::spawn(network.boxed());
+        tokio::task::spawn(eth.boxed());
         Ok(handle)
     }
 }
@@ -231,6 +233,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     handshake: Arc<dyn EthRlpxHandshake>,
     /// Maximum allowed ETH message size for post-handshake ETH/Snap streams.
     eth_max_message_size: usize,
+    /// Maximum uncompressed size of a message payload on the `p2p` stream.
+    p2p_max_payload_size: usize,
     /// List of block hashes to check for required blocks.
     required_block_hashes: Vec<BlockNumHash>,
     /// Optional network id
@@ -278,6 +282,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             nat: None,
             handshake: Arc::new(EthHandshake::default()),
             eth_max_message_size: MAX_MESSAGE_SIZE,
+            p2p_max_payload_size: MAX_PAYLOAD_SIZE,
             required_block_hashes: Vec::new(),
             network_id: None,
             snap_enabled: false,
@@ -294,7 +299,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
     /// Returns the configured [`PeerId`]
     pub fn get_peer_id(&self) -> PeerId {
-        pk2id(&self.secret_key.public_key(SECP256K1))
+        pk2id(&self.secret_key.public_key())
     }
 
     /// Returns the configured [`SecretKey`], from which the node's identity is derived.
@@ -613,6 +618,10 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     ///
     /// This does not affect the initial status handshake, which continues to use
     /// [`MAX_MESSAGE_SIZE`].
+    ///
+    /// Every message also passes the `p2p` stream's payload limit first, so a value above
+    /// [`p2p_max_payload_size`](Self::p2p_max_payload_size) only takes effect once that is raised
+    /// as well.
     pub const fn eth_max_message_size(mut self, max_message_size: usize) -> Self {
         self.eth_max_message_size = max_message_size;
         self
@@ -623,6 +632,18 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         if let Some(max_message_size) = max_message_size {
             self.eth_max_message_size = max_message_size;
         }
+        self
+    }
+
+    /// Sets the maximum uncompressed size of a message payload on the `p2p` stream, which defaults
+    /// to [`MAX_PAYLOAD_SIZE`] (16 MiB, from EIP-706).
+    ///
+    /// The limit applies to every subprotocol, in both directions, and to the `p2p` handshake.
+    /// An `RLPx` frame carries less than 16 MiB of snappy-compressed data, so a larger value only
+    /// admits messages that compress below that. Sending a frame that does not fit closes the
+    /// session with an error.
+    pub const fn p2p_max_payload_size(mut self, max_payload_size: usize) -> Self {
+        self.p2p_max_payload_size = max_payload_size;
         self
     }
 
@@ -647,7 +668,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         let Self {
             secret_key,
             mut dns_discovery_config,
-            discovery_v4_builder,
+            mut discovery_v4_builder,
             mut discovery_v5_builder,
             boot_nodes,
             discovery_addr,
@@ -665,6 +686,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             nat,
             handshake,
             eth_max_message_size,
+            p2p_max_payload_size,
             required_block_hashes,
             network_id,
             snap_enabled,
@@ -684,6 +706,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         // as the ENR address.
         let advertised_ip = nat.clone().and_then(|nat| nat.as_external_ip(listener_addr.port()));
 
+        // EIP-8189: DNS discovery lists select snap servers by the versions in this ENR entry.
+        let snap_versions = snap_enabled.then(|| vec![SnapVersion::V2 as u64]);
+        if let (Some(builder), Some(versions)) = (discovery_v4_builder.as_mut(), &snap_versions) {
+            builder.add_eip868_pair("snap", versions);
+        }
+
         discovery_v5_builder = discovery_v5_builder.map(|mut builder| {
             let fork_id = chain_spec.fork_id(&head);
             if let Some(network_stack_id) = NetworkStackId::id(&chain_spec) {
@@ -696,6 +724,10 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
             if let Some(ip) = advertised_ip {
                 builder = builder.advertised_ip(ip);
+            }
+
+            if let Some(versions) = &snap_versions {
+                builder = builder.add_enr_kv_pair(b"snap", alloy_rlp::encode(versions).into());
             }
 
             builder
@@ -752,6 +784,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             nat,
             handshake,
             eth_max_message_size,
+            p2p_max_payload_size,
             required_block_hashes,
         }
     }
@@ -796,7 +829,7 @@ mod tests {
     use std::{net::Ipv4Addr, sync::Arc};
 
     fn builder() -> NetworkConfigBuilder {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
         NetworkConfigBuilder::new(secret_key, Runtime::test())
     }
 
@@ -826,6 +859,45 @@ mod tests {
         );
         // eth is still advertised alongside snap.
         assert!(config.hello_message.protocols.iter().any(|p| p.cap.name == "eth"));
+    }
+
+    #[test]
+    fn test_snap_enr_entry_lists_served_versions() {
+        let config = builder()
+            .with_snap(true)
+            .discovery_v5(reth_discv5::Config::builder((Ipv4Addr::LOCALHOST, 30303).into()))
+            .build(NoopProvider::default());
+
+        let discv4 = config.discovery_v4_config.expect("should build discv4 config");
+        assert_eq!(
+            discv4.additional_eip868_rlp_pairs.get(b"snap".as_slice()).map(|rlp| rlp.as_ref()),
+            Some([0xc1, 0x02].as_slice())
+        );
+
+        let (local_enr, _, _, _) = build_local_enr(
+            &config.secret_key,
+            &config.discovery_v5_config.expect("should build discv5 config"),
+        );
+        assert_eq!(
+            local_enr.get_decodable::<Vec<u64>>("snap").expect("should read 'snap'").unwrap(),
+            vec![2]
+        );
+    }
+
+    #[test]
+    fn test_snap_enr_entry_absent_by_default() {
+        let config = builder()
+            .discovery_v5(reth_discv5::Config::builder((Ipv4Addr::LOCALHOST, 30303).into()))
+            .build(NoopProvider::default());
+
+        let discv4 = config.discovery_v4_config.expect("should build discv4 config");
+        assert!(!discv4.additional_eip868_rlp_pairs.contains_key(b"snap".as_slice()));
+
+        let (local_enr, _, _, _) = build_local_enr(
+            &config.secret_key,
+            &config.discovery_v5_config.expect("should build discv5 config"),
+        );
+        assert!(local_enr.get_raw_rlp("snap").is_none());
     }
 
     #[test]

@@ -5,33 +5,6 @@ use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use reth_storage_errors::provider::ProviderResult;
 
-/// Notification emitted when a new BAL is inserted into the store.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BalNotification {
-    /// Number and hash of the block the BAL belongs to.
-    pub num_hash: NumHash,
-    /// Raw BAL RLP payload.
-    pub bal: RawBal,
-}
-
-impl BalNotification {
-    /// Creates a new [`BalNotification`].
-    pub const fn new(num_hash: NumHash, bal: RawBal) -> Self {
-        Self { num_hash, bal }
-    }
-}
-
-#[cfg(feature = "std")]
-pub use self::subscriptions::BalNotificationStream;
-
-#[cfg(feature = "std")]
-mod subscriptions {
-    use super::BalNotification;
-
-    /// A stream of [`BalNotification`]s.
-    pub type BalNotificationStream = reth_tokio_util::EventStream<BalNotification>;
-}
-
 /// Store for Block Access Lists (BALs).
 ///
 /// This abstraction intentionally does not prescribe where BALs live. Implementations may keep
@@ -121,13 +94,6 @@ pub trait BalStore: Send + Sync + 'static {
         }
         Ok(())
     }
-
-    /// Returns a stream of BAL insert notifications.
-    ///
-    /// Notifications are emitted only after a BAL has been successfully inserted into the store.
-    /// They do not imply canonicality.
-    #[cfg(feature = "std")]
-    fn bal_stream(&self) -> BalNotificationStream;
 }
 
 /// The limit to enforce for [`BalStore::get_by_hashes_with_limit`].
@@ -230,13 +196,6 @@ impl BalStoreHandle {
     ) -> ProviderResult<()> {
         self.inner.append_by_hashes_with_limit(block_hashes, limit, out)
     }
-
-    /// Returns a stream of BAL insert notifications.
-    #[cfg(feature = "std")]
-    #[inline]
-    pub fn bal_stream(&self) -> BalNotificationStream {
-        self.inner.bal_stream()
-    }
 }
 
 impl Default for BalStoreHandle {
@@ -316,19 +275,12 @@ impl BalStore for NoopBalStore {
         }
         Ok(())
     }
-
-    #[cfg(feature = "std")]
-    fn bal_stream(&self) -> BalNotificationStream {
-        reth_tokio_util::EventSender::new(1).new_listener()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::B256;
-    #[cfg(feature = "std")]
-    use tokio_stream::StreamExt;
 
     const EMPTY_LIST_CODE: u8 = 0xc0;
 
@@ -342,24 +294,6 @@ mod tests {
         assert_eq!(by_hash, vec![None, None]);
         assert!(store.get_by_hash(B256::random()).unwrap().is_none());
         assert_eq!(store.prune(10).unwrap(), 0);
-    }
-
-    #[test]
-    fn noop_provider_returns_empty_results() {
-        let provider = crate::noop::NoopProvider::default();
-        let hashes = [B256::random(), B256::random()];
-
-        assert_eq!(provider.get_bals_by_hashes(&hashes).unwrap(), vec![None, None]);
-        assert_eq!(
-            provider
-                .get_bals_by_hashes_with_limit(
-                    &hashes,
-                    GetBlockAccessListLimit::ResponseSizeSoftLimit(0),
-                )
-                .unwrap(),
-            vec![None]
-        );
-        assert!(provider.get_bal_by_hash(B256::random()).unwrap().is_none());
     }
 
     #[test]
@@ -387,6 +321,8 @@ mod tests {
         let decoded = store.get_decoded_by_hash(hash).unwrap().unwrap();
 
         assert_eq!(decoded.as_raw(), &raw_bal);
+
+        assert!(decoded.as_bal().is_empty());
     }
 
     #[test]
@@ -412,15 +348,6 @@ mod tests {
         assert!(size_limit_2mb.exceeds(3 * 1024 * 1024));
     }
 
-    #[cfg(feature = "std")]
-    #[tokio::test]
-    async fn noop_store_stream_is_empty() {
-        let store = BalStoreHandle::default();
-        let mut stream = store.bal_stream();
-
-        assert!(stream.next().await.is_none());
-    }
-
     #[derive(Debug)]
     struct TestBalStore {
         hash: B256,
@@ -441,11 +368,6 @@ mod tests {
                 .iter()
                 .map(|hash| (*hash == self.hash).then(|| self.raw_bal.clone()))
                 .collect())
-        }
-
-        #[cfg(feature = "std")]
-        fn bal_stream(&self) -> BalNotificationStream {
-            reth_tokio_util::EventSender::new(1).new_listener()
         }
     }
 }

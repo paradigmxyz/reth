@@ -1,5 +1,17 @@
+use alloy_eips::{eip2718::Encodable2718, BlockId};
+use alloy_network::{
+    Ethereum, EthereumWallet, Network, NetworkTransactionBuilder, NetworkWallet, TransactionBuilder,
+};
+use alloy_primitives::{Address, Bytes, U256};
+use alloy_provider::Provider;
+use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::Signer;
 use alloy_signer_local::{coins_bip39::English, MnemonicBuilder, PrivateKeySigner};
+use futures_util::future::BoxFuture;
+use std::future::IntoFuture;
+
+/// Mnemonic of the test accounts funded by the [`test_genesis`](crate::test_genesis).
+pub const TEST_MNEMONIC: &str = "test test test test test test test test test test test junk";
 
 /// One of the accounts of the genesis allocations.
 #[derive(Debug)]
@@ -11,14 +23,12 @@ pub struct Wallet {
     /// The chain id
     pub chain_id: u64,
     amount: usize,
-    derivation_path: Option<String>,
 }
 
 impl Wallet {
     /// Creates a new account from one of the secret/pubkeys of the genesis allocations (test.json)
     pub fn new(amount: usize) -> Self {
-        let inner = MnemonicBuilder::<English>::default().phrase(TEST_MNEMONIC).build().unwrap();
-        Self { inner, chain_id: 1, amount, derivation_path: None, inner_nonce: 0 }
+        Self { inner: test_signer(0), chain_id: 1, amount, inner_nonce: 0 }
     }
 
     /// Sets chain id
@@ -27,32 +37,428 @@ impl Wallet {
         self
     }
 
-    fn get_derivation_path(&self) -> &str {
-        self.derivation_path.as_deref().unwrap_or("m/44'/60'/0'/0/")
-    }
-
     /// Generates a list of wallets
     pub fn wallet_gen(&self) -> Vec<PrivateKeySigner> {
-        let builder = MnemonicBuilder::<English>::default().phrase(TEST_MNEMONIC);
+        (0..self.amount as u32).map(|idx| self.signer(idx)).collect()
+    }
 
-        // use the derivation path
-        let derivation_path = self.get_derivation_path();
+    /// Returns the signer of the test account at `index`, with the chain id of the wallet.
+    pub fn signer(&self, index: u32) -> PrivateKeySigner {
+        test_signer(index).with_chain_id(Some(self.chain_id))
+    }
 
-        let mut wallets = Vec::with_capacity(self.amount);
-        for idx in 0..self.amount {
-            let builder =
-                builder.clone().derivation_path(format!("{derivation_path}{idx}")).unwrap();
-            let wallet = builder.build().unwrap().with_chain_id(Some(self.chain_id));
-            wallets.push(wallet);
-        }
-        wallets
+    /// Returns the test account at `index`, with the chain id of the wallet and nonce 0.
+    pub fn account(&self, index: u32) -> TestAccount {
+        TestAccount::new(self.signer(index), self.chain_id)
     }
 }
-
-const TEST_MNEMONIC: &str = "test test test test test test test test test test test junk";
 
 impl Default for Wallet {
     fn default() -> Self {
         Self::new(1)
+    }
+}
+
+/// Returns the signer of the test account at `index`, derived from [`TEST_MNEMONIC`] with the
+/// default Ethereum derivation path `m/44'/60'/0'/0/{index}`.
+pub fn test_signer(index: u32) -> PrivateKeySigner {
+    MnemonicBuilder::<English>::default()
+        .phrase(TEST_MNEMONIC)
+        .index(index)
+        .expect("valid derivation index")
+        .build()
+        .expect("valid test mnemonic")
+}
+
+/// A test account that tracks its nonce, e.g. one of the accounts funded by the
+/// [`test_genesis`](crate::test_genesis).
+///
+/// [`Self::sign_tx_bytes`] fills the nonce, chain id, gas limit and fees of transaction requests
+/// that do not set them, so tests only need to set the fields they care about. The gas limit and
+/// fees default to [`Self::DEFAULT_GAS_LIMIT`] and the `DEFAULT_*_FEE_PER_GAS` constants and can be
+/// changed once per account with [`Self::with_gas_limit`] and [`Self::with_fees`].
+///
+/// [`Self::tx`] and its shortcuts [`Self::call`], [`Self::transfer`] and [`Self::deploy`] build and
+/// sign a transaction in a single expression:
+///
+/// ```ignore
+/// let mut account = wallet.account(0).with_fees(max_fee_per_gas, max_priority_fee_per_gas);
+/// let contract = account.next_contract_address();
+/// let deploy = account.deploy(init_code).await;
+/// let call = account.call(contract, calldata).gas_limit(100_000).await;
+/// ```
+#[derive(Debug, Clone)]
+pub struct TestAccount {
+    signer: PrivateKeySigner,
+    chain_id: u64,
+    nonce: u64,
+    gas_limit: u64,
+    max_fee_per_gas: u128,
+    max_priority_fee_per_gas: u128,
+}
+
+impl TestAccount {
+    /// Initial gas limit of transactions signed by [`Self::sign_tx_bytes`] that do not set one.
+    pub const DEFAULT_GAS_LIMIT: u64 = 1_000_000;
+
+    /// Initial max fee per gas of transactions signed by [`Self::sign_tx_bytes`] that set no fees.
+    ///
+    /// High enough that transactions are accepted regardless of the base fee of test chains.
+    pub const DEFAULT_MAX_FEE_PER_GAS: u128 = 1_000_000_000_000;
+
+    /// Initial max priority fee per gas of transactions signed by [`Self::sign_tx_bytes`] that set
+    /// no fees.
+    pub const DEFAULT_MAX_PRIORITY_FEE_PER_GAS: u128 = 1_000_000_000;
+
+    /// Creates a new account for the given signer and chain id, starting at nonce 0.
+    pub const fn new(signer: PrivateKeySigner, chain_id: u64) -> Self {
+        Self {
+            signer,
+            chain_id,
+            nonce: 0,
+            gas_limit: Self::DEFAULT_GAS_LIMIT,
+            max_fee_per_gas: Self::DEFAULT_MAX_FEE_PER_GAS,
+            max_priority_fee_per_gas: Self::DEFAULT_MAX_PRIORITY_FEE_PER_GAS,
+        }
+    }
+
+    /// Sets the gas limit of signed transactions that do not set one.
+    pub const fn with_gas_limit(mut self, gas_limit: u64) -> Self {
+        self.gas_limit = gas_limit;
+        self
+    }
+
+    /// Sets the EIP-1559 fees of signed transactions that set neither these fees nor a legacy gas
+    /// price.
+    pub const fn with_fees(
+        mut self,
+        max_fee_per_gas: u128,
+        max_priority_fee_per_gas: u128,
+    ) -> Self {
+        self.max_fee_per_gas = max_fee_per_gas;
+        self.max_priority_fee_per_gas = max_priority_fee_per_gas;
+        self
+    }
+
+    /// Returns the signer of the account.
+    pub const fn signer(&self) -> &PrivateKeySigner {
+        &self.signer
+    }
+
+    /// Returns the address of the account.
+    pub const fn address(&self) -> Address {
+        self.signer.address()
+    }
+
+    /// Returns the chain id transactions of the account are signed for.
+    pub const fn chain_id(&self) -> u64 {
+        self.chain_id
+    }
+
+    /// Returns the nonce of the next transaction of the account.
+    pub const fn nonce(&self) -> u64 {
+        self.nonce
+    }
+
+    /// Returns the nonce of the next transaction and increments it.
+    pub const fn next_nonce(&mut self) -> u64 {
+        let nonce = self.nonce;
+        self.nonce += 1;
+        nonce
+    }
+
+    /// Sets the nonce to the pending transaction count of the account on the node behind
+    /// `provider`, and returns it.
+    pub async fn sync_nonce<N: Network>(
+        &mut self,
+        provider: &impl Provider<N>,
+    ) -> eyre::Result<u64> {
+        self.nonce =
+            provider.get_transaction_count(self.address()).block_id(BlockId::pending()).await?;
+        Ok(self.nonce)
+    }
+
+    /// Signs the transaction request, returning the EIP-2718 encoded bytes.
+    ///
+    /// Fills unset fields: the nonce with [`Self::next_nonce`], the chain id, gas limit and, unless
+    /// the request sets a legacy gas price, the EIP-1559 fees of the account. An explicit nonce
+    /// does not advance the tracked nonce. Contract creations must set `to`, e.g. with
+    /// [`TransactionRequest::create`] or [`Self::deploy`].
+    ///
+    /// See [`Self::sign_request`] for other networks.
+    ///
+    /// # Panics
+    ///
+    /// If the request can not be built into a signed transaction.
+    pub async fn sign_tx_bytes(&mut self, tx: TransactionRequest) -> Bytes {
+        self.sign_request::<Ethereum>(tx).await
+    }
+
+    /// Returns the address of the contract created by the next transaction of the account, if it
+    /// is a contract creation that does not set an explicit nonce.
+    pub fn next_contract_address(&self) -> Address {
+        self.address().create(self.nonce)
+    }
+
+    /// Starts building a transaction of the account that sets no fields yet.
+    ///
+    /// See [`Self::tx_for`] for other networks.
+    pub fn tx(&mut self) -> TestTx<'_> {
+        self.tx_for()
+    }
+
+    /// Starts building a call of `to` with the given input.
+    pub fn call(&mut self, to: Address, input: impl Into<Bytes>) -> TestTx<'_> {
+        self.tx().to(to).input(input)
+    }
+
+    /// Starts building a transfer of `value` to `to`.
+    pub fn transfer(&mut self, to: Address, value: U256) -> TestTx<'_> {
+        self.tx().to(to).value(value)
+    }
+
+    /// Starts building a contract creation with the given init code.
+    ///
+    /// See [`Self::next_contract_address`] for the address of the created contract.
+    pub fn deploy(&mut self, init_code: impl Into<Bytes>) -> TestTx<'_> {
+        self.tx().create().input(init_code)
+    }
+
+    /// Signs the transaction request of the network `N` like [`Self::sign_tx_bytes`], returning
+    /// the EIP-2718 encoded bytes.
+    ///
+    /// Only the secp256k1 key of the account signs, so transactions of networks that are signed
+    /// with other keys, e.g. P256 or passkeys, need their own wallets. Transactions using a
+    /// network-specific nonce scheme, such as 2D nonces, should set an explicit nonce so that the
+    /// tracked protocol nonce is not advanced.
+    ///
+    /// # Panics
+    ///
+    /// If the request can not be built into a signed transaction.
+    pub async fn sign_request<N: Network>(&mut self, mut tx: N::TransactionRequest) -> Bytes
+    where
+        EthereumWallet: NetworkWallet<N>,
+    {
+        if tx.nonce().is_none() {
+            tx.set_nonce(self.next_nonce());
+        }
+        if tx.chain_id().is_none() {
+            tx.set_chain_id(self.chain_id);
+        }
+        if tx.gas_limit().is_none() {
+            tx.set_gas_limit(self.gas_limit);
+        }
+        if tx.gas_price().is_none() {
+            if tx.max_fee_per_gas().is_none() {
+                tx.set_max_fee_per_gas(self.max_fee_per_gas);
+            }
+            if tx.max_priority_fee_per_gas().is_none() {
+                tx.set_max_priority_fee_per_gas(self.max_priority_fee_per_gas);
+            }
+        }
+        let wallet = EthereumWallet::from(self.signer.clone());
+        NetworkTransactionBuilder::<N>::build(tx, &wallet)
+            .await
+            .unwrap_or_else(|err| panic!("failed to sign the test transaction: {err}"))
+            .encoded_2718()
+            .into()
+    }
+
+    /// Starts building a transaction of the network `N` that sets no fields yet.
+    ///
+    /// The shortcuts [`Self::call`], [`Self::transfer`] and [`Self::deploy`] build Ethereum
+    /// transactions; for other networks, use the setters of [`TestTx`], e.g.
+    /// `account.tx_for::<N>().to(to).input(input)`. See [`Self::sign_request`] for the limits.
+    pub fn tx_for<N: Network>(&mut self) -> TestTx<'_, N> {
+        TestTx { account: self, request: Default::default() }
+    }
+}
+
+/// A transaction of a [`TestAccount`] being built for the network `N`, see [`TestAccount::tx`]
+/// and [`TestAccount::tx_for`].
+///
+/// Awaiting it signs the transaction with [`TestAccount::sign_request`], like [`Self::sign`],
+/// which fills the fields that are not set from the account. Network-specific fields can be set
+/// with [`Self::map_request`].
+#[derive(Debug)]
+#[must_use = "the transaction is only signed when awaited"]
+pub struct TestTx<'a, N: Network = Ethereum> {
+    account: &'a mut TestAccount,
+    request: N::TransactionRequest,
+}
+
+impl<N: Network> TestTx<'_, N> {
+    /// Sets the recipient.
+    pub fn to(mut self, to: Address) -> Self {
+        self.request.set_to(to);
+        self
+    }
+
+    /// Makes the transaction a contract creation, with the input as init code.
+    pub fn create(mut self) -> Self {
+        self.request.set_create();
+        self
+    }
+
+    /// Sets the value transferred with the transaction.
+    pub fn value(mut self, value: U256) -> Self {
+        self.request.set_value(value);
+        self
+    }
+
+    /// Sets the input, i.e. the calldata of a call or the init code of a contract creation.
+    pub fn input(mut self, input: impl Into<Bytes>) -> Self {
+        self.request.set_input(input);
+        self
+    }
+
+    /// Sets the gas limit instead of the gas limit of the account.
+    pub fn gas_limit(mut self, gas_limit: u64) -> Self {
+        self.request.set_gas_limit(gas_limit);
+        self
+    }
+
+    /// Sets the EIP-1559 fees instead of the fees of the account.
+    pub fn fees(mut self, max_fee_per_gas: u128, max_priority_fee_per_gas: u128) -> Self {
+        self.request.set_max_fee_per_gas(max_fee_per_gas);
+        self.request.set_max_priority_fee_per_gas(max_priority_fee_per_gas);
+        self
+    }
+
+    /// Sets a legacy gas price, which makes this a legacy transaction without the EIP-1559 fees of
+    /// the account.
+    pub fn gas_price(mut self, gas_price: u128) -> Self {
+        self.request.set_gas_price(gas_price);
+        self
+    }
+
+    /// Sets an explicit nonce, which does not advance the tracked nonce of the account.
+    pub fn nonce(mut self, nonce: u64) -> Self {
+        self.request.set_nonce(nonce);
+        self
+    }
+
+    /// Modifies the underlying transaction request, e.g. to set network-specific fields or fields
+    /// without a dedicated setter.
+    pub fn map_request(
+        mut self,
+        f: impl FnOnce(N::TransactionRequest) -> N::TransactionRequest,
+    ) -> Self {
+        self.request = f(self.request);
+        self
+    }
+
+    /// Signs the transaction, returning the EIP-2718 encoded bytes.
+    ///
+    /// See [`TestAccount::sign_request`].
+    pub async fn sign(self) -> Bytes
+    where
+        EthereumWallet: NetworkWallet<N>,
+    {
+        self.account.sign_request::<N>(self.request).await
+    }
+}
+
+impl<'a, N: Network> IntoFuture for TestTx<'a, N>
+where
+    EthereumWallet: NetworkWallet<N>,
+{
+    type Output = Bytes;
+    type IntoFuture = BoxFuture<'a, Bytes>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(self.sign())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::{transaction::SignerRecoverable, Transaction, TxEnvelope};
+    use alloy_eips::eip2718::Decodable2718;
+    use alloy_network::AnyNetwork;
+    use alloy_primitives::TxKind;
+
+    fn decode(raw: Bytes) -> TxEnvelope {
+        let tx = TxEnvelope::decode_2718(&mut raw.as_ref()).unwrap();
+        assert_eq!(tx.recover_signer().unwrap(), Wallet::default().account(0).address());
+        tx
+    }
+
+    fn assert_send<T: Send>(_: T) {}
+
+    /// Tests of downstream nodes sign transactions in spawned tasks, so the futures must be
+    /// `Send`.
+    #[expect(dead_code)]
+    fn test_sign_futures_are_send(account: &mut TestAccount) {
+        assert_send(account.sign_tx_bytes(TransactionRequest::default()));
+        assert_send(account.tx().sign());
+        assert_send(account.tx().into_future());
+        assert_send(account.sign_request::<AnyNetwork>(Default::default()));
+        assert_send(account.tx_for::<AnyNetwork>().into_future());
+    }
+
+    #[tokio::test]
+    async fn tx_builder_fills_account_defaults() {
+        let mut account = Wallet::default()
+            .with_chain_id(1337)
+            .account(0)
+            .with_gas_limit(300_000)
+            .with_fees(7, 3);
+        let to = Address::repeat_byte(0x11);
+
+        let call = decode(account.call(to, [0xab, 0xcd]).await);
+        assert!(call.is_eip1559());
+        assert_eq!(call.chain_id(), Some(1337));
+        assert_eq!(call.nonce(), 0);
+        assert_eq!(call.kind(), TxKind::Call(to));
+        assert_eq!(call.input().as_ref(), [0xab, 0xcd]);
+        assert_eq!(call.value(), U256::ZERO);
+        assert_eq!(call.gas_limit(), 300_000);
+        assert_eq!(call.max_fee_per_gas(), 7);
+        assert_eq!(call.max_priority_fee_per_gas(), Some(3));
+
+        let transfer =
+            decode(account.transfer(to, U256::from(5)).gas_limit(21_000).fees(9, 1).sign().await);
+        assert_eq!(transfer.nonce(), 1);
+        assert_eq!(transfer.value(), U256::from(5));
+        assert_eq!(transfer.gas_limit(), 21_000);
+        assert_eq!(transfer.max_fee_per_gas(), 9);
+        assert_eq!(transfer.max_priority_fee_per_gas(), Some(1));
+
+        assert_eq!(account.next_contract_address(), account.address().create(2));
+        let deploy = decode(account.deploy([0x00]).await);
+        assert_eq!(deploy.nonce(), 2);
+        assert_eq!(deploy.kind(), TxKind::Create);
+        assert_eq!(deploy.input().as_ref(), [0x00]);
+
+        // An explicit nonce does not advance the tracked nonce.
+        let legacy = decode(account.transfer(to, U256::ZERO).gas_price(11).nonce(9).await);
+        assert!(legacy.is_legacy());
+        assert_eq!(legacy.nonce(), 9);
+        assert_eq!(legacy.gas_price(), Some(11));
+        assert_eq!(account.nonce(), 3);
+
+        let mapped = decode(account.tx().map_request(|tx| tx.to(to).value(U256::ONE)).await);
+        assert_eq!(mapped.nonce(), 3);
+        assert_eq!(mapped.value(), U256::ONE);
+    }
+
+    /// The builder works for any network whose transactions the account's wallet can sign.
+    #[tokio::test]
+    async fn tx_builder_is_network_generic() {
+        let mut account = Wallet::default().account(0);
+        let to = Address::repeat_byte(0x11);
+
+        let ethereum = account.transfer(to, U256::ONE).input([0xab]).nonce(0).await;
+        let any = account.tx_for::<AnyNetwork>().to(to).value(U256::ONE).input([0xab]).await;
+        assert_eq!(any, ethereum);
+        assert_eq!(account.nonce(), 1);
+
+        let deploy = account.tx_for::<AnyNetwork>().create().input([0x00]).fees(9, 1).sign().await;
+        let deploy = decode(deploy);
+        assert_eq!(deploy.kind(), TxKind::Create);
+        assert_eq!(deploy.nonce(), 1);
+        assert_eq!(deploy.max_fee_per_gas(), 9);
     }
 }

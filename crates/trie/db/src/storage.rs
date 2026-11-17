@@ -5,7 +5,8 @@ use reth_execution_errors::StorageRootError;
 use reth_storage_api::{BlockNumReader, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StorageRoot,
+    hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
+    HashedStorage, StorageRoot, TrieInputSorted,
 };
 
 #[cfg(feature = "metrics")]
@@ -19,11 +20,11 @@ pub trait DatabaseStorageRoot<'a, TX> {
     /// Create a new storage root calculator from database transaction and hashed address.
     fn from_tx_hashed(tx: &'a TX, hashed_address: B256) -> Self;
 
-    /// Calculates the storage root for this [`HashedStorage`] and returns it.
+    /// Calculates the storage root with the given trie input.
     fn overlay_root(
         tx: &'a TX,
         address: Address,
-        hashed_storage: HashedStorage,
+        input: TrieInputSorted,
     ) -> Result<B256, StorageRootError>;
 }
 
@@ -85,16 +86,22 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageRoot<'a, TX>
     fn overlay_root(
         tx: &'a TX,
         address: Address,
-        hashed_storage: HashedStorage,
+        mut input: TrieInputSorted,
     ) -> Result<B256, StorageRootError> {
-        let prefix_set = hashed_storage.construct_prefix_set().freeze();
-        let state_sorted =
-            HashedPostState::from_hashed_storage(keccak256(address), hashed_storage).into_sorted();
+        let hashed_address = keccak256(address);
         StorageRoot::new(
-            DatabaseTrieCursorFactory::<_, A>::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            InMemoryTrieCursorFactory::new(
+                DatabaseTrieCursorFactory::<_, A>::new(tx),
+                &input.nodes,
+            ),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &input.state),
             address,
-            prefix_set,
+            input
+                .prefix_sets
+                .storage_prefix_sets
+                .remove(&hashed_address)
+                .unwrap_or_default()
+                .freeze(),
             #[cfg(feature = "metrics")]
             TrieRootMetrics::new(reth_trie::TrieType::Storage),
         )
@@ -107,7 +114,11 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_primitives::U256;
-    use reth_db_api::{models::BlockNumberAddress, tables, transaction::DbTxMut};
+    use reth_db_api::{
+        models::{BlockNumberAddress, StorageBeforeTx, StorageSettings},
+        tables,
+        transaction::DbTxMut,
+    };
     use reth_primitives_traits::StorageEntry;
     use reth_provider::{
         test_utils::create_test_provider_factory, StaticFileProviderFactory, StaticFileSegment,
@@ -152,8 +163,8 @@ mod tests {
         assert!(!provider.cached_storage_settings().use_hashed_state());
 
         let address = Address::with_last_byte(42);
-        let slot1 = B256::from(U256::from(100));
-        let slot2 = B256::from(U256::from(200));
+        let slot1 = B256::with_last_byte(100);
+        let slot2 = B256::with_last_byte(200);
 
         append_headers_to_static_files(&factory, 5);
 
@@ -191,8 +202,6 @@ mod tests {
 
     #[test]
     fn test_hashed_storage_from_reverts_hashed_state() {
-        use reth_db_api::models::{StorageBeforeTx, StorageSettings};
-
         let factory = create_test_provider_factory();
 
         factory.set_storage_settings_cache(StorageSettings::v2());
@@ -202,8 +211,8 @@ mod tests {
         assert!(provider.cached_storage_settings().is_v2());
 
         let address = Address::with_last_byte(42);
-        let plain_slot1 = B256::from(U256::from(100));
-        let plain_slot2 = B256::from(U256::from(200));
+        let plain_slot1 = B256::with_last_byte(100);
+        let plain_slot2 = B256::with_last_byte(200);
         let hashed_slot1 = keccak256(plain_slot1);
         let hashed_slot2 = keccak256(plain_slot2);
 

@@ -305,6 +305,19 @@ pub trait Stage<Provider>: Send {
     fn post_unwind_commit(&mut self) -> Result<(), StageError> {
         Ok(())
     }
+
+    /// Rejects an unwind target this stage cannot reach.
+    ///
+    /// The pipeline calls this for every selected stage before recording or performing an unwind. A
+    /// stage that only rejects the target in [`Self::unwind`] does so after later stages have
+    /// already committed their unwinds.
+    fn validate_unwind(
+        &mut self,
+        _provider: &Provider,
+        _input: UnwindInput,
+    ) -> Result<(), StageError> {
+        Ok(())
+    }
 }
 
 /// [Stage] trait extension.

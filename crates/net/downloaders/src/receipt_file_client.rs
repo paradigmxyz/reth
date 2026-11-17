@@ -214,7 +214,7 @@ pub struct ReceiptWithBlockNumber<R> {
 #[cfg(test)]
 mod test {
     use alloy_primitives::{
-        address, b256,
+        address, b256, bytes,
         bytes::{Buf, BytesMut},
         hex, Bytes, Log, LogData,
     };
@@ -339,9 +339,7 @@ mod test {
                     b256!("0x0000000000000000000000000000000000000000000000000000000000014218"),
                     b256!("0x00000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d"),
                 ],
-                Bytes::from(hex!(
-                    "00000000000000000000000000000000000000000000000000000000618d8837"
-                )),
+                bytes!("00000000000000000000000000000000000000000000000000000000618d8837"),
             )
             .unwrap(),
         };

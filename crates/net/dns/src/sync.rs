@@ -180,7 +180,7 @@ impl ResolveKind {
 mod tests {
     use super::*;
     use enr::EnrKey;
-    use secp256k1::rand::thread_rng;
+    use secp256k1::rand::rng;
 
     fn base_root() -> TreeRootEntry {
         // taken from existing tests to ensure valid formatting
@@ -189,7 +189,7 @@ mod tests {
     }
 
     fn make_tree() -> SyncTree {
-        let secret_key = SecretKey::new(&mut thread_rng());
+        let secret_key = SecretKey::new(&mut rng());
         let link =
             LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
         SyncTree::new(base_root(), link)

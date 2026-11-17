@@ -23,15 +23,15 @@ pub struct EmptyBlockPayloadJobGenerator<Client, Builder> {
     _config: BasicPayloadJobGeneratorConfig,
     /// The type responsible for building payloads.
     ///
-    /// See [PayloadBuilder]
+    /// See [`PayloadBuilder`]
     builder: Builder,
 }
 
 // === impl EmptyBlockPayloadJobGenerator ===
 
 impl<Client, Builder> EmptyBlockPayloadJobGenerator<Client, Builder> {
-    /// Creates a new [EmptyBlockPayloadJobGenerator] with the given config and custom
-    /// [PayloadBuilder]
+    /// Creates a new [`EmptyBlockPayloadJobGenerator`] with the given config and custom
+    /// [`PayloadBuilder`]
     pub fn with_builder(
         client: Client,
         executor: Runtime,

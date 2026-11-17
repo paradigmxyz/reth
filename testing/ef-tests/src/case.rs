@@ -1,11 +1,25 @@
 //! Test case definitions
 
 use crate::result::{CaseResult, Error};
-use rayon::prelude::*;
+use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
 use std::{
     fmt::Debug,
     path::{Path, PathBuf},
+    sync::LazyLock,
 };
+
+/// Stack size of the worker threads that run test cases.
+///
+/// The EVM recurses natively per call frame, so a 1024-deep call chain needs more than the 2 MiB
+/// default.
+const WORKER_STACK_SIZE: usize = 8 * 1024 * 1024;
+
+static POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
+    ThreadPoolBuilder::new()
+        .stack_size(WORKER_STACK_SIZE)
+        .build()
+        .expect("failed to build the test case thread pool")
+});
 
 /// A single test case, capable of loading a JSON description of itself and running it.
 ///
@@ -35,9 +49,11 @@ pub struct Cases<T> {
 impl<T: Case> Cases<T> {
     /// Run the contained test cases.
     pub fn run(self) -> Vec<CaseResult> {
-        self.test_cases
-            .into_par_iter()
-            .map(|(path, case)| CaseResult::new(&path, case.description(), case.run()))
-            .collect()
+        POOL.install(|| {
+            self.test_cases
+                .into_par_iter()
+                .map(|(path, case)| CaseResult::new(&path, case.description(), case.run()))
+                .collect()
+        })
     }
 }

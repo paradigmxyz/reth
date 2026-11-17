@@ -162,11 +162,19 @@ pub trait StateProofProvider {
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof>;
 
-    /// Generate a V2 decoded multiproof for target hashed accounts and storage slots.
+    /// Generate a V2 decoded multiproof for target hashed accounts and storage slots against the
+    /// provider's state.
+    ///
+    /// A storage address with no slot targets requests its storage root node. Empty targets return
+    /// an empty proof.
+    ///
+    /// Set `requires_masks` when the hash and tree masks of returned branch nodes must match the
+    /// stored trie, as required to produce trie updates from them. Otherwise node hashes are still
+    /// exact, but masks are not guaranteed to match.
     fn multiproof_v2(
         &self,
-        input: TrieInput,
         targets: MultiProofTargetsV2,
+        requires_masks: bool,
     ) -> ProviderResult<DecodedMultiProofV2>;
 
     /// Get trie witness for provided state using the given witness generation mode.

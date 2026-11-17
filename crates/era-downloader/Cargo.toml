@@ -23,7 +23,7 @@ reqwest.workspace = true
 
 # async
 tokio.workspace = true
-tokio.features = ["fs", "io-util", "macros"]
+tokio.features = ["fs", "io-util", "macros", "sync"]
 futures-util.workspace = true
 
 # errors

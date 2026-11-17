@@ -3,11 +3,12 @@ use reth_cli_util::cancellation::CancellationToken;
 use std::{
     io::{self, Read, Write},
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc, Condvar, Mutex,
     },
     time::{Duration, Instant},
 };
+use tokio::sync::Notify;
 use tracing::info;
 
 const BYTE_UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
@@ -132,8 +133,8 @@ pub(crate) struct SharedProgress {
     pub(crate) active_extractions: AtomicU64,
     /// Number of archives currently verifying extracted outputs.
     pub(crate) active_verifications: AtomicU64,
-    /// Signals the background progress task to exit.
-    pub(crate) done: AtomicBool,
+    /// Wakes the background progress task to print the final summary and exit.
+    pub(crate) done: Notify,
     /// Cancellation token shared by the whole command.
     cancel_token: CancellationToken,
 }
@@ -164,7 +165,7 @@ impl SharedProgress {
             active_download_requests: AtomicU64::new(0),
             active_extractions: AtomicU64::new(0),
             active_verifications: AtomicU64::new(0),
-            done: AtomicBool::new(false),
+            done: Notify::new(),
             cancel_token,
         })
     }
@@ -559,9 +560,11 @@ impl ArchiveExtractionProgressHandle {
 }
 
 /// Tracks one active archive verification attempt.
+///
+/// Bytes are recorded through a shared reference because output files are hashed in parallel.
 pub(crate) struct ArchiveVerificationProgress<'a> {
     progress: Option<&'a Arc<SharedProgress>>,
-    verified: u64,
+    verified: AtomicU64,
     completed: bool,
 }
 
@@ -571,12 +574,12 @@ impl<'a> ArchiveVerificationProgress<'a> {
         if let Some(progress) = progress {
             progress.verification_started();
         }
-        Self { progress, verified: 0, completed: false }
+        Self { progress, verified: AtomicU64::new(0), completed: false }
     }
 
     /// Adds plain-output bytes hashed by this verification attempt.
-    pub(crate) fn record_verified(&mut self, bytes: u64) {
-        self.verified += bytes;
+    pub(crate) fn record_verified(&self, bytes: u64) {
+        self.verified.fetch_add(bytes, Ordering::Relaxed);
         if let Some(progress) = self.progress {
             progress.add_active_verified_output_bytes(bytes);
         }
@@ -587,11 +590,11 @@ impl<'a> ArchiveVerificationProgress<'a> {
         if self.completed {
             return;
         }
+        let verified = std::mem::take(self.verified.get_mut());
         if let Some(progress) = self.progress {
-            progress.sub_active_verified_output_bytes(self.verified);
+            progress.sub_active_verified_output_bytes(verified);
             progress.record_archive_output_complete(total_bytes);
         }
-        self.verified = 0;
         self.completed = true;
     }
 }
@@ -599,7 +602,7 @@ impl<'a> ArchiveVerificationProgress<'a> {
 impl Drop for ArchiveVerificationProgress<'_> {
     fn drop(&mut self) {
         if let Some(progress) = self.progress {
-            progress.sub_active_verified_output_bytes(self.verified);
+            progress.sub_active_verified_output_bytes(*self.verified.get_mut());
             progress.verification_finished();
         }
     }
@@ -697,10 +700,9 @@ pub(crate) fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::ta
         let mut interval = tokio::time::interval(Duration::from_secs(3));
         interval.tick().await;
         loop {
-            interval.tick().await;
-
-            if progress.done.load(Ordering::Relaxed) {
-                break;
+            tokio::select! {
+                _ = interval.tick() => {}
+                _ = progress.done.notified() => break,
             }
 
             let download_total = progress.total_download_bytes;
@@ -840,5 +842,16 @@ mod tests {
             progress.verification_phase.lock().unwrap().as_ref().unwrap().baseline_bytes,
             40
         );
+    }
+
+    #[tokio::test]
+    async fn progress_display_exits_when_done() {
+        let progress = SharedProgress::new(10, 20, 1, CancellationToken::new());
+        let handle = spawn_progress_display(Arc::clone(&progress));
+
+        progress.done.notify_one();
+
+        // The task must exit right away instead of on its next 3s progress tick.
+        tokio::time::timeout(Duration::from_secs(1), handle).await.unwrap().unwrap();
     }
 }

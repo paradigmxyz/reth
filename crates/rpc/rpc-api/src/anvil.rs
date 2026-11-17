@@ -6,8 +6,7 @@ use alloy_rpc_types_eth::Block;
 
 /// Anvil rpc interface.
 /// https://book.getfoundry.sh/reference/anvil/#custom-methods
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "anvil"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "anvil"))]
+#[rpc(server, namespace = "anvil")]
 pub trait AnvilApi {
     /// Sends transactions impersonating specific account and contract addresses.
     #[method(name = "impersonateAccount")]

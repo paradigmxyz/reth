@@ -12,7 +12,8 @@ use crate::transactions::constants::{
         DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
     },
     tx_manager::{
-        DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+        DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS, DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+        DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
     },
 };
 use alloy_eips::eip2718::IsTyped2718;
@@ -33,6 +34,11 @@ pub struct TransactionsManagerConfig {
     /// remains may exceed this limit by at most 255 transactions; broadcasts are truncated to fit.
     #[cfg_attr(feature = "serde", serde(default = "default_max_pending_pool_imports"))]
     pub max_pending_pool_imports: usize,
+    /// Soft limit on the encoded byte size of concurrent transaction imports, including blob
+    /// sidecars. A fetched response admitted while capacity remains may exceed this limit by one
+    /// response message; broadcasts are truncated to fit.
+    #[cfg_attr(feature = "serde", serde(default = "default_max_pending_pool_imports_bytes"))]
+    pub max_pending_pool_imports_bytes: usize,
     /// How new pending transactions are propagated.
     #[cfg_attr(feature = "serde", serde(default))]
     pub propagation_mode: TransactionPropagationMode,
@@ -53,6 +59,11 @@ const fn default_max_pending_pool_imports() -> usize {
 }
 
 #[cfg(feature = "serde")]
+const fn default_max_pending_pool_imports_bytes() -> usize {
+    DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS
+}
+
+#[cfg(feature = "serde")]
 const fn default_tx_channel_memory_limit_bytes() -> usize {
     DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES
 }
@@ -63,6 +74,7 @@ impl Default for TransactionsManagerConfig {
             transaction_fetcher_config: TransactionFetcherConfig::default(),
             max_transactions_seen_by_peer_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             max_pending_pool_imports: DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+            max_pending_pool_imports_bytes: DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS,
             propagation_mode: TransactionPropagationMode::default(),
             ingress_policy: TransactionIngressPolicy::default(),
             tx_channel_memory_limit_bytes: DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
@@ -197,7 +209,9 @@ pub trait TransactionPropagationPolicy<N: NetworkPrimitives>:
 {
     /// Filter a given peer based on the policy.
     ///
-    /// This determines whether transactions can be propagated to this peer.
+    /// This determines whether transactions can be propagated to this peer. Peers that are
+    /// filtered out also don't receive the pending pool announcement on session establishment and
+    /// are served empty responses to `GetPooledTransactions` requests.
     fn can_propagate(&self, peer: &mut PeerMetadata<N>) -> bool;
 
     /// A callback on the policy when a new peer session is established.

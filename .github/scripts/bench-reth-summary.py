@@ -14,7 +14,8 @@ Usage:
 Generates a statistical comparison between baseline and feature. Point estimates
 use pooled baseline and feature rows. Confidence intervals use whole-run cluster
 bootstrapping when multiple runs are available. Fails if baseline or feature CSV
-is missing or empty.
+is missing or empty. Elapsed time and end-to-end throughput use per-run means
+from sibling txgen report.json files; missing measured durations remain unavailable.
 """
 
 from __future__ import annotations
@@ -49,6 +50,7 @@ PRACTICAL_FLOOR_PCT = {
     "p90": 1.35,
     "p99": 5.0,
     "mgas_s": 1.20,
+    "end_to_end_mgas_s": 1.20,
     "wall_clock": 0.70,
     "persist_wait": 5.0,
 }
@@ -243,7 +245,7 @@ def compute_stats(combined: list[dict]) -> dict:
     mean_mgas_s = sum(mgas_s_values) / len(mgas_s_values) if mgas_s_values else 0
 
     total_latencies_ms = [r["total_latency_us"] / 1_000 for r in combined]
-    wall_clock_s = sum(total_latencies_ms) / 1_000
+    processing_time_s = sum(total_latencies_ms) / 1_000
     mean_total_lat_ms = sum(total_latencies_ms) / n
 
     # Persistence wait mean (for main table)
@@ -262,7 +264,9 @@ def compute_stats(combined: list[dict]) -> dict:
         "p90_ms": percentile(sorted_lat, 90),
         "p99_ms": percentile(sorted_lat, 99),
         "mean_mgas_s": mean_mgas_s,
-        "wall_clock_s": wall_clock_s,
+        "processing_time_s": processing_time_s,
+        "wall_clock_s": None,
+        "end_to_end_mgas_s": None,
         "mean_total_lat_ms": mean_total_lat_ms,
         "mean_persist_ms": mean_persist_ms,
     }
@@ -284,6 +288,84 @@ def compute_point_stats(runs: list[list[dict]]) -> dict:
     for key in ("p50_ms", "p90_ms", "p99_ms"):
         stats[key] = _mean([run_stats[key] for run_stats in per_run_stats])
     return stats
+
+
+def load_elapsed_run(csv_path: str, rows: list[dict]) -> dict | None:
+    """Read measured run totals, never reconstruct elapsed time from server timings."""
+    report_path = Path(csv_path).with_name("report.json")
+    if not report_path.exists():
+        return None
+    with report_path.open() as f:
+        report = json.load(f)
+    totals = report.get("run_stats", {})
+    duration_ms = totals.get("duration_ms")
+    if duration_ms is None:
+        return None
+    if (
+        isinstance(duration_ms, bool)
+        or not isinstance(duration_ms, (int, float))
+        or not math.isfinite(duration_ms)
+        or duration_ms <= 0
+    ):
+        raise ValueError(f"Invalid measured duration in {report_path}")
+    gas = sum(row["gas_used"] for row in rows)
+    expected = {
+        "total_blocks": len(rows),
+        "total_gas": gas,
+        "start_block": min(row["block_number"] for row in rows),
+        "end_block": max(row["block_number"] for row in rows),
+    }
+    if any(totals.get(key) != value for key, value in expected.items()):
+        raise ValueError(f"Run totals in {report_path} do not match {csv_path}")
+    duration_s = duration_ms / 1_000
+    return {
+        "wall_clock_s": duration_s,
+        "end_to_end_mgas_s": gas / duration_s / 1_000_000,
+    }
+
+
+def add_elapsed_stats(
+    baseline_paths: list[str],
+    feature_paths: list[str],
+    baseline_runs: list[list[dict]],
+    feature_runs: list[list[dict]],
+    baseline_stats: dict,
+    feature_stats: dict,
+    ci_stats: dict,
+) -> None:
+    """Average measured run metrics and bootstrap whole runs in matching units.
+
+    A single run has no run-to-run noise estimate. Its elapsed metrics remain
+    informational; block-level resampling cannot estimate that uncertainty.
+    """
+    baseline = [
+        load_elapsed_run(path, rows)
+        for path, rows in zip(baseline_paths, baseline_runs, strict=True)
+    ]
+    feature = [
+        load_elapsed_run(path, rows)
+        for path, rows in zip(feature_paths, feature_runs, strict=True)
+    ]
+    if any(run is None for run in baseline + feature):
+        print("Measured run duration unavailable; elapsed metrics are n/a", file=sys.stderr)
+        return
+    ci_stats["elapsed_informational"] = len(baseline) < 2 or len(feature) < 2
+    rng = random.Random(42)
+    for key, ci_key in (
+        ("wall_clock_s", "wall_clock_ci_s"),
+        ("end_to_end_mgas_s", "end_to_end_mgas_ci"),
+    ):
+        b = [run[key] for run in baseline]
+        f = [run[key] for run in feature]
+        baseline_stats[key] = _mean(b)
+        feature_stats[key] = _mean(f)
+        ci_stats[ci_key] = 0.0
+        if not ci_stats["elapsed_informational"]:
+            samples = [
+                _mean(rng.choices(f, k=len(f))) - _mean(rng.choices(b, k=len(b)))
+                for _ in range(BOOTSTRAP_ITERATIONS)
+            ]
+            ci_stats[ci_key] = _ci_half_width(samples)
 
 
 def compute_wait_stats(combined: list[dict], field: str) -> dict:
@@ -407,7 +489,6 @@ def _per_run_metric_values(runs: list[list[dict]]) -> dict[str, list[float]]:
         "p90_ms": [],
         "p99_ms": [],
         "mgas": [],
-        "wall_clock_ms": [],
         "persist_ms": [],
     }
     for run in runs:
@@ -417,7 +498,6 @@ def _per_run_metric_values(runs: list[list[dict]]) -> dict[str, list[float]]:
         values["p90_ms"].append(stats["p90_ms"])
         values["p99_ms"].append(stats["p99_ms"])
         values["mgas"].append(stats["mean_mgas_s"])
-        values["wall_clock_ms"].append(stats["mean_total_lat_ms"])
         values["persist_ms"].append(stats["mean_persist_ms"])
     return values
 
@@ -434,7 +514,7 @@ def _cluster_bootstrap_ci(
     replacement. This estimates run-to-run noise without expanding reused
     baseline/feature runs into independent block-level datapoints.
     """
-    metrics = ("mean_ms", "p50_ms", "p90_ms", "p99_ms", "mgas", "wall_clock_ms", "persist_ms")
+    metrics = ("mean_ms", "p50_ms", "p90_ms", "p99_ms", "mgas", "persist_ms")
     empty = {metric: 0.0 for metric in metrics}
     if len(baseline_runs) < 2 or len(feature_runs) < 2:
         return empty
@@ -479,10 +559,9 @@ def compute_ci_stats(
         p90_ci = cluster_ci["p90_ms"]
         p99_ci = cluster_ci["p99_ms"]
         mgas_ci = cluster_ci["mgas"]
-        wall_clock_ci_ms = cluster_ci["wall_clock_ms"]
         persist_ci_ms = cluster_ci["persist_ms"]
     else:
-        pairs, all_lat_diffs, all_mgas_diffs, all_total_lat_diffs, all_persist_diffs = (
+        pairs, all_lat_diffs, all_mgas_diffs, _all_total_lat_diffs, all_persist_diffs = (
             _paired_data(baseline_runs[0], feature_runs[0])
         )
         if not all_lat_diffs:
@@ -492,7 +571,6 @@ def compute_ci_stats(
         p90_ci = _bootstrap_percentile_ci(rng, pairs, 90)
         p99_ci = _bootstrap_percentile_ci(rng, pairs, 99)
         mgas_ci = _bootstrap_ci(rng, all_mgas_diffs) if all_mgas_diffs else 0.0
-        wall_clock_ci_ms = _bootstrap_ci(rng, all_total_lat_diffs) if all_total_lat_diffs else 0.0
         persist_ci_ms = _bootstrap_ci(rng, all_persist_diffs) if all_persist_diffs else 0.0
 
     return {
@@ -501,7 +579,6 @@ def compute_ci_stats(
         "p90_ci_ms": p90_ci,
         "p99_ci_ms": p99_ci,
         "mgas_ci": mgas_ci,
-        "wall_clock_ci_ms": wall_clock_ci_ms,
         "persist_ci_ms": persist_ci_ms,
         "blocks": blocks,
     }
@@ -578,6 +655,8 @@ def informational_reason(
     baseline_stats: dict,
     feature_stats: dict,
 ) -> str | None:
+    if metric in ("wall_clock", "end_to_end_mgas_s") and ci_stats.get("elapsed_informational"):
+        return "informational <2 measured runs per side"
     if metric == "p99" and ci_stats["blocks"] < P99_MIN_VERDICT_BLOCKS:
         return f"informational <{P99_MIN_VERDICT_BLOCKS} blocks"
     if (
@@ -627,9 +706,13 @@ def compute_changes(
         ("p90", "p90_ms", "p90_ci_ms", "p90_ms", True),
         ("p99", "p99_ms", "p99_ci_ms", "p99_ms", True),
         ("mgas_s", "mean_mgas_s", "mgas_ci", "mean_mgas_s", False),
-        ("wall_clock", "wall_clock_s", "wall_clock_ci_ms", "mean_total_lat_ms", True),
         ("persist_wait", "mean_persist_ms", "persist_ci_ms", "mean_persist_ms", True),
     ]
+    if baseline_stats.get("wall_clock_s") is not None and feature_stats.get("wall_clock_s") is not None:
+        metrics.extend([
+            ("wall_clock", "wall_clock_s", "wall_clock_ci_s", "wall_clock_s", True),
+            ("end_to_end_mgas_s", "end_to_end_mgas_s", "end_to_end_mgas_ci", "end_to_end_mgas_s", False),
+        ])
     changes = {}
     for name, stat_key, ci_key, base_key, lower_is_better in metrics:
         p = pct(baseline_stats[stat_key], feature_stats[stat_key])
@@ -1671,7 +1754,6 @@ def generate_comparison_table(
         return (feat - base) / base * 100.0 if base > 0 else 0.0
 
     gas_pct = pct(run1["mean_mgas_s"], run2["mean_mgas_s"])
-    wall_pct = pct(run1["wall_clock_s"], run2["wall_clock_s"])
 
     mean_pct = pct(run1["mean_ms"], run2["mean_ms"])
     p50_pct = pct(run1["p50_ms"], run2["p50_ms"])
@@ -1688,7 +1770,6 @@ def generate_comparison_table(
 
     # CI as a percentage of baseline
     mgas_ci_pct = ci_stats["mgas_ci"] / run1["mean_mgas_s"] * 100.0 if run1["mean_mgas_s"] > 0 else 0.0
-    wall_ci_pct = ci_stats["wall_clock_ci_ms"] / run1["mean_total_lat_ms"] * 100.0 if run1["mean_total_lat_ms"] > 0 else 0.0
     persist_ci_pct = ci_stats["persist_ci_ms"] / run1["mean_persist_ms"] * 100.0 if run1["mean_persist_ms"] > 0 else 0.0
 
     mean_floor = practical_floor_pct("mean", run1["mean_ms"])
@@ -1696,7 +1777,6 @@ def generate_comparison_table(
     p90_floor = practical_floor_pct("p90", run1["p90_ms"])
     p99_floor = practical_floor_pct("p99", run1["p99_ms"])
     mgas_floor = practical_floor_pct("mgas_s", run1["mean_mgas_s"])
-    wall_floor = practical_floor_pct("wall_clock", run1["mean_total_lat_ms"])
     persist_floor = practical_floor_pct("persist_wait", run1["mean_persist_ms"])
     p99_informational = informational_reason("p99", ci_stats, run1, run2)
     persist_informational = informational_reason("persist_wait", ci_stats, run1, run2)
@@ -1708,15 +1788,35 @@ def generate_comparison_table(
     lines = [
         f"| Metric | {baseline_label} | {feature_label} | Change |",
         "|--------|------|--------|--------|",
-        f"| Mean | {fmt_ms(run1['mean_ms'])} | {fmt_ms(run2['mean_ms'])} | {change_str(mean_pct, mean_ci_pct, mean_floor, lower_is_better=True)} |",
-        f"| P50 | {fmt_ms(run1['p50_ms'])} | {fmt_ms(run2['p50_ms'])} | {change_str(p50_pct, p50_ci_pct, p50_floor, lower_is_better=True)} |",
-        f"| P90 | {fmt_ms(run1['p90_ms'])} | {fmt_ms(run2['p90_ms'])} | {change_str(p90_pct, p90_ci_pct, p90_floor, lower_is_better=True)} |",
-        f"| P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, p99_floor, lower_is_better=True, informational=p99_informational)} |",
-        f"| Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, mgas_ci_pct, mgas_floor, lower_is_better=False)} |",
-        f"| Wall Clock | {fmt_s(run1['wall_clock_s'])} | {fmt_s(run2['wall_clock_s'])} | {change_str(wall_pct, wall_ci_pct, wall_floor, lower_is_better=True)} |",
+        f"| Execution Mean | {fmt_ms(run1['mean_ms'])} | {fmt_ms(run2['mean_ms'])} | {change_str(mean_pct, mean_ci_pct, mean_floor, lower_is_better=True)} |",
+        f"| Execution P50 | {fmt_ms(run1['p50_ms'])} | {fmt_ms(run2['p50_ms'])} | {change_str(p50_pct, p50_ci_pct, p50_floor, lower_is_better=True)} |",
+        f"| Execution P90 | {fmt_ms(run1['p90_ms'])} | {fmt_ms(run2['p90_ms'])} | {change_str(p90_pct, p90_ci_pct, p90_floor, lower_is_better=True)} |",
+        f"| Execution P99 | {fmt_ms(run1['p99_ms'])} | {fmt_ms(run2['p99_ms'])} | {change_str(p99_pct, p99_ci_pct, p99_floor, lower_is_better=True, informational=p99_informational)} |",
+        f"| Execution Mgas/s | {fmt_mgas(run1['mean_mgas_s'])} | {fmt_mgas(run2['mean_mgas_s'])} | {change_str(gas_pct, mgas_ci_pct, mgas_floor, lower_is_better=False)} |",
         f"| Persist Wait | {fmt_ms(run1['mean_persist_ms'])} | {fmt_ms(run2['mean_persist_ms'])} | {change_str(persist_pct, persist_ci_pct, persist_floor, lower_is_better=True, informational=persist_informational)} |",
-        "",
     ]
+    changes = compute_changes(run1, run2, ci_stats)
+    for label, key, metric, formatter, lower_is_better in (
+        ("Wall Clock", "wall_clock_s", "wall_clock", fmt_s, True),
+        ("End-to-end Mgas/s", "end_to_end_mgas_s", "end_to_end_mgas_s", fmt_mgas, False),
+    ):
+        if metric not in changes:
+            lines.append(f"| {label} | n/a | n/a | |")
+            continue
+        change = changes[metric]
+        description = change_str(
+            change["pct"], change["ci_pct"], change["floor_pct"], lower_is_better,
+            change.get("informational_reason"),
+        )
+        lines.append(f"| {label} | {formatter(run1[key])} | {formatter(run2[key])} | {description} |")
+    lines.extend([
+        "",
+        "Execution metrics use server processing time (local block time in RPC mode). "
+        "Wall Clock and end-to-end throughput use measured run duration, including persistence "
+        "waits and any configured pacing; values are averaged per run. "
+        "Missing measured durations are shown as n/a.",
+        "",
+    ])
     meta_parts = [f"{n} {'big blocks' if big_blocks else 'blocks'}", f"mode: {mode}"]
     if warmup_blocks:
         meta_parts.append(f"{warmup_blocks} warmup")
@@ -2020,6 +2120,11 @@ def main():
     if not ci_stats:
         print("No comparable baseline and feature results", file=sys.stderr)
         sys.exit(1)
+
+    add_elapsed_stats(
+        args.baseline_csv, args.feature_csv, baseline_runs, feature_runs,
+        baseline_stats, feature_stats, ci_stats,
+    )
 
     baseline_ref = args.baseline_ref or "main"
     baseline_name = args.baseline_name or "baseline"
