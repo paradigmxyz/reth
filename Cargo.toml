@@ -663,7 +663,7 @@ rmp-serde = "1.3"
 roaring = "0.11.3"
 rolling-file = "0.2.0"
 similar = { version = "2.7", default-features = false }
-smolgen = "0.1.1"
+smolgen = "0.1.2"
 snap = "1.1.1"
 socket2 = { version = "0.6", default-features = false }
 sysinfo = { version = "0.38", default-features = false }
@@ -694,6 +694,3 @@ reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev
 reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
 reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
 
-# smolgen
-# TODO: swap for a smolgen release that includes alloy-rs/smolgen#2
-smolgen = { git = "https://github.com/alloy-rs/smolgen", rev = "99abe6c759b5674db76d10ba2ea07fbb7490d57b" }
