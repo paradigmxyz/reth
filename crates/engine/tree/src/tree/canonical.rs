@@ -262,20 +262,39 @@ where
         Ok(())
     }
 
-    /// Prepares a rewind to a canonical ancestor when the executed segment is still retained.
-    pub(super) fn retained_canonical_rewind(&self, number: u64) -> Option<NewCanonicalChain<N>> {
-        if number < self.persistence_state.last_persisted_block.number {
-            return None
+    /// Prepares an ancestor rewind when every block being reverted is still retained.
+    pub(super) fn retained_canonical_rewind(
+        &self,
+        ancestor: &SealedHeader<N::BlockHeader>,
+    ) -> ProviderResult<Option<NewCanonicalChain<N>>> {
+        let number = ancestor.number();
+        let persisted = self.persistence_state.last_persisted_block;
+        if number < persisted.number {
+            return Ok(None)
         }
 
-        let new_head = self.canonical_in_memory_state.state_by_number(number)?;
         let current_head = self.state.tree_state.canonical_block_number();
         let old = self.collect_blocks_for_canonical_unwind(number, current_head);
         if old.len() as u64 != current_head - number {
-            return None
+            return Ok(None)
         }
 
-        Some(NewCanonicalChain::Reorg { new: vec![new_head.block_ref().clone()], old })
+        let tip = if let Some(state) = self.canonical_in_memory_state.state_by_number(number) {
+            Arc::clone(&state.block_ref().recovered_block)
+        } else if ancestor.num_hash() == persisted {
+            // Persistence can evict the ancestor while retaining the entire reverted suffix.
+            let Some(block) = self
+                .provider
+                .recovered_block(ancestor.hash().into(), TransactionVariant::WithHash)?
+            else {
+                return Ok(None)
+            };
+            Arc::new(block)
+        } else {
+            return Ok(None)
+        };
+
+        Ok(Some(NewCanonicalChain::Revert { tip, old }))
     }
 
     /// Handles chain advance or same height scenarios.
@@ -436,14 +455,17 @@ where
         let notification = chain_update.to_chain_notification();
 
         // reinsert any missing reorged blocks
-        if let NewCanonicalChain::Reorg { new, old } = &chain_update {
+        if let NewCanonicalChain::Reorg { old, .. } | NewCanonicalChain::Revert { old, .. } =
+            &chain_update
+        {
+            let new = chain_update.new_blocks();
             let new_first = new.first().map(|first| first.recovered_block().num_hash());
             let old_first = old.first().map(|first| first.recovered_block().num_hash());
             trace!(target: "engine::tree", ?new_first, ?old_first, "Reorg detected, new and old first blocks");
 
             self.state.set_pending_sparse_trie_prune(false);
             self.update_reorg_metrics(old.len(), old_first);
-            self.reinsert_reorged_blocks(new.clone());
+            self.reinsert_reorged_blocks(new.to_vec());
             self.reinsert_reorged_blocks(old.clone());
         }
 

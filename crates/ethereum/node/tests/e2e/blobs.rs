@@ -34,11 +34,9 @@ async fn can_handle_blobs() -> eyre::Result<()> {
     let blob_payload = node.advance_block_synced().await?;
     assert!(blob_payload.block().body().transactions().any(|tx| *tx.hash() == blob_tx_hash));
 
-    // reorg the blob block out with a block on genesis, which can't include the blob tx anymore
-    let block_hash = node.advance_block_on(genesis_hash).await?.block().hash();
-
-    // wait for the pool to process the reorg, and then re-inject the blob tx
-    node.wait_for_pool_head(block_hash).await?;
+    // Rewind to genesis and wait for the pool to re-inject the reverted blob transaction.
+    node.reorg_to(genesis_hash).await?;
+    node.wait_for_pool_head(genesis_hash).await?;
     node.wait_for_pooled([blob_tx_hash]).await?;
 
     // expects the blob tx to be back in the pool

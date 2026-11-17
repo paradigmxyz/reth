@@ -1963,9 +1963,20 @@ async fn test_fcu_rewinds_and_updates_markers_with_or_without_payload_attributes
         ..Default::default()
     };
 
-    for attrs in [None, Some(payload_attributes)] {
+    let cases = [
+        (false, None),
+        (false, Some(payload_attributes.clone())),
+        (true, None),
+        (true, Some(payload_attributes)),
+    ];
+    for (persisted_tip, attrs) in cases {
         let mut test_harness = TestHarness::new(chain_spec.clone()).with_blocks(blocks.clone());
         let canonical = &test_harness.tree.canonical_in_memory_state;
+        if persisted_tip {
+            test_harness.tree.persistence_state.last_persisted_block = ancestor.num_hash();
+            canonical.remove_persisted_blocks(ancestor.num_hash());
+            assert!(canonical.state_by_number(ancestor.number()).is_none());
+        }
         canonical.set_finalized(previous_finalized.clone_sealed_header());
         canonical.set_safe(previous_finalized.clone_sealed_header());
         let mut notifications = canonical.subscribe_canon_state();
@@ -2000,6 +2011,7 @@ async fn test_fcu_rewinds_and_updates_markers_with_or_without_payload_attributes
         assert_eq!(canonical.get_safe_num_hash(), Some(ancestor.num_hash()));
         assert_eq!(canonical.get_finalized_num_hash(), Some(finalized.num_hash()));
         let notification = notifications.try_recv().unwrap();
+        assert_eq!(notification.tip().hash(), ancestor.hash());
         assert!(notification.committed().is_empty());
         let reverted = notification.reverted().unwrap();
         assert_eq!(reverted.len(), 1);
@@ -2019,27 +2031,31 @@ async fn test_fcu_rewind_behind_persisted_tip_is_rejected() {
     test_harness.tree.persistence_state.last_persisted_block =
         blocks[2].recovered_block().num_hash();
 
-    let err = test_harness
-        .tree
-        .on_forkchoice_updated(
-            ForkchoiceState {
-                head_block_hash: ancestor.hash(),
-                safe_block_hash: ancestor.hash(),
-                finalized_block_hash: B256::ZERO,
-            },
-            None,
-        )
-        .unwrap()
-        .outcome
-        .await
-        .unwrap_err();
-    assert_matches!(
-        err,
-        BeaconForkChoiceUpdateError::ForkchoiceUpdateError(ForkchoiceUpdateError::TooDeepReorg)
-    );
-    let canonical = &test_harness.tree.canonical_in_memory_state;
-    assert_eq!(canonical.get_canonical_head().hash(), current_head.hash());
-    assert!(canonical.get_safe_num_hash().is_none());
+    let attrs = EthPayloadAttributes { timestamp: ancestor.timestamp() + 1, ..Default::default() };
+    for attrs in [None, Some(attrs)] {
+        let err = test_harness
+            .tree
+            .on_forkchoice_updated(
+                ForkchoiceState {
+                    head_block_hash: ancestor.hash(),
+                    safe_block_hash: ancestor.hash(),
+                    finalized_block_hash: B256::ZERO,
+                },
+                attrs,
+            )
+            .unwrap()
+            .outcome
+            .await
+            .unwrap_err();
+        assert_matches!(
+            err,
+            BeaconForkChoiceUpdateError::ForkchoiceUpdateError(ForkchoiceUpdateError::TooDeepReorg)
+        );
+        let canonical = &test_harness.tree.canonical_in_memory_state;
+        assert_eq!(canonical.get_canonical_head().hash(), current_head.hash());
+        assert!(canonical.get_safe_num_hash().is_none());
+        assert!(test_harness.payload_command_rx.is_empty());
+    }
 }
 
 /// Test that verifies the happy path where a new payload extends the canonical chain

@@ -255,6 +255,9 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             NewCanonicalChain::Reorg { new, old } => {
                 self.update_blocks(new, old);
             }
+            NewCanonicalChain::Revert { old, .. } => {
+                self.update_blocks(vec![], old);
+            }
         }
     }
 

@@ -350,10 +350,9 @@ where
     /// finalized blocks of the node. Its effect depends on `parent`:
     /// - The current head: the engine starts a payload job on that head.
     /// - A canonical ancestor compatible with the safe and finalized blocks: the default Ethereum
-    ///   engine rewinds the head to `parent` before building when the executed segment is still
-    ///   retained. When building on a persisted ancestor outside that range, the head stays until a
-    ///   replacement chain is adopted. A custom engine or tree configuration can change when the
-    ///   head moves.
+    ///   engine rewinds the head to `parent` before building if the reverted blocks are still
+    ///   retained. This includes a rewind to the persisted tip. A rewind outside that range returns
+    ///   an error. A custom engine or tree configuration can change this behavior.
     /// - A block on a side chain: the engine first makes the side chain canonical, so `parent`
     ///   becomes the head, reorging the chain.
     /// - A canonical block below the finalized block, or a side chain block that does not descend
