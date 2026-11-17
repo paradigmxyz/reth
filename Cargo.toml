@@ -693,4 +693,3 @@ reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "
 reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
 reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
 reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-
