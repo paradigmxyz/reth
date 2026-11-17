@@ -2268,10 +2268,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
- "js-sys",
  "num-traits",
  "serde",
- "wasm-bindgen",
  "windows-link",
 ]
 
@@ -5032,22 +5030,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91f255a4535024abf7640cb288260811fc14794f62b063652ed349f9a6c2348e"
 
 [[package]]
-name = "humantime"
-version = "2.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15cdd26707701c53297e2fa6afb323d55fbc1d0810c3aec078ae3ef0424c3c15"
-
-[[package]]
-name = "humantime-serde"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57a3db5ea5923d99402c94e9feb261dc5ee9b4efa158b0315f788cf549cc200c"
-dependencies = [
- "humantime",
- "serde",
-]
-
-[[package]]
 name = "hybrid-array"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7340,8 +7322,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25485360a54d6861439d60facef26de713b1e126bf015ec8f98239467a2b82f7"
 dependencies = [
  "bitflags 2.13.2",
- "chrono",
- "flate2",
  "procfs-core",
  "rustix",
 ]
@@ -7353,7 +7333,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6401bf7b6af22f78b563665d15a22e9aef27775b79b149a66ca022468a4e405"
 dependencies = [
  "bitflags 2.13.2",
- "chrono",
  "hex",
 ]
 
@@ -8105,7 +8084,6 @@ dependencies = [
  "fdlimit",
  "futures",
  "human_bytes",
- "humantime",
  "itertools 0.14.0",
  "lz4",
  "metrics",
@@ -8193,6 +8171,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "eyre",
+ "jiff",
  "libc",
  "rand 0.9.5",
  "reth-fs-util",
@@ -8241,7 +8220,7 @@ version = "2.11.0"
 dependencies = [
  "alloy-primitives",
  "eyre",
- "humantime-serde",
+ "jiff",
  "reth-network-peers",
  "reth-network-types",
  "reth-prune-types",
@@ -9567,7 +9546,7 @@ name = "reth-network-types"
 version = "2.11.0"
 dependencies = [
  "alloy-eip2124",
- "humantime-serde",
+ "jiff",
  "reth-net-banlist",
  "reth-network-peers",
  "serde",
@@ -9705,7 +9684,6 @@ dependencies = [
  "dirs-next",
  "eyre",
  "futures",
- "humantime",
  "ipnet",
  "proptest",
  "rand 0.9.5",
@@ -9838,8 +9816,8 @@ version = "2.11.0"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
- "chrono",
  "futures-util",
+ "jiff",
  "reth-chain-state",
  "reth-network-api",
  "reth-primitives-traits",
@@ -9865,8 +9843,8 @@ dependencies = [
  "alloy-rpc-types-engine",
  "derive_more",
  "futures",
- "humantime",
  "pin-project",
+ "reth-cli-util",
  "reth-engine-primitives",
  "reth-network-api",
  "reth-primitives-traits",
@@ -10166,8 +10144,8 @@ dependencies = [
  "evm2",
  "evm2-inspectors",
  "futures",
- "humantime",
  "itertools 0.14.0",
+ "jiff",
  "jsonrpsee",
  "jsonrpsee-types",
  "parking_lot",
@@ -10874,7 +10852,7 @@ dependencies = [
  "clap",
  "eyre",
  "reth-tracing-otlp",
- "rolling-file",
+ "tempfile",
  "tracing",
  "tracing-appender",
  "tracing-chrome",
@@ -11223,15 +11201,6 @@ checksum = "ddb7af00d2b17dbd07d82c0063e25411959748ff03e8d4f96134c2ff41fce34f"
 dependencies = [
  "libc",
  "librocksdb-sys",
-]
-
-[[package]]
-name = "rolling-file"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8395b4f860856b740f20a296ea2cd4d823e81a2658cf05ef61be22916026a906"
-dependencies = [
- "chrono",
 ]
 
 [[package]]
