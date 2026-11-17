@@ -44,6 +44,7 @@ use std::{
 };
 use tokio::sync::RwLock;
 use tower::{BoxError, Layer, Service};
+use tracing::debug;
 
 const OCTET_STREAM: &str = "application/octet-stream";
 const APPLICATION_JSON: &str = "application/json";
