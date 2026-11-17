@@ -238,29 +238,26 @@ where
                 if self.config.unwind_canonical_header() {
                     self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
                 }
-            } else if attrs.is_none() &&
-                canonical_header.number() < self.state.tree_state.canonical_block_number()
-            {
-                // A zero safe hash leaves the previous marker in place.
-                if state.safe_block_hash.is_zero() &&
-                    self.canonical_in_memory_state
-                        .get_safe_num_hash()
-                        .is_some_and(|safe| safe.number > canonical_header.number())
-                {
-                    return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())))
-                }
-                // Rewind through the retained executed blocks, where we can notify subscribers
-                // of every reverted block. Refuse requests beyond that range before mutation.
-                if !self.try_rewind_canonical_chain(&canonical_header) {
+            } else if canonical_header.number() < self.state.tree_state.canonical_block_number() {
+                if let Some(rewind) = self.retained_canonical_rewind(canonical_header.number()) {
+                    // A zero safe hash leaves the previous marker in place.
+                    if state.safe_block_hash.is_zero() &&
+                        self.canonical_in_memory_state
+                            .get_safe_num_hash()
+                            .is_some_and(|safe| safe.number > canonical_header.number())
+                    {
+                        return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())))
+                    }
+                    self.on_canonical_chain_update(rewind);
+                    if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
+                        return Ok(Some(TreeOutcome::new(outcome)))
+                    }
+                } else if attrs.is_none() {
                     return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::too_deep_reorg())))
-                }
-                if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
-                    return Ok(Some(TreeOutcome::new(outcome)))
                 }
             }
 
-            // Building on a canonical ancestor can prepare a replacement for its suffix,
-            // including when the suffix has already been persisted.
+            // A payload job can still prepare a replacement for a persisted suffix.
             if let Some(attr) = attrs {
                 debug!(target: "engine::tree", head = canonical_header.number(), "handling payload attributes for canonical head");
                 // Clone only when we actually need to process the attributes

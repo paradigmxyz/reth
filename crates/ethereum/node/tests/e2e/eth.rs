@@ -186,10 +186,15 @@ async fn rewinds_to_canonical_ancestor_above_finality() -> eyre::Result<()> {
         assert_eq!(advanced.payload_status.status, PayloadStatusEnum::Valid);
         hashes.push(hash);
     }
-    let (checkpoint, ancestor, tip) = (hashes[3], hashes[5], hashes[8]);
+    let (checkpoint, safe, ancestor, tip) = (hashes[3], hashes[4], hashes[5], hashes[8]);
 
     assert!(canonical.get_finalized_num_hash().is_none());
-    for finalized in [B256::ZERO, checkpoint] {
+    let cases = [
+        (B256::ZERO, None),
+        (checkpoint, None),
+        (checkpoint, Some(eth_payload_attributes(&chain_spec, 9))),
+    ];
+    for (index, (finalized, attrs)) in cases.into_iter().enumerate() {
         let advanced = engine
             .request::<_, ForkchoiceUpdated>(
                 "engine_forkchoiceUpdatedV3",
@@ -209,22 +214,23 @@ async fn rewinds_to_canonical_ancestor_above_finality() -> eyre::Result<()> {
             tip
         );
 
+        let build_requested = attrs.is_some();
         let rewound = engine
             .request::<_, ForkchoiceUpdated>(
                 "engine_forkchoiceUpdatedV3",
                 (
                     ForkchoiceState {
                         head_block_hash: ancestor,
-                        safe_block_hash: ancestor,
-                        finalized_block_hash: B256::ZERO,
+                        safe_block_hash: safe,
+                        finalized_block_hash: finalized,
                     },
-                    None::<PayloadAttributes>,
+                    attrs,
                 ),
             )
             .await?;
         assert_eq!(rewound.payload_status.status, PayloadStatusEnum::Valid);
         assert_eq!(rewound.payload_status.latest_valid_hash, Some(ancestor));
-        assert_eq!(rewound.payload_id, None);
+        assert_eq!(rewound.payload_id.is_some(), build_requested);
         assert_eq!(
             rpc.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap().header.hash,
             ancestor
@@ -232,7 +238,7 @@ async fn rewinds_to_canonical_ancestor_above_finality() -> eyre::Result<()> {
         for number in 6..=8 {
             assert!(rpc.get_block_by_number(BlockNumberOrTag::Number(number)).await?.is_none());
         }
-        assert_eq!(canonical.get_safe_num_hash().unwrap().hash, ancestor);
+        assert_eq!(canonical.get_safe_num_hash().unwrap().hash, safe);
         node.wait_for_pool_head(ancestor).await?;
         assert_eq!(
             canonical.get_finalized_num_hash().map(|block| block.hash),
@@ -240,7 +246,7 @@ async fn rewinds_to_canonical_ancestor_above_finality() -> eyre::Result<()> {
         );
 
         // The payload service processes the revert notification before handling this build.
-        let timestamp = 9 + u64::from(!finalized.is_zero());
+        let timestamp = 10 + index as u64;
         let build = engine
             .request::<_, ForkchoiceUpdated>(
                 "engine_forkchoiceUpdatedV3",

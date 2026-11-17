@@ -262,30 +262,20 @@ where
         Ok(())
     }
 
-    /// Rewinds to a canonical ancestor, returning false if the executed segment is unavailable.
-    pub(super) fn try_rewind_canonical_chain(
-        &mut self,
-        ancestor: &SealedHeader<N::BlockHeader>,
-    ) -> bool {
-        let number = ancestor.number();
+    /// Prepares a rewind to a canonical ancestor when the executed segment is still retained.
+    pub(super) fn retained_canonical_rewind(&self, number: u64) -> Option<NewCanonicalChain<N>> {
         if number < self.persistence_state.last_persisted_block.number {
-            return false
+            return None
         }
 
-        let Some(new_head) = self.canonical_in_memory_state.state_by_number(number) else {
-            return false
-        };
+        let new_head = self.canonical_in_memory_state.state_by_number(number)?;
         let current_head = self.state.tree_state.canonical_block_number();
         let old = self.collect_blocks_for_canonical_unwind(number, current_head);
         if old.len() as u64 != current_head - number {
-            return false
+            return None
         }
 
-        self.on_canonical_chain_update(NewCanonicalChain::Reorg {
-            new: vec![new_head.block_ref().clone()],
-            old,
-        });
-        true
+        Some(NewCanonicalChain::Reorg { new: vec![new_head.block_ref().clone()], old })
     }
 
     /// Handles chain advance or same height scenarios.
