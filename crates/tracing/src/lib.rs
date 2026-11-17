@@ -79,6 +79,8 @@ mod layers;
 #[cfg(feature = "std")]
 pub mod log_handle;
 #[cfg(feature = "std")]
+mod rolling;
+#[cfg(feature = "std")]
 mod test_tracer;
 #[cfg(feature = "std")]
 mod throttle;
