@@ -711,6 +711,8 @@ where
                         if is_pending {
                             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
                             self.canonical_in_memory_state.set_pending_block(block.clone());
+                        } else {
+                            self.canonical_in_memory_state.insert_executed(block.clone());
                         }
 
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);

@@ -10,7 +10,7 @@ use reth_cli_commands::{
     common::{CliComponentsBuilder, CliNodeTypes, HeaderMut},
     launcher::{FnLauncher, Launcher},
 };
-use reth_cli_runner::CliRunner;
+use reth_cli_runner::{CliRunner, CliRunnerConfig};
 use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
@@ -31,6 +31,7 @@ pub struct CliApp<
 > {
     cli: Cli<Spec, Ext, Rpc, SubCmd>,
     runner: Option<CliRunner>,
+    runner_config: Option<CliRunnerConfig>,
     layers: Option<Layers>,
     guard: Option<TracingGuards>,
 }
@@ -43,7 +44,7 @@ where
     SubCmd: ExtendedCommand + Subcommand + fmt::Debug,
 {
     pub(crate) fn new(cli: Cli<C, Ext, Rpc, SubCmd>) -> Self {
-        Self { cli, runner: None, layers: Some(Layers::new()), guard: None }
+        Self { cli, runner: None, runner_config: None, layers: Some(Layers::new()), guard: None }
     }
 
     /// Sets the runner for the CLI commander.
@@ -51,6 +52,15 @@ where
     /// This replaces any existing runner with the provided one.
     pub fn set_runner(&mut self, runner: CliRunner) {
         self.runner = Some(runner);
+    }
+
+    /// Sets the [`CliRunnerConfig`] of the runner this app builds when none was set with
+    /// [`Self::set_runner`].
+    ///
+    /// Unlike [`Self::set_runner`], this keeps the runtime configuration derived from the command,
+    /// such as the node's CPU and worker thread settings.
+    pub const fn set_runner_config(&mut self, config: CliRunnerConfig) {
+        self.runner_config = Some(config);
     }
 
     /// Access to tracing layers.
@@ -123,7 +133,11 @@ where
                     }
                     _ => reth_tasks::RuntimeConfig::default(),
                 };
-                CliRunner::try_with_runtime_config(runtime_config)?
+                let runner = CliRunner::try_with_runtime_config(runtime_config)?;
+                match self.runner_config.take() {
+                    Some(config) => runner.with_config(config),
+                    None => runner,
+                }
             }
         };
 
