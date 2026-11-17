@@ -16,7 +16,7 @@ use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
-    BlockState, CanonicalInMemoryState, ExecutedBlock, ForkChoiceNotifications,
+    BlockState, CanonicalInMemoryState, ChainInfoHeaders, ExecutedBlock, ForkChoiceNotifications,
     ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
 };
 use reth_chainspec::ChainInfo;
@@ -84,30 +84,17 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockchainProvider<N> {
-    /// Create a new [`BlockchainProvider`] using only the storage, fetching the latest
-    /// header from the database to initialize the provider.
+    /// Creates a provider over `storage` and the in-memory state of `storage`, fetching the
+    /// latest, safe and finalized headers from the database to initialize the provider.
+    ///
+    /// The in-memory blocks are shared with every other handle of that in-memory state. The chain
+    /// info and the canonical state notifications belong to the returned provider and its clones.
     pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
         let provider = storage.provider()?;
         let best = provider.chain_info()?;
-        match provider.header_by_number(best.best_number)? {
-            Some(header) => {
-                drop(provider);
-                Ok(Self::with_latest(storage, SealedHeader::new(header, best.best_hash))?)
-            }
-            None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
-        }
-    }
-
-    /// Create new provider instance that wraps the database and the blockchain tree, using the
-    /// provided latest header to initialize the chain info tracker.
-    ///
-    /// This returns a `ProviderResult` since it tries the retrieve the last finalized header from
-    /// `database`.
-    pub fn with_latest(
-        storage: ProviderFactory<N>,
-        latest: SealedHeader<HeaderTy<N>>,
-    ) -> ProviderResult<Self> {
-        let provider = storage.provider()?;
+        let latest = provider
+            .header_by_number(best.best_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(best.best_number.into()))?;
         let finalized_header = provider
             .last_finalized_block_number()?
             .map(|num| provider.sealed_header(num))
@@ -123,17 +110,17 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             .map(|num| provider.sealed_header(num))
             .transpose()?
             .flatten();
+        let canonical_in_memory_state = CanonicalInMemoryState::with_head(
+            ChainInfoHeaders {
+                canonical_head: SealedHeader::new(latest, best.best_hash),
+                safe: safe_header,
+                finalized: finalized_header,
+            },
+            storage.in_memory_state().clone(),
+        );
         let bal_store = storage.bal_store().clone();
 
-        Ok(Self {
-            database: storage,
-            canonical_in_memory_state: CanonicalInMemoryState::with_head(
-                latest,
-                finalized_header,
-                safe_header,
-            ),
-            bal_store,
-        })
+        Ok(Self { database: storage, canonical_in_memory_state, bal_store })
     }
 
     /// Gets a clone of `canonical_in_memory_state`.
@@ -4009,6 +3996,23 @@ mod tests {
             let outcome = provider.get_state(number as u64)?.expect("persisted block state");
             assert_eq!(outcome.receipts, vec![receipts], "block {number}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn providers_of_one_factory_share_in_memory_blocks() -> eyre::Result<()> {
+        let factory = test_provider_factory_with_genesis()?;
+        let provider = BlockchainProvider::new(factory.clone())?;
+        let other = BlockchainProvider::new(factory)?;
+        let genesis = provider.canonical_in_memory_state.get_canonical_head();
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, genesis.hash());
+        let hash = block.recovered_block().hash();
+
+        provider
+            .canonical_in_memory_state
+            .update_chain(NewCanonicalChain::Commit { new: vec![block] });
+
+        assert!(other.canonical_in_memory_state.state_by_hash(hash).is_some());
         Ok(())
     }
 }

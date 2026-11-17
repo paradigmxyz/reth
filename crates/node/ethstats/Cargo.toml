@@ -30,5 +30,5 @@ serde_json.workspace = true
 
 tracing.workspace = true
 url.workspace = true
-chrono.workspace = true
+jiff = { workspace = true, features = ["tz-system", "tzdb-bundle-platform", "tzdb-zoneinfo"] }
 thiserror = { workspace = true, features = ["std"] }

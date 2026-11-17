@@ -27,7 +27,9 @@ use alloy_rpc_types_engine::{
 use assert_matches::assert_matches;
 use evm2::evm::Bal as EvmBal;
 use futures::FutureExt as _;
-use reth_chain_state::{test_utils::TestBlockBuilder, NewCanonicalChain};
+use reth_chain_state::{
+    test_utils::TestBlockBuilder, ChainInfoHeaders, InMemoryState, NewCanonicalChain,
+};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{
     BeaconForkChoiceUpdateError, ConsensusEngineHandle, EngineApiValidator, ForkchoiceStatus,
@@ -230,7 +232,10 @@ impl TestHarness {
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
         let runtime = reth_tasks::Runtime::test();
-        let overlay_manager = OverlayManager::new(runtime.state_trie_overlay_worker_pool());
+        let overlay_manager = OverlayManager::with_worker_pool(
+            InMemoryState::default(),
+            runtime.state_trie_overlay_worker_pool(),
+        );
 
         let header = chain_spec.genesis_header().clone();
         let header = SealedHeader::seal_slow(header);
@@ -242,7 +247,10 @@ impl TestHarness {
             EngineApiKind::Ethereum,
             overlay_manager.clone(),
         );
-        let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
+        let canonical_in_memory_state = CanonicalInMemoryState::with_head(
+            ChainInfoHeaders { canonical_head: header, safe: None, finalized: None },
+            overlay_manager.in_memory_state().clone(),
+        );
 
         let (to_payload_service, payload_command_rx) = unbounded_channel();
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
@@ -312,6 +320,14 @@ impl TestHarness {
         for block in &blocks {
             overlay_manager.insert_block(block.clone());
         }
+        let canonical_in_memory_state = CanonicalInMemoryState::with_head(
+            ChainInfoHeaders {
+                canonical_head: blocks.last().unwrap().recovered_block().clone_sealed_header(),
+                safe: None,
+                finalized: None,
+            },
+            overlay_manager.in_memory_state().clone(),
+        );
 
         self.tree.state.tree_state = TreeState {
             blocks_by_hash,
@@ -322,10 +338,7 @@ impl TestHarness {
             overlay_manager,
         };
 
-        let canonical_in_memory_state = CanonicalInMemoryState::empty();
         canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
-        canonical_in_memory_state
-            .set_canonical_head(blocks.last().unwrap().recovered_block().clone_sealed_header());
         self.tree.canonical_in_memory_state = canonical_in_memory_state;
 
         self.blocks = blocks.clone();
