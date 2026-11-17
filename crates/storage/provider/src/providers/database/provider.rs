@@ -1932,6 +1932,19 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N
         self.static_file_provider.last_block_number()
     }
 
+    fn last_durable_block_number(&self) -> ProviderResult<BlockNumber> {
+        // The Finish checkpoint is written in the same transaction as the blocks it covers.
+        Ok(self
+            .get_stage_checkpoint(StageId::Finish)?
+            .map(|checkpoint| {
+                checkpoint
+                    .finish_stage_checkpoint()
+                    .and_then(|finish| finish.partial_state_trie())
+                    .unwrap_or(checkpoint.block_number)
+            })
+            .unwrap_or_default())
+    }
+
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
         Ok(self.tx.get::<tables::HeaderNumbers>(hash)?)
     }
@@ -4289,6 +4302,29 @@ mod tests {
             provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap().block_number,
             11
         );
+    }
+
+    #[test]
+    fn last_durable_block_number_follows_finish_checkpoint() {
+        let factory = create_test_provider_factory();
+        assert_eq!(factory.provider().unwrap().last_durable_block_number().unwrap(), 0);
+
+        let provider = factory.database_provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(10)).unwrap();
+        assert_eq!(provider.last_durable_block_number().unwrap(), 10);
+
+        provider
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(20).with_finish_stage_checkpoint(FinishCheckpoint {
+                    partial_state_trie: Some(15),
+                }),
+            )
+            .unwrap();
+        assert_eq!(provider.last_durable_block_number().unwrap(), 15);
+        provider.commit().unwrap();
+
+        assert_eq!(factory.last_durable_block_number().unwrap(), 15);
     }
 
     #[test]
