@@ -16,10 +16,6 @@ ignore = [
     "RUSTSEC-2026-0387",
     # https://rustsec.org/advisories/RUSTSEC-2026-0441 pin-utils is unmaintained, transitive dep via wasmtimer (alloy-contract)
     "RUSTSEC-2026-0441",
-    # https://rustsec.org/advisories/RUSTSEC-2026-0542 humantime is unmaintained, needs a replacement crate first
-    "RUSTSEC-2026-0542",
-    # https://rustsec.org/advisories/RUSTSEC-2026-0543 chrono is unmaintained, needs a replacement crate first
-    "RUSTSEC-2026-0543",
 ]
 
 # This section is considered when running `cargo deny check bans`.
