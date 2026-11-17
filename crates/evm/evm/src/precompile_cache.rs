@@ -475,10 +475,11 @@ mod tests {
         filtered.move_precompiles(&[(custom, hidden)]).unwrap();
         assert!(filtered.contains(&hidden));
         assert!(!filtered.contains(&custom));
+        // Moves keep the pre-move warm set, so the vacated source stays warm.
         let mut warm = evm2::evm::PrewarmSet::new();
         filtered.warm_addresses(&mut warm);
         assert!(warm.is_warm(&hidden));
-        assert!(!warm.is_warm(&custom));
+        assert!(warm.is_warm(&custom));
     }
 
     #[test]
