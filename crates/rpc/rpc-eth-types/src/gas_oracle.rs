@@ -8,6 +8,7 @@ use alloy_primitives::{map::FbBuildHasher, B256, U256};
 use alloy_rpc_types_eth::BlockId;
 use derive_more::{Deref, DerefMut, From, Into};
 use itertools::Itertools;
+use parking_lot::RwLock;
 use reth_lru::LruMap;
 use reth_rpc_server_types::{
     constants,
@@ -87,9 +88,14 @@ where
     oracle_config: GasPriceOracleConfig,
     /// The price under which the sample will be ignored.
     ignore_price: Option<u128>,
-    /// Stores the latest calculated price and its block hash and Cache stores the lowest effective
-    /// tip values of recent blocks
-    inner: Mutex<GasPriceOracleInner>,
+    /// The latest calculated price and the hash of the block it was calculated for, `None` until
+    /// the first calculation.
+    ///
+    /// Kept outside of the async mutex so that a price that is already cached for the current head
+    /// can be served without waiting on a concurrent computation.
+    last_price: RwLock<Option<GasPriceOracleResult>>,
+    /// Cache of the lowest effective tip values of recent blocks.
+    lowest_effective_tip_cache: Mutex<EffectiveTipLruCache>,
 }
 
 impl<Provider> GasPriceOracle<Provider>
@@ -111,20 +117,20 @@ where
 
         // this is the number of blocks that we will cache the values for
         let cached_values = (oracle_config.blocks * 5).max(oracle_config.max_block_history as u32);
-        let inner = Mutex::new(GasPriceOracleInner {
-            last_price: GasPriceOracleResult {
-                block_hash: B256::ZERO,
-                price: oracle_config
-                    .default_suggested_fee
-                    .unwrap_or_else(|| GasPriceOracleResult::default().price),
-            },
-            lowest_effective_tip_cache: EffectiveTipLruCache(LruMap::with_hasher(
-                cached_values,
-                Default::default(),
-            )),
-        });
+        let last_price = RwLock::new(None);
+        let lowest_effective_tip_cache = Mutex::new(EffectiveTipLruCache(LruMap::with_hasher(
+            cached_values,
+            Default::default(),
+        )));
 
-        Self { provider, oracle_config, cache, ignore_price, inner }
+        Self {
+            provider,
+            oracle_config,
+            cache,
+            ignore_price,
+            last_price,
+            lowest_effective_tip_cache,
+        }
     }
 
     /// Returns the configuration of the gas price oracle.
@@ -134,16 +140,21 @@ where
 
     /// Suggests a gas price estimate based on recent blocks, using the configured percentile.
     pub async fn suggest_tip_cap(&self) -> EthResult<U256> {
+        // fast path: the price for the current head is already cached
+        if let Some(price) = self.cached_price(self.provider.chain_info()?.best_hash) {
+            return Ok(price)
+        }
+
         let header = self
             .provider
             .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
             .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
 
-        let mut inner = self.inner.lock().await;
+        let mut tip_cache = self.lowest_effective_tip_cache.lock().await;
 
-        // if we have stored a last price, then we check whether or not it was for the same head
-        if inner.last_price.block_hash == header.hash() {
-            return Ok(inner.last_price.price)
+        // another task may have computed the price for this head while we waited for the lock
+        if let Some(price) = self.cached_price(header.hash()) {
+            return Ok(price)
         }
 
         // if all responses are empty, then we can return a maximum of 2*check_block blocks' worth
@@ -160,20 +171,17 @@ where
 
         for _ in 0..max_blocks {
             // Check if current hash is in cache
-            let (parent_hash, block_values) =
-                if let Some(vals) = inner.lowest_effective_tip_cache.get(&current_hash) {
-                    vals.to_owned()
-                } else {
-                    // Otherwise we fetch it using get_block_values
-                    let (parent_hash, block_values) = self
-                        .get_block_values(current_hash, SAMPLE_NUMBER)
-                        .await?
-                        .ok_or(EthApiError::HeaderNotFound(current_hash.into()))?;
-                    inner
-                        .lowest_effective_tip_cache
-                        .insert(current_hash, (parent_hash, block_values.clone()));
-                    (parent_hash, block_values)
-                };
+            let (parent_hash, block_values) = if let Some(vals) = tip_cache.get(&current_hash) {
+                vals.to_owned()
+            } else {
+                // Otherwise we fetch it using get_block_values
+                let (parent_hash, block_values) = self
+                    .get_block_values(current_hash, SAMPLE_NUMBER)
+                    .await?
+                    .ok_or(EthApiError::HeaderNotFound(current_hash.into()))?;
+                tip_cache.insert(current_hash, (parent_hash, block_values.clone()));
+                (parent_hash, block_values)
+            };
 
             if block_values.is_empty() {
                 // For empty blocks, use zero gas price to signal no demand
@@ -193,7 +201,11 @@ where
 
         // sort results then take the configured percentile result
         let mut price = if results.is_empty() {
-            inner.last_price.price
+            self.last_price.read().as_ref().map(|last| last.price).unwrap_or_else(|| {
+                self.oracle_config
+                    .default_suggested_fee
+                    .unwrap_or_else(|| GasPriceOracleResult::default().price)
+            })
         } else {
             results.sort_unstable();
             *results.get((results.len() - 1) * self.oracle_config.percentile as usize / 100).expect(
@@ -208,7 +220,7 @@ where
             price = max_price;
         }
 
-        inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price };
+        *self.last_price.write() = Some(GasPriceOracleResult { block_hash: header.hash(), price });
 
         Ok(price)
     }
@@ -286,16 +298,22 @@ where
     /// A block is considered at capacity if its total gas used plus the maximum single transaction
     /// gas would exceed the block's gas limit.
     pub async fn op_suggest_tip_cap(&self, min_suggested_priority_fee: U256) -> EthResult<U256> {
+        // fast path: the price for the current head is already cached
+        if let Some(price) = self.cached_price(self.provider.chain_info()?.best_hash) {
+            return Ok(price)
+        }
+
         let header = self
             .provider
             .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
             .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
 
-        let mut inner = self.inner.lock().await;
+        // serialize concurrent computations, the tip cache itself is not used here
+        let _guard = self.lowest_effective_tip_cache.lock().await;
 
-        // if we have stored a last price, then we check whether or not it was for the same head
-        if inner.last_price.block_hash == header.hash() {
-            return Ok(inner.last_price.price);
+        // another task may have computed the price for this head while we waited for the lock
+        if let Some(price) = self.cached_price(header.hash()) {
+            return Ok(price)
         }
 
         let mut suggestion = min_suggested_priority_fee;
@@ -342,7 +360,8 @@ where
             suggestion = max_price;
         }
 
-        inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price: suggestion };
+        *self.last_price.write() =
+            Some(GasPriceOracleResult { block_hash: header.hash(), price: suggestion });
 
         Ok(suggestion)
     }
@@ -383,12 +402,12 @@ where
 
         Ok(median)
     }
-}
-/// Container type for mutable inner state of the [`GasPriceOracle`]
-#[derive(Debug)]
-struct GasPriceOracleInner {
-    last_price: GasPriceOracleResult,
-    lowest_effective_tip_cache: EffectiveTipLruCache,
+
+    /// Returns the cached price if it was calculated for the given head.
+    fn cached_price(&self, head_hash: B256) -> Option<U256> {
+        let last_price = self.last_price.read();
+        last_price.as_ref().filter(|last| last.block_hash == head_hash).map(|last| last.price)
+    }
 }
 
 /// Wrapper struct for `LruMap`
@@ -426,5 +445,61 @@ pub struct GasCap(pub u64);
 impl Default for GasCap {
     fn default() -> Self {
         RPC_DEFAULT_GAS_CAP
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::EthStateCacheConfig;
+    use reth_ethereum_primitives::EthPrimitives;
+    use reth_storage_api::noop::NoopProvider;
+    use reth_tasks::Runtime;
+    use std::time::Duration;
+    use tokio::time::timeout;
+
+    fn test_oracle() -> GasPriceOracle<NoopProvider> {
+        let cache = EthStateCache::<EthPrimitives>::spawn_with(
+            NoopProvider::default(),
+            EthStateCacheConfig::default(),
+            Runtime::test(),
+        );
+        GasPriceOracle::new(NoopProvider::default(), GasPriceOracleConfig::default(), cache)
+    }
+
+    #[tokio::test]
+    async fn cached_price_for_head_does_not_wait_for_lock() {
+        let oracle = test_oracle();
+
+        // `NoopProvider` reports the zero hash as its head and has no headers, so only the cached
+        // price can answer.
+        let price = U256::from(42);
+        *oracle.last_price.write() = Some(GasPriceOracleResult { block_hash: B256::ZERO, price });
+
+        // a computation in flight holds the async mutex
+        let _guard = oracle.lowest_effective_tip_cache.lock().await;
+
+        let suggested = timeout(Duration::from_secs(1), oracle.suggest_tip_cap()).await;
+        assert_eq!(suggested.unwrap().unwrap(), price);
+
+        let suggested =
+            timeout(Duration::from_secs(1), oracle.op_suggest_tip_cap(U256::ZERO)).await;
+        assert_eq!(suggested.unwrap().unwrap(), price);
+    }
+
+    #[tokio::test]
+    async fn stale_price_requires_latest_header() {
+        let oracle = test_oracle();
+
+        *oracle.last_price.write() = Some(GasPriceOracleResult {
+            block_hash: B256::with_last_byte(1),
+            price: U256::from(42),
+        });
+
+        let err = oracle.suggest_tip_cap().await.unwrap_err();
+        assert!(
+            matches!(&err, EthApiError::HeaderNotFound(id) if *id == BlockId::latest()),
+            "{err:?}"
+        );
     }
 }

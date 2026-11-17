@@ -65,6 +65,7 @@ fixed-cache.workspace = true
 rand.workspace = true
 tracing.workspace = true
 itertools.workspace = true
+parking_lot.workspace = true
 
 [dev-dependencies]
 reth-db-models.workspace = true

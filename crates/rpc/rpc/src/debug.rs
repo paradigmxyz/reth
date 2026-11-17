@@ -58,6 +58,8 @@ use alloy_rpc_types_trace::geth::{
 };
 #[cfg(feature = "js-tracer")]
 use evm2_inspectors::tracing::js::JsInspectorInterrupt;
+#[cfg(feature = "js-tracer")]
+use jiff::fmt::friendly::SpanParser;
 
 /// `debug` API implementation.
 ///
@@ -846,9 +848,9 @@ where
 
     /// Executes a block and returns the state root after each transaction.
     ///
-    /// The block is either canonical or a bad block the engine rejected. Execution stops at the
-    /// first transaction that is invalid on top of its predecessors, so the result for a bad block
-    /// holds the roots before that transaction.
+    /// The block is canonical, a non-canonical block the engine tree still holds, or a bad block
+    /// the engine rejected. Execution stops at the first transaction that is invalid on top of
+    /// its predecessors, so the result for a bad block holds the roots before that transaction.
     pub async fn intermediate_roots(&self, block_hash: B256) -> Result<Vec<B256>, Eth::Error> {
         let block = match self.eth_api().recovered_block(block_hash.into()).await? {
             Some(block) => block,
@@ -1610,9 +1612,13 @@ impl JsTraceInterrupt {
             runs_js_tracer(tracer, &opts.tracer_config)
         {
             let timeout = match &opts.timeout {
-                Some(timeout) => humantime::parse_duration(timeout).map_err(|err| {
-                    EthApiError::InvalidParams(format!("invalid tracer timeout {timeout:?}: {err}"))
-                })?,
+                Some(timeout) => {
+                    SpanParser::new().parse_unsigned_duration(timeout).map_err(|err| {
+                        EthApiError::InvalidParams(format!(
+                            "invalid tracer timeout {timeout:?}: {err}"
+                        ))
+                    })?
+                }
                 None => DEFAULT_JS_TRACER_TIMEOUT,
             };
             return Ok(Self { js: Some((JsInspectorInterrupt::new(), timeout)) })

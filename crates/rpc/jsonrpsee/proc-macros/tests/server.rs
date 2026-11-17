@@ -25,6 +25,10 @@ trait Api {
     async fn default_body(&self, a: u64) -> RpcResult<u64> {
         Ok(a + self.no_params()?)
     }
+
+    /// An async method with an argument borrowed from the params.
+    #[method(name = "echo")]
+    async fn echo(&self, s: &str) -> RpcResult<String>;
 }
 
 struct Api;
@@ -44,6 +48,10 @@ impl ApiServer for Api {
 
     fn blocking(&self, a: u64) -> RpcResult<u64> {
         Ok(a * 2)
+    }
+
+    async fn echo(&self, s: &str) -> RpcResult<String> {
+        Ok(s.to_owned())
     }
 }
 
@@ -81,6 +89,8 @@ async fn decodes_positional_params() {
 
     assert_eq!(call(&module, "test_noParams", None).await, result("7"));
     assert_eq!(call(&module, "test_noParams", Some("[]")).await, result("7"));
+
+    assert_eq!(call(&module, "test_echo", Some(r#"["hi"]"#)).await, result(r#""hi""#));
 }
 
 #[tokio::test]
@@ -101,13 +111,11 @@ async fn rejects_invalid_params() {
     // Parameters are positional, so objects are rejected even if every parameter is optional.
     assert_eq!(
         call(&module, "test_add", Some(r#"{"a":1,"b":2}"#)).await,
-        invalid_params(
-            r#"Invalid params. Expected one of '[', ']' or ',' but found \"{\\\"a\\\":1,\\\"b\\\":2}\""#
-        )
+        invalid_params("Invalid params. Expected one of '[', ']' or ',' but found '{'")
     );
     assert_eq!(
         call(&module, "test_optional", Some("{}")).await,
-        invalid_params(r#"Invalid params. Expected one of '[', ']' or ',' but found \"{}\""#)
+        invalid_params("Invalid params. Expected one of '[', ']' or ',' but found '{'")
     );
 }
 

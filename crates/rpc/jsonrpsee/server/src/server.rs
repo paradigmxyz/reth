@@ -25,27 +25,37 @@
 // DEALINGS IN THE SOFTWARE.
 
 use std::{
-    borrow::Cow, fmt, future::Future, net::SocketAddr, pin::Pin, sync::Arc, task::Poll,
+    borrow::Cow,
+    fmt,
+    future::Future,
+    net::SocketAddr,
+    pin::Pin,
+    sync::{Arc, OnceLock},
+    task::Poll,
     time::Duration,
 };
 
 use crate::{
-    future::{ConnectionGuard, ServerHandle, StopHandle},
+    future::{ConnectionGuard, ConnectionPermit, ServerHandle, StopHandle},
     middleware::rpc::{catch_call_panic, RpcService},
-    transport::{http, ws, ws::BackgroundTaskParams},
+    transport::{
+        http, ws,
+        ws::{is_upgrade_request, upgrade_response, BackgroundTaskParams},
+    },
     utils::{
         accept_error_backoff, deserialize_notification, no_request_within, NotifyOnRequest,
-        PermitBody, WriteTimeoutIo, DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_WRITE_TIMEOUT,
+        PermitBody, WriteTimeoutIo, DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_PING_INTERVAL,
+        DEFAULT_WRITE_TIMEOUT,
     },
     HttpBody, HttpRequest, HttpResponse, LOG_TARGET,
 };
 
-use futures_util::{
-    future::{Either, FutureExt},
-    io::{BufReader, BufWriter},
+use futures_util::future::{Either, FutureExt};
+use hyper::body::{Bytes, Incoming};
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo, TokioTimer},
+    service::TowerToHyperService,
 };
-use hyper::body::Bytes;
-use hyper_util::rt::{TokioExecutor, TokioIo};
 use jsonrpsee_core::{
     id_providers::RandomIntegerIdProvider,
     middleware::{Batch, BatchEntry, BatchEntryErr, RpcServiceBuilder, RpcServiceT},
@@ -70,19 +80,16 @@ use serde::{
     },
     Deserialize,
 };
-use soketto::handshake::http::is_upgrade_request;
 use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
-    sync::{mpsc, watch, Notify, OwnedSemaphorePermit},
+    sync::{mpsc, watch, Notify},
 };
-use tokio_util::compat::TokioAsyncReadCompatExt;
-use tower::{layer::util::Identity, Layer, Service};
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tower::{layer::util::Identity, Layer, Service, ServiceExt};
 use tracing::{instrument, Instrument};
 
 /// Default maximum connections allowed.
 const MAX_CONNECTIONS: u32 = 100;
-
-type Notif<'a> = Option<Cow<'a, JsonRawValue>>;
 
 /// JSON RPC server.
 pub struct Server<HttpMiddleware = Identity, RpcMiddleware = Identity> {
@@ -216,11 +223,15 @@ pub struct ServerConfig {
     pub(crate) message_buffer_capacity: u32,
     /// ID provider.
     pub(crate) id_provider: Arc<dyn IdProvider>,
-    /// Timeout for receiving the first request of a connection.
+    /// Timeout for receiving the first request of a connection, and the next request head of an
+    /// HTTP/1 keep-alive connection.
     pub(crate) first_request_timeout: Option<Duration>,
     /// Timeout for writing a single message to a WebSocket connection and for a stalled HTTP
     /// response write.
     pub(crate) write_timeout: Duration,
+    /// Interval at which WebSocket connections are pinged. A connection that completes neither a
+    /// message nor a pong within twice this interval is closed.
+    pub(crate) ping_interval: Duration,
 }
 
 /// The builder to configure and create a JSON-RPC server configuration.
@@ -248,7 +259,7 @@ pub struct ConnectionState {
     /// Connection ID
     pub(crate) conn_id: usize,
     /// Connection guard.
-    pub(crate) _conn_permit: Arc<OwnedSemaphorePermit>,
+    pub(crate) _conn_permit: Arc<ConnectionPermit>,
 }
 
 impl ConnectionState {
@@ -256,7 +267,7 @@ impl ConnectionState {
     pub fn new(
         stop_handle: StopHandle,
         conn_id: usize,
-        conn_permit: OwnedSemaphorePermit,
+        conn_permit: ConnectionPermit,
     ) -> ConnectionState {
         Self { stop_handle, conn_id, _conn_permit: Arc::new(conn_permit) }
     }
@@ -290,6 +301,7 @@ impl Default for ServerConfigBuilder {
             id_provider: Arc::new(RandomIntegerIdProvider),
             first_request_timeout: Some(DEFAULT_FIRST_REQUEST_TIMEOUT),
             write_timeout: DEFAULT_WRITE_TIMEOUT,
+            ping_interval: DEFAULT_PING_INTERVAL,
         })
     }
 }
@@ -415,7 +427,8 @@ impl ServerConfigBuilder {
     }
 
     /// Configure how long a connection may take to send its first request, e.g. the WebSocket
-    /// upgrade request, before it is closed. `None` disables the timeout.
+    /// upgrade request, before it is closed. An HTTP/1 keep-alive connection is closed as well
+    /// when it takes longer to send the head of its next request. `None` disables the timeout.
     ///
     /// Default is 30 seconds.
     pub fn set_first_request_timeout(mut self, first_request_timeout: Option<Duration>) -> Self {
@@ -629,8 +642,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 }
 
 /// Data required by the server to handle requests.
-#[derive(Debug, Clone)]
-struct ServiceData {
+struct ServiceData<S> {
     /// Registered server methods.
     methods: Methods,
     /// Stop handle.
@@ -641,16 +653,36 @@ struct ServiceData {
     conn_guard: ConnectionGuard,
     /// ServerConfig
     server_cfg: ServerConfig,
+    /// RPC service for the HTTP requests of the connection, built on the first one.
+    http_rpc_service: OnceLock<Arc<S>>,
 }
 
 /// jsonrpsee tower service without HTTP specific middleware.
 ///
+/// hyper clones the service for every request, so the connection's state is shared behind an
+/// [`Arc`].
+///
 /// # Note
 /// This is similar to [`hyper::service::service_fn`].
-#[derive(Debug, Clone)]
-pub struct TowerServiceNoHttp<L> {
-    inner: ServiceData,
+pub struct TowerServiceNoHttp<L: Layer<RpcService>> {
+    inner: Arc<ServiceData<L::Service>>,
     rpc_middleware: RpcServiceBuilder<L>,
+}
+
+impl<L: Layer<RpcService> + Clone> Clone for TowerServiceNoHttp<L> {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone(), rpc_middleware: self.rpc_middleware.clone() }
+    }
+}
+
+// Not derived, a derive would require the RPC service of the middleware to be `Debug` as well.
+impl<L: Layer<RpcService> + fmt::Debug> fmt::Debug for TowerServiceNoHttp<L> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TowerServiceNoHttp")
+            .field("conn_id", &self.inner.conn_id)
+            .field("rpc_middleware", &self.rpc_middleware)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<Body, RpcMiddleware> Service<HttpRequest<Body>> for TowerServiceNoHttp<RpcMiddleware>
@@ -677,16 +709,19 @@ where
         let request = request.map(HttpBody::new);
 
         let conn_guard = &self.inner.conn_guard;
-        let stop_handle = self.inner.stop_handle.clone();
         let conn_id = self.inner.conn_id;
 
-        tracing::trace!(target: LOG_TARGET, "{:?}", request);
+        tracing::trace!(
+            target: LOG_TARGET,
+            "{} {} {:?}",
+            request.method(),
+            request.uri(),
+            request.version()
+        );
 
         let Some(conn_permit) = conn_guard.try_acquire() else {
             return async move { Ok(http::response::too_many_requests()) }.boxed();
         };
-
-        let conn = ConnectionState::new(stop_handle.clone(), conn_id, conn_permit);
 
         let max_conns = conn_guard.max_connections();
         let curr_conns = max_conns - conn_guard.available_connections();
@@ -695,11 +730,11 @@ where
         let is_upgrade_request = is_upgrade_request(&request);
 
         if self.inner.server_cfg.enable_ws && is_upgrade_request {
-            let this = self.inner.clone();
+            let this = &self.inner;
+            let conn = ConnectionState::new(this.stop_handle.clone(), conn_id, conn_permit);
+            let server_cfg = this.server_cfg.clone();
 
-            let mut server = soketto::handshake::http::Server::new();
-
-            let response = match server.receive_request(&request) {
+            let response = match upgrade_response(&request) {
                 Ok(response) => {
                     let (tx, rx) = mpsc::channel(this.server_cfg.message_buffer_capacity as usize);
                     let sink =
@@ -731,15 +766,22 @@ where
                                 }
                             };
 
-                            let io = TokioIo::new(upgraded);
-
-                            let stream = BufReader::new(BufWriter::new(io.compat()));
-                            let mut ws_builder = server.into_builder(stream);
-                            ws_builder.set_max_message_size(this.server_cfg.max_request_body_size as usize);
-                            let (sender, receiver) = ws_builder.finish();
+                            let max_request_size = server_cfg.max_request_body_size as usize;
+                            // `tungstenite` reads a frame whole into its read buffer and never
+                            // shrinks it, so after a frame near the limit the connection keeps
+                            // that much allocated until it closes. An unfinished fragmented
+                            // message takes about twice its size: the collected fragments and the
+                            // read buffer that grew for them.
+                            // Frames that a client didn't mask have always been read.
+                            let ws_config = WebSocketConfig::default()
+                                .max_message_size(Some(max_request_size))
+                                .max_frame_size(Some(max_request_size))
+                                .accept_unmasked_frames(true);
+                            let (sender, receiver) =
+                                ws::split(TokioIo::new(upgraded), ws_config).await;
 
                             let params = BackgroundTaskParams {
-                                server_cfg: this.server_cfg,
+                                server_cfg,
                                 conn,
                                 ws_sender: sender,
                                 ws_receiver: receiver,
@@ -755,11 +797,15 @@ where
                         .in_current_span(),
                     );
 
-                    response.map(|()| HttpBody::empty())
+                    response
                 }
                 Err(e) => {
                     tracing::debug!(target: LOG_TARGET, "Could not upgrade connection: {}", e);
-                    HttpResponse::new(HttpBody::from(format!("Could not upgrade connection: {e}")))
+                    let mut response = HttpResponse::new(HttpBody::from(format!(
+                        "Could not upgrade connection: {e}"
+                    )));
+                    *response.status_mut() = hyper::StatusCode::BAD_REQUEST;
+                    response
                 }
             };
 
@@ -768,23 +814,27 @@ where
             let this = &self.inner;
             let max_response_size = this.server_cfg.max_response_body_size;
             let max_request_size = this.server_cfg.max_request_body_size;
-            let methods = this.methods.clone();
             let batch_config = this.server_cfg.batch_requests_config;
 
-            let rpc_service = self.rpc_middleware.service(RpcService::without_subscriptions(
-                methods,
-                max_response_size as usize,
-                this.conn_id.into(),
-            ));
+            let rpc_service = this
+                .http_rpc_service
+                .get_or_init(|| {
+                    Arc::new(self.rpc_middleware.service(RpcService::without_subscriptions(
+                        this.methods.clone(),
+                        max_response_size as usize,
+                        this.conn_id.into(),
+                    )))
+                })
+                .clone();
 
             Box::pin(async move {
                 let rp =
-                    http::call_with_service(request, batch_config, max_request_size, rpc_service)
+                    http::call_with_service(request, batch_config, max_request_size, &*rpc_service)
                         .await;
                 // NOTE: The `conn guard` must be held until the response body is written (or
                 // dropped) to respect the `max_connections` limit, because hyper writes the body
                 // after this future completes.
-                Ok(rp.map(|body| HttpBody::new(PermitBody::new(body, conn))))
+                Ok(rp.map(|body| HttpBody::new(PermitBody::new(body, conn_permit))))
             })
         } else {
             // NOTE: the `conn guard` is dropped when this function which is fine
@@ -807,10 +857,11 @@ struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
     methods: Methods,
 }
 
-#[instrument(name = "connection", skip_all, fields(remote_addr = %params.remote_addr, conn_id = %params.conn_id), level = "INFO")]
+#[instrument(name = "connection", target = LOG_TARGET, skip_all, fields(remote_addr = %params.remote_addr, conn_id = %params.conn_id), level = "INFO")]
 fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
     params: ProcessConnection<HttpMiddleware, RpcMiddleware>,
 ) where
+    RpcMiddleware: Layer<RpcService>,
     HttpMiddleware: Layer<TowerServiceNoHttp<RpcMiddleware>> + Send + 'static,
     <HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service: Service<HttpRequest, Response = HttpResponse<Body>, Error = BoxError>
         + Clone
@@ -844,27 +895,33 @@ fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
     let write_timeout = server_cfg.write_timeout;
 
     let tower_service = TowerServiceNoHttp {
-        inner: ServiceData {
+        inner: Arc::new(ServiceData {
             server_cfg,
             methods,
             stop_handle: stop_handle.clone(),
             conn_id,
             conn_guard: conn_guard.clone(),
-        },
+            http_rpc_service: OnceLock::new(),
+        }),
         rpc_middleware,
     };
 
     let service = http_middleware.service(tower_service);
 
-    tokio::spawn(async move {
+    let serve = async move {
         let request_received = Arc::new(Notify::new());
         // this requires Clone.
         let service = NotifyOnRequest::new(
-            crate::utils::TowerToHyperService::new(service),
+            TowerToHyperService::new(
+                service.map_request(|request: HttpRequest<Incoming>| request.map(HttpBody::new)),
+            ),
             request_received.clone(),
         );
         let io = TokioIo::new(WriteTimeoutIo::new(socket, write_timeout));
-        let builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+        let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+        // Also bounds how long an idle HTTP/1 keep-alive connection waits for its next request,
+        // which holds the socket without a connection permit.
+        builder.http1().timer(TokioTimer::new()).header_read_timeout(first_request_timeout);
         let conn = builder.serve_connection_with_upgrades(io, service);
         let stopped = stop_handle.shutdown();
 
@@ -885,7 +942,9 @@ fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
             tracing::debug!(target: LOG_TARGET, "HTTP serve connection failed {:?}", e);
         }
         drop(drop_on_completion)
-    });
+    };
+    // `#[instrument]` only spans this function, so the connection span is carried into the task.
+    tokio::spawn(serve.in_current_span());
 }
 
 enum AcceptConnection<S> {
@@ -934,7 +993,7 @@ where
     if is_single {
         if let Ok(req) = serde_json::from_slice::<Request<'_>>(body) {
             catch_call_panic(req.id(), || rpc_service.call(req)).await
-        } else if let Ok(notif) = deserialize_notification::<Notif>(body) {
+        } else if let Ok(notif) = deserialize_notification(body) {
             rpc_service.notification(notif).await
         } else {
             let (id, code) = prepare_error(body);
@@ -1004,7 +1063,7 @@ fn parse_batch_entry(call: &JsonRawValue) -> Result<BatchEntry<'_>, BatchEntryEr
 
     if let Ok(req) = serde_json::from_str(call.get()) {
         Ok(BatchEntry::Call(req))
-    } else if let Ok(notif) = deserialize_notification::<Notif>(call.get().as_bytes()) {
+    } else if let Ok(notif) = deserialize_notification(call.get().as_bytes()) {
         Ok(BatchEntry::Notification(notif))
     } else {
         let id = match serde_json::from_str::<jsonrpsee_types::InvalidRequest>(call.get()) {
@@ -1028,12 +1087,13 @@ struct ValidBatchEntry<'a> {
     #[serde(borrow)]
     method: Cow<'a, str>,
     #[serde(borrow)]
-    params: Option<Cow<'a, JsonRawValue>>,
+    params: Option<&'a JsonRawValue>,
 }
 
 impl<'a> From<ValidBatchEntry<'a>> for BatchEntry<'a> {
     fn from(entry: ValidBatchEntry<'a>) -> Self {
         let ValidBatchEntry { jsonrpc, id, method, params } = entry;
+        let params = params.map(Cow::Borrowed);
         match id {
             Some(id) => Self::Call(Request { jsonrpc, id, method, params }),
             None => Self::Notification(Notification::new(method, params)),
