@@ -71,7 +71,6 @@ tokio = { workspace = true, features = ["net"] }
 socket2 = { workspace = true, features = ["all"] }
 
 # misc
-humantime.workspace = true
 human_bytes.workspace = true
 eyre.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
