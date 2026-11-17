@@ -878,17 +878,22 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?hash, "Getting state by block hash");
         if let Some(state) = self.canonical_in_memory_state.state_by_hash(hash) {
-            self.state_provider_for_state(state)
-        } else if let Ok(state) = self.history_by_block_hash(hash) {
-            // This could be tracked by a historical block
-            Ok(state)
-        } else if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
-            // .. or this could be the pending state
-            Ok(pending)
-        } else {
-            // if we couldn't find it anywhere, then we should return an error
-            Err(ProviderError::StateForHashNotFound(hash))
+            return self.state_provider_for_state(state)
         }
+        match self.history_by_block_hash(hash) {
+            // The hash is not a canonical block, it can still be the pending block.
+            Err(ProviderError::BlockHashNotFound(not_found)) if not_found == hash => {}
+            result => return result,
+        }
+        if let Some(pending) = self.pending_state_by_hash(hash)? {
+            return Ok(pending)
+        }
+        // Only canonical blocks and the pending block are served. A block that is executed and
+        // tracked in memory without being either is reported as such, not as an unknown hash.
+        if self.canonical_in_memory_state.in_memory_state().contains(&hash) {
+            return Err(ProviderError::StateForHashNotCanonical(hash))
+        }
+        Err(ProviderError::StateForHashNotFound(hash))
     }
 
     /// Returns the state provider for pending state.
@@ -4009,6 +4014,44 @@ mod tests {
             .update_chain(NewCanonicalChain::Commit { new: vec![block] });
 
         assert!(other.canonical_in_memory_state.state_by_hash(hash).is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn state_by_block_hash_reports_executed_blocks_that_are_not_canonical() -> eyre::Result<()> {
+        let provider = BlockchainProvider::new(test_provider_factory_with_genesis()?)?;
+        let genesis = provider.canonical_in_memory_state.get_canonical_head();
+        let mut block_builder = TestBlockBuilder::eth();
+        let canonical = block_builder.get_executed_block_with_number(1, genesis.hash());
+        let canonical_hash = canonical.recovered_block().hash();
+        let fork = block_builder.get_executed_block_with_number(1, genesis.hash());
+        let fork_hash = fork.recovered_block().hash();
+        let pending = block_builder.get_executed_block_with_number(2, canonical_hash);
+        let pending_hash = pending.recovered_block().hash();
+
+        provider
+            .canonical_in_memory_state
+            .update_chain(NewCanonicalChain::Commit { new: vec![canonical] });
+        provider.canonical_in_memory_state.insert_executed(fork);
+        provider.canonical_in_memory_state.set_pending_block(pending);
+
+        // Canonical blocks and the pending block are served.
+        provider.state_by_block_hash(canonical_hash)?;
+        provider.state_by_block_hash(pending_hash)?;
+
+        // The fork is tracked without being either, so its hash is reported as not canonical.
+        assert!(matches!(
+            provider.state_by_block_hash(fork_hash).err(),
+            Some(ProviderError::StateForHashNotCanonical(hash)) if hash == fork_hash
+        ));
+
+        // A hash that is neither tracked in memory nor stored in the database is reported as not
+        // found.
+        let unknown_hash = B256::random();
+        assert!(matches!(
+            provider.state_by_block_hash(unknown_hash).err(),
+            Some(ProviderError::StateForHashNotFound(hash)) if hash == unknown_hash
+        ));
         Ok(())
     }
 }

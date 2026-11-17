@@ -706,7 +706,7 @@ async fn test_engine_ssz_witness_requires_provider_parent_state() -> eyre::Resul
             "type": "/engine-api/errors/internal",
             "detail": format!(
                 "parent state {parent_hash} is unavailable through the provider: \
-                 no state found for block {parent_hash}"
+                 no state served for block {parent_hash}: the block is executed but not canonical"
             ),
         })
     );

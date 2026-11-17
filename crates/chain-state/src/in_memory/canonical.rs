@@ -97,6 +97,11 @@ impl<N: NodePrimitives> InMemoryState<N> {
         self.inner.blocks.read().canonical().get(&hash).cloned()
     }
 
+    /// Returns `true` if a block with the given hash is tracked, canonical or not.
+    pub fn contains(&self, hash: &B256) -> bool {
+        self.inner.blocks.read().contains(hash)
+    }
+
     /// Returns the state for a given block number.
     pub(crate) fn state_by_number(&self, number: u64) -> Option<Arc<BlockState<N>>> {
         self.inner.blocks.read().canonical().by_number(number).cloned()
@@ -510,6 +515,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         }
         None
     }
+
+    /// Returns the in-memory state this is the canonical view of.
+    pub fn in_memory_state(&self) -> &InMemoryState<N> {
+        &self.inner.in_memory_state
+    }
 }
 
 #[cfg(test)]
@@ -705,7 +715,7 @@ mod tests {
         let block2_hash = block2.recovered_block().hash();
         let fork2 = test_block_builder.get_executed_block_with_number(2, block1_hash);
         let fork2_hash = fork2.recovered_block().hash();
-        let tracked = |hash| state.inner.in_memory_state.inner.blocks.read().contains(&hash);
+        let tracked = |hash| state.in_memory_state().contains(&hash);
 
         // Executed blocks are tracked, but not canonical.
         state.insert_executed(block1.clone());
