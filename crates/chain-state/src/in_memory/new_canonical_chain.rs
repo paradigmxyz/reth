@@ -1,6 +1,5 @@
 use super::ExecutedBlock;
 use crate::CanonStateNotification;
-use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{Chain, ExecutionOutcome};

@@ -1,7 +1,7 @@
 use crate::{
     providers::{
-        ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
-        StaticFileProviderRWRefMut,
+        ConsistentProvider, LatestStateProvider, ProviderNodeTypes, RocksDBProvider,
+        StaticFileProvider, StaticFileProviderRWRefMut,
     },
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
@@ -821,8 +821,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
             trace!(target: "providers::blockchain", "Using head state for latest state provider");
             self.state_provider_for_state(state)
         } else {
+            let head = self.canonical_in_memory_state.get_canonical_head();
+            let provider = self.database.provider()?;
+            if provider.best_block_number()? > head.number() {
+                // After a rewind the canonical head can move before persistence truncates disk.
+                return Ok(self.state_provider_from_database(provider, head.hash()))
+            }
             trace!(target: "providers::blockchain", "Using database state for latest state provider");
-            self.database.latest()
+            Ok(Box::new(LatestStateProvider::new(provider)))
         }
     }
 

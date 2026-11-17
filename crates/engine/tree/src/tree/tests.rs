@@ -2020,12 +2020,15 @@ async fn test_fcu_rewinds_and_updates_markers_with_or_without_payload_attributes
 }
 
 #[tokio::test]
-async fn test_fcu_rewind_behind_persisted_tip_is_rejected() {
+async fn test_fcu_rewind_without_execution_history_is_rejected() {
     let chain_spec = MAINNET.clone();
     let mut builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
     let blocks: Vec<_> = builder.get_executed_blocks(1..5).collect();
-    let mut test_harness = TestHarness::new(chain_spec).with_blocks(blocks.clone());
+    let mut test_harness = TestHarness::new(chain_spec).with_blocks(blocks[3..].to_vec());
 
+    // The mock provider serves persisted blocks but has no persisted execution history.
+    test_harness
+        .persist_blocks(blocks[..3].iter().map(|block| block.recovered_block().clone()).collect());
     let ancestor = blocks[1].recovered_block();
     let current_head = blocks[3].recovered_block();
     test_harness.tree.persistence_state.last_persisted_block =

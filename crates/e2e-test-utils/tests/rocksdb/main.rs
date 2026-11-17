@@ -10,6 +10,7 @@ use reth_e2e_test_utils::{node::Finality, wait::poll_until, E2ETestSetupExt};
 use reth_node_ethereum::EthereumNode;
 use reth_provider::RocksDBProviderFactory;
 use reth_prune_types::PruneSegment;
+use reth_transaction_pool::TransactionPool;
 use std::time::Duration;
 
 /// Polls `RocksDB` until the given `tx_hash` appears in `TransactionHashNumbers` and returns its
@@ -318,6 +319,7 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_restartable_nodes()
         .with_storage_v2(true)
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
@@ -329,7 +331,6 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
 
     // Use two separate accounts to avoid nonce conflicts during reorg
     let (mut account1, mut account2) = (wallet.account(0), wallet.account(1));
-    let client = node.rpc_client().expect("RPC client");
 
     // Mine block 1 with a transaction from account1
     let raw_tx1 = account1.transfer(Address::random(), U256::from(100)).await;
@@ -365,16 +366,28 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     let tx_number3 = poll_tx_in_rocksdb(&node.inner.provider, tx_hash3).await?;
     assert_eq!(tx_number3, 2, "Third tx should have tx_number 2");
 
-    // The reorg must unwind blocks 2 and 3 from disk. Also wait for the pool to drop their
-    // transactions, so the alternate block can't include tx2.
+    // Restart with blocks 2 and 3 persisted and the in-memory canonical chain empty.
     node.wait_for_persisted_block(3).await?;
     node.wait_for_pool_head(payload3.block().hash()).await?;
+    node = node.restart().await?;
+    let client = node.rpc_client().expect("RPC client");
+    assert_eq!(node.block_hash(3), payload3.block().hash());
+    assert!(node.inner.provider.canonical_in_memory_state().head_state().is_none());
 
-    // Reorg blocks 2 and 3 out with an alternate block 2 on block 1, which only includes a tx
-    // from account2 (nonce 0).
+    node.reorg_to(block1_hash).await?;
+    assert_eq!(node.current_forkchoice_state()?.head_block_hash, block1_hash);
+    let nonce: U256 =
+        client.request("eth_getTransactionCount", (account1.address(), "latest")).await?;
+    assert_eq!(nonce, U256::ONE);
+    node.wait_unwind(1).await?;
+    node.wait_for_pool_head(block1_hash).await?;
+    node.wait_for_pooled([tx_hash2, tx_hash3]).await?;
+    node.inner.pool.remove_transactions(vec![tx_hash2, tx_hash3]);
+
+    // The alternate block should contain only the new transaction from account2.
     let raw_alt_tx = account2.transfer(Address::random(), U256::from(100)).await;
     let alt_tx_hash = node.rpc.inject_tx(raw_alt_tx).await?;
-    let alt_payload = node.advance_block_on(block1_hash).await?;
+    let alt_payload = node.advance_block().await?;
     let alt_block_hash = alt_payload.block().hash();
     assert_eq!(alt_payload.block().number(), 2);
     assert_eq!(

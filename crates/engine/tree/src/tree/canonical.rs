@@ -262,27 +262,40 @@ where
         Ok(())
     }
 
-    /// Prepares an ancestor rewind when every block being reverted is still retained.
-    pub(super) fn retained_canonical_rewind(
+    /// Prepares an ancestor rewind, including persisted blocks with available execution history.
+    ///
+    /// Returns `None` if the blocks or state needed to unwind are no longer available.
+    pub(super) fn canonical_ancestor_rewind(
         &self,
         ancestor: &SealedHeader<N::BlockHeader>,
     ) -> ProviderResult<Option<NewCanonicalChain<N>>> {
-        let number = ancestor.number();
-        let persisted = self.persistence_state.last_persisted_block;
-        if number < persisted.number {
+        let mut cursor = self.state.tree_state.current_canonical_head;
+        let mut old = Vec::new();
+        while cursor.number > ancestor.number() {
+            let block = match self.canonical_block_by_hash(cursor.hash) {
+                Ok(block) => block,
+                Err(
+                    ProviderError::HeaderNotFound(_) |
+                    ProviderError::BlockExpired { .. } |
+                    ProviderError::InsufficientChangesets { .. } |
+                    ProviderError::StateAtBlockPruned(_) |
+                    ProviderError::StateForHashNotFound(_) |
+                    ProviderError::StateForNumberNotFound(_),
+                ) => return Ok(None),
+                Err(err) => return Err(err),
+            };
+            cursor = block.recovered_block().parent_num_hash();
+            old.push(block);
+        }
+        if cursor != ancestor.num_hash() {
             return Ok(None)
         }
+        old.reverse();
 
-        let current_head = self.state.tree_state.canonical_block_number();
-        let old = self.collect_blocks_for_canonical_unwind(number, current_head);
-        if old.len() as u64 != current_head - number {
-            return Ok(None)
-        }
-
-        let tip = if let Some(state) = self.canonical_in_memory_state.state_by_number(number) {
+        let tip = if let Some(state) = self.canonical_in_memory_state.state_by_hash(ancestor.hash())
+        {
             Arc::clone(&state.block_ref().recovered_block)
-        } else if ancestor.num_hash() == persisted {
-            // Persistence can evict the ancestor while retaining the entire reverted suffix.
+        } else {
             let Some(block) = self
                 .provider
                 .recovered_block(ancestor.hash().into(), TransactionVariant::WithHash)?
@@ -290,8 +303,6 @@ where
                 return Ok(None)
             };
             Arc::new(block)
-        } else {
-            return Ok(None)
         };
 
         Ok(Some(NewCanonicalChain::Revert { tip, old }))

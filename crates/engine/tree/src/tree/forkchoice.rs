@@ -239,7 +239,7 @@ where
                     self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
                 }
             } else if canonical_header.number() < self.state.tree_state.canonical_block_number() {
-                let Some(rewind) = self.retained_canonical_rewind(&canonical_header)? else {
+                let Some(rewind) = self.canonical_ancestor_rewind(&canonical_header)? else {
                     return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::too_deep_reorg())))
                 };
                 // A zero safe hash leaves the previous marker in place.

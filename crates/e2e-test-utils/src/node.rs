@@ -350,9 +350,8 @@ where
     /// finalized blocks of the node. Its effect depends on `parent`:
     /// - The current head: the engine starts a payload job on that head.
     /// - A canonical ancestor compatible with the safe and finalized blocks: the default Ethereum
-    ///   engine rewinds the head to `parent` before building if the reverted blocks are still
-    ///   retained. This includes a rewind to the persisted tip. A rewind outside that range returns
-    ///   an error. A custom engine or tree configuration can change this behavior.
+    ///   engine rewinds the head to `parent` before building if the execution history needed for
+    ///   the unwind is available. A custom engine or tree configuration can change this behavior.
     /// - A block on a side chain: the engine first makes the side chain canonical, so `parent`
     ///   becomes the head, reorging the chain.
     /// - A canonical block below the finalized block, or a side chain block that does not descend
@@ -1207,7 +1206,7 @@ where
     /// finalized blocks, and returns once the block is the latest block.
     ///
     /// The engine can adopt a block on a side chain, for example a chain the node left with
-    /// [`Self::advance_fork`], or rewind to a retained canonical ancestor. The target must be at or
+    /// [`Self::advance_fork`], or rewind to a canonical ancestor. The target must be at or
     /// above the safe and finalized blocks on its chain. Use [`Finality::Keep`] or
     /// [`Finality::Lag`] to keep blocks reorgable, see [`Self::set_finality`].
     ///
@@ -1218,7 +1217,7 @@ where
     /// [`Self::wait_for_pool`].
     ///
     /// Returns an error for an unknown or invalid target, a target incompatible with the safe
-    /// or finalized blocks, or a rewind outside the retained execution range.
+    /// or finalized blocks, or a rewind with missing execution history.
     pub async fn reorg_to(&self, hash: B256) -> eyre::Result<()> {
         let state = ForkchoiceState { head_block_hash: hash, ..self.current_forkchoice_state()? };
         self.send_forkchoice_updated(state, None).await?;
