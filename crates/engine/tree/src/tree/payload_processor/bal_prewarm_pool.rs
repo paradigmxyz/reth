@@ -11,7 +11,7 @@ use std::{
     thread::JoinHandle,
 };
 use tokio::sync::oneshot;
-use tracing::trace;
+use tracing::{error, trace};
 
 /// Builds a fresh EVM provider over the block's parent state. Type-erased so the pool is not
 /// generic over the provider factory; each worker builds its own per block.
@@ -135,8 +135,10 @@ impl Drop for BalPrewarmPool {
         self.workers.clear();
         let current = std::thread::current().id();
         for handle in self.handles.drain(..) {
-            if handle.thread().id() != current {
-                let _ = handle.join();
+            if handle.thread().id() != current &&
+                let Err(err) = handle.join()
+            {
+                error!(target: "engine::tree::bal_prewarm_pool", ?err, "BAL prewarm worker panicked");
             }
         }
     }
@@ -231,7 +233,7 @@ impl Drop for SendOnDrop {
 mod tests {
     use super::*;
     use reth_provider::ProviderError;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn drop_waits_for_the_workers_to_exit() {
@@ -249,7 +251,9 @@ mod tests {
             })
         };
         pool.begin_block(build, ExecutionCache::new(1_000), None);
+        let deadline = Instant::now() + Duration::from_secs(5);
         while started.load(Ordering::SeqCst) < num_threads {
+            assert!(Instant::now() < deadline, "BAL prewarm workers did not start");
             std::thread::yield_now();
         }
 

@@ -1625,11 +1625,15 @@ impl JsTraceInterrupt {
         not(feature = "js-tracer"),
         expect(clippy::missing_const_for_fn, reason = "only JS tracers can be interrupted")
     )]
-    fn attach(&self, mut inspector: DebugInspector) -> DebugInspector {
+    fn attach(&self, inspector: DebugInspector) -> DebugInspector {
         #[cfg(feature = "js-tracer")]
-        if let Some((interrupt, _)) = &self.js {
-            inspector.set_js_interrupt(interrupt);
-        }
+        let inspector = {
+            let mut inspector = inspector;
+            if let Some((interrupt, _)) = &self.js {
+                inspector.set_js_interrupt(interrupt);
+            }
+            inspector
+        };
         inspector
     }
 

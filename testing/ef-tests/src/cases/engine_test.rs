@@ -7,16 +7,19 @@
 //! versions the fixture names, so the handler's own parameter decoding and version checks run.
 //! No node, RPC server or network is started.
 
-use alloy_primitives::B256;
-use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
-use ef_tests::{
-    case::{load_json, spawn_worker},
+use crate::{
+    case::{load_json, run_workers},
     models::{EngineNewPayload, EngineTest},
     result::{FixtureResult, Rejection},
     Error,
 };
+use alloy_primitives::B256;
+use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
 use futures::StreamExt;
-use jsonrpsee::RpcModule;
+use jsonrpsee::{
+    types::{Response, ResponsePayload},
+    RpcModule,
+};
 use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_db::{
     init_db,
@@ -56,6 +59,7 @@ use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     fs,
+    num::NonZeroUsize,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
@@ -65,6 +69,9 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// The cross-block cache size of each fixture's engine, in MB (`--engine.cross-block-cache-size`).
 const CROSS_BLOCK_CACHE_SIZE_MB: usize = 1;
 
+/// BAL prewarm workers per fixture engine; production nodes use their normal pool size.
+const BAL_PREWARM_THREADS: NonZeroUsize = NonZeroUsize::new(2).unwrap();
+
 /// The engine tree's persistence threshold (`--engine.persistence-threshold`): more blocks than a
 /// fixture has, so the tree persists them only when it terminates.
 const PERSISTENCE_THRESHOLD: u64 = 1_000_000;
@@ -72,47 +79,60 @@ const PERSISTENCE_THRESHOLD: u64 = 1_000_000;
 /// How long a fixture's engine tree gets to persist its blocks and stop.
 const ENGINE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Maximum number of fixture runtimes waiting for background database handles per worker.
+const MAX_PENDING_ENGINES: usize = 8;
+
+/// Bound requests so a stopped or stuck engine cannot hang the whole fixture set.
+const ENGINE_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// Runs every fixture in the JSON `files` on `workers` threads and passes one result per
-/// fixture to `on_result` as it completes. A file that fails to load is reported as a failed
-/// result. Each fixture's datadir is created in the system temporary directory (`TMPDIR`), where
-/// a tmpfs avoids disk syncs, and its genesis is written with `storage_settings`.
-pub(crate) fn run_fixtures(
+/// fixture to `on_result` as it completes. A file that fails to load is reported as an error,
+/// without creating a fixture result. Each datadir is created in the temporary directory
+/// (`TMPDIR`), where a tmpfs avoids disk syncs, and its genesis is written with `storage_settings`.
+/// Returns an error if the fixture engines cannot be cleaned up completely.
+pub fn run_fixtures(
     files: Vec<PathBuf>,
     bal_sequential: bool,
     storage_settings: StorageSettings,
     workers: usize,
-    on_result: &(dyn Fn(FixtureResult) + Sync),
-) {
+    on_result: &(dyn Fn(Result<FixtureResult, Error>) + Sync),
+) -> Result<(), Error> {
     let tree_config = tree_config(bal_sequential);
     let datadir_root = std::env::temp_dir();
-    let files = Mutex::new(files.into_iter());
-    // A closure, so the queue's lock is released before the file runs: a guard taken in the
-    // `while let` condition would be held until the end of the loop body.
-    let next_file = || files.lock().unwrap().next();
-    std::thread::scope(|scope| {
-        for _ in 0..workers.max(1) {
-            spawn_worker(scope, || {
-                let mut cleanup = Cleanup::default();
-                while let Some(path) = next_file() {
-                    let tests = match load_json::<BTreeMap<String, EngineTest>>(&path) {
-                        Ok(tests) => tests,
-                        Err(err) => {
-                            on_result(FixtureResult::load_failed(&path, err));
-                            continue
-                        }
-                    };
-                    for (name, test) in tests {
-                        let (result, remains) =
-                            run_fixture(name, &test, &tree_config, storage_settings, &datadir_root);
-                        on_result(result);
-                        cleanup.remains.push(remains);
-                        cleanup.sweep();
-                    }
+    let cleanup_error = Mutex::new(None);
+    let record_error = |err| {
+        let mut first = cleanup_error.lock().unwrap();
+        if first.is_none() {
+            *first = Some(err);
+        } else {
+            eprintln!("error: {err}");
+        }
+    };
+    run_workers(files, workers, |files| {
+        let mut cleanup = Cleanup::default();
+        for path in files {
+            let tests = match load_json::<BTreeMap<String, EngineTest>>(&path) {
+                Ok(tests) => tests,
+                Err(err) => {
+                    on_result(Err(err));
+                    continue
                 }
-                cleanup.finish();
-            });
+            };
+            for (name, test) in tests {
+                let (result, remains) =
+                    run_fixture(name, &test, &tree_config, storage_settings, &datadir_root);
+                on_result(Ok(result));
+                if let Err(err) = cleanup.push(remains) {
+                    record_error(err);
+                    return
+                }
+            }
+        }
+        if let Err(err) = cleanup.finish() {
+            record_error(err);
         }
     });
+    cleanup_error.into_inner().unwrap().map_or(Ok(()), Err)
 }
 
 /// Returns the engine tree configuration of the node with the runner's engine arguments.
@@ -126,7 +146,8 @@ fn tree_config(bal_sequential: bool) -> TreeConfig {
         ..Default::default()
     };
     engine_args.validate().expect("the runner's engine arguments are valid");
-    engine_args.tree_config()
+    // Fixtures have their own engine; avoid creating the production pool's 128 threads per case.
+    engine_args.tree_config().with_bal_prewarm_threads(BAL_PREWARM_THREADS)
 }
 
 /// What the engine ended with, reported beside the verdict.
@@ -187,6 +208,16 @@ struct Cleanup {
 }
 
 impl Cleanup {
+    /// Applies backpressure before pending runtimes or directories can grow beyond the limit.
+    fn push(&mut self, remains: Remains) -> Result<(), Error> {
+        self.remains.push(remains);
+        self.sweep();
+        if self.remains.len() >= MAX_PENDING_ENGINES || self.datadirs.len() >= MAX_PENDING_ENGINES {
+            std::mem::take(self).finish()?;
+        }
+        Ok(())
+    }
+
     /// Clears the remains whose databases were released and retries the datadirs that could not be
     /// removed yet.
     fn sweep(&mut self) {
@@ -199,7 +230,7 @@ impl Cleanup {
 
     /// Sweeps until everything is cleaned up or [`ENGINE_SHUTDOWN_TIMEOUT`] passes, then clears
     /// what is left and reports the datadirs that could not be removed.
-    fn finish(mut self) {
+    fn finish(mut self) -> Result<(), Error> {
         let deadline = std::time::Instant::now() + ENGINE_SHUTDOWN_TIMEOUT;
         self.sweep();
         while !(self.remains.is_empty() && self.datadirs.is_empty()) &&
@@ -208,12 +239,17 @@ impl Cleanup {
             std::thread::sleep(Duration::from_millis(10));
             self.sweep();
         }
+        let unreleased = self.remains.len();
         self.datadirs.extend(self.remains.into_iter().filter_map(Remains::clear));
-        for datadir in self.datadirs {
-            if let Err(err) = fs::remove_dir_all(&datadir) {
-                eprintln!("failed to remove {}: {err}", datadir.display());
-            }
+        for path in self.datadirs {
+            fs::remove_dir_all(&path).map_err(|error| Error::Io { path, error })?;
         }
+        if unreleased > 0 {
+            return Err(Error::Assertion(format!(
+                "{unreleased} fixture engines retained database handles after shutdown"
+            )))
+        }
+        Ok(())
     }
 }
 
@@ -275,14 +311,17 @@ async fn run_case(
     let datadir = tempfile::Builder::new()
         .prefix("reth-enginetest-")
         .tempdir_in(datadir_root)
-        .map_err(|err| Error::Assertion(format!("failed to create a datadir: {err}")))?
+        .map_err(|err| Error::Io { path: datadir_root.to_path_buf(), error: err })?
         .keep();
     remains.datadir = Some(datadir.clone());
     let engine = Engine::start(chain_spec, &datadir, tree_config, storage_settings, runtime)?;
     let result = drive(&engine.rpc, test, outcome).await;
-    outcome.last_block_hash = engine.provider.chain_info().ok().map(|info| info.best_hash);
-    remains.databases = Some(engine.stop().await);
+    let head = engine.provider.chain_info().map(|info| info.best_hash);
+    let (databases, shutdown) = engine.stop().await;
+    remains.databases = Some(databases);
+    outcome.last_block_hash = Some(head?);
     result?;
+    shutdown?;
 
     match outcome.last_block_hash {
         Some(hash) if hash == test.lastblockhash => Ok(()),
@@ -313,9 +352,6 @@ impl Engine {
         storage_settings: StorageSettings,
         runtime: &Runtime,
     ) -> Result<Self, Error> {
-        let setup_err = |err: &dyn std::fmt::Display| {
-            Error::Assertion(format!("failed to set up the engine: {err}"))
-        };
         let db = Arc::new(
             init_db(
                 datadir.join("db"),
@@ -323,25 +359,27 @@ impl Engine {
                 // (`--db.sync-mode safe-no-sync`).
                 DatabaseArguments::test().with_sync_mode(Some(SyncMode::SafeNoSync)),
             )
-            .map_err(|e| setup_err(&e))?,
+            .map_err(|err| Error::engine("failed to set up the engine", err))?,
         );
         let rocksdb = RocksDBBuilder::new(datadir.join("rocksdb"))
             .with_default_tables()
             .build()
-            .map_err(|e| setup_err(&e))?;
+            .map_err(|err| Error::engine("failed to set up the engine", err))?;
         let overlay_manager = OverlayManager::new(runtime.state_trie_overlay_worker_pool());
         let factory = ProviderFactory::<FixtureNode>::new(
             db.clone(),
             chain_spec.clone(),
             StaticFileProvider::read_write(datadir.join("static_files"))
-                .map_err(|e| setup_err(&e))?,
+                .map_err(|err| Error::engine("failed to set up the engine", err))?,
             rocksdb.clone(),
             runtime.clone(),
         )
-        .map_err(|e| setup_err(&e))?
+        .map_err(|err| Error::engine("failed to set up the engine", err))?
         .with_overlay_manager(overlay_manager.clone());
-        init_genesis_with_settings(&factory, storage_settings).map_err(|e| setup_err(&e))?;
-        let provider = BlockchainProvider::new(factory.clone()).map_err(|e| setup_err(&e))?;
+        init_genesis_with_settings(&factory, storage_settings)
+            .map_err(|err| Error::engine("failed to set up the engine", err))?;
+        let provider = BlockchainProvider::new(factory.clone())
+            .map_err(|err| Error::engine("failed to set up the engine", err))?;
 
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
         let evm_config = EthEvmConfig::new(chain_spec.clone());
@@ -428,17 +466,29 @@ impl Engine {
 
     /// Asks the engine tree to persist its blocks and stop, as a node does on shutdown, and
     /// returns the databases, which background tasks may still hold.
-    async fn stop(self) -> Databases {
+    async fn stop(self) -> (Databases, Result<(), Error>) {
         let Self { rpc, provider, databases, handler, to_handler } = self;
         drop(rpc);
         let (tx, rx) = tokio::sync::oneshot::channel();
-        if to_handler.send(FromOrchestrator::Terminate { tx }).is_ok() {
-            let _ = tokio::time::timeout(ENGINE_SHUTDOWN_TIMEOUT, rx).await;
-        }
+        let shutdown = if to_handler.send(FromOrchestrator::Terminate { tx }).is_ok() {
+            match tokio::time::timeout(ENGINE_SHUTDOWN_TIMEOUT, rx).await {
+                Ok(result) => {
+                    result.map_err(|err| Error::engine("engine stopped before persisting", err))
+                }
+                Err(err) => Err(Error::engine("timed out stopping the engine", err)),
+            }
+        } else {
+            Err(Error::Assertion("engine handler stopped before termination".to_string()))
+        };
         handler.abort();
-        let _ = handler.await;
+        let joined = match tokio::time::timeout(ENGINE_SHUTDOWN_TIMEOUT, handler).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(err)) if err.is_cancelled() => Ok(()),
+            Ok(Err(err)) => Err(Error::engine("engine handler panicked", err)),
+            Err(err) => Err(Error::engine("timed out joining the engine handler", err)),
+        };
         drop(provider);
-        databases
+        (databases, shutdown.and(joined))
     }
 }
 
@@ -447,21 +497,16 @@ impl Engine {
 async fn drive(rpc: &RpcModule<()>, test: &EngineTest, outcome: &mut Outcome) -> Result<(), Error> {
     let Some(first) = test.engine_new_payloads.first() else { return Ok(()) };
     forkchoice_updated(rpc, &first.forkchoice_updated_version, test.genesis_block_header.hash)
-        .await
-        .map_err(|err| Error::Assertion(format!("forkchoice update to genesis: {err}")))?;
+        .await?;
 
     for (idx, payload) in test.engine_new_payloads.iter().enumerate() {
-        new_payload(rpc, idx, payload, outcome)
-            .await
-            .map_err(|err| Error::Assertion(format!("payload {idx}: {err}")))?;
+        new_payload(rpc, idx, payload, outcome).await?;
         if payload.validation_error.is_none() && payload.error_code.is_none() {
             let head = payload.params[0]["blockHash"].as_str().unwrap_or_default();
             let head = head.parse().map_err(|err| {
                 Error::Assertion(format!("payload {idx}: invalid blockHash {head:?}: {err}"))
             })?;
-            forkchoice_updated(rpc, &payload.forkchoice_updated_version, head)
-                .await
-                .map_err(|err| Error::Assertion(format!("payload {idx}: {err}")))?;
+            forkchoice_updated(rpc, &payload.forkchoice_updated_version, head).await?;
         }
     }
     Ok(())
@@ -475,11 +520,7 @@ struct RpcError {
     data: Option<Value>,
 }
 
-impl RpcError {
-    const fn new(code: i64, message: String) -> Self {
-        Self { code, message, data: None }
-    }
-}
+impl std::error::Error for RpcError {}
 
 impl std::fmt::Display for RpcError {
     /// Formats the error as `<code>: <message>`, followed by `: <data>` when it carries data: a
@@ -494,24 +535,34 @@ impl std::fmt::Display for RpcError {
     }
 }
 
-/// Calls a method of the handler with raw JSON parameters, as a JSON-RPC request would, and
-/// returns its result or its error.
-async fn call(rpc: &RpcModule<()>, method: &str, params: Value) -> Result<Value, RpcError> {
-    let request = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
-    let (response, _) = rpc
-        .raw_json_request(&request.to_string(), 1)
-        .await
-        .map_err(|err| RpcError::new(0, format!("invalid request: {err}")))?;
-    let mut response: Value =
-        serde_json::from_str(response.get()).map_err(|err| RpcError::new(0, err.to_string()))?;
-    if let Some(error) = response.get_mut("error") {
-        return Err(RpcError {
-            code: error["code"].as_i64().unwrap_or_default(),
-            message: error["message"].as_str().unwrap_or_default().to_string(),
-            data: error.get_mut("data").map(Value::take),
-        })
-    }
-    Ok(response["result"].take())
+/// Separates dispatch failures from client JSON-RPC responses, so a timeout is never reported as
+/// a rejected payload or matched against a fixture's `errorCode`.
+async fn call(
+    rpc: &RpcModule<()>,
+    method: &str,
+    params: Value,
+) -> Result<Result<Value, RpcError>, Error> {
+    let request =
+        json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).to_string();
+    let (response, _) =
+        tokio::time::timeout(ENGINE_REQUEST_TIMEOUT, rpc.raw_json_request(&request, 1))
+            .await
+            .map_err(|err| Error::engine(format!("{method} timed out"), err))?
+            .map_err(|err| Error::engine(method, err))?;
+    let response: Response<'_, Value> = serde_json::from_str(&response)
+        .map_err(|err| Error::engine(format!("cannot decode {method} response"), err))?;
+    Ok(match response.payload {
+        ResponsePayload::Success(result) => Ok(result.into_owned()),
+        ResponsePayload::Error(error) => Err(RpcError {
+            code: i64::from(error.code()),
+            message: error.message().to_string(),
+            data: error
+                .data()
+                .map(|data| serde_json::from_str(data.get()))
+                .transpose()
+                .map_err(|err| Error::engine(format!("cannot decode {method} error data"), err))?,
+        }),
+    })
 }
 
 /// Calls `engine_newPayloadV<n>` with the fixture's payload at `index`, records a rejection
@@ -521,16 +572,16 @@ async fn new_payload(
     index: usize,
     payload: &EngineNewPayload,
     outcome: &mut Outcome,
-) -> Result<(), String> {
+) -> Result<(), Error> {
     let method = format!("engine_newPayloadV{}", payload.new_payload_version);
     let expected_code = payload
         .error_code
         .as_deref()
         .map(str::parse::<i64>)
         .transpose()
-        .map_err(|err| format!("invalid errorCode: {err}"))?;
+        .map_err(|err| Error::engine("invalid fixture errorCode", err))?;
 
-    match call(rpc, &method, Value::from(payload.params.clone())).await {
+    match call(rpc, &method, Value::from(payload.params.clone())).await? {
         Ok(response) => {
             let status = response["status"].as_str().unwrap_or_default().to_string();
             outcome.last_payload_status = Some(status.clone());
@@ -540,10 +591,14 @@ async fn new_payload(
             }
             let expected = if payload.validation_error.is_some() { "INVALID" } else { "VALID" };
             if status != expected {
-                return Err(format!("{method} returned {response}, expected status {expected}"))
+                return Err(Error::Assertion(format!(
+                    "{method} returned {response}, expected status {expected}"
+                )))
             }
             if let Some(code) = expected_code {
-                return Err(format!("{method} returned {response}, expected error code {code}"))
+                return Err(Error::Assertion(format!(
+                    "{method} returned {response}, expected error code {code}"
+                )))
             }
             Ok(())
         }
@@ -554,14 +609,14 @@ async fn new_payload(
             if expected_code == Some(code) {
                 Ok(())
             } else {
-                Err(format!("{method} failed with error {code}: {}", err.message))
+                Err(Error::engine(method, err))
             }
         }
     }
 }
 
 /// Calls `engine_forkchoiceUpdatedV<n>` without payload attributes and requires a valid head.
-async fn forkchoice_updated(rpc: &RpcModule<()>, version: &str, head: B256) -> Result<(), String> {
+async fn forkchoice_updated(rpc: &RpcModule<()>, version: &str, head: B256) -> Result<(), Error> {
     let method = format!("engine_forkchoiceUpdatedV{version}");
     let state = json!({
         "headBlockHash": head,
@@ -569,36 +624,50 @@ async fn forkchoice_updated(rpc: &RpcModule<()>, version: &str, head: B256) -> R
         "finalizedBlockHash": B256::ZERO,
     });
     let response = call(rpc, &method, json!([state, null]))
-        .await
-        .map_err(|err| format!("{method} failed with error {}: {}", err.code, err.message))?;
+        .await?
+        .map_err(|err| Error::engine(&method, err))?;
     match response["payloadStatus"]["status"].as_str() {
         Some("VALID") => Ok(()),
-        _ => Err(format!("{method} returned {response}, expected status VALID")),
+        _ => Err(Error::Assertion(format!("{method} returned {response}, expected status VALID"))),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
-    use alloy_eips::eip1559::BaseFeeParams;
-    use alloy_primitives::{Address, Bloom, U256};
+    use crate::models::{ForkSpec, Header, State};
+    use alloy_consensus::{
+        proofs::calculate_transaction_root, SignableTransaction, TxLegacy, EMPTY_OMMER_ROOT_HASH,
+        EMPTY_ROOT_HASH,
+    };
+    use alloy_eips::{eip1559::BaseFeeParams, eip2718::Encodable2718};
+    use alloy_primitives::{Address, Bloom, Bytes, Signature, TxKind, U256, U64};
     use alloy_rpc_types_engine::ExecutionPayloadV1;
-    use ef_tests::models::{ForkSpec, Header, State};
+    use reth_ethereum_primitives::TransactionSigned;
+    use reth_primitives_traits::SignerRecoverable;
     use reth_provider::{DatabaseProviderFactory, StorageSettingsCache};
 
     /// A Paris fixture whose one payload is an empty block on genesis with the given state root,
     /// and that payload's block hash.
     fn empty_block_fixture(state_root: Option<B256>) -> (EngineTest, B256) {
+        block_fixture(State::default(), Vec::new(), state_root)
+    }
+
+    fn block_fixture(
+        pre: State,
+        transactions: Vec<TransactionSigned>,
+        state_root: Option<B256>,
+    ) -> (EngineTest, B256) {
         let mut test = EngineTest {
             genesis_block_header: Header {
                 gas_limit: U256::from(30_000_000),
                 base_fee_per_gas: Some(U256::from(1_000_000_000)),
                 ..Default::default()
             },
-            pre: State::default(),
+            pre,
             lastblockhash: B256::ZERO,
             network: ForkSpec::Merge,
+            config: Default::default(),
             engine_new_payloads: Vec::new(),
         };
         let chain_spec = test.chain_spec();
@@ -609,7 +678,7 @@ mod tests {
             parent_hash: chain_spec.genesis_hash(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
             state_root: state_root.unwrap_or(genesis.state_root),
-            transactions_root: EMPTY_ROOT_HASH,
+            transactions_root: calculate_transaction_root(&transactions),
             receipts_root: EMPTY_ROOT_HASH,
             number: 1,
             gas_limit: genesis.gas_limit,
@@ -632,7 +701,7 @@ mod tests {
             extra_data: Default::default(),
             base_fee_per_gas: U256::from(header.base_fee_per_gas.unwrap()),
             block_hash,
-            transactions: Vec::new(),
+            transactions: transactions.into_iter().map(|tx| tx.encoded_2718().into()).collect(),
         };
         test.engine_new_payloads.push(EngineNewPayload {
             params: vec![serde_json::to_value(payload).unwrap()],
@@ -656,7 +725,7 @@ mod tests {
         );
         let mut cleanup = Cleanup::default();
         cleanup.remains.push(remains);
-        cleanup.finish();
+        cleanup.finish().unwrap();
         assert_eq!(fs::read_dir(datadir_root.path()).unwrap().count(), 0, "datadir left behind");
         result
     }
@@ -681,7 +750,9 @@ mod tests {
                 let stored =
                     engine.provider.database_provider_ro().unwrap().cached_storage_settings();
                 assert_eq!(stored, storage_settings);
-                engine.stop().await
+                let (databases, shutdown) = engine.stop().await;
+                shutdown.unwrap();
+                databases
             });
             runtime.clone().shutdown_timeout(Duration::ZERO);
             let mut cleanup = Cleanup::default();
@@ -690,7 +761,7 @@ mod tests {
                 databases: Some(databases),
                 datadir: Some(datadir),
             });
-            cleanup.finish();
+            cleanup.finish().unwrap();
             let left = fs::read_dir(datadir_root.path()).unwrap().count();
             assert_eq!(left, 0, "datadir left behind");
         }
@@ -746,5 +817,107 @@ mod tests {
         let result = run(&test);
         assert!(!result.pass);
         assert_eq!(result.last_payload_status.as_deref(), Some("INVALID"));
+    }
+    /// A protected transaction calling a contract on a chain chosen by the fixture, with a
+    /// deliberately wrong gas-used header so completed execution returns INVALID.
+    fn transaction_fixture(chain_id: u64, code: Bytes) -> EngineTest {
+        let contract = Address::with_last_byte(0x42);
+        let tx = TransactionSigned::Legacy(
+            TxLegacy {
+                chain_id: Some(1),
+                nonce: 0,
+                gas_limit: 30_000_000,
+                gas_price: 1_000_000_000,
+                to: TxKind::Call(contract),
+                ..Default::default()
+            }
+            .into_signed(Signature::test_signature()),
+        );
+        let sender = tx.recover_signer().unwrap();
+        let pre = serde_json::from_value(json!({
+            sender.to_string(): {"balance": "0xffffffffffffffffffffffff", "nonce": "0x0", "code": "0x", "storage": {}},
+            contract.to_string(): {"balance": "0x0", "nonce": "0x1", "code": code, "storage": {}}
+        })).unwrap();
+        let (mut test, _) = block_fixture(pre, vec![tx], Some(B256::repeat_byte(1)));
+        test.config.chain_id = Some(U64::from(chain_id));
+        test.lastblockhash = test.genesis_block_header.hash;
+        test.engine_new_payloads[0].validation_error = Some("invalid block".to_string());
+        test
+    }
+
+    #[test]
+    fn protected_transaction_uses_fixture_chain_id() {
+        let result = run(&transaction_fixture(7, Bytes::from_static(&[0x00])));
+        assert!(result.pass, "{}", result.error);
+        assert_eq!(result.last_payload_status.as_deref(), Some("INVALID"));
+        assert_eq!(result.rejections.len(), 1);
+        assert_eq!(
+            result.rejections[0].error,
+            "EVM reported invalid transaction (0xb74c71ef0df77555a822630371d46d129d235b18edb45f1ad1f646ef7beb4f11): invalid chain id: expected 7, got 1"
+        );
+    }
+
+    #[test]
+    fn deeply_nested_calls_fit_the_engine_thread_stack() {
+        // Repeated CALL to ADDRESS with all remaining gas recurses until the EIP-150 gas bound.
+        let code = Bytes::from_static(&[
+            0x60, 0, 0x60, 0, 0x60, 0, 0x60, 0, 0x60, 0, 0x30, 0x5a, 0xf1, 0x00,
+        ]);
+        let result = run(&transaction_fixture(1, code));
+        assert!(result.pass, "{}", result.error);
+        assert_eq!(result.last_payload_status.as_deref(), Some("INVALID"));
+        assert_eq!(result.rejections.len(), 1);
+        assert!(
+            result.rejections[0].error.starts_with("block gas used mismatch:"),
+            "{}",
+            result.rejections[0].error
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn request_timeout_is_not_a_payload_rejection() {
+        let mut rpc = RpcModule::new(());
+        rpc.register_async_method("engine_newPayloadV1", |_, _| async {
+            std::future::pending::<Result<Value, jsonrpsee::types::ErrorObjectOwned>>().await
+        })
+        .unwrap();
+        let (test, _) = empty_block_fixture(None);
+        let mut outcome = Outcome::default();
+        let error =
+            new_payload(&rpc, 0, &test.engine_new_payloads[0], &mut outcome).await.unwrap_err();
+        assert_eq!(error.to_string(), "engine_newPayloadV1 timed out: deadline has elapsed");
+        assert_eq!(outcome.rejections, []);
+        assert_eq!(outcome.last_payload_status, None);
+    }
+
+    #[test]
+    fn cleanup_keeps_pending_runtimes_bounded() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cleanup = Cleanup::default();
+        let (mut test, hash) = empty_block_fixture(None);
+        test.lastblockhash = hash;
+        for _ in 0..MAX_PENDING_ENGINES * 2 {
+            let (result, remains) = run_fixture(
+                "test".to_string(),
+                &test,
+                &tree_config(false),
+                StorageSettings::base(),
+                dir.path(),
+            );
+            assert!(result.pass, "{}", result.error);
+            cleanup.push(remains).unwrap();
+            assert!(cleanup.remains.len() < MAX_PENDING_ENGINES);
+            assert!(cleanup.datadirs.len() < MAX_PENDING_ENGINES);
+        }
+        cleanup.finish().unwrap();
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn fixture_engines_bound_bal_prewarm_workers_without_disabling_parallel_execution() {
+        let config = tree_config(false);
+        assert_eq!(config.bal_prewarm_threads(), Some(BAL_PREWARM_THREADS));
+        assert!(!config.disable_bal_parallel_execution());
+        assert_eq!(TreeConfig::default().bal_prewarm_threads(), None);
     }
 }

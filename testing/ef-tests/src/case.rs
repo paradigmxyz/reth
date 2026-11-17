@@ -7,7 +7,7 @@ use std::{
     fmt::Debug,
     fs,
     path::{Path, PathBuf},
-    sync::LazyLock,
+    sync::{LazyLock, Mutex},
 };
 
 /// Stack size of the worker threads that run test cases.
@@ -22,17 +22,6 @@ static POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
         .build()
         .expect("failed to build the test case thread pool")
 });
-
-/// Spawns a scoped worker thread with the stack size of the test case pool's threads.
-pub fn spawn_worker<'scope, F>(scope: &'scope std::thread::Scope<'scope, '_>, f: F)
-where
-    F: FnOnce() + Send + 'scope,
-{
-    std::thread::Builder::new()
-        .stack_size(WORKER_STACK_SIZE)
-        .spawn_scoped(scope, f)
-        .expect("failed to spawn a worker thread");
-}
 
 /// A single test case, capable of loading a JSON description of itself and running it.
 ///
@@ -77,4 +66,25 @@ pub fn load_json<T: DeserializeOwned>(path: &Path) -> Result<T, Error> {
         fs::read_to_string(path).map_err(|error| Error::Io { path: path.into(), error })?;
     serde_json::from_str(&contents)
         .map_err(|error| Error::CouldNotDeserialize { path: path.into(), error })
+}
+
+/// Runs file workers with one shared queue and bounded thread stacks.
+pub(crate) fn run_workers(
+    files: Vec<PathBuf>,
+    workers: usize,
+    worker: impl Fn(&mut dyn Iterator<Item = PathBuf>) + Sync,
+) {
+    let workers = workers.max(1).min(files.len());
+    let files = Mutex::new(files.into_iter());
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            std::thread::Builder::new()
+                .stack_size(WORKER_STACK_SIZE)
+                .spawn_scoped(scope, || {
+                    let mut files = std::iter::from_fn(|| files.lock().unwrap().next());
+                    worker(&mut files);
+                })
+                .expect("failed to spawn a fixture worker");
+        }
+    });
 }

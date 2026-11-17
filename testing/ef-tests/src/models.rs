@@ -4,8 +4,10 @@ use crate::{assert::assert_equal, Error};
 use alloy_consensus::Header as RethHeader;
 use alloy_eips::{eip4895::Withdrawals, eip7840::BlobParams};
 use alloy_genesis::{Genesis, GenesisAccount};
-use alloy_primitives::{keccak256, map::HashMap, Address, Bloom, Bytes, B256, B64, U256};
-use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, ForkCondition};
+use alloy_primitives::{
+    keccak256, map::HashMap, Address, Bloom, Bytes, B256, B64, U128, U256, U64,
+};
+use reth_chainspec::{Chain, ChainSpec, ChainSpecBuilder, EthereumHardfork, ForkCondition};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::SealedHeader;
 use serde::Deserialize;
@@ -34,9 +36,19 @@ pub struct BlockchainTest {
     pub lastblockhash: B256,
     /// Network spec.
     pub network: ForkSpec,
+    /// Chain ID and blob schedule supplied by the fixture.
     #[serde(default)]
+    pub config: FixtureConfig,
     /// Engine spec.
+    #[serde(default)]
     pub seal_engine: SealEngine,
+}
+
+impl BlockchainTest {
+    /// Builds the fixture's fork schedule, chain ID, blob parameters and genesis allocation.
+    pub fn chain_spec(&self) -> ChainSpec {
+        fixture_chain_spec(&self.genesis_block_header, &self.pre, self.network, &self.config)
+    }
 }
 
 /// A blockchain test in the engine format, whose blocks are Engine API payloads.
@@ -51,6 +63,9 @@ pub struct EngineTest {
     pub lastblockhash: B256,
     /// Network spec.
     pub network: ForkSpec,
+    /// Chain ID and blob schedule supplied by the fixture.
+    #[serde(default)]
+    pub config: FixtureConfig,
     /// The payloads to send, in order.
     pub engine_new_payloads: Vec<EngineNewPayload>,
 }
@@ -58,21 +73,7 @@ pub struct EngineTest {
 impl EngineTest {
     /// Returns the chain spec of the test's network, with the test's genesis block.
     pub fn chain_spec(&self) -> ChainSpec {
-        let header = &self.genesis_block_header;
-        let genesis = Genesis::default()
-            .with_nonce(u64::from_be_bytes(header.nonce.0))
-            .with_timestamp(header.timestamp.to())
-            .with_extra_data(header.extra_data.clone())
-            .with_gas_limit(header.gas_limit.to())
-            .with_difficulty(header.difficulty)
-            .with_mix_hash(header.mix_hash)
-            .with_coinbase(header.coinbase)
-            .with_base_fee(header.base_fee_per_gas.map(|fee| fee.to()))
-            .with_excess_blob_gas(header.excess_blob_gas.map(|gas| gas.to()))
-            .with_blob_gas_used(header.blob_gas_used.map(|gas| gas.to()))
-            .with_slot_number(header.slot_number.map(|slot| slot.to()))
-            .extend_accounts(self.pre.clone().into_genesis_state());
-        self.network.chain_spec_on(genesis)
+        fixture_chain_spec(&self.genesis_block_header, &self.pre, self.network, &self.config)
     }
 }
 
@@ -90,6 +91,31 @@ pub struct EngineNewPayload {
     pub validation_error: Option<String>,
     /// The expected JSON-RPC error code, if the call must fail.
     pub error_code: Option<String>,
+}
+
+/// Execution configuration embedded in a fixture.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FixtureConfig {
+    /// The chain ID; absent legacy configurations use mainnet's ID.
+    #[serde(rename = "chainid")]
+    pub chain_id: Option<U64>,
+    /// Per-fork blob parameters. Unlisted forks retain their protocol defaults.
+    #[serde(default)]
+    pub blob_schedule: BTreeMap<ForkSpec, FixtureBlobParams>,
+}
+
+/// Quantity-encoded EIP-7840 parameters from the fixture format.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FixtureBlobParams {
+    /// Target number of blobs in a block.
+    pub target: U64,
+    /// Maximum number of blobs in a block.
+    pub max: U64,
+    /// Nonzero denominator used to update the blob base fee.
+    #[serde(deserialize_with = "deserialize_blob_update_fraction")]
+    pub base_fee_update_fraction: U128,
 }
 
 /// A block header in an Ethereum blockchain test.
@@ -349,8 +375,10 @@ pub enum ForkSpec {
     /// Homestead to Tangerine
     HomesteadToEIP150At5,
     /// Tangerine
+    #[serde(alias = "TangerineWhistle")]
     EIP150,
     /// Spurious Dragon
+    #[serde(alias = "SpuriousDragon")]
     EIP158, // EIP-161: State trie clearing
     /// Spurious Dragon to Byzantium
     EIP158ToByzantiumAt5,
@@ -398,8 +426,28 @@ pub enum ForkSpec {
     Prague,
     /// Osaka
     Osaka,
-    /// Amsterdam
+    /// Amsterdam.
     Amsterdam,
+    /// Prague to Osaka at timestamp 15,000.
+    PragueToOsakaAtTime15k,
+    /// First mainnet blob-parameter-only update.
+    BPO1,
+    /// Second mainnet blob-parameter-only update.
+    BPO2,
+    /// Osaka to BPO1 at timestamp 15,000.
+    OsakaToBPO1AtTime15k,
+    /// BPO1 to BPO2 at timestamp 15,000.
+    BPO1ToBPO2AtTime15k,
+    /// BPO2 to Amsterdam at timestamp 15,000.
+    BPO2ToAmsterdamAtTime15k,
+    /// Amsterdam with the fixture's increased blob parameters.
+    AmsterdamBPOIncrease,
+    /// Amsterdam with the fixture's decreased blob parameters.
+    AmsterdamBPODecrease,
+    /// Amsterdam to increased blob parameters at timestamp 15,000.
+    AmsterdamToBPOIncreaseAtTime15k,
+    /// Amsterdam to decreased blob parameters at timestamp 15,000.
+    AmsterdamToBPODecreaseAtTime15k,
 }
 
 impl ForkSpec {
@@ -429,10 +477,22 @@ impl ForkSpec {
     fn build_chain_spec(self, builder: ChainSpecBuilder) -> ChainSpec {
         let mut spec = builder.build();
 
-        // Amsterdam follows BPO1 and BPO2, so its fixtures use BPO2's blob parameters.
-        if self == Self::Amsterdam {
-            spec.blob_params = spec.blob_params.with_scheduled([(0, BlobParams::bpo2())]);
-        }
+        let scheduled = match self {
+            Self::BPO1 => vec![(0, BlobParams::bpo1())],
+            Self::BPO2 | Self::Amsterdam | Self::BPO2ToAmsterdamAtTime15k => {
+                vec![(0, BlobParams::bpo2())]
+            }
+            Self::OsakaToBPO1AtTime15k => vec![(15_000, BlobParams::bpo1())],
+            Self::BPO1ToBPO2AtTime15k => {
+                vec![(0, BlobParams::bpo1()), (15_000, BlobParams::bpo2())]
+            }
+            Self::AmsterdamBPOIncrease |
+            Self::AmsterdamBPODecrease |
+            Self::AmsterdamToBPOIncreaseAtTime15k |
+            Self::AmsterdamToBPODecreaseAtTime15k => vec![(0, BlobParams::bpo2())],
+            _ => Vec::new(),
+        };
+        spec.blob_params = spec.blob_params.with_scheduled(scheduled);
         spec
     }
 
@@ -490,6 +550,47 @@ impl ForkSpec {
             Self::Prague => spec_builder.prague_activated(),
             Self::Osaka => spec_builder.osaka_activated(),
             Self::Amsterdam => spec_builder.amsterdam_activated(),
+            Self::PragueToOsakaAtTime15k => spec_builder
+                .prague_activated()
+                .with_fork(EthereumHardfork::Osaka, ForkCondition::Timestamp(15_000)),
+            Self::BPO1 | Self::OsakaToBPO1AtTime15k => spec_builder.osaka_activated().with_fork(
+                EthereumHardfork::Bpo1,
+                ForkCondition::Timestamp(if self == Self::BPO1 { 0 } else { 15_000 }),
+            ),
+            Self::BPO2 | Self::BPO1ToBPO2AtTime15k | Self::BPO2ToAmsterdamAtTime15k => {
+                let builder = spec_builder
+                    .osaka_activated()
+                    .with_fork(EthereumHardfork::Bpo1, ForkCondition::Timestamp(0))
+                    .with_fork(
+                        EthereumHardfork::Bpo2,
+                        ForkCondition::Timestamp(if self == Self::BPO1ToBPO2AtTime15k {
+                            15_000
+                        } else {
+                            0
+                        }),
+                    );
+                if self == Self::BPO2ToAmsterdamAtTime15k {
+                    builder.with_fork(EthereumHardfork::Amsterdam, ForkCondition::Timestamp(15_000))
+                } else {
+                    builder
+                }
+            }
+            Self::AmsterdamBPOIncrease |
+            Self::AmsterdamBPODecrease |
+            Self::AmsterdamToBPOIncreaseAtTime15k |
+            Self::AmsterdamToBPODecreaseAtTime15k => {
+                let timestamp =
+                    if matches!(self, Self::AmsterdamBPOIncrease | Self::AmsterdamBPODecrease) {
+                        0
+                    } else {
+                        15_000
+                    };
+                spec_builder
+                    .amsterdam_activated()
+                    .with_fork(EthereumHardfork::Bpo1, ForkCondition::Timestamp(0))
+                    .with_fork(EthereumHardfork::Bpo2, ForkCondition::Timestamp(0))
+                    .with_fork(EthereumHardfork::Bpo3, ForkCondition::Timestamp(timestamp))
+            }
         }
     }
 }
@@ -550,6 +651,73 @@ pub struct AccessListItem {
 /// Access list.
 pub type AccessList = Vec<AccessListItem>;
 
+// Fixture quantities need their own decoder because BlobParams' serde form uses JSON numbers.
+fn deserialize_blob_update_fraction<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<U128, D::Error> {
+    let fraction = U128::deserialize(deserializer)?;
+    if fraction.is_zero() {
+        return Err(serde::de::Error::custom("blob base fee update fraction must be nonzero"))
+    }
+    Ok(fraction)
+}
+
+fn fixture_chain_spec(
+    header: &Header,
+    pre: &State,
+    network: ForkSpec,
+    config: &FixtureConfig,
+) -> ChainSpec {
+    let genesis = Genesis::default()
+        .with_nonce(u64::from_be_bytes(header.nonce.0))
+        .with_timestamp(header.timestamp.to())
+        .with_extra_data(header.extra_data.clone())
+        .with_gas_limit(header.gas_limit.to())
+        .with_difficulty(header.difficulty)
+        .with_mix_hash(header.mix_hash)
+        .with_coinbase(header.coinbase)
+        .with_base_fee(header.base_fee_per_gas.map(|fee| fee.to()))
+        .with_excess_blob_gas(header.excess_blob_gas.map(|gas| gas.to()))
+        .with_blob_gas_used(header.blob_gas_used.map(|gas| gas.to()))
+        .with_slot_number(header.slot_number.map(|slot| slot.to()))
+        .extend_accounts(pre.clone().into_genesis_state());
+    let mut spec = network.chain_spec_on(genesis);
+    if let Some(chain_id) = config.chain_id {
+        spec.chain = Chain::from_id(chain_id.to());
+    }
+    for (fork, fixture_params) in &config.blob_schedule {
+        let mut params = match fork {
+            ForkSpec::Cancun => BlobParams::cancun(),
+            ForkSpec::Prague => BlobParams::prague(),
+            _ => BlobParams::osaka(),
+        };
+        params.target_blob_count = fixture_params.target.to();
+        params.max_blob_count = fixture_params.max.to();
+        params.update_fraction = fixture_params.base_fee_update_fraction.to();
+        match fork {
+            ForkSpec::Cancun => spec.blob_params.cancun = params,
+            ForkSpec::Prague => spec.blob_params.prague = params,
+            ForkSpec::Osaka => spec.blob_params.osaka = params,
+            _ => {
+                let hardfork = match fork {
+                    ForkSpec::BPO1 => EthereumHardfork::Bpo1,
+                    ForkSpec::BPO2 => EthereumHardfork::Bpo2,
+                    ForkSpec::Amsterdam => EthereumHardfork::Amsterdam,
+                    ForkSpec::AmsterdamBPOIncrease | ForkSpec::AmsterdamBPODecrease => {
+                        EthereumHardfork::Bpo3
+                    }
+                    _ => continue,
+                };
+                if let Some(timestamp) = spec.hardforks.fork(hardfork).as_timestamp() {
+                    spec.blob_params.scheduled.push((timestamp, params));
+                }
+            }
+        }
+    }
+    spec.blob_params.scheduled.sort_by_key(|(timestamp, _)| *timestamp);
+    spec
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -563,6 +731,50 @@ mod tests {
         ] {
             assert_eq!(spec.blob_params_at_timestamp(0), Some(BlobParams::bpo2()));
         }
+    }
+
+    #[test]
+    fn fixture_chain_id_and_blob_schedule_are_applied() {
+        let config: FixtureConfig = serde_json::from_value(serde_json::json!({
+            "chainid": "0x07",
+            "blobSchedule": {
+                "Amsterdam": {"target": "0x0e", "max": "0x15", "baseFeeUpdateFraction": "0xb24b3f"},
+                "AmsterdamBPOIncrease": {"target": "0x15", "max": "0x20", "baseFeeUpdateFraction": "0x10b70de"}
+            }
+        })).unwrap();
+        let spec = fixture_chain_spec(
+            &Header::default(),
+            &State::default(),
+            ForkSpec::AmsterdamToBPOIncreaseAtTime15k,
+            &config,
+        );
+        assert_eq!(spec.chain.id(), 7);
+        assert_eq!(spec.blob_params_at_timestamp(14_999).unwrap().target_blob_count, 14);
+        assert_eq!(spec.blob_params_at_timestamp(15_000).unwrap().target_blob_count, 21);
+        assert_eq!(spec.blob_params_at_timestamp(15_000).unwrap().max_blob_count, 32);
+    }
+
+    #[test]
+    fn bpo_transition_uses_the_fixture_activation_time() {
+        let spec = ForkSpec::BPO1ToBPO2AtTime15k.chain_spec_on(Genesis::default());
+        assert_eq!(spec.blob_params_at_timestamp(14_999), Some(BlobParams::bpo1()));
+        assert_eq!(spec.blob_params_at_timestamp(15_000), Some(BlobParams::bpo2()));
+    }
+
+    #[test]
+    fn fixture_aliases_and_zero_blob_fraction() {
+        assert_eq!(
+            serde_json::from_str::<ForkSpec>("\"SpuriousDragon\"").unwrap(),
+            ForkSpec::EIP158
+        );
+        assert_eq!(
+            serde_json::from_str::<ForkSpec>("\"TangerineWhistle\"").unwrap(),
+            ForkSpec::EIP150
+        );
+        let error = serde_json::from_value::<FixtureConfig>(serde_json::json!({
+            "blobSchedule": {"BPO1": {"target": "0xa", "max": "0xf", "baseFeeUpdateFraction": "0x0"}}
+        })).unwrap_err();
+        assert_eq!(error.to_string(), "blob base fee update fraction must be nonzero");
     }
 
     #[test]

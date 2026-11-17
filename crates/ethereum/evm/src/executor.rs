@@ -1177,4 +1177,61 @@ mod tests {
         let err = executor.execute_transaction(blob_tx(1)).unwrap_err();
         assert!(err.to_string().contains("too many blobs: have 7, max 6"), "{err}");
     }
+
+    #[test]
+    fn request_contracts_require_code_after_prague() {
+        for spec in [SpecId::CANCUN, SpecId::PRAGUE, SpecId::AMSTERDAM] {
+            let contracts: &[_] = if spec == SpecId::AMSTERDAM {
+                &[
+                    WITHDRAWAL_REQUEST_ADDRESS,
+                    CONSOLIDATION_REQUEST_ADDRESS,
+                    BUILDER_DEPOSIT_REQUEST_ADDRESS,
+                    BUILDER_EXIT_REQUEST_ADDRESS,
+                ]
+            } else {
+                &[WITHDRAWAL_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS]
+            };
+            for address in contracts {
+                for absent in [true, false] {
+                    let mut database = TestDatabase::default();
+                    insert_request_contracts(&mut database);
+                    if absent {
+                        database.accounts.remove(address);
+                    } else {
+                        database
+                            .accounts
+                            .insert(*address, AccountInfo::default().with_balance(U256::from(1)));
+                    }
+                    let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(
+                        ChainSpecBuilder::mainnet().amsterdam_activated().build(),
+                    ));
+                    let env = EthEvmEnv::new(
+                        spec,
+                        BlockEnv::<BaseEvmTypes> {
+                            number: U256::from(1),
+                            gas_limit: U256::from(30_000_000),
+                            ..Default::default()
+                        },
+                        1,
+                    );
+                    let evm = factory.evm_with_env(Db::new(database), env);
+                    let mut ctx = segment(0, 1, B256::ZERO).ctx;
+                    ctx.parent_beacon_block_root = Some(B256::ZERO);
+                    let mut executor = factory.create_executor(evm, ctx);
+                    executor.apply_pre_execution_changes().unwrap();
+                    let result = executor.finish_with_block_access_list();
+                    if spec == SpecId::CANCUN {
+                        assert!(result.is_ok());
+                    } else {
+                        let error = result.unwrap_err();
+                        assert!(error.as_validation().is_some());
+                        assert_eq!(
+                            error.to_string(),
+                            format!("system contract {address} has no code")
+                        );
+                    }
+                }
+            }
+        }
+    }
 }

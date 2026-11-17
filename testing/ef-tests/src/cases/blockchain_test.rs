@@ -1,7 +1,7 @@
 //! Test runners for `BlockchainTests` in <https://github.com/ethereum/tests>
 
 use crate::{
-    case::{load_json, spawn_worker},
+    case::{load_json, run_workers},
     models::{BlockchainTest, ForkSpec},
     result::{FixtureResult, Rejection},
     Case, Error, Suite,
@@ -19,12 +19,11 @@ use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
+use reth_engine_tree::tree::payload_validator::BAL_EXECUTION_PATH_TARGET;
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
 use reth_evm::{
-    database::StateProviderDatabase,
-    execute::{BlockExecutionOutput, Executor},
-    ConfigureEvm,
+    database::StateProviderDatabase, execute::BlockExecutor, BlockExecutorFor, ConfigureEvm,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{GotExpected, ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
@@ -32,9 +31,9 @@ use reth_provider::{
     providers::{RocksDBBuilder, RocksDBProvider, StaticFileProviderBuilder},
     test_utils::MockNodeTypesWithDB,
     BlockWriter, DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, HistoryWriter,
-    OriginalValuesKnown, ProviderFactory, StateProvider, StateWriteConfig, StateWriter,
-    StaticFileProviderFactory, StaticFileSegment, StaticFileWriter, StorageSettingsCache,
-    TrieWriter,
+    OriginalValuesKnown, ProviderError, ProviderFactory, StateProvider, StateWriteConfig,
+    StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    StorageSettingsCache, TrieWriter,
 };
 use reth_tasks::Runtime;
 use reth_trie::StateRoot;
@@ -43,14 +42,9 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex},
 };
 use tracing::debug;
-
-/// The tracing target on which the engine reports which executor runs each block
-/// (`reth_engine_tree::tree::payload_validator::BAL_EXECUTION_PATH_TARGET`), and on which block
-/// import reports the same.
-pub const BAL_EXECUTION_PATH_TARGET: &str = "engine::tree::bal_execution_path";
 
 /// A handler for the blockchain test suite.
 #[derive(Debug)]
@@ -67,8 +61,7 @@ impl BlockchainTests {
     /// Runs every fixture in the JSON `files`, one file at a time on each of `workers` threads,
     /// and passes one result per fixture to `on_result` as it completes.
     ///
-    /// Unlike [`Suite::run`], this reports a file that fails to load as a failed result instead
-    /// of panicking.
+    /// Reports a file that fails to load as an error, without creating a fixture result.
     ///
     /// The files are not run on the rayon pool: a rayon thread waiting on block execution's own
     /// parallel work would start other files meanwhile, with no bound on how many are open.
@@ -76,54 +69,43 @@ impl BlockchainTests {
         files: Vec<PathBuf>,
         options: BlockTestOptions,
         workers: usize,
-        on_result: &(dyn Fn(FixtureResult) + Sync),
+        on_result: &(dyn Fn(Result<FixtureResult, Error>) + Sync),
     ) {
-        let files = Mutex::new(files.into_iter());
-        // A closure, so the queue's lock is released before the file runs: a guard taken in the
-        // `while let` condition would be held until the end of the loop body.
-        let next_file = || files.lock().unwrap().next();
-        std::thread::scope(|scope| {
-            for _ in 0..workers.max(1) {
-                spawn_worker(scope, || {
-                    while let Some(path) = next_file() {
-                        Self::run_file(&path, options, on_result);
-                    }
-                });
+        run_workers(files, workers, |files| {
+            for path in files {
+                Self::run_file(&path, options, on_result);
             }
         });
     }
 
     /// Runs every fixture in the JSON file at `path` and passes one result per fixture to
     /// `on_result`.
-    fn run_file(path: &Path, options: BlockTestOptions, on_result: &dyn Fn(FixtureResult)) {
-        let case = match BlockchainTestCase::load(path) {
-            Ok(case) => case,
-            Err(err) => return on_result(FixtureResult::load_failed(path, err)),
+    fn run_file(
+        path: &Path,
+        options: BlockTestOptions,
+        on_result: &dyn Fn(Result<FixtureResult, Error>),
+    ) {
+        let tests = match load_json::<BTreeMap<String, BlockchainTest>>(path) {
+            Ok(tests) => tests,
+            Err(err) => return on_result(Err(err)),
         };
-        for (name, test) in case.tests {
-            if BlockchainTestCase::excluded_fork(test.network) {
-                continue
-            }
+        for (name, test) in tests {
             let fork = format!("{:?}", test.network);
-            if case.skip {
-                on_result(FixtureResult::new(name, fork, Err(Error::Skipped)));
-                continue
-            }
             let mut last_block_hash = test.genesis_block_header.hash;
             let mut rejections = Vec::new();
-            let result = BlockchainTestCase::run_single_case_with(
-                &name,
-                &test,
-                options,
-                &mut last_block_hash,
-                &mut rejections,
-            )
-            .and_then(|()| check_last_block_hash(&test, last_block_hash));
-            on_result(
-                FixtureResult::new(name, fork, result)
-                    .with_last_block_hash(last_block_hash)
-                    .with_rejections(rejections),
-            );
+            let result = run_case(&name, &test, options, &mut last_block_hash, &mut rejections)
+                .and_then(|()| {
+                    if last_block_hash != test.lastblockhash {
+                        return Err(Error::Assertion(format!(
+                            "last block hash mismatch: got {last_block_hash}, expected {}",
+                            test.lastblockhash
+                        )))
+                    }
+                    Ok(())
+                });
+            on_result(Ok(FixtureResult::new(name, fork, result)
+                .with_last_block_hash(last_block_hash)
+                .with_rejections(rejections)));
         }
     }
 }
@@ -193,91 +175,24 @@ impl BlockchainTestCase {
         name.contains("UncleFromSideChain")
     }
 
-    /// If the test expects an exception, return the block number
-    /// at which it must occur together with the original message.
-    ///
-    /// Note: There is a +1 here because the genesis block is not included
-    /// in the set of blocks, so the first block is actually block number 1
-    /// and not block number 0.
-    #[inline]
-    fn expected_failure(case: &BlockchainTest) -> Option<(u64, String)> {
-        case.blocks.iter().enumerate().find_map(|(idx, blk)| {
-            blk.expect_exception.as_ref().map(|msg| ((idx + 1) as u64, msg.clone()))
-        })
-    }
-
     /// Execute a single `BlockchainTest`, validating the outcome against the
     /// expectations encoded in the JSON file.
     pub fn run_single_case(name: &str, case: &BlockchainTest) -> Result<(), Error> {
         let mut last_block_hash = B256::ZERO;
-        Self::run_single_case_with(
+        let result = run_case(
             name,
             case,
             BlockTestOptions::default(),
             &mut last_block_hash,
             &mut Vec::new(),
-        )
-    }
-
-    /// Like [`Self::run_single_case`], with the given options. `last_block_hash` is set to the
-    /// hash of the last block that was imported, or of genesis if none was, and the block that
-    /// was rejected, if any, is added to `rejections` with reth's error.
-    pub fn run_single_case_with(
-        name: &str,
-        case: &BlockchainTest,
-        options: BlockTestOptions,
-        last_block_hash: &mut B256,
-        rejections: &mut Vec<Rejection>,
-    ) -> Result<(), Error> {
-        let expectation = Self::expected_failure(case);
-        let result = run_case(case, options, last_block_hash);
-        // Block number 0 is the genesis setup, not a fixture block.
-        if let Err(Error::BlockProcessingFailed { block_number, err }) = &result &&
-            *block_number > 0
+        );
+        // Retain this legacy exception only for the old ethereum/tests suite.
+        if Self::is_uncle_sidechain_case(name) &&
+            matches!(result, Err(Error::BlockProcessingFailed { .. }))
         {
-            rejections.push(rejection(case, *block_number, err.to_string()));
-        }
-        match result {
-            // All blocks executed successfully.
-            Ok(()) => {
-                // Check if the test case specifies that it should have failed
-                if let Some((block, msg)) = expectation {
-                    Err(Error::Assertion(format!(
-                        "Test case: {name}\nExpected failure at block {block} - {msg}, but all blocks succeeded",
-                    )))
-                } else {
-                    Ok(())
-                }
-            }
-
-            // A block processing failure occurred.
-            Err(Error::BlockProcessingFailed { block_number, err }) => {
-                match expectation {
-                    // It happened on exactly the block we were told to fail on
-                    Some((expected, _)) if block_number == expected => Ok(()),
-
-                    // Uncle side‑chain edge case, we accept as long as it failed.
-                    // But we don't check the exact block number.
-                    _ if Self::is_uncle_sidechain_case(name) => Ok(()),
-
-                    // Expected failure, but block number does not match
-                    Some((expected, _)) => Err(Error::Assertion(format!(
-                        "Test case: {name}\nExpected failure at block {expected}\nGot failure at block {block_number}",
-                    ))),
-
-                    // No failure expected at all - bubble up original error.
-                    None => Err(Error::BlockProcessingFailed { block_number, err }),
-                }
-            }
-
-            // Non‑processing error – forward as‑is.
-            //
-            // This should only happen if we get an unexpected error from processing the block.
-            // Since it is unexpected, we treat it as a test failure.
-            //
-            // One reason for this happening is when one forgets to wrap the error from `run_case`
-            // so that it produces an `Error::BlockProcessingFailed`
-            Err(other) => Err(other),
+            Ok(())
+        } else {
+            result
         }
     }
 }
@@ -322,14 +237,16 @@ impl Case for BlockchainTestCase {
 /// - `Ok(())` if all blocks execute successfully.
 /// - `Err(Error)` if any block fails to execute correctly.
 fn run_case(
+    name: &str,
     case: &BlockchainTest,
     options: BlockTestOptions,
     last_block_hash: &mut B256,
+    rejections: &mut Vec<Rejection>,
 ) -> Result<(), Error> {
     // Create a new test database and initialize a provider for the test case.
-    let chain_spec = case.network.to_chain_spec();
+    let chain_spec = Arc::new(case.chain_spec());
     let factory = create_test_provider_factory(chain_spec.clone());
-    let provider = factory.database_provider_rw().unwrap();
+    let provider = factory.database_provider_rw()?;
 
     // Insert initial test state into the provider.
     let genesis_block = SealedBlock::<Block>::from_sealed_parts(
@@ -337,33 +254,31 @@ fn run_case(
         Default::default(),
     )
     .try_recover()
-    .unwrap();
+    .map_err(|err| Error::block_failed(0, err))?;
 
-    provider.insert_block(&genesis_block).map_err(|err| Error::block_failed(0, err))?;
+    provider.insert_block(&genesis_block)?;
     *last_block_hash = genesis_block.hash();
 
     // Increment block number for receipts static file
     provider
         .static_file_provider()
         .latest_writer(StaticFileSegment::Receipts)
-        .and_then(|mut writer| writer.increment_block(0))
-        .map_err(|err| Error::block_failed(0, err))?;
+        .and_then(|mut writer| writer.increment_block(0))?;
 
     let genesis_state = case.pre.clone().into_genesis_state();
-    insert_genesis_state(&provider, genesis_state.iter())
-        .map_err(|err| Error::block_failed(0, err))?;
-    insert_genesis_hashes(&provider, genesis_state.iter())
-        .map_err(|err| Error::block_failed(0, err))?;
-    insert_genesis_history(&provider, genesis_state.iter())
-        .map_err(|err| Error::block_failed(0, err))?;
+    insert_genesis_state(&provider, genesis_state.iter())?;
+    insert_genesis_hashes(&provider, genesis_state.iter())?;
+    insert_genesis_history(&provider, genesis_state.iter())?;
 
     // Build the genesis trie, as `init_genesis` does, so block 1 reads stored nodes.
     let (_, trie_updates) = reth_trie_db::with_adapter!(provider, |A| {
         StateRoot::<reth_trie_db::DatabaseTrieCursorFactory<_, A>, _>::from_tx(provider.tx_ref())
             .root_with_updates()
     })
-    .map_err(|err| Error::block_failed(0, err))?;
-    provider.write_trie_updates(trie_updates).map_err(|err| Error::block_failed(0, err))?;
+    .map_err(ProviderError::other)?;
+    provider.write_trie_updates(trie_updates)?;
+    // BLOCKHASH reads static files, including genesis during execution of block 1.
+    provider.static_file_provider().commit()?;
 
     let executor_provider = EthEvmConfig::ethereum(chain_spec.clone());
     let mut parent = genesis_block;
@@ -373,101 +288,130 @@ fn run_case(
         // The blocks do not include the genesis block which is why we have the plus one.
         // We also cannot use block.number because for invalid blocks, this may be incorrect.
         let block_number = (block_index + 1) as u64;
-        // Decoded one at a time, so that the blocks before one that does not decode are imported.
-        let block = &decode_block(fixture_block, block_number)?;
+        let result = (|| -> Result<(), Error> {
+            // Decode only the block being imported; rejected blocks do not change the chain.
+            let block = &SealedBlock::<Block>::decode(&mut fixture_block.rlp.as_ref())
+                .map_err(|err| Error::block_failed(block_number, err))?
+                .try_recover()
+                .map_err(|err| Error::block_failed(block_number, err))?;
 
-        // Insert the block into the database
-        provider.insert_block(block).map_err(|err| Error::block_failed(block_number, err))?;
-        provider
-            .static_file_provider()
-            .commit()
-            .map_err(|err| Error::block_failed(block_number, err))?;
+            // Consensus checks before block execution
+            pre_execution_checks(chain_spec.clone(), &parent, block)
+                .map_err(|err| Error::block_failed(block_number, err))?;
 
-        // Consensus checks before block execution
-        pre_execution_checks(chain_spec.clone(), &parent, block)
-            .map_err(|err| Error::block_failed(block_number, err))?;
+            // Like a block downloaded with its access list, the delivered list counts only when the
+            // header commits to one.
+            let delivered =
+                fixture_block.access_list().filter(|_| block.block_access_list_hash.is_some());
+            let access_list = delivered
+                .filter(|_| !options.bal_withhold)
+                .map(|access_list| check_delivered_access_list(block, access_list))
+                .transpose()
+                .map_err(|err| Error::block_failed(block_number, err))?
+                .flatten();
+            let attached = access_list.is_some();
 
-        // Like a block downloaded with its access list, the delivered list counts only when the
-        // header commits to one.
-        let delivered =
-            fixture_block.access_list().filter(|_| block.block_access_list_hash.is_some());
-        let access_list = delivered
-            .filter(|_| !options.bal_withhold)
-            .map(|access_list| check_delivered_access_list(block, access_list))
-            .transpose()
-            .map_err(|err| Error::block_failed(block_number, err))?
-            .flatten();
-        report_execution_path(block, delivered.is_some(), access_list.is_some(), options);
+            let state_provider = provider.latest();
+            let state_db = StateProviderDatabase((&state_provider).into_evm_state_provider());
+            let mut executor = executor_provider
+                .executor_for_block(state_db, block.sealed_block())
+                .unwrap_or_else(|err| match err {});
+            if block.block_access_list_hash.is_some() {
+                executor.enable_block_access_list_builder();
+            }
+            if let Some(access_list) = access_list {
+                let access_list =
+                    <BlockExecutorFor<'_, EthEvmConfig> as BlockExecutor>::convert_block_access_list(
+                        &access_list.into(),
+                    )
+                    .map_err(|err| Error::block_failed(block_number, err))?;
+                executor.set_block_access_list(Arc::new(access_list));
+            }
+            report_execution_path(block, delivered.is_some(), attached, options);
+            executor
+                .apply_pre_execution_changes()
+                .map_err(|err| Error::block_execution_failed(block_number, err))?;
+            for transaction in block.transactions_recovered() {
+                executor
+                    .execute_transaction(transaction)
+                    .map_err(|err| Error::block_execution_failed(block_number, err))?;
+            }
+            let (output, built_bal) = executor
+                .finish_with_block_access_list()
+                .map_err(|err| Error::block_execution_failed(block_number, err))?;
+            let block_access_list_hash = built_bal
+                .map(|bal| {
+                    let bal = Bal::from(bal);
+                    bal.validate_gas_limit(block.gas_limit)
+                        .map(|()| bal.compute_hash_with_buf(&mut bal_buf))
+                })
+                .transpose()
+                .map_err(|err| Error::block_failed(block_number, err))?;
 
-        // Execute the block
-        let state_provider = provider.latest();
-        let state_db = StateProviderDatabase((&state_provider).into_evm_state_provider());
-        let mut executor = executor_provider.batch_executor(state_db);
-
-        let result = executor
-            .execute_one(&(*block).clone())
-            .map_err(|err| Error::block_failed(block_number, err))?;
-        // Check the block access list size cap and compute its hash for post-Amsterdam blocks so
-        // the consensus check below validates it.
-        let block_access_list_hash = executor
-            .take_bal()
-            .map(|bal| {
-                let bal = Bal::from(bal);
-                bal.validate_gas_limit(block.gas_limit)
-                    .map(|()| bal.compute_hash_with_buf(&mut bal_buf))
-            })
-            .transpose()
-            .map_err(|err| Error::block_failed(block_number, err))?;
-        let output = BlockExecutionOutput { state: executor.into_state(), result };
-
-        // Consensus checks after block execution
-        validate_block_post_execution(block, &chain_spec, &output, None, block_access_list_hash)
-            .map_err(|err| Error::block_failed(block_number, err))?;
-
-        // Compute and check the post state root
-        let hashed_state = state_provider
-            .hashed_post_state(&output.state)
-            .map_err(|err| Error::block_failed(block_number, err))?;
-        let sorted = hashed_state.clone_into_sorted();
-        let (computed_state_root, trie_updates) = reth_trie_db::with_adapter!(provider, |A| {
-            StateRoot::<reth_trie_db::DatabaseTrieCursorFactory<_, A>, _>::overlay_root_with_updates(
-                provider.tx_ref(),
-                &sorted,
+            // Consensus checks after block execution
+            validate_block_post_execution(
+                block,
+                &chain_spec,
+                &output,
+                None,
+                block_access_list_hash,
             )
-        })
-        .map_err(|err| Error::block_failed(block_number, err))?;
-        if computed_state_root != block.state_root {
-            return Err(Error::block_failed(
-                block_number,
-                ConsensusError::BodyStateRootDiff(
-                    GotExpected { got: computed_state_root, expected: block.state_root }.into(),
-                ),
-            ));
-        }
+            .map_err(|err| Error::block_failed(block_number, err))?;
 
-        // Commit the post state/state diff to the database
-        provider
-            .write_state(
+            // Compute and check the post state root
+            let hashed_state = state_provider.hashed_post_state(&output.state)?;
+            let sorted = hashed_state.clone_into_sorted();
+            let (computed_state_root, trie_updates) = reth_trie_db::with_adapter!(provider, |A| {
+                StateRoot::<reth_trie_db::DatabaseTrieCursorFactory<_, A>, _>::overlay_root_with_updates(
+                    provider.tx_ref(),
+                    &sorted,
+                )
+            })
+            .map_err(ProviderError::other)?;
+            if computed_state_root != block.state_root {
+                return Err(Error::block_failed(
+                    block_number,
+                    ConsensusError::BodyStateRootDiff(
+                        GotExpected { got: computed_state_root, expected: block.state_root }.into(),
+                    ),
+                ));
+            }
+
+            // Publish a block only after all validation succeeds, so a rejected block leaves no
+            // writes.
+            provider.insert_block(block)?;
+            provider.static_file_provider().commit()?;
+
+            // Commit the post state/state diff to the database
+            provider.write_state(
                 &ExecutionOutcome::single(block.number, output),
                 OriginalValuesKnown::Yes,
                 StateWriteConfig::default(),
-            )
-            .map_err(|err| Error::block_failed(block_number, err))?;
+            )?;
 
-        provider
-            .write_hashed_state(&hashed_state.into_sorted())
-            .map_err(|err| Error::block_failed(block_number, err))?;
-        // Persist the trie so later blocks read stored nodes.
-        provider
-            .write_trie_updates(trie_updates)
-            .map_err(|err| Error::block_failed(block_number, err))?;
-        provider
-            .update_history_indices(block.number..=block.number)
-            .map_err(|err| Error::block_failed(block_number, err))?;
+            provider.write_hashed_state(&hashed_state.into_sorted())?;
+            // Persist the trie so later blocks read stored nodes.
+            provider.write_trie_updates(trie_updates)?;
+            provider.update_history_indices(block.number..=block.number)?;
 
-        // Since there were no errors, update the parent block
-        *last_block_hash = block.hash();
-        parent = block.clone()
+            // Since there were no errors, update the parent block
+            *last_block_hash = block.hash();
+            parent = block.clone();
+            Ok(())
+        })();
+        match result {
+            Ok(()) if fixture_block.expect_exception.is_some() => {
+                return Err(Error::Assertion(format!("Test case: {name}\nExpected failure at block {block_number}, but the block succeeded")))
+            }
+            Err(Error::BlockProcessingFailed { block_number, err }) => {
+                rejections.push(rejection(case, block_number, err.to_string()));
+                if fixture_block.expect_exception.is_none() {
+                    return Err(Error::BlockProcessingFailed { block_number, err })
+                }
+            }
+            Err(err) => return Err(err),
+            Ok(()) => {}
+        }
     }
 
     match &case.post_state {
@@ -494,18 +438,6 @@ fn run_case(
     Ok(())
 }
 
-/// Checks that the chain ends on the fixture's `lastblockhash`, whether or not a block was
-/// rejected.
-fn check_last_block_hash(case: &BlockchainTest, last_block_hash: B256) -> Result<(), Error> {
-    if last_block_hash == case.lastblockhash {
-        return Ok(())
-    }
-    Err(Error::Assertion(format!(
-        "last block hash mismatch: got {last_block_hash}, expected {}",
-        case.lastblockhash
-    )))
-}
-
 /// The rejection of the fixture block with the given number, counted from 1, with its hash if
 /// it decodes.
 fn rejection(case: &BlockchainTest, block_number: u64, error: String) -> Rejection {
@@ -516,17 +448,6 @@ fn rejection(case: &BlockchainTest, block_number: u64, error: String) -> Rejecti
         .and_then(|block| SealedBlock::<Block>::decode(&mut block.rlp.as_ref()).ok())
         .map(|block| block.hash());
     Rejection { index, hash, error }
-}
-
-/// Decodes the fixture block with the given number, counted from 1, and recovers its senders.
-fn decode_block(
-    block: &crate::models::Block,
-    block_number: u64,
-) -> Result<RecoveredBlock<Block>, Error> {
-    SealedBlock::<Block>::decode(&mut block.rlp.as_ref())
-        .map_err(|err| Error::block_failed(block_number, err))?
-        .try_recover()
-        .map_err(|err| Error::block_failed(block_number, err))
 }
 
 /// Checks the access list delivered beside a block the way reth's sync checks one downloaded with
@@ -677,20 +598,16 @@ fn path_contains(path_str: &str, rhs: &[&str]) -> bool {
     path_str.contains(&rhs)
 }
 
-/// `RocksDB` instance shared by all test cases of the current process.
+/// Empty auxiliary database shared while v1-storage fixtures run.
 ///
-/// Opening `RocksDB` is expensive and ef-tests never use it: the storage settings stay at v1, so
-/// everything is stored in MDBX and static files. A fresh instance per case dominates the runtime.
-///
-/// The backing directory is created with [`reth_db::test_utils::tempdir_path`]. Statics are never
-/// dropped, so the instance is never closed and no close can run while the process exits. A test
-/// process leaves its small, mostly empty directory in the system temp dir; `ef-test-runner`
-/// removes it with [`remove_shared_rocksdb`] once every fixture ran.
-static SHARED_ROCKSDB: OnceLock<(PathBuf, RocksDBProvider)> = OnceLock::new();
+/// Legacy suite processes retain their handle until exit. The CLI closes it after its workers
+/// join, before removing the backing directory.
+static SHARED_ROCKSDB: Mutex<Option<(PathBuf, RocksDBProvider)>> = Mutex::new(None);
 
-/// Returns the [`SHARED_ROCKSDB`] instance, created on first use.
-pub fn shared_rocksdb() -> RocksDBProvider {
-    let (_, rocksdb) = SHARED_ROCKSDB.get_or_init(|| {
+/// Returns the process's shared v1 auxiliary database, opening it on first use.
+fn shared_rocksdb() -> RocksDBProvider {
+    let mut shared = SHARED_ROCKSDB.lock().unwrap();
+    let (_, rocksdb) = shared.get_or_insert_with(|| {
         let path = reth_db::test_utils::tempdir_path();
         let rocksdb = RocksDBBuilder::new(path.join("rocksdb"))
             .with_default_tables()
@@ -701,13 +618,16 @@ pub fn shared_rocksdb() -> RocksDBProvider {
     rocksdb.clone()
 }
 
-/// Removes the directory of the [`SHARED_ROCKSDB`] instance, if one was created. Call it only once
-/// no case runs anymore.
+/// Closes and removes the shared database after every fixture worker has joined.
+///
+/// No fixture may be running when this is called.
 pub fn remove_shared_rocksdb() {
-    if let Some((path, _)) = SHARED_ROCKSDB.get() &&
-        let Err(err) = fs::remove_dir_all(path)
-    {
-        eprintln!("failed to remove {}: {err}", path.display());
+    if let Some((path, rocksdb)) = SHARED_ROCKSDB.lock().unwrap().take() {
+        // Close the database before removing files which RocksDB still has open.
+        drop(rocksdb);
+        if let Err(err) = fs::remove_dir_all(&path) {
+            eprintln!("failed to remove {}: {err}", path.display());
+        }
     }
 }
 
