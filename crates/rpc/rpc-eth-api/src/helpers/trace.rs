@@ -2,7 +2,7 @@
 
 use super::{Call, LoadBlock, LoadState, LoadTransaction};
 use crate::{FromEthApiError, FromEvmError};
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
 use alloy_eip7928::{bal::DecodedBal, BlockAccessIndex};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
@@ -239,6 +239,32 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     where
         I: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
     {
+        self.inspect_transaction_in_block_with_hook(
+            block,
+            db,
+            inspector,
+            target_tx_index,
+            bal,
+            |_, _| {},
+        )
+    }
+
+    /// Like [`Self::inspect_transaction_in_block`], but calls `before_inspect` with the inspector
+    /// right before the target transaction runs, together with the number of logs in the receipts
+    /// of the replayed transactions (zero when the BAL is used).
+    #[expect(clippy::type_complexity)]
+    fn inspect_transaction_in_block_with_hook<I>(
+        &self,
+        block: &RecoveredBlock<BlockTy<Self::Primitives>>,
+        db: &mut StateCacheDb,
+        mut inspector: I,
+        target_tx_index: usize,
+        bal: Option<&DecodedBal<Arc<EvmBal>>>,
+        before_inspect: impl FnOnce(&mut I, usize),
+    ) -> Result<(I, TxResultWithStateFor<Self::Evm>, EvmEnvFor<Self::Evm>), Self::Error>
+    where
+        I: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
+    {
         let Some(target_tx) = block.transactions_recovered().nth(target_tx_index) else {
             return Err(EthApiError::InvalidParams(format!(
                 "tx_index {target_tx_index} out of bounds for block with {} transactions",
@@ -267,6 +293,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 target_tx_index,
             )?;
         }
+        let replayed_logs = executor.receipts().iter().map(|receipt| receipt.logs().len()).sum();
+        before_inspect(&mut inspector, replayed_logs);
         let (inspector, result) = executor
             .inspect_transaction_without_commit(target_tx, inspector)
             .map(|(inspector, output)| (inspector, output.into_result()))
