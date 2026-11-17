@@ -8,9 +8,8 @@ use reth_e2e_test_utils::{node::Finality, E2ETestSetupExt};
 use reth_node_ethereum::EthereumNode;
 use reth_storage_api::BlockReader;
 
-/// Tests that a fork built with `advance_fork` becomes the head, that `reorg_to` switches back to
-/// the previous chain while the reorged-out blocks stay readable by hash, and that both explain why
-/// they can't reorg below the finalized block.
+/// Tests ancestor rewinds, switching chains, reading reverted blocks by hash, and rejecting reorgs
+/// below finality.
 #[tokio::test]
 async fn can_build_forks_and_reorg() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
@@ -35,9 +34,9 @@ async fn can_build_forks_and_reorg() -> eyre::Result<()> {
         }
     );
 
-    // Building on a canonical ancestor leaves the head.
+    // The forkchoice update rewinds to the retained ancestor before building.
     assert_eq!(node.build_payload_on(b1).await?.block().parent_hash, b1);
-    assert_eq!(node.current_forkchoice_state()?.head_block_hash, b3);
+    assert_eq!(node.current_forkchoice_state()?.head_block_hash, b1);
 
     node.reorg_to(a2).await?;
     assert_eq!(node.current_forkchoice_state()?.head_block_hash, a2);
@@ -48,13 +47,11 @@ async fn can_build_forks_and_reorg() -> eyre::Result<()> {
     assert_eq!(block.map(|block| block.header.hash), Some(b3));
     assert_eq!(node.inner.provider.block(b3.into())?.map(|block| block.hash_slow()), Some(b3));
 
-    assert_eq!(
-        node.reorg_to(a1).await.unwrap_err().to_string(),
-        format!(
-            "block {a1} is a canonical ancestor of the head {a2}, which the engine does not move \
-             the head back to, build a block on it with `advance_block_on` instead"
-        )
-    );
+    node.reorg_to(a1).await?;
+    assert_eq!(node.current_forkchoice_state()?.head_block_hash, a1);
+
+    // Restore a2 before extending and finalizing the chain.
+    node.reorg_to(a2).await?;
 
     // Once a3 is finalized, neither chain B nor the blocks below a3 can become the head.
     node.set_finality(Finality::Head);
