@@ -62,6 +62,11 @@ impl<N: NodePrimitives> BlockState<N> {
         self.block.recovered_block().number()
     }
 
+    /// Returns the hash of the parent block.
+    pub fn parent_hash(&self) -> B256 {
+        self.block.recovered_block().parent_hash()
+    }
+
     /// Returns the state root after applying the executed block that determines
     /// the state.
     pub fn state_root(&self) -> B256 {
