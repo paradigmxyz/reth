@@ -238,7 +238,9 @@ where
                 if self.config.unwind_canonical_header() {
                     self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
                 }
-            } else if canonical_header.number() < self.state.tree_state.canonical_block_number() {
+            } else if attrs.is_none() &&
+                canonical_header.number() < self.state.tree_state.canonical_block_number()
+            {
                 // A zero safe hash leaves the previous marker in place.
                 if state.safe_block_hash.is_zero() &&
                     self.canonical_in_memory_state
@@ -257,6 +259,8 @@ where
                 }
             }
 
+            // Building on a canonical ancestor can prepare a replacement for its suffix,
+            // including when the suffix has already been persisted.
             if let Some(attr) = attrs {
                 debug!(target: "engine::tree", head = canonical_header.number(), "handling payload attributes for canonical head");
                 // Clone only when we actually need to process the attributes

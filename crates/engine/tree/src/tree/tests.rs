@@ -1943,7 +1943,7 @@ async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
 }
 
 #[tokio::test]
-async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build() {
+async fn test_fcu_with_canonical_ancestor_above_finalized_builds_or_rewinds() {
     reth_tracing::init_test_tracing();
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec.clone());
@@ -1953,6 +1953,7 @@ async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build()
 
     let finalized = blocks[0].recovered_block();
     let ancestor = blocks[2].recovered_block();
+    let current_head = blocks[3].recovered_block();
     let canonical = &test_harness.tree.canonical_in_memory_state;
     canonical.set_finalized(finalized.clone_sealed_header());
     let mut notifications = canonical.subscribe_canon_state();
@@ -1986,7 +1987,19 @@ async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build()
         panic!("expected build new payload command")
     };
     assert_eq!(input.parent_hash, ancestor.hash());
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), current_head.hash());
 
+    let response = test_harness
+        .tree
+        .on_forkchoice_updated(
+            ForkchoiceState { head_block_hash: ancestor.hash(), ..Default::default() },
+            None,
+        )
+        .unwrap()
+        .outcome
+        .await
+        .unwrap();
+    assert!(response.payload_status.is_valid());
     assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), ancestor.hash());
     assert_eq!(
         test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(),
