@@ -8151,6 +8151,7 @@ dependencies = [
 name = "reth-cli-runner"
 version = "2.11.0"
 dependencies = [
+ "libc",
  "reth-tasks",
  "tokio",
  "tracing",
