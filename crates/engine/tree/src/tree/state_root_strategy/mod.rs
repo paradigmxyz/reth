@@ -1328,7 +1328,8 @@ mod tests {
     fn finish_publishes_only_accepted_sparse_trie() {
         let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
         let genesis_hash = init_genesis(&factory).unwrap();
-        let provider = BlockchainProvider::new(factory).unwrap();
+        let chain_info_headers = factory.chain_info_headers().unwrap();
+        let provider = BlockchainProvider::new(factory, chain_info_headers);
         let runtime = reth_tasks::Runtime::test();
 
         for timeout in [None, Some(Duration::from_secs(1))] {
@@ -1650,7 +1651,8 @@ mod tests {
             }
         }
 
-        let provider_factory = BlockchainProvider::new(factory).unwrap();
+        let chain_info_headers = factory.chain_info_headers().unwrap();
+        let provider_factory = BlockchainProvider::new(factory, chain_info_headers);
         let runtime = reth_tasks::Runtime::test();
         let overlay_manager = OverlayManager::<EthPrimitives>::default();
         let config = TreeConfig::default()

@@ -17,6 +17,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use core::fmt;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
+use reth_chain_state::{ChainInfoHeaders, InMemoryState};
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
@@ -114,6 +115,10 @@ impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, Database
 impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// Create new database provider factory.
     ///
+    /// `overlay_manager` carries the in-memory state that [`Self::in_memory_state`] returns. A
+    /// default manager has an empty in-memory state of its own, which fits storage whose blocks
+    /// are all on disk.
+    ///
     /// The storage backends used by the produced factory MAY be inconsistent.
     /// It is recommended to call [`Self::check_consistency`] after
     /// creation to ensure consistency between the database and static files.
@@ -124,6 +129,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        overlay_manager: OverlayManager<N::Primitives>,
         runtime: reth_tasks::Runtime,
     ) -> ProviderResult<Self> {
         // Load storage settings from database at init time. Creates a temporary provider
@@ -132,7 +138,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         // Both factory and all providers it creates should share these cached settings.
         let legacy_settings = StorageSettings::v1();
         let database_provider_metrics = Arc::new(DatabaseProviderMetrics::default());
-        let overlay_manager = OverlayManager::default();
         let storage_settings = DatabaseProvider::<_, N>::new(
             db.tx()?,
             chain_spec.clone(),
@@ -177,9 +182,10 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        overlay_manager: OverlayManager<N::Primitives>,
         runtime: reth_tasks::Runtime,
     ) -> ProviderResult<Self> {
-        Self::new(db, chain_spec, static_file_provider, rocksdb_provider, runtime)
+        Self::new(db, chain_spec, static_file_provider, rocksdb_provider, overlay_manager, runtime)
             .and_then(Self::assert_consistent)
     }
 }
@@ -194,12 +200,6 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     /// Sets the BAL store for an existing [`ProviderFactory`].
     pub fn with_bal_store(mut self, bal_store: BalStoreHandle) -> Self {
         self.bal_store = bal_store;
-        self
-    }
-
-    /// Sets the overlay manager for an existing [`ProviderFactory`].
-    pub fn with_overlay_manager(mut self, overlay_manager: OverlayManager<N::Primitives>) -> Self {
-        self.overlay_manager = overlay_manager;
         self
     }
 
@@ -323,6 +323,12 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     pub fn into_db(self) -> N::DB {
         self.db
     }
+
+    /// Returns the in-memory state of the overlay manager of this factory, which holds the
+    /// canonical blocks that are not on disk yet.
+    pub fn in_memory_state(&self) -> &InMemoryState<N::Primitives> {
+        self.overlay_manager.in_memory_state()
+    }
 }
 
 impl<N: NodeTypesWithDB> StorageSettingsCache for ProviderFactory<N> {
@@ -358,6 +364,7 @@ impl<N: ProviderNodeTypes<DB = DatabaseEnv>> ProviderFactory<N> {
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        overlay_manager: OverlayManager<N::Primitives>,
         runtime: reth_tasks::Runtime,
     ) -> RethResult<Self> {
         Self::new(
@@ -365,6 +372,7 @@ impl<N: ProviderNodeTypes<DB = DatabaseEnv>> ProviderFactory<N> {
             chain_spec,
             static_file_provider,
             rocksdb_provider,
+            overlay_manager,
             runtime,
         )
         .map_err(RethError::Provider)
@@ -581,6 +589,43 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     ) -> ProviderResult<StaticFileProvider<N::Primitives>> {
         self.sync_providers_if_needed()?;
         Ok(self.static_file_provider.clone())
+    }
+
+    /// Returns the head of the chain stored in the database, and the safe and finalized blocks
+    /// if they are stored.
+    ///
+    /// The safe block is the finalized block if no safe block is stored. A stored safe or
+    /// finalized block number whose header is not stored yields `None` for that block.
+    ///
+    /// Returns [`ProviderError::HeaderNotFound`] if the header of the head is not stored, for
+    /// example in a database without a genesis block.
+    pub fn chain_info_headers(&self) -> ProviderResult<ChainInfoHeaders<HeaderTy<N>>> {
+        let provider = self.provider()?;
+        let ChainInfo { best_hash, best_number } = provider.chain_info()?;
+        let canonical_head = provider
+            .header_by_number(best_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(best_number.into()))?;
+        let finalized = provider
+            .last_finalized_block_number()?
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
+        let safe = provider
+            .last_safe_block_number()?
+            .or_else(|| {
+                // for the purpose of this we can also use the finalized block if we don't have the
+                // safe block
+                provider.last_finalized_block_number().ok().flatten()
+            })
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
+
+        Ok(ChainInfoHeaders {
+            canonical_head: SealedHeader::new(canonical_head, best_hash),
+            safe,
+            finalized,
+        })
     }
 }
 
@@ -1045,7 +1090,9 @@ mod tests {
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_api::MetadataWriter;
     use reth_storage_errors::provider::ProviderError;
-    use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
+    use reth_testing_utils::generators::{
+        self, random_block, random_block_range, random_header, BlockParams, BlockRangeParams,
+    };
     use std::{ops::RangeInclusive, sync::Arc};
 
     #[test]
@@ -1086,6 +1133,7 @@ mod tests {
             DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
             RocksDBProvider::builder(&rocksdb_path).build().unwrap(),
+            OverlayManager::default(),
             reth_tasks::Runtime::test(),
         )
         .unwrap();
@@ -1562,5 +1610,40 @@ mod tests {
             writer.commit().unwrap();
         }
         factory
+    }
+
+    #[test]
+    fn chain_info_headers() {
+        let factory = create_test_provider_factory();
+        assert_matches!(
+            factory.chain_info_headers(),
+            Err(ProviderError::HeaderNotFound(BlockHashOrNumber::Number(0)))
+        );
+
+        let mut rng = generators::rng();
+        let blocks = random_block_range(
+            &mut rng,
+            0..=3,
+            BlockRangeParams { tx_count: 0..1, ..Default::default() },
+        );
+        let provider = factory.provider_rw().unwrap();
+        for block in &blocks {
+            provider.insert_block(&block.clone().try_recover().unwrap()).unwrap();
+        }
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
+        provider.save_finalized_block_number(2).unwrap();
+        provider.commit().unwrap();
+
+        // The safe block is the finalized block while no safe block is stored.
+        let headers = factory.chain_info_headers().unwrap();
+        assert_eq!(headers.canonical_head, blocks[3].clone_sealed_header());
+        assert_eq!(headers.finalized, Some(blocks[2].clone_sealed_header()));
+        assert_eq!(headers.safe, headers.finalized);
+
+        let provider = factory.provider_rw().unwrap();
+        provider.save_safe_block_number(1).unwrap();
+        provider.commit().unwrap();
+        let headers = factory.chain_info_headers().unwrap();
+        assert_eq!(headers.safe, Some(blocks[1].clone_sealed_header()));
     }
 }
