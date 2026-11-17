@@ -12,15 +12,26 @@ use evm2::{
     interpreter::{GasTracker, Message},
     Evm, EvmTypesHost, PrecompileError,
 };
-use moka::policy::EvictionPolicy;
 #[cfg(feature = "metrics")]
 use reth_metrics::Metrics;
 use reth_primitives_traits::dashmap::DashMap;
 use std::{fmt, hash::Hash, sync::Arc};
 use tracing::error;
 
-/// Default max cache size for [`PrecompileCache`].
-const MAX_CACHE_SIZE: u32 = 1024 * 1024;
+/// Largest input kept in [`PrecompileCache::small`], which covers ecrecover, the BN254 additions
+/// and multiplications, and short hashes.
+const SMALL_INPUT_SIZE: usize = 128;
+
+/// Number of entries of [`PrecompileCache::small`].
+///
+/// A full table takes at most about 12 MiB with inputs and outputs of [`SMALL_INPUT_SIZE`].
+const SMALL_CACHE_ENTRIES: usize = 1 << 15;
+
+/// Number of entries of [`PrecompileCache::large`].
+///
+/// A full table takes at most about 4 MiB with inputs and outputs of
+/// [`MAX_PRECOMPILE_CACHE_INPUT_SIZE`].
+const LARGE_CACHE_ENTRIES: usize = 1 << 10;
 
 /// Maximum input retained by a precompile cache.
 const MAX_PRECOMPILE_CACHE_INPUT_SIZE: usize = 2 * 1024;
@@ -61,10 +72,28 @@ where
 }
 
 /// Cache for one precompile's inputs and outputs.
+///
+/// Lookups are a probe of a fixed-size table, where a new entry replaces the one it collides
+/// with. Inputs are split by size so that many small entries fit without letting large ones
+/// grow the cache past about 16 MiB.
 struct PrecompileCache<S> {
-    cache: moka::sync::Cache<Bytes, CacheEntry<S>, DefaultHashBuilder>,
+    /// Entries with inputs of up to [`SMALL_INPUT_SIZE`].
+    small: PrecompileCacheTable<S>,
+    /// Entries with larger inputs, up to [`MAX_PRECOMPILE_CACHE_INPUT_SIZE`].
+    large: PrecompileCacheTable<S>,
     #[cfg(feature = "metrics")]
     metrics: std::sync::OnceLock<CachedPrecompileMetrics>,
+}
+
+/// A table of [`PrecompileCache`].
+type PrecompileCacheTable<S> =
+    fixed_cache::Cache<Bytes, CacheEntry<S>, DefaultHashBuilder, PrecompileCacheConfig>;
+
+/// Configuration of [`PrecompileCacheTable`].
+struct PrecompileCacheConfig;
+
+impl fixed_cache::CacheConfig for PrecompileCacheConfig {
+    const STATS: bool = false;
 }
 
 impl<S> fmt::Debug for PrecompileCache<S> {
@@ -79,12 +108,8 @@ where
 {
     fn default() -> Self {
         Self {
-            cache: moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
-                .eviction_policy(EvictionPolicy::lru())
-                .weigher(|key: &Bytes, value: &CacheEntry<S>| {
-                    (key.len() + value.output.bytes().len()) as u32
-                })
-                .build_with_hasher(Default::default()),
+            small: fixed_cache::Cache::new(SMALL_CACHE_ENTRIES, Default::default()),
+            large: fixed_cache::Cache::new(LARGE_CACHE_ENTRIES, Default::default()),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -96,12 +121,19 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn get(&self, input: &[u8], spec: S) -> Option<CacheEntry<S>> {
-        self.cache.get(input).filter(|entry| entry.spec == spec)
+        self.table(input.len()).get(input).filter(|entry| entry.spec == spec)
     }
 
-    fn insert(&self, input: Bytes, value: CacheEntry<S>) -> usize {
-        self.cache.insert(input, value);
-        self.cache.entry_count() as usize
+    fn insert(&self, input: Bytes, value: CacheEntry<S>) {
+        self.table(input.len()).insert(input, value)
+    }
+
+    const fn table(&self, input_len: usize) -> &PrecompileCacheTable<S> {
+        if input_len <= SMALL_INPUT_SIZE {
+            &self.small
+        } else {
+            &self.large
+        }
     }
 }
 
@@ -280,7 +312,7 @@ where
                         "cacheable precompile changed refund gas, skipping cache insertion"
                     );
                 } else if let Some(regular_gas_used) = after.spent.checked_sub(before.spent) {
-                    let _size = cache.insert(
+                    cache.insert(
                         input,
                         CacheEntry {
                             output: output.clone(),
@@ -290,7 +322,6 @@ where
                     );
                     #[cfg(feature = "metrics")]
                     if let Some(metrics) = metrics {
-                        metrics.precompile_cache_size.set(_size as f64);
                         metrics.precompile_cache_misses.increment(1);
                     }
                 } else {
@@ -369,9 +400,6 @@ pub struct CachedPrecompileMetrics {
 
     /// Precompile cache misses.
     pub precompile_cache_misses: metrics::Counter,
-
-    /// Precompile cache size. Uses the LRU cache length as the size metric.
-    pub precompile_cache_size: metrics::Gauge,
 
     /// Precompile execution errors.
     pub precompile_errors: metrics::Counter,
@@ -654,6 +682,31 @@ mod tests {
             }
             assert!(!cache.0.contains_key(&identity));
             assert!(!provider.cache_map.0.contains_key(&identity));
+        }
+    }
+
+    #[test]
+    fn splits_entries_by_input_size() {
+        let spec = SpecId::OSAKA;
+        let cache = PrecompileCache::default();
+        for len in [SMALL_INPUT_SIZE, SMALL_INPUT_SIZE + 1, MAX_PRECOMPILE_CACHE_INPUT_SIZE] {
+            let input = Bytes::from(vec![1; len]);
+            cache.insert(
+                input.clone(),
+                CacheEntry {
+                    output: PrecompileOutput::new(input.clone()),
+                    regular_gas_used: 15,
+                    spec,
+                },
+            );
+            assert_eq!(cache.get(&input, spec).unwrap().output.bytes(), &input);
+            let (holds, other) = if len <= SMALL_INPUT_SIZE {
+                (&cache.small, &cache.large)
+            } else {
+                (&cache.large, &cache.small)
+            };
+            assert!(holds.get(input.as_ref()).is_some());
+            assert!(other.get(input.as_ref()).is_none());
         }
     }
 }
