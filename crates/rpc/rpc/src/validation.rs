@@ -35,7 +35,7 @@ use reth_metrics::{
 use reth_payload_primitives::{NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
     block::error::SealedBlockRecoveryError, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
-    SealedBlock, SealedHeaderFor,
+    SealedHeaderFor,
 };
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
@@ -320,7 +320,7 @@ where
     /// to checking the latest block transaction.
     fn ensure_payment(
         &self,
-        block: &SealedBlock<<E::Primitives as NodePrimitives>::Block>,
+        block: &RecoveredBlock<<E::Primitives as NodePrimitives>::Block>,
         output: &BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
@@ -354,13 +354,18 @@ where
             return Ok(())
         }
 
-        let (receipt, tx) = output
+        let (receipt, (sender, tx)) = output
             .receipts
             .last()
-            .zip(block.body().transactions().last())
+            .zip(block.transactions_with_sender().last())
             .ok_or(ValidationApiError::ProposerPayment)?;
 
         if !receipt.status() {
+            return Err(ValidationApiError::ProposerPayment)
+        }
+
+        // A transfer from the fee recipient to itself moves no value.
+        if *sender == message.proposer_fee_recipient {
             return Err(ValidationApiError::ProposerPayment)
         }
 
@@ -1207,9 +1212,7 @@ mod tests {
             state: fee_recipient_spent(message.proposer_fee_recipient),
         };
 
-        test_validation_api(provider)
-            .ensure_payment(block.sealed_block(), &output, &message)
-            .unwrap();
+        test_validation_api(provider).ensure_payment(&block, &output, &message).unwrap();
     }
 
     /// Execution state for a block in which `address` ended up poorer than it started.
