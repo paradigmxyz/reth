@@ -36,6 +36,7 @@ use reth_stages::{
     Pipeline, PipelineTarget, StageId, StageSet,
 };
 use reth_static_file::StaticFileProducer;
+use reth_storage_overlay::OverlayManager;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, info, warn};
@@ -210,6 +211,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             self.chain.clone(),
             static_file_provider,
             rocksdb_provider,
+            OverlayManager::default(),
             runtime,
         )?
         .with_prune_modes(config.prune.segments.clone())

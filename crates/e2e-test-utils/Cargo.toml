@@ -28,6 +28,7 @@ reth-node-core.workspace = true
 reth-node-builder = { workspace = true, features = ["test-utils"] }
 reth-tokio-util.workspace = true
 reth-stages-types.workspace = true
+reth-storage-overlay.workspace = true
 reth-network-peers.workspace = true
 reth-engine-primitives.workspace = true
 reth-tasks.workspace = true

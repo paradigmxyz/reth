@@ -365,17 +365,20 @@ impl Engine {
             .with_default_tables()
             .build()
             .map_err(|err| Error::engine("failed to set up the engine", err))?;
-        let overlay_manager = OverlayManager::new(runtime.state_trie_overlay_worker_pool());
+        let overlay_manager = OverlayManager::with_worker_pool(
+            Default::default(),
+            runtime.state_trie_overlay_worker_pool(),
+        );
         let factory = ProviderFactory::<FixtureNode>::new(
             db.clone(),
             chain_spec.clone(),
             StaticFileProvider::read_write(datadir.join("static_files"))
                 .map_err(|err| Error::engine("failed to set up the engine", err))?,
             rocksdb.clone(),
+            overlay_manager.clone(),
             runtime.clone(),
         )
-        .map_err(|err| Error::engine("failed to set up the engine", err))?
-        .with_overlay_manager(overlay_manager.clone());
+        .map_err(|err| Error::engine("failed to set up the engine", err))?;
         init_genesis_with_settings(&factory, storage_settings)
             .map_err(|err| Error::engine("failed to set up the engine", err))?;
         let provider = BlockchainProvider::new(factory.clone())
