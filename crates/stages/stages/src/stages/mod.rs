@@ -612,17 +612,16 @@ mod tests {
         });
         assert_consistency(&db, None);
 
-        // Once the segment holds senders, it is still checked, so rows the database does not back
-        // are healed instead of being served.
+        // Once the segment holds senders, it is still checked, so senders above the stage
+        // checkpoint are pruned instead of being served.
         let static_file_provider = db.factory.static_file_provider();
         let first_block = static_file_provider
             .get_highest_static_file_block(StaticFileSegment::TransactionSenders)
             .map_or(0, |block| block + 1);
-        let last_block = 10;
         {
             let mut writer =
                 static_file_provider.latest_writer(StaticFileSegment::TransactionSenders).unwrap();
-            for block in first_block..=last_block {
+            for block in first_block..=10 {
                 writer.increment_block(block).unwrap();
                 let indices = db.factory.block_body_indices(block).unwrap().unwrap();
                 for tx_num in indices.tx_num_range() {
@@ -631,7 +630,19 @@ mod tests {
             }
             writer.commit().unwrap();
         }
-        assert_consistency(&db, Some(PipelineTarget::Unwind(last_block)));
+        let checkpoint_block = 5;
+        let provider_rw = db.factory.provider_rw().unwrap();
+        provider_rw
+            .save_stage_checkpoint(StageId::SenderRecovery, StageCheckpoint::new(checkpoint_block))
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        assert_consistency(&db, None);
+        assert_eq!(
+            static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::TransactionSenders),
+            Some(checkpoint_block)
+        );
     }
 
     #[test]

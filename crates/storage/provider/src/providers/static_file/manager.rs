@@ -1539,10 +1539,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     return false;
                 }
 
-                // Senders are configured as `Full`, but nothing has written the `Full` prune
-                // checkpoint yet. This happens when a node restarts before its tip reaches the
-                // minimum pruning distance and it has never run the pipeline. With no senders on
-                // disk, checking would unwind to genesis.
+                // With `Full` sender recovery the engine persists blocks without senders, but
+                // only the sender recovery stage and the pruner write the `Full` prune checkpoint.
+                // A node that never ran the pipeline has none until the pruner first runs, which
+                // the block interval, the minimum pruning distance, or a lagging ExEx can delay.
+                // With no senders on disk, checking would unwind to genesis.
                 if provider.prune_modes_ref().sender_recovery.is_some_and(|mode| mode.is_full()) &&
                     self.get_highest_static_file_tx(segment).is_none()
                 {
