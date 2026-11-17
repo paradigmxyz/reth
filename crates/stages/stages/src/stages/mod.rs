@@ -46,7 +46,7 @@ mod tests {
     use crate::test_utils::{StorageKind, TestStageDB};
     use alloy_consensus::{SignableTransaction, TxLegacy};
     use alloy_primitives::{
-        address, hex_literal::hex, keccak256, BlockNumber, Signature, B256, U256,
+        address, hex_literal::hex, keccak256, Address, BlockNumber, Signature, B256, U256,
     };
     use alloy_rlp::Decodable;
     use reth_chainspec::ChainSpecBuilder;
@@ -588,6 +588,50 @@ mod tests {
             );
             assert_consistency(&db, None);
         }
+    }
+
+    #[test]
+    fn test_consistency_full_sender_pruning_without_checkpoint() {
+        let mut db = seed_v2_data();
+
+        // Only the history segments have prune checkpoints, so senders decide the outcome.
+        save_prune_checkpoints(
+            &db,
+            [PruneSegment::AccountHistory, PruneSegment::StorageHistory]
+                .map(|segment| (segment, 89, PruneMode::Distance(2_000_000))),
+        );
+
+        // Without `Full` sender pruning, the missing senders look like data loss.
+        assert_consistency(&db, Some(PipelineTarget::Unwind(0)));
+
+        // A node that persisted blocks without senders because `sender_recovery` is `Full`, before
+        // the pruner first ran and recorded a `Full` prune checkpoint, is consistent.
+        db.factory = db.factory.with_prune_modes(PruneModes {
+            sender_recovery: Some(PruneMode::Full),
+            ..Default::default()
+        });
+        assert_consistency(&db, None);
+
+        // Once the segment holds senders, it is still checked, so rows the database does not back
+        // are healed instead of being served.
+        let static_file_provider = db.factory.static_file_provider();
+        let first_block = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::TransactionSenders)
+            .map_or(0, |block| block + 1);
+        let last_block = 10;
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::TransactionSenders).unwrap();
+            for block in first_block..=last_block {
+                writer.increment_block(block).unwrap();
+                let indices = db.factory.block_body_indices(block).unwrap().unwrap();
+                for tx_num in indices.tx_num_range() {
+                    writer.append_transaction_sender(tx_num, &Address::ZERO).unwrap();
+                }
+            }
+            writer.commit().unwrap();
+        }
+        assert_consistency(&db, Some(PipelineTarget::Unwind(last_block)));
     }
 
     #[test]

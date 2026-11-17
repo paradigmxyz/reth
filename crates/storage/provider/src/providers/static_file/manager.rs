@@ -1539,6 +1539,17 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     return false;
                 }
 
+                // Senders are configured as `Full`, but nothing has written the `Full` prune
+                // checkpoint yet. This happens when a node restarts before its tip reaches the
+                // minimum pruning distance and it has never run the pipeline. With no senders on
+                // disk, checking would unwind to genesis.
+                if provider.prune_modes_ref().sender_recovery.is_some_and(|mode| mode.is_full()) &&
+                    self.get_highest_static_file_tx(segment).is_none()
+                {
+                    debug!(target: "reth::providers::static_file", ?segment, "Skipping senders segment: configured as fully pruned and empty");
+                    return false;
+                }
+
                 true
             }
             StaticFileSegment::AccountChangeSets => {
