@@ -39,7 +39,7 @@ tempfile = { workspace = true, optional = true }
 tikv-jemalloc-ctl = { workspace = true, optional = true, features = ["stats"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = "0.18.0"
+procfs = { version = "0.18.0", default-features = false }
 
 [dev-dependencies]
 socket2.workspace = true
