@@ -2,7 +2,7 @@
 
 use crate::{assert::assert_equal, Error};
 use alloy_consensus::Header as RethHeader;
-use alloy_eips::{eip4895::Withdrawals, eip7840::BlobParams};
+use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip4895::Withdrawals, eip7840::BlobParams};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{
     keccak256, map::HashMap, Address, Bloom, Bytes, B256, B64, U128, U256, U64,
@@ -46,7 +46,11 @@ pub struct BlockchainTest {
 
 impl BlockchainTest {
     /// Builds the fixture's fork schedule, chain ID, blob parameters and genesis allocation.
-    pub fn chain_spec(&self) -> ChainSpec {
+    ///
+    /// # Errors
+    /// Returns an error for unsupported forks, out-of-range genesis quantities, or invalid blob
+    /// parameters.
+    pub fn chain_spec(&self) -> Result<ChainSpec, FixtureConfigError> {
         fixture_chain_spec(&self.genesis_block_header, &self.pre, self.network, &self.config)
     }
 }
@@ -72,7 +76,11 @@ pub struct EngineTest {
 
 impl EngineTest {
     /// Returns the chain spec of the test's network, with the test's genesis block.
-    pub fn chain_spec(&self) -> ChainSpec {
+    ///
+    /// # Errors
+    /// Returns an error for unsupported forks, out-of-range genesis quantities, or invalid blob
+    /// parameters.
+    pub fn chain_spec(&self) -> Result<ChainSpec, FixtureConfigError> {
         fixture_chain_spec(&self.genesis_block_header, &self.pre, self.network, &self.config)
     }
 }
@@ -116,6 +124,34 @@ pub struct FixtureBlobParams {
     /// Nonzero denominator used to update the blob base fee.
     #[serde(deserialize_with = "deserialize_blob_update_fraction")]
     pub base_fee_update_fraction: U128,
+}
+
+/// A fixture configuration that the runner cannot execute.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum FixtureConfigError {
+    /// An experimental fork has no matching EVM configuration.
+    #[error("unsupported fixture fork: {0:?}")]
+    UnsupportedFork(ForkSpec),
+    /// A genesis header quantity exceeds the client's representation.
+    #[error("fixture genesis {field} does not fit in u64: {source}")]
+    HeaderQuantity {
+        /// The fixture's header field.
+        field: &'static str,
+        /// The failed checked conversion.
+        #[source]
+        source: alloy_primitives::ruint::FromUintError<u64>,
+    },
+    /// Blob parameters would overflow or divide by zero during header validation.
+    #[error("unsupported fixture blob schedule for {fork:?}: target {target}, maximum {max}")]
+    BlobParams {
+        /// The fork whose parameters cannot be executed.
+        fork: ForkSpec,
+        /// The configured target.
+        target: u64,
+        /// The configured maximum.
+        max: u64,
+    },
 }
 
 /// A block header in an Ethereum blockchain test.
@@ -174,19 +210,28 @@ pub struct Header {
     pub slot_number: Option<U256>,
 }
 
-impl From<Header> for SealedHeader {
-    fn from(value: Header) -> Self {
+impl TryFrom<Header> for SealedHeader {
+    type Error = FixtureConfigError;
+
+    fn try_from(value: Header) -> Result<Self, Self::Error> {
+        let quantity = |value: U256, field| {
+            u64::try_from(value)
+                .map_err(|source| FixtureConfigError::HeaderQuantity { field, source })
+        };
         let header = RethHeader {
-            base_fee_per_gas: value.base_fee_per_gas.map(|v| v.to::<u64>()),
+            base_fee_per_gas: value
+                .base_fee_per_gas
+                .map(|v| quantity(v, "baseFeePerGas"))
+                .transpose()?,
             beneficiary: value.coinbase,
             difficulty: value.difficulty,
             extra_data: value.extra_data,
-            gas_limit: value.gas_limit.to::<u64>(),
-            gas_used: value.gas_used.to::<u64>(),
+            gas_limit: quantity(value.gas_limit, "gasLimit")?,
+            gas_used: quantity(value.gas_used, "gasUsed")?,
             mix_hash: value.mix_hash,
             nonce: u64::from_be_bytes(value.nonce.0).into(),
-            number: value.number.to::<u64>(),
-            timestamp: value.timestamp.to::<u64>(),
+            number: quantity(value.number, "number")?,
+            timestamp: quantity(value.timestamp, "timestamp")?,
             transactions_root: value.transactions_trie,
             receipts_root: value.receipt_trie,
             ommers_hash: value.uncle_hash,
@@ -194,14 +239,17 @@ impl From<Header> for SealedHeader {
             parent_hash: value.parent_hash,
             logs_bloom: value.bloom,
             withdrawals_root: value.withdrawals_root,
-            blob_gas_used: value.blob_gas_used.map(|v| v.to::<u64>()),
-            excess_blob_gas: value.excess_blob_gas.map(|v| v.to::<u64>()),
+            blob_gas_used: value.blob_gas_used.map(|v| quantity(v, "blobGasUsed")).transpose()?,
+            excess_blob_gas: value
+                .excess_blob_gas
+                .map(|v| quantity(v, "excessBlobGas"))
+                .transpose()?,
             parent_beacon_block_root: value.parent_beacon_block_root,
             requests_hash: value.requests_hash,
             block_access_list_hash: value.block_access_list_hash,
-            slot_number: value.slot_number.map(|v| v.to::<u64>()),
+            slot_number: value.slot_number.map(|v| quantity(v, "slotNumber")).transpose()?,
         };
-        Self::new(header, value.hash)
+        Ok(Self::new(header, value.hash))
     }
 }
 
@@ -667,61 +715,102 @@ fn fixture_chain_spec(
     pre: &State,
     network: ForkSpec,
     config: &FixtureConfig,
-) -> ChainSpec {
+) -> Result<ChainSpec, FixtureConfigError> {
+    if matches!(network, ForkSpec::MergeEOF | ForkSpec::MergeMeterInitCode | ForkSpec::MergePush0) {
+        return Err(FixtureConfigError::UnsupportedFork(network))
+    }
+    let header = SealedHeader::try_from(header.clone())?;
     let genesis = Genesis::default()
         .with_nonce(u64::from_be_bytes(header.nonce.0))
-        .with_timestamp(header.timestamp.to())
+        .with_timestamp(header.timestamp)
         .with_extra_data(header.extra_data.clone())
-        .with_gas_limit(header.gas_limit.to())
+        .with_gas_limit(header.gas_limit)
         .with_difficulty(header.difficulty)
         .with_mix_hash(header.mix_hash)
-        .with_coinbase(header.coinbase)
-        .with_base_fee(header.base_fee_per_gas.map(|fee| fee.to()))
-        .with_excess_blob_gas(header.excess_blob_gas.map(|gas| gas.to()))
-        .with_blob_gas_used(header.blob_gas_used.map(|gas| gas.to()))
-        .with_slot_number(header.slot_number.map(|slot| slot.to()))
+        .with_coinbase(header.beneficiary)
+        .with_base_fee(header.base_fee_per_gas.map(u128::from))
+        .with_excess_blob_gas(header.excess_blob_gas)
+        .with_blob_gas_used(header.blob_gas_used)
+        .with_slot_number(header.slot_number)
         .extend_accounts(pre.clone().into_genesis_state());
     let mut spec = network.chain_spec_on(genesis);
     if let Some(chain_id) = config.chain_id {
         spec.chain = Chain::from_id(chain_id.to());
     }
-    for (fork, fixture_params) in &config.blob_schedule {
-        let mut params = match fork {
-            ForkSpec::Cancun => BlobParams::cancun(),
-            ForkSpec::Prague => BlobParams::prague(),
-            _ => BlobParams::osaka(),
-        };
-        params.target_blob_count = fixture_params.target.to();
-        params.max_blob_count = fixture_params.max.to();
-        params.update_fraction = fixture_params.base_fee_update_fraction.to();
-        match fork {
-            ForkSpec::Cancun => spec.blob_params.cancun = params,
-            ForkSpec::Prague => spec.blob_params.prague = params,
-            ForkSpec::Osaka => spec.blob_params.osaka = params,
-            _ => {
-                let hardfork = match fork {
-                    ForkSpec::BPO1 => EthereumHardfork::Bpo1,
-                    ForkSpec::BPO2 => EthereumHardfork::Bpo2,
-                    ForkSpec::Amsterdam => EthereumHardfork::Amsterdam,
-                    ForkSpec::AmsterdamBPOIncrease | ForkSpec::AmsterdamBPODecrease => {
-                        EthereumHardfork::Bpo3
-                    }
-                    _ => continue,
-                };
-                if let Some(timestamp) = spec.hardforks.fork(hardfork).as_timestamp() {
-                    spec.blob_params.scheduled.push((timestamp, params));
-                }
-            }
+    spec.blob_params.cancun =
+        fixture_blob_params(ForkSpec::Cancun, spec.blob_params.cancun, config)?;
+    spec.blob_params.prague =
+        fixture_blob_params(ForkSpec::Prague, spec.blob_params.prague, config)?;
+    spec.blob_params.osaka = fixture_blob_params(ForkSpec::Osaka, spec.blob_params.osaka, config)?;
+
+    let bpo3 = match network {
+        ForkSpec::AmsterdamBPOIncrease | ForkSpec::AmsterdamToBPOIncreaseAtTime15k => {
+            Some(ForkSpec::AmsterdamBPOIncrease)
+        }
+        ForkSpec::AmsterdamBPODecrease | ForkSpec::AmsterdamToBPODecreaseAtTime15k => {
+            Some(ForkSpec::AmsterdamBPODecrease)
+        }
+        _ => None,
+    };
+    // Apply forks in protocol order, including defaults. Later forks win when genesis activates
+    // multiple forks at the same timestamp, independently of ForkSpec's declaration order.
+    let forks = [
+        (ForkSpec::BPO1, EthereumHardfork::Bpo1, BlobParams::bpo1()),
+        (ForkSpec::BPO2, EthereumHardfork::Bpo2, BlobParams::bpo2()),
+        (ForkSpec::Amsterdam, EthereumHardfork::Amsterdam, BlobParams::bpo2()),
+    ];
+    let mut scheduled = BTreeMap::new();
+    for (fork, hardfork, defaults) in
+        forks.into_iter().chain(bpo3.map(|fork| (fork, EthereumHardfork::Bpo3, BlobParams::bpo2())))
+    {
+        if let Some(timestamp) = spec.hardforks.fork(hardfork).as_timestamp() {
+            scheduled.insert(timestamp, fixture_blob_params(fork, defaults, config)?);
         }
     }
-    spec.blob_params.scheduled.sort_by_key(|(timestamp, _)| *timestamp);
-    spec
+    spec.blob_params.scheduled = scheduled.into_iter().collect();
+    Ok(spec)
+}
+
+fn fixture_blob_params(
+    fork: ForkSpec,
+    mut params: BlobParams,
+    config: &FixtureConfig,
+) -> Result<BlobParams, FixtureConfigError> {
+    let Some(fixture) = config.blob_schedule.get(&fork) else { return Ok(params) };
+    params.target_blob_count = fixture.target.to();
+    params.max_blob_count = fixture.max.to();
+    params.update_fraction = fixture.base_fee_update_fraction.to();
+    if params.target_blob_count > params.max_blob_count ||
+        params.max_blob_count > u64::MAX / DATA_GAS_PER_BLOB ||
+        (params.blob_base_cost != 0 && params.max_blob_count == 0)
+    {
+        return Err(FixtureConfigError::BlobParams {
+            fork,
+            target: params.target_blob_count,
+            max: params.max_blob_count,
+        })
+    }
+    if matches!(fork, ForkSpec::Cancun | ForkSpec::Prague) {
+        params.max_blobs_per_tx = params.max_blob_count;
+    }
+    Ok(params)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::{SignableTransaction, TxEip4844};
+    use alloy_eips::eip4844::VERSIONED_HASH_VERSION_KZG;
+    use alloy_primitives::Signature;
     use reth_chainspec::EthChainSpec;
+    use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
+    use reth_evm::{database::StateProviderDatabase, ConfigureEvm, Evm, EvmEnv};
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_primitives_traits::SignedTransaction;
+    use reth_provider::{
+        test_utils::{ExtendedAccount, MockEthProvider},
+        StateProvider,
+    };
 
     #[test]
     fn amsterdam_uses_bpo2_blob_params_on_any_genesis() {
@@ -747,7 +836,8 @@ mod tests {
             &State::default(),
             ForkSpec::AmsterdamToBPOIncreaseAtTime15k,
             &config,
-        );
+        )
+        .unwrap();
         assert_eq!(spec.chain.id(), 7);
         assert_eq!(spec.blob_params_at_timestamp(14_999).unwrap().target_blob_count, 14);
         assert_eq!(spec.blob_params_at_timestamp(15_000).unwrap().target_blob_count, 21);
@@ -775,6 +865,190 @@ mod tests {
             "blobSchedule": {"BPO1": {"target": "0xa", "max": "0xf", "baseFeeUpdateFraction": "0x0"}}
         })).unwrap_err();
         assert_eq!(error.to_string(), "blob base fee update fraction must be nonzero");
+    }
+
+    #[test]
+    fn fixture_blob_maximum_applies_during_transaction_execution() {
+        for (fork, max, count) in [(ForkSpec::Cancun, 9, 7), (ForkSpec::Prague, 12, 10)] {
+            let config = FixtureConfig {
+                blob_schedule: BTreeMap::from([(
+                    fork,
+                    FixtureBlobParams {
+                        target: U64::from(3),
+                        max: U64::from(max),
+                        base_fee_update_fraction: U128::from(3_338_477),
+                    },
+                )]),
+                ..Default::default()
+            };
+            let spec =
+                fixture_chain_spec(&Header::default(), &State::default(), fork, &config).unwrap();
+            let evm_config = EthEvmConfig::new(Arc::new(spec));
+            let env = evm_config
+                .evm_env(&RethHeader {
+                    gas_limit: 30_000_000,
+                    base_fee_per_gas: Some(0),
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                })
+                .unwrap();
+            let sender = Address::with_last_byte(0x42);
+            let provider = MockEthProvider::<EthPrimitives>::default();
+            provider.add_account(sender, ExtendedAccount::new(0, U256::MAX));
+            let tx = TransactionSigned::Eip4844(
+                TxEip4844 {
+                    chain_id: 1,
+                    gas_limit: 21_000,
+                    max_fee_per_blob_gas: 1,
+                    blob_versioned_hashes: vec![
+                        B256::repeat_byte(VERSIONED_HASH_VERSION_KZG);
+                        count
+                    ],
+                    ..Default::default()
+                }
+                .into_signed(Signature::test_signature()),
+            );
+            let tx = evm_config.tx_env(tx.with_signer(sender));
+            let mut evm = evm_config
+                .evm_with_env(StateProviderDatabase(provider.into_evm_state_provider()), env);
+            evm.transact_and_discard(&tx, |_| {}).unwrap();
+        }
+        let config = FixtureConfig {
+            blob_schedule: BTreeMap::from([(
+                ForkSpec::Osaka,
+                FixtureBlobParams {
+                    target: U64::from(6),
+                    max: U64::from(12),
+                    base_fee_update_fraction: U128::from(5_007_716),
+                },
+            )]),
+            ..Default::default()
+        };
+        let spec =
+            fixture_chain_spec(&Header::default(), &State::default(), ForkSpec::Osaka, &config)
+                .unwrap();
+        let env = EthEvmConfig::new(Arc::new(spec)).evm_env(&RethHeader::default()).unwrap();
+        assert_eq!(
+            env.version().max_blobs_per_tx,
+            usize::try_from(BlobParams::osaka().max_blobs_per_tx).unwrap()
+        );
+    }
+
+    #[test]
+    fn equal_timestamp_blob_overrides_follow_fork_order() {
+        let mut config = FixtureConfig {
+            blob_schedule: BTreeMap::from([
+                (
+                    ForkSpec::BPO2,
+                    FixtureBlobParams {
+                        target: U64::from(14),
+                        max: U64::from(21),
+                        base_fee_update_fraction: U128::from(5_007_716),
+                    },
+                ),
+                (
+                    ForkSpec::Amsterdam,
+                    FixtureBlobParams {
+                        target: U64::from(16),
+                        max: U64::from(24),
+                        base_fee_update_fraction: U128::from(5_007_716),
+                    },
+                ),
+            ]),
+            ..Default::default()
+        };
+        for fork in
+            [ForkSpec::AmsterdamToBPOIncreaseAtTime15k, ForkSpec::AmsterdamToBPODecreaseAtTime15k]
+        {
+            let spec =
+                fixture_chain_spec(&Header::default(), &State::default(), fork, &config).unwrap();
+            let params = spec.blob_params_at_timestamp(14_999).unwrap();
+            assert_eq!((params.target_blob_count, params.max_blob_count), (16, 24));
+        }
+        config.blob_schedule.remove(&ForkSpec::Amsterdam);
+        let spec = fixture_chain_spec(
+            &Header::default(),
+            &State::default(),
+            ForkSpec::AmsterdamToBPOIncreaseAtTime15k,
+            &config,
+        )
+        .unwrap();
+        assert_eq!(spec.blob_params_at_timestamp(0), Some(BlobParams::bpo2()));
+    }
+
+    #[test]
+    fn experimental_merge_forks_are_not_executed_as_paris() {
+        for fork in [ForkSpec::MergeEOF, ForkSpec::MergeMeterInitCode, ForkSpec::MergePush0] {
+            let error = fixture_chain_spec(
+                &Header::default(),
+                &State::default(),
+                fork,
+                &FixtureConfig::default(),
+            )
+            .unwrap_err();
+            assert!(matches!(error, FixtureConfigError::UnsupportedFork(actual) if actual == fork));
+        }
+    }
+
+    #[test]
+    fn genesis_quantities_return_errors_instead_of_panicking() {
+        for field in [
+            "gasLimit",
+            "gasUsed",
+            "number",
+            "timestamp",
+            "baseFeePerGas",
+            "blobGasUsed",
+            "excessBlobGas",
+            "slotNumber",
+        ] {
+            let mut header = Header::default();
+            let value = U256::from(u64::MAX) + U256::ONE;
+            match field {
+                "gasLimit" => header.gas_limit = value,
+                "gasUsed" => header.gas_used = value,
+                "number" => header.number = value,
+                "timestamp" => header.timestamp = value,
+                "baseFeePerGas" => header.base_fee_per_gas = Some(value),
+                "blobGasUsed" => header.blob_gas_used = Some(value),
+                "excessBlobGas" => header.excess_blob_gas = Some(value),
+                "slotNumber" => header.slot_number = Some(value),
+                _ => unreachable!(),
+            }
+            let error = fixture_chain_spec(
+                &header,
+                &State::default(),
+                ForkSpec::Merge,
+                &FixtureConfig::default(),
+            )
+            .unwrap_err();
+            assert!(
+                matches!(error, FixtureConfigError::HeaderQuantity {field: actual, ..} if actual == field)
+            );
+        }
+    }
+
+    #[test]
+    fn unsafe_blob_schedules_return_configuration_errors() {
+        for (target, max) in [(0, 0), (2, 1), (1, u64::MAX)] {
+            let config = FixtureConfig {
+                blob_schedule: BTreeMap::from([(
+                    ForkSpec::Osaka,
+                    FixtureBlobParams {
+                        target: U64::from(target),
+                        max: U64::from(max),
+                        base_fee_update_fraction: U128::from(5_007_716),
+                    },
+                )]),
+                ..Default::default()
+            };
+            let error =
+                fixture_chain_spec(&Header::default(), &State::default(), ForkSpec::Osaka, &config)
+                    .unwrap_err();
+            assert!(
+                matches!(error, FixtureConfigError::BlobParams {fork: ForkSpec::Osaka, target: actual_target, max: actual_max} if actual_target == target && actual_max == max)
+            );
+        }
     }
 
     #[test]

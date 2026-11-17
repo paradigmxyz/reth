@@ -299,7 +299,7 @@ async fn run_case(
     outcome: &mut Outcome,
     remains: &mut Remains,
 ) -> Result<(), Error> {
-    let chain_spec = Arc::new(test.chain_spec());
+    let chain_spec = Arc::new(test.chain_spec()?);
     let genesis_hash = chain_spec.genesis_hash();
     if genesis_hash != test.genesis_block_header.hash {
         return Err(Error::Assertion(format!(
@@ -646,9 +646,14 @@ mod tests {
     use alloy_eips::{eip1559::BaseFeeParams, eip2718::Encodable2718};
     use alloy_primitives::{Address, Bloom, Bytes, Signature, TxKind, U256, U64};
     use alloy_rpc_types_engine::ExecutionPayloadV1;
-    use reth_ethereum_primitives::TransactionSigned;
-    use reth_primitives_traits::SignerRecoverable;
-    use reth_provider::{DatabaseProviderFactory, StorageSettingsCache};
+    use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
+    use reth_evm::{database::StateProviderDatabase, ConfigureEvm, Evm};
+    use reth_primitives_traits::{SignedTransaction, SignerRecoverable};
+    use reth_provider::{
+        test_utils::{ExtendedAccount, MockEthProvider},
+        DatabaseProviderFactory, StateProvider, StorageSettingsCache,
+    };
+    use std::process::Command;
 
     /// A Paris fixture whose one payload is an empty block on genesis with the given state root,
     /// and that payload's block hash.
@@ -673,7 +678,7 @@ mod tests {
             config: Default::default(),
             engine_new_payloads: Vec::new(),
         };
-        let chain_spec = test.chain_spec();
+        let chain_spec = test.chain_spec().unwrap();
         let genesis = chain_spec.genesis_header();
         test.genesis_block_header.hash = chain_spec.genesis_hash();
 
@@ -743,7 +748,7 @@ mod tests {
             let runtime = Runtime::test();
             let databases = runtime.handle().block_on(async {
                 let engine = Engine::start(
-                    Arc::new(test.chain_spec()),
+                    Arc::new(test.chain_spec().unwrap()),
                     &datadir,
                     &tree_config(false),
                     storage_settings,
@@ -862,19 +867,80 @@ mod tests {
 
     #[test]
     fn deeply_nested_calls_fit_the_engine_thread_stack() {
-        // Repeated CALL to ADDRESS with all remaining gas recurses until the EIP-150 gas bound.
-        let code = Bytes::from_static(&[
-            0x60, 0, 0x60, 0, 0x60, 0, 0x60, 0, 0x60, 0, 0x30, 0x5a, 0xf1, 0x00,
-        ]);
-        let result = run(&transaction_fixture(1, code));
-        assert!(result.pass, "{}", result.error);
-        assert_eq!(result.last_payload_status.as_deref(), Some("INVALID"));
-        assert_eq!(result.rejections.len(), 1);
-        assert!(
-            result.rejections[0].error.starts_with("block gas used mismatch:"),
-            "{}",
-            result.rejections[0].error
-        );
+        with_runner_stack("deeply_nested_calls_fit_the_engine_thread_stack", || {
+            // Repeated CALL to ADDRESS with all remaining gas recurses until the EIP-150 gas bound.
+            let code = Bytes::from_static(&[
+                0x60, 0, 0x60, 0, 0x60, 0, 0x60, 0, 0x60, 0, 0x30, 0x5a, 0xf1, 0x00,
+            ]);
+            let result = run(&transaction_fixture(1, code));
+            assert!(result.pass, "{}", result.error);
+            assert_eq!(result.last_payload_status.as_deref(), Some("INVALID"));
+            assert_eq!(result.rejections.len(), 1);
+            assert!(
+                result.rejections[0].error.starts_with("block gas used mismatch:"),
+                "{}",
+                result.rejections[0].error
+            );
+        });
+    }
+
+    #[test]
+    fn deeply_nested_calls_fit_speculative_worker_stacks() {
+        with_runner_stack("deeply_nested_calls_fit_speculative_worker_stacks", || {
+            let runtime = Runtime::test();
+            for pool in [runtime.prewarming_pool(), runtime.bal_streaming_pool()] {
+                pool.install_fn(|| {
+                    let sender = Address::with_last_byte(0x41);
+                    let contract = Address::with_last_byte(0x42);
+                    let provider = MockEthProvider::<EthPrimitives>::default();
+                    provider.add_account(sender, ExtendedAccount::new(0, U256::MAX));
+                    provider.add_account(
+                        contract,
+                        ExtendedAccount::new(1, U256::ZERO).with_bytecode(Bytes::from_static(&[
+                            0x60, 0, 0x60, 0, 0x60, 0, 0x60, 0, 0x60, 0, 0x30, 0x5a, 0xf1, 0x00,
+                        ])),
+                    );
+                    let config = EthEvmConfig::new(ForkSpec::Merge.to_chain_spec());
+                    let env = config
+                        .evm_env(&alloy_consensus::Header {
+                            gas_limit: 30_000_000,
+                            base_fee_per_gas: Some(0),
+                            ..Default::default()
+                        })
+                        .unwrap();
+                    let tx = TransactionSigned::Legacy(
+                        TxLegacy {
+                            chain_id: Some(1),
+                            gas_limit: 30_000_000,
+                            to: TxKind::Call(contract),
+                            ..Default::default()
+                        }
+                        .into_signed(Signature::test_signature()),
+                    );
+                    let tx = config.tx_env(tx.with_signer(sender));
+                    let mut evm = config.evm_with_env(
+                        StateProviderDatabase(provider.into_evm_state_provider()),
+                        env,
+                    );
+                    evm.transact_and_discard(&tx, |_| {}).unwrap();
+                });
+            }
+        });
+    }
+
+    #[test]
+    fn fixture_configuration_errors_are_reported_without_starting_an_engine() {
+        let (mut test, _) = empty_block_fixture(None);
+        test.network = ForkSpec::MergePush0;
+        let result = run(&test);
+        assert!(!result.pass);
+        assert_eq!(result.error, "unsupported fixture fork: MergePush0");
+        test.network = ForkSpec::Merge;
+        test.genesis_block_header.gas_limit = U256::from(u64::MAX) + U256::ONE;
+        let result = run(&test);
+        assert!(!result.pass);
+        assert_eq!(result.last_payload_status, None);
+        assert!(result.rejections.is_empty());
     }
 
     #[tokio::test(start_paused = true)]
@@ -922,5 +988,27 @@ mod tests {
         assert_eq!(config.bal_prewarm_threads(), Some(BAL_PREWARM_THREADS));
         assert!(!config.disable_bal_parallel_execution());
         assert_eq!(TreeConfig::default().bal_prewarm_threads(), None);
+    }
+
+    /// Exercises deep calls in a process started with the runner's stack policy, without
+    /// changing environment variables while the test harness has other threads running.
+    fn with_runner_stack(test: &str, run: impl FnOnce()) {
+        let minimum_stack_size = 8 * 1024 * 1024;
+        if matches!(std::env::var("RUST_MIN_STACK"), Ok(value) if value.parse::<usize>().is_ok_and(|size| size >= minimum_stack_size))
+        {
+            run();
+            return
+        }
+        let module = module_path!().split_once("::").unwrap().1;
+        let test = format!("{module}::{test}");
+        let output = Command::new(std::env::current_exe().unwrap())
+            .env("RUST_MIN_STACK", minimum_stack_size.to_string())
+            .args(["--exact", &test, "--color", "never"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let expected = format!("test {test} ... ok");
+        assert!(stdout.lines().any(|line| line == expected), "{stdout}");
     }
 }

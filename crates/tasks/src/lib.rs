@@ -71,27 +71,14 @@ where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    spawn_os_thread_with_builder(thread::Builder::new().name(name.to_string()), f)
-}
-
-/// Spawns a thread with the builder's settings and the current tokio runtime context.
-///
-/// # Panics
-///
-/// Panics if the OS cannot create the thread.
-#[track_caller]
-pub fn spawn_os_thread_with_builder<F, T>(builder: thread::Builder, f: F) -> thread::JoinHandle<T>
-where
-    F: FnOnce() -> T + Send + 'static,
-    T: Send + 'static,
-{
     let handle = Handle::try_current().ok();
-    builder
+    thread::Builder::new()
+        .name(name.to_string())
         .spawn(move || {
             let _guard = handle.as_ref().map(Handle::enter);
             f()
         })
-        .expect("failed to spawn OS thread")
+        .unwrap_or_else(|e| panic!("failed to spawn thread {name:?}: {e}"))
 }
 
 /// Spawns a scoped OS thread with the current tokio runtime context propagated.

@@ -3442,7 +3442,6 @@ version = "2.11.0"
 dependencies = [
  "clap",
  "ef-tests",
- "reth-engine-tree",
  "reth-node-core",
  "reth-node-version-build",
  "reth-provider",

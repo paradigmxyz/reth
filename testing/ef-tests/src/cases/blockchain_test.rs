@@ -19,14 +19,15 @@ use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
-use reth_engine_tree::tree::payload_validator::BAL_EXECUTION_PATH_TARGET;
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
 use reth_evm::{
     database::StateProviderDatabase, execute::BlockExecutor, BlockExecutorFor, ConfigureEvm,
 };
 use reth_evm_ethereum::EthEvmConfig;
-use reth_primitives_traits::{GotExpected, ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{
+    GotExpected, ParallelBridgeBuffered, RecoveredBlock, SealedBlock, SealedHeader,
+};
 use reth_provider::{
     providers::{RocksDBBuilder, RocksDBProvider, StaticFileProviderBuilder},
     test_utils::MockNodeTypesWithDB,
@@ -245,13 +246,13 @@ fn run_case(
     rejections: &mut Vec<Rejection>,
 ) -> Result<(), Error> {
     // Create a new test database and initialize a provider for the test case.
-    let chain_spec = Arc::new(case.chain_spec());
+    let chain_spec = Arc::new(case.chain_spec()?);
     let factory = create_test_provider_factory(chain_spec.clone());
     let provider = factory.database_provider_rw()?;
 
     // Insert initial test state into the provider.
     let genesis_block = SealedBlock::<Block>::from_sealed_parts(
-        case.genesis_block_header.clone().into(),
+        SealedHeader::try_from(case.genesis_block_header.clone())?,
         Default::default(),
     )
     .try_recover()
@@ -470,7 +471,7 @@ fn check_delivered_access_list(
     Ok(None)
 }
 
-/// Reports, on the engine's [`BAL_EXECUTION_PATH_TARGET`], which executor runs the block. Block
+/// Reports which executor runs the block on the engine's execution-path tracing target. Block
 /// import has only the sequential executor, so the reason is the first gate that would also rule
 /// out the parallel one in the engine, or else `block-import`.
 fn report_execution_path(
@@ -481,7 +482,7 @@ fn report_execution_path(
 ) {
     let reason = execution_path_reason(delivered, attached, options);
     debug!(
-        target: BAL_EXECUTION_PATH_TARGET,
+        target: "engine::tree::bal_execution_path",
         block = block.number,
         hash = %block.hash(),
         path = "sequential",

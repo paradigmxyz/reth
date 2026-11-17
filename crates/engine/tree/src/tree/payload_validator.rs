@@ -179,11 +179,6 @@ const MAX_EXPECTED_GAS_LIMIT_MULTIPLIER: u64 = 2;
 /// Worker name for deferred trie data preparation.
 const DEFERRED_TRIE_WORKER_NAME: &str = "deferred-trie";
 
-/// Tracing target of the debug event that reports, for each block about to execute, which
-/// executor runs it and, for the sequential one, the first gate that ruled out the BAL path.
-/// `ef-test-runner --bal-report` prints these events.
-pub const BAL_EXECUTION_PATH_TARGET: &str = "engine::tree::bal_execution_path";
-
 type ReceiptRootSender<N> =
     crossbeam_channel::Sender<IndexedReceipt<<N as NodePrimitives>::Receipt>>;
 type ReceiptRootReceiver = tokio::sync::oneshot::Receiver<(B256, alloy_primitives::Bloom)>;
@@ -721,7 +716,7 @@ where
         let path = if parallel_bal_execution { "parallel" } else { "sequential" };
         let reason = sequential_reason.unwrap_or_default();
         let NumHash { number, hash } = input.num_hash();
-        debug!(target: BAL_EXECUTION_PATH_TARGET, block = number, %hash, path, reason, "Executing block");
+        debug!(target: "engine::tree::bal_execution_path", block = number, %hash, path, reason, "Executing block");
         let execute_block_start = Instant::now();
         let execution_result = if parallel_bal_execution {
             self.execute_block_bal(env, &input, &handle, &make_state_provider)

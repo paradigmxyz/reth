@@ -1,6 +1,5 @@
 //! Reports which executor ran each block, as one JSON object per line on stderr.
 
-use reth_engine_tree::tree::payload_validator::BAL_EXECUTION_PATH_TARGET;
 use serde::Serialize;
 use std::{fmt, io::Write};
 use tracing::{
@@ -17,14 +16,13 @@ use tracing_subscriber::{
 /// Installs the global subscriber that prints the engine's execution path events.
 pub(crate) fn init() {
     tracing_subscriber::registry()
-        .with(
-            ExecutionPathLayer
-                .with_filter(Targets::new().with_target(BAL_EXECUTION_PATH_TARGET, Level::DEBUG)),
-        )
+        .with(ExecutionPathLayer.with_filter(
+            Targets::new().with_target("engine::tree::bal_execution_path", Level::DEBUG),
+        ))
         .init();
 }
 
-/// Prints each event on [`BAL_EXECUTION_PATH_TARGET`] as a `balExecution` line.
+/// Prints each execution-path event as a `balExecution` line.
 struct ExecutionPathLayer;
 
 impl<S: Subscriber> Layer<S> for ExecutionPathLayer {

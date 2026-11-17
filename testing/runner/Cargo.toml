@@ -9,7 +9,6 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
-reth-engine-tree.workspace = true
 reth-node-core.workspace = true
 reth-provider.workspace = true
 

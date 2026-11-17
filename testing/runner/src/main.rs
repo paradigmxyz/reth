@@ -110,6 +110,13 @@ fn default_workers() -> usize {
 }
 
 fn main() {
+    // Deep EVM calls also run on engine and speculative workers with Rust's default stack.
+    let minimum_stack_size = 8 * 1024 * 1024;
+    if !matches!(std::env::var("RUST_MIN_STACK"), Ok(value) if value.parse::<usize>().is_ok_and(|size| size >= minimum_stack_size))
+    {
+        // SAFETY: This runs at process startup, before the runner creates any threads or runtimes.
+        unsafe { std::env::set_var("RUST_MIN_STACK", minimum_stack_size.to_string()) };
+    }
     try_init_version_metadata(reth_node_core::reth_version_metadata!())
         .expect("runner version metadata is initialized once before parsing arguments");
     let cmd = TestRunnerCommand::parse();

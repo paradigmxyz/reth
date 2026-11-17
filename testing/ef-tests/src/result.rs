@@ -1,5 +1,6 @@
 //! Test results and errors
 
+use crate::models::FixtureConfigError;
 use alloy_primitives::B256;
 use reth_db::DatabaseError;
 use reth_evm::{BlockExecutionError, InternalBlockExecutionError};
@@ -66,6 +67,9 @@ pub enum Error {
     /// An internal execution failure, which must never count as an invalid block.
     #[error(transparent)]
     Execution(#[from] InternalBlockExecutionError),
+    /// The fixture requests a configuration the client cannot execute.
+    #[error(transparent)]
+    FixtureConfig(#[from] FixtureConfigError),
     /// A test assertion failed.
     #[error("test failed: {0}")]
     Assertion(String),
