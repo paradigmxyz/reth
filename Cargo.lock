@@ -5003,22 +5003,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91f255a4535024abf7640cb288260811fc14794f62b063652ed349f9a6c2348e"
 
 [[package]]
-name = "humantime"
-version = "2.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15cdd26707701c53297e2fa6afb323d55fbc1d0810c3aec078ae3ef0424c3c15"
-
-[[package]]
-name = "humantime-serde"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57a3db5ea5923d99402c94e9feb261dc5ee9b4efa158b0315f788cf549cc200c"
-dependencies = [
- "humantime",
- "serde",
-]
-
-[[package]]
 name = "hybrid-array"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8076,7 +8060,6 @@ dependencies = [
  "fdlimit",
  "futures",
  "human_bytes",
- "humantime",
  "itertools 0.14.0",
  "lz4",
  "metrics",
@@ -8164,6 +8147,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "eyre",
+ "jiff",
  "libc",
  "rand 0.9.5",
  "reth-fs-util",
@@ -8212,7 +8196,7 @@ version = "2.11.0"
 dependencies = [
  "alloy-primitives",
  "eyre",
- "humantime-serde",
+ "jiff",
  "reth-network-peers",
  "reth-network-types",
  "reth-prune-types",
@@ -9538,7 +9522,7 @@ name = "reth-network-types"
 version = "2.11.0"
 dependencies = [
  "alloy-eip2124",
- "humantime-serde",
+ "jiff",
  "reth-net-banlist",
  "reth-network-peers",
  "serde",
@@ -9676,7 +9660,6 @@ dependencies = [
  "dirs-next",
  "eyre",
  "futures",
- "humantime",
  "ipnet",
  "proptest",
  "rand 0.9.5",
@@ -9836,8 +9819,8 @@ dependencies = [
  "alloy-rpc-types-engine",
  "derive_more",
  "futures",
- "humantime",
  "pin-project",
+ "reth-cli-util",
  "reth-engine-primitives",
  "reth-network-api",
  "reth-primitives-traits",
@@ -10137,8 +10120,8 @@ dependencies = [
  "evm2",
  "evm2-inspectors",
  "futures",
- "humantime",
  "itertools 0.14.0",
+ "jiff",
  "jsonrpsee",
  "jsonrpsee-types",
  "parking_lot",
