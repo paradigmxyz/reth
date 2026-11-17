@@ -72,7 +72,13 @@ impl<N: NodePrimitives> InMemoryState<N> {
     ///
     /// This tries to acquire a read lock. Drop any write locks before calling this.
     pub(crate) fn update_metrics(&self) {
-        let InMemoryBlocksStats { count, earliest, latest } = self.blocks.read().stats();
+        let stats = self.blocks.read().stats();
+        self.record_metrics(stats);
+    }
+
+    /// Sets the in-memory state metrics from `stats`.
+    fn record_metrics(&self, stats: InMemoryBlocksStats) {
+        let InMemoryBlocksStats { count, earliest, latest } = stats;
         if let Some(earliest_block_number) = earliest {
             self.metrics.earliest_block.set(earliest_block_number as f64);
         }
@@ -113,11 +119,15 @@ impl<N: NodePrimitives> InMemoryState<N> {
         self.blocks.read().canonical().len()
     }
 
-    /// Applies `f` to the blocks under the write lock, and updates the metrics after releasing
-    /// it.
+    /// Applies `f` to the blocks under the write lock, and updates the metrics from the stats
+    /// read under the same lock.
     fn update(&self, f: impl FnOnce(&mut InMemoryBlocks<N>)) {
-        f(&mut self.blocks.write());
-        self.update_metrics();
+        let stats = {
+            let mut blocks = self.blocks.write();
+            f(&mut blocks);
+            blocks.stats()
+        };
+        self.record_metrics(stats);
     }
 }
 
