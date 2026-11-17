@@ -16,7 +16,7 @@ use moka::policy::EvictionPolicy;
 #[cfg(feature = "metrics")]
 use reth_metrics::Metrics;
 use reth_primitives_traits::dashmap::DashMap;
-use std::{fmt, hash::Hash, sync::Arc};
+use std::{cell::RefCell, fmt, hash::Hash, sync::Arc};
 use tracing::error;
 
 /// Default max cache size for [`PrecompileCache`].
@@ -122,7 +122,7 @@ where
     inner: evm2::Precompiles<T>,
     cache_map: PrecompileCacheMap<S>,
     /// Caches already resolved from `cache_map`, so repeated calls skip the shared map lookup.
-    caches: AddressMap<Arc<PrecompileCache<S>>>,
+    caches: RefCell<AddressMap<Arc<PrecompileCache<S>>>>,
     spec_id: S,
     policy: PrecompileCachePolicy,
     #[cfg_attr(not(feature = "metrics"), allow(dead_code))]
@@ -205,7 +205,7 @@ where
             // Relocated entries need a private cache because address alone no longer identifies
             // the same precompile implementation.
             self.cache_map = PrecompileCacheMap::default();
-            self.caches.clear();
+            self.caches.get_mut().clear();
         }
         Ok(())
     }
@@ -215,7 +215,7 @@ where
     }
 
     fn execute(
-        &mut self,
+        &self,
         evm: &mut Evm<'_, T>,
         message: &Message<T>,
         gas: &mut GasTracker,
@@ -224,8 +224,13 @@ where
         if !self.policy.allows(&address) {
             return self.inner.execute(evm, message, gas);
         }
-        let cache =
-            self.caches.entry(address).or_insert_with(|| self.cache_map.cache_for_address(address));
+        // Release the borrow before running the precompile, which may re-enter this provider.
+        let cache = self
+            .caches
+            .borrow_mut()
+            .entry(address)
+            .or_insert_with(|| self.cache_map.cache_for_address(address))
+            .clone();
         #[cfg(feature = "metrics")]
         let metrics = self.metrics_enabled.then(|| {
             cache.metrics.get_or_init(|| CachedPrecompileMetrics::new_with_address(address))
