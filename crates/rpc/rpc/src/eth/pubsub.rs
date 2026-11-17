@@ -567,7 +567,7 @@ mod tests {
     use futures::stream;
     use jsonrpsee::RpcModule;
     use jsonrpsee_types::{SubscriptionId, SubscriptionPayload, SubscriptionResponse};
-    use reth_chain_state::CanonStateNotification;
+    use reth_chain_state::{CanonStateNotification, ChainInfoHeaders};
     use reth_chainspec::ChainSpecProvider;
     use reth_ethereum_primitives::Receipt;
     use reth_evm_ethereum::EthEvmConfig;
@@ -597,8 +597,14 @@ mod tests {
     const NOTIFICATION_BUFFER: usize = 16;
 
     fn test_provider() -> TestProvider {
-        BlockchainProvider::with_latest(create_test_provider_factory(), SealedHeader::default())
-            .unwrap()
+        BlockchainProvider::new(
+            create_test_provider_factory(),
+            ChainInfoHeaders {
+                canonical_head: SealedHeader::default(),
+                safe: None,
+                finalized: None,
+            },
+        )
     }
 
     fn test_pubsub(provider: TestProvider, pool: TestPool) -> EthPubSub<impl EthSubscriptions> {

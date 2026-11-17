@@ -3,7 +3,8 @@ use super::{
     BlockState, ExecutedBlock, NewCanonicalChain,
 };
 use crate::{
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, ChainInfoTracker,
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
+    ChainInfoHeaders, ChainInfoTracker,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockNumHash;
@@ -39,17 +40,17 @@ pub(crate) struct InMemoryStateMetrics {
 /// This tracks blocks and their state that haven't been persisted to disk yet but are part of the
 /// canonical chain that can be traced back to a canonical block on disk.
 ///
+/// A node has one in-memory state. Clones are handles to the same blocks, pending block and
+/// metrics, and the default value is an empty state of its own.
+///
 /// # Locking behavior on state updates
 ///
 /// Updates change the blocks, the numbers and the pending block under one write lock. This
 /// prevents readers from observing partially updated state where they are out of sync with each
 /// other.
-#[derive(Debug, Default)]
-pub(crate) struct InMemoryState<N: NodePrimitives = EthPrimitives> {
-    /// The canonical blocks that are not on disk yet and the pending block.
-    blocks: RwLock<InMemoryBlocks<N>>,
-    /// Metrics for the in-memory state.
-    metrics: InMemoryStateMetrics,
+#[derive(Debug, Clone, Default)]
+pub struct InMemoryState<N: NodePrimitives = EthPrimitives> {
+    inner: Arc<InMemoryStateInner<N>>,
 }
 
 impl<N: NodePrimitives> InMemoryState<N> {
@@ -59,8 +60,10 @@ impl<N: NodePrimitives> InMemoryState<N> {
         pending: Option<BlockState<N>>,
     ) -> Self {
         let this = Self {
-            blocks: RwLock::new(InMemoryBlocks::new(blocks, numbers, pending)),
-            metrics: Default::default(),
+            inner: Arc::new(InMemoryStateInner {
+                blocks: RwLock::new(InMemoryBlocks::new(blocks, numbers, pending)),
+                metrics: Default::default(),
+            }),
         };
         this.update_metrics();
         this
@@ -72,7 +75,7 @@ impl<N: NodePrimitives> InMemoryState<N> {
     ///
     /// This tries to acquire a read lock. Drop any write locks before calling this.
     pub(crate) fn update_metrics(&self) {
-        let stats = self.blocks.read().stats();
+        let stats = self.inner.blocks.read().stats();
         self.record_metrics(stats);
     }
 
@@ -80,55 +83,64 @@ impl<N: NodePrimitives> InMemoryState<N> {
     fn record_metrics(&self, stats: InMemoryBlocksStats) {
         let InMemoryBlocksStats { count, earliest, latest } = stats;
         if let Some(earliest_block_number) = earliest {
-            self.metrics.earliest_block.set(earliest_block_number as f64);
+            self.inner.metrics.earliest_block.set(earliest_block_number as f64);
         }
         if let Some(latest_block_number) = latest {
-            self.metrics.latest_block.set(latest_block_number as f64);
+            self.inner.metrics.latest_block.set(latest_block_number as f64);
         }
-        self.metrics.num_blocks.set(count as f64);
+        self.inner.metrics.num_blocks.set(count as f64);
     }
 
     /// Returns the state for a given block hash.
     pub(crate) fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
-        self.blocks.read().canonical().get(&hash).cloned()
+        self.inner.blocks.read().canonical().get(&hash).cloned()
     }
 
     /// Returns the state for a given block number.
     pub(crate) fn state_by_number(&self, number: u64) -> Option<Arc<BlockState<N>>> {
-        self.blocks.read().canonical().by_number(number).cloned()
+        self.inner.blocks.read().canonical().by_number(number).cloned()
     }
 
     /// Returns the hash for a specific block number
     pub(crate) fn hash_by_number(&self, number: u64) -> Option<B256> {
-        self.blocks.read().canonical().hash_by_number(number)
+        self.inner.blocks.read().canonical().hash_by_number(number)
     }
 
     /// Returns the current chain head state.
     pub(crate) fn head_state(&self) -> Option<Arc<BlockState<N>>> {
-        self.blocks.read().canonical().head().cloned()
+        self.inner.blocks.read().canonical().head().cloned()
     }
 
     /// Returns the pending state corresponding to the current head plus one,
     /// from the payload received in newPayload that does not have a FCU yet.
     pub(crate) fn pending_state(&self) -> Option<BlockState<N>> {
-        self.blocks.read().pending_state().cloned()
+        self.inner.blocks.read().pending_state().cloned()
     }
 
     #[cfg(test)]
     fn block_count(&self) -> usize {
-        self.blocks.read().canonical().len()
+        self.inner.blocks.read().canonical().len()
     }
 
     /// Applies `f` to the blocks under the write lock, and updates the metrics from the stats
     /// read under the same lock.
     fn update(&self, f: impl FnOnce(&mut InMemoryBlocks<N>)) {
         let stats = {
-            let mut blocks = self.blocks.write();
+            let mut blocks = self.inner.blocks.write();
             f(&mut blocks);
             blocks.stats()
         };
         self.record_metrics(stats);
     }
+}
+
+/// The blocks of an [`InMemoryState`] with their lock, and the metrics recorded from them.
+#[derive(Debug, Default)]
+struct InMemoryStateInner<N: NodePrimitives> {
+    /// The canonical blocks that are not on disk yet and the pending block.
+    blocks: RwLock<InMemoryBlocks<N>>,
+    /// Metrics for the in-memory state.
+    metrics: InMemoryStateMetrics,
 }
 
 /// Inner type to provide in memory state. It includes a chain tracker to be
@@ -173,7 +185,8 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         let header = in_memory_state.head_state().map_or_else(SealedHeader::default, |state| {
             state.block_ref().recovered_block().clone_sealed_header()
         });
-        let chain_info_tracker = ChainInfoTracker::new(header, finalized, safe);
+        let chain_info_tracker =
+            ChainInfoTracker::new(ChainInfoHeaders { canonical_head: header, safe, finalized });
         let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
 
@@ -191,15 +204,17 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         Self::new(B256Map::default(), BTreeMap::new(), None, None, None)
     }
 
-    /// Create a new in memory state with the given local head and finalized header
-    /// if it exists.
+    /// Creates a canonical state over the blocks of `in_memory_state`, with the canonical head
+    /// and the safe and finalized blocks of `chain_info_headers`.
+    ///
+    /// The blocks are shared with every other handle of `in_memory_state`, so an update of the
+    /// blocks through the returned value is visible through all of them. The chain info and the
+    /// notifications belong to the returned value and its clones.
     pub fn with_head(
-        head: SealedHeader<N::BlockHeader>,
-        finalized: Option<SealedHeader<N::BlockHeader>>,
-        safe: Option<SealedHeader<N::BlockHeader>>,
+        chain_info_headers: ChainInfoHeaders<N::BlockHeader>,
+        in_memory_state: InMemoryState<N>,
     ) -> Self {
-        let chain_info_tracker = ChainInfoTracker::new(head, finalized, safe);
-        let in_memory_state = InMemoryState::default();
+        let chain_info_tracker = ChainInfoTracker::new(chain_info_headers);
         let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
         let inner = CanonicalInMemoryStateInner {
