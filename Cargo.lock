@@ -3491,6 +3491,7 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-storage-overlay",
  "reth-tasks",
  "reth-tracing",
  "reth-trie",
@@ -3718,7 +3719,7 @@ dependencies = [
 [[package]]
 name = "evm2"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=66687c18b34d3bdbb899f5eb7605070615c03475#66687c18b34d3bdbb899f5eb7605070615c03475"
+source = "git+https://github.com/DaniPopes/evm2?rev=e681662b6d9ec59edafd112f7c8d64f49f1e6dd1#e681662b6d9ec59edafd112f7c8d64f49f1e6dd1"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -3759,7 +3760,7 @@ dependencies = [
 [[package]]
 name = "evm2-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=66687c18b34d3bdbb899f5eb7605070615c03475#66687c18b34d3bdbb899f5eb7605070615c03475"
+source = "git+https://github.com/DaniPopes/evm2?rev=e681662b6d9ec59edafd112f7c8d64f49f1e6dd1#e681662b6d9ec59edafd112f7c8d64f49f1e6dd1"
 dependencies = [
  "alloy-consensus",
  "alloy-eip2930",
@@ -3782,7 +3783,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=66687c18b34d3bdbb899f5eb7605070615c03475#66687c18b34d3bdbb899f5eb7605070615c03475"
+source = "git+https://github.com/DaniPopes/evm2?rev=e681662b6d9ec59edafd112f7c8d64f49f1e6dd1#e681662b6d9ec59edafd112f7c8d64f49f1e6dd1"
 dependencies = [
  "evm2",
  "evm2-jit-backend",
@@ -3797,7 +3798,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-backend"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=66687c18b34d3bdbb899f5eb7605070615c03475#66687c18b34d3bdbb899f5eb7605070615c03475"
+source = "git+https://github.com/DaniPopes/evm2?rev=e681662b6d9ec59edafd112f7c8d64f49f1e6dd1#e681662b6d9ec59edafd112f7c8d64f49f1e6dd1"
 dependencies = [
  "eyre",
  "ruint",
@@ -3806,12 +3807,12 @@ dependencies = [
 [[package]]
 name = "evm2-jit-build"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=66687c18b34d3bdbb899f5eb7605070615c03475#66687c18b34d3bdbb899f5eb7605070615c03475"
+source = "git+https://github.com/DaniPopes/evm2?rev=e681662b6d9ec59edafd112f7c8d64f49f1e6dd1#e681662b6d9ec59edafd112f7c8d64f49f1e6dd1"
 
 [[package]]
 name = "evm2-jit-builtins"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=66687c18b34d3bdbb899f5eb7605070615c03475#66687c18b34d3bdbb899f5eb7605070615c03475"
+source = "git+https://github.com/DaniPopes/evm2?rev=e681662b6d9ec59edafd112f7c8d64f49f1e6dd1#e681662b6d9ec59edafd112f7c8d64f49f1e6dd1"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3824,7 +3825,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-codegen"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=66687c18b34d3bdbb899f5eb7605070615c03475#66687c18b34d3bdbb899f5eb7605070615c03475"
+source = "git+https://github.com/DaniPopes/evm2?rev=e681662b6d9ec59edafd112f7c8d64f49f1e6dd1#e681662b6d9ec59edafd112f7c8d64f49f1e6dd1"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.13.2",
@@ -3847,7 +3848,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-context"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=66687c18b34d3bdbb899f5eb7605070615c03475#66687c18b34d3bdbb899f5eb7605070615c03475"
+source = "git+https://github.com/DaniPopes/evm2?rev=e681662b6d9ec59edafd112f7c8d64f49f1e6dd1#e681662b6d9ec59edafd112f7c8d64f49f1e6dd1"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3857,7 +3858,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-llvm"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=66687c18b34d3bdbb899f5eb7605070615c03475#66687c18b34d3bdbb899f5eb7605070615c03475"
+source = "git+https://github.com/DaniPopes/evm2?rev=e681662b6d9ec59edafd112f7c8d64f49f1e6dd1#e681662b6d9ec59edafd112f7c8d64f49f1e6dd1"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -3870,7 +3871,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-runtime"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=66687c18b34d3bdbb899f5eb7605070615c03475#66687c18b34d3bdbb899f5eb7605070615c03475"
+source = "git+https://github.com/DaniPopes/evm2?rev=e681662b6d9ec59edafd112f7c8d64f49f1e6dd1#e681662b6d9ec59edafd112f7c8d64f49f1e6dd1"
 dependencies = [
  "alloy-primitives",
  "crossbeam-channel",
@@ -3896,7 +3897,7 @@ dependencies = [
 [[package]]
 name = "evm2-macros"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=66687c18b34d3bdbb899f5eb7605070615c03475#66687c18b34d3bdbb899f5eb7605070615c03475"
+source = "git+https://github.com/DaniPopes/evm2?rev=e681662b6d9ec59edafd112f7c8d64f49f1e6dd1#e681662b6d9ec59edafd112f7c8d64f49f1e6dd1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4254,6 +4255,7 @@ dependencies = [
  "futures",
  "jsonrpsee",
  "reth-ethereum",
+ "reth-storage-overlay",
  "tokio",
 ]
 
@@ -8162,6 +8164,7 @@ dependencies = [
  "reth-static-file",
  "reth-static-file-types",
  "reth-storage-api",
+ "reth-storage-overlay",
  "reth-tasks",
  "reth-trie",
  "reth-trie-common",
@@ -8392,6 +8395,7 @@ dependencies = [
  "reth-provider",
  "reth-stages-types",
  "reth-static-file-types",
+ "reth-storage-overlay",
  "reth-tasks",
  "reth-trie",
  "reth-trie-db",
@@ -8594,6 +8598,7 @@ dependencies = [
  "reth-rpc-eth-api",
  "reth-rpc-server-types",
  "reth-stages-types",
+ "reth-storage-overlay",
  "reth-tasks",
  "reth-tokio-util",
  "reth-tracing",
@@ -9268,6 +9273,7 @@ dependencies = [
  "reth-payload-builder",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-storage-overlay",
  "reth-tasks",
  "reth-transaction-pool",
  "tempfile",
@@ -10204,7 +10210,6 @@ dependencies = [
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
  "reth-storage-api",
- "reth-storage-overlay",
  "reth-tasks",
  "reth-testing-utils",
  "reth-transaction-pool",
@@ -10274,6 +10279,7 @@ dependencies = [
  "reth-chain-state",
  "reth-chainspec",
  "reth-consensus",
+ "reth-db-common",
  "reth-engine-primitives",
  "reth-ethereum-engine-primitives",
  "reth-ethereum-primitives",
@@ -10622,6 +10628,7 @@ dependencies = [
  "reth-static-file-types",
  "reth-storage-api",
  "reth-storage-errors",
+ "reth-storage-overlay",
  "reth-tasks",
  "reth-testing-utils",
  "reth-tracing",
@@ -10658,6 +10665,7 @@ dependencies = [
  "reth-stages-types",
  "reth-static-file",
  "reth-static-file-types",
+ "reth-storage-overlay",
  "reth-tasks",
  "reth-testing-utils",
  "reth-tokio-util",
