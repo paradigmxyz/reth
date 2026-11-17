@@ -13,7 +13,6 @@ use alloy_rpc_types_engine::{
     ClientVersionV1, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
     PayloadStatusEnum,
 };
-use jsonrpsee::core::client::ClientT;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
     eth_payload_attributes, node::NodeTestContext, test_chain_spec,
@@ -239,6 +238,24 @@ async fn rewinds_to_canonical_ancestor_above_finality() -> eyre::Result<()> {
             canonical.get_finalized_num_hash().map(|block| block.hash),
             (!finalized.is_zero()).then_some(finalized),
         );
+
+        // The payload service processes the revert notification before handling this build.
+        let timestamp = 9 + u64::from(!finalized.is_zero());
+        let build = engine
+            .request::<_, ForkchoiceUpdated>(
+                "engine_forkchoiceUpdatedV3",
+                (
+                    ForkchoiceState {
+                        head_block_hash: ancestor,
+                        safe_block_hash: ancestor,
+                        finalized_block_hash: B256::ZERO,
+                    },
+                    Some(eth_payload_attributes(&chain_spec, timestamp)),
+                ),
+            )
+            .await?;
+        assert_eq!(build.payload_status.status, PayloadStatusEnum::Valid);
+        assert!(build.payload_id.is_some());
     }
 
     Ok(())

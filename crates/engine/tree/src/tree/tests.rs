@@ -2001,10 +2001,10 @@ async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build()
 
 #[tokio::test]
 async fn test_fcu_rewind_behind_persisted_tip_is_rejected() {
-    let mut test_harness = TestHarness::new(MAINNET.clone());
-    let mut builder = TestBlockBuilder::eth().with_chain_spec((*MAINNET).clone());
-    let blocks: Vec<_> = builder.get_executed_blocks(1..=4).collect();
-    test_harness = test_harness.with_blocks(blocks.clone());
+    let chain_spec = MAINNET.clone();
+    let mut builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = builder.get_executed_blocks(1..5).collect();
+    let mut test_harness = TestHarness::new(chain_spec).with_blocks(blocks.clone());
 
     let ancestor = blocks[1].recovered_block();
     let current_head = blocks[3].recovered_block();
