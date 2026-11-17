@@ -23,7 +23,7 @@ use reth_node_core::{
 use reth_node_ethereum::{
     engine_ssz_witness::PayloadStatusWithWitness, EthereumAddOns, EthereumNode,
 };
-use reth_provider::{BlockNumReader, StateProviderFactory};
+use reth_provider::{BlockNumReader, ProviderError, StateProviderFactory};
 use reth_rpc_api::{TestingBuildBlockRequestV1, TestingBuildBlockResponseV1};
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use reth_tasks::Runtime;
@@ -687,7 +687,10 @@ async fn test_engine_ssz_witness_requires_provider_parent_state() -> eyre::Resul
     target.submit_payload(first).await?;
     let parent = source.advance_block().await?;
     let parent_hash = target.submit_payload(parent).await?;
-    assert!(target.inner.provider.state_by_block_hash(parent_hash).is_err());
+    assert!(matches!(
+        target.inner.provider.state_by_block_hash(parent_hash).err(),
+        Some(ProviderError::StateForHashNotCanonical(hash)) if hash == parent_hash
+    ));
     let child = source.new_payload().await?.try_into_v6()?;
     let request = ExecutionPayloadEnvelopeAmsterdam {
         payload: child.execution_payload,

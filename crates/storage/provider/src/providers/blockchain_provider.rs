@@ -4021,12 +4021,12 @@ mod tests {
     fn state_by_block_hash_reports_executed_blocks_that_are_not_canonical() -> eyre::Result<()> {
         let provider = BlockchainProvider::new(test_provider_factory_with_genesis()?)?;
         let genesis = provider.canonical_in_memory_state.get_canonical_head();
-        let mut block_builder = TestBlockBuilder::eth();
-        let canonical = block_builder.get_executed_block_with_number(1, genesis.hash());
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let canonical = test_block_builder.get_executed_block_with_number(1, genesis.hash());
         let canonical_hash = canonical.recovered_block().hash();
-        let fork = block_builder.get_executed_block_with_number(1, genesis.hash());
+        let fork = test_block_builder.get_executed_block_with_number(1, genesis.hash());
         let fork_hash = fork.recovered_block().hash();
-        let pending = block_builder.get_executed_block_with_number(2, canonical_hash);
+        let pending = test_block_builder.get_executed_block_with_number(2, canonical_hash);
         let pending_hash = pending.recovered_block().hash();
 
         provider
@@ -4036,6 +4036,7 @@ mod tests {
         provider.canonical_in_memory_state.set_pending_block(pending);
 
         // Canonical blocks and the pending block are served.
+        provider.state_by_block_hash(genesis.hash())?;
         provider.state_by_block_hash(canonical_hash)?;
         provider.state_by_block_hash(pending_hash)?;
 

@@ -97,11 +97,6 @@ impl<N: NodePrimitives> InMemoryState<N> {
         self.inner.blocks.read().canonical().get(&hash).cloned()
     }
 
-    /// Returns `true` if a block with the given hash is tracked, canonical or not.
-    pub fn contains(&self, hash: &B256) -> bool {
-        self.inner.blocks.read().contains(hash)
-    }
-
     /// Returns the state for a given block number.
     pub(crate) fn state_by_number(&self, number: u64) -> Option<Arc<BlockState<N>>> {
         self.inner.blocks.read().canonical().by_number(number).cloned()
@@ -121,6 +116,11 @@ impl<N: NodePrimitives> InMemoryState<N> {
     /// from the payload received in newPayload that does not have a FCU yet.
     pub(crate) fn pending_state(&self) -> Option<Arc<BlockState<N>>> {
         self.inner.blocks.read().pending_state().cloned()
+    }
+
+    /// Returns `true` if a block with the given hash is tracked, canonical or not.
+    pub fn contains(&self, hash: &B256) -> bool {
+        self.inner.blocks.read().contains(hash)
     }
 
     #[cfg(test)]
