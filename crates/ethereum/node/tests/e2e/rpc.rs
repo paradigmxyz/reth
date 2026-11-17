@@ -1,3 +1,4 @@
+use alloy_consensus::Header;
 use alloy_eips::{
     eip2718::Encodable2718, eip7910::EthConfig, eip7928::BlockAccessList, BlockNumberOrTag,
 };
@@ -22,13 +23,18 @@ use alloy_rpc_types_eth::{
 use alloy_rpc_types_trace::geth::{
     CallConfig, ChainBlockTraceResult, GethDebugTracingOptions, GethTrace,
 };
-use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use reth_chainspec::{EthChainSpec, EthereumHardfork};
+use reth_chainspec::{
+    sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
+    EthChainSpec, EthereumHardfork, SEPOLIA,
+};
 use reth_e2e_test_utils::{
-    receipt::PendingTransactionExt, test_chain_spec, test_chain_spec_builder,
-    transaction::TransactionTestContext, wait::poll_until, wallet::Wallet, E2ETestSetupExt,
-    NodeHelperType,
+    receipt::PendingTransactionExt,
+    test_chain_spec, test_chain_spec_builder,
+    transaction::TransactionTestContext,
+    wait::{poll_until, WAIT_TIMEOUT},
+    wallet::Wallet,
+    E2ETestSetupExt, NodeHelperType,
 };
 use reth_network::{types::NatResolver, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
@@ -38,10 +44,12 @@ use reth_node_core::{
 };
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, SealedHeader, SignedTransaction};
+use reth_provider::CanonChainTracker;
 use reth_rpc_api::servers::AdminApiServer;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
+use reth_transaction_pool::test_utils::TransactionGenerator;
 use std::{
     net::{IpAddr, Ipv4Addr},
     sync::Arc,
@@ -64,9 +72,6 @@ alloy_sol_types::sol! {
 
 #[tokio::test]
 async fn test_rpc_shares_sender_recovery_cache_with_execution() -> eyre::Result<()> {
-    use reth_primitives_traits::SignedTransaction;
-    use reth_transaction_pool::test_utils::TransactionGenerator;
-
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let cache = node.inner.evm_config.sender_recovery_cache.as_ref().unwrap();
@@ -79,7 +84,7 @@ async fn test_rpc_shares_sender_recovery_cache_with_execution() -> eyre::Result<
     assert_eq!(cache.get(&hash), None);
 
     for _ in 0..2 {
-        let result = client.request::<B256, _>("eth_sendRawTransaction", (raw.clone(),)).await;
+        let result = client.request::<_, B256>("eth_sendRawTransaction", (raw.clone(),)).await;
         assert!(result.unwrap_err().to_string().contains("chain ID"));
         assert_eq!(cache.get(&hash), Some(sender));
     }
@@ -109,13 +114,13 @@ async fn test_block_access_list_lookup_semantics() -> eyre::Result<()> {
 
     for method in ["eth_getBlockAccessList", "debug_getRawBlockAccessList"] {
         let error = client
-            .request::<serde_json::Value, _>(method, (BlockNumberOrTag::Latest,))
+            .request::<_, serde_json::Value>(method, (BlockNumberOrTag::Latest,))
             .await
             .unwrap_err();
-        let jsonrpsee::core::client::Error::Call(error) = error else {
+        let Some(error) = error.as_error_resp() else {
             panic!("expected a resource not found error, got {error:?}")
         };
-        assert_eq!(error.code(), EthRpcErrorCode::ResourceNotFound.code());
+        assert_eq!(error.code, i64::from(EthRpcErrorCode::ResourceNotFound.code()));
     }
 
     Ok(())
@@ -165,7 +170,7 @@ async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
             for hash in hashes {
                 expected.push(
                     client
-                        .request::<serde_json::Value, _>("debug_traceTransaction", (hash, &opts))
+                        .request::<_, serde_json::Value>("debug_traceTransaction", (hash, &opts))
                         .await?,
                 );
             }
@@ -277,29 +282,29 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
     node.advance_blocks(2).await?;
 
     let client = node.inner.rpc_server_handle().ws_client().await.unwrap();
-    let invalid: Result<Subscription<ChainBlockTraceResult>, _> = client
-        .subscribe(
-            "debug_subscribe",
-            jsonrpsee::rpc_params!["traceChain", "0x3", "0x3"],
-            "debug_unsubscribe",
-        )
-        .await;
-    assert!(invalid.is_err(), "equal endpoints must be rejected");
 
-    let mut subscription: Subscription<ChainBlockTraceResult> = client
-        .subscribe(
-            "debug_subscribe",
-            jsonrpsee::rpc_params![
-                "traceChain",
-                BlockNumberOrTag::Number(0),
-                BlockNumberOrTag::Number(3),
-                GethDebugTracingOptions::default()
-            ],
-            "debug_unsubscribe",
-        )
-        .await?;
+    // Marking a call as a subscription makes the client track its notifications.
+    let mut invalid = client.request::<_, B256>("debug_subscribe", ("traceChain", "0x3", "0x3"));
+    invalid.set_is_subscription();
+    let err = invalid.await.unwrap_err();
+    assert_eq!(
+        err.as_error_resp().unwrap().message,
+        "end block (#3) needs to come after start block (#3)"
+    );
 
-    let traced = subscription.next().await.unwrap()?;
+    let mut subscribe = client.request::<_, B256>(
+        "debug_subscribe",
+        (
+            "traceChain",
+            BlockNumberOrTag::Number(0),
+            BlockNumberOrTag::Number(3),
+            GethDebugTracingOptions::default(),
+        ),
+    );
+    subscribe.set_is_subscription();
+    let mut subscription = client.get_subscription::<ChainBlockTraceResult>(subscribe.await?).await;
+
+    let traced = tokio::time::timeout(WAIT_TIMEOUT, subscription.recv()).await??;
     assert_eq!(traced.block, U256::from(2));
     let expected = provider
         .debug_trace_block_by_number(
@@ -310,10 +315,9 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
     assert_eq!(expected.len(), 2, "both transactions must be traced");
     assert_eq!(traced.traces, expected.into_iter().map(Some).collect::<Vec<_>>());
 
-    let terminal = subscription.next().await.unwrap()?;
+    let terminal = tokio::time::timeout(WAIT_TIMEOUT, subscription.recv()).await??;
     assert_eq!(terminal.block, U256::from(3));
     assert!(terminal.traces.is_empty());
-    subscription.unsubscribe().await?;
 
     Ok(())
 }
@@ -832,14 +836,6 @@ async fn test_eth_config() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
-    use alloy_consensus::Header;
-    use reth_chainspec::{
-        sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
-        SEPOLIA,
-    };
-    use reth_primitives_traits::SealedHeader;
-    use reth_provider::CanonChainTracker;
-
     let node_config = NodeConfig::test()
         .with_chain(SEPOLIA.clone())
         .with_unused_ports()
@@ -1115,6 +1111,24 @@ async fn eth_call_caps_execution_gas_under_amsterdam() -> eyre::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn eth_call_without_gas_with_max_rpc_gas_cap() -> eyre::Result<()> {
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Amsterdam)
+        .with_rpc_modifier(|mut rpc| {
+            rpc.rpc_gas_cap = u64::MAX;
+            rpc
+        })
+        .build_single()
+        .await?;
+
+    let result = node
+        .rpc_provider()
+        .call(TransactionRequest::default().to(Address::with_last_byte(0x42)))
+        .await?;
+    assert_eq!(result, Bytes::new());
     Ok(())
 }
 

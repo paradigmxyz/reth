@@ -30,7 +30,11 @@ use reth_provider::{
     },
     BalStoreHandle, ProviderFactory, RocksDBBalStore, StaticFileProviderFactory, StorageSettings,
 };
-use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
+use reth_stages::{
+    sets::DefaultStages,
+    stages::{EraImportSource, EraStage},
+    Pipeline, PipelineTarget, StageId, StageSet,
+};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
@@ -236,17 +240,24 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
             // Builds and executes an unwind-only pipeline
             let mut pipeline = Pipeline::<NodeTypesWithDBAdapter<N, DatabaseEnv>>::builder()
-                .add_stages(DefaultStages::new(
-                    factory.clone(),
-                    tip_rx,
-                    Arc::new(NoopConsensus::default()),
-                    NoopHeaderDownloader::default(),
-                    NoopBodiesDownloader::default(),
-                    NoopEvmConfig::<N::Evm>::default(),
-                    config.stages.clone(),
-                    config.prune.segments.clone(),
-                    None,
-                ))
+                .add_stages(
+                    DefaultStages::new(
+                        factory.clone(),
+                        tip_rx,
+                        Arc::new(NoopConsensus::default()),
+                        NoopHeaderDownloader::default(),
+                        NoopBodiesDownloader::default(),
+                        NoopEvmConfig::<N::Evm>::default(),
+                        config.stages.clone(),
+                        config.prune.segments.clone(),
+                        None,
+                    )
+                    .builder()
+                    .add_before(
+                        EraStage::new(None::<EraImportSource>, config.stages.etl.clone()),
+                        StageId::Headers,
+                    ),
+                )
                 .build(
                     factory.clone(),
                     StaticFileProducer::new(factory.clone(), config.prune.segments.clone()),

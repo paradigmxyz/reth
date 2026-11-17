@@ -25,7 +25,6 @@ reth-trie.workspace = true
 alloy-eips.workspace = true
 alloy-primitives = { workspace = true, features = ["std"] }
 alloy-consensus.workspace = true
-revm = { workspace = true, optional = true }
 
 # async
 tokio = { workspace = true, default-features = false, features = ["sync", "macros"] }
@@ -41,10 +40,11 @@ parking_lot.workspace = true
 pin-project.workspace = true
 serde = { workspace = true, optional = true }
 
-# optional deps for test-utils
+# test-utils
 alloy-signer = { workspace = true, optional = true }
 alloy-signer-local = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
+evm2 = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
@@ -52,7 +52,7 @@ reth-testing-utils.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
 rand.workspace = true
-revm.workspace = true
+evm2.workspace = true
 
 [features]
 serde = [
@@ -66,10 +66,11 @@ serde = [
     "reth-execution-types/serde",
     "reth-primitives-traits/serde",
     "reth-trie/serde",
-    "revm?/serde",
+    "evm2?/serde",
 ]
 test-utils = [
     "alloy-primitives/getrandom",
+    "dep:evm2",
     "alloy-signer",
     "alloy-signer-local",
     "rand",
@@ -78,5 +79,4 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-trie-sparse/test-utils",
-    "dep:revm",
 ]

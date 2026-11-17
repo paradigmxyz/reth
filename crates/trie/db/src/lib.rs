@@ -10,6 +10,7 @@ mod proof;
 mod state;
 mod storage;
 mod trie_cursor;
+mod verify;
 
 pub use hashed_cursor::{
     DatabaseHashedAccountCursor, DatabaseHashedCursorFactory, DatabaseHashedStorageCursor,
@@ -23,6 +24,7 @@ pub use trie_cursor::{
     DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
     LegacyKeyAdapter, PackedKeyAdapter, StorageTrieEntryLike, TrieKeyAdapter, TrieTableAdapter,
 };
+pub use verify::DatabaseVerifier;
 
 /// Dispatches a trie operation using the correct [`TrieKeyAdapter`] based on storage settings.
 ///

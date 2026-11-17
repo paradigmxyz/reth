@@ -12,7 +12,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
-use reth_chain_state::{BlockState, CanonicalInMemoryState};
+use reth_chain_state::{BlockState, CanonicalInMemoryState, ExecutedBlock};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::RecoveredBlockAndExecutionOutput;
@@ -28,7 +28,7 @@ use reth_storage_api::{
     StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
-use revm::database::states::PlainStorageRevert;
+use reth_trie::bundle_state::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
@@ -36,7 +36,7 @@ use std::{
 
 /// Type that interacts with a snapshot view of the blockchain (storage and in-memory) at time of
 /// instantiation, EXCEPT for pending, safe and finalized block which might change while holding
-/// this provider.
+/// this provider, and non-canonical blocks by hash, which are read from the live engine tree.
 ///
 /// CAUTION: Avoid holding this provider for too long or the inner database transaction will
 /// time-out.
@@ -404,6 +404,15 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         }
         fetch_from_db(&self.storage_provider)
     }
+
+    /// Returns a block the engine tree holds by hash, such as a side chain or reorged-out block.
+    ///
+    /// This reads the live tree rather than this provider's snapshot, which is safe because a hash
+    /// always identifies the same block.
+    fn tree_block(&self, id: BlockHashOrNumber) -> Option<ExecutedBlock<N::Primitives>> {
+        let BlockHashOrNumber::Hash(hash) = id else { return None };
+        self.storage_provider.overlay_manager().executed_block_by_hash(&hash)
+    }
 }
 
 impl<N: ProviderNodeTypes> NodePrimitivesProvider for ConsistentProvider<N> {
@@ -621,11 +630,13 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
     }
 
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
-        self.get_in_memory_or_storage_by_block(
-            id,
-            |db_provider| db_provider.block(id),
-            |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
-        )
+        Ok(self
+            .get_in_memory_or_storage_by_block(
+                id,
+                |db_provider| db_provider.block(id),
+                |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
+            )?
+            .or_else(|| self.tree_block(id).map(|block| block.recovered_block().clone_block())))
     }
 
     fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
@@ -649,11 +660,13 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.get_in_memory_or_storage_by_block(
-            id,
-            |db_provider| db_provider.recovered_block(id, transaction_kind),
-            |block_state| Ok(Some(block_state.block().recovered_block().clone())),
-        )
+        Ok(self
+            .get_in_memory_or_storage_by_block(
+                id,
+                |db_provider| db_provider.recovered_block(id, transaction_kind),
+                |block_state| Ok(Some(block_state.block().recovered_block().clone())),
+            )?
+            .or_else(|| self.tree_block(id).map(|block| block.recovered_block().clone())))
     }
 
     fn sealed_block_with_senders(
@@ -661,11 +674,13 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.get_in_memory_or_storage_by_block(
-            id,
-            |db_provider| db_provider.sealed_block_with_senders(id, transaction_kind),
-            |block_state| Ok(Some(block_state.block().recovered_block().clone())),
-        )
+        Ok(self
+            .get_in_memory_or_storage_by_block(
+                id,
+                |db_provider| db_provider.sealed_block_with_senders(id, transaction_kind),
+                |block_state| Ok(Some(block_state.block().recovered_block().clone())),
+            )?
+            .or_else(|| self.tree_block(id).map(|block| block.recovered_block().clone())))
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
@@ -775,6 +790,22 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         }
 
         self.storage_provider.transaction_by_hash_with_meta(tx_hash)
+    }
+
+    fn transaction_by_hash_with_meta_and_sender(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta, Option<Address>)>> {
+        if let Some(found) = self.head_block.as_ref().and_then(|b| {
+            b.chain().find_map(|block_state| {
+                let indexed = block_state.find_indexed(tx_hash)?;
+                Some((indexed.tx().clone(), indexed.meta(), Some(indexed.recovered_tx().signer())))
+            })
+        }) {
+            return Ok(Some(found))
+        }
+
+        self.storage_provider.transaction_by_hash_with_meta_and_sender(tx_hash)
     }
 
     fn transactions_by_block(
@@ -1012,6 +1043,12 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for ConsistentProvider<N> {
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
         self.storage_provider.get_prune_checkpoints()
+    }
+
+    fn get_prune_checkpoints_for_availability(
+        &self,
+    ) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
+        self.storage_provider.get_prune_checkpoints_for_availability()
     }
 }
 
@@ -1417,20 +1454,28 @@ mod tests {
         test_utils::create_test_provider_factory, BlockWriter,
     };
     use alloy_eips::BlockHashOrNumber;
-    use alloy_primitives::B256;
+    use alloy_primitives::{B256, U256};
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
-    use reth_db_api::models::AccountBeforeTx;
+    use reth_db_api::{
+        models::{AccountBeforeTx, StorageSettings},
+        tables,
+        transaction::DbTxMut,
+    };
     use reth_ethereum_primitives::Block;
     use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
-    use reth_primitives_traits::{RecoveredBlock, SealedBlock};
-    use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader, StateReader};
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock, StorageEntry};
+    use reth_storage_api::{
+        BlockReader, BlockSource, ChangeSetReader, StateReader, StorageChangeSetReader,
+        StorageSettingsCache,
+    };
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
     };
-    use revm::database::BundleState;
+    use reth_trie::bundle_state::BundleState;
     use std::{
+        collections::HashMap,
         ops::{Bound, Range, RangeBounds},
         sync::Arc,
     };
@@ -1740,7 +1785,7 @@ mod tests {
                     }),
                     database_changesets.iter().map(|block_changesets| {
                         block_changesets.iter().map(|(address, account, _)| {
-                            (*address, Some(Some((account.clone()).into())), [])
+                            (*address, Some(Some(account.clone().into())), [])
                         })
                     }),
                     Vec::new(),
@@ -1771,7 +1816,7 @@ mod tests {
                                     (address, None, Some(account.into()), Default::default())
                                 }),
                                 [in_memory_changesets.iter().map(|(address, account, _)| {
-                                    (*address, Some(Some((account.clone()).into())), Vec::new())
+                                    (*address, Some(Some(account.clone().into())), Vec::new())
                                 })],
                                 [],
                             ),
@@ -1815,12 +1860,6 @@ mod tests {
     }
     #[test]
     fn test_get_state_storage_value_plain_state() -> eyre::Result<()> {
-        use alloy_primitives::U256;
-        use reth_db_api::{models::StorageSettings, tables, transaction::DbTxMut};
-        use reth_primitives_traits::StorageEntry;
-        use reth_storage_api::StorageSettingsCache;
-        use std::collections::HashMap;
-
         let address = alloy_primitives::Address::with_last_byte(1);
         let account = reth_primitives_traits::Account {
             nonce: 1,
@@ -1897,11 +1936,6 @@ mod tests {
 
     #[test]
     fn test_storage_changeset_consistent_keys_plain_state() -> eyre::Result<()> {
-        use alloy_primitives::U256;
-        use reth_db_api::models::StorageSettings;
-        use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
-        use std::collections::HashMap;
-
         let mut rng = generators::rng();
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v1());
@@ -1996,11 +2030,6 @@ mod tests {
 
     #[test]
     fn test_storage_changesets_range_consistent_keys_plain_state() -> eyre::Result<()> {
-        use alloy_primitives::U256;
-        use reth_db_api::models::StorageSettings;
-        use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
-        use std::collections::HashMap;
-
         let mut rng = generators::rng();
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v1());

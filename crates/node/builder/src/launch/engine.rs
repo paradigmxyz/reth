@@ -34,6 +34,7 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_node_events::node;
+use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
     BlockNumReader, StorageSettingsCache,
@@ -106,6 +107,10 @@ impl<B> EngineNodeLauncher<B> {
             config,
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
+
+        // Install the recorder before creating anything that registers metrics: metrics registered
+        // earlier stay no-ops, and derived metrics cache their first instance for the process.
+        install_prometheus_recorder();
 
         // Create the overlay manager that will be shared across the provider and engine.
         let overlay_manager = OverlayManager::<N::Primitives>::new(

@@ -960,7 +960,10 @@ mod tests {
         }
         {
             let mut writer = provider.latest_writer(segment).unwrap();
-            assert!(writer.prune_account_changesets(9).is_err());
+            assert_eq!(
+                writer.prune_account_changesets(9).unwrap_err().to_string(),
+                "cannot unwind AccountChangeSets to block 9 below the pruned anchor at block 10"
+            );
         }
         drop(provider);
 
@@ -1011,6 +1014,43 @@ mod tests {
     }
 
     #[test]
+    fn test_unwind_receipts_across_empty_file() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 2);
+        let segment = StaticFileSegment::Receipts;
+        let replacement = Receipt { cumulative_gas_used: 1, ..Default::default() };
+
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            writer.increment_block(0).unwrap();
+            writer.append_receipt(0, &Receipt::default()).unwrap();
+            // Blocks 1..=3 have no receipts, so the file for blocks 2..=3 holds no rows.
+            for block in 1..=4 {
+                writer.increment_block(block).unwrap();
+            }
+            writer.append_receipt(1, &Receipt::default()).unwrap();
+            writer.commit().unwrap();
+        }
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            writer.prune_receipts(1, 0).unwrap();
+            writer.commit().unwrap();
+            writer.increment_block(1).unwrap();
+            writer.append_receipt(1, &replacement).unwrap();
+            writer.commit().unwrap();
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 2);
+        assert_eq!(provider.receipt(1).unwrap(), Some(replacement));
+        assert_eq!(provider.get_highest_static_file_block(segment), Some(1));
+        let header = provider.latest_writer(segment).unwrap().user_header().clone();
+        assert_eq!(header.block_range(), Some((0..=1).into()));
+        assert_eq!(header.tx_range(), Some((0..=1).into()));
+        assert!(!provider.directory().join(segment.filename(&(2..=3).into())).exists());
+    }
+
+    #[test]
     fn test_unwind_within_anchor_in_later_file() {
         let (static_dir, _) = create_test_static_files_dir();
         let provider = setup_test_provider(&static_dir, 500);
@@ -1054,7 +1094,10 @@ mod tests {
         }
         {
             let mut writer = provider.latest_writer(segment).unwrap();
-            assert!(writer.prune_account_changesets(499).is_err());
+            assert_eq!(
+                writer.prune_account_changesets(499).unwrap_err().to_string(),
+                "cannot unwind AccountChangeSets to block 499 below the pruned anchor at block 750"
+            );
         }
         drop(provider);
 
@@ -1081,7 +1124,10 @@ mod tests {
         }
         {
             let mut writer = provider.latest_writer(segment).unwrap();
-            assert!(writer.prune_receipts(1, 749).is_err());
+            assert_eq!(
+                writer.prune_receipts(1, 749).unwrap_err().to_string(),
+                "cannot unwind Receipts to block 749 below the pruned anchor at block 750"
+            );
         }
         drop(provider);
 
@@ -1114,7 +1160,13 @@ mod tests {
                 } else {
                     writer.prune_receipts(1, 499)
                 };
-                assert!(queued.is_err(), "{segment}, committed={committed}");
+                assert_eq!(
+                    queued.unwrap_err().to_string(),
+                    format!(
+                        "cannot unwind {segment} to block 499 below the pruned anchor at block 500"
+                    ),
+                    "committed={committed}"
+                );
                 // A rejected unwind must leave pending data available to commit.
                 writer.commit().unwrap();
             }

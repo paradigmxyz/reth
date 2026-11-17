@@ -5,11 +5,14 @@ use alloy_rpc_types_engine::{
     ssz_engine_types::{Optional, PayloadStatus, PayloadStatusKind},
     ExecutionData,
 };
+use evm2::evm::{CacheDB, Db};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{
+    database::StateProviderDatabase, execute::Executor, witness::ExecutionWitnessRecord,
+    ConfigureEvm,
+};
 use reth_primitives_traits::{AlloyBlockHeader, Block};
-use reth_provider::{HeaderProvider, StateProvider, StateProviderBox, StateProviderFactory};
-use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
+use reth_provider::{HeaderProvider, StateProvider, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_trie_common::ExecutionWitnessMode;
 use std::{future::Future, pin::Pin};
@@ -18,8 +21,8 @@ use std::{future::Future, pin::Pin};
 ///
 /// The parent state must be available through the provider (persisted, canonical in-memory,
 /// or pending). Parents present only in the engine tree are reported as
-/// [`EngineSszWitnessError::ParentStateUnavailable`]; the route then answers with the payload
-/// status alone.
+/// [`EngineSszWitnessError::ParentStateUnavailable`]; the route then answers with an internal
+/// error.
 #[derive(Clone, Debug)]
 pub struct EngineSszWitnessGenerator<Provider, Evm> {
     provider: Provider,
@@ -72,28 +75,25 @@ where
                                 source: eyre::Report::new(source),
                             }
                         })?;
-                    let block_executor = evm_config.executor(StateProviderDatabase::new(
-                        state_provider.into_evm_state_provider(),
-                    ));
-                    let mut witness = None;
-                    let mut first_header = block_number.saturating_sub(1);
-                    block_executor
-                        .execute_with_state_closure(&block, |statedb: &reth_revm::State<_>| {
-                            if let Some((number, _)) = statedb.block_hashes.lowest() {
-                                first_header = number;
-                            }
-                            witness = Some(
-                                ExecutionWitnessRecord::new(statedb)
-                                    .into_execution_witness_without_headers::<StateProviderBox>(
-                                        &statedb.database,
-                                        ExecutionWitnessMode::Canonical,
-                                    ),
-                            );
-                        })
-                        .map_err(eyre::Report::new)?;
-
-                    let witness = witness
-                        .expect("state closure is called after successful execution")
+                    let mut db = CacheDB::new(Db::new(StateProviderDatabase::new(
+                        state_provider.as_ref().into_evm_state_provider(),
+                    )));
+                    let output =
+                        evm_config.executor(&mut db).execute(&block).map_err(eyre::Report::new)?;
+                    let codes = ExecutionWitnessRecord::commit_execution(&mut db, &output.state);
+                    let first_header = db
+                        .cache
+                        .block_hashes
+                        .keys()
+                        .map(|number| number.saturating_to::<u64>())
+                        .min()
+                        .unwrap_or_else(|| block_number.saturating_sub(1));
+                    let witness = ExecutionWitnessRecord::new(&db)
+                        .with_canonical_codes(codes)
+                        .into_execution_witness_without_headers(
+                            state_provider.as_ref(),
+                            ExecutionWitnessMode::Canonical,
+                        )
                         .map_err(eyre::Report::new)?;
 
                     // Header numbers may refer to a different canonical ancestor.
@@ -203,9 +203,8 @@ pub type ExecutionWitness = ExecutionWitnessV1;
 /// REST-SSZ response for `POST /payloads/witness`.
 ///
 /// The witness uses the Engine REST-SSZ `Optional[T]` encoding from execution-apis and is present
-/// only when the payload status is `VALID`. A `VALID` status without a witness means the parent
-/// state was not yet available through the provider (the parent is only known to the engine
-/// tree); resubmitting the payload once forkchoice has made the parent canonical yields it.
+/// for every `VALID` payload status and absent for all other statuses. A failure to generate
+/// the witness is returned as an HTTP error.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode)]
 pub struct PayloadStatusWithWitness {
     /// Result of processing the submitted payload.

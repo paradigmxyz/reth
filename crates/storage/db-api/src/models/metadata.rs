@@ -1,5 +1,6 @@
 //! Storage metadata models.
 
+use alloc::{string::String, vec::Vec};
 use reth_codecs::{add_arbitrary_tests, Compact};
 use serde::{Deserialize, Serialize};
 
@@ -99,4 +100,15 @@ pub struct PartialStateTrieUnwindMarker {
     pub finish_block_number: u64,
     /// The partial state trie frontier the pipeline is unwinding to.
     pub partial_state_trie: u64,
+}
+
+/// A pipeline unwind that must finish before forward execution can resume.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PipelineUnwind {
+    /// Last block to retain.
+    pub target: u64,
+    /// Stages in execution order. Offline unwinds intentionally exclude online stages.
+    pub stages: Vec<String>,
+    /// Invalid block that caused the unwind, if any.
+    pub bad_block: Option<u64>,
 }

@@ -1,7 +1,10 @@
 use crossbeam_utils::CachePadded;
 use parking_lot::{Condvar, Mutex};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    panic::{catch_unwind, AssertUnwindSafe},
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 /// Extension trait for [`IndexedParallelIterator`]
 /// that streams results to a sequential consumer in index order.
@@ -111,8 +114,6 @@ where
     I::Item: Send,
     F: FnMut(I::Item),
 {
-    use std::panic::{catch_unwind, AssertUnwindSafe};
-
     let n = iter.len();
     if n == 0 {
         return;
@@ -165,9 +166,12 @@ where
 mod tests {
     use super::*;
     use rayon::prelude::*;
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Barrier,
+    use std::{
+        rc::Rc,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Barrier,
+        },
     };
 
     #[test]
@@ -265,7 +269,6 @@ mod tests {
 
     #[test]
     fn callback_is_not_send() {
-        use std::rc::Rc;
         let counter = Rc::new(std::cell::Cell::new(0u64));
         let input: Vec<u64> = (0..100).collect();
         input.par_iter().map(|&x| x).for_each_ordered(|x| {

@@ -114,7 +114,11 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_primitives::U256;
-    use reth_db_api::{models::BlockNumberAddress, tables, transaction::DbTxMut};
+    use reth_db_api::{
+        models::{BlockNumberAddress, StorageBeforeTx, StorageSettings},
+        tables,
+        transaction::DbTxMut,
+    };
     use reth_primitives_traits::StorageEntry;
     use reth_provider::{
         test_utils::create_test_provider_factory, StaticFileProviderFactory, StaticFileSegment,
@@ -198,8 +202,6 @@ mod tests {
 
     #[test]
     fn test_hashed_storage_from_reverts_hashed_state() {
-        use reth_db_api::models::{StorageBeforeTx, StorageSettings};
-
         let factory = create_test_provider_factory();
 
         factory.set_storage_settings_cache(StorageSettings::v2());

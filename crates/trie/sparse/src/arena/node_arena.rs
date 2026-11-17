@@ -616,7 +616,6 @@ mod tests {
             state_mask: alloy_trie::TrieMask::new((1 << children.len()) - 1),
             children,
             state: ArenaSparseNodeState::Revealed,
-            short_key: Default::default(),
             branch_masks: Default::default(),
         })
     }

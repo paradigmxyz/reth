@@ -68,6 +68,8 @@ mod tests {
             Arc,
         },
     };
+    use tokio::sync::mpsc::unbounded_channel;
+    use tokio_stream::wrappers::UnboundedReceiverStream;
 
     #[derive(Clone)]
     struct TestNetwork {
@@ -122,9 +124,6 @@ mod tests {
 
     #[tokio::test]
     async fn resolves_when_syncing_stops() {
-        use tokio::sync::mpsc::unbounded_channel;
-        use tokio_stream::wrappers::UnboundedReceiverStream;
-
         let syncing = Arc::new(AtomicBool::new(true));
         let network = TestNetwork { syncing: syncing.clone() };
         let (tx, rx) = unbounded_channel();

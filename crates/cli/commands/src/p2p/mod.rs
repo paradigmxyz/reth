@@ -7,6 +7,7 @@ use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
 use eyre::WrapErr;
+use futures::FutureExt;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::hash_or_num_value_parser;
@@ -215,7 +216,7 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
                 .manager()
                 .await?;
         let handle = net.handle().clone();
-        tokio::task::spawn(net);
+        tokio::task::spawn(net.boxed());
 
         Ok(handle)
     }

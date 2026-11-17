@@ -123,9 +123,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     VersionSpecificValidationError::NoWithdrawalsPostShanghai |
                     VersionSpecificValidationError::HasWithdrawalsPreShanghai |
                     VersionSpecificValidationError::BlockAccessListNotSupported |
-                    VersionSpecificValidationError::HasBlockAccessListPreAmsterdam |
                     VersionSpecificValidationError::NoBlockAccessListPostAmsterdam |
-                    VersionSpecificValidationError::HasSlotNumberPreAmsterdam |
                     VersionSpecificValidationError::NoSlotNumberPostAmsterdam |
                     VersionSpecificValidationError::SlotNumberNotSupported,
                 ),

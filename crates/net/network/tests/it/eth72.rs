@@ -35,7 +35,6 @@ use reth_network_peers::pk2id;
 use reth_primitives_traits::{crypto::secp256k1::sign_message, SignerRecoverable};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::TransactionPool;
-use secp256k1::SECP256K1;
 use std::time::Duration;
 use tokio::net::TcpStream;
 
@@ -127,7 +126,7 @@ async fn test_eth72_blob_announcements_and_elided_pooled_response() {
 
     // connect a raw eth/72 peer
     let raw_key = rng_secret_key();
-    let raw_id = pk2id(&raw_key.public_key(SECP256K1));
+    let raw_id = pk2id(&raw_key.public_key());
 
     let tcp = TcpStream::connect(node.local_addr()).await.unwrap();
     let ecies = ECIESStream::connect(tcp, raw_key, node_id).await.unwrap();

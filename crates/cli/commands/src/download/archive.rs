@@ -16,7 +16,6 @@ use futures::stream::{self, StreamExt};
 use reth_cli_util::cancellation::CancellationToken;
 use reth_fs_util as fs;
 use std::{path::Path, sync::Arc, time::Duration};
-use tokio::task;
 use tracing::{debug, info, warn};
 
 const DOWNLOAD_CACHE_DIR: &str = ".download-cache";
@@ -101,7 +100,7 @@ impl ModularDownloadJob {
 
     /// Runs one archive on the blocking pool so fetch and extraction stay off the async executor.
     async fn process_archive(ctx: ArchiveProcessContext, archive: PlannedArchive) -> Result<()> {
-        task::spawn_blocking(move || ArchiveProcessor::new(archive, ctx).run()).await??;
+        reth_tasks::spawn_blocking(move || ArchiveProcessor::new(archive, ctx).run()).await??;
         Ok(())
     }
 }

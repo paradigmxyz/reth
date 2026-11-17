@@ -1,4 +1,7 @@
-use super::{manifest::OutputFileChecksum, progress::ArchiveVerificationProgress};
+use super::{
+    extract::ensure_no_symlinks, manifest::OutputFileChecksum,
+    progress::ArchiveVerificationProgress,
+};
 use blake3::Hasher;
 use eyre::Result;
 use rayon::prelude::*;
@@ -6,8 +9,9 @@ use reth_fs_util::{self as fs, FsPathError};
 use std::{
     io::{ErrorKind, Read},
     mem,
-    path::Path,
+    path::{Path, PathBuf},
 };
+use tracing::warn;
 
 /// Read size per hash update. Large enough for `update_rayon` to split across threads.
 const HASH_BUFFER_SIZE: usize = 4 * 1024 * 1024;
@@ -48,7 +52,7 @@ impl<'a> OutputVerifier<'a> {
 
         let mut paths = Vec::with_capacity(output_files.len());
         for expected in output_files {
-            let output_path = self.output_path(&expected.path);
+            let output_path = self.output_path(expected)?;
             match fs::metadata(&output_path) {
                 Ok(meta) if meta.len() == expected.size => paths.push(output_path),
                 Ok(_) => return Ok(false),
@@ -73,20 +77,47 @@ impl<'a> OutputVerifier<'a> {
     }
 
     /// Removes any declared output files so a fresh archive attempt can restart cleanly.
+    ///
+    /// Files are only removed if their path stays below the output root and no existing parent
+    /// directory is a symlink. Extraction rejects link entries, so this guards against links
+    /// already present in the datadir; the check is not atomic with the removal.
     pub(crate) fn cleanup(&self, output_files: &[OutputFileChecksum]) {
         for output in output_files {
-            let _ = fs::remove_file(self.output_path(&output.path));
+            match self.removal_path(output) {
+                Ok(path) => {
+                    let _ = fs::remove_file(path);
+                }
+                Err(error) => {
+                    warn!(target: "reth::cli", path = %output.path, %error, "Skipping output cleanup");
+                }
+            }
         }
     }
 
-    /// Resolves archive paths consistently for verification and retry cleanup.
-    pub(crate) fn output_path(&self, path: &str) -> std::path::PathBuf {
-        if let Some(static_files_dir) = self.static_files_dir &&
-            let Some(relative_path) = super::extract::static_file_relative_path(Path::new(path))
-        {
-            return static_files_dir.join(relative_path)
+    /// Returns the path to remove for `output`, or an error if removing it could touch anything
+    /// outside the output root.
+    fn removal_path(&self, output: &OutputFileChecksum) -> Result<PathBuf> {
+        let (root, relative) = self.resolve(output)?;
+        if let Some(parent) = relative.parent() {
+            ensure_no_symlinks(root, parent)?;
         }
-        self.target_dir.join(path)
+        Ok(root.join(relative))
+    }
+
+    /// Resolves archive paths consistently for verification and retry cleanup.
+    pub(crate) fn output_path(&self, output: &OutputFileChecksum) -> Result<PathBuf> {
+        self.resolve(output).map(|(root, relative)| root.join(relative))
+    }
+
+    /// Returns the output root and the validated path of `output` relative to it.
+    fn resolve<'p>(&'p self, output: &'p OutputFileChecksum) -> Result<(&'p Path, &'p Path)> {
+        let path = output.relative_path()?;
+        if let Some(static_files_dir) = self.static_files_dir &&
+            let Some(relative_path) = super::extract::static_file_relative_path(path)
+        {
+            return Ok((static_files_dir, relative_path))
+        }
+        Ok((self.target_dir, path))
     }
 
     /// Computes the hex-encoded BLAKE3 checksum for one plain output file.
@@ -216,5 +247,66 @@ mod tests {
         verifier.cleanup(&outputs);
         assert!(!custom_file.exists());
         assert_eq!(fs::read(default_file).unwrap(), b"headers");
+    }
+
+    #[test]
+    fn cleanup_ignores_output_paths_outside_target() {
+        let root = tempfile::tempdir().unwrap();
+        let datadir = root.path().join("datadir");
+        fs::create_dir_all(&datadir).unwrap();
+        let outside = root.path().join("outside");
+        fs::write(&outside, b"keep").unwrap();
+        let inside = datadir.join("inside");
+        fs::write(&inside, b"remove").unwrap();
+
+        let outputs = [
+            checksum(outside.to_str().unwrap(), b"keep"),
+            checksum("../outside", b"keep"),
+            checksum("db/../../outside", b"keep"),
+            checksum("inside", b"remove"),
+        ];
+        let verifier = OutputVerifier::new(&datadir, None);
+        assert!(verifier.verify(&outputs).is_err(), "invalid paths are never verified");
+        verifier.cleanup(&outputs);
+
+        assert_eq!(fs::read(&outside).unwrap(), b"keep");
+        assert!(!inside.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cleanup_does_not_follow_symlinked_parents() {
+        let root = tempfile::tempdir().unwrap();
+        let datadir = root.path().join("datadir");
+        let static_dir = root.path().join("static");
+        let outside = root.path().join("outside");
+        fs::create_dir_all(&datadir).unwrap();
+        fs::create_dir_all(&static_dir).unwrap();
+        fs::create_dir_all(outside.join("nested")).unwrap();
+        for path in ["mdbx.dat", "headers", "nested/headers"] {
+            fs::write(outside.join(path), b"keep").unwrap();
+        }
+        std::os::unix::fs::symlink(&outside, datadir.join("db")).unwrap();
+        std::os::unix::fs::symlink(&outside, static_dir.join("link")).unwrap();
+        std::os::unix::fs::symlink(&outside, static_dir.join("nested")).unwrap();
+
+        let outputs = [
+            checksum("db/mdbx.dat", b"keep"),
+            checksum("static_files/link/headers", b"keep"),
+            checksum("static_files/nested/nested/headers", b"keep"),
+        ];
+        for static_files_dir in [None, Some(static_dir.as_path())] {
+            OutputVerifier::new(&datadir, static_files_dir).cleanup(&outputs);
+        }
+
+        for path in ["mdbx.dat", "headers", "nested/headers"] {
+            assert_eq!(fs::read(outside.join(path)).unwrap(), b"keep");
+        }
+
+        // A symlink as the output itself is unlinked without touching its target.
+        std::os::unix::fs::symlink(outside.join("mdbx.dat"), datadir.join("link")).unwrap();
+        OutputVerifier::new(&datadir, None).cleanup(&[checksum("link", b"keep")]);
+        assert!(datadir.join("link").symlink_metadata().is_err());
+        assert_eq!(fs::read(outside.join("mdbx.dat")).unwrap(), b"keep");
     }
 }

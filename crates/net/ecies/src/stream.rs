@@ -194,15 +194,15 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codec::MAX_FRAME_SIZE;
     use reth_network_peers::pk2id;
-    use secp256k1::SECP256K1;
     use tokio::net::{TcpListener, TcpStream};
 
     #[tokio::test]
     async fn can_write_and_read() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server_key = SecretKey::new(&mut rand_08::thread_rng());
+        let server_key = SecretKey::new(&mut rand::rng());
 
         let handle = tokio::spawn(async move {
             // roughly based off of the design of tokio::net::TcpListener
@@ -215,9 +215,9 @@ mod tests {
         });
 
         // create the server pubkey
-        let server_id = pk2id(&server_key.public_key(SECP256K1));
+        let server_id = pk2id(&server_key.public_key());
 
-        let client_key = SecretKey::new(&mut rand_08::thread_rng());
+        let client_key = SecretKey::new(&mut rand::rng());
         let outgoing = TcpStream::connect(addr).await.unwrap();
         let mut client_stream =
             ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
@@ -231,7 +231,7 @@ mod tests {
     async fn connection_should_timeout() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server_key = SecretKey::new(&mut rand_08::thread_rng());
+        let server_key = SecretKey::new(&mut rand::rng());
 
         let _handle = tokio::spawn(async move {
             // Delay accepting the connection for longer than the client's timeout period
@@ -245,9 +245,9 @@ mod tests {
         });
 
         // create the server pubkey
-        let server_id = pk2id(&server_key.public_key(SECP256K1));
+        let server_id = pk2id(&server_key.public_key());
 
-        let client_key = SecretKey::new(&mut rand_08::thread_rng());
+        let client_key = SecretKey::new(&mut rand::rng());
         let outgoing = TcpStream::connect(addr).await.unwrap();
 
         // Attempt to connect, expecting a timeout due to the server's delayed response
@@ -262,6 +262,33 @@ mod tests {
         // Assert that a timeout error occurred
         assert!(
             matches!(connect_result, Err(e) if e.to_string() == ECIESErrorImpl::StreamTimeout.to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_frame_larger_than_header_can_describe() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_key = SecretKey::new(&mut rand::rng());
+
+        let handle = tokio::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            ECIESStream::incoming(incoming, server_key).await.unwrap()
+        });
+
+        let server_id = pk2id(&server_key.public_key());
+        let client_key = SecretKey::new(&mut rand::rng());
+        let outgoing = TcpStream::connect(addr).await.unwrap();
+        let mut client_stream =
+            ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
+        let _server_stream = handle.await.unwrap();
+
+        let err = client_stream.send(Bytes::from(vec![0; MAX_FRAME_SIZE + 1])).await.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(
+            err.to_string(),
+            ECIESErrorImpl::FrameTooLarge { size: MAX_FRAME_SIZE + 1, max_size: MAX_FRAME_SIZE }
+                .to_string()
         );
     }
 }

@@ -14,12 +14,11 @@ use reth_eth_wire::{
     handshake::EthHandshake,
     multiplex::ProtocolConnection,
     protocol::{Protocol, ProtocolIngressLimits},
-    Capability, EthNetworkPrimitives, StatusBuilder, UnauthedEthStream,
+    Capability, EthNetworkPrimitives, StatusBuilder, UnauthedEthStream, MAX_PAYLOAD_SIZE,
 };
 use reth_eth_wire_types::message::MAX_MESSAGE_SIZE;
 use reth_ethereum_forks::EthereumHardfork;
 use reth_network_peers::pk2id;
-use secp256k1::SECP256K1;
 use std::{sync::Mutex, task::Waker};
 use tokio::{net::TcpListener, sync::Notify};
 
@@ -95,7 +94,7 @@ impl ConnectionHandler for ProtocolSpy {
 }
 
 fn new_peer() -> (SecretKey, PeerId) {
-    let (key, pk) = SECP256K1.generate_keypair(&mut rand_08::thread_rng());
+    let (key, pk) = secp256k1::generate_keypair(&mut rand::rng());
     (key, pk2id(&pk))
 }
 
@@ -160,6 +159,7 @@ async fn incoming_hello_with_spoofed_identity_is_rejected() {
         start_pending_incoming_session::<EthNetworkPrimitives>(
             Arc::new(EthHandshake::default()),
             MAX_MESSAGE_SIZE,
+            MAX_PAYLOAD_SIZE,
             disconnect_rx,
             SessionId(0),
             incoming,
@@ -217,6 +217,7 @@ async fn outgoing_hello_with_spoofed_identity_is_rejected() {
         start_pending_outbound_session::<EthNetworkPrimitives>(
             Arc::new(EthHandshake::default()),
             MAX_MESSAGE_SIZE,
+            MAX_PAYLOAD_SIZE,
             disconnect_rx,
             events_tx,
             SessionId(0),
@@ -258,6 +259,7 @@ async fn matching_identity_establishes_session() {
         start_pending_incoming_session::<EthNetworkPrimitives>(
             Arc::new(EthHandshake::default()),
             MAX_MESSAGE_SIZE,
+            MAX_PAYLOAD_SIZE,
             disconnect_rx,
             SessionId(0),
             incoming,
@@ -340,6 +342,7 @@ async fn extra_protocol_waits_for_status_handshake() {
             start_pending_incoming_session::<EthNetworkPrimitives>(
                 Arc::new(EthHandshake::default()),
                 MAX_MESSAGE_SIZE,
+                MAX_PAYLOAD_SIZE,
                 disconnect_rx,
                 SessionId(0),
                 incoming,
@@ -426,6 +429,7 @@ fn session_manager() -> SessionManager<EthNetworkPrimitives> {
         RlpxSubProtocols::default(),
         Arc::new(EthHandshake::default()),
         MAX_MESSAGE_SIZE,
+        MAX_PAYLOAD_SIZE,
         false,
     )
 }
@@ -470,7 +474,7 @@ async fn canceled_dial_events_do_not_reach_replacement_sessions() {
             })
             .await
             .unwrap();
-        assert!(sessions.poll(&mut Context::from_waker(Waker::noop()), |_| true).is_pending());
+        assert!(sessions.poll(&mut Context::from_waker(Waker::noop()), |_| None).is_pending());
         assert!(sessions.pending_sessions.contains_key(&new_id));
     }
     sessions
@@ -483,7 +487,7 @@ async fn canceled_dial_events_do_not_reach_replacement_sessions() {
         })
         .await
         .unwrap();
-    assert!(sessions.poll(&mut Context::from_waker(Waker::noop()), |_| true).is_pending());
+    assert!(sessions.poll(&mut Context::from_waker(Waker::noop()), |_| None).is_pending());
     sessions
         .pending_sessions_tx
         .send(PendingSessionEvent::Disconnected {
@@ -494,7 +498,7 @@ async fn canceled_dial_events_do_not_reach_replacement_sessions() {
         })
         .await
         .unwrap();
-    assert!(matches!(sessions.poll(&mut Context::from_waker(Waker::noop()), |_| true),
+    assert!(matches!(sessions.poll(&mut Context::from_waker(Waker::noop()), |_| None),
         Poll::Ready(SessionEvent::OutgoingPendingSessionClosed { peer_id: id, error: None, .. }) if id == peer_id));
     assert!(sessions.pending_sessions.is_empty());
 }
@@ -511,6 +515,7 @@ async fn cancellation_interrupts_stalled_ecies() {
     let mut auth = Box::pin(authenticate::<EthNetworkPrimitives>(
         Arc::new(EthHandshake::default()),
         MAX_MESSAGE_SIZE,
+        MAX_PAYLOAD_SIZE,
         disconnect_rx,
         events,
         stream,
@@ -572,7 +577,7 @@ async fn canceled_completed_dial_sends_disconnect() {
     );
     outgoing.counter.inc_pending_outbound();
     outgoing.pending_sessions_tx.send(event).await.unwrap();
-    assert!(outgoing.poll(&mut Context::from_waker(Waker::noop()), |_| true).is_pending());
+    assert!(outgoing.poll(&mut Context::from_waker(Waker::noop()), |_| None).is_pending());
     assert!(outgoing.pending_sessions.contains_key(&replacement));
     assert!(outgoing.active_sessions.is_empty());
     let error = tokio::time::timeout(Duration::from_secs(5), conn.next())
@@ -603,7 +608,7 @@ async fn inbound_capacity_rejection_preserves_outbound_attempt() {
             futures::future::poll_fn(|cx| {
                 incoming.poll(cx, |id| {
                     assert_eq!(id, peer_id);
-                    allow
+                    (!allow).then_some(DisconnectReason::TooManyPeers)
                 })
             }),
         )

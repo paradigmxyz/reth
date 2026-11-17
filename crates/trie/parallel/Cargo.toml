@@ -15,19 +15,16 @@ workspace = true
 # reth
 reth-primitives-traits = { workspace = true, features = ["std"] }
 reth-execution-errors.workspace = true
+reth-execution-types.workspace = true
 reth-provider.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie.workspace = true
 
 # alloy
-alloy-evm.workspace = true
 alloy-primitives.workspace = true
 
 # tracing
 tracing.workspace = true
-
-# revm
-revm.workspace = true
 
 # misc
 thiserror.workspace = true
@@ -53,7 +50,6 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 
 # misc
 rand.workspace = true
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
 
 [features]
 default = ["metrics"]
