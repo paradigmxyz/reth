@@ -18,17 +18,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-// The native derive remains a dependency in fuzz builds, but is not used there.
-#[cfg(feature = "fuzz")]
-use metrics_derive as _;
-
 /// Metrics derive macro.
-#[cfg(not(feature = "fuzz"))]
 pub use metrics_derive::Metrics;
-
-/// Fuzz-only metrics derive macro.
-#[cfg(feature = "fuzz")]
-pub use reth_metrics_derive::Metrics;
 
 /// Implementation of common metric utilities.
 #[cfg(feature = "common")]

@@ -52,7 +52,6 @@ members = [
     "crates/exex/types/",
     "crates/lru/",
     "crates/metrics/",
-    "crates/metrics/derive/",
     "crates/net/banlist/",
     "crates/net/discv4/",
     "crates/net/discv5/",
@@ -547,7 +546,7 @@ chrono = "0.4.41"
 
 # metrics
 metrics = "=0.24.6"
-metrics-derive = "0.1.1"
+metrics-derive = { git = "https://github.com/tempoxyz/metrics-derive", rev = "d191b3c78394c8508eed8651ca803752426461e6" }
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
 metrics-process = "2.1.0"
 metrics-util = { default-features = false, version = "0.20.3" }

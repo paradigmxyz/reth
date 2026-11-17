@@ -6217,8 +6217,7 @@ dependencies = [
 [[package]]
 name = "metrics-derive"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "161ab904c2c62e7bda0f7562bf22f96440ca35ff79e66c800cbac298f2f4f5ec"
+source = "git+https://github.com/tempoxyz/metrics-derive?rev=d191b3c78394c8508eed8651ca803752426461e6#d191b3c78394c8508eed8651ca803752426461e6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9404,18 +9403,9 @@ dependencies = [
  "libc",
  "metrics",
  "metrics-derive",
- "reth-metrics-derive",
  "reth-primitives-traits",
  "tokio",
  "tokio-util",
-]
-
-[[package]]
-name = "reth-metrics-derive"
-version = "2.11.0"
-dependencies = [
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
