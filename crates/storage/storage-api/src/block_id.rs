@@ -19,21 +19,6 @@ pub trait BlockNumReader: BlockHashReader + Send {
     /// Returns the last block number associated with the last canonical header in the database.
     fn last_block_number(&self) -> ProviderResult<BlockNumber>;
 
-    /// Returns the last block number that is still canonical in the database after a restart.
-    ///
-    /// This can be behind [`Self::last_block_number`]: static files are written before the database
-    /// transaction that commits the same blocks, and blocks above the partial state/trie frontier
-    /// of the `Finish` stage checkpoint are unwound on startup.
-    ///
-    /// The height only survives a host crash or power loss when the database syncs every commit
-    /// to disk. With `--db.sync-mode safe-no-sync`, it survives a process crash, but MDBX may
-    /// discard the latest commits when the database is reopened after a host failure.
-    ///
-    /// Defaults to [`Self::last_block_number`] for providers that are not backed by a database.
-    fn last_durable_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.last_block_number()
-    }
-
     /// Returns earliest block number to keep track of the expired block range.
     fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
         Ok(0)

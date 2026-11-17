@@ -544,10 +544,6 @@ impl<N: ProviderNodeTypes> BlockNumReader for ConsistentProvider<N> {
         self.storage_provider.last_block_number()
     }
 
-    fn last_durable_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.storage_provider.last_durable_block_number()
-    }
-
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
         self.get_in_memory_or_storage_by_block(
             hash.into(),

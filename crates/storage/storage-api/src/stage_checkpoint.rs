@@ -15,6 +15,30 @@ pub trait StageCheckpointReader: Send {
     /// Reads all stage checkpoints and returns a list with the name of the stage and the checkpoint
     /// data.
     fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>>;
+
+    /// Returns the last block number that is still canonical in the database after a restart.
+    ///
+    /// This can be behind
+    /// [`BlockNumReader::last_block_number`](crate::BlockNumReader::last_block_number): static
+    /// files are written before the database transaction that commits the same blocks, and blocks
+    /// above the partial state/trie frontier of the `Finish` stage checkpoint are unwound on
+    /// startup. Returns genesis if there is no `Finish` checkpoint.
+    ///
+    /// The height only survives a host crash or power loss when the database syncs every commit
+    /// to disk. With `--db.sync-mode safe-no-sync`, it survives a process crash, but MDBX may
+    /// discard the latest commits when the database is reopened after a host failure.
+    fn last_durable_block_number(&self) -> ProviderResult<BlockNumber> {
+        // The Finish checkpoint is written in the same transaction as the blocks it covers.
+        Ok(self
+            .get_stage_checkpoint(StageId::Finish)?
+            .map(|checkpoint| {
+                checkpoint
+                    .finish_stage_checkpoint()
+                    .and_then(|finish| finish.partial_state_trie())
+                    .unwrap_or(checkpoint.block_number)
+            })
+            .unwrap_or_default())
+    }
 }
 
 /// The trait for updating stage checkpoint related data.
