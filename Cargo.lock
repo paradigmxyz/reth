@@ -10839,6 +10839,7 @@ dependencies = [
  "pin-project",
  "rayon",
  "reth-metrics",
+ "reth-primitives-traits",
  "shuttle",
  "shuttle-parking_lot",
  "shuttle-sync",

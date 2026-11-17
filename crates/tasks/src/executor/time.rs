@@ -9,6 +9,12 @@ use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 pub use std::time::{Duration, SystemTimeError};
 
+/// Uses the native fast clock outside simulation and the virtual clock under `fuzz`.
+#[cfg(feature = "fuzz")]
+pub use self::Instant as FastInstant;
+
+#[cfg(not(feature = "fuzz"))]
+pub use reth_primitives_traits::FastInstant;
 #[cfg(not(feature = "fuzz"))]
 pub use std::time::{Instant, SystemTime, UNIX_EPOCH};
 

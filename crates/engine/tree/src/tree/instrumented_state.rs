@@ -5,6 +5,7 @@ use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::EvmStateProvider;
+use reth_tasks::executor::time::FastInstant as Instant;
 use std::{
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -12,12 +13,6 @@ use std::{
     },
     time::Duration,
 };
-
-#[cfg(not(feature = "fuzz"))]
-use reth_primitives_traits::FastInstant as Instant;
-
-#[cfg(feature = "fuzz")]
-use reth_tasks::executor::time::Instant;
 
 /// Nanoseconds per second
 const NANOS_PER_SEC: u32 = 1_000_000_000;

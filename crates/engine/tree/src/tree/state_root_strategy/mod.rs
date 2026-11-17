@@ -76,6 +76,7 @@ use reth_tasks::{
             Receiver,
         },
         thread,
+        time::FastInstant as Instant,
     },
     utils::increase_thread_priority,
 };
@@ -96,12 +97,6 @@ use reth_trie_sparse::{
 };
 use std::{fmt, sync::Arc, time::Duration};
 use tracing::{debug, debug_span, instrument, warn, Span};
-
-#[cfg(not(feature = "fuzz"))]
-use reth_primitives_traits::FastInstant as Instant;
-
-#[cfg(feature = "fuzz")]
-use reth_tasks::executor::time::Instant;
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
 pub type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;

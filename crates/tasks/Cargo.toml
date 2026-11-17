@@ -12,6 +12,9 @@ description = "Task management"
 workspace = true
 
 [dependencies]
+# clocks
+reth-primitives-traits = { workspace = true, features = ["std"] }
+
 # executor
 crossbeam-channel.workspace = true
 either = { workspace = true, optional = true }
@@ -49,7 +52,7 @@ tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time",
 
 [features]
 rayon = ["dep:crossbeam-utils", "pin-project"]
-test-utils = []
+test-utils = ["reth-primitives-traits/test-utils"]
 fuzz = [
     "metrics/fuzz",
     "reth-metrics/fuzz",

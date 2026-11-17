@@ -31,6 +31,7 @@ use reth_tasks::{
     executor::{
         channel,
         channel::{mpsc, select_biased, Receiver, Sender},
+        time::FastInstant as Instant,
     },
     spawn_thread,
     utils::increase_thread_priority,
@@ -43,12 +44,6 @@ use tokio::sync::{
     oneshot,
 };
 use tracing::*;
-
-#[cfg(not(feature = "fuzz"))]
-use reth_primitives_traits::FastInstant as Instant;
-
-#[cfg(feature = "fuzz")]
-use reth_tasks::executor::time::Instant;
 
 mod block_buffer;
 mod canonical;

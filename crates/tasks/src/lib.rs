@@ -20,6 +20,8 @@
 
 #[cfg(feature = "fuzz")]
 use ::rayon as _;
+#[cfg(feature = "fuzz")]
+use reth_primitives_traits as _;
 
 /// Executor primitives shared by task, engine, and trie workers.
 pub mod executor;

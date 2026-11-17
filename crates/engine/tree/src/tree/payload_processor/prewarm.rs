@@ -48,6 +48,7 @@ use reth_tasks::{
         rayon::prelude::*,
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
         thread,
+        time::FastInstant as Instant,
     },
     Runtime, WorkerStatefulPool,
 };
@@ -55,12 +56,6 @@ use reth_trie_common::MultiProofTargetsV2;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
-
-#[cfg(not(feature = "fuzz"))]
-use reth_primitives_traits::FastInstant as Instant;
-
-#[cfg(feature = "fuzz")]
-use reth_tasks::executor::time::Instant;
 
 /// Maximum number of consecutive rounds that execute stale prewarm results again.
 const MAX_REFRESH_ROUNDS: usize = 4;

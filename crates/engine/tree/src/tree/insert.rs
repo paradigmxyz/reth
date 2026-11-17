@@ -29,13 +29,8 @@ use reth_provider::{
     StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache,
 };
+use reth_tasks::executor::time::FastInstant as Instant;
 use tracing::{debug, error, instrument, trace, warn};
-
-#[cfg(not(feature = "fuzz"))]
-use reth_primitives_traits::FastInstant as Instant;
-
-#[cfg(feature = "fuzz")]
-use reth_tasks::executor::time::Instant;
 
 impl<N, P, T, V, C> EngineApiTreeHandler<N, P, T, V, C>
 where

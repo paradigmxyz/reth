@@ -31,6 +31,7 @@ use reth_tasks::{
             atomic::{AtomicBool, AtomicUsize},
             OnceLock,
         },
+        time::FastInstant as Instant,
     },
     Runtime,
 };
@@ -45,12 +46,6 @@ pub use reth_trie_parallel::{
 };
 use std::{ops::Not, sync::Arc};
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
-
-#[cfg(not(feature = "fuzz"))]
-use reth_primitives_traits::FastInstant as Instant;
-
-#[cfg(feature = "fuzz")]
-use reth_tasks::executor::time::Instant;
 
 pub mod bal;
 pub mod bal_prewarm_pool;

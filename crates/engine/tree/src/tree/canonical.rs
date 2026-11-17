@@ -16,15 +16,10 @@ use reth_provider::{
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
     TransactionVariant,
 };
+use reth_tasks::executor::time::FastInstant as Instant;
 use reth_trie::{HashedPostState, KeccakKeyHasher, SortedTrieData};
 use std::sync::Arc;
 use tracing::{debug, instrument, trace, warn};
-
-#[cfg(not(feature = "fuzz"))]
-use reth_primitives_traits::FastInstant as Instant;
-
-#[cfg(feature = "fuzz")]
-use reth_tasks::executor::time::Instant;
 
 impl<N, P, T, V, C> EngineApiTreeHandler<N, P, T, V, C>
 where
