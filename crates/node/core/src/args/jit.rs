@@ -12,6 +12,20 @@ pub struct JitArgs {
     #[arg(id = "jit.enabled", long = "jit", default_value_t = false, help_heading = "JIT")]
     pub enabled: bool,
 
+    /// Run EVM bytecode with superinstructions (experimental): fused stack instructions that
+    /// replace common opcode sequences, with the same results and gas.
+    ///
+    /// The first start translates the bytecode already in the database. From then on the
+    /// database stores bytecode translated, which builds without superinstructions cannot read,
+    /// so once a database enables them they stay enabled, with or without this flag.
+    #[arg(
+        id = "experimental.sx",
+        long = "experimental.sx",
+        default_value_t = false,
+        help_heading = "Experimental"
+    )]
+    pub sx: bool,
+
     /// Number of observed misses before a bytecode is promoted to JIT compilation.
     #[arg(long = "jit.hot-threshold", default_value_t = Self::DEFAULT_HOT_THRESHOLD, help_heading = "JIT")]
     pub hot_threshold: usize,
@@ -78,6 +92,7 @@ impl Default for JitArgs {
     fn default() -> Self {
         Self {
             enabled: false,
+            sx: false,
             hot_threshold: Self::DEFAULT_HOT_THRESHOLD,
             worker_count: None,
             channel_capacity: Self::DEFAULT_CHANNEL_CAPACITY,

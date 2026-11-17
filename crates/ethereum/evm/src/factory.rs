@@ -384,6 +384,8 @@ pub struct RethEvmFactory {
     metrics: JitMetrics,
     #[cfg(feature = "jit")]
     jit_support: bool,
+    /// Whether EVMs run bytecode with evm2 superinstructions.
+    superinstructions: bool,
 }
 
 impl Default for RethEvmFactory {
@@ -402,9 +404,32 @@ impl RethEvmFactory {
         }
         #[cfg(not(feature = "jit"))]
         {
-            Self {}
+            Self { superinstructions: false }
         }
     }
+
+    /// Runs bytecode with evm2 superinstructions (experimental): fused stack instructions that
+    /// replace common opcode sequences, with the same results and gas.
+    pub const fn with_superinstructions(mut self, enabled: bool) -> Self {
+        self.superinstructions = enabled;
+        self
+    }
+
+    /// Returns whether EVMs run bytecode with superinstructions.
+    pub const fn superinstructions(&self) -> bool {
+        self.superinstructions
+    }
+}
+
+/// Returns a function that translates legacy bytecode to the superinstructions of `spec`, as an
+/// EVM of [`RethEvmFactory::with_superinstructions`] does when it runs the code.
+pub fn sx_translator(spec: evm2::SpecId) -> impl Fn(&evm2::bytecode::Bytecode) + Send + Sync {
+    let mut config = evm2::ExecutionConfig::<evm2::BaseEvmTypes>::for_spec_and_version(
+        spec,
+        evm2::Version::new(spec),
+    );
+    config.set_superinstructions(true);
+    move |code| config.analyze(code)
 }
 
 impl EvmFactory for RethEvmFactory {
@@ -427,6 +452,16 @@ impl EvmFactory for RethEvmFactory {
         evm2::ethereum::ethereum_tx_registry(spec)
     }
 
+    fn execution_config(
+        &self,
+        spec: Self::SpecId,
+        version: evm2::Version,
+    ) -> evm2::ExecutionConfig<Self::Types> {
+        let mut config = evm2::ExecutionConfig::for_spec_and_version(spec, version);
+        config.set_superinstructions(self.superinstructions);
+        config
+    }
+
     fn configure_evm(&self, evm: &mut evm2::Evm<'_, Self::Types>) {
         #[cfg(feature = "jit")]
         self.configure_evm(evm);
@@ -445,7 +480,7 @@ impl RethEvmFactory {
 
     /// Creates a new factory configuration that owns the backend and records metrics.
     pub const fn new_with_metrics(backend: JitBackend, metrics: JitMetrics) -> Self {
-        Self { backend, metrics, jit_support: false }
+        Self { backend, metrics, jit_support: false, superinstructions: false }
     }
 
     /// Returns a reference to the JIT backend.

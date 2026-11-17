@@ -540,7 +540,7 @@ pub fn build_evm_config<C: EthereumHardforks>(
         let config = RuntimeConfig { blocking: false, ..jit_runtime_config(jit) };
         #[cfg(not(unix))]
         let config = RuntimeConfig { jit_mode: JitMode::InProcess, ..config };
-        let factory = RethEvmFactory::new(JitBackend::new(config)?);
+        let factory = RethEvmFactory::new(JitBackend::new(config)?).with_superinstructions(jit.sx);
         return Ok((EthEvmConfig::new_with_evm_factory(chain_spec, factory), None));
     }
 
@@ -565,7 +565,8 @@ pub fn build_evm_config<C: EthereumHardforks>(
         "Started experimental evm2 JIT backend; this may cause instability",
     );
 
-    let factory = RethEvmFactory::new_with_metrics(backend, jit_metrics.as_ref().clone());
+    let factory = RethEvmFactory::new_with_metrics(backend, jit_metrics.as_ref().clone())
+        .with_superinstructions(jit.sx);
     let evm_config = EthEvmConfig::new_with_evm_factory(chain_spec, factory);
 
     Ok((evm_config, Some(jit_metrics)))
@@ -587,8 +588,57 @@ pub fn build_evm_config<C: EthereumHardforks>(
             "JIT compilation was requested but this binary was compiled without the `jit` feature"
         );
     }
-    let factory = RethEvmFactory::disabled();
+    let factory = RethEvmFactory::disabled().with_superinstructions(jit.sx);
     Ok((EthEvmConfig::new_with_evm_factory(chain_spec, factory), None))
+}
+
+/// Enables superinstructions when requested or when the database already uses them, which it
+/// then always does: its bytecode is stored translated. The first start translates the bytecode
+/// already in the database, resuming where an interrupted start stopped.
+///
+/// Returns whether EVMs run with superinstructions.
+fn enable_superinstructions<Node: FullNodeTypes>(
+    ctx: &BuilderContext<Node>,
+    requested: bool,
+) -> eyre::Result<bool>
+where
+    Node::Types: NodeTypes<ChainSpec: EthereumHardforks>,
+{
+    use reth_provider::{sx, DBProvider, DatabaseProviderFactory};
+    let provider = ctx.provider();
+    let mut state = sx::state(&provider.database_provider_ro()?)?;
+    if !requested && !state.enabled {
+        return Ok(false)
+    }
+    if !requested {
+        info!(target: "reth::cli", "Superinstructions stay enabled: this database stores bytecode translated to them");
+    }
+    let head = ctx.head();
+    let spec = reth_evm_ethereum::spec_id_by_timestamp_and_block_number(
+        ctx.chain_spec().as_ref(),
+        head.timestamp,
+        head.number,
+    );
+    sx::set_translator(Box::new(reth_evm_ethereum::factory::sx_translator(spec)));
+    if !state.enabled {
+        state.enabled = true;
+        let rw = provider.database_provider_rw()?;
+        sx::write_state(&rw, &state)?;
+        rw.commit()?;
+        info!(target: "reth::cli", "Enabled superinstructions; this database now needs them");
+    }
+    if !state.translated {
+        info!(target: "reth::cli", ?spec, "Translating existing bytecode to superinstructions");
+        let mut last = std::time::Instant::now();
+        let done = sx::translate_existing(provider, |p| {
+            if last.elapsed() >= std::time::Duration::from_secs(10) {
+                last = std::time::Instant::now();
+                info!(target: "reth::cli", codes = p.codes, translated = p.translated, mb = p.bytes >> 20, elapsed = ?p.elapsed, "Translating existing bytecode");
+            }
+        })?;
+        info!(target: "reth::cli", codes = done.codes, translated = done.translated, mb = done.bytes >> 20, elapsed = ?done.elapsed, "Translated existing bytecode");
+    }
+    Ok(true)
 }
 
 /// A regular ethereum evm and executor builder.
@@ -604,7 +654,9 @@ where
     type EVM = EthEvmConfig<Types::ChainSpec, RethEvmFactory>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        let jit = &ctx.config().jit;
+        let mut jit = ctx.config().jit.clone();
+        jit.sx = enable_superinstructions(ctx, jit.sx)?;
+        let jit = &jit;
         let dump_dir = jit.debug.then(|| ctx.config().datadir().data_dir().join("jit"));
 
         let (mut evm_config, jit_metrics) = build_evm_config(ctx.chain_spec(), jit, dump_dir)?;

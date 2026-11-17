@@ -679,17 +679,19 @@ walkdir = "2.3.3"
 # networking
 ipnet = "2.11"
 
+# The evm2 and reth-core revisions are the sx/stack-superinstructions branches, for the
+# experimental --experimental.sx flag.
 # evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
 # rejects a patch from the same source.
 [patch."https://github.com/alloy-rs/evm2"]
-evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "e681662b6d9ec59edafd112f7c8d64f49f1e6dd1" }
-evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "e681662b6d9ec59edafd112f7c8d64f49f1e6dd1" }
-evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "e681662b6d9ec59edafd112f7c8d64f49f1e6dd1" }
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "d962d25503774023788323bd8c40132f49988dbd" }
+evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "d962d25503774023788323bd8c40132f49988dbd" }
+evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "d962d25503774023788323bd8c40132f49988dbd" }
 
 [patch.crates-io]
 # reth-core
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "37f36b181bd7a19111ad89a63dc8944fd09f8b4d" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "37f36b181bd7a19111ad89a63dc8944fd09f8b4d" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "37f36b181bd7a19111ad89a63dc8944fd09f8b4d" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "37f36b181bd7a19111ad89a63dc8944fd09f8b4d" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "37f36b181bd7a19111ad89a63dc8944fd09f8b4d" }

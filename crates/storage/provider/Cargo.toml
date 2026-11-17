@@ -88,6 +88,8 @@ rand.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 [features]
+# Experimental: bytecode translated to evm2 superinstructions (`--experimental.sx`).
+sx = ["dep:evm2", "reth-primitives-traits/sx"]
 test-utils = [
     "dep:evm2",
     "reth-db/test-utils",

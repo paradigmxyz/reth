@@ -945,6 +945,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ) -> ProviderResult<()> {
         let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
         for (hash, bytecode) in bytecodes {
+            // With superinstructions on, bytecode is stored translated.
+            #[cfg(feature = "sx")]
+            crate::sx::translate(&bytecode);
             bytecodes_cursor.upsert(hash, &bytecode)?;
         }
         Ok(())

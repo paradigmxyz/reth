@@ -20,7 +20,7 @@ reth-ethereum-primitives.workspace = true
 ## ensure secp256k1 recovery with rayon support is activated
 reth-primitives-traits = { workspace = true, features = ["secp256k1", "rayon"] }
 reth-node-builder.workspace = true
-reth-provider.workspace = true
+reth-provider = { workspace = true, features = ["sx"] }
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
 reth-evm = { workspace = true, features = ["blst", "c-kzg", "p256-aws-lc-rs"] }

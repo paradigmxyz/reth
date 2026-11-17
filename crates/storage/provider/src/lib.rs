@@ -38,6 +38,9 @@ pub mod either_writer;
 pub use either_writer::*;
 
 mod bal;
+
+#[cfg(feature = "sx")]
+pub mod sx;
 pub use bal::{BalConfig, InMemoryBalStore, RocksDBBalStore};
 
 pub use reth_chain_state::{
