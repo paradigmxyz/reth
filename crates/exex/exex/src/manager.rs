@@ -1119,8 +1119,7 @@ mod tests {
     async fn exex_handle_new() {
         let provider_factory = create_test_provider_factory();
         init_genesis(&provider_factory).unwrap();
-        let chain_info_headers = provider_factory.chain_info_headers().unwrap();
-        let provider = BlockchainProvider::new(provider_factory, chain_info_headers);
+        let provider = BlockchainProvider::new(provider_factory).unwrap();
 
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
@@ -1175,8 +1174,7 @@ mod tests {
     async fn test_notification_if_finished_height_gt_chain_tip() {
         let provider_factory = create_test_provider_factory();
         init_genesis(&provider_factory).unwrap();
-        let chain_info_headers = provider_factory.chain_info_headers().unwrap();
-        let provider = BlockchainProvider::new(provider_factory, chain_info_headers);
+        let provider = BlockchainProvider::new(provider_factory).unwrap();
 
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
@@ -1226,8 +1224,7 @@ mod tests {
     async fn test_sends_chain_reorged_notification() {
         let provider_factory = create_test_provider_factory();
         init_genesis(&provider_factory).unwrap();
-        let chain_info_headers = provider_factory.chain_info_headers().unwrap();
-        let provider = BlockchainProvider::new(provider_factory, chain_info_headers);
+        let provider = BlockchainProvider::new(provider_factory).unwrap();
 
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
@@ -1270,8 +1267,7 @@ mod tests {
     async fn test_sends_chain_reverted_notification() {
         let provider_factory = create_test_provider_factory();
         init_genesis(&provider_factory).unwrap();
-        let chain_info_headers = provider_factory.chain_info_headers().unwrap();
-        let provider = BlockchainProvider::new(provider_factory, chain_info_headers);
+        let provider = BlockchainProvider::new(provider_factory).unwrap();
 
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
@@ -1331,8 +1327,7 @@ mod tests {
         provider_rw.insert_block(&block).unwrap();
         provider_rw.commit().unwrap();
 
-        let chain_info_headers = provider_factory.chain_info_headers().unwrap();
-        let provider = BlockchainProvider::new(provider_factory, chain_info_headers);
+        let provider = BlockchainProvider::new(provider_factory).unwrap();
 
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
@@ -1433,8 +1428,7 @@ mod tests {
         let wal = Wal::new(temp_dir.path()).unwrap();
         let provider_factory = create_test_provider_factory();
         init_genesis(&provider_factory).unwrap();
-        let chain_info_headers = provider_factory.chain_info_headers().unwrap();
-        let provider = BlockchainProvider::new(provider_factory.clone(), chain_info_headers);
+        let provider = BlockchainProvider::new(provider_factory.clone()).unwrap();
 
         // 1. Setup Manager with Capacity = 1
         let (exex_handle, _, mut notifications) = ExExHandle::new(

@@ -258,8 +258,7 @@ pub async fn test_exex_context_with_chain_spec(
     )?;
 
     let genesis_hash = init_genesis(&provider_factory)?;
-    let chain_info_headers = provider_factory.chain_info_headers()?;
-    let provider = BlockchainProvider::new(provider_factory.clone(), chain_info_headers);
+    let provider = BlockchainProvider::new(provider_factory.clone())?;
 
     let runtime = Runtime::test();
     let network_manager = NetworkManager::new(

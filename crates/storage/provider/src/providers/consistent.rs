@@ -1539,8 +1539,7 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
         let consistent_provider = provider.consistent_provider()?;
 
         // Useful blocks
@@ -1684,8 +1683,7 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
         let consistent_provider = provider.consistent_provider()?;
 
         // First in memory block
@@ -1799,8 +1797,7 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
 
         let in_memory_changesets = in_memory_changesets.into_iter().next().unwrap();
         let chain = NewCanonicalChain::Commit {
@@ -1919,8 +1916,7 @@ mod tests {
 
         provider_rw.commit()?;
 
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
         let outcome = provider.get_state(1)?.expect("should return execution outcome");
 
         let state = &outcome.bundle.state;
@@ -1977,8 +1973,7 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
 
         let in_mem_block = in_memory_blocks.first().unwrap();
         let senders = in_mem_block.senders().expect("failed to recover senders");
@@ -2079,8 +2074,7 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let chain_info_headers = factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(factory, chain_info_headers);
+        let provider = BlockchainProvider::new(factory)?;
 
         let in_mem_block = in_memory_blocks.first().unwrap();
         let senders = in_mem_block.senders().expect("failed to recover senders");

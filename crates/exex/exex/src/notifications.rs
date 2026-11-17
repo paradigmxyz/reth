@@ -598,8 +598,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let chain_info_headers = provider_factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(provider_factory.clone(), chain_info_headers);
+        let provider = BlockchainProvider::new(provider_factory.clone())?;
 
         let node_head_block = random_block(
             &mut rng,
@@ -674,8 +673,7 @@ mod tests {
         let genesis_block = provider_factory
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
-        let chain_info_headers = provider_factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(provider_factory.clone(), chain_info_headers);
+        let provider = BlockchainProvider::new(provider_factory.clone())?;
 
         let exex_head =
             ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };
@@ -766,8 +764,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let chain_info_headers = provider_factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(provider_factory, chain_info_headers);
+        let provider = BlockchainProvider::new(provider_factory)?;
 
         let node_head = BlockNumHash { number: genesis_block.number, hash: genesis_hash };
         let exex_head = ExExHead { block: node_head };
@@ -821,8 +818,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let chain_info_headers = provider_factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(provider_factory, chain_info_headers);
+        let provider = BlockchainProvider::new(provider_factory)?;
 
         let node_head_block = random_block(
             &mut rng,
@@ -913,8 +909,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let chain_info_headers = provider_factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(provider_factory, chain_info_headers);
+        let provider = BlockchainProvider::new(provider_factory)?;
 
         let exex_head_block = random_block(
             &mut rng,
@@ -999,8 +994,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let chain_info_headers = provider_factory.chain_info_headers()?;
-        let provider = BlockchainProvider::new(provider_factory.clone(), chain_info_headers);
+        let provider = BlockchainProvider::new(provider_factory.clone())?;
 
         // Insert block 1 into the DB so there's something to backfill
         let node_head_block = random_block(

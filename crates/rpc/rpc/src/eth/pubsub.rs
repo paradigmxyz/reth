@@ -567,13 +567,13 @@ mod tests {
     use futures::stream;
     use jsonrpsee::RpcModule;
     use jsonrpsee_types::{SubscriptionId, SubscriptionPayload, SubscriptionResponse};
-    use reth_chain_state::{CanonStateNotification, ChainInfoHeaders};
+    use reth_chain_state::CanonStateNotification;
     use reth_chainspec::ChainSpecProvider;
+    use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Receipt;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives_traits::SealedHeader;
     use reth_provider::{
         providers::BlockchainProvider,
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
@@ -597,14 +597,9 @@ mod tests {
     const NOTIFICATION_BUFFER: usize = 16;
 
     fn test_provider() -> TestProvider {
-        BlockchainProvider::new(
-            create_test_provider_factory(),
-            ChainInfoHeaders {
-                canonical_head: SealedHeader::default(),
-                safe: None,
-                finalized: None,
-            },
-        )
+        let factory = create_test_provider_factory();
+        init_genesis(&factory).unwrap();
+        BlockchainProvider::new(factory).unwrap()
     }
 
     fn test_pubsub(provider: TestProvider, pool: TestPool) -> EthPubSub<impl EthSubscriptions> {

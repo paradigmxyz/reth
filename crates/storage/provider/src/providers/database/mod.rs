@@ -17,7 +17,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use core::fmt;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
-use reth_chain_state::{ChainInfoHeaders, InMemoryState};
+use reth_chain_state::InMemoryState;
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
@@ -590,43 +590,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         self.sync_providers_if_needed()?;
         Ok(self.static_file_provider.clone())
     }
-
-    /// Returns the head of the chain stored in the database, and the safe and finalized blocks
-    /// if they are stored.
-    ///
-    /// The safe block is the finalized block if no safe block is stored. A stored safe or
-    /// finalized block number whose header is not stored yields `None` for that block.
-    ///
-    /// Returns [`ProviderError::HeaderNotFound`] if the header of the head is not stored, for
-    /// example in a database without a genesis block.
-    pub fn chain_info_headers(&self) -> ProviderResult<ChainInfoHeaders<HeaderTy<N>>> {
-        let provider = self.provider()?;
-        let ChainInfo { best_hash, best_number } = provider.chain_info()?;
-        let canonical_head = provider
-            .header_by_number(best_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(best_number.into()))?;
-        let finalized = provider
-            .last_finalized_block_number()?
-            .map(|num| provider.sealed_header(num))
-            .transpose()?
-            .flatten();
-        let safe = provider
-            .last_safe_block_number()?
-            .or_else(|| {
-                // for the purpose of this we can also use the finalized block if we don't have the
-                // safe block
-                provider.last_finalized_block_number().ok().flatten()
-            })
-            .map(|num| provider.sealed_header(num))
-            .transpose()?
-            .flatten();
-
-        Ok(ChainInfoHeaders {
-            canonical_head: SealedHeader::new(canonical_head, best_hash),
-            safe,
-            finalized,
-        })
-    }
 }
 
 impl<N: NodeTypesWithDB> NodePrimitivesProvider for ProviderFactory<N> {
@@ -1090,9 +1053,7 @@ mod tests {
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_api::MetadataWriter;
     use reth_storage_errors::provider::ProviderError;
-    use reth_testing_utils::generators::{
-        self, random_block, random_block_range, random_header, BlockParams, BlockRangeParams,
-    };
+    use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
     use std::{ops::RangeInclusive, sync::Arc};
 
     #[test]
@@ -1610,40 +1571,5 @@ mod tests {
             writer.commit().unwrap();
         }
         factory
-    }
-
-    #[test]
-    fn chain_info_headers() {
-        let factory = create_test_provider_factory();
-        assert_matches!(
-            factory.chain_info_headers(),
-            Err(ProviderError::HeaderNotFound(BlockHashOrNumber::Number(0)))
-        );
-
-        let mut rng = generators::rng();
-        let blocks = random_block_range(
-            &mut rng,
-            0..=3,
-            BlockRangeParams { tx_count: 0..1, ..Default::default() },
-        );
-        let provider = factory.provider_rw().unwrap();
-        for block in &blocks {
-            provider.insert_block(&block.clone().try_recover().unwrap()).unwrap();
-        }
-        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
-        provider.save_finalized_block_number(2).unwrap();
-        provider.commit().unwrap();
-
-        // The safe block is the finalized block while no safe block is stored.
-        let headers = factory.chain_info_headers().unwrap();
-        assert_eq!(headers.canonical_head, blocks[3].clone_sealed_header());
-        assert_eq!(headers.finalized, Some(blocks[2].clone_sealed_header()));
-        assert_eq!(headers.safe, headers.finalized);
-
-        let provider = factory.provider_rw().unwrap();
-        provider.save_safe_block_number(1).unwrap();
-        provider.commit().unwrap();
-        let headers = factory.chain_info_headers().unwrap();
-        assert_eq!(headers.safe, Some(blocks[1].clone_sealed_header()));
     }
 }

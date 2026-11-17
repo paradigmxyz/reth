@@ -160,8 +160,7 @@ impl<B> EngineNodeLauncher<B> {
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
             .with_blockchain_db::<T, _>(move |provider_factory| {
-                let chain_info_headers = provider_factory.chain_info_headers()?;
-                Ok(BlockchainProvider::new(provider_factory, chain_info_headers))
+                Ok(BlockchainProvider::new(provider_factory)?)
             })?
             .with_components(components_builder, on_component_initialized).await?;
 
