@@ -24,7 +24,8 @@ pre-build = [
 env.passthrough = [
     "CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER=riscv64-linux-gnu-gcc",
     "CXX_riscv64gc_unknown_linux_gnu=riscv64-linux-gnu-g++",
+    "VERGEN_IDEMPOTENT",
 ]
 
 [build.env]
-passthrough = ["JEMALLOC_SYS_WITH_LG_PAGE"]
+passthrough = ["JEMALLOC_SYS_WITH_LG_PAGE", "VERGEN_IDEMPOTENT"]
