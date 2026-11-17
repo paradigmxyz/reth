@@ -6209,6 +6209,8 @@ dependencies = [
 [[package]]
 name = "metrics"
 version = "0.24.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89550ee9f79e88fef3119de263694973a8adb26c21d75322164fb8c493039fe2"
 dependencies = [
  "portable-atomic",
  "rapidhash",
@@ -6217,7 +6219,8 @@ dependencies = [
 [[package]]
 name = "metrics-derive"
 version = "0.1.2"
-source = "git+https://github.com/tempoxyz/metrics-derive?rev=d191b3c78394c8508eed8651ca803752426461e6#d191b3c78394c8508eed8651ca803752426461e6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "161ab904c2c62e7bda0f7562bf22f96440ca35ff79e66c800cbac298f2f4f5ec"
 dependencies = [
  "proc-macro2",
  "quote",

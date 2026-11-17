@@ -54,8 +54,6 @@ tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time",
 rayon = ["dep:crossbeam-utils", "pin-project"]
 test-utils = ["reth-primitives-traits/test-utils"]
 fuzz = [
-    "metrics/fuzz",
-    "reth-metrics/fuzz",
     "dep:either",
     "dep:shuttle",
     "shuttle-sync/shuttle",

@@ -50,4 +50,4 @@ reth-tracing.workspace = true
 assert_matches.workspace = true
 
 [features]
-fuzz = ["metrics/fuzz", "reth-metrics/fuzz", "reth-tasks/fuzz", "reth-provider/fuzz", "reth-stages/fuzz"]
+fuzz = ["reth-tasks/fuzz", "reth-provider/fuzz", "reth-stages/fuzz"]

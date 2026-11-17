@@ -28,5 +28,4 @@ tokio-util = { workspace = true, optional = true }
 libc.workspace = true
 
 [features]
-fuzz = ["metrics-derive/noop", "metrics/fuzz"]
 common = ["tokio", "futures", "tokio-util", "reth-primitives-traits"]

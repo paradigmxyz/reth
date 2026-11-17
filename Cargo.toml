@@ -160,7 +160,7 @@ members = [
     "crates/tracing-otlp",
 ]
 default-members = ["bin/reth"]
-exclude = ["docs/cli", "crates/metrics/vendor"]
+exclude = ["docs/cli"]
 
 # Explicitly set the resolver to version 2, which is the default for packages with edition >= 2021
 # https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html
@@ -545,8 +545,8 @@ moka = "0.12"
 chrono = "0.4.41"
 
 # metrics
-metrics = "=0.24.6"
-metrics-derive = { git = "https://github.com/tempoxyz/metrics-derive", rev = "d191b3c78394c8508eed8651ca803752426461e6" }
+metrics = "0.24.0"
+metrics-derive = "0.1.1"
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
 metrics-process = "2.1.0"
 metrics-util = { default-features = false, version = "0.20.3" }
@@ -690,8 +690,6 @@ evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "e681662b6d
 evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "e681662b6d9ec59edafd112f7c8d64f49f1e6dd1" }
 
 [patch.crates-io]
-# Keep all metrics facade users, including transitive dependencies, inert under fuzz.
-metrics = { path = "crates/metrics/vendor" }
 # reth-core
 reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
 reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }

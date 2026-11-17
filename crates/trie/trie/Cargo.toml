@@ -63,7 +63,7 @@ proptest.workspace = true
 rand.workspace = true
 
 [features]
-fuzz = ["metrics?/fuzz", "reth-metrics?/fuzz", "reth-trie-sparse/fuzz", "reth-trie-common/fuzz", "reth-tasks/fuzz"]
+fuzz = ["reth-trie-sparse/fuzz", "reth-trie-common/fuzz", "reth-tasks/fuzz"]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [
     "alloy-primitives/serde",

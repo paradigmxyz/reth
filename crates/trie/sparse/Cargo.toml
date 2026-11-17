@@ -45,7 +45,7 @@ proptest.workspace = true
 rand.workspace = true
 
 [features]
-fuzz = ["metrics?/fuzz", "reth-metrics?/fuzz", "reth-tasks?/fuzz", "reth-trie-common/fuzz", "reth-trie/fuzz"]
+fuzz = ["reth-tasks?/fuzz", "reth-trie-common/fuzz", "reth-trie/fuzz"]
 default = ["std", "metrics"]
 std = [
     "dep:either",
