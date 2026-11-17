@@ -114,7 +114,18 @@ where
     }
 
     /// Updates the cached state for the given head hash.
+    ///
+    /// The update is dropped if the given reads hold more than [`MAX_CACHED_READS`] entries.
     async fn update_cached_reads(&self, head: B256, cached_state: CachedReads) {
+        // Each request starts from a clone of the cache for its head, so dropping oversized
+        // updates also keeps the cache for that head near the limit.
+        let entries = cached_state.accounts.len() +
+            cached_state.accounts.values().map(|account| account.storage.len()).sum::<usize>() +
+            cached_state.contracts.len();
+        if entries > MAX_CACHED_READS {
+            return
+        }
+
         let mut cache = self.inner.cached_state.write().await;
         if cache.0 == head {
             cache.1.extend(cached_state);
@@ -678,6 +689,9 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     /// Validation metrics
     metrics: ValidationMetrics,
 }
+
+/// The maximum number of cached accounts, storage slots and contracts kept for one head.
+const MAX_CACHED_READS: usize = 500_000;
 
 /// Ensures that the raw execution payload fields match the corresponding [`BidTrace`] fields.
 fn validate_message_against_payload(
