@@ -893,6 +893,7 @@ mod tests {
         BalStoreHandle, DBProvider, DatabaseProviderFactory, InMemoryBalStore,
         StageCheckpointWriter, StateProviderFactory,
     };
+    use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
     use reth_tasks::Runtime;
     use reth_trie_pbt::{
         key,
@@ -2030,6 +2031,109 @@ mod tests {
                 DecodeLimits::native(),
             )?;
             assert_eq!(store.verify_block(next.block().hash())?, next.block().state_root);
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn standard_node_gates_mpt_rpcs_and_binary_witnesses_on_pbt_chains() -> eyre::Result<()> {
+        for enabled in [false, true] {
+            let mut chain = (*test_chain_spec(EthereumHardfork::Bogota)).clone();
+            if enabled {
+                chain
+                    .genesis
+                    .config
+                    .extra_fields
+                    .insert("binaryTrieTime".into(), serde_json::json!(0));
+            }
+            let chain = configure_chain(Arc::new(chain))?;
+            let (address, account) = chain.genesis.alloc.first_key_value().unwrap();
+            let (address, expected_balance) = (*address, account.balance);
+            let (node, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain)
+                .with_rpc_modifier(|rpc| {
+                    rpc.with_http_api(RpcModuleSelection::from([
+                        RethRpcModule::Eth,
+                        RethRpcModule::Debug,
+                    ]))
+                })
+                .with_backfill(crate::snap::EthereumBackfill::new)
+                .build_single()
+                .await?;
+            let public = node.rpc_client().unwrap();
+            let auth = node.inner.auth_server_handle();
+            let authenticated = auth.http_client();
+            for method in [
+                "eth_getProof",
+                "eth_getMultiProof",
+                "eth_getAccount",
+                "debug_accountAt",
+                "debug_executionWitness",
+                "debug_executionWitnessByBlockHash",
+                "debug_intermediateRoots",
+                "debug_stateRootWithUpdates",
+            ] {
+                // Empty parameters distinguish a registered method from a disabled one,
+                // without accidentally running a full MPT calculation in this test.
+                let error = public
+                    .request::<_, serde_json::Value>(method, Vec::<serde_json::Value>::new())
+                    .await
+                    .unwrap_err();
+                let expected = if enabled {
+                    jsonrpsee::types::error::METHOD_NOT_FOUND_CODE
+                } else {
+                    jsonrpsee::types::error::INVALID_PARAMS_CODE
+                };
+                assert_eq!(
+                    error.as_error_resp().unwrap().code,
+                    i64::from(expected),
+                    "{method}, PBT={enabled}"
+                );
+                if enabled {
+                    let error = authenticated
+                        .request::<_, serde_json::Value>(method, Vec::<serde_json::Value>::new())
+                        .await
+                        .unwrap_err();
+                    assert_eq!(
+                        error.as_error_resp().unwrap().code,
+                        i64::from(jsonrpsee::types::error::METHOD_NOT_FOUND_CODE),
+                        "authenticated {method}"
+                    );
+                }
+            }
+            assert_eq!(
+                public.request::<_, U256>("eth_getBalance", (address, "latest")).await?,
+                expected_balance
+            );
+            let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
+            let response = client
+                .get(format!("{}/engine/v1/capabilities", auth.http_url()))
+                .header(
+                    reqwest::header::AUTHORIZATION,
+                    reth_rpc_layer::secret_to_bearer_header(auth.jwt_secret()),
+                )
+                .send()
+                .await?;
+            assert_eq!(response.status(), reqwest::StatusCode::OK);
+            let capabilities: serde_json::Value = response.json().await?;
+            let mut endpoints = vec!["payloads", "forkchoice", "bodies"];
+            if !enabled {
+                endpoints.push("payloads/witness");
+            }
+            assert_eq!(capabilities["fork_scoped_endpoints"], serde_json::json!(endpoints));
+            if enabled {
+                let response = client
+                    .post(format!("{}/engine/v1/payloads/witness", auth.http_url()))
+                    .header(
+                        reqwest::header::AUTHORIZATION,
+                        reth_rpc_layer::secret_to_bearer_header(auth.jwt_secret()),
+                    )
+                    .header("Eth-Execution-Version", "amsterdam")
+                    .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+                    .body(Vec::new())
+                    .send()
+                    .await?;
+                assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+            }
         }
         Ok(())
     }

@@ -12,6 +12,7 @@ use reth_provider::{
 };
 use reth_stages::StageId;
 use reth_trie_pbt::TreeHasher;
+use std::time::Instant;
 
 pub(super) fn validate_startup<P>(strategy: &PbtStateRootStrategy, provider: &P) -> eyre::Result<()>
 where
@@ -167,7 +168,51 @@ fn persisted_state(checkpoint: &reth_stages::StageCheckpoint) -> u64 {
         .unwrap_or(checkpoint.block_number)
 }
 
+// Bound deferred garbage in removed-root units without scanning the complete state
+// at every finality update. Explicit store collection remains available to callers.
+const COLLECTION_ROOT_INTERVAL: u64 = 256;
+// Start reclaiming outstanding garbage while there is still room for GC's writes.
+const COLLECTION_MIN_FREE_BYTES: u64 = 10 * 1024 * 1024 * 1024;
+
 pub(super) fn prune_finalized<P>(
+    strategy: &PbtStateRootStrategy,
+    provider: &P,
+    previous: Option<B256>,
+    history: u64,
+) -> eyre::Result<Option<B256>>
+where
+    P: DatabaseProviderFactory + BlockIdReader + HeaderProvider,
+    P::Provider: HeaderProvider + StageCheckpointReader,
+{
+    let available = reth_fs_util::available_space(strategy.store().path().join("nodes"))?;
+    prune_finalized_with_headroom(strategy, provider, previous, history, available)
+}
+
+fn prune_finalized_with_headroom<P>(
+    strategy: &PbtStateRootStrategy,
+    provider: &P,
+    previous: Option<B256>,
+    history: u64,
+    available: u64,
+) -> eyre::Result<Option<B256>>
+where
+    P: DatabaseProviderFactory + BlockIdReader + HeaderProvider,
+    P::Provider: HeaderProvider + StageCheckpointReader,
+{
+    let pruned = prune_references(strategy, provider, previous, history)?;
+    // Recheck collection even when reference pruning found no new finalized hash.
+    // A pressure pass still requires outstanding debt, so low space alone cannot
+    // cause a full-state scan on every maintenance tick after reclamation succeeds.
+    let low_disk_space = available < COLLECTION_MIN_FREE_BYTES;
+    let minimum_removed_roots = if low_disk_space { 1 } else { COLLECTION_ROOT_INTERVAL };
+    let collection_started = Instant::now();
+    if strategy.store().collect_if_needed(minimum_removed_roots)? {
+        tracing::info!(target: "pbt::persistence", phase = "collection", low_disk_space, available_bytes = available, elapsed_ms = collection_started.elapsed().as_secs_f64() * 1000.0, "Collected unreachable PBT nodes");
+    }
+    Ok(pruned)
+}
+
+fn prune_references<P>(
     strategy: &PbtStateRootStrategy,
     provider: &P,
     previous: Option<B256>,
@@ -245,9 +290,88 @@ where
         }
     }
     let outcome = strategy.store().prune_finalized_with_orphans(hash, &obsolete)?;
-    if outcome.state_files != 0 {
-        strategy.store().collect()?;
-    }
     tracing::debug!(target: "pbt::persistence", finalized = finalized.number(), outcome = ?outcome, "Pruned obsolete PBT checkpoints");
     Ok(Some(hash))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::{Address, U256};
+    use reth_db_api::transaction::DbTxMut;
+    use reth_provider::{
+        providers::BlockchainProvider,
+        test_utils::{create_test_provider_factory, insert_headers},
+    };
+    use reth_trie_pbt::{
+        migration::DecodeLimits, persistence::SnapshotStore, AccountData, Blake3Hasher, StateTree,
+    };
+    use rocksdb::DB;
+    use std::sync::Arc;
+
+    #[test]
+    fn disk_pressure_collects_dense_garbage_without_new_finality() -> eyre::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store = SnapshotStore::<Blake3Hasher>::open_with_limits(
+            directory.path(),
+            DecodeLimits::default(),
+            DecodeLimits::native(),
+        )?;
+        let mut retained = StateTree::new();
+        retained.set_account(Address::ZERO, AccountData { nonce: 1, ..Default::default() })?;
+        let header =
+            SealedHeader::seal_slow(Header { state_root: retained.root(), ..Default::default() });
+        store.save_block_with_number(header.hash(), 0, &retained)?;
+        let mut orphan = retained.clone();
+        for index in 1..=4096u64 {
+            let address = Address::from_word(B256::from(U256::from(index)));
+            orphan.set_account(address, AccountData { nonce: 1, ..Default::default() })?;
+            for slot in [0, 64, 256] {
+                orphan.set_storage(address, U256::from(slot), B256::repeat_byte(1))?;
+            }
+        }
+        store.save(&orphan)?;
+        assert_eq!(store.prune_finalized_with_orphans(header.hash(), &[])?.state_files, 1);
+        drop(store);
+        let provider = create_test_provider_factory();
+        insert_headers(&provider, std::slice::from_ref(&header));
+        let database = provider.database_provider_rw()?;
+        database
+            .tx_ref()
+            .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, 0)?;
+        database.commit()?;
+        let provider = BlockchainProvider::with_latest(provider, header.clone())?;
+        assert_eq!(provider.finalized_block_hash()?, Some(header.hash()));
+        let node_key = |root: B256| [b"n".as_slice(), root.as_slice()].concat();
+        for (available, reclaimed) in
+            [(COLLECTION_MIN_FREE_BYTES, false), (COLLECTION_MIN_FREE_BYTES - 1, true)]
+        {
+            let store = Arc::new(SnapshotStore::open_with_limits(
+                directory.path(),
+                DecodeLimits::default(),
+                DecodeLimits::native(),
+            )?);
+            let strategy = PbtStateRootStrategy::new(store, 0);
+            assert_eq!(
+                prune_finalized_with_headroom(
+                    &strategy,
+                    &provider,
+                    Some(header.hash()),
+                    64,
+                    available
+                )?,
+                Some(header.hash())
+            );
+            assert_eq!(strategy.store().verify_block(header.hash())?, retained.root());
+            if reclaimed {
+                assert!(!strategy.store().collect_if_needed(1)?);
+            }
+            drop(strategy);
+            let raw = DB::open_default(directory.path().join("nodes"))?;
+            assert_eq!(raw.get(node_key(orphan.root()))?.is_none(), reclaimed);
+            assert!(raw.get(node_key(retained.root()))?.is_some());
+        }
+        Ok(())
+    }
 }

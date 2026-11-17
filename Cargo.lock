@@ -4457,6 +4457,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs4"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e72ed92b67c146290f88e9c89d60ca163ea417a446f61ffd7b72df3e7f1dfd5"
+dependencies = [
+ "rustix",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "fs_extra"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6937,7 +6947,7 @@ dependencies = [
 [[package]]
 name = "pbt"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/pbtree?rev=967be95e51f45fc9f343faa205731e5fb2699eed#967be95e51f45fc9f343faa205731e5fb2699eed"
+source = "git+https://github.com/Rimeeeeee/pbtree?rev=6580f58862f0f32ea3b4774c81ef78b644f7ca7d#6580f58862f0f32ea3b4774c81ef78b644f7ca7d"
 dependencies = [
  "alloy-eip7928",
  "alloy-primitives",
@@ -9294,6 +9304,7 @@ dependencies = [
 name = "reth-fs-util"
 version = "2.11.0"
 dependencies = [
+ "fs4",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -9825,6 +9836,7 @@ dependencies = [
  "reth-trie-common",
  "reth-trie-db",
  "reth-trie-pbt",
+ "rocksdb",
  "serde",
  "serde_json",
  "similar-asserts",

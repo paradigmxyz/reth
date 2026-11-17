@@ -396,11 +396,18 @@ where
         };
 
         let (ssz_proxy_layer, ssz_proxy_handle) = EngineSszProxyLayer::new();
-        ssz_proxy_handle.set_witness_handler_sync(Arc::new(EngineSszWitnessGenerator::new(
-            ctx.node.provider().clone(),
-            ctx.node.evm_config().clone(),
-            ctx.node.task_executor().clone(),
-        )));
+        #[cfg(not(target_family = "wasm"))]
+        let pbt_enabled = pbt_methods.is_some();
+        #[cfg(target_family = "wasm")]
+        let pbt_enabled = false;
+        // The binary witness generator still produces MPT witnesses.
+        if !pbt_enabled {
+            ssz_proxy_handle.set_witness_handler_sync(Arc::new(EngineSszWitnessGenerator::new(
+                ctx.node.provider().clone(),
+                ctx.node.evm_config().clone(),
+                ctx.node.task_executor().clone(),
+            )));
+        }
 
         self.inner
             .map_engine_api(|engine_api_builder| {
@@ -412,8 +419,21 @@ where
             .launch_add_ons_with(ctx, move |container| {
                 #[cfg(not(target_family = "wasm"))]
                 if let Some(methods) = pbt_methods {
-                    container.modules.remove_method_from_configured("eth_getProof");
-                    container.auth_module.remove_auth_method("eth_getProof");
+                    // These methods return MPT proofs, roots, or witnesses. Keep ordinary
+                    // state reads and transaction tracing available on binary-tree chains.
+                    for method in [
+                        "eth_getProof",
+                        "eth_getMultiProof",
+                        "eth_getAccount",
+                        "debug_accountAt",
+                        "debug_executionWitness",
+                        "debug_executionWitnessByBlockHash",
+                        "debug_intermediateRoots",
+                        "debug_stateRootWithUpdates",
+                    ] {
+                        container.modules.remove_method_from_configured(method);
+                        container.auth_module.remove_auth_method(method);
+                    }
                     container.auth_module.merge_auth_methods(methods)?;
                 }
 
