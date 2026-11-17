@@ -25,6 +25,10 @@ pub trait BlockNumReader: BlockHashReader + Send {
     /// transaction that commits the same blocks, and blocks above the partial state/trie frontier
     /// of the `Finish` stage checkpoint are unwound on startup.
     ///
+    /// The height only survives a host crash or power loss when the database syncs every commit
+    /// to disk. With `--db.sync-mode safe-no-sync`, it survives a process crash, but MDBX may
+    /// discard the latest commits when the database is reopened after a host failure.
+    ///
     /// Defaults to [`Self::last_block_number`] for providers that are not backed by a database.
     fn last_durable_block_number(&self) -> ProviderResult<BlockNumber> {
         self.last_block_number()
