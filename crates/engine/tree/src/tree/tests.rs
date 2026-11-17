@@ -1951,10 +1951,11 @@ async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build()
     let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
     test_harness = test_harness.with_blocks(blocks.clone());
 
-    let current_head = blocks[3].recovered_block();
     let finalized = blocks[0].recovered_block();
     let ancestor = blocks[2].recovered_block();
-    test_harness.tree.canonical_in_memory_state.set_finalized(finalized.clone_sealed_header());
+    let canonical = &test_harness.tree.canonical_in_memory_state;
+    canonical.set_finalized(finalized.clone_sealed_header());
+    let mut notifications = canonical.subscribe_canon_state();
 
     let payload_attributes = EthPayloadAttributes {
         timestamp: ancestor.timestamp() + 1,
@@ -1986,12 +1987,51 @@ async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build()
     };
     assert_eq!(input.parent_hash, ancestor.hash());
 
-    // the canonical chain remains untouched, only the built block reorgs it eventually
-    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), current_head.hash());
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), ancestor.hash());
     assert_eq!(
         test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(),
-        current_head.hash()
+        ancestor.hash()
     );
+    let notification = notifications.try_recv().unwrap();
+    assert!(notification.committed().is_empty());
+    let reverted = notification.reverted().unwrap();
+    assert_eq!(reverted.len(), 1);
+    assert_eq!(reverted.tip().hash(), blocks[3].recovered_block().hash());
+}
+
+#[tokio::test]
+async fn test_fcu_rewind_behind_persisted_tip_is_rejected() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let mut builder = TestBlockBuilder::eth().with_chain_spec((*MAINNET).clone());
+    let blocks: Vec<_> = builder.get_executed_blocks(1..=4).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+
+    let ancestor = blocks[1].recovered_block();
+    let current_head = blocks[3].recovered_block();
+    test_harness.tree.persistence_state.last_persisted_block =
+        blocks[2].recovered_block().num_hash();
+
+    let err = test_harness
+        .tree
+        .on_forkchoice_updated(
+            ForkchoiceState {
+                head_block_hash: ancestor.hash(),
+                safe_block_hash: ancestor.hash(),
+                finalized_block_hash: B256::ZERO,
+            },
+            None,
+        )
+        .unwrap()
+        .outcome
+        .await
+        .unwrap_err();
+    assert_matches!(
+        err,
+        BeaconForkChoiceUpdateError::ForkchoiceUpdateError(ForkchoiceUpdateError::TooDeepReorg)
+    );
+    let canonical = &test_harness.tree.canonical_in_memory_state;
+    assert_eq!(canonical.get_canonical_head().hash(), current_head.hash());
+    assert!(canonical.get_safe_num_hash().is_none());
 }
 
 /// Test that verifies the happy path where a new payload extends the canonical chain

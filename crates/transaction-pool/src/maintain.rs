@@ -26,7 +26,9 @@ use reth_fs_util::FsPathError;
 use reth_primitives_traits::{
     transaction::signed::SignedTransaction, NodePrimitives, SealedHeader,
 };
-use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
+use reth_storage_api::{
+    errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory, TransactionVariant,
+};
 use reth_tasks::Runtime;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -105,7 +107,7 @@ pub fn maintain_transaction_pool_future<N, Client, P, St>(
 where
     N: NodePrimitives,
     Client: StateProviderFactory
-        + BlockReaderIdExt<Header = N::BlockHeader>
+        + BlockReaderIdExt<Block = N::Block, Header = N::BlockHeader>
         + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader> + EthereumHardforks>
         + Clone
         + 'static,
@@ -131,7 +133,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
 ) where
     N: NodePrimitives,
     Client: StateProviderFactory
-        + BlockReaderIdExt<Header = N::BlockHeader>
+        + BlockReaderIdExt<Block = N::Block, Header = N::BlockHeader>
         + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader> + EthereumHardforks>
         + Clone
         + 'static,
@@ -329,13 +331,24 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
             CanonStateNotification::Reorg { old, new } => {
                 let (old_blocks, old_state) = old.inner();
                 let (new_blocks, new_state) = new.inner();
-                let new_tip = new_blocks.tip();
-                let new_first = new_blocks.first();
-                let old_first = old_blocks.first();
+                let fork_hash = old_blocks.first().parent_hash();
+                let rewind_tip;
+                let (new_tip, new_parent_hash) = if new.is_empty() {
+                    let Ok(Some(block)) =
+                        client.recovered_block(fork_hash.into(), TransactionVariant::WithHash)
+                    else {
+                        maintained_state = MaintainedPoolState::Drifted;
+                        continue
+                    };
+                    rewind_tip = block;
+                    (&rewind_tip, fork_hash)
+                } else {
+                    (new_blocks.tip(), new_blocks.first().parent_hash())
+                };
 
                 // check if the reorg is not canonical with the pool's block
-                if !(old_first.parent_hash() == pool_info.last_seen_block_hash ||
-                    new_first.parent_hash() == pool_info.last_seen_block_hash)
+                if !(fork_hash == pool_info.last_seen_block_hash ||
+                    new_parent_hash == pool_info.last_seen_block_hash)
                 {
                     // the new block points to a higher block than the oldest block in the old chain
                     maintained_state = MaintainedPoolState::Drifted;

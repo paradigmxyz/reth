@@ -1,5 +1,6 @@
 use super::ExecutedBlock;
 use crate::CanonStateNotification;
+use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{Chain, ExecutionOutcome};
@@ -46,10 +47,23 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
             Self::Commit { new } => {
                 CanonStateNotification::Commit { new: Arc::new(Self::blocks_to_chain(new)) }
             }
-            Self::Reorg { new, old } => CanonStateNotification::Reorg {
-                new: Arc::new(Self::blocks_to_chain(new)),
-                old: Arc::new(Self::blocks_to_chain(old)),
-            },
+            Self::Reorg { new, old } => {
+                // A rewind carries the retained tip for the engine to update its head. Only the
+                // removed suffix belongs in the notification sent to subscribers.
+                let new = match (new.as_slice(), old.first()) {
+                    ([tip], Some(first))
+                        if first.recovered_block().parent_hash() ==
+                            tip.recovered_block().hash() =>
+                    {
+                        Chain::default()
+                    }
+                    _ => Self::blocks_to_chain(new),
+                };
+                CanonStateNotification::Reorg {
+                    new: Arc::new(new),
+                    old: Arc::new(Self::blocks_to_chain(old)),
+                }
+            }
         }
     }
 
