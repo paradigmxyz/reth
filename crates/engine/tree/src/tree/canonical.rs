@@ -262,6 +262,22 @@ where
         Ok(())
     }
 
+    /// Prepares a rewind to a canonical ancestor when the executed segment is still retained.
+    pub(super) fn retained_canonical_rewind(&self, number: u64) -> Option<NewCanonicalChain<N>> {
+        if number < self.persistence_state.last_persisted_block.number {
+            return None
+        }
+
+        let new_head = self.canonical_in_memory_state.state_by_number(number)?;
+        let current_head = self.state.tree_state.canonical_block_number();
+        let old = self.collect_blocks_for_canonical_unwind(number, current_head);
+        if old.len() as u64 != current_head - number {
+            return None
+        }
+
+        Some(NewCanonicalChain::Reorg { new: vec![new_head.block_ref().clone()], old })
+    }
+
     /// Handles chain advance or same height scenarios.
     fn handle_chain_advance_or_same_height(
         &self,

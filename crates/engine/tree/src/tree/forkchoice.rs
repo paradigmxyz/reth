@@ -234,19 +234,30 @@ where
                 return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())));
             }
 
-            // We need to effectively unwind the _canonical_ chain to the FCU's head, which is
-            // part of the canonical chain. We need to update the latest block state to reflect
-            // the canonical ancestor. This ensures that state providers and the transaction
-            // pool operate with the correct chain state after forkchoice update processing, and
-            // new payloads built on the reorg'd head will be added to the tree immediately.
-            if always_trigger_payload_job && self.config.unwind_canonical_header() {
-                self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
+            if always_trigger_payload_job {
+                if self.config.unwind_canonical_header() {
+                    self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
+                }
+            } else if canonical_header.number() < self.state.tree_state.canonical_block_number() {
+                if let Some(rewind) = self.retained_canonical_rewind(canonical_header.number()) {
+                    // A zero safe hash leaves the previous marker in place.
+                    if state.safe_block_hash.is_zero() &&
+                        self.canonical_in_memory_state
+                            .get_safe_num_hash()
+                            .is_some_and(|safe| safe.number > canonical_header.number())
+                    {
+                        return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())))
+                    }
+                    self.on_canonical_chain_update(rewind);
+                    if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
+                        return Ok(Some(TreeOutcome::new(outcome)))
+                    }
+                } else if attrs.is_none() {
+                    return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::too_deep_reorg())))
+                }
             }
 
-            // A canonical ancestor at or above the latest known finalized block can become the
-            // parent of the next block, e.g. when the CL wants to reorg out the current head.
-            // The canonical chain remains untouched here; the block built on the ancestor
-            // triggers the actual reorg once it is inserted via newPayload and FCU'd.
+            // A payload job can still prepare a replacement for a persisted suffix.
             if let Some(attr) = attrs {
                 debug!(target: "engine::tree", head = canonical_header.number(), "handling payload attributes for canonical head");
                 // Clone only when we actually need to process the attributes
