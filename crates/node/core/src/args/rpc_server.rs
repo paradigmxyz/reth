@@ -1,9 +1,5 @@
 //! clap [`Args`] for RPC related arguments.
 
-// The clap `Args` derive generates large unoptimized stack frames, and item-level lint
-// attributes on the struct do not reach the generated impl.
-#![allow(clippy::large_unopt_stack_frames)]
-
 use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},
     GasPriceOracleArgs, RpcStateCacheArgs,
