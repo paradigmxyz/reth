@@ -40,14 +40,6 @@ impl ArenaSparseNodeState {
             _ => None,
         }
     }
-
-    /// Returns the cached epoch, if this node is cached.
-    pub(super) const fn cached_epoch(&self) -> Option<TrieNodeEpoch> {
-        match self {
-            Self::Cached { epoch, .. } => Some(*epoch),
-            _ => None,
-        }
-    }
 }
 
 /// The branch-specific data stored in an [`ArenaSparseNode::Branch`].

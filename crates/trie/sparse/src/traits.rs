@@ -68,17 +68,6 @@ impl LeafUpdate {
 /// This trait provides a unified interface for the core trie operations needed by
 /// `RevealableSparseTrie`.
 pub trait SparseTrie: Sized + Debug + Send + Sync {
-    /// Forks the current trie, including pending updates and cached root state.
-    ///
-    /// Both tries can subsequently be read and modified independently. The default
-    /// implementation clones the trie; implementations can share unchanged storage.
-    fn snapshot(&mut self) -> Self
-    where
-        Self: Clone,
-    {
-        self.clone()
-    }
-
     /// Configures the trie to have the given root node revealed.
     ///
     /// # Arguments
@@ -225,6 +214,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 
     /// Collapses nodes last modified before `prune_before` into hash stubs.
     ///
+    /// When trie snapshots share storage, this can blind a node without reclaiming the
+    /// memory still held by the other snapshot.
+    ///
     /// # Preconditions
     ///
     /// The trie must not be dirty. An unmodified revealed root may be pruned because
@@ -258,6 +250,27 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         updates: &mut B256Map<LeafUpdate>,
         proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
     ) -> SparseTrieResult<()>;
+
+    /// Returns an independently writable snapshot of the current trie.
+    ///
+    /// Use this before applying different changes to two tries that start from the same state.
+    /// This does not hash the trie: a dirty root stays dirty, and a cached root retains its hash
+    /// and modification epoch. Subsequent changes to either trie do not affect the other.
+    ///
+    /// Both tries start with the same accumulated updates. Taking updates from one does not drain
+    /// the other. When persisting updates from a shared history with [`Self::take_updates`], apply
+    /// those common updates only once.
+    ///
+    /// The default calls [`Clone::clone`], so the method is available only when `Self: Clone`.
+    /// An override may change the original's storage representation to share unchanged data
+    /// without changing its logical state. The cost of taking a snapshot depends on the
+    /// implementation; sharing can also retain memory longer and make later writes more expensive.
+    fn snapshot(&mut self) -> Self
+    where
+        Self: Clone,
+    {
+        self.clone()
+    }
 }
 
 /// Tracks modifications to the sparse trie structure.
