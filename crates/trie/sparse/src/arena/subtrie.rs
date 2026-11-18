@@ -361,8 +361,8 @@ impl ArenaSparseSubtrie {
         self.debug_assert_counters();
     }
 
-    /// Reveals nodes inside this subtrie. Uses [`ArenaCursor::seek`] to locate the ancestor
-    /// node, then replaces blinded children with the proof nodes.
+    /// Reveals nodes inside this subtrie. Uses [`super::cursor::ArenaCursor::seek`] to locate the
+    /// ancestor node, then replaces blinded children with the proof nodes.
     pub(super) fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()> {
         if nodes.is_empty() {
             return Ok(());
