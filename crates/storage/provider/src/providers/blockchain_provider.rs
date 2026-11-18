@@ -250,11 +250,9 @@ impl<N: ProviderNodeTypes> BalProvider for BlockchainProvider<N> {
     ) -> ProviderResult<Vec<Option<Bytes>>> {
         let mut bals = self.bal_store.get_by_hashes_with_limit(block_hashes, limit)?;
         for (bal, hash) in bals.iter_mut().zip(block_hashes).filter(|(bal, _)| bal.is_none()) {
-            *bal = self
-                .database
-                .overlay_manager()
-                .executed_block_by_hash(hash)
-                .and_then(|block| block.bal().map(|bal| bal.as_raw_bal().as_raw().clone()));
+            *bal = self.database.in_memory_state().state_by_hash(*hash).and_then(|state| {
+                state.block_ref().bal().map(|bal| bal.as_raw_bal().as_raw().clone())
+            });
         }
         // Filled BALs only grow the response, so the limit can only cut it shorter.
         let mut size = 0;
@@ -1323,8 +1321,8 @@ mod tests {
         let writer = factory.provider_rw()?;
         writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 2, 1))?;
         writer.commit()?;
-        factory.overlay_manager().insert_block(blocks[2].clone());
         let provider = BlockchainProvider::new(factory)?;
+        provider.canonical_in_memory_state.insert_executed(blocks[2].clone());
 
         for number in [1, 2] {
             let state = provider.history_by_block_hash(blocks[number].recovered_block().hash())?;
@@ -1477,9 +1475,6 @@ mod tests {
         };
         if !in_memory_blocks.is_empty() {
             provider.canonical_in_memory_state.update_chain(chain);
-        }
-        for state in provider.canonical_in_memory_state.canonical_chain() {
-            provider.database.overlay_manager().insert_block(state.block());
         }
 
         // Get canonical, safe, and finalized blocks
@@ -1790,7 +1785,7 @@ mod tests {
         let fork_hash = fork.hash();
         let recovered = RecoveredBlock::new_sealed(fork.clone(), fork.senders().unwrap());
         let bal = Bytes::from_static(&[0xc2, 0xc0, 0xc0]);
-        provider.database.overlay_manager().insert_block(
+        provider.canonical_in_memory_state.insert_executed(
             ExecutedBlock { recovered_block: Arc::new(recovered.clone()), ..Default::default() }
                 .with_bal(Some(Arc::new(DecodedEvmBal::new(Arc::default(), bal.clone())))),
         );
@@ -1830,8 +1825,8 @@ mod tests {
             Some(canonical.hash())
         );
 
-        // Once the tree drops the fork, its hash is unknown again.
-        provider.database.overlay_manager().remove_blocks([fork_hash]);
+        // Once the fork is dropped, its hash is unknown again.
+        provider.canonical_in_memory_state.prune_conflicting_with_finalized(canonical.num_hash());
         assert_eq!(provider.block(fork_hash.into())?, None);
         assert_eq!(provider.get_bals_by_hashes(&[fork_hash])?, vec![None]);
 
@@ -3669,7 +3664,6 @@ mod tests {
         };
         let executed =
             ExecutedBlock::new(Arc::new(memory_block), Arc::new(execution_output), trie_data);
-        provider.database.overlay_manager().insert_block(executed.clone());
         provider
             .canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
@@ -3750,7 +3744,6 @@ mod tests {
                 Arc::new(TrieUpdates::default().into_sorted()),
             ),
         );
-        provider.database.overlay_manager().insert_block(executed.clone());
         provider
             .canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
@@ -3812,7 +3805,6 @@ mod tests {
             state: Default::default(),
         };
         let executed = ExecutedBlock::new(Arc::new(block), Arc::new(execution_output), trie_data);
-        provider.database.overlay_manager().insert_block(executed.clone());
         provider
             .canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
