@@ -10,10 +10,10 @@ use crate::{
 use alloc::sync::Arc;
 use core::fmt;
 
-#[cfg(not(all(feature = "fuzz", feature = "std")))]
+#[cfg(not(feature = "std"))]
 use reth_primitives_traits::sync::OnceLock;
 
-#[cfg(all(feature = "fuzz", feature = "std"))]
+#[cfg(feature = "std")]
 use reth_tasks::executor::sync::OnceLock;
 
 #[cfg(feature = "rayon")]

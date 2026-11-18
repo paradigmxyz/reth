@@ -1,9 +1,12 @@
 //! Synchronization primitives belonging to the selected backend.
 
-#[cfg(feature = "fuzz")]
-pub use shuttle_sync::sync::*;
+#[cfg(not(feature = "fuzz"))]
+pub use reth_primitives_traits::sync::{LazyLock, OnceLock};
 #[cfg(not(feature = "fuzz"))]
 pub use std::sync::*;
+
+#[cfg(feature = "fuzz")]
+pub use shuttle_sync::sync::*;
 
 #[cfg(feature = "fuzz")]
 mod deterministic;
