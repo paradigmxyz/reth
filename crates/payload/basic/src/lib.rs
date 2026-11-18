@@ -25,7 +25,7 @@ use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
 use reth_primitives_traits::{AlloyBlockHeader, HeaderTy, NodePrimitives, SealedHeader};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::{CancelOnDrop, Runtime};
-use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
+pub use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
 use std::{
     fmt,
     future::Future,
@@ -421,9 +421,13 @@ where
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let execution_cache = self.execution_cache.clone();
-        let mut state_root_handle = self.state_root_handle.take();
         let on_payload_built =
-            state_root_handle.as_mut().and_then(PayloadStateRootHandle::take_on_payload_built);
+            self.state_root_handle.as_mut().and_then(PayloadStateRootHandle::take_on_payload_built);
+        let state_root_handle = self
+            .state_root_handle
+            .as_ref()
+            .and_then(PayloadStateRootHandle::clone_output_backend)
+            .or_else(|| self.state_root_handle.take());
         let leases = self.leases.clone();
         let builder = self.builder.clone();
         let executor = self.executor.clone();
@@ -551,7 +555,12 @@ where
             // started right away and the first full block should have been
             // built by the time CL is requesting the payload.
             self.metrics.inc_requested_empty_payload();
-            self.builder.build_empty_payload(self.config.clone())
+            self.builder.build_empty_payload_with_state_root(
+                self.config.clone(),
+                self.state_root_handle
+                    .as_ref()
+                    .and_then(PayloadStateRootHandle::clone_output_backend),
+            )
         }
     }
 
@@ -586,7 +595,10 @@ where
             let args = BuildArguments {
                 cached_reads: self.cached_reads.take().unwrap_or_default(),
                 execution_cache: self.execution_cache.clone(),
-                state_root_handle: None,
+                state_root_handle: self
+                    .state_root_handle
+                    .as_ref()
+                    .and_then(PayloadStateRootHandle::clone_output_backend),
                 config: self.config.clone(),
                 cancel: CancelOnDrop::default(),
                 best_payload: None,
@@ -605,6 +617,10 @@ where
                     let (tx, rx) = oneshot::channel();
                     let config = self.config.clone();
                     let builder = self.builder.clone();
+                    let state_root_handle = self
+                        .state_root_handle
+                        .as_ref()
+                        .and_then(PayloadStateRootHandle::clone_output_backend);
                     let span = Span::current();
                     self.executor.spawn_blocking_named_or_tokio(
                         PAYLOAD_BUILDER_THREAD_NAME,
@@ -613,7 +629,8 @@ where
                             let _span =
                                 debug_span!(target: "payload_builder", "build_empty_payload")
                                     .entered();
-                            let res = builder.build_empty_payload(config);
+                            let res = builder
+                                .build_empty_payload_with_state_root(config, state_root_handle);
                             let _ = tx.send(res);
                         },
                     );
@@ -1023,6 +1040,23 @@ pub trait PayloadBuilder: Send + Sync + Clone {
         &self,
         config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError>;
+
+    /// Builds an empty payload with a repeatable commitment backend, when one is configured.
+    ///
+    /// Builders supporting alternate commitments must override this method. Rejecting an
+    /// unsupported backend avoids returning a default-commitment payload after a tree fork.
+    fn build_empty_payload_with_state_root(
+        &self,
+        config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
+        state_root_handle: Option<PayloadStateRootHandle>,
+    ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
+        if state_root_handle.is_some() {
+            return Err(PayloadBuilderError::other(std::io::Error::other(
+                "payload builder does not support an output state-root backend",
+            )));
+        }
+        self.build_empty_payload(config)
+    }
 }
 
 /// Tells the payload builder how to react to payload request if there's no payload available yet.

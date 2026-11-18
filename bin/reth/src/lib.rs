@@ -211,7 +211,10 @@ pub use reth_cli_runner::{CliContext, CliRunner};
 // for rendering diagrams
 use aquamarine as _;
 
-// used in main
+// Used by the binary target.
 use clap as _;
+use eyre as _;
+use reth_cli as _;
 use reth_cli_util as _;
+use reth_node_pbt as _;
 use tracing as _;

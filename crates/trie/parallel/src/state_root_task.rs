@@ -10,7 +10,10 @@
 use crate::error::StateRootTaskError;
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_types::{OnStateHook, StateUpdate};
-use reth_trie::{updates::TrieUpdates, HashedPostState, MultiProofTargetsV2, ProofV2Target};
+use reth_trie::{
+    bundle_state::BundleState, updates::TrieUpdates, HashedPostState, MultiProofTargetsV2,
+    ProofV2Target,
+};
 use std::{fmt, sync::Arc};
 
 /// Messages used internally by the multi proof task.
@@ -176,6 +179,7 @@ impl StateRootHandle {
             state_root_rx: self.state_root_rx.take(),
             hashed_state_rx: self.hashed_state_rx.take(),
             on_payload_built: None,
+            from_output: None,
         }
     }
 }
@@ -208,7 +212,12 @@ pub struct PayloadStateRootHandle {
     hashed_state_rx: Option<std::sync::mpsc::Receiver<Arc<HashedPostState>>>,
     /// Returns retained state to the engine once the completed block's identity is known.
     on_payload_built: Option<Box<dyn FnOnce(B256, B256) + Send>>,
+    /// A commitment backend that consumes finalized execution output instead of a stream.
+    from_output: Option<OutputStateRoot>,
 }
+
+type OutputStateRoot =
+    Arc<dyn Fn(&BundleState) -> Result<StateRootComputeOutcome, StateRootTaskError> + Send + Sync>;
 
 impl fmt::Debug for PayloadStateRootHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -218,6 +227,7 @@ impl fmt::Debug for PayloadStateRootHandle {
             .field("has_cancel_guard", &self.cancel_guard.is_some())
             .field("has_state_root_rx", &self.state_root_rx.is_some())
             .field("has_hashed_state_rx", &self.hashed_state_rx.is_some())
+            .field("has_output_callback", &self.from_output.is_some())
             .finish()
     }
 }
@@ -242,7 +252,67 @@ impl PayloadStateRootHandle {
             state_root_rx: Some(state_root_rx),
             hashed_state_rx,
             on_payload_built: None,
+            from_output: None,
         }
+    }
+
+    /// Creates a state-root job that consumes finalized block state synchronously.
+    ///
+    /// Errors from this backend must fail payload building. Falling back to the default MPT
+    /// root could silently construct a block with the wrong commitment after a tree fork.
+    pub fn from_output(
+        name: &'static str,
+        compute: impl Fn(&BundleState) -> Result<StateRootComputeOutcome, StateRootTaskError>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        Self {
+            name,
+            hook: None,
+            cancel_guard: None,
+            state_root_rx: None,
+            hashed_state_rx: None,
+            on_payload_built: None,
+            from_output: Some(Arc::new(compute)),
+        }
+    }
+
+    /// Whether this job consumes finalized output instead of streamed updates.
+    pub const fn uses_output(&self) -> bool {
+        self.from_output.is_some()
+    }
+
+    /// Whether an execution hook can be installed for this job.
+    pub const fn has_state_hook(&self) -> bool {
+        self.hook.is_some()
+    }
+
+    /// Resolves a synchronous backend or awaits a streamed state-root result.
+    pub fn finish_with_output(
+        &mut self,
+        state: &BundleState,
+    ) -> Result<StateRootComputeOutcome, StateRootTaskError> {
+        match &self.from_output {
+            Some(compute) => compute(state),
+            None => self.state_root(),
+        }
+    }
+
+    /// Creates another attempt using the same finalized-output backend.
+    ///
+    /// Stream handles remain single-use and return `None`. The optional one-shot payload-built
+    /// callback is not copied; its owner still delivers it once.
+    pub fn clone_output_backend(&self) -> Option<Self> {
+        Some(Self {
+            name: self.name,
+            hook: None,
+            cancel_guard: None,
+            state_root_rx: None,
+            hashed_state_rx: None,
+            on_payload_built: None,
+            from_output: Some(self.from_output.as_ref()?.clone()),
+        })
     }
 
     /// Attaches a callback receiving the completed payload's block hash and state root.
@@ -638,6 +708,39 @@ mod tests {
             .unwrap();
         let outcome = handle.state_root().expect("outcome is delivered");
         assert_eq!(outcome.state_root, B256::repeat_byte(0x42));
+    }
+
+    #[test]
+    fn output_backend_needs_no_execution_hook() {
+        let mut handle = PayloadStateRootHandle::from_output("output", |state| {
+            assert!(state.state().is_empty());
+            Ok(StateRootComputeOutcome {
+                state_root: B256::repeat_byte(0x42),
+                trie_updates: Arc::new(TrieUpdates::default()),
+                hashed_state: Arc::new(HashedPostState::default()),
+            })
+        });
+        assert!(handle.uses_output());
+        assert!(!handle.has_state_hook());
+        assert_eq!(
+            handle.finish_with_output(&BundleState::default()).unwrap().state_root,
+            B256::repeat_byte(0x42)
+        );
+        let mut retry = handle.clone_output_backend().unwrap();
+        assert_eq!(
+            retry.finish_with_output(&BundleState::default()).unwrap().state_root,
+            B256::repeat_byte(0x42)
+        );
+    }
+
+    #[test]
+    fn output_backend_errors_are_preserved() {
+        let mut handle =
+            PayloadStateRootHandle::from_output("output", |_| Err(StateRootTaskError::Stalled));
+        assert!(matches!(
+            handle.finish_with_output(&BundleState::default()),
+            Err(StateRootTaskError::Stalled)
+        ));
     }
 
     #[test]

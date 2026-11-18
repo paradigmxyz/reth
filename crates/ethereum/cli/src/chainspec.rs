@@ -10,14 +10,31 @@ pub const SUPPORTED_CHAINS: &[&str] = &["mainnet", "sepolia", "holesky", "hoodi"
 /// The value parser matches either a known chain, the path
 /// to a json file, or a json formatted string in-memory. The json needs to be a Genesis struct.
 pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
-    Ok(match s {
+    let chain = match s {
         "mainnet" => MAINNET.clone(),
         "sepolia" => SEPOLIA.clone(),
         "holesky" => HOLESKY.clone(),
         "hoodi" => HOODI.clone(),
         "dev" => DEV.clone(),
         _ => Arc::new(parse_genesis(s)?.into()),
-    })
+    };
+    #[cfg(not(target_family = "wasm"))]
+    {
+        reth_node_ethereum::pbt::configure_chain(chain)
+    }
+    #[cfg(target_family = "wasm")]
+    {
+        eyre::ensure!(
+            !chain
+                .genesis
+                .config
+                .extra_fields
+                .get("binaryTrieTime")
+                .is_some_and(|value| !value.is_null()),
+            "binaryTrieTime is unsupported on WebAssembly"
+        );
+        Ok(chain)
+    }
 }
 
 /// Ethereum chain specification parser.
@@ -45,6 +62,14 @@ mod tests {
         for &chain in EthereumChainSpecParser::SUPPORTED_CHAINS {
             assert!(<EthereumChainSpecParser as ChainSpecParser>::parse(chain).is_ok());
         }
+    }
+
+    #[test]
+    #[cfg(not(target_family = "wasm"))]
+    fn parses_a_native_binary_trie_schedule() {
+        let genesis = r#"{"config":{"chainId":1,"bogotaTime":0,"binaryTrieTime":0},"gasLimit":"0x100000","difficulty":"0x0","alloc":{}}"#;
+        let chain = chain_value_parser(genesis).unwrap();
+        assert_eq!(reth_node_ethereum::pbt::activation_timestamp(&chain).unwrap(), Some(0));
     }
 
     #[test]

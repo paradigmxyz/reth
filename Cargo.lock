@@ -4207,6 +4207,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-pbt-node"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "reth-ethereum",
+ "reth-node-pbt",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "example-polygon-p2p"
 version = "0.0.0"
 dependencies = [
@@ -4443,6 +4454,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fs4"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e72ed92b67c146290f88e9c89d60ca163ea417a446f61ffd7b72df3e7f1dfd5"
+dependencies = [
+ "rustix",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6906,6 +6927,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "pbt"
+version = "0.1.0"
+source = "git+https://github.com/Rimeeeeee/pbtree?rev=6580f58862f0f32ea3b4774c81ef78b644f7ca7d#6580f58862f0f32ea3b4774c81ef78b644f7ca7d"
+dependencies = [
+ "alloy-eip7928",
+ "alloy-primitives",
+ "alloy-trie",
+ "blake3",
+ "imbl",
+ "rayon",
+ "rocksdb",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "pem"
 version = "3.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7872,10 +7908,12 @@ dependencies = [
  "backon",
  "blake3",
  "clap",
+ "eyre",
  "http-body-util",
  "hyper",
  "hyper-util",
  "reth-chainspec",
+ "reth-cli",
  "reth-cli-runner",
  "reth-cli-util",
  "reth-consensus",
@@ -7891,6 +7929,7 @@ dependencies = [
  "reth-node-core",
  "reth-node-ethereum",
  "reth-node-metrics",
+ "reth-node-pbt",
  "reth-node-version-build",
  "reth-payload-builder",
  "reth-payload-primitives",
@@ -8695,6 +8734,7 @@ dependencies = [
  "reth-trie",
  "reth-trie-common",
  "reth-trie-parallel",
+ "reth-trie-pbt",
  "reth-trie-sparse",
  "thiserror 2.0.21",
  "tokio",
@@ -9249,6 +9289,7 @@ dependencies = [
 name = "reth-fs-util"
 version = "2.11.0"
 dependencies = [
+ "fs4",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -9701,6 +9742,7 @@ version = "2.11.0"
 dependencies = [
  "alloy-consensus",
  "alloy-contract",
+ "alloy-eip7928",
  "alloy-eips",
  "alloy-genesis",
  "alloy-network",
@@ -9723,9 +9765,11 @@ dependencies = [
  "jsonrpsee",
  "rand 0.9.5",
  "reqwest",
+ "reth-chain-state",
  "reth-chainspec",
  "reth-consensus",
  "reth-db",
+ "reth-db-api",
  "reth-downloaders",
  "reth-e2e-test-utils",
  "reth-engine-local",
@@ -9740,6 +9784,7 @@ dependencies = [
  "reth-evm",
  "reth-evm-ethereum",
  "reth-exex",
+ "reth-fs-util",
  "reth-network",
  "reth-network-api",
  "reth-network-p2p",
@@ -9766,15 +9811,21 @@ dependencies = [
  "reth-stages-types",
  "reth-static-file",
  "reth-storage-api",
+ "reth-storage-overlay",
  "reth-tasks",
  "reth-testing-utils",
  "reth-tracing",
  "reth-transaction-pool",
+ "reth-trie",
  "reth-trie-common",
+ "reth-trie-db",
+ "reth-trie-pbt",
+ "rocksdb",
  "serde",
  "serde_json",
  "similar-asserts",
  "tempfile",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "tower",
@@ -9857,6 +9908,17 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+]
+
+[[package]]
+name = "reth-node-pbt"
+version = "2.11.0"
+dependencies = [
+ "alloy-primitives",
+ "clap",
+ "eyre",
+ "reth-ethereum",
+ "reth-node-ethereum",
 ]
 
 [[package]]
@@ -11022,6 +11084,25 @@ dependencies = [
  "reth-trie",
  "thiserror 2.0.21",
  "tracing",
+]
+
+[[package]]
+name = "reth-trie-pbt"
+version = "2.11.0"
+dependencies = [
+ "alloy-primitives",
+ "pbt",
+ "reth-fs-util",
+ "reth-lru",
+ "reth-primitives-traits",
+ "reth-storage-api",
+ "reth-storage-errors",
+ "reth-trie",
+ "reth-trie-common",
+ "rocksdb",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

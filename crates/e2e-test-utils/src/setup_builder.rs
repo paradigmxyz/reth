@@ -577,7 +577,7 @@ impl<N: NodeBuilderHelper> Clone for LaunchArgs<N> {
 /// Discovery is disabled, all ports are unused, all RPC modules except `testing` are served over
 /// HTTP, the node reports an idle sync state from startup, does not persist its peers and the
 /// engine uses a cross block cache of 1 MiB.
-pub(crate) fn test_node_config<C>(chain_spec: Arc<C>) -> NodeConfig<C> {
+pub fn test_node_config<C>(chain_spec: Arc<C>) -> NodeConfig<C> {
     let mut config = NodeConfig::new(chain_spec)
         .with_network(NetworkArgs {
             discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },

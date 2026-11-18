@@ -113,7 +113,7 @@ RUST_LOG=info,engine::tree=debug cargo nextest run -p reth-node-ethereum --test 
 | Wait for a block, or a pool state | `wait_block(n, hash, wait_finish_checkpoint)`, `wait_for_pool(condition)`, `wait_for_pool_head(hash)` |
 | Wait until a block is the head | `wait_for_head(hash)`, which only observes the node; `wait_block` is also satisfied by a canonical block below the head |
 | Wait for transactions to enter or leave the pool | `wait_for_pooled(hashes)`, `wait_for_pool_removal(hashes)`, which returns right away for transactions that never entered |
-| Wait for persistence or pruning | `wait_for_persisted_block(n)`, `wait_for_prune_checkpoint(segment, n)` |
+| Wait for persistence or pruning | `wait_for_persisted_block(n)` for block data, `wait_for_persisted_state(n)` for the durable state/trie frontier, `wait_for_prune_checkpoint(segment, n)` |
 | **Assertions and inspection** | |
 | Inspect a mined block | `MinedBlock`: `block()`, `receipts`, `chain` (the committed `Chain` with its execution outcome), `ensure_success()` |
 | Wait for the receipt of a transaction sent through a provider | `PendingTransactionExt::successful_receipt`, `receipt::await_successful_receipts` |

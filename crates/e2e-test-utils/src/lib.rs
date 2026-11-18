@@ -55,7 +55,7 @@ pub use chain_spec::{
 
 /// Builder for configuring test node setups
 mod setup_builder;
-pub use setup_builder::{E2ETestSetupBuilder, E2ETestSetupExt, TestNodeBuilder};
+pub use setup_builder::{test_node_config, E2ETestSetupBuilder, E2ETestSetupExt, TestNodeBuilder};
 
 // Type aliases
 

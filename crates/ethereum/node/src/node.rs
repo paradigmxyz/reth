@@ -33,10 +33,10 @@ use reth_node_builder::{
     },
     node::{FullNodeTypes, NodeTypes},
     rpc::{
-        BasicEngineApiBuilder, BasicEngineValidatorBuilder, Either, EngineApiBuilder,
-        EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, EthApiCtx, EthApiFor,
-        EthRpcConverterFor, Identity, PayloadValidatorBuilder, RethAuthHttpMiddleware,
-        RethRpcAddOns, RethRpcMiddleware, RpcAddOns, RpcHandle, Stack,
+        BasicEngineApiBuilder, Either, EngineApiBuilder, EngineValidatorAddOn,
+        EngineValidatorBuilder, EthApiBuilder, EthApiCtx, EthApiFor, EthRpcConverterFor, Identity,
+        PayloadValidatorBuilder, RethAuthHttpMiddleware, RethRpcAddOns, RethRpcMiddleware,
+        RpcAddOns, RpcHandle, Stack,
     },
     BuilderContext, DebugNode, EngineApiExt, Node, NodeAdapter, PayloadBuilderConfig,
 };
@@ -65,6 +65,12 @@ use tracing::warn;
 use tracing::{debug, info};
 
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
+
+#[cfg(not(target_family = "wasm"))]
+pub use crate::pbt::EthereumTreeValidatorBuilder;
+
+#[cfg(target_family = "wasm")]
+pub use reth_node_builder::rpc::BasicEngineValidatorBuilder as EthereumTreeValidatorBuilder;
 
 /// Handles the legacy JIT helper subcommand hook.
 #[cfg(feature = "jit")]
@@ -179,7 +185,7 @@ pub struct EthereumAddOns<
     EthB: EthApiBuilder<N>,
     PVB,
     EB = BasicEngineApiBuilder<PVB>,
-    EVB = BasicEngineValidatorBuilder<PVB>,
+    EVB = EthereumTreeValidatorBuilder<PVB>,
     RpcMiddleware = Identity,
     AuthHttpMiddleware = Identity,
 > {
@@ -217,10 +223,36 @@ where
             EthereumEthApiBuilder::default(),
             EthereumEngineValidatorBuilder::default(),
             BasicEngineApiBuilder::default(),
-            BasicEngineValidatorBuilder::default(),
+            EthereumTreeValidatorBuilder::default(),
             Default::default(),
             Identity::new(),
         ))
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl<N, EthB, PVB, EB, RpcMiddleware, AuthHttpMiddleware>
+    EthereumAddOns<
+        N,
+        EthB,
+        PVB,
+        EB,
+        EthereumTreeValidatorBuilder<PVB>,
+        RpcMiddleware,
+        AuthHttpMiddleware,
+    >
+where
+    N: FullNodeComponents,
+    EthB: EthApiBuilder<N>,
+    PVB: Default,
+{
+    /// Configures binary-tree resources; the chain schedule controls activation.
+    pub fn with_pbt_config(self, config: crate::pbt::PbtConfig) -> Self {
+        Self::new(
+            self.inner.with_engine_validator(
+                EthereumTreeValidatorBuilder::default().with_pbt_config(config),
+            ),
+        )
     }
 }
 
@@ -356,12 +388,43 @@ where
         let testing_desired_gas_limit = ctx.config.builder.gas_limit_for(ctx.config.chain.chain());
         let testing_engine_handle = ctx.beacon_engine_handle.clone();
 
+        #[cfg(target_family = "wasm")]
+        {
+            eyre::ensure!(
+                !ctx.config.datadir().data_dir().join("pbt/chain-config").try_exists()?,
+                "PBT data directories are unsupported on WebAssembly"
+            );
+            eyre::ensure!(
+                !ctx.config
+                    .chain
+                    .genesis()
+                    .config
+                    .extra_fields
+                    .get("binaryTrieTime")
+                    .is_some_and(|value| !value.is_null()),
+                "binaryTrieTime is unsupported on WebAssembly"
+            );
+        }
+        #[cfg(not(target_family = "wasm"))]
+        let pbt_methods = if crate::pbt::activation_timestamp(&*ctx.config.chain)?.is_some() {
+            Some(crate::pbt::proof_methods(ctx.config.datadir().data_dir())?)
+        } else {
+            None
+        };
+
         let (ssz_proxy_layer, ssz_proxy_handle) = EngineSszProxyLayer::new();
-        ssz_proxy_handle.set_witness_handler_sync(Arc::new(EngineSszWitnessGenerator::new(
-            ctx.node.provider().clone(),
-            ctx.node.evm_config().clone(),
-            ctx.node.task_executor().clone(),
-        )));
+        #[cfg(not(target_family = "wasm"))]
+        let pbt_enabled = pbt_methods.is_some();
+        #[cfg(target_family = "wasm")]
+        let pbt_enabled = false;
+        // The binary witness generator still produces MPT witnesses.
+        if !pbt_enabled {
+            ssz_proxy_handle.set_witness_handler_sync(Arc::new(EngineSszWitnessGenerator::new(
+                ctx.node.provider().clone(),
+                ctx.node.evm_config().clone(),
+                ctx.node.task_executor().clone(),
+            )));
+        }
 
         self.inner
             .map_engine_api(|engine_api_builder| {
@@ -371,6 +434,12 @@ where
             })
             .map_auth_http_middleware(|middleware| Stack::new(ssz_proxy_layer, middleware))
             .launch_add_ons_with(ctx, move |container| {
+                #[cfg(not(target_family = "wasm"))]
+                if let Some(methods) = pbt_methods {
+                    crate::pbt::remove_mpt_rpc_methods(container.modules, container.auth_module);
+                    container.auth_module.merge_auth_methods(methods)?;
+                }
+
                 container.modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
                     validation_api.into_rpc(),

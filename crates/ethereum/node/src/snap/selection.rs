@@ -1,8 +1,11 @@
-//! Picks the engine's backfill at launch: the staged pipeline, or snap sync with `--snap.v2`.
+//! Selects staged fork-aware verification or snap sync from Ethereum node settings.
 
 use super::{SnapBackfillSync, SnapHandoff};
+use reth_chainspec::EthChainSpec;
 use reth_engine_tree::backfill::{BackfillAction, BackfillEvent, BackfillSync, PipelineSync};
-use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
+use reth_network_p2p::{
+    headers::client::HeadersClient, snap::client::SnapClient, BlockAccessListsClient,
+};
 use reth_node_builder::{
     sync::{BackfillContext, BackfillSyncBuilder, PipelineBackfill},
     NodeConfig,
@@ -10,38 +13,94 @@ use reth_node_builder::{
 use reth_provider::{providers::ProviderNodeTypes, DatabaseProviderFactory, ProviderFactory};
 use std::task::{Context, Poll};
 
+#[cfg(not(target_family = "wasm"))]
+use crate::pbt::{activation_timestamp, open_strategy, PbtBackfill, PbtConfig};
+#[cfg(not(target_family = "wasm"))]
+use reth_db_api::database::Database;
+#[cfg(not(target_family = "wasm"))]
+use reth_provider::ChainSpecProvider;
+
 /// Builds the Ethereum node's backfill: the staged pipeline, or snap sync with `--snap.v2`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum EthereumBackfill {
     /// The staged pipeline, which every node runs unless snap sync is opted into.
     Pipeline,
     /// Snap sync, on chains with block access lists.
     Snap,
+    /// Staged verification for a chain scheduling binary-tree commitments.
+    #[cfg(not(target_family = "wasm"))]
+    BinaryTrie {
+        /// Resource limits and hashing configuration.
+        config: PbtConfig,
+    },
 }
 
 impl EthereumBackfill {
     /// Picks the backfill for `config`'s `--snap.v2` setting.
-    pub const fn new<ChainSpec>(config: &NodeConfig<ChainSpec>) -> Self {
+    pub fn new<ChainSpec: EthChainSpec>(config: &NodeConfig<ChainSpec>) -> Self {
+        #[cfg(not(target_family = "wasm"))]
+        if config
+            .chain
+            .genesis()
+            .config
+            .extra_fields
+            .get("binaryTrieTime")
+            .is_some_and(|value| !value.is_null()) &&
+            !config.network.snap_v2
+        {
+            return Self::BinaryTrie { config: PbtConfig::default() }
+        }
         if config.network.snap_v2 {
             Self::Snap
         } else {
             Self::Pipeline
         }
     }
+
+    /// Configures binary-tree resources without changing the chain's fork schedule.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn with_pbt_config(mut self, config: PbtConfig) -> Self {
+        if let Self::BinaryTrie { config: current, .. } = &mut self {
+            *current = config;
+        }
+        self
+    }
 }
 
 impl<N, C> BackfillSyncBuilder<N, C> for EthereumBackfill
 where
-    N: ProviderNodeTypes,
-    C: SnapClient + HeadersClient + Clone + Unpin + 'static,
+    N: ProviderNodeTypes<Primitives = reth_ethereum_primitives::EthPrimitives>,
+    C: SnapClient + HeadersClient + BlockAccessListsClient + Clone + Unpin + 'static,
 {
     type Backfill = EthereumBackfillSync<N, C>;
 
     fn build(self, ctx: BackfillContext<N, C>) -> eyre::Result<Self::Backfill> {
         // Genesis has stored the storage settings by now, so the layout check covers a fresh
         // database too.
-        ctx.provider_factory().database_provider_ro()?.ensure_sync_mode(self == Self::Snap)?;
+        ctx.provider_factory()
+            .database_provider_ro()?
+            .ensure_sync_mode(matches!(self, Self::Snap))?;
+        #[cfg(not(target_family = "wasm"))]
+        eyre::ensure!(
+            !matches!(self, Self::Snap) ||
+                activation_timestamp(&*ctx.provider_factory().chain_spec())?.is_none(),
+            "snap/2 state synchronization is unsupported on a binary-tree chain"
+        );
         match self {
+            #[cfg(not(target_family = "wasm"))]
+            Self::BinaryTrie { config } => {
+                let chain = ctx.provider_factory().chain_spec();
+                let activation = activation_timestamp(&*chain)?
+                    .ok_or_else(|| eyre::eyre!("missing binaryTrieTime for staged verification"))?;
+                let db_path = ctx.provider_factory().db_ref().path();
+                let directory = db_path
+                    .parent()
+                    .ok_or_else(|| eyre::eyre!("database path has no chain data directory"))?;
+                let strategy = open_strategy(&*chain, directory, activation, &config)?;
+                PbtBackfill::new(strategy, config.catchup)
+                    .build(ctx)
+                    .map(EthereumBackfillSync::Pipeline)
+            }
             Self::Pipeline => PipelineBackfill.build(ctx).map(EthereumBackfillSync::Pipeline),
             Self::Snap => {
                 let client = ctx.client().clone();
@@ -60,7 +119,7 @@ where
     fn recover(&mut self, provider_factory: &ProviderFactory<N>) -> eyre::Result<()> {
         SnapHandoff::new(provider_factory.clone()).resume_interrupted_publish()?;
         // The snap layout is checked in `build`, after genesis initializes it.
-        if *self == Self::Pipeline {
+        if !matches!(self, Self::Snap) {
             provider_factory.database_provider_ro()?.ensure_sync_mode(false)?;
         }
         Ok(())
@@ -176,6 +235,18 @@ mod tests {
         // Genesis supplies the layout before the backfill is built.
         factory.set_storage_settings_cache(StorageSettings::v2());
         assert!(matches!(build(true, factory).unwrap(), EthereumBackfillSync::Snap(_)));
+    }
+
+    #[test]
+    fn snap_sync_rejects_a_scheduled_binary_tree_fork() {
+        let mut chain = ChainSpecBuilder::mainnet().bogota_activated().build();
+        chain.genesis.config.extra_fields.insert("binaryTrieTime".into(), serde_json::json!(0));
+        let factory = factory(chain);
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        assert_eq!(
+            build(true, factory).unwrap_err().to_string(),
+            "snap/2 state synchronization is unsupported on a binary-tree chain"
+        );
     }
 
     #[test]

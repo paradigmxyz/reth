@@ -1,0 +1,26 @@
+[package]
+name = "reth-node-pbt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Ethereum binary-tree fork configuration"
+license.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+reth-node-ethereum.workspace = true
+
+# cli
+clap = { workspace = true, optional = true, features = ["derive", "env"] }
+alloy-primitives = { workspace = true, optional = true }
+eyre = { workspace = true, optional = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+reth-ethereum = { workspace = true, features = ["cli"] }
+
+[lints]
+workspace = true
+
+[features]
+cli = ["dep:clap", "dep:alloy-primitives", "dep:eyre"]

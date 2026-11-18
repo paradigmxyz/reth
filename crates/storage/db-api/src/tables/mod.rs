@@ -590,6 +590,8 @@ pub enum ChainStateKey {
     LastFinalizedBlock,
     /// Last safe block key
     LastSafeBlock,
+    /// Finalized PBT block at which MPT node storage was permanently retired.
+    PbtMptRetiredBlock,
 }
 
 impl Encode for ChainStateKey {
@@ -599,6 +601,7 @@ impl Encode for ChainStateKey {
         match self {
             Self::LastFinalizedBlock => [0],
             Self::LastSafeBlock => [1],
+            Self::PbtMptRetiredBlock => [2],
         }
     }
 }
@@ -608,6 +611,7 @@ impl Decode for ChainStateKey {
         match value {
             [0] => Ok(Self::LastFinalizedBlock),
             [1] => Ok(Self::LastSafeBlock),
+            [2] => Ok(Self::PbtMptRetiredBlock),
             _ => Err(crate::DatabaseError::Decode),
         }
     }
@@ -633,5 +637,18 @@ mod tests {
             assert_eq!(table.to_string(), table.name());
             assert_eq!(Tables::from_str(table.name()).unwrap(), *table);
         }
+    }
+
+    #[test]
+    fn chain_state_keys_preserve_existing_encoding() {
+        for (key, encoded) in [
+            (ChainStateKey::LastFinalizedBlock, [0]),
+            (ChainStateKey::LastSafeBlock, [1]),
+            (ChainStateKey::PbtMptRetiredBlock, [2]),
+        ] {
+            assert_eq!(key.clone().encode(), encoded);
+            assert_eq!(ChainStateKey::decode(&encoded).unwrap(), key);
+        }
+        assert!(matches!(ChainStateKey::decode(&[3]), Err(crate::DatabaseError::Decode)));
     }
 }

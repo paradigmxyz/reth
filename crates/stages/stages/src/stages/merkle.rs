@@ -188,8 +188,49 @@ where
         }
     }
 
-    /// Execute the stage.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+        self.execute_with_root_validator(provider, input, validate_state_root)
+    }
+
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
+    fn unwind(
+        &mut self,
+        provider: &Provider,
+        input: UnwindInput,
+    ) -> Result<UnwindOutput, StageError> {
+        self.unwind_with_root_validator(provider, input, validate_state_root)
+    }
+}
+
+impl MerkleStage {
+    /// Maintains MPT nodes, then validates the completed root using the chain's commitment rule.
+    ///
+    /// The validator is called only when a range completes. It must authenticate the supplied
+    /// header and the computed MPT state, including an alternative commitment after activation.
+    pub fn execute_with_root_validator<Provider>(
+        &mut self,
+        provider: &Provider,
+        input: ExecInput,
+        validate: impl FnOnce(
+            B256,
+            SealedHeader<Provider::Header>,
+            BlockNumber,
+        ) -> Result<(), StageError>,
+    ) -> Result<ExecOutput, StageError>
+    where
+        Provider: DBProvider<Tx: DbTxMut>
+            + TrieWriter
+            + StatsReader
+            + HeaderProvider
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + StorageSettingsCache
+            + StageCheckpointReader
+            + StageCheckpointWriter,
+    {
         let (threshold, incremental_threshold) = match self {
             Self::Unwind { .. } => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
@@ -360,19 +401,37 @@ where
         // Reset the checkpoint
         self.save_execution_checkpoint(provider, None)?;
 
-        validate_state_root(trie_root, SealedHeader::seal_slow(target_block), to_block)?;
+        validate(trie_root, SealedHeader::seal_slow(target_block), to_block)?;
 
         Ok(ExecOutput::done(
             StageCheckpoint::new(to_block).with_entities_stage_checkpoint(entities_checkpoint),
         ))
     }
 
-    /// Unwind the stage.
-    fn unwind(
+    /// Unwinds MPT nodes after the validator authenticates the target's state commitment.
+    ///
+    /// The validator runs before trie updates are written. An error prevents their publication.
+    pub fn unwind_with_root_validator<Provider>(
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
+        validate: impl FnOnce(
+            B256,
+            SealedHeader<Provider::Header>,
+            BlockNumber,
+        ) -> Result<(), StageError>,
+    ) -> Result<UnwindOutput, StageError>
+    where
+        Provider: DBProvider<Tx: DbTxMut>
+            + TrieWriter
+            + StatsReader
+            + HeaderProvider
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + StorageSettingsCache
+            + StageCheckpointReader
+            + StageCheckpointWriter,
+    {
         let tx = provider.tx_ref();
         let range = input.unwind_block_range();
         if matches!(self, Self::Execution { .. }) {
@@ -425,7 +484,7 @@ where
                 .header_by_number(input.unwind_to)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;
 
-            validate_state_root(block_root, SealedHeader::seal_slow(target), input.unwind_to)?;
+            validate(block_root, SealedHeader::seal_slow(target), input.unwind_to)?;
 
             // Validation passed, apply unwind changes to the database.
             provider.write_trie_updates(updates)?;
@@ -867,5 +926,27 @@ mod tests {
                 .unwrap();
             Ok(())
         }
+    }
+
+    #[test]
+    fn custom_root_validator_receives_computed_state_and_can_reject() {
+        let mut runner = MerkleTestRunner::default();
+        let input = ExecInput { target: Some(2), checkpoint: Some(StageCheckpoint::new(1)) };
+        runner.seed_execution(input).unwrap();
+        let provider = runner.db.factory.provider_rw().unwrap();
+        let mut stage = runner.stage();
+        let mut called = false;
+        let result =
+            stage.execute_with_root_validator(&*provider, input, |root, header, number| {
+                called = true;
+                assert_eq!(number, 2);
+                assert_eq!(root, header.state_root());
+                Err(StageError::MissingDownloadBuffer)
+            });
+        assert!(called);
+        assert_matches!(result, Err(StageError::MissingDownloadBuffer));
+        drop(provider);
+        let provider = runner.db.factory.provider_rw().unwrap();
+        assert!(stage.execute(&*provider, input).unwrap().done);
     }
 }
