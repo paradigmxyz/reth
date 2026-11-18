@@ -185,7 +185,7 @@ thread_local! {
 }
 
 #[cfg(feature = "fuzz")]
-crate::executor::thread_local! {
+reth_concurrency::sync::thread_local! {
     static LOGICAL_CURRENT: RefCell<Option<Arc<CancellationState>>> = const { RefCell::new(None) };
 }
 
@@ -254,7 +254,7 @@ impl CancellationState {
 
     fn schedule() {
         if shuttle::current::try_get_current_task().is_some() {
-            crate::executor::thread::yield_now();
+            reth_concurrency::sync::thread::yield_now();
         }
     }
 }
@@ -262,7 +262,7 @@ impl CancellationState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::executor::{thread, Runtime};
+    use reth_concurrency::sync::{thread, Runtime};
 
     #[test]
     fn test_default_cancelled() {

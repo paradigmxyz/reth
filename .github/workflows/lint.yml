@@ -106,7 +106,7 @@ jobs:
 
           # Expanded thread_local! diagnostics ignore local allowances on these backend declarations.
           tls = {
-              "crates/tasks/src/executor/deterministic.rs": "CLOCK",
+              "crates/concurrency/src/sync/deterministic.rs": "CLOCK",
               "crates/tasks/src/pool.rs": "WORKERS",
               "crates/tasks/src/cancel.rs": "CURRENT",
           }

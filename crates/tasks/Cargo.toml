@@ -12,19 +12,8 @@ description = "Task management"
 workspace = true
 
 [dependencies]
-# clocks
-reth-primitives-traits = { workspace = true, features = ["std"] }
+reth-concurrency = { workspace = true, features = ["std"] }
 
-# executor
-crossbeam-channel.workspace = true
-either = { workspace = true, optional = true }
-rayon.workspace = true
-parking_lot.workspace = true
-shuttle = { workspace = true, optional = true }
-shuttle-sync = { workspace = true, optional = true }
-shuttle-parking_lot = { workspace = true, optional = true }
-
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
 # async
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
 tracing-futures.workspace = true
@@ -36,6 +25,8 @@ metrics.workspace = true
 
 # misc
 dashmap.workspace = true
+parking_lot.workspace = true
+shuttle = { workspace = true, optional = true }
 thread-priority.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
@@ -47,19 +38,10 @@ pin-project = { workspace = true, optional = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 
-[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+[dev-dependencies]
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
 
 [features]
 rayon = ["dep:crossbeam-utils", "pin-project"]
-test-utils = ["reth-primitives-traits/test-utils"]
-fuzz = [
-    "dep:either",
-    "dep:shuttle",
-    "shuttle-sync/shuttle",
-    "shuttle-parking_lot/shuttle",
-]
-
-# The all-features udeps job selects fuzz, which replaces the native Rayon backend.
-[package.metadata.cargo-udeps.ignore]
-normal = ["rayon"]
+test-utils = ["reth-concurrency/test-utils"]
+fuzz = ["reth-concurrency/fuzz", "dep:shuttle"]

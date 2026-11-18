@@ -1,5 +1,10 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
+use reth_concurrency::sync::{
+    channel::{mpsc, Sender},
+    thread::JoinHandle,
+    time::FastInstant as Instant,
+};
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::NodePrimitives;
@@ -9,14 +14,7 @@ use reth_provider::{
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
-use reth_tasks::{
-    executor::{
-        channel::{mpsc, Sender},
-        thread::JoinHandle,
-        time::FastInstant as Instant,
-    },
-    spawn_thread,
-};
+use reth_tasks::spawn_thread;
 use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 use tracing::{debug, error, instrument, warn};
@@ -37,7 +35,7 @@ pub struct PersistenceResult {
 /// This is meant to be a spawned service that listens for various incoming persistence operations,
 /// performing those actions on disk, and returning the result in a channel.
 ///
-/// This should be spawned in its own thread with [`reth_tasks::executor::thread::spawn`], since
+/// This should be spawned in its own thread with [`reth_concurrency::sync::thread::spawn`], since
 /// this performs blocking I/O operations in an endless loop.
 #[derive(Debug)]
 pub struct PersistenceService<N>
@@ -414,6 +412,7 @@ mod tests {
     use alloy_eips::NumHash;
     use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, B256, U256};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_concurrency::sync::{channel, thread};
     use reth_db::{models::ShardedKey, tables, BlockNumberList};
     use reth_db_common::init::init_genesis;
     use reth_exex_types::FinishedExExHeight;
@@ -426,7 +425,6 @@ mod tests {
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
-    use reth_tasks::executor::{channel, thread};
     use tokio::sync::mpsc::unbounded_channel;
 
     fn default_persistence_handle() -> PersistenceHandle<EthPrimitives> {
@@ -457,7 +455,7 @@ mod tests {
 
     #[test]
     fn test_pruner_prunes_bal_store() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             reth_tracing::init_test_tracing();
 
             let old_hash = B256::random();
@@ -500,7 +498,7 @@ mod tests {
 
     #[test]
     fn test_pruner_ignores_bal_store_prune_error() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             reth_tracing::init_test_tracing();
 
             let provider = create_test_provider_factory()
@@ -526,7 +524,7 @@ mod tests {
 
     #[test]
     fn test_remove_blocks_above_requires_tip_header() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let provider = create_test_provider_factory();
             init_genesis(&provider).unwrap();
 
@@ -570,7 +568,7 @@ mod tests {
 
     #[test]
     fn test_save_blocks_single_block() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             reth_tracing::init_test_tracing();
             let handle = default_persistence_handle();
             let block_number = 1;
@@ -594,7 +592,7 @@ mod tests {
 
     #[test]
     fn test_save_blocks_flushes_bal_store() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             reth_tracing::init_test_tracing();
             let provider = create_test_provider_factory();
             let bal_store = BalStoreHandle::new(RocksDBBalStore::new(provider.rocksdb_provider()));
@@ -638,7 +636,7 @@ mod tests {
 
     #[test]
     fn test_save_blocks_multiple_blocks() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             reth_tracing::init_test_tracing();
             let handle = default_persistence_handle();
 
@@ -655,7 +653,7 @@ mod tests {
 
     #[test]
     fn test_save_blocks_multiple_calls() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             reth_tracing::init_test_tracing();
             let handle = default_persistence_handle();
 
@@ -683,7 +681,7 @@ mod tests {
     /// first, then runs the pruner against committed state in a separate provider.
     #[test]
     fn test_save_blocks_then_prune_preserves_new_history() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             reth_tracing::init_test_tracing();
 
             let provider_factory = create_test_provider_factory();

@@ -679,10 +679,10 @@ mod tests {
         BaseEvmTypes, SpecId,
     };
     use reth_chainspec::{Chain, ChainSpecBuilder, EthereumHardfork, ForkCondition};
+    use reth_concurrency::sync::{channel, Runtime};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{BlockExecutor, BlockExecutorFactory, CommitChanges};
     use reth_primitives_traits::Recovered;
-    use reth_tasks::executor::{channel, Runtime};
     use std::{collections::BTreeMap, convert::Infallible, sync::Arc};
 
     fn segment(

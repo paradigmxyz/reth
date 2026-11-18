@@ -1,5 +1,9 @@
 use alloy_primitives::{keccak256, B256};
 use itertools::Itertools;
+use reth_concurrency::sync::{
+    channel::mpsc::{self, Receiver},
+    rayon,
+};
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -17,10 +21,6 @@ use reth_stages_api::{
     StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_tasks::executor::{
-    channel::mpsc::{self, Receiver},
-    rayon,
-};
 use std::{
     collections::BTreeSet,
     fmt::Debug,

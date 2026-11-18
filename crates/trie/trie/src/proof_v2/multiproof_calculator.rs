@@ -9,15 +9,10 @@ use crate::{
 };
 use alloy_primitives::{map::B256Map, B256, U256};
 use alloy_rlp::Encodable;
+use reth_concurrency::sync::parking_lot::Mutex;
 use reth_execution_errors::StateProofError;
 use reth_primitives_traits::Account;
 use std::{fmt, marker::PhantomPinned, pin::Pin, sync::Arc};
-
-#[cfg(not(target_family = "wasm"))]
-use reth_tasks::executor::sync::parking_lot::Mutex;
-
-#[cfg(target_family = "wasm")]
-use parking_lot::Mutex;
 
 /// Generates account and storage multiproofs for one immutable state snapshot.
 ///

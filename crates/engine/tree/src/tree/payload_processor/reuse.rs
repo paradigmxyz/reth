@@ -36,7 +36,7 @@ use evm2::{
     utils::WordExt,
     EvmFeatures, EvmTypes, Inspector, InspectorConfig, OpcodeSet, TxResultWithState, Version,
 };
-use reth_tasks::executor::sync::{
+use reth_concurrency::sync::{
     atomic::{AtomicUsize, Ordering},
     parking_lot::{Mutex, RwLock},
 };
@@ -1539,7 +1539,7 @@ mod tests {
 
     #[test]
     fn reuses_independent_transactions() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let txs = [tx(1, 0, sender(2), 1), tx(3, 0, Address::repeat_byte(0xaa), 1)];
             assert_eq!(reuse(&txs), [Ok(()), Ok(())]);
         });
@@ -1547,7 +1547,7 @@ mod tests {
 
     #[test]
     fn rebases_unobserved_balances() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // The last transaction's caller and recipient were credited by earlier ones.
             let txs = [tx(1, 0, NOOP, 1), tx(1, 1, sender(2), 1), tx(2, 0, NOOP, 1)];
             assert_eq!(reuse(&txs), [Ok(()), Ok(()), Ok(())]);
@@ -1556,7 +1556,7 @@ mod tests {
 
     #[test]
     fn reuses_predicted_writes() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1), tx(1, 1, COUNTER, 1)];
             assert_eq!(reuse(&txs), [Ok(()), Ok(()), Ok(())]);
             // Results executed before the transactions they depend on are executed again.
@@ -1566,7 +1566,7 @@ mod tests {
 
     #[test]
     fn refreshes_against_executed_writes() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1), tx(1, 1, sender(3), 1)];
             assert_eq!(reuse_in(&txs, &[1, 2], true), [Err(ReuseMiss::Missing), Ok(()), Ok(())]);
         });
@@ -1574,7 +1574,7 @@ mod tests {
 
     #[test]
     fn rebases_original_balances() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // The first transaction leaves the forwarder 5 wei more, and the second forwards 5 wei,
             // so its rebased balance equals its speculative balance before the second transaction.
             let txs = [tx(1, 0, FORWARDER, 10), tx(2, 0, FORWARDER, 0)];
@@ -1584,7 +1584,7 @@ mod tests {
 
     #[test]
     fn rejects_stale_storage() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1)];
             assert_eq!(
                 reuse_in(&txs, &[1], false),
@@ -1595,7 +1595,7 @@ mod tests {
 
     #[test]
     fn rejects_stale_callers() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let txs = [tx(1, 0, sender(2), 1), tx(1, 1, sender(3), 1)];
             assert_eq!(
                 reuse_in(&txs, &[1], false),
@@ -1606,7 +1606,7 @@ mod tests {
 
     #[test]
     fn rejects_observed_balances() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let txs = [
                 tx(1, 0, SELF_BALANCE_READER, 1),
                 tx(2, 0, SELF_BALANCE_READER, 1),
@@ -1621,7 +1621,7 @@ mod tests {
 
     #[test]
     fn rejects_lower_sender_balances() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let txs = [tx(1, 0, FORWARDER, 0), tx(2, 0, FORWARDER, 0), tx(3, 0, FORWARDER, 0)];
             // The forwarder can send twice from its speculative balance, but not three times.
             assert_eq!(
@@ -1633,7 +1633,7 @@ mod tests {
 
     #[test]
     fn reuses_pool_results() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // The last transaction's caller was credited by the first one.
             let txs = [tx(1, 0, sender(2), 1), tx(3, 0, COUNTER, 1), tx(2, 0, GAS_LIMIT_READER, 1)];
             assert_eq!(reuse_pool(&txs, &txs, BENEFICIARY), [Ok(()), Ok(()), Ok(())]);
@@ -1647,7 +1647,7 @@ mod tests {
 
     #[test]
     fn rejects_stale_pool_results() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // Test transactions are hashed without their sender.
             let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 2)];
             assert_eq!(reuse_pool(&txs, &txs, BENEFICIARY), [Ok(()), Err(ReuseMiss::Stale)]);
@@ -1662,7 +1662,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_credit_to_empty_beneficiary() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // Executing the credit deletes the empty beneficiary, which detached state cannot
             // express.
             let txs = [tx_with_gas_price(1, 0, COUNTER, 1, 100_000, 1)];
@@ -1672,7 +1672,7 @@ mod tests {
 
     #[test]
     fn rejects_pool_results_observing_block_env() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let txs = [
                 tx(1, 0, TIMESTAMP_READER, 1),
                 tx(2, 0, BENEFICIARY_READER, 1),
@@ -1694,7 +1694,7 @@ mod tests {
 
     #[test]
     fn seeds_only_unexecuted_transactions() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let txs = [tx(1, 0, COUNTER, 1)];
             let differs = BlockEnvFields::default();
             let seeds = PoolSeeds::new(Arc::new(pool_results(&txs)), BENEFICIARY, differs);
@@ -1705,7 +1705,7 @@ mod tests {
 
     #[test]
     fn rejects_pool_results_overflowing_the_beneficiary() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let txs = [tx(1, 0, COUNTER, 1)];
             assert_eq!(reuse_pool(&txs, &txs, SATURATED), [Err(ReuseMiss::Stale)]);
         });
@@ -1737,7 +1737,7 @@ mod tests {
 
     #[test]
     fn bounds_pool_results() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let txs = [tx(1, 0, COUNTER, 1)];
             let results = pool_results(&txs);
             assert!(store_again(&results, &txs[0], B256::ZERO, |_, _| {}));
@@ -1754,7 +1754,7 @@ mod tests {
 
     #[test]
     fn rejects_recorded_pool_hashes() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let txs = [tx(1, 0, COUNTER, 1)];
             let results = pool_results(&txs);
             assert!(!store_again(&results, &txs[0], *txs[0].tx_hash(), |_, _| {}));
@@ -1764,7 +1764,7 @@ mod tests {
 
     #[test]
     fn rejects_saturated_pool_beneficiaries() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let txs = [tx(1, 0, COUNTER, 1)];
             let results = pool_results(&txs);
             // Crediting a saturated balance leaves it unchanged.
@@ -1782,7 +1782,7 @@ mod tests {
 
     #[test]
     fn rejects_pool_results_running_out_of_gas() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // Enough gas to read the balance of the warm beneficiary in the block, but not of the
             // cold one during speculation.
             let txs = [tx_with_gas_limit(1, 0, BENEFICIARY_BALANCE_BY_ADDRESS, 0, 21_500)];
@@ -1792,7 +1792,7 @@ mod tests {
 
     #[test]
     fn rejects_invalid_transactions() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             assert_eq!(reusable(&[tx(1, 0, NOOP, 0)]), Ok(()));
             // The caller cannot pay for the value.
             assert_eq!(reusable(&[tx(1, 0, NOOP, 10u64.pow(19))]), Err(ReuseMiss::Stale));
@@ -1823,7 +1823,7 @@ mod tests {
 
     #[test]
     fn keeps_stale_results_unchanged() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let txs = [tx(1, 0, NOOP, 0)];
             let prewarm = Prewarm::new(&txs, &[0]);
             // The caller's balance can be rebased, but the callee changed.
@@ -1853,7 +1853,7 @@ mod tests {
 
     #[test]
     fn keeps_results_on_database_errors() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let txs = [tx(1, 0, NOOP, 0)];
             let prewarm = Prewarm::new(&txs, &[0]);
             assert!(matches!(
@@ -1867,7 +1867,7 @@ mod tests {
 
     #[test]
     fn rejects_unknown_code() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             assert_eq!(
                 reuse_in(&[tx(1, 0, UNKNOWN_CODE, 0)], &[0], false),
                 [Err(ReuseMiss::Stale)]
@@ -1877,7 +1877,7 @@ mod tests {
 
     #[test]
     fn rejects_rebasing_unbounded_or_zero_balances() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let rebased = [tx(1, 0, sender(4), 1), tx(2, 0, sender(4), 1)];
             assert_eq!(reuse_in(&rebased, &[1], false), [Err(ReuseMiss::Missing), Ok(())]);
             for txs in [
@@ -1896,7 +1896,7 @@ mod tests {
 
     #[test]
     fn preserves_account_lifecycle_and_rejects_rebasing_it() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let creation = Recovered::new_unchecked(
                 TransactionSigned::new_unhashed(
                     Transaction::Legacy(TxLegacy {
@@ -1943,7 +1943,7 @@ mod tests {
 
     #[test]
     fn rejects_results_after_failed_observer_reads() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let reads = ReadSet {
                 accounts: vec![AccountRead {
                     address: sender(1),

@@ -1,8 +1,8 @@
 use crate::tree::TxPoolPrewarmCacheSnapshot as Snapshot;
 use alloy_primitives::B256;
-use reth_tasks::executor::{
+use reth_concurrency::sync::{
     channel::{unbounded, Receiver, Sender},
-    sync::parking_lot::RwLock,
+    parking_lot::RwLock,
 };
 use std::{
     fmt::Debug,
@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn snapshot_is_published_for_matching_parent() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (control, _receiver) = control();
             let parent_hash = B256::repeat_byte(0x01);
             *control.publication.write() = Some(snapshot(parent_hash));
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn start_sends_job() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (control, receiver) = control();
             let parent_hash = B256::repeat_byte(0x01);
             control.start(parent_hash, 1);
@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn pause_guard_does_not_retain_control() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (control, _receiver) = control();
             let weak_control = Arc::downgrade(&control);
             let guard = control.pause();
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn overlapping_pause_guards_send_matching_resumes() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (control, receiver) = control();
             let first = control.pause();
             let second = control.pause();

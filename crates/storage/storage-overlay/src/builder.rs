@@ -32,7 +32,7 @@ use std::{
 use tracing::{debug, debug_span, instrument};
 
 #[cfg(feature = "rayon")]
-use reth_tasks::executor::rayon;
+use reth_concurrency::sync::rayon;
 
 /// Contains the trie and hashed-state data required to initialize an overlay state provider.
 #[derive(Debug, Clone)]
@@ -970,7 +970,7 @@ mod tests {
 
     #[test]
     fn execution_overlay_extends_bundle_state() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let address = Address::with_last_byte(1);
             let no_storage = Address::with_last_byte(2);
             let slot = U256::from(2);
@@ -999,7 +999,7 @@ mod tests {
 
     #[test]
     fn execution_overlay_zeroes_unobserved_storage_for_destroyed_accounts() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let address = Address::with_last_byte(1);
             let mut state = BundleState::default();
             state.state.insert(
@@ -1023,7 +1023,7 @@ mod tests {
 
     #[test]
     fn execution_overlay_storage_changes_preserve_account_fallback() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let address = Address::with_last_byte(1);
             let info = AccountInfo::default().with_balance(U256::from(5));
             let state = BundleState::builder(0..=0)
@@ -1047,7 +1047,7 @@ mod tests {
 
     #[test]
     fn overlay_builder_for_state_matches_hash_lookup() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // The state trie frontier sits at block 1 while Finish is at block 3, so the in-memory
             // chain straddles the state-masking frontier.
             let (factory, blocks) = setup_frontiers(1, 3);
@@ -1114,7 +1114,7 @@ mod tests {
 
     #[test]
     fn managed_overlay_starts_at_state_trie_frontier() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 3);
             let manager = OverlayManager::default();
             for block in &blocks[2..=4] {
@@ -1146,7 +1146,7 @@ mod tests {
 
     #[test]
     fn managed_overlay_skips_when_finish_is_the_anchor() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(3, 3);
             let manager = OverlayManager::default();
             manager.insert_block(blocks[4].clone());
@@ -1165,7 +1165,7 @@ mod tests {
 
     #[test]
     fn no_reverts_errors_when_reverts_are_required() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(2, 3);
             let provider = factory.provider().unwrap();
 
@@ -1180,7 +1180,7 @@ mod tests {
 
     #[test]
     fn appended_overlay_rejects_noncanonical_anchor_when_reverts_are_required() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 3);
             let provider = factory.provider().unwrap();
             let parent_hash = B256::with_last_byte(100);
@@ -1203,7 +1203,7 @@ mod tests {
 
     #[test]
     fn state_trie_overlay_invalidates_reverts_and_fork_without_trie_changesets() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(3, 3);
             let provider_rw = factory.provider_rw().unwrap();
             provider_rw
@@ -1249,7 +1249,7 @@ mod tests {
 
     #[test]
     fn execution_overlay_marks_historical_fallback() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 3);
             let provider_rw = factory.provider_rw().unwrap();
             let address = Address::with_last_byte(1);
@@ -1301,7 +1301,7 @@ mod tests {
 
     #[test]
     fn execution_overlay_uses_managed_blocks_after_the_anchor() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 3);
             let manager = OverlayManager::default();
             for block in &blocks[2..=4] {
@@ -1335,7 +1335,7 @@ mod tests {
 
     #[test]
     fn execution_overlay_marks_historical_fallback_for_managed_fork() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 3);
             let address = Address::with_last_byte(1);
             let slot = U256::ONE;
@@ -1409,7 +1409,7 @@ mod tests {
 
     #[test]
     fn managed_overlay_uses_persisted_parent_even_if_retained() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(2, 3);
             let manager = OverlayManager::default();
             manager.insert_block(blocks[1].clone());
@@ -1429,7 +1429,7 @@ mod tests {
 
     #[test]
     fn builder_appends_block_to_parent_state() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let manager = OverlayManager::default();
             let blocks = test_blocks();
             for block in &blocks[2..=4] {
@@ -1457,7 +1457,7 @@ mod tests {
 
     #[test]
     fn overlay_after_state_trie_frontier_requires_managed_coverage() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 3);
             let provider = factory.provider().unwrap();
             let error = OverlayManager::<EthPrimitives>::default()
@@ -1474,7 +1474,7 @@ mod tests {
 
     #[test]
     fn managed_overlay_skips_manager_for_persisted_parent() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let parent_hash = B256::with_last_byte(1);
             let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
 
@@ -1486,7 +1486,7 @@ mod tests {
 
     #[test]
     fn managed_overlay_errors_if_parent_is_not_persisted_or_managed() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let parent_hash = B256::with_last_byte(1);
             let anchor_hash = B256::with_last_byte(2);
             let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
@@ -1499,7 +1499,7 @@ mod tests {
 
     #[test]
     fn managed_overlay_skip_requires_both_frontiers() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let parent_hash = B256::with_last_byte(1);
             let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
             assert!(!builder.should_skip_overlay_for_reused_sparse_trie(parent_hash, parent_hash));

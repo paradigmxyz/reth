@@ -1,13 +1,11 @@
 //! Additional helpers for executing tracing calls
 
-use crate::{
-    executor::sync::{
-        atomic::{AtomicUsize, Ordering},
-        OnceLock,
-    },
-    metrics::WorkerPoolMetrics,
+use crate::metrics::WorkerPoolMetrics;
+use reth_concurrency::sync::{
+    atomic::{AtomicUsize, Ordering},
     rayon, thread,
     time::Instant,
+    OnceLock,
 };
 use std::{
     any::Any,
@@ -22,7 +20,7 @@ use std::{
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
 
 #[cfg(feature = "fuzz")]
-use crate::channel;
+use reth_concurrency::sync::channel;
 #[cfg(feature = "fuzz")]
 use std::mem;
 
@@ -167,7 +165,7 @@ impl<T> Future for BlockingTaskHandle<T> {
 #[non_exhaustive]
 pub struct TokioBlockingTaskError;
 
-crate::executor::thread_local! {
+reth_concurrency::sync::thread_local! {
     static WORKER: RefCell<Worker> = const { RefCell::new(Worker::new()) };
 }
 
@@ -186,7 +184,7 @@ std::thread_local! {
 #[derive(Default)]
 struct WorkerSlot {
     state: RefCell<Worker>,
-    access: crate::executor::sync::Mutex<()>,
+    access: reth_concurrency::sync::Mutex<()>,
     owner: std::cell::Cell<Option<thread::ThreadId>>,
 }
 
@@ -697,7 +695,8 @@ impl Drop for WorkerStatefulPool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{channel, rayon::prelude::*, test_utils};
+    use crate::test_utils;
+    use reth_concurrency::sync::{channel, rayon::prelude::*};
     use std::{mem, time::Duration};
 
     #[test]

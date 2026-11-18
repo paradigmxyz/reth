@@ -1,4 +1,4 @@
-use reth_tasks::executor::thread;
+use reth_concurrency::sync::thread;
 use std::{cmp::max, time::Duration};
 
 /// The default port for the http server

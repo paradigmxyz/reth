@@ -1224,7 +1224,7 @@ mod tests {
 
     #[test]
     fn overlay_cache_is_keyed_by_both_durable_frontiers() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 3);
             let manager = OverlayManager::default();
             for block in &blocks[2..=3] {
@@ -1264,7 +1264,7 @@ mod tests {
 
     #[test]
     fn overlays_are_computed_lazily() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 3);
             let manager = OverlayManager::default();
             for block in &blocks[2..=3] {
@@ -1293,7 +1293,7 @@ mod tests {
 
     #[test]
     fn state_trie_overlay_cache_is_keyed_by_trie_changesets() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 3);
             let manager = OverlayManager::default();
             for block in &blocks[2..=3] {
@@ -1314,7 +1314,7 @@ mod tests {
 
     #[test]
     fn supplied_state_trie_overlay_is_available_in_both_modes() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, _) = setup_frontiers(1, 1);
             let provider = factory.provider().unwrap();
             let provider = OverlayStateProvider::<&_, EthPrimitives>::new_with_state_trie(
@@ -1330,7 +1330,7 @@ mod tests {
 
     #[test]
     fn lazy_overlays_survive_manager_block_removal() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 1);
             let manager = OverlayManager::default();
             for block in &blocks[2..=3] {
@@ -1358,7 +1358,7 @@ mod tests {
 
     #[test]
     fn skipped_state_trie_overlay_is_not_cached_or_used_for_state_roots() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(3, 3);
             let manager = OverlayManager::default();
             manager.insert_block(blocks[4].clone());
@@ -1382,7 +1382,7 @@ mod tests {
 
     #[test]
     fn execution_overlay_readers_use_overlay_first() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, _) = setup_frontiers(1, 3);
             let address = Address::with_last_byte(1);
             let account_info =
@@ -1425,7 +1425,7 @@ mod tests {
     #[test]
     #[allow(clippy::clone_on_copy)]
     fn historical_execution_reads_use_history_indexes() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 3);
             let address = Address::with_last_byte(1);
             let storage_key = B256::with_last_byte(2);
@@ -1500,7 +1500,7 @@ mod tests {
     #[test]
     #[allow(clippy::clone_on_copy)]
     fn history_starts_above_lowest_changeset_file() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(2, 3);
             factory.set_storage_settings_cache(StorageSettings::v2());
             let address = Address::with_last_byte(1);

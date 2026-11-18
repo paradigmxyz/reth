@@ -3,8 +3,8 @@ use crate::{
     ConfigureEvm, EvmEnvFor, ExecutionCtxFor, TxEnvFor,
 };
 use alloy_consensus::transaction::Either;
+use reth_concurrency::sync::rayon::{iter::Map, prelude::*};
 use reth_primitives_traits::TxTy;
-use reth_tasks::executor::rayon::{iter::Map, prelude::*};
 
 /// [`ConfigureEvm`] extension providing methods for executing payloads.
 pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {

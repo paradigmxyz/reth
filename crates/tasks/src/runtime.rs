@@ -9,7 +9,6 @@
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
-    time::{Duration, Instant},
     wait_for_shutdown_progress,
     worker_map::WorkerMap,
     PanickedTaskError, TaskEvent, TaskManager,
@@ -18,6 +17,7 @@ use futures_util::{
     future::{select, BoxFuture},
     Future, FutureExt, TryFutureExt,
 };
+use reth_concurrency::sync::time::{Duration, Instant};
 use std::{
     num::NonZeroUsize,
     pin::pin,
@@ -33,9 +33,11 @@ use tracing::{debug, error, Span};
 use tracing_futures::Instrument;
 
 #[cfg(feature = "rayon")]
-use crate::{
-    pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, WorkerPool},
+use crate::pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, WorkerPool};
+#[cfg(feature = "rayon")]
+use reth_concurrency::sync::{
     rayon::{ThreadPool, ThreadPoolBuildError, ThreadPoolBuilder},
+    thread::available_parallelism,
 };
 
 use tokio::runtime::Runtime as TokioRuntime;
@@ -217,7 +219,6 @@ impl RayonConfig {
 
     /// Compute the default number of threads based on available parallelism.
     fn default_thread_count(&self) -> usize {
-        use crate::thread::available_parallelism;
         // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
         // sizes doesn't actually reserve CPU cores for other processes.
         let _ = self.reserved_cpu_cores;
@@ -722,7 +723,7 @@ impl Runtime {
                 #[cfg(feature = "fuzz")]
                 {
                     if shuttle::current::try_get_current_task().is_some() {
-                        crate::thread::yield_now();
+                        reth_concurrency::sync::thread::yield_now();
                     }
                     let func = named_func.lock().take();
                     if let Some(func) = func {
@@ -742,7 +743,7 @@ impl Runtime {
         #[cfg(feature = "fuzz")]
         {
             if shuttle::current::try_get_current_task().is_some() {
-                crate::thread::yield_now();
+                reth_concurrency::sync::thread::yield_now();
             }
             let func = func.lock().take();
             if let Some(func) = func {
@@ -1302,7 +1303,7 @@ mod tests {
             assert_eq!(runtime.cpu_pool().current_num_threads(), 5);
             assert_eq!(
                 crate::test_utils::block_on(
-                    runtime.rpc_pool().spawn(crate::rayon::current_num_threads)
+                    runtime.rpc_pool().spawn(reth_concurrency::sync::rayon::current_num_threads)
                 )
                 .unwrap(),
                 5

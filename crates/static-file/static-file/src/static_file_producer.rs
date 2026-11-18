@@ -4,6 +4,7 @@ use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use reth_codecs::Compact;
+use reth_concurrency::sync::rayon::prelude::*;
 use reth_db_api::table::Value;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -14,7 +15,6 @@ use reth_prune_types::PruneModes;
 use reth_stages_types::StageId;
 use reth_static_file_types::{HighestStaticFiles, StaticFileTargets};
 use reth_storage_errors::provider::ProviderResult;
-use reth_tasks::executor::rayon::prelude::*;
 use reth_tokio_util::{EventSender, EventStream};
 use std::{
     ops::{Deref, RangeInclusive},

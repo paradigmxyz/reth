@@ -1,7 +1,7 @@
 //! Monotonic and system time using native clocks or a virtual clock in simulation.
 
 #[cfg(feature = "fuzz")]
-use crate::executor::deterministic::{self, Timer};
+use crate::sync::deterministic::{self, Timer};
 #[cfg(feature = "fuzz")]
 use shuttle::thread;
 #[cfg(feature = "fuzz")]
@@ -134,7 +134,7 @@ impl SystemTime {
 
     /// Returns the Unix epoch plus the current execution's virtual elapsed time.
     ///
-    /// Panics outside [`crate::executor::Runtime::run`]. Each execution starts at the epoch.
+    /// Panics outside [`crate::sync::Runtime::run`]. Each execution starts at the epoch.
     pub fn now() -> Self {
         Self::UNIX_EPOCH + deterministic::now()
     }
@@ -197,7 +197,7 @@ mod tests {
     use super::*;
 
     #[cfg(feature = "fuzz")]
-    use crate::executor::Runtime;
+    use crate::sync::Runtime;
 
     #[test]
     fn system_time_arithmetic_preserves_native_errors_and_bounds() {

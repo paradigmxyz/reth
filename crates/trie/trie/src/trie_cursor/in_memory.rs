@@ -391,7 +391,7 @@ impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
 mod tests {
     use super::*;
     use crate::trie_cursor::mock::MockTrieCursor;
-    use reth_tasks::executor::{sync::parking_lot::Mutex, Runtime};
+    use reth_concurrency::sync::{parking_lot::Mutex, Runtime};
     use std::{collections::BTreeMap, sync::Arc};
     use tracing::debug;
 

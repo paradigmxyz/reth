@@ -1,8 +1,6 @@
 //! Reth task management.
 //!
-//! Tokio task management is available on non-WebAssembly targets. The [`executor`]
-//! module and selected channel, compute, thread, and clock reexports are available
-//! on all targets, including wasm.
+//! Blocking concurrency primitives are provided by [`reth_concurrency::sync`].
 //!
 //! # Feature Flags
 //!
@@ -18,68 +16,51 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-#[cfg(feature = "fuzz")]
-use ::rayon as _;
-#[cfg(feature = "fuzz")]
-use reth_primitives_traits as _;
+// Backend-dependent task integration must agree with the selected primitive types.
+const _: () = assert!(
+    cfg!(feature = "fuzz") == reth_concurrency::sync::IS_SIMULATED,
+    "enable reth-tasks/fuzz when enabling reth-concurrency/fuzz"
+);
 
-/// Executor primitives shared by task, engine, and trie workers.
-pub mod executor;
-/// Selected channel, compute, thread, and clock backends.
-pub use executor::{channel, rayon, thread, time};
-
-#[cfg(not(target_family = "wasm"))]
 pub mod cancel;
-#[cfg(not(target_family = "wasm"))]
 pub mod lazy;
-#[cfg(not(target_family = "wasm"))]
 pub mod metrics;
-#[cfg(not(target_family = "wasm"))]
 pub mod runtime;
-#[cfg(not(target_family = "wasm"))]
 pub mod shutdown;
-#[cfg(not(target_family = "wasm"))]
 pub mod utils;
-#[cfg(not(target_family = "wasm"))]
 pub(crate) mod worker_map;
 
-#[cfg(all(not(target_family = "wasm"), feature = "rayon"))]
+#[cfg(feature = "rayon")]
 pub mod pool;
-#[cfg(all(not(target_family = "wasm"), feature = "rayon"))]
+#[cfg(feature = "rayon")]
 pub use pool::{build_pool_with_panic_handler, Worker, WorkerPool, WorkerStatefulPool};
 
 /// Lock-free ordered parallel iterator extension trait.
-#[cfg(all(not(target_family = "wasm"), feature = "rayon"))]
+#[cfg(feature = "rayon")]
 pub mod for_each_ordered;
-#[cfg(all(not(target_family = "wasm"), feature = "rayon"))]
+#[cfg(feature = "rayon")]
 pub use for_each_ordered::ForEachOrdered;
 
-#[cfg(not(target_family = "wasm"))]
 pub use cancel::{CancelOnDrop, ManualCancel};
-#[cfg(not(target_family = "wasm"))]
 pub use lazy::LazyHandle;
-#[cfg(all(not(target_family = "wasm"), feature = "rayon"))]
+#[cfg(feature = "rayon")]
 pub use runtime::RayonConfig;
-#[cfg(not(target_family = "wasm"))]
 pub use runtime::{Runtime, RuntimeBuildError, RuntimeBuilder, RuntimeConfig, TokioConfig};
 
-#[cfg(not(target_family = "wasm"))]
 mod task_manager;
-#[cfg(not(target_family = "wasm"))]
 pub use task_manager::{
     spawn_blocking, spawn_scoped_thread, spawn_thread, PanickedTaskError, TaskExecutor, TaskManager,
 };
 // Preserve the original native thread helper names.
-#[cfg(all(not(target_family = "wasm"), not(feature = "fuzz")))]
+#[cfg(not(feature = "fuzz"))]
 pub use task_manager::{
     spawn_scoped_thread as spawn_scoped_os_thread, spawn_thread as spawn_os_thread,
 };
-#[cfg(not(target_family = "wasm"))]
 pub(crate) use task_manager::{wait_for_shutdown_progress, TaskEvent};
 
-#[cfg(all(test, not(target_family = "wasm")))]
+#[cfg(test)]
 mod test_utils {
-    use crate::executor::Runtime;
+    use reth_concurrency::sync::Runtime;
     use tokio::runtime::Builder;
 
     // This lock is acquired before entering the selected runtime and serializes simulations.
@@ -91,9 +72,9 @@ mod test_utils {
     use std::sync::Mutex;
 
     #[cfg(feature = "rayon")]
-    use crate::thread;
-    #[cfg(feature = "rayon")]
     use futures_util::FutureExt;
+    #[cfg(feature = "rayon")]
+    use reth_concurrency::sync::thread;
     #[cfg(feature = "rayon")]
     #[allow(
         clippy::disallowed_types,

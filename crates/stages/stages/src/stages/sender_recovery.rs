@@ -1,4 +1,5 @@
 use alloy_primitives::{Address, BlockNumber, TxNumber};
+use reth_concurrency::sync::{channel::mpsc, rayon};
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
 use reth_db::static_file::TransactionMask;
@@ -16,7 +17,6 @@ use reth_stages_api::{
     StageId, TransactionRangeOutput, UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_tasks::executor::{channel::mpsc, rayon};
 use std::{fmt::Debug, ops::Range};
 use thiserror::Error;
 use tracing::*;

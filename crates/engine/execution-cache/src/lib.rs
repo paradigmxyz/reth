@@ -22,9 +22,9 @@ pub use txpool::*;
 
 use alloy_primitives::B256;
 use metrics::{Counter, Histogram};
+use reth_concurrency::sync::parking_lot::Mutex;
 use reth_metrics::Metrics;
 use reth_primitives_traits::FastInstant as Instant;
-use reth_tasks::executor::sync::parking_lot::Mutex;
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, instrument, warn};
 
@@ -191,7 +191,7 @@ struct PayloadExecutionCacheMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_tasks::executor::{channel::mpsc, thread, Runtime};
+    use reth_concurrency::sync::{channel::mpsc, thread, Runtime};
     use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]

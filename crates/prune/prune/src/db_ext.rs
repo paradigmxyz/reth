@@ -201,11 +201,11 @@ impl<Tx> DbTxPruneExt for Tx where Tx: DbTxMut + DbTx {}
 mod tests {
     use super::DbTxPruneExt;
     use crate::PruneLimiter;
+    use reth_concurrency::sync::atomic::{AtomicUsize, Ordering};
     use reth_db_api::tables;
     use reth_primitives_traits::SignerRecoverable;
     use reth_provider::{DBProvider, DatabaseProviderFactory};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use reth_tasks::executor::sync::atomic::{AtomicUsize, Ordering};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
     use std::sync::Arc;
 
@@ -255,7 +255,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_concurrency::sync::Runtime::new().run(move || {
             let db = TestStageDB::default();
             db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
@@ -311,7 +311,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_concurrency::sync::Runtime::new().run(move || {
             let db = TestStageDB::default();
             db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 

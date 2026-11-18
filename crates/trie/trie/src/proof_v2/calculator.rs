@@ -1865,7 +1865,7 @@ mod tests {
     use alloy_trie::proof::AddedRemovedKeys;
     use itertools::Itertools;
     use rand::prelude::*;
-    use reth_tasks::executor::Runtime;
+    use reth_concurrency::sync::Runtime;
     use reth_trie_common::{
         prefix_set::{PrefixSet, PrefixSetMut},
         updates::TrieUpdatesSorted,

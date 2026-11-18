@@ -1,14 +1,14 @@
 //! BAL read-set prewarming pool.
 
 use alloy_primitives::{Address, StorageKey};
-use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
-use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
-use reth_tasks::executor::{
+use reth_concurrency::sync::{
+    atomic::{AtomicUsize, Ordering},
     channel,
     channel::{Receiver, Sender},
-    sync::atomic::{AtomicUsize, Ordering},
     thread::{Builder, JoinHandle},
 };
+use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
+use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tracing::trace;

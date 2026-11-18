@@ -15,6 +15,7 @@ use crate::{
     StaticFileProviderFactory,
 };
 use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
+use reth_concurrency::sync::rayon::prelude::ParallelSliceMut;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
     models::{AccountBeforeTx, StorageBeforeTx},
@@ -36,7 +37,6 @@ use reth_storage_api::{
     ChangeSetReader, DBProvider, DbTxProvider, NodePrimitivesProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_tasks::executor::rayon::prelude::ParallelSliceMut;
 use strum::{Display, EnumIs};
 
 /// Type alias for [`EitherReader`] constructors.

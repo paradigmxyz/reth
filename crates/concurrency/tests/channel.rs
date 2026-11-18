@@ -1,6 +1,6 @@
 //! Selected-channel ownership and disconnection regressions.
 
-use reth_tasks::executor::{channel, thread, Runtime};
+use reth_concurrency::sync::{channel, thread, Runtime};
 
 #[test]
 fn mpsc_receiver_drop_releases_payloads_before_sender() {

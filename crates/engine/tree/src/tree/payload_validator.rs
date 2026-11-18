@@ -117,14 +117,12 @@ use alloy_eip7928::{
 };
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_primitives::{map::B256Set, B256};
-use reth_tasks::{
-    executor::{
-        channel,
-        channel::{mpsc, Sender},
-        time::FastInstant as Instant,
-    },
-    LazyHandle,
+use reth_concurrency::sync::{
+    channel,
+    channel::{mpsc, Sender},
+    time::FastInstant as Instant,
 };
+use reth_tasks::LazyHandle;
 
 use crate::tree::{
     payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle},
@@ -137,6 +135,7 @@ use crate::tree::{
 use alloy_primitives::Address;
 use evm2::evm::{AccountInfo, Bal as EvmBal};
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
+use reth_concurrency::sync::atomic::{AtomicUsize, Ordering};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -166,7 +165,6 @@ use reth_provider::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-use reth_tasks::executor::sync::atomic::{AtomicUsize, Ordering};
 use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, LazyTrieData};
 use reth_trie_common::bundle_state::BundleAccount;
 use std::{sync::Arc, time::Duration};

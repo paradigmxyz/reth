@@ -12,6 +12,7 @@ use eyre::WrapErr;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
+use reth_concurrency::sync::thread;
 use reth_consensus::FullConsensus;
 use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use reth_node_core::args::JitArgs;
@@ -22,7 +23,6 @@ use reth_provider::{
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
 use reth_storage_api::{ChangeSetReader, DBProvider, StateProvider, StorageChangeSetReader};
-use reth_tasks::executor::thread;
 use reth_trie::bundle_state::{AccountInfoRevert, BundleState, RevertToSlot};
 use std::{
     collections::HashMap,

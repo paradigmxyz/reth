@@ -48,6 +48,7 @@ reth-stages.workspace = true
 reth-stages-types.workspace = true
 reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-static-file.workspace = true
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-tasks.workspace = true
 reth-storage-api.workspace = true
 reth-storage-overlay.workspace = true
@@ -111,8 +112,10 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [features]
 fuzz = [
+    "reth-storage-overlay/fuzz",
     "reth-trie/fuzz",
     "reth-tasks/fuzz",
+    "reth-concurrency/fuzz",
     "reth-downloaders/fuzz",
     "reth-etl/fuzz",
     "reth-evm/fuzz",

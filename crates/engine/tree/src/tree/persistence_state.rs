@@ -22,7 +22,7 @@
 
 use crate::persistence::PersistenceResult;
 use alloy_eips::BlockNumHash;
-use reth_tasks::executor::{channel::Receiver, time::FastInstant as Instant};
+use reth_concurrency::sync::{channel::Receiver, time::FastInstant as Instant};
 use tracing::trace;
 
 /// The state of the persistence task.

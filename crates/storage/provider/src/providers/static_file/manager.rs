@@ -18,6 +18,7 @@ use alloy_primitives::{b256, Address, BlockHash, BlockNumber, TxHash, TxNumber, 
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, NamedChain};
+use reth_concurrency::sync::{channel::mpsc, rayon};
 use reth_db::{
     lockfile::StorageLock,
     static_file::{
@@ -51,7 +52,6 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
-use reth_tasks::executor::{channel::mpsc, rayon};
 use std::{
     collections::BTreeMap,
     fmt::Debug,

@@ -11,8 +11,8 @@ use crate::{
         TreeConfig,
     },
 };
+use reth_concurrency::sync::channel::mpsc::{channel, Receiver, Sender};
 use reth_storage_overlay::OverlayManager;
-use reth_tasks::executor::channel::mpsc::{channel, Receiver, Sender};
 
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
@@ -32,6 +32,7 @@ use reth_chain_state::{
     test_utils::TestBlockBuilder, ChainInfoHeaders, InMemoryState, NewCanonicalChain,
 };
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
+use reth_concurrency::sync::thread;
 use reth_engine_primitives::{
     BeaconForkChoiceUpdateError, ConsensusEngineHandle, EngineApiValidator, ForkchoiceStatus,
     NoopInvalidBlockHook, DEFAULT_BACKFILL_RUN_THRESHOLD,
@@ -48,7 +49,7 @@ use reth_provider::{
     InMemoryBalStore, RawBal,
 };
 use reth_stages_api::ControlFlow;
-use reth_tasks::{executor::thread, spawn_thread};
+use reth_tasks::spawn_thread;
 use reth_trie_common::SortedTrieData;
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 use tokio::sync::oneshot;
@@ -693,7 +694,7 @@ fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled(
 
 #[test]
 fn payload_build_tracker_notifies_after_last_lease_drops() {
-    reth_tasks::executor::Runtime::new().run(|| {
+    reth_concurrency::sync::Runtime::new().run(|| {
         let (tracker, finished) = PayloadBuildTracker::new();
         let first = tracker.acquire();
         let second = tracker.acquire();

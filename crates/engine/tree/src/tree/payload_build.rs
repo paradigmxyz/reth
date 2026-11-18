@@ -1,6 +1,6 @@
 //! Tracking of active payload build jobs.
 
-use reth_tasks::executor::channel::{self, Receiver, Sender};
+use reth_concurrency::sync::channel::{self, Receiver, Sender};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,

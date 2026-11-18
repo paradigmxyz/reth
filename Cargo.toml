@@ -18,6 +18,7 @@ members = [
     "crates/cli/commands/",
     "crates/cli/runner/",
     "crates/cli/util/",
+    "crates/concurrency/",
     "crates/config/",
     "crates/consensus/common/",
     "crates/consensus/consensus/",
@@ -338,6 +339,7 @@ reth-cli-runner = { path = "crates/cli/runner" }
 reth-cli-util = { path = "crates/cli/util" }
 reth-codecs = { version = "0.8.2", default-features = false }
 reth-codecs-derive = "0.8.2"
+reth-concurrency = { path = "crates/concurrency", default-features = false }
 reth-config = { path = "crates/config", default-features = false }
 reth-consensus = { path = "crates/consensus/consensus", default-features = false }
 reth-consensus-common = { path = "crates/consensus/common", default-features = false }

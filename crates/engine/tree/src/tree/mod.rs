@@ -11,6 +11,11 @@ use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus, PayloadStatusEnum};
 use error::InsertBlockFatalError;
 use payload_build::PayloadBuildTracker;
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
+use reth_concurrency::sync::{
+    channel,
+    channel::{mpsc, select_biased, Receiver, Sender},
+    time::FastInstant as Instant,
+};
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::{
     BeaconEngineMessage, ConsensusEngineEvent, ExecutionPayload, ForkchoiceStateTracker,
@@ -27,15 +32,7 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayManager;
-use reth_tasks::{
-    executor::{
-        channel,
-        channel::{mpsc, select_biased, Receiver, Sender},
-        time::FastInstant as Instant,
-    },
-    spawn_thread,
-    utils::increase_thread_priority,
-};
+use reth_tasks::{spawn_thread, utils::increase_thread_priority};
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 

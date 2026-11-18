@@ -10,6 +10,10 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockNumHash, NumHash};
 use alloy_primitives::B256;
+use reth_concurrency::sync::{
+    channel::{self, TryRecvError},
+    time::FastInstant as Instant,
+};
 use reth_engine_primitives::{ConsensusEngineEvent, SlowBlockInfo};
 use reth_errors::ProviderResult;
 use reth_evm::ConfigureEvm;
@@ -19,10 +23,6 @@ use reth_provider::{
     BalProvider, BlockReader, ChangeSetReader, DatabaseProviderFactory, ProviderError,
     PruneCheckpointReader, SaveBlocksInput, StageCheckpointReader, StateProviderFactory,
     StateReader, StorageChangeSetReader, StorageSettingsCache,
-};
-use reth_tasks::executor::{
-    channel::{self, TryRecvError},
-    time::FastInstant as Instant,
 };
 use std::time::Duration;
 use tracing::debug;

@@ -7,14 +7,9 @@ use crate::{
     BranchNodeCompact, Nibbles,
 };
 use alloy_primitives::{map::B256Map, B256};
+use reth_concurrency::sync::parking_lot::{Mutex, MutexGuard};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::updates::TrieUpdates;
-
-#[cfg(not(target_family = "wasm"))]
-use reth_tasks::executor::sync::parking_lot::{Mutex, MutexGuard};
-
-#[cfg(target_family = "wasm")]
-use parking_lot::{Mutex, MutexGuard};
 
 /// Mock trie cursor factory.
 #[derive(Clone, Default, Debug)]

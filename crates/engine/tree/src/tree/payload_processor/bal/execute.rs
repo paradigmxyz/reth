@@ -32,20 +32,18 @@ use alloy_eip7928::{
 };
 use alloy_primitives::Address;
 use evm2::evm::Bal as EvmBal;
+use reth_concurrency::sync::{
+    channel,
+    channel::{Receiver, Sender},
+    rayon::Scope,
+};
 use reth_engine_primitives::BlockAccessListDecodeError;
 use reth_evm::{
     BlockExecutionOutput, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, ConfigureEvm,
     Database, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
 };
 use reth_primitives_traits::ReceiptTy;
-use reth_tasks::{
-    executor::{
-        channel,
-        channel::{Receiver, Sender},
-        rayon::Scope,
-    },
-    Runtime,
-};
+use reth_tasks::Runtime;
 use std::sync::Arc;
 
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
@@ -250,6 +248,7 @@ mod tests {
         CacheDB, EmptyDB, BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
     };
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_concurrency::sync::atomic::{AtomicUsize, Ordering};
     use reth_engine_primitives::{InsertBlockErrorKind, InsertBlockValidationError};
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction, TransactionSigned};
     use reth_evm::{
@@ -258,7 +257,6 @@ mod tests {
     };
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Block as _, Recovered, SealedBlock};
-    use reth_tasks::executor::sync::atomic::{AtomicUsize, Ordering};
     use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
     use std::{convert::Infallible, io};
 
@@ -545,7 +543,7 @@ mod tests {
 
     #[test]
     fn empty_block_happy_path_round_trip() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // Two-pass end-to-end:
             //   1. Build the canonical BAL an empty Amsterdam block produces (via
             //      `reference_bal_for_empty_block`).
@@ -572,7 +570,7 @@ mod tests {
 
     #[test]
     fn multi_tx_happy_path_round_trip() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // End-to-end with two value transfers from distinct senders to the same recipient.
             //
             // 1. Fund alice and bob in a fresh canonical DB.
@@ -628,7 +626,7 @@ mod tests {
 
     #[test]
     fn shadow_empty_block() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // System calls only — no txs. Both paths should produce identical system-call
             // side effects in their execution state (beacon roots storage, history storage, etc.).
             assert_shadow_equal(
@@ -642,7 +640,7 @@ mod tests {
 
     #[test]
     fn shadow_multi_value_transfer() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // Two senders → same recipient. Byte-equal across paths means: worker-produced
             // diffs commit identically to a directly-executed serial path.
             let evm_config = test_evm_config();
@@ -667,7 +665,7 @@ mod tests {
 
     #[test]
     fn rejects_tx_gas_limit_that_exceeds_remaining_block_gas() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // Each worker sees an empty block, so both transactions fit individually. The ordered
             // commit loop must still reject tx2 because tx1's committed gas leaves too little
             // block gas for tx2's gas limit.
@@ -721,7 +719,7 @@ mod tests {
 
     #[test]
     fn shadow_tx_with_revert() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // A tx that reverts in a deployed contract. Both paths must produce identical receipts
             // (success = false, gas charged, state rolled back except for gas payment + nonce
             // bump).
@@ -748,7 +746,7 @@ mod tests {
 
     #[test]
     fn shadow_tx_with_sstore() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // Tx calls a deployed contract that does `SSTORE(0, 0x42)`. The storage write must
             // commit identically across serial and BAL paths even though the canonical state
             // applies a diff produced by a worker EVM.
@@ -774,7 +772,7 @@ mod tests {
 
     #[test]
     fn returns_built_bal_for_final_hash_mismatch() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // Build the BAL an empty block actually produces, then append a phantom address
             // that execution never touches. The rebuilt BAL omits it, and the outer consensus
             // validator is responsible for comparing that rebuilt hash to the header commitment.
@@ -813,7 +811,7 @@ mod tests {
 
     #[test]
     fn canonical_make_db_failure() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // A make_db that always fails must surface as Provider.
             let block = empty_amsterdam_block(B256::ZERO);
             let failing_make_db = |_: bool| -> Result<CacheDB<EmptyDB>, BalExecutionError> {
@@ -833,7 +831,7 @@ mod tests {
 
     #[test]
     fn worker_tx_recovery_error_becomes_validation_error() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // A tx recovery failure fed into the worker channel must surface as
             // a block validation error. Uses execute_block directly since tx_stream hardcodes
             // Infallible and cannot inject errors.
@@ -867,7 +865,7 @@ mod tests {
 
     #[test]
     fn gas_tracker_non_amsterdam_uses_cumulative_gas() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // tx2's gas limit fits the block gas limit on its own but not the gas left after tx1,
             // so non-Amsterdam admission, which budgets by cumulative gas, must reject it.
             let evm_config = non_amsterdam_evm_config();
@@ -911,7 +909,7 @@ mod tests {
 
     #[test]
     fn gas_tracker_caps_oversized_tx_gas_limit_at_tx_gas_limit_cap() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // A tx with gas_limit above the tx gas limit cap (EIP-7825) is admitted when the
             // capped value fits in the remaining block gas.
             const TX_GAS_LIMIT_CAP: u64 = 1 << 24;
@@ -1017,7 +1015,7 @@ mod tests {
 
     #[test]
     fn default_tx_gas_limit_cap_matches_serial_execution() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let evm_config = test_evm_config();
             let block_gas_limit = 20_000_000;
             // The uncapped second limit exceeds the remaining regular budget. EIP-7825's
@@ -1049,7 +1047,7 @@ mod tests {
 
     #[test]
     fn propagates_bal_miss_of_admitted_transaction_as_block_verdict() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // The BAL covers neither transaction: the first slot's speculative failure is
             // adjudicated in block order and becomes the block's verdict.
             let (pre_block_db, reference_bal, tx1, tx2) =
@@ -1087,7 +1085,7 @@ mod tests {
 
     #[test]
     fn admission_rejects_before_speculative_worker_failure_surfaces() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             // tx2 exceeds the remaining block gas AND misses the BAL; block-gas admission is
             // adjudicated first, so the verdict is the gas error, not tx2's BAL failure.
             let (pre_block_db, reference_bal, tx1, tx2) =
@@ -1120,7 +1118,7 @@ mod tests {
 
     #[test]
     fn worker_reuses_provider_after_failure_and_finishes_earlier_transactions() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let evm_config = test_evm_config();
             let (pre_block_db, reference_bal, tx1, tx2) =
                 two_transfers_with_reference_bal(&evm_config, 100_000, true);
@@ -1199,7 +1197,7 @@ mod tests {
 
     #[test]
     fn amsterdam_state_gas_admission_matches_serial_execution() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let evm_config = EthEvmConfig::new(Arc::new(
                 reth_chainspec::ChainSpecBuilder::mainnet().amsterdam_activated().build(),
             ));

@@ -7,6 +7,10 @@ use crate::tree::{
     TxPoolPrewarmCacheSnapshot as Snapshot,
 };
 use alloy_primitives::B256;
+use reth_concurrency::sync::{
+    channel::{Receiver, RecvTimeoutError, TryRecvError},
+    time::Instant,
+};
 use reth_evm::{cached::CachedReads, database::StateProviderDatabase, ConfigureEvm, Evm, EvmEnv};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
@@ -15,10 +19,6 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
-use reth_tasks::executor::{
-    channel::{Receiver, RecvTimeoutError, TryRecvError},
-    time::Instant,
-};
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, trace};
 
@@ -355,19 +355,17 @@ mod tests {
     use alloy_consensus::{transaction::Recovered, Signed, TxLegacy};
     use alloy_primitives::{Address, Signature, TxKind};
     use evm2::BaseEvmTypes;
+    use reth_concurrency::sync::{
+        atomic::{AtomicUsize, Ordering},
+        channel::{unbounded, Sender},
+        parking_lot::{Mutex, RwLock},
+        thread::{self, JoinHandle},
+    };
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::EvmEnvFor;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_stages_api::{StageCheckpoint, StageId};
-    use reth_tasks::executor::{
-        channel::{unbounded, Sender},
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            parking_lot::{Mutex, RwLock},
-        },
-        thread::{self, JoinHandle},
-    };
     use std::collections::{HashMap, VecDeque};
 
     /// Upper bound on any single wait; failures surface as panics well before CI timeouts.
@@ -544,7 +542,7 @@ mod tests {
 
     #[test]
     fn warms_pool_transactions_into_a_published_snapshot() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let harness = Harness::spawn();
             let parent_hash = B256::repeat_byte(0x01);
 
@@ -563,7 +561,7 @@ mod tests {
 
     #[test]
     fn records_results_of_pool_transactions() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let harness = Harness::spawn();
             let parent_hash = B256::repeat_byte(0x01);
             let results = harness.start_recording(parent_hash);
@@ -577,7 +575,7 @@ mod tests {
 
     #[test]
     fn overlapping_pauses_require_matching_resumes() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let harness = Harness::spawn();
             let parent_hash = B256::repeat_byte(0x01);
             harness.start(parent_hash);
@@ -602,7 +600,7 @@ mod tests {
 
     #[test]
     fn reuses_the_iterator_per_head_and_reopens_on_switch() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let harness = Harness::spawn();
             let first = B256::repeat_byte(0x01);
             let second = B256::repeat_byte(0x02);
@@ -623,7 +621,7 @@ mod tests {
 
     #[test]
     fn shuts_down_when_control_is_dropped() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let harness = Harness::spawn();
             let parent_hash = B256::repeat_byte(0x01);
             harness.start(parent_hash);

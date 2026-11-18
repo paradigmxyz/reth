@@ -16,6 +16,7 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::Recovered;
 use alloy_primitives::{Address, B256};
+use reth_concurrency::sync::parking_lot::RwLock;
 use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, EvmTypesFor};
 use reth_primitives_traits::{NodePrimitives, SealedHeader, TxTy};
 use reth_provider::{
@@ -24,7 +25,6 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
-use reth_tasks::executor::sync::parking_lot::RwLock;
 use std::{fmt::Debug, sync::Arc};
 
 /// Coordinates a long-lived worker and the latest completed immutable snapshot.

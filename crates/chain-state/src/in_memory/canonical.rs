@@ -10,13 +10,13 @@ use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{map::B256Map, BlockNumber, TxHash, B256};
 use reth_chainspec::ChainInfo;
+use reth_concurrency::sync::parking_lot::RwLock;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::RecoveredBlockAndExecutionOutput;
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
     BlockBody as _, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
-use reth_tasks::executor::sync::parking_lot::RwLock;
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -517,7 +517,7 @@ mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
     use rand::Rng;
-    use reth_tasks::executor::Runtime;
+    use reth_concurrency::sync::Runtime;
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder<EthPrimitives>,

@@ -25,6 +25,7 @@ reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
@@ -89,6 +90,7 @@ fuzz = [
     "reth-trie/fuzz",
     "reth-chain-state/fuzz",
     "reth-tasks/fuzz",
+    "reth-concurrency/fuzz",
     "reth-storage-overlay/fuzz",
     "reth-db/fuzz",
 ]
@@ -108,6 +110,7 @@ test-utils = [
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
     "reth-tasks/test-utils",
+    "reth-concurrency/test-utils",
     "dep:tokio",
 ]
 account-ext = [

@@ -3,6 +3,7 @@ use alloy_primitives::{BlockNumber, B256};
 use alloy_rlp::Decodable;
 use eyre::WrapErr;
 use reth_codecs::Compact;
+use reth_concurrency::sync::channel::mpsc;
 use reth_fs_util::FsPathError;
 use reth_node_builder::NodePrimitives;
 use reth_primitives_traits::{SealedBlock, SealedHeader, SealedHeaderFor};
@@ -12,7 +13,6 @@ use reth_provider::{
 };
 use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
-use reth_tasks::executor::channel::mpsc;
 use std::{io::ErrorKind, path::Path};
 use tracing::info;
 
@@ -214,12 +214,12 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_primitives::{address, b256};
-    use reth_db_common::init::init_genesis;
-    use reth_provider::{test_utils::create_test_provider_factory, DatabaseProviderFactory};
-    use reth_tasks::executor::{
-        sync::atomic::{AtomicU64, Ordering},
+    use reth_concurrency::sync::{
+        atomic::{AtomicU64, Ordering},
         Runtime,
     };
+    use reth_db_common::init::init_genesis;
+    use reth_provider::{test_utils::create_test_provider_factory, DatabaseProviderFactory};
     use std::{io::Write, sync::Arc};
     use tempfile::NamedTempFile;
 

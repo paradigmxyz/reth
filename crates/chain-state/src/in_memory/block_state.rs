@@ -181,8 +181,8 @@ mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
     use rand::Rng;
+    use reth_concurrency::sync::{thread, Runtime};
     use reth_ethereum_primitives::{EthPrimitives, Receipt};
-    use reth_tasks::executor::{thread, Runtime};
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder<EthPrimitives>,

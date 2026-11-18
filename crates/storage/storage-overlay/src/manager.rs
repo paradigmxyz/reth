@@ -38,13 +38,12 @@ use parking_lot::Mutex;
 use std::{sync::OnceLock, time::Instant};
 
 #[cfg(feature = "fuzz")]
-use reth_tasks::executor::{
-    sync::{parking_lot::Mutex, OnceLock},
-    time::Instant,
-};
+use reth_concurrency::sync::{parking_lot::Mutex, time::Instant, OnceLock};
 
 #[cfg(feature = "rayon")]
-use reth_tasks::{executor::rayon, WorkerPool};
+use reth_concurrency::sync::rayon;
+#[cfg(feature = "rayon")]
+use reth_tasks::WorkerPool;
 
 /// Manages state trie and execution overlays for in-memory blocks.
 ///
@@ -1094,9 +1093,9 @@ mod tests {
     use alloy_primitives::{map::HashMap, Address, U256};
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_concurrency::sync::{channel::mpsc, thread};
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::Account;
-    use reth_tasks::executor::{channel::mpsc, thread};
     use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, HashedStorage, SortedTrieData};
     use reth_trie_common::bundle_state::BundleState;
     use std::{sync::Arc, time::Duration};
@@ -1179,7 +1178,7 @@ mod tests {
 
     #[test]
     fn builds_managed_overlay_for_inserted_blocks() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let manager = OverlayManager::default();
             let blocks = test_blocks();
             for block in &blocks {
@@ -1207,7 +1206,7 @@ mod tests {
 
     #[test]
     fn builds_execution_overlay_for_inserted_blocks() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let manager = OverlayManager::default();
             let blocks = test_blocks();
             for block in &blocks {
@@ -1249,7 +1248,7 @@ mod tests {
 
     #[test]
     fn computing_sibling_evicts_ready_cached_overlays() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let manager = OverlayManager::default();
             let mut builder = TestBlockBuilder::eth();
             let anchor_hash = B256::random();
@@ -1285,7 +1284,7 @@ mod tests {
 
     #[test]
     fn promotes_ready_parent_overlays_to_the_child() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let manager = OverlayManager::default();
             let blocks = test_blocks();
             for block in &blocks {
@@ -1313,7 +1312,7 @@ mod tests {
 
     #[test]
     fn promotes_parent_overlays_held_by_callers() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let manager = OverlayManager::default();
             let blocks = test_blocks();
             for block in &blocks {
@@ -1354,7 +1353,7 @@ mod tests {
 
     #[test]
     fn does_not_cache_or_take_parent_overlays_for_unmanaged_blocks() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let manager = OverlayManager::default();
             let blocks = test_blocks();
             for block in &blocks[..2] {
@@ -1392,7 +1391,7 @@ mod tests {
     #[cfg(feature = "rayon")]
     #[test]
     fn uncached_overlays_do_not_use_worker_pool() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let worker_pool = Arc::new(WorkerPool::new(1, "uncached-overlay-test"));
             let manager = OverlayManager::with_worker_pool(
                 InMemoryState::default(),
@@ -1436,7 +1435,7 @@ mod tests {
     #[cfg(feature = "rayon")]
     #[test]
     fn precomputes_execution_overlay_for_cached_parent() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let manager = OverlayManager::with_worker_pool(
                 InMemoryState::default(),
                 Arc::new(WorkerPool::new(1, "execution-overlay-test")),
@@ -1472,7 +1471,7 @@ mod tests {
     #[cfg(feature = "rayon")]
     #[test]
     fn precomputes_execution_overlay_after_anchor_advances() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let manager = OverlayManager::with_worker_pool(
                 InMemoryState::default(),
                 Arc::new(WorkerPool::new(1, "execution-overlay-test")),
@@ -1528,7 +1527,7 @@ mod tests {
     #[cfg(feature = "rayon")]
     #[test]
     fn execution_overlay_precompute_does_not_wait_for_pending_entry() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let worker_pool = Arc::new(WorkerPool::new(1, "execution-overlay-pending-test"));
             let manager = OverlayManager::with_worker_pool(
                 InMemoryState::default(),
@@ -1559,7 +1558,7 @@ mod tests {
 
     #[test]
     fn contains_hash_detects_hashes_from_anchor_to_parent() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let manager = OverlayManager::default();
             let blocks = test_blocks();
             for block in &blocks {
@@ -1583,7 +1582,7 @@ mod tests {
 
     #[test]
     fn contains_hash_rejects_hash_before_anchor() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let manager = OverlayManager::default();
             let blocks = test_blocks();
             for block in &blocks {
@@ -1602,7 +1601,7 @@ mod tests {
 
     #[test]
     fn contains_hash_rejects_unknown_anchor() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let manager = OverlayManager::default();
             let blocks = test_blocks();
             for block in &blocks {
@@ -1618,7 +1617,7 @@ mod tests {
 
     #[test]
     fn required_lookup_waits_for_in_progress_overlay() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let manager = OverlayManager::<EthPrimitives>::default();
             let block = test_blocks().remove(0);
             let parent_state = BlockState::new(block);
@@ -1659,7 +1658,7 @@ mod tests {
 
     #[test]
     fn prunes_cached_overlays_after_removing_blocks() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let manager = OverlayManager::default();
             let blocks = test_blocks();
             for block in &blocks {

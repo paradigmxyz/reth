@@ -30,6 +30,7 @@ reth-provider.workspace = true
 reth-prune.workspace = true
 reth-stages-api.workspace = true
 reth-storage-overlay = { workspace = true, features = ["rayon"] }
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
@@ -103,6 +104,7 @@ fuzz = [
     "reth-provider/fuzz",
     "reth-storage-overlay/fuzz",
     "reth-tasks/fuzz",
+    "reth-concurrency/fuzz",
     "reth-trie-parallel/fuzz",
     "reth-trie-common/fuzz",
     "reth-trie-sparse/fuzz",
@@ -150,6 +152,7 @@ test-utils = [
     "reth-ethereum-primitives/test-utils",
     "reth-node-ethereum/test-utils",
     "reth-tasks/test-utils",
+    "reth-concurrency/test-utils",
     "reth-execution-cache/test-utils",
     "reth-evm-ethereum/test-utils",
 ]

@@ -24,11 +24,11 @@ pub fn send_or_cancel<T>(
 
 #[cfg(feature = "fuzz")]
 mod simulated {
-    use crate::executor::{
+    use crate::sync::{
         deterministic::Timer,
-        sync::{Arc, Mutex},
         thread,
         time::{Duration, Instant},
+        Arc, Mutex,
     };
     use std::{collections::VecDeque, fmt, mem};
 
@@ -460,7 +460,7 @@ mod simulated {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use crate::executor::Runtime;
+        use crate::sync::Runtime;
 
         #[test]
         fn receiver_drop_returns_queued_rendezvous_offer_to_sender() {
@@ -489,11 +489,11 @@ mod simulated {
 #[macro_export]
 macro_rules! select_biased {
     ($(recv($receiver:expr) -> $binding:pat => $body:expr),+ $(,)?) => {{
-        let receivers = ($($crate::channel::Receiver::clone(&$receiver),)+);
+        let receivers = ($($crate::sync::channel::Receiver::clone(&$receiver),)+);
         $crate::__select_recv!(@index receivers; []; []; [0 1 2 3 4 5 6 7]; $(($binding, $body)),+)
     }};
     ($(recv($receiver:expr) -> $binding:pat => $body:expr,)+ default => $default:expr $(,)?) => {{
-        let receivers = ($($crate::channel::Receiver::clone(&$receiver),)+);
+        let receivers = ($($crate::sync::channel::Receiver::clone(&$receiver),)+);
         $crate::__select_recv!(@index receivers; [$default]; []; [0 1 2 3 4 5 6 7]; $(($binding, $body)),+)
     }};
 }
@@ -522,9 +522,9 @@ macro_rules! __select_recv {
         let selected = loop {
             let listeners = ($($receivers.$index.listen(),)*);
             $(match $receivers.$index.try_recv() {
-                Err($crate::channel::TryRecvError::Empty) => {}
+                Err($crate::sync::channel::TryRecvError::Empty) => {}
                 result => {
-                    results.$index = Some(result.map_err(|_| $crate::channel::RecvError));
+                    results.$index = Some(result.map_err(|_| $crate::sync::channel::RecvError));
                     drop(listeners);
                     break Some($index);
                 }
@@ -541,7 +541,7 @@ macro_rules! __select_recv {
             Some(_) => unreachable!("only declared receive branches can be selected"),
         }
     }};
-    (@wait $listeners:ident; []) => { $crate::thread::park(); drop($listeners); };
+    (@wait $listeners:ident; []) => { $crate::sync::thread::park(); drop($listeners); };
     (@wait $listeners:ident; [$default:expr]) => { drop($listeners); break None; };
     (@default []) => { unreachable!("blocking selection always selects a receive") };
     (@default [$default:expr]) => { $default };

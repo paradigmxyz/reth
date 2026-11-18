@@ -1,9 +1,9 @@
-use crate::rayon;
+use reth_concurrency::sync::rayon;
 
-#[cfg(feature = "fuzz")]
-use crate::channel;
 use crossbeam_utils::CachePadded;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+#[cfg(feature = "fuzz")]
+use reth_concurrency::sync::channel;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// Extension trait for [`IndexedParallelIterator`]
@@ -24,8 +24,8 @@ pub trait ForEachOrdered: IndexedParallelIterator {
     /// while waiting for the next item to become ready. It does **not** participate in rayon's
     /// work-stealing while blocked. With the native backend, invoke this from a dedicated blocking
     /// thread (e.g. via [`tokio::task::spawn_blocking`]) rather than the rayon thread pool.
-    /// With `fuzz`, invoke this inside [`crate::executor::Runtime::run`] or one of its selected
-    /// threads, not directly from a Tokio blocking worker.
+    /// With `fuzz`, invoke this inside [`reth_concurrency::sync::Runtime::run`] or one of its
+    /// selected threads, not directly from a Tokio blocking worker.
     fn for_each_ordered<F>(self, f: F)
     where
         Self::Item: Send,
@@ -204,10 +204,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        executor::sync::atomic::{AtomicUsize, Ordering},
+    use crate::test_utils;
+    use reth_concurrency::sync::{
+        atomic::{AtomicUsize, Ordering},
         rayon::prelude::*,
-        test_utils, thread,
+        thread,
     };
     use std::{cell::Cell, rc::Rc};
 

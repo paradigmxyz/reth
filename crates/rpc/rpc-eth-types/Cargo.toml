@@ -24,6 +24,7 @@ reth-storage-api.workspace = true
 evm2.workspace = true
 reth-rpc-server-types.workspace = true
 reth-rpc-convert.workspace = true
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
 reth-trie-common.workspace = true
@@ -76,6 +77,7 @@ tokio = { workspace = true, features = ["test-util"] }
 [features]
 fuzz = [
     "reth-tasks/fuzz",
+    "reth-concurrency/fuzz",
     "reth-chain-state/fuzz",
     "reth-evm/fuzz",
     "reth-rpc-server-types/fuzz",

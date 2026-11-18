@@ -38,6 +38,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
+use reth_concurrency::sync::rayon::prelude::ParallelSliceMut;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::{Database, ReaderTxnTracker},
@@ -72,7 +73,6 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
-use reth_tasks::executor::rayon::prelude::ParallelSliceMut;
 use reth_trie::{
     bundle_state::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},

@@ -3,12 +3,12 @@
 use super::{Output, StorageJob, StorageWorker};
 use crate::{hashed_cursor::HashedStorageCursor, trie_cursor::TrieStorageCursor};
 use alloy_primitives::{B256, U256};
-use reth_execution_errors::StateRootError;
-use reth_storage_errors::db::DatabaseError;
-use reth_tasks::executor::{
+use reth_concurrency::sync::{
     channel::{self, Receiver, Sender},
     thread::{self, JoinHandle},
 };
+use reth_execution_errors::StateRootError;
+use reth_storage_errors::db::DatabaseError;
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},
     sync::Arc,

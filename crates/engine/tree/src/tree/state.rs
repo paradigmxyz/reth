@@ -398,7 +398,7 @@ mod tests {
 
     #[test]
     fn test_tree_state_normal_descendant() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let mut tree_state = TreeState::new(
                 BlockNumHash::default(),
                 EngineApiKind::Ethereum,

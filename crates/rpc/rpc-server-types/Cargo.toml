@@ -14,7 +14,7 @@ workspace = true
 [dependencies]
 reth-errors.workspace = true
 reth-network-api.workspace = true
-reth-tasks.workspace = true
+reth-concurrency = { workspace = true, features = ["std"] }
 
 # ethereum
 alloy-primitives.workspace = true
@@ -29,4 +29,4 @@ strum = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 
 [features]
-fuzz = ["reth-tasks/fuzz"]
+fuzz = ["reth-concurrency/fuzz"]

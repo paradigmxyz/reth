@@ -3,13 +3,13 @@ use alloy_consensus::Transaction;
 use alloy_eip7928::BlockAccessIndex;
 use alloy_primitives::{Address, B256, U256};
 use evm2::{bytecode::Bytecode, evm::AccountInfo, AnyError};
+use reth_concurrency::sync::{
+    channel::{select_biased, Receiver, Sender},
+    rayon::Scope,
+};
 use reth_evm::{
     BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor,
     BlockValidationError, ConfigureEvm, Database, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
-};
-use reth_tasks::executor::{
-    channel::{select_biased, Receiver, Sender},
-    rayon::Scope,
 };
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 

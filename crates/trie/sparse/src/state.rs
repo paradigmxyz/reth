@@ -13,7 +13,7 @@ use reth_trie_common::{
 use tracing::instrument;
 
 #[cfg(feature = "std")]
-use reth_tasks::executor::rayon::{
+use reth_concurrency::sync::rayon::{
     self,
     iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
 };
@@ -614,9 +614,9 @@ mod tests {
     };
     use arbitrary::Arbitrary;
     use rand::{rngs::StdRng, Rng, SeedableRng};
+    use reth_concurrency::sync::Runtime;
     use reth_execution_errors::{SparseStateTrieErrorKind, SparseTrieErrorKind};
     use reth_primitives_traits::Account;
-    use reth_tasks::executor::Runtime;
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},

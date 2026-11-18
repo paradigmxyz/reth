@@ -17,6 +17,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash, NumHash};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{PayloadStatus, PayloadStatusEnum};
+use reth_concurrency::sync::time::FastInstant as Instant;
 use reth_consensus::Consensus;
 use reth_engine_primitives::{ConsensusEngineEvent, ExecutionPayload, SlowBlockInfo};
 use reth_errors::{ConsensusError, ProviderResult};
@@ -29,7 +30,6 @@ use reth_provider::{
     StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache,
 };
-use reth_tasks::executor::time::FastInstant as Instant;
 use tracing::{debug, error, instrument, trace, warn};
 
 impl<N, P, T, V, C> EngineApiTreeHandler<N, P, T, V, C>

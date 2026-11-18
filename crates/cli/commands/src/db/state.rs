@@ -1,5 +1,10 @@
 use alloy_primitives::{keccak256, Address, BlockNumber, B256, U256};
 use clap::Parser;
+use reth_concurrency::sync::{
+    parking_lot::Mutex,
+    thread,
+    time::{Duration, Instant},
+};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     database::Database,
@@ -12,14 +17,7 @@ use reth_provider::{
     StaticFileProviderFactory,
 };
 use reth_storage_api::{BlockNumReader, StateProvider, StateProviderFactory, StorageSettingsCache};
-use reth_tasks::{
-    executor::{
-        sync::parking_lot::Mutex,
-        thread,
-        time::{Duration, Instant},
-    },
-    spawn_scoped_thread,
-};
+use reth_tasks::spawn_scoped_thread;
 use std::collections::BTreeSet;
 use tracing::info;
 

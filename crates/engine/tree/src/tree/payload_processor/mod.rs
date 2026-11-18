@@ -11,6 +11,14 @@ use crate::tree::{
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::B256;
 use prewarm::PrewarmMetrics;
+use reth_concurrency::sync::{
+    atomic::{AtomicBool, AtomicUsize},
+    channel,
+    channel::{mpsc, Receiver, Sender},
+    rayon::prelude::*,
+    time::FastInstant as Instant,
+    OnceLock,
+};
 use reth_evm::{
     precompile_cache::PrecompileCacheMap, ConfigureEvm, ConvertTx, EvmEnv, EvmTypesFor,
     ExecutableTxFor, ExecutableTxIterator, ExecutableTxParts, ExecutableTxTuple, SpecFor, TxEnvFor,
@@ -22,19 +30,7 @@ use reth_provider::{
     PruneCheckpointReader, StageCheckpointReader, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
-use reth_tasks::{
-    executor::{
-        channel,
-        channel::{mpsc, Receiver, Sender},
-        rayon::prelude::*,
-        sync::{
-            atomic::{AtomicBool, AtomicUsize},
-            OnceLock,
-        },
-        time::FastInstant as Instant,
-    },
-    Runtime,
-};
+use reth_tasks::Runtime;
 use reth_trie_common::bundle_state::BundleState;
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
@@ -760,9 +756,9 @@ mod tests {
         test_runner::{Config, TestRunner},
     };
     use reth_chainspec::ChainSpec;
+    use reth_concurrency::sync::{channel::RecvTimeoutError, Mutex};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
-    use reth_tasks::executor::{channel::RecvTimeoutError, sync::Mutex};
     use reth_trie_common::bundle_state::BundleState;
     use std::{
         collections::HashSet,
@@ -802,7 +798,7 @@ mod tests {
 
     #[test]
     fn transaction_conversion_preserves_results() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             for (count, bal) in [(10, false), (200, false), (200, true)] {
                 let processor = test_processor();
                 let (prewarm, receiver) = processor.spawn_tx_iterator(
@@ -829,7 +825,7 @@ mod tests {
 
     #[test]
     fn transaction_conversion_stops_on_error() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             for (count, bal, fail_at) in
                 [(10, false, 0), (10, true, 0), (200, false, 0), (200, false, 4), (200, false, 20)]
             {
@@ -866,7 +862,7 @@ mod tests {
 
     #[test]
     fn bal_transaction_conversion_preserves_all_error_slots() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let count = 200;
             let processor = test_processor();
             let (_, receiver) = processor.spawn_tx_iterator(
@@ -894,7 +890,7 @@ mod tests {
 
     #[test]
     fn dropping_payload_handle_stops_transaction_conversion() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             for (count, bal, pause_at) in
                 [(10, false, 0), (1000, false, 0), (1000, false, 4), (1000, true, 0)]
             {
@@ -951,7 +947,7 @@ mod tests {
 
     #[test]
     fn execution_cache_allows_single_checkout() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let execution_cache = PayloadExecutionCache::default();
             let hash = B256::repeat_byte(1u8);
 
@@ -972,7 +968,7 @@ mod tests {
 
     #[test]
     fn execution_cache_checkout_releases_on_drop() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let execution_cache = PayloadExecutionCache::default();
             let hash = B256::repeat_byte(2u8);
 
@@ -991,7 +987,7 @@ mod tests {
 
     #[test]
     fn execution_cache_mismatch_parent_clears_and_returns() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let execution_cache = PayloadExecutionCache::default();
             let hash = B256::repeat_byte(3u8);
 
@@ -1014,7 +1010,7 @@ mod tests {
 
     #[test]
     fn execution_cache_update_after_release_succeeds() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let execution_cache = PayloadExecutionCache::default();
             let initial = B256::repeat_byte(5u8);
 
@@ -1036,7 +1032,7 @@ mod tests {
 
     #[test]
     fn on_inserted_executed_block_populates_cache() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let payload_processor = PayloadProcessor::new(
                 reth_tasks::Runtime::test(),
                 EthEvmConfig::new(Arc::new(ChainSpec::default())),
@@ -1067,7 +1063,7 @@ mod tests {
 
     #[test]
     fn cache_for_executes_without_cache_while_stored_cache_is_in_use() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let payload_processor = PayloadProcessor::new(
                 reth_tasks::Runtime::test(),
                 EthEvmConfig::new(Arc::new(ChainSpec::default())),
@@ -1094,7 +1090,7 @@ mod tests {
 
     #[test]
     fn on_inserted_executed_block_skips_on_parent_mismatch() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let payload_processor = PayloadProcessor::new(
                 reth_tasks::Runtime::test(),
                 EthEvmConfig::new(Arc::new(ChainSpec::default())),
@@ -1131,7 +1127,7 @@ mod tests {
 
     #[test]
     fn on_inserted_executed_block_does_not_mutate_checked_out_parent_cache() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let payload_processor = PayloadProcessor::new(
                 reth_tasks::Runtime::test(),
                 EthEvmConfig::new(Arc::new(ChainSpec::default())),
@@ -1202,7 +1198,7 @@ mod tests {
     ///    data.
     #[test]
     fn fork_prewarm_dropped_without_save_does_not_corrupt_cache() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let execution_cache = PayloadExecutionCache::default();
 
             // Canonical chain at block 4.
@@ -1277,7 +1273,7 @@ mod tests {
         let level = level.parse::<LevelFilter>().unwrap();
         tracing::subscriber::set_global_default(tracing_subscriber::registry().with(level))
             .unwrap();
-        reth_tasks::executor::Runtime::new().run(move || {
+        reth_concurrency::sync::Runtime::new().run(move || {
             let processor = test_processor();
 
             // Exercise both sides of the sequential cutoff and the first parallel window, as well
@@ -1290,7 +1286,7 @@ mod tests {
         });
         TestRunner::new(Config::with_cases(32))
             .run(&(0..200usize, any::<bool>()), |(count, bal)| {
-                reth_tasks::executor::Runtime::new().run(move || {
+                reth_concurrency::sync::Runtime::new().run(move || {
                     let processor = test_processor();
                     assert_conversion_spans(&processor, count, bal, level);
                 });

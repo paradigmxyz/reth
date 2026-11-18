@@ -132,7 +132,7 @@ mod tests {
     use super::*;
     use crate::trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory};
     use alloy_trie::TrieMask;
-    use reth_tasks::executor::Runtime;
+    use reth_concurrency::sync::Runtime;
     use std::{collections::BTreeMap, sync::Arc};
 
     /// A trie cursor that always returns an error on seek/next.

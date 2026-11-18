@@ -6,7 +6,7 @@
     reason = "Native TLS shares scheduler state across logical tasks; native locks only hand work and results across the runner boundary."
 )]
 
-use crate::executor::time::{Duration, Instant};
+use crate::sync::time::{Duration, Instant};
 use shuttle::{
     scheduler::{RoundRobinScheduler, Schedule, Scheduler, Task, TaskId},
     thread, Config, MaxSteps, Runner,

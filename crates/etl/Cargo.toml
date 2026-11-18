@@ -13,10 +13,10 @@ workspace = true
 [dependencies]
 tempfile.workspace = true
 reth-db-api.workspace = true
-reth-tasks.workspace = true
+reth-concurrency = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["getrandom"] }
 
 [features]
-fuzz = ["reth-tasks/fuzz"]
+fuzz = ["reth-concurrency/fuzz"]

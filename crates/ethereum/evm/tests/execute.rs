@@ -18,6 +18,7 @@ use evm2::{
     evm::{AccountInfo, Database, InMemoryDB},
 };
 use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
+use reth_concurrency::sync::{channel, Runtime};
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
 use reth_evm::{
     execute::{BasicBlockExecutor, Executor},
@@ -26,7 +27,6 @@ use reth_evm::{
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::{BlockExecutionResult, BundleSource, StateUpdate};
 use reth_primitives_traits::{Block as _, RecoveredBlock};
-use reth_tasks::executor::{channel, Runtime};
 use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
 use std::sync::Arc;
 

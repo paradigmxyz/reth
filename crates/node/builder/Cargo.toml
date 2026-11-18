@@ -51,6 +51,7 @@ reth-rpc-layer.workspace = true
 reth-stages.workspace = true
 reth-static-file.workspace = true
 reth-storage-overlay = { workspace = true, features = ["rayon"] }
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-tokio-util.workspace = true
 reth-tracing = { workspace = true, features = ["std"] }
@@ -99,6 +100,7 @@ reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 fuzz = [
     "reth-chain-state/fuzz",
     "reth-tasks/fuzz",
+    "reth-concurrency/fuzz",
     "reth-downloaders/fuzz",
     "reth-engine-tree/fuzz",
     "reth-evm/fuzz",
@@ -139,6 +141,7 @@ test-utils = [
     "reth-node-ethereum/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-tasks/test-utils",
+    "reth-concurrency/test-utils",
 ]
 trie-debug = [
     "reth-engine-tree/trie-debug",

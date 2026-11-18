@@ -38,6 +38,7 @@ reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
 reth-stages-api.workspace = true
 reth-static-file-types.workspace = true
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-tasks.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
@@ -99,8 +100,10 @@ tempfile.workspace = true
 
 [features]
 fuzz = [
+    "reth-storage-overlay/fuzz",
     "reth-trie/fuzz",
     "reth-tasks/fuzz",
+    "reth-concurrency/fuzz",
     "reth-etl/fuzz",
     "reth-evm/fuzz",
     "reth-provider/fuzz",
@@ -133,4 +136,5 @@ test-utils = [
     "reth-ethereum-primitives?/test-utils",
     "reth-evm-ethereum/test-utils",
     "reth-tasks/test-utils",
+    "reth-concurrency/test-utils",
 ]

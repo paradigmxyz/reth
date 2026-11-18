@@ -28,15 +28,13 @@ pub mod metrics;
 
 use crate::error::StateRootTaskError;
 use alloy_primitives::B256;
-use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult, StateProofProvider};
-use reth_tasks::{
-    executor::{
-        channel::{unbounded, Receiver, Sender},
-        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-        time::FastInstant as Instant,
-    },
-    Runtime, WorkerPool,
+use reth_concurrency::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    channel::{unbounded, Receiver, Sender},
+    time::FastInstant as Instant,
 };
+use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult, StateProofProvider};
+use reth_tasks::{Runtime, WorkerPool};
 use reth_trie::{DecodedMultiProofV2, MultiProofTargetsV2, ProofV2Target};
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},
@@ -503,7 +501,7 @@ impl<Factory: DatabaseProviderROFactory, J> ProofWorker<Factory, J> {
                     jitter_us = jitter.as_micros(),
                     "Proof worker applying proof jitter"
                 );
-                reth_tasks::executor::thread::sleep(jitter);
+                reth_concurrency::sync::thread::sleep(jitter);
             }
 
             match catch_unwind(AssertUnwindSafe(|| process(&provider, job))) {
@@ -708,8 +706,8 @@ impl From<ProofJobError> for StateRootTaskError {
 mod tests {
     use super::*;
     use reth_chainspec::ChainSpec;
+    use reth_concurrency::sync::channel::{bounded, RecvTimeoutError};
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
-    use reth_tasks::executor::channel::{bounded, RecvTimeoutError};
     use std::sync::Arc;
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
@@ -719,7 +717,7 @@ mod tests {
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
     #[test]
     fn spawn_proof_workers_creates_handle() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let chain_spec = Arc::new(ChainSpec::default());
             let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
             let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
@@ -757,7 +755,7 @@ mod tests {
     /// Ensures a single pool serves quarter, half, and full-capacity worker counts.
     #[test]
     fn single_pool_serves_fractional_worker_counts() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let provider_factory =
                 create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
             let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
@@ -844,7 +842,7 @@ mod tests {
     /// backlog does not hold the pools that the next block's workers queue behind.
     #[test]
     fn dropped_handle_discards_queued_jobs() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
         let provider_factory =
             create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
         let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();

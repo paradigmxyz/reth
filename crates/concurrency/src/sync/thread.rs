@@ -16,7 +16,7 @@ use std::{
     },
 };
 
-pub use crate::executor::time::sleep;
+pub use crate::sync::time::sleep;
 #[cfg(feature = "fuzz")]
 pub use shuttle::thread::{current, panicking, park, yield_now, Result, Thread, ThreadId};
 #[cfg(not(feature = "fuzz"))]

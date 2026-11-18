@@ -4,8 +4,8 @@ use super::{
 };
 use blake3::Hasher;
 use eyre::Result;
+use reth_concurrency::sync::rayon::{self, prelude::*};
 use reth_fs_util::{self as fs, FsPathError};
-use reth_tasks::executor::rayon::{self, prelude::*};
 use std::{
     io::{ErrorKind, Read},
     mem,

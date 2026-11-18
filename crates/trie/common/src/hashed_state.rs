@@ -14,7 +14,7 @@ use itertools::Itertools;
 use reth_primitives_traits::Account;
 
 #[cfg(feature = "rayon")]
-use reth_tasks::executor::rayon::prelude::{
+use reth_concurrency::sync::rayon::prelude::{
     FromParallelIterator, IntoParallelIterator, ParallelIterator,
 };
 

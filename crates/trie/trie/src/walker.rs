@@ -460,8 +460,8 @@ mod tests {
         StorageRoot,
     };
     use alloy_primitives::{map::B256Map, B256, U256};
+    use reth_concurrency::sync::Runtime;
     use reth_storage_errors::db::DatabaseErrorInfo;
-    use reth_tasks::executor::Runtime;
     use std::collections::BTreeMap;
 
     fn branch_node(state_mask: u16, tree_mask: u16, hash_mask: u16) -> BranchNodeCompact {

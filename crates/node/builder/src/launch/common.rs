@@ -38,6 +38,7 @@ use alloy_eips::eip2124::Head;
 use alloy_primitives::{BlockNumber, B256};
 use eyre::Context;
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
+use reth_concurrency::sync::rayon::ThreadPoolBuilder;
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{
@@ -85,7 +86,7 @@ use reth_stages::{
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
 use reth_storage_overlay::OverlayManager;
-use reth_tasks::{executor::rayon::ThreadPoolBuilder, TaskExecutor};
+use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
 use reth_transaction_pool::TransactionPool;
 use std::{sync::Arc, time::Duration};

@@ -16,7 +16,7 @@ use reth_trie::{
 use reth_trie_common::{HashedPostState, HashedStorage};
 
 #[cfg(feature = "fuzz")]
-use reth_tasks::executor::Runtime;
+use reth_concurrency::sync::Runtime;
 
 /// Generate test data for benchmarking.
 ///

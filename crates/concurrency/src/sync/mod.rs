@@ -1,19 +1,75 @@
-//! Synchronization primitives belonging to the selected backend.
+//! Blocking execution primitives selected at compile time.
+//!
+//! The default backend uses native threads, Crossbeam channels, and Rayon. With
+//! `fuzz`, run callers inside `Runtime::run`: stackful Shuttle tasks execute on
+//! one OS thread in fixed round-robin order. Only primitives from this crate may
+//! block simulated tasks; native blocking or OS I/O is outside the simulation.
 
 #[cfg(not(feature = "fuzz"))]
 pub use reth_primitives_traits::sync::{LazyLock, OnceLock};
-#[cfg(not(feature = "fuzz"))]
-pub use std::sync::*;
 
+#[cfg(all(feature = "std", not(feature = "fuzz")))]
+pub use std::{sync::*, thread_local};
+
+#[cfg(feature = "fuzz")]
+pub use shuttle::thread_local;
 #[cfg(feature = "fuzz")]
 pub use shuttle_sync::sync::*;
 
+#[cfg(feature = "std")]
+pub mod channel;
+#[cfg(feature = "std")]
+pub mod iter;
+#[cfg(feature = "std")]
+pub mod pool;
+#[cfg(feature = "std")]
+pub mod runtime;
+
+#[cfg(feature = "std")]
+pub mod thread;
+#[cfg(feature = "std")]
+pub mod time;
+
 #[cfg(feature = "fuzz")]
 mod deterministic;
+
 #[cfg(feature = "fuzz")]
-pub use deterministic::{LazyLock, OnceLock};
+mod once;
+#[cfg(feature = "fuzz")]
+pub use once::{LazyLock, OnceLock};
+
+#[cfg(feature = "std")]
+pub use pool::{ThreadPool, ThreadPoolBuilder};
+
+#[cfg(feature = "std")]
+pub use runtime::Runtime;
+
+/// Rayon-compatible compute operations selected with the executor backend.
+#[cfg(feature = "std")]
+pub mod rayon {
+    pub use crate::sync::pool::*;
+    /// Parallel iterator extension traits for the selected compute backend.
+    pub mod prelude {
+        #[cfg(feature = "fuzz")]
+        pub use crate::sync::iter::*;
+        #[cfg(not(feature = "fuzz"))]
+        pub use ::rayon::prelude::*;
+    }
+    /// Slice sorting operations for the selected compute backend.
+    pub mod slice {
+        #[cfg(feature = "fuzz")]
+        pub use crate::sync::iter::ParallelSliceMut;
+        #[cfg(not(feature = "fuzz"))]
+        pub use ::rayon::slice::*;
+    }
+    /// Parallel iterator types for the selected compute backend.
+    pub mod iter {
+        pub use crate::sync::iter::*;
+    }
+}
 
 /// Native non-poisoning locks, or their Shuttle equivalents under `fuzz`.
+#[cfg(feature = "std")]
 pub mod parking_lot {
     #[cfg(not(feature = "fuzz"))]
     pub use ::parking_lot::*;
@@ -21,10 +77,15 @@ pub mod parking_lot {
     pub use shuttle_parking_lot::*;
 }
 
-#[cfg(test)]
+/// Whether these primitives require an active simulated runtime.
+///
+/// Crates with backend-specific integration must select the same `fuzz` feature.
+pub const IS_SIMULATED: bool = cfg!(feature = "fuzz");
+
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
-    use crate::executor::{thread, time, Runtime};
+    use crate::sync::{thread, time, Runtime};
     use std::{
         any::Any,
         panic::{catch_unwind, AssertUnwindSafe},

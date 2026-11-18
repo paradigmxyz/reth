@@ -59,6 +59,15 @@ use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};
 use crate::tree::{metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, TreeConfig};
 use alloy_primitives::B256;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie, SparseTrieWithStorageRoots};
+use reth_concurrency::sync::{
+    channel::{
+        self,
+        mpsc::{self, RecvTimeoutError},
+        Receiver,
+    },
+    thread,
+    time::FastInstant as Instant,
+};
 use reth_errors::ProviderResult;
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, RecoveredBlock, SealedHeader};
@@ -68,18 +77,7 @@ use reth_provider::{
     StageCheckpointReader, StateRootProvider, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-use reth_tasks::{
-    executor::{
-        channel::{
-            self,
-            mpsc::{self, RecvTimeoutError},
-            Receiver,
-        },
-        thread,
-        time::FastInstant as Instant,
-    },
-    utils::increase_thread_priority,
-};
+use reth_tasks::utils::increase_thread_priority;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use reth_trie_parallel::proof_task::{
     metrics::ProofWorkerIdleMetrics, ProofTaskCtx, ProofWorkerCounts, ProofWorkerHandle,
@@ -1261,6 +1259,7 @@ mod tests {
     use rand::Rng;
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_chainspec::ChainSpec;
+    use reth_concurrency::sync::{channel, thread};
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm::OnStateHook;
@@ -1272,7 +1271,6 @@ mod tests {
         HashingWriter,
     };
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-    use reth_tasks::executor::{channel, thread};
     use reth_testing_utils::generators;
     use reth_trie::test_utils::state_root;
     use reth_trie_common::bundle_state::StorageSlot;
@@ -1328,7 +1326,7 @@ mod tests {
 
     #[test]
     fn finish_publishes_only_accepted_sparse_trie() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let factory =
                 create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
             let genesis_hash = init_genesis(&factory).unwrap();
@@ -1410,7 +1408,7 @@ mod tests {
 
     #[test]
     fn failed_parent_trie_closes_handoff_without_publishing() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let factory =
                 create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
             let genesis_hash = init_genesis(&factory).unwrap();
@@ -1450,7 +1448,7 @@ mod tests {
 
     #[test]
     fn publication_does_not_wait_for_worker() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (pending_trie_tx, pending_trie_rx) = mpsc::channel();
             let overlay_manager = OverlayManager::<EthPrimitives>::default();
             let (done_tx, done_rx) = mpsc::channel();
@@ -1468,7 +1466,7 @@ mod tests {
 
     #[test]
     fn dropped_root_receiver_still_completes_pending_trie() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let factory =
                 create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
             let genesis_hash = init_genesis(&factory).unwrap();
@@ -1620,7 +1618,7 @@ mod tests {
 
     #[test]
     fn payload_builder_trie_matches_serial_root_and_can_be_reused() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             reth_tracing::init_test_tracing();
 
             let factory =

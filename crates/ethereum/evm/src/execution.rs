@@ -46,12 +46,12 @@ mod tests {
         bytecode::Bytecode, env::BlockEnv as EvmBlockEnv, evm::InMemoryDB, interpreter::opcode::op,
     };
     use reth_chainspec::{Chain, ChainSpec, MAINNET};
+    use reth_concurrency::sync::{channel, Runtime};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition};
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
     use reth_evm::{BlockExecutorFactory, ConfigureEvm, Executor};
     use reth_execution_types::BlockExecutionOutput;
     use reth_primitives_traits::RecoveredBlock;
-    use reth_tasks::executor::{channel, Runtime};
     use reth_trie_common::{HashedPostState, KeccakKeyHasher};
     use std::sync::Arc;
 

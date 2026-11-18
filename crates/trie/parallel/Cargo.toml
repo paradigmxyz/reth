@@ -17,6 +17,7 @@ reth-primitives-traits = { workspace = true, features = ["std"] }
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-provider.workspace = true
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie.workspace = true
 
@@ -54,6 +55,7 @@ rand.workspace = true
 fuzz = [
     "reth-trie/fuzz",
     "reth-tasks/fuzz",
+    "reth-concurrency/fuzz",
     "reth-provider/fuzz",
     "reth-storage-overlay/fuzz",
 ]
@@ -67,6 +69,7 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-trie/test-utils",
     "reth-tasks/test-utils",
+    "reth-concurrency/test-utils",
     "reth-chainspec/test-utils",
     "reth-ethereum-primitives/test-utils",
 ]

@@ -21,10 +21,10 @@ use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
-use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
-use reth_tasks::executor::rayon::iter::{
+use reth_concurrency::sync::rayon::iter::{
     IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
+use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
     ProofV2TargetParent, RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
@@ -3171,7 +3171,7 @@ mod tests {
     };
     use alloy_primitives::{map::B256Map, B256, U256};
     use rand::{seq::SliceRandom, Rng, SeedableRng};
-    use reth_tasks::executor::Runtime;
+    use reth_concurrency::sync::Runtime;
     use reth_trie::test_utils::TrieTestHarness;
     use reth_trie_common::{ProofV2Target, RlpNode};
     use std::collections::BTreeMap;

@@ -817,7 +817,7 @@ mod tests {
 
     #[test]
     fn consumers_restore_trie_values_masked_by_deferred_blocks() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
             let factory = create_test_provider_factory();
             let blocks = TestBlockBuilder::eth().get_executed_blocks(0..11).collect::<Vec<_>>();
@@ -899,7 +899,7 @@ mod tests {
 
     #[test]
     fn calculated_reverts_preserve_deletions_across_frontiers() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let factory = create_test_provider_factory();
             let blocks = TestBlockBuilder::eth().get_executed_blocks(0..4).collect::<Vec<_>>();
             let address = Address::with_last_byte(1);
@@ -989,7 +989,7 @@ mod tests {
 
     #[test]
     fn calculated_historical_range_excludes_tail_reverts() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let factory = create_test_provider_factory();
             let provider = factory.provider_rw().unwrap();
             let address = Address::with_last_byte(1);
@@ -1042,7 +1042,7 @@ mod tests {
 
     #[test]
     fn persisted_range_retains_transient_nodes_without_executed_blocks() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let factory = create_test_provider_factory();
             seed_headers(&factory, 2);
             let provider = factory.provider_rw().unwrap();
@@ -1150,7 +1150,7 @@ mod tests {
 
     #[test]
     fn cached_range_merge_keeps_oldest_revert_values() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let factory = create_test_provider_factory();
             seed_headers(&factory, 2);
 
@@ -1203,7 +1203,7 @@ mod tests {
 
     #[test]
     fn aggregate_range_reverts_to_pre_range_state() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let factory = create_test_provider_factory();
             seed_headers(&factory, 3);
 
@@ -1342,7 +1342,7 @@ mod tests {
 
     #[test]
     fn aggregate_range_matches_legacy_per_block_merge_with_storage_wipe() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let factory = create_test_provider_factory();
             seed_headers(&factory, 3);
 

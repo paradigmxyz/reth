@@ -23,7 +23,7 @@ alloy-primitives.workspace = true
 
 # misc
 either = { workspace = true, optional = true }
-reth-tasks = { workspace = true, optional = true }
+reth-concurrency = { workspace = true, optional = true }
 smallvec = { workspace = true, optional = true }
 strum = { workspace = true, features = ["derive"] }
 
@@ -45,11 +45,11 @@ proptest.workspace = true
 rand.workspace = true
 
 [features]
-fuzz = ["reth-tasks?/fuzz", "reth-trie-common/fuzz", "reth-trie/fuzz"]
+fuzz = ["reth-concurrency?/fuzz", "reth-trie-common/fuzz", "reth-trie/fuzz"]
 default = ["std", "metrics"]
 std = [
     "dep:either",
-    "dep:reth-tasks",
+    "reth-concurrency/std",
     "dep:smallvec",
     "dep:tracing",
     "alloy-primitives/std",
@@ -65,7 +65,7 @@ std = [
 ]
 metrics = ["dep:reth-metrics", "dep:metrics", "std"]
 test-utils = [
-    "reth-tasks?/test-utils",
+    "reth-concurrency?/test-utils",
     "std",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",

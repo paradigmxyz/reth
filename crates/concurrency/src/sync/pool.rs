@@ -10,7 +10,7 @@ pub use rayon::{
 
 #[cfg(feature = "fuzz")]
 mod deterministic {
-    use crate::executor::deterministic::with_pool_slots;
+    use crate::sync::deterministic::with_pool_slots;
     use shuttle::{sync::mpsc, thread, thread_local};
     use std::{
         any::Any,
@@ -484,7 +484,7 @@ mod deterministic {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use crate::executor::Runtime;
+        use crate::sync::Runtime;
         use shuttle::sync::Barrier;
         use std::time::Duration;
 

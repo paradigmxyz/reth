@@ -111,7 +111,7 @@ impl<T, F: FnOnce() -> T> LazyLock<T, F> {
     ///
     /// An initializer panic permanently poisons the value; all later accesses panic, even
     /// in a subsequent execution. Like other simulated blocking operations, forcing a value
-    /// requires an active [`crate::executor::Runtime::run`].
+    /// requires an active [`crate::sync::Runtime::run`].
     pub fn force(this: &Self) -> &T {
         // Shuttle's Once keeps its waiting lock in execution-local storage. It serializes all
         // native-cell access, so no simulated contender can block on the native initializer.

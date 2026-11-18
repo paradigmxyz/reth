@@ -8,8 +8,8 @@
 
 use alloy_eips::Encodable2718;
 use alloy_primitives::{map::HashMap, Bloom, B256};
+use reth_concurrency::sync::channel::Receiver;
 use reth_primitives_traits::Receipt;
-use reth_tasks::executor::channel::Receiver;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
 use tokio::sync::oneshot;
 use tracing::debug_span;
@@ -137,8 +137,8 @@ mod tests {
     use super::*;
     use alloy_consensus::{proofs::calculate_receipt_root, TxReceipt};
     use alloy_primitives::{b256, Address, Bytes, Log};
+    use reth_concurrency::sync::{channel::bounded, thread, Runtime};
     use reth_ethereum_primitives::{Receipt, TxType};
-    use reth_tasks::executor::{channel::bounded, thread, Runtime};
 
     #[test]
     fn test_receipt_root_task_empty() {

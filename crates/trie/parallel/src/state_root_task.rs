@@ -9,12 +9,12 @@
 
 use crate::error::StateRootTaskError;
 use alloy_primitives::{map::B256Map, B256};
-use reth_execution_types::{OnStateHook, StateUpdate};
-use reth_tasks::executor::{
+use reth_concurrency::sync::{
     channel,
     channel::{mpsc::Receiver, Sender},
     thread,
 };
+use reth_execution_types::{OnStateHook, StateUpdate};
 use reth_trie::{updates::TrieUpdates, HashedPostState, MultiProofTargetsV2, ProofV2Target};
 use std::{fmt, sync::Arc};
 
@@ -511,9 +511,9 @@ impl StateRootSink for SparseTrieStateRootSink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_tasks::executor::{
+    use reth_concurrency::sync::{
+        atomic::{AtomicUsize, Ordering},
         channel::{mpsc, RecvTimeoutError, TryRecvError},
-        sync::atomic::{AtomicUsize, Ordering},
     };
     use std::time::Duration;
 
@@ -538,7 +538,7 @@ mod tests {
 
     #[test]
     fn state_access_hint_converts_to_sparse_targets() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let account = B256::repeat_byte(0x01);
             let storage_account = B256::repeat_byte(0x02);
             let storage_slot = B256::repeat_byte(0x03);
@@ -565,7 +565,7 @@ mod tests {
     /// incomplete, and a finish marker would make the task compute a root from them.
     #[test]
     fn hook_dropped_during_panic_does_not_finish_stream() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let sink = Arc::new(CountingSink::default());
             let hook = StateRootUpdateStream::new(sink.clone()).into_state_hook();
 
@@ -585,7 +585,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "authoritative update capability already taken")]
     fn authoritative_capability_can_only_be_taken_once() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (updates_tx, _updates_rx) = channel::unbounded();
             let (cancel_guard, _cancel_rx) = StateRootTaskCancelGuard::channel();
             let (_state_root_tx, state_root_rx) = mpsc::channel();
@@ -609,7 +609,7 @@ mod tests {
     /// channel.
     #[test]
     fn payload_state_root_handle_lifecycle() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let sink = Arc::new(CountingSink::default());
             let hook = StateRootUpdateStream::new(sink.clone()).into_state_hook();
 
@@ -650,7 +650,7 @@ mod tests {
 
     #[test]
     fn payload_state_root_receiver_retains_cancellation() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let (updates_tx, _updates_rx) = channel::unbounded();
             let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
             let (_state_root_tx, state_root_rx) = mpsc::channel();

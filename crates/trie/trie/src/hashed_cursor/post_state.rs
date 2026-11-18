@@ -423,7 +423,7 @@ where
 mod tests {
     use super::*;
     use crate::hashed_cursor::mock::MockHashedCursor;
-    use reth_tasks::executor::{sync::parking_lot::Mutex, Runtime};
+    use reth_concurrency::sync::{parking_lot::Mutex, Runtime};
     use std::{collections::BTreeMap, sync::Arc};
 
     fn key(byte: u8) -> B256 {

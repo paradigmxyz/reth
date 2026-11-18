@@ -2,8 +2,9 @@
 
 use crate::{
     shutdown::{signal, Shutdown, Signal},
-    thread, time, Runtime,
+    Runtime,
 };
+use reth_concurrency::sync::{thread, time};
 use std::{
     any::Any,
     fmt::{Display, Formatter},
@@ -29,9 +30,9 @@ pub type TaskExecutor = Runtime;
 /// Natively, this captures the current Tokio handle, if available, and enters it on the new
 /// OS thread so the workload can use [`Handle::current()`] and [`Handle::spawn_blocking()`].
 /// Under `fuzz`, logical threads share the calling OS thread's Tokio context. If the workload
-/// needs Tokio, enter the desired [`Handle`] around the entire [`crate::executor::Runtime::run`]
-/// call, not inside individual logical threads: native context guards cannot span logical task
-/// switches.
+/// needs Tokio, enter the desired [`Handle`] around the entire
+/// [`reth_concurrency::sync::Runtime::run`] call, not inside individual logical threads: native
+/// context guards cannot span logical task switches.
 #[track_caller]
 pub fn spawn_thread<F, T>(name: &str, f: F) -> thread::JoinHandle<T>
 where
@@ -54,7 +55,7 @@ where
 ///
 /// This is the scoped version of [`spawn_thread`], for use with [`thread::scope`], with the same
 /// Tokio context rules: native OS threads enter the captured handle, while `fuzz` logical threads
-/// share the context entered around the entire [`crate::executor::Runtime::run`] call.
+/// share the context entered around the entire [`reth_concurrency::sync::Runtime::run`] call.
 #[track_caller]
 pub fn spawn_scoped_thread<'scope, 'env, F, T>(
     scope: &'scope thread::Scope<'scope, 'env>,

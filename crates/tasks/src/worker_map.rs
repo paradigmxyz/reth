@@ -7,13 +7,13 @@
 //! Native waits do not yield to Shuttle and can stall an execution when another
 //! logical task must produce the awaited message.
 
-use crate::{
-    executor::sync::atomic::{AtomicUsize, Ordering},
-    metrics::WorkerThreadMetrics,
+use crate::metrics::WorkerThreadMetrics;
+use dashmap::DashMap;
+use reth_concurrency::sync::{
+    atomic::{AtomicUsize, Ordering},
     thread,
     time::Instant,
 };
-use dashmap::DashMap;
 use std::{panic::AssertUnwindSafe, sync::Arc};
 use tokio::sync::{mpsc, oneshot};
 

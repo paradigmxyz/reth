@@ -1,5 +1,6 @@
 use crate::tree::{payload_processor::reuse::ReuseMiss, TreeOutcome};
 use alloy_rpc_types_engine::{PayloadStatus, PayloadStatusEnum};
+use reth_concurrency::sync::time::FastInstant as Instant;
 use reth_engine_primitives::{ForkchoiceStatus, InsertBlockProcessingError, OnForkChoiceUpdated};
 use reth_errors::ProviderError;
 use reth_evm::metrics::ExecutorMetrics;
@@ -10,7 +11,6 @@ use reth_metrics::{
     Metrics,
 };
 use reth_primitives_traits::constants::gas_units::MEGAGAS;
-use reth_tasks::executor::time::FastInstant as Instant;
 use reth_trie::updates::TrieUpdates;
 use std::time::Duration;
 

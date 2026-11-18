@@ -220,8 +220,8 @@ struct CachedValue<V> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_tasks::executor::{
-        sync::atomic::{AtomicUsize, Ordering},
+    use reth_concurrency::sync::{
+        atomic::{AtomicUsize, Ordering},
         Runtime,
     };
     use std::sync::Arc;

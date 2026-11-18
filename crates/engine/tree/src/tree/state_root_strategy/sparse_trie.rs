@@ -1,6 +1,5 @@
 //! Sparse Trie task related functionality.
 
-use reth_tasks::executor::{channel, rayon, time::FastInstant as Instant};
 use std::{
     any::Any,
     panic::{self, AssertUnwindSafe},
@@ -14,12 +13,14 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use metrics::{Gauge, Histogram};
+use reth_concurrency::sync::{
+    channel::{self, mpsc, select_biased, Receiver, Sender},
+    rayon,
+    time::FastInstant as Instant,
+};
 use reth_metrics::Metrics;
 use reth_primitives_traits::Account;
-use reth_tasks::{
-    executor::channel::{mpsc, select_biased, Receiver, Sender},
-    Runtime,
-};
+use reth_tasks::Runtime;
 use reth_trie::{
     updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
@@ -1659,10 +1660,10 @@ enum SparseTrieTaskMessage {
 mod tests {
     use super::*;
     use alloy_primitives::{B256, U256};
+    use reth_concurrency::sync::thread;
     use reth_db_common::init::init_genesis;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-    use reth_tasks::executor::thread;
     use reth_trie_common::{
         BranchNodeV2, ExtensionNode, LeafNode, Nibbles, RlpNode, TrieMask, TrieNodeV2,
     };
@@ -1810,7 +1811,7 @@ mod tests {
 
     #[test]
     fn hashing_task_returns_after_finish_marker_while_hint_sender_is_alive() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = Runtime::test();
             let (task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
             // A hint sender outliving execution, like a prewarm task queued behind earlier blocks.
@@ -1837,7 +1838,7 @@ mod tests {
 
     #[test]
     fn checked_out_storage_trie_holds_back_its_updates_until_it_returns() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = Runtime::test();
             let trie = SparseStateTrie::default()
                 .with_accounts_trie(
@@ -1948,7 +1949,7 @@ mod tests {
     #[test]
     #[allow(clippy::clone_on_copy)]
     fn in_flight_storage_updates_keep_latest_values_and_deletions() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = Runtime::test();
             let trie = SparseStateTrie::default()
                 .with_accounts_trie(RevealableSparseTrie::revealed_empty())
@@ -2062,7 +2063,7 @@ mod tests {
 
     #[test]
     fn unrelated_storage_proofs_do_not_retry_blocked_leaves() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = Runtime::test();
             let (mut task, updates_tx, _cancel_guard) =
                 test_task(&runtime, SparseStateTrie::default());
@@ -2103,7 +2104,7 @@ mod tests {
 
     #[test]
     fn canceled_task_disconnects_checked_out_storage_jobs() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = Runtime::test();
             let trie = SparseStateTrie::default()
                 .with_default_storage_trie(RevealableSparseTrie::revealed_empty());
@@ -2131,7 +2132,7 @@ mod tests {
 
     #[test]
     fn storage_job_panics_are_resumed_on_the_task() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = Runtime::test();
             let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
             let address = B256::repeat_byte(0x11);
@@ -2166,7 +2167,7 @@ mod tests {
 
     #[test]
     fn unsupported_storage_root_errors_are_returned_to_the_task() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = Runtime::test();
             let (mut task, updates_tx, _cancel_guard) =
                 test_task(&runtime, SparseStateTrie::default());
@@ -2202,7 +2203,7 @@ mod tests {
 
     #[test]
     fn large_storage_batches_run_off_thread() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = Runtime::test();
             let trie = SparseStateTrie::default()
                 .with_accounts_trie(
@@ -2258,7 +2259,7 @@ mod tests {
     #[test]
     #[allow(clippy::clone_on_copy)]
     fn run_waits_for_storage_tries_hashed_off_thread() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = Runtime::test();
             let default_trie = RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty();
             let trie = SparseStateTrie::default()
@@ -2314,7 +2315,7 @@ mod tests {
 
     #[test]
     fn first_leaf_batch_starts_proofs_before_input_queue_drains() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = reth_tasks::Runtime::test();
             let provider_factory = create_test_provider_factory();
             let anchor_hash =
@@ -2398,7 +2399,7 @@ mod tests {
 
     #[test]
     fn run_returns_parent_root_without_revealing_blind_trie_when_no_state_updates() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = reth_tasks::Runtime::test();
             let provider_factory = create_test_provider_factory();
             let anchor_hash =
@@ -2453,7 +2454,7 @@ mod tests {
 
     #[test]
     fn stall_check_waits_for_in_flight_proofs_then_reports_pending_updates() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = reth_tasks::Runtime::test();
             let provider_factory = create_test_provider_factory();
             let anchor_hash =
@@ -2540,7 +2541,7 @@ mod tests {
 
     #[test]
     fn run_completes_when_hints_follow_updates_finish() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = reth_tasks::Runtime::test();
             let provider_factory = create_test_provider_factory();
             let anchor_hash =

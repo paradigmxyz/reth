@@ -28,6 +28,13 @@ use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::keccak256;
 use evm2::evm::Database;
 use metrics::{Counter, Gauge, Histogram};
+use reth_concurrency::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    channel::mpsc::{self, channel, Receiver, Sender},
+    rayon::prelude::*,
+    thread,
+    time::FastInstant as Instant,
+};
 use reth_evm::{
     database::StateProviderDatabase, precompile_cache::PrecompileCacheMap, ConfigureEvm,
     Evm as EvmInstance, EvmEnv, EvmEnvFor, EvmFor, EvmTypesFor, ExecutableTxFor, RecoveredTx,
@@ -42,16 +49,7 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
-use reth_tasks::{
-    executor::{
-        channel::mpsc::{self, channel, Receiver, Sender},
-        rayon::prelude::*,
-        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-        thread,
-        time::FastInstant as Instant,
-    },
-    Runtime, WorkerStatefulPool,
-};
+use reth_tasks::{Runtime, WorkerStatefulPool};
 use reth_trie_common::MultiProofTargetsV2;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::oneshot;
@@ -1046,25 +1044,23 @@ mod tests {
     use alloy_primitives::{Address, Signature, TxKind, B256, U256};
     use evm2::{evm::EmptyDB, BaseEvmTypes};
     use reth_chainspec::ChainSpec;
+    use reth_concurrency::sync::{
+        channel,
+        thread::{JoinHandle, ThreadId},
+    };
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_stages_api::{StageCheckpoint, StageId};
     use reth_storage_overlay::OverlayManager;
-    use reth_tasks::{
-        executor::{
-            channel,
-            thread::{JoinHandle, ThreadId},
-        },
-        WorkerPool,
-    };
+    use reth_tasks::WorkerPool;
     use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
     use std::time::Duration;
 
     #[test]
     fn terminate_event_stops_transaction_execution() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let terminate_execution = Arc::new(AtomicBool::new(false));
             let ctx = PrewarmContext {
                 env: ExecutionEnv::test_default(),
@@ -1106,7 +1102,7 @@ mod tests {
 
     #[test]
     fn rebuilds_evm_for_each_prewarm_run() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let caller = Address::repeat_byte(1);
             let provider = MockEthProvider::default();
             provider.enable_database_provider();
@@ -1173,7 +1169,7 @@ mod tests {
 
     #[test]
     fn transaction_prewarm_releases_worker_cache_before_cache_task_finishes() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = Runtime::test();
             let saved = SavedCache::new(B256::ZERO, crate::tree::ExecutionCache::new(1_000));
             let mut ctx = test_prewarm_context(saved.clone(), Gauge::noop());
@@ -1292,7 +1288,7 @@ mod tests {
 
     #[test]
     fn save_cache_releases_warm_cache_before_duration_metric() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = Runtime::test();
             let execution_cache = PayloadExecutionCache::default();
             let saved =
@@ -1331,7 +1327,7 @@ mod tests {
 
     #[test]
     fn save_cache_blocks_reuse_while_execution_cache_is_cloned() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = Runtime::test();
             let execution_cache = PayloadExecutionCache::default();
             let saved =
@@ -1415,7 +1411,7 @@ mod tests {
 
     #[test]
     fn save_cache_freeing_waits_for_validator_cache_references() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             let runtime = Runtime::test();
             let execution_cache = PayloadExecutionCache::default();
             let saved =
@@ -1533,42 +1529,42 @@ mod tests {
 
     #[test]
     fn save_cache_drops_replaced_allocation_after_unlock() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, false);
         });
     }
 
     #[test]
     fn save_cache_drops_invalid_allocations_after_unlock() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             assert_save_cache_drops_removed_caches(CacheSlot::Distinct, false, false);
         });
     }
 
     #[test]
     fn save_cache_drops_allocations_after_unlock_on_insert_error() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, true);
         });
     }
 
     #[test]
     fn save_cache_drops_shared_allocation_after_unlock_on_invalid_block() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             assert_save_cache_drops_removed_caches(CacheSlot::Shared, false, false);
         });
     }
 
     #[test]
     fn save_cache_drops_shared_allocation_after_unlock_on_insert_error() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             assert_save_cache_drops_removed_caches(CacheSlot::Shared, true, true);
         });
     }
 
     #[test]
     fn save_cache_handles_empty_slot() {
-        reth_tasks::executor::Runtime::new().run(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             for (valid, insert_error) in [(true, false), (false, false), (true, true)] {
                 assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid, insert_error);
             }

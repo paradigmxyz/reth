@@ -7,12 +7,12 @@ use crate::{
 };
 use alloy_primitives::{map::B256Set, B256};
 use futures::{Stream, StreamExt};
+use reth_concurrency::sync::channel::Sender;
 use reth_engine_primitives::{BeaconEngineMessage, ConsensusEngineEvent};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_primitives::{BuiltPayloadExecutedBlock, PayloadTypes};
 use reth_primitives_traits::{Block, NodePrimitives};
-use reth_tasks::executor::channel::Sender;
 use std::{
     fmt::Display,
     task::{ready, Context, Poll},
