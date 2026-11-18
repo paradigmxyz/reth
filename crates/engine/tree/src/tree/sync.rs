@@ -89,12 +89,11 @@ where
     /// Checks the tracked finalized block against the block on disk and requests another backfill
     /// run if the distance to the tip exceeds the threshold for another backfill run.
     ///
-    /// This will also do the necessary housekeeping of the tree state, this includes:
+    /// This will also do the necessary housekeeping of the in-memory state, this includes:
     ///  - removing all blocks below the backfill height
     ///  - moving the remaining canonical in-memory blocks to the non-canonical section
     ///
-    /// In case backfill resulted in an unwind, this will clear the tree state above the unwind
-    /// target block.
+    /// In case backfill resulted in an unwind, this will remove all in-memory blocks.
     pub(super) fn on_backfill_sync_finished(
         &mut self,
         ctrl: ControlFlow,
@@ -120,9 +119,6 @@ where
 
         // state house keeping after backfill sync
         // remove all executed blocks below the backfill height
-        //
-        // We set the `finalized_num` to `Some(backfill_height)` to ensure we remove all state
-        // before that
         let Some(backfill_num_hash) = self
             .provider
             .block_hash(backfill_height)?

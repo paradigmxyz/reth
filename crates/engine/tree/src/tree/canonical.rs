@@ -245,6 +245,7 @@ where
         // Perform the reorg to properly handle the unwind
         self.canonical_in_memory_state
             .update_chain(NewCanonicalChain::Reorg { new: vec![executed_block], old: old_blocks });
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // CRITICAL: Update the canonical head after the reorg
         // This ensures get_canonical_head() returns the correct block
@@ -285,6 +286,7 @@ where
         let executed_block = self.canonical_block_by_hash(block_hash)?;
         self.canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed_block] });
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         debug!(
             target: "engine::tree",
@@ -417,7 +419,6 @@ where
         let tip = chain_update.tip().clone_sealed_header();
         let notification = chain_update.to_chain_notification();
 
-        // reinsert any missing reorged blocks
         if let NewCanonicalChain::Reorg { new, old } = &chain_update {
             let new_first = new.first().map(|first| first.recovered_block().num_hash());
             let old_first = old.first().map(|first| first.recovered_block().num_hash());
@@ -427,8 +428,8 @@ where
             self.update_reorg_metrics(old.len(), old_first);
         }
 
-        // update the tracked in-memory state with the new chain, this also inserts any missing
-        // reorged blocks
+        // update the tracked in-memory state with the new chain, which also tracks the blocks of a
+        // reorg that are missing from it.
         self.canonical_in_memory_state.update_chain(chain_update);
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
         self.canonical_in_memory_state.set_canonical_head(tip.clone());

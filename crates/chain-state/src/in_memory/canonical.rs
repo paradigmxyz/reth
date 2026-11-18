@@ -110,7 +110,8 @@ impl<N: NodePrimitives> InMemoryState<N> {
         self.inner.blocks.read().contains(hash)
     }
 
-    /// Returns the number of tracked blocks per section, read under one lock.
+    /// Returns the numbers of tracked canonical blocks and of tracked blocks that are not
+    /// canonical, both taken from the same snapshot of the blocks.
     pub fn block_counts(&self) -> InMemoryStateBlockCounts {
         self.inner.blocks.read().counts()
     }
@@ -182,12 +183,12 @@ struct InMemoryStateInner<N: NodePrimitives> {
     metrics: InMemoryStateMetrics,
 }
 
-/// Number of tracked blocks per section.
+/// The numbers of blocks an [`InMemoryState`] tracks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InMemoryStateBlockCounts {
-    /// Blocks in the canonical section.
+    /// The number of canonical blocks.
     pub canonical: usize,
-    /// Blocks in the non-canonical section.
+    /// The number of executed blocks that are not canonical, including the pending block.
     pub non_canonical: usize,
 }
 
@@ -274,8 +275,10 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         Self { inner: Arc::new(inner) }
     }
 
-    /// Returns `true` if `in_memory_state` reads the blocks that updates through this state
-    /// change.
+    /// Returns `true` if a block written through this state is read through `in_memory_state`.
+    ///
+    /// This is the case if both share the same blocks, which is decided by the identity of the
+    /// two handles and not by the blocks they hold.
     pub fn writes_to(&self, in_memory_state: &InMemoryState<N>) -> bool {
         Arc::ptr_eq(&self.inner.in_memory_state.inner, &in_memory_state.inner)
     }
@@ -344,6 +347,39 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             };
             blocks.demote_canonical_chain();
             (removed, blocks.prune_conflicting_with_finalized(backfill))
+        });
+    }
+
+    /// Applies the persistence of blocks, in one update.
+    ///
+    /// Reports `last_persisted_block` as the persisted tip and removes the canonical blocks up to
+    /// and including `state_trie_persisted_block` like [`Self::remove_persisted_blocks_until`].
+    /// If there is a `finalized` block, it also removes the executed blocks that conflict with it
+    /// like [`Self::prune_conflicting_with_finalized`]. A finalized block above
+    /// `state_trie_persisted_block` is replaced by that block, so that only the blocks that
+    /// conflict with the persisted chain are removed.
+    pub fn on_blocks_persisted(
+        &self,
+        last_persisted_block: BlockNumHash,
+        state_trie_persisted_block: BlockNumHash,
+        finalized: Option<BlockNumHash>,
+    ) {
+        self.set_persisted(last_persisted_block);
+        self.inner.in_memory_state.update(|blocks| {
+            let removed = blocks.remove_canonical_until(
+                last_persisted_block.hash,
+                state_trie_persisted_block.number.min(last_persisted_block.number),
+            );
+            let pruned = finalized.map(|finalized| {
+                blocks.prune_conflicting_with_finalized(
+                    if state_trie_persisted_block.number < finalized.number {
+                        state_trie_persisted_block
+                    } else {
+                        finalized
+                    },
+                )
+            });
+            (removed, pruned)
         });
     }
 
@@ -1024,6 +1060,58 @@ mod tests {
         for kept in [fork_hash, fork_child_hash] {
             assert_eq!(in_memory_state.state_by_hash(kept).unwrap().hash(), kept);
         }
+    }
+
+    #[test]
+    fn test_on_blocks_persisted() {
+        let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
+        let in_memory_state = &state.inner.in_memory_state;
+        let mut block_builder = TestBlockBuilder::eth();
+        let blocks = block_builder.get_executed_blocks(1..6).collect::<Vec<_>>();
+        let hash = |number: usize| blocks[number - 1].recovered_block().hash();
+        let num_hash = |number: usize| blocks[number - 1].recovered_block().num_hash();
+        // One fork at the height of each of the blocks 2, 3 and 4.
+        let forks = (2..5)
+            .map(|number| {
+                block_builder.get_executed_block_with_number(number as u64, hash(number - 1))
+            })
+            .collect::<Vec<_>>();
+        let fork_hash = |number: usize| forks[number - 2].recovered_block().hash();
+        state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        for fork in &forks {
+            state.insert_executed(fork.clone());
+        }
+
+        // Without a finalized block only the canonical blocks up to the state trie frontier are
+        // removed, in one update.
+        let generation = in_memory_state.removal_generation();
+        state.on_blocks_persisted(num_hash(2), num_hash(1), None);
+        assert_eq!(in_memory_state.removal_generation(), generation + 1);
+        assert_eq!(state.get_persisted_num_hash(), Some(num_hash(2)));
+        assert_eq!(
+            in_memory_state.block_counts(),
+            InMemoryStateBlockCounts { canonical: 4, non_canonical: 3 }
+        );
+        assert!(!in_memory_state.contains(&hash(1)));
+
+        // A finalized block above the state trie frontier is replaced by the frontier: the fork
+        // at the height of block 2 conflicts with it, the ones above do not.
+        state.on_blocks_persisted(num_hash(2), num_hash(2), Some(num_hash(4)));
+        assert_eq!(in_memory_state.removal_generation(), generation + 2);
+        assert_eq!(
+            in_memory_state.block_counts(),
+            InMemoryStateBlockCounts { canonical: 3, non_canonical: 2 }
+        );
+        assert!(!in_memory_state.contains(&fork_hash(2)));
+
+        // A finalized block below the frontier is used as it is.
+        state.on_blocks_persisted(num_hash(4), num_hash(4), Some(num_hash(3)));
+        assert_eq!(
+            in_memory_state.block_counts(),
+            InMemoryStateBlockCounts { canonical: 1, non_canonical: 1 }
+        );
+        assert!(!in_memory_state.contains(&fork_hash(3)));
+        assert!(in_memory_state.contains(&fork_hash(4)));
     }
 
     #[test]

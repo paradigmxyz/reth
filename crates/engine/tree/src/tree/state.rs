@@ -10,20 +10,21 @@ use reth_storage_overlay::OverlayManager;
 
 /// Keeps track of the state of the tree.
 ///
-/// The executed blocks are tracked by the in-memory state of the [`OverlayManager`], which this
-/// type reads and the engine writes through its
-/// [`CanonicalInMemoryState`](reth_chain_state::CanonicalInMemoryState). Newly executed blocks are
-/// tracked in its non-canonical section, and move to its canonical section when they become
-/// canonical.
+/// The executed blocks are tracked, canonical or not, by the [`InMemoryState`] of the
+/// [`OverlayManager`]. This type only reads them: they have to be written through a
+/// [`CanonicalInMemoryState`](reth_chain_state::CanonicalInMemoryState) that shares that
+/// [`InMemoryState`].
 ///
 /// ## Invariants
 ///
-/// - All executed blocks are valid and have been executed.
-#[derive(Debug, Default)]
+/// - All tracked blocks are valid: the engine either validated them, or loaded them from disk as
+///   canonical blocks.
+#[derive(Debug)]
 pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     /// Currently tracked canonical head of the chain.
     pub(crate) current_canonical_head: BlockNumHash,
-    /// Manages state trie overlays for in-memory blocks.
+    /// Manages state trie overlays for in-memory blocks, and holds the in-memory state that
+    /// tracks them.
     pub(crate) overlay_manager: OverlayManager<N>,
 }
 
@@ -37,35 +38,35 @@ impl<N: NodePrimitives> TreeState<N> {
         Self { current_canonical_head, overlay_manager }
     }
 
-    /// Returns the number of executed blocks stored.
+    /// Returns the number of tracked executed blocks, canonical or not.
     pub fn block_count(&self) -> usize {
         let InMemoryStateBlockCounts { canonical, non_canonical } =
             self.in_memory_state().block_counts();
         canonical + non_canonical
     }
 
-    /// Returns the [`ExecutedBlock`] by hash.
+    /// Returns the tracked [`ExecutedBlock`] with the given hash, canonical or not.
     pub fn executed_block_by_hash(&self, hash: B256) -> Option<ExecutedBlock<N>> {
         self.in_memory_state().state_by_hash(hash).map(|state| state.block())
     }
 
-    /// Returns `true` if a block with the given hash exists in memory.
+    /// Returns `true` if a block with the given hash is tracked, canonical or not.
     pub fn contains_hash(&self, hash: &B256) -> bool {
         self.in_memory_state().contains(hash)
     }
 
-    /// Returns the sealed block header by hash.
+    /// Returns the sealed header of the tracked block with the given hash, canonical or not.
     pub fn sealed_header_by_hash(&self, hash: &B256) -> Option<SealedHeader<N::BlockHeader>> {
         self.in_memory_state()
             .state_by_hash(*hash)
             .map(|state| state.block_ref().sealed_block().sealed_header().clone())
     }
 
-    /// Returns all available blocks for the given hash that lead back to the canonical chain, from
-    /// newest to oldest, and the parent hash of the oldest returned block. This parent hash is the
-    /// highest persisted block connected to this chain.
+    /// Returns the tracked block with the given hash and its tracked ancestors, from newest to
+    /// oldest, and the parent hash of the oldest returned block, which is the block this chain
+    /// builds on.
     ///
-    /// Returns `None` if the block for the given hash is not found.
+    /// Returns `None` if the block for the given hash is not tracked.
     pub fn blocks_by_hash(&self, hash: B256) -> Option<(B256, Vec<ExecutedBlock<N>>)> {
         let state = self.in_memory_state().state_by_hash(hash)?;
         Some((state.anchor().hash, state.chain().map(BlockState::block).collect()))
@@ -100,7 +101,6 @@ impl<N: NodePrimitives> TreeState<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip1898::BlockWithParent;
     use reth_chain_state::{
         test_utils::TestBlockBuilder, CanonicalInMemoryState, ChainInfoHeaders, NewCanonicalChain,
     };
@@ -129,71 +129,6 @@ mod tests {
     /// block the chain builds on.
     fn chain_hashes(tree_state: &TreeState, block: &ExecutedBlock) -> Vec<B256> {
         tree_state.in_memory_state().state_by_hash(hash(block)).unwrap().chain_hashes().collect()
-    }
-
-    /// Determines if the second block is a descendant of the first block.
-    ///
-    /// If the two blocks are the same, this returns `false`.
-    fn is_descendant(tree_state: &TreeState, first: BlockNumHash, second: BlockWithParent) -> bool {
-        // If the second block's parent is the first block's hash, then it is a direct child
-        // and we can return early.
-        if second.parent == first.hash {
-            return true
-        }
-
-        // If the second block is lower than, or has the same block number, they are not
-        // descendants.
-        if second.block.number <= first.number {
-            return false
-        }
-
-        // The first block is an ancestor if it is on the in-memory chain of the second block's
-        // parent, or the block that chain builds on.
-        tree_state
-            .in_memory_state()
-            .state_by_hash(second.parent)
-            .is_some_and(|parent| parent.chain_hashes().any(|hash| hash == first.hash))
-    }
-
-    /// Removes the blocks the engine removes once `persisted` is persisted while `finalized` is the
-    /// finalized block.
-    fn on_blocks_persisted(
-        canonical_in_memory_state: &CanonicalInMemoryState,
-        persisted: BlockNumHash,
-        finalized: Option<BlockNumHash>,
-    ) {
-        canonical_in_memory_state.remove_persisted_blocks_until(persisted, persisted.number);
-        if let Some(finalized) = finalized {
-            canonical_in_memory_state.prune_conflicting_with_finalized(
-                if persisted.number < finalized.number { persisted } else { finalized },
-            );
-        }
-    }
-
-    #[test]
-    fn test_tree_state_normal_descendant() {
-        let (tree_state, canonical_in_memory_state) = tree_state();
-        let blocks = TestBlockBuilder::eth().get_executed_blocks(1..4).collect::<Vec<_>>();
-
-        canonical_in_memory_state.insert_executed(blocks[0].clone());
-        assert!(is_descendant(
-            &tree_state,
-            blocks[0].recovered_block().num_hash(),
-            blocks[1].recovered_block().block_with_parent()
-        ));
-
-        canonical_in_memory_state.insert_executed(blocks[1].clone());
-
-        assert!(is_descendant(
-            &tree_state,
-            blocks[0].recovered_block().num_hash(),
-            blocks[2].recovered_block().block_with_parent()
-        ));
-        assert!(is_descendant(
-            &tree_state,
-            blocks[1].recovered_block().num_hash(),
-            blocks[2].recovered_block().block_with_parent()
-        ));
     }
 
     #[tokio::test]
@@ -350,8 +285,8 @@ mod tests {
         canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
 
         // Inclusive bound, so we should remove anything up to and including 2.
-        on_blocks_persisted(
-            &canonical_in_memory_state,
+        canonical_in_memory_state.on_blocks_persisted(
+            BlockNumHash::new(2, hash(&blocks[1])),
             BlockNumHash::new(2, hash(&blocks[1])),
             Some(blocks[1].recovered_block().num_hash()),
         );
@@ -370,8 +305,8 @@ mod tests {
         canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
 
         // We should still remove everything up to and including 2.
-        on_blocks_persisted(
-            &canonical_in_memory_state,
+        canonical_in_memory_state.on_blocks_persisted(
+            BlockNumHash::new(2, hash(&blocks[1])),
             BlockNumHash::new(2, hash(&blocks[1])),
             None,
         );
@@ -390,8 +325,8 @@ mod tests {
         canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
 
         // We have no forks so we should still remove anything up to and including 2.
-        on_blocks_persisted(
-            &canonical_in_memory_state,
+        canonical_in_memory_state.on_blocks_persisted(
+            BlockNumHash::new(2, hash(&blocks[1])),
             BlockNumHash::new(2, hash(&blocks[1])),
             Some(blocks[0].recovered_block().num_hash()),
         );
@@ -422,8 +357,8 @@ mod tests {
             InMemoryStateBlockCounts { canonical: 5, non_canonical: 3 }
         );
 
-        on_blocks_persisted(
-            &canonical_in_memory_state,
+        canonical_in_memory_state.on_blocks_persisted(
+            BlockNumHash::new(2, hash(&blocks[1])),
             BlockNumHash::new(2, hash(&blocks[1])),
             Some(blocks[1].recovered_block().num_hash()),
         );

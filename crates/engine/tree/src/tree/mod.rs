@@ -357,6 +357,12 @@ where
     V: EngineValidator<T> + WaitForCaches,
 {
     /// Creates a new [`EngineApiTreeHandler`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `canonical_in_memory_state` and the overlay manager of `state` do not share one
+    /// [`InMemoryState`](reth_chain_state::InMemoryState): the engine writes the executed blocks
+    /// through the former and reads them through the latter.
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
@@ -375,7 +381,7 @@ where
     ) -> Self {
         assert!(
             canonical_in_memory_state.writes_to(state.tree_state.overlay_manager.in_memory_state()),
-            "the engine does not write to the in-memory state that its tree state reads"
+            "the canonical in-memory state and the overlay manager do not share one in-memory state"
         );
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
@@ -410,6 +416,11 @@ where
     ///
     /// Returns the sender through which incoming requests can be sent to the task and the receiver
     /// end of a [`EngineApiEvent`] unbounded channel to receive events from the engine.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `canonical_in_memory_state` and `overlay_manager` do not share one
+    /// [`InMemoryState`](reth_chain_state::InMemoryState), see [`Self::new`].
     #[expect(clippy::complexity)]
     pub fn spawn_new(
         provider: P,
@@ -711,14 +722,14 @@ where
                         } else {
                             self.canonical_in_memory_state.insert_executed(block.clone());
                         }
-                        self.metrics
-                            .engine
-                            .executed_blocks
-                            .set(self.state.tree_state.block_count() as f64);
                         self.state
                             .tree_state
                             .overlay_manager
                             .precompute_child_execution_overlays(block_num_hash.hash);
+                        self.metrics
+                            .engine
+                            .executed_blocks
+                            .set(self.state.tree_state.block_count() as f64);
 
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(

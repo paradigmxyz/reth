@@ -296,18 +296,19 @@ impl TestHarness {
     }
 
     fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
-        let overlay_manager = self.tree.state.tree_state.overlay_manager.clone();
         let canonical_in_memory_state = CanonicalInMemoryState::with_head(
             ChainInfoHeaders {
                 canonical_head: blocks.last().unwrap().recovered_block().clone_sealed_header(),
                 safe: None,
                 finalized: None,
             },
-            overlay_manager.in_memory_state().clone(),
+            self.tree.state.tree_state.overlay_manager.in_memory_state().clone(),
         );
 
-        self.tree.state.tree_state =
-            TreeState::new(blocks.last().unwrap().recovered_block().num_hash(), overlay_manager);
+        self.tree
+            .state
+            .tree_state
+            .set_canonical_head(blocks.last().unwrap().recovered_block().num_hash());
 
         canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
         self.tree.canonical_in_memory_state = canonical_in_memory_state;
