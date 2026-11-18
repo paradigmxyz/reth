@@ -480,9 +480,20 @@ where
             self.reinsert_reorged_blocks(old.clone());
         }
 
-        // update the tracked in-memory state with the new chain
+        let first_reverted = match &chain_update {
+            NewCanonicalChain::Revert { old, .. } => {
+                old.first().map(|block| block.recovered_block().num_hash())
+            }
+            NewCanonicalChain::Commit { .. } | NewCanonicalChain::Reorg { .. } => None,
+        };
+
         self.canonical_in_memory_state.update_chain(chain_update);
-        self.canonical_in_memory_state.set_canonical_head(tip.clone());
+        if let Some(first_reverted) = first_reverted {
+            self.canonical_in_memory_state
+                .set_canonical_head_after_rewind(tip.clone(), first_reverted);
+        } else {
+            self.canonical_in_memory_state.set_canonical_head(tip.clone());
+        }
         self.payload_validator.on_canonical_head_changed(tip.hash(), &self.state);
 
         // Update metrics based on new tip

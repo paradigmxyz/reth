@@ -47,8 +47,8 @@ pub struct ConsistentProvider<N: ProviderNodeTypes> {
     storage_provider: <ProviderFactory<N> as DatabaseProviderFactory>::Provider,
     /// Head block at time of [`Self`] creation, if it is tracked in memory.
     head_block: Option<Arc<BlockState<N::Primitives>>>,
-    /// Canonical head at time of [`Self`] creation, including when it is already on disk.
-    canonical_head: Option<BlockNumHash>,
+    /// Canonical head for a rewind whose old suffix is still in the storage snapshot.
+    rewind_head: Option<BlockNumHash>,
     /// In-memory canonical state. This is not a snapshot, and can change! Use with caution.
     canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
 }
@@ -71,15 +71,20 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         // working under an older view), while the in-memory state may have deleted them
         // entirely. Resulting in gaps on the range.
         let head_block = state.head_state();
-        let canonical_head = if let Some(block) = &head_block {
-            Some(BlockNumHash::new(block.number(), block.hash()))
-        } else {
-            let head = state.chain_info();
-            (!head.best_hash.is_zero())
-                .then_some(BlockNumHash::new(head.best_number, head.best_hash))
-        };
+        let pending_rewind =
+            state.first_block_in_pending_rewind().map(|first| (first, state.chain_info()));
         let storage_provider = storage_provider_factory.database_provider_ro()?;
-        Ok(Self { storage_provider, head_block, canonical_head, canonical_in_memory_state: state })
+        let rewind_head = if let Some((first, head)) = pending_rewind &&
+            storage_provider.block_hash(first.number)? == Some(first.hash)
+        {
+            Some(head_block.as_ref().map_or_else(
+                || BlockNumHash::new(head.best_number, head.best_hash),
+                |block| BlockNumHash::new(block.number(), block.hash()),
+            ))
+        } else {
+            None
+        };
+        Ok(Self { storage_provider, head_block, rewind_head, canonical_in_memory_state: state })
     }
 
     /// Consumes this consistent view and returns its database provider snapshot.
@@ -151,9 +156,9 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             self.head_block.as_ref().map(|b| b.chain().collect::<Vec<_>>()).unwrap_or_default();
         let db_provider = &self.storage_provider;
 
-        let tip = self.best_block_number()?;
-        let (start, end) = self.convert_range_bounds(range, || tip);
-        let end = end.min(tip);
+        let (start, end) =
+            self.convert_range_bounds(range, || self.best_block_number().unwrap_or_default());
+        let end = self.rewind_head.map_or(end, |head| end.min(head.number));
 
         if start > end {
             return Ok(vec![])
@@ -406,7 +411,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     {
         // Persistence can still contain the suffix that a forkchoice update just reverted.
         if let BlockHashOrNumber::Number(number) = id &&
-            self.canonical_head.is_some_and(|head| number > head.number)
+            self.rewind_head.is_some_and(|head| number > head.number)
         {
             return Ok(None)
         }
@@ -543,7 +548,7 @@ impl<N: ProviderNodeTypes> BlockHashReader for ConsistentProvider<N> {
 
 impl<N: ProviderNodeTypes> BlockNumReader for ConsistentProvider<N> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
-        if let Some(head) = self.canonical_head {
+        if let Some(head) = self.rewind_head {
             return Ok(ChainInfo { best_hash: head.hash, best_number: head.number })
         }
         let best_number = self.best_block_number()?;
@@ -551,7 +556,10 @@ impl<N: ProviderNodeTypes> BlockNumReader for ConsistentProvider<N> {
     }
 
     fn best_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.canonical_head.map(|head| Ok(head.number)).unwrap_or_else(|| self.last_block_number())
+        if let Some(head) = self.rewind_head {
+            return Ok(head.number)
+        }
+        self.head_block.as_ref().map(|b| Ok(b.number())).unwrap_or_else(|| self.last_block_number())
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
@@ -1516,8 +1524,13 @@ mod tests {
         state.set_canonical_head(blocks[3].clone_sealed_header());
         let before = provider.consistent_provider()?;
 
-        // Publish a rewind while the reverted suffix is still stored on disk.
+        // During backfill published head tracking can lag the stored chain.
         state.set_canonical_head(blocks[1].clone_sealed_header());
+        assert_eq!(provider.consistent_provider()?.block_hash(2)?, Some(blocks[2].hash()));
+
+        // Publish a rewind while the reverted suffix is still stored on disk.
+        state
+            .set_canonical_head_after_rewind(blocks[1].clone_sealed_header(), blocks[2].num_hash());
         let after = provider.consistent_provider()?;
         assert_eq!(after.best_block_number()?, 1);
         assert_eq!(after.block_hash(1)?, Some(blocks[1].hash()));
