@@ -13,9 +13,8 @@ use reth_fs_util as fs;
 use std::{
     any::Any,
     collections::VecDeque,
-    fs::OpenOptions,
-    io::{self, BufWriter, Read, Write},
-    os::unix::fs::FileExt,
+    fs::{File, OpenOptions},
+    io::{self, BufWriter, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -669,11 +668,11 @@ impl SegmentedDownload {
         terminal_failure: Arc<TerminalFailure>,
         piece_progress_bytes: Arc<AtomicU64>,
     ) {
-        let file = match OpenOptions::new().write(true).open(context.part_path) {
+        let mut file = match OpenOptions::new().write(true).open(context.part_path) {
             Ok(file) => file,
             Err(error) => {
                 state.note_terminal_failure();
-                terminal_failure.record(error.into());
+                terminal_failure.record(fs::FsPathError::open(error, context.part_path).into());
                 return;
             }
         };
@@ -682,7 +681,7 @@ impl SegmentedDownload {
             match Self::download_piece_with_retries(
                 client,
                 context.url,
-                &file,
+                &mut file,
                 piece,
                 context.shared,
                 &piece_progress_bytes,
@@ -719,7 +718,7 @@ impl SegmentedDownload {
     fn download_piece_with_retries(
         client: &BlockingClient,
         url: &str,
-        file: &std::fs::File,
+        file: &mut File,
         piece: DownloadPiece,
         shared: Option<&Arc<SharedProgress>>,
         piece_progress_bytes: &AtomicU64,
@@ -765,7 +764,7 @@ impl SegmentedDownload {
     fn download_piece_once(
         client: &BlockingClient,
         url: &str,
-        file: &std::fs::File,
+        file: &mut File,
         piece: DownloadPiece,
         shared: Option<&Arc<SharedProgress>>,
         piece_progress_bytes: &AtomicU64,
@@ -806,7 +805,10 @@ impl SegmentedDownload {
 
         let mut buf = [0u8; 64 * 1024];
         let mut reader = response.take(expected_len);
-        let mut offset = piece.start;
+        // Each worker has its own file cursor. A retry starts at the beginning of the piece.
+        file.seek(SeekFrom::Start(piece.start))
+            .map_err(|error| PieceAttemptFailure::Terminal(error.into()))?;
+        let mut downloaded_len = 0;
 
         loop {
             if cancel_token.is_cancelled() {
@@ -816,9 +818,9 @@ impl SegmentedDownload {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    file.write_all_at(&buf[..n], offset)
+                    file.write_all(&buf[..n])
                         .map_err(|error| PieceAttemptFailure::Terminal(error.into()))?;
-                    offset += n as u64;
+                    downloaded_len += n as u64;
                     if let Some(progress) = shared {
                         progress.record_session_fetched_bytes(n as u64);
                     }
@@ -833,7 +835,6 @@ impl SegmentedDownload {
             }
         }
 
-        let downloaded_len = offset - piece.start;
         if downloaded_len == expected_len {
             if let Some(progress) = shared {
                 progress.add_active_download_bytes(expected_len);
@@ -1027,9 +1028,7 @@ fn panic_payload_message(payload: Box<dyn Any + Send + 'static>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest::StatusCode;
-    use reth_cli_util::cancellation::CancellationToken;
-    use std::io::Write;
+    use std::{io::BufRead, net::TcpListener};
 
     #[test]
     fn segmented_plan_skips_small_files() {
@@ -1124,5 +1123,58 @@ mod tests {
         assert!(state.requeue(first));
         assert!(!state.requeue(first));
         assert_eq!(state.pieces.lock().unwrap().back(), Some(&first));
+    }
+
+    #[test]
+    fn segmented_piece_retry_restarts_at_its_file_offset() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            for body in ["EFGH", "AB", "ABCD"] {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                for line in io::BufReader::new(&mut stream).lines() {
+                    if line.unwrap().is_empty() {
+                        break;
+                    }
+                }
+                write!(
+                    stream,
+                    "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+            }
+        });
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("archive.part");
+        let mut file = File::create(&path).unwrap();
+        file.set_len(8).unwrap();
+        let client =
+            BlockingClient::builder().no_proxy().timeout(Duration::from_secs(5)).build().unwrap();
+        let token = CancellationToken::new();
+        let progress = AtomicU64::new(0);
+        let request_limiter = DownloadRequestLimiter::new(1);
+        let session = DownloadSession::new(None, None, token.clone())
+            .with_retry_backoff(Some(Duration::ZERO));
+
+        for piece in [DownloadPiece { start: 4, end: 7 }, DownloadPiece { start: 0, end: 3 }] {
+            let result = SegmentedDownload::download_piece_with_retries(
+                &client,
+                &url,
+                &mut file,
+                piece,
+                None,
+                &progress,
+                &request_limiter,
+                &token,
+                &session,
+            );
+            assert!(result.is_ok());
+        }
+        assert_eq!(fs::read(&path).unwrap(), b"ABCDEFGH");
+        assert_eq!(progress.load(Ordering::Relaxed), 8);
+        server.join().unwrap();
     }
 }

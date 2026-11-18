@@ -13,6 +13,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(windows)]
+use std::os::windows::fs::OpenOptionsExt;
+
 /// Result alias for [`FsPathError`].
 pub type Result<T> = std::result::Result<T, FsPathError>;
 
@@ -358,8 +361,15 @@ where
 
     // fsync() directory
     if let Some(parent) = file_path.parent() {
-        OpenOptions::new()
-            .read(true)
+        let mut options = OpenOptions::new();
+        options.read(true);
+        #[cfg(windows)]
+        {
+            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x02000000;
+            // Opening a directory requires backup semantics, and flushing requires write access.
+            options.write(true).custom_flags(FILE_FLAG_BACKUP_SEMANTICS);
+        }
+        options
             .open(parent)
             .map_err(|err| FsPathError::open(err, parent))?
             .sync_all()
