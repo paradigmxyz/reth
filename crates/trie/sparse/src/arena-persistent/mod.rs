@@ -1741,6 +1741,7 @@ mod tests {
 
             assert!(fork.prune(prune_epoch) > 0);
             assert_eq!(fork.upper_arena.len(), 1);
+            assert!(fork.upper_arena.has_vacant_slots());
             assert_eq!(fork.prune(cleanup_epoch), 0);
             assert!(fork.upper_arena.is_snapshot_ready());
             assert_eq!(leaf_value(&original, EDITED_KEY), &[1; 40]);
@@ -1750,6 +1751,7 @@ mod tests {
             assert!(fork.upper_arena.is_snapshot_ready());
             assert_eq!(fork.prune(cleanup_epoch), 0);
             assert!(!fork.upper_arena.is_snapshot_ready());
+            assert!(!fork.upper_arena.has_vacant_slots());
             assert_eq!(fork.upper_arena.len(), 1);
             assert!(matches!(
                 fork.find_leaf(&Nibbles::unpack(EDITED_KEY), None),
@@ -1863,6 +1865,98 @@ mod tests {
             }
             assert_eq!(original.root(cutoff), original_root);
             assert_eq!(leaf_value(&original, EDITED_KEY), &[1; 40]);
+        }
+    }
+
+    #[test]
+    fn pruning_compacts_leaf_subtries_after_a_snapshot_drops() {
+        for min_leaves_for_prune in [u64::MAX, 0] {
+            let mut original = trie_with_shared_prefix_leaves();
+            let cutoff = epoch(1);
+            let original_root = original.root(cutoff);
+            let mut fork = original.snapshot();
+            fork.parallelism_thresholds.min_leaves_for_prune = min_leaves_for_prune;
+            apply_leaf_edits(&mut fork, &[(SHARED_PREFIX_KEY, &[])]);
+            let root = fork.root(epoch(2));
+
+            let path = Nibbles::from_nibbles([1, 1]);
+            let subtrie_index = |trie: &PersistentArenaParallelSparseTrie| {
+                trie.upper_arena
+                    .iter()
+                    .find_map(|(idx, node)| match node {
+                        ArenaSparseNode::Subtrie(subtrie) if subtrie.path == path => Some(idx),
+                        _ => None,
+                    })
+                    .unwrap()
+            };
+            let subtrie_idx = subtrie_index(&fork);
+            let ArenaSparseNode::Subtrie(subtrie) = &mut fork.upper_arena[subtrie_idx] else {
+                unreachable!()
+            };
+            assert!(matches!(subtrie.arena[subtrie.root], ArenaSparseNode::Leaf { .. }));
+            assert_eq!(subtrie.arena.len(), 1);
+            assert!(!subtrie.arena.can_compact());
+            assert_eq!(subtrie.prune(cutoff), 0);
+            assert_eq!(original.root(cutoff), original_root);
+            assert_eq!(leaf_value(&original, SHARED_PREFIX_KEY), &[2; 40]);
+
+            drop(original);
+            assert_eq!(fork.prune(cutoff), 0);
+            assert_eq!(fork.root(epoch(2)), root);
+            assert_eq!(leaf_value(&fork, EDITED_KEY), &[1; 40]);
+            let subtrie_idx = subtrie_index(&fork);
+            let ArenaSparseNode::Subtrie(subtrie) = &mut fork.upper_arena[subtrie_idx] else {
+                unreachable!()
+            };
+            assert!(!subtrie.arena.is_snapshot_ready());
+            assert_eq!(subtrie.arena.len(), 1);
+            assert_eq!(subtrie.root, NodeIndex::new(0));
+            assert!(!subtrie.arena.has_vacant_slots());
+        }
+    }
+
+    #[test]
+    fn pruning_dense_exclusive_arenas_preserves_storage() {
+        let mut trie = trie_with_shared_prefix_leaves();
+        let cutoff = epoch(1);
+        let root = trie.root(cutoff);
+        assert_eq!(trie.prune(cutoff), 0);
+
+        let subtrie_idx = trie
+            .upper_arena
+            .iter()
+            .find_map(|(idx, node)| match node {
+                ArenaSparseNode::Subtrie(subtrie)
+                    if subtrie.path == Nibbles::from_nibbles([1, 2]) =>
+                {
+                    Some(idx)
+                }
+                _ => None,
+            })
+            .unwrap();
+        let ArenaSparseNode::Subtrie(subtrie) = &mut trie.upper_arena[subtrie_idx] else {
+            unreachable!()
+        };
+        assert!(!subtrie.arena.has_vacant_slots());
+        let leaf = core::ptr::from_ref(&subtrie.arena[subtrie.root]);
+        assert_eq!(subtrie.prune(cutoff), 0);
+        assert_eq!(core::ptr::from_ref(&subtrie.arena[subtrie.root]), leaf);
+
+        // A same-slot write needs reclamation even when it does not create vacancies.
+        let peer = subtrie.arena.snapshot();
+        subtrie.arena[subtrie.root] = peer[subtrie.root].clone();
+        drop(peer);
+        assert!(!subtrie.arena.has_vacant_slots());
+        assert!(subtrie.arena.is_snapshot_ready());
+        assert_eq!(subtrie.prune(cutoff), 0);
+        assert!(!subtrie.arena.is_snapshot_ready());
+
+        assert!(!trie.upper_arena.has_vacant_slots());
+        let upper_root = core::ptr::from_ref(&trie.upper_arena[trie.root]);
+        for cleanup_epoch in [cutoff, TrieNodeEpoch::UNMODIFIED] {
+            assert_eq!(trie.prune(cleanup_epoch), 0);
+            assert_eq!(core::ptr::from_ref(&trie.upper_arena[trie.root]), upper_root);
+            assert_eq!(trie.root(cutoff), root);
         }
     }
 

@@ -84,11 +84,16 @@ impl ArenaSparseSubtrie {
     /// The upper trie has checked the epoch cutoff, that the trie is not dirty, and that this
     /// root is kept.
     pub(super) fn prune(&mut self, prune_before: TrieNodeEpoch) -> usize {
+        self.arena.reclaim_snapshot_overrides();
         if !self.arena.can_compact() {
             return self.plan_prune(prune_before).map_or(0, |plan| self.apply_prune_plan(plan));
         }
 
         if branch_idx(&self.arena, self.root).is_none() {
+            // A retained leaf can still have vacant slots from edits made while shared.
+            if self.arena.has_vacant_slots() {
+                self.arena.compact(&mut self.root);
+            }
             return 0;
         }
 

@@ -441,6 +441,11 @@ impl NodeArena {
             drained: self.drained,
         }
     }
+
+    /// Returns whether either slot table has vacancies that compaction can release.
+    pub(super) const fn has_vacant_slots(&self) -> bool {
+        self.free.len() > 0 || self.blinded_free.len() > 0 || self.drained > 0
+    }
 }
 
 impl Index<NodeIndex> for NodeArena {

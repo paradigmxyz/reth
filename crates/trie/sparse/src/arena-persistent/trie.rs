@@ -405,6 +405,9 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
         if prune_before == TrieNodeEpoch::UNMODIFIED ||
             branch_idx(&self.upper_arena, self.root).is_none()
         {
+            if self.upper_arena.has_vacant_slots() && self.upper_arena.can_compact() {
+                self.upper_arena.compact(&mut self.root);
+            }
             return 0;
         }
 
@@ -524,7 +527,8 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
             pruned += self.prune_taken_subtries(taken, ArenaSparseSubtrie::apply_prune_plan);
         }
 
-        if pruned > 0 && self.upper_arena.can_compact() {
+        // Vacancies from a shared prune can outlive the last snapshot without new evictions.
+        if (pruned > 0 || self.upper_arena.has_vacant_slots()) && self.upper_arena.can_compact() {
             self.upper_arena.compact(&mut self.root);
         }
 
