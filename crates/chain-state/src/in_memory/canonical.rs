@@ -105,6 +105,16 @@ impl<N: NodePrimitives> InMemoryState<N> {
         self.inner.blocks.read().get(&hash).cloned()
     }
 
+    /// Returns `true` if a block with the given hash is tracked, canonical or not.
+    pub fn contains(&self, hash: &B256) -> bool {
+        self.inner.blocks.read().contains(hash)
+    }
+
+    /// Returns the number of tracked blocks per section, read under one lock.
+    pub fn block_counts(&self) -> InMemoryStateBlockCounts {
+        self.inner.blocks.read().counts()
+    }
+
     /// Returns the state for a given block number.
     pub(crate) fn state_by_number(&self, number: u64) -> Option<Arc<BlockState<N>>> {
         self.inner.blocks.read().canonical().by_number(number).cloned()
@@ -170,6 +180,15 @@ struct InMemoryStateInner<N: NodePrimitives> {
     removal_generation: AtomicU64,
     /// Metrics for the in-memory state.
     metrics: InMemoryStateMetrics,
+}
+
+/// Number of tracked blocks per section.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InMemoryStateBlockCounts {
+    /// Blocks in the canonical section.
+    pub canonical: usize,
+    /// Blocks in the non-canonical section.
+    pub non_canonical: usize,
 }
 
 /// Inner type to provide in memory state. It includes a chain tracker to be
@@ -253,6 +272,12 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         };
 
         Self { inner: Arc::new(inner) }
+    }
+
+    /// Returns `true` if `in_memory_state` reads the blocks that updates through this state
+    /// change.
+    pub fn writes_to(&self, in_memory_state: &InMemoryState<N>) -> bool {
+        Arc::ptr_eq(&self.inner.in_memory_state.inner, &in_memory_state.inner)
     }
 
     /// Returns the block hash corresponding to the given number.
@@ -999,5 +1024,36 @@ mod tests {
         for kept in [fork_hash, fork_child_hash] {
             assert_eq!(in_memory_state.state_by_hash(kept).unwrap().hash(), kept);
         }
+    }
+
+    #[test]
+    fn test_in_memory_state_contains_and_block_counts() {
+        let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
+        let in_memory_state = &state.inner.in_memory_state;
+        let mut block_builder = TestBlockBuilder::eth();
+        let blocks = block_builder.get_executed_blocks(1..3).collect::<Vec<_>>();
+        let fork =
+            block_builder.get_executed_block_with_number(2, blocks[0].recovered_block().hash());
+        state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        state.insert_executed(fork.clone());
+
+        assert_eq!(
+            in_memory_state.block_counts(),
+            InMemoryStateBlockCounts { canonical: 2, non_canonical: 1 }
+        );
+        for block in blocks.iter().chain([&fork]) {
+            assert!(in_memory_state.contains(&block.recovered_block().hash()));
+        }
+        assert!(!in_memory_state.contains(&B256::random()));
+    }
+
+    #[test]
+    fn test_writes_to() {
+        let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
+        let other: CanonicalInMemoryState = CanonicalInMemoryState::empty();
+
+        // Clones share the blocks, separately created states do not.
+        assert!(state.clone().writes_to(&state.inner.in_memory_state.clone()));
+        assert!(!state.writes_to(&other.inner.in_memory_state));
     }
 }

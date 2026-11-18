@@ -341,16 +341,16 @@ where
             target = ?target,
             "Returning save input"
         );
-        while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
+        while let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash) {
             if block.recovered_block().number() <= prev_partial_state_trie {
                 break;
             }
 
-            if block.recovered_block().number() <= new_db_tip {
-                blocks.push(block.clone());
-            }
-
             current_hash = block.recovered_block().parent_hash();
+
+            if block.recovered_block().number() <= new_db_tip {
+                blocks.push(block);
+            }
         }
 
         // Reverse the order so that the oldest block comes first
@@ -383,9 +383,9 @@ where
         }
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        // Trim the canonical blocks of the in-memory state, then the tree state and the blocks
-        // that are not canonical. Overlays are built from the in-memory state alone and pruned
-        // on their next use, so the order between the two trims is free to choose.
+        // Trim the canonical blocks of the in-memory state, then the blocks that are not
+        // canonical. Overlays are built from the in-memory state alone and pruned on their next
+        // use.
         self.canonical_in_memory_state.remove_persisted_blocks_until(
             self.persistence_state.last_persisted_block,
             in_memory_persisted_block.number,
@@ -452,38 +452,32 @@ where
         Ok(Some(persisted.number))
     }
 
-    /// Remove all blocks up to __and including__ the given block number.
+    /// Removes the executed blocks that are not canonical and can never become canonical again.
     ///
     /// If a finalized hash is provided, the only non-canonical blocks which will be removed are
-    /// those which have a fork point at or below the finalized hash.
+    /// those which have a fork point at or below the finalized hash. Without one, nothing is
+    /// removed.
     ///
-    /// Canonical blocks below the upper bound will still be removed.
+    /// The canonical blocks up to the upper bound are removed by the caller.
     pub(crate) fn remove_before(
-        &mut self,
+        &self,
         upper_bound: BlockNumHash,
         finalized_hash: Option<B256>,
     ) -> ProviderResult<()> {
-        // first fetch the finalized block number and then call the remove_before method on
-        // tree_state
+        // first fetch the finalized block number
         let num = if let Some(hash) = finalized_hash {
             self.provider.block_number(hash)?.map(|number| BlockNumHash { number, hash })
         } else {
             None
         };
 
-        // The executed blocks that are not canonical are removed from the in-memory state like
-        // the tree state removes them: if the finalized block is ahead of the upper bound, the
-        // upper bound is used instead.
+        // If the finalized block is ahead of the upper bound, the upper bound is used instead, so
+        // that the only blocks removed are those that fork off at or below it.
         if let Some(finalized) = num {
             self.canonical_in_memory_state.prune_conflicting_with_finalized(
                 if upper_bound.number < finalized.number { upper_bound } else { finalized },
             );
         }
-        self.state.tree_state.remove_until(
-            upper_bound,
-            self.persistence_state.last_persisted_block.hash,
-            num,
-        );
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
         Ok(())
     }

@@ -1,4 +1,4 @@
-use super::{BlockState, ExecutedBlock, NewCanonicalChain};
+use super::{canonical::InMemoryStateBlockCounts, BlockState, ExecutedBlock, NewCanonicalChain};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
@@ -80,6 +80,14 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
     /// Returns the state of the pending block, if there is one.
     pub(super) fn pending_state(&self) -> Option<&Arc<BlockState<N>>> {
         self.pending_hash.and_then(|hash| self.get(&hash))
+    }
+
+    /// Returns the number of tracked blocks per section.
+    pub(super) fn counts(&self) -> InMemoryStateBlockCounts {
+        InMemoryStateBlockCounts {
+            canonical: self.canonical.blocks.len(),
+            non_canonical: self.non_canonical.blocks.len(),
+        }
     }
 
     /// Returns the number of canonical blocks and the lowest and highest of their numbers.

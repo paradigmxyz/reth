@@ -136,17 +136,12 @@ where
             // the node reset so we need to clear everything above that height so that backfill
             // height is the new canonical block.
             self.state.set_pending_sparse_trie_prune(false);
-            self.state.tree_state.reset(backfill_num_hash);
+            self.state.tree_state.set_canonical_head(backfill_num_hash);
             self.canonical_in_memory_state.clear_state();
         } else {
-            self.state.tree_state.remove_until(
-                backfill_num_hash,
-                self.persistence_state.last_persisted_block.hash,
-                Some(backfill_num_hash),
-            );
-            // The in-memory state drops the blocks the tree state dropped above. The executed
-            // blocks that do not conflict with the backfill block stay in it like they stay in the
-            // tree state, but none of them is canonical.
+            // The in-memory state drops the blocks up to the backfill height and the blocks that
+            // conflict with the backfill block. The other executed blocks stay in it, but none of
+            // them is canonical.
             self.canonical_in_memory_state.on_backfill_finished(
                 self.persistence_state.last_persisted_block.hash,
                 backfill_num_hash,

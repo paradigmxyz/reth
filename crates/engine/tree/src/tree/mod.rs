@@ -110,7 +110,6 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         max_invalid_header_cache_length: u32,
         invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
-        engine_kind: EngineApiKind,
         overlay_manager: OverlayManager<N>,
     ) -> Self {
         Self {
@@ -119,7 +118,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(canonical_block, engine_kind, overlay_manager),
+            tree_state: TreeState::new(canonical_block, overlay_manager),
             pending_sparse_trie_prune: false,
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
@@ -374,6 +373,10 @@ where
         evm_config: C,
         runtime: reth_tasks::Runtime,
     ) -> Self {
+        assert!(
+            canonical_in_memory_state.writes_to(state.tree_state.overlay_manager.in_memory_state()),
+            "the engine does not write to the in-memory state that its tree state reads"
+        );
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
         let (payload_builds, payload_build_finished) = PayloadBuildTracker::new();
@@ -437,7 +440,6 @@ where
             config.max_invalid_header_cache_length(),
             config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
-            kind,
             overlay_manager,
         );
 
@@ -702,11 +704,6 @@ where
 
                         let is_pending = self.state.tree_state.canonical_block_hash() ==
                             block.recovered_block().parent_hash();
-                        self.state.tree_state.insert_executed(block.clone());
-                        self.metrics
-                            .engine
-                            .executed_blocks
-                            .set(self.state.tree_state.block_count() as f64);
 
                         if is_pending {
                             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
@@ -714,6 +711,10 @@ where
                         } else {
                             self.canonical_in_memory_state.insert_executed(block.clone());
                         }
+                        self.metrics
+                            .engine
+                            .executed_blocks
+                            .set(self.state.tree_state.block_count() as f64);
                         self.state
                             .tree_state
                             .overlay_manager
