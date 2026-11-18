@@ -9,7 +9,7 @@ use core::{
     ops::{Index as IndexOps, IndexMut},
 };
 use reth_trie_common::RlpNode;
-use slots::{Slots, MAX_SLOTS};
+use slots::{Slots, VacantSlot, MAX_SLOTS};
 
 /// Bits per word of a [`BlindedMarks`] bitmap.
 const WORD_BITS: usize = u64::BITS as usize;
@@ -72,7 +72,7 @@ impl NodeArena {
     ///
     /// Panics if the slot is out of bounds or free.
     pub(super) fn drain_node(&mut self, idx: Index) -> ArenaSparseNode {
-        let node = self.nodes.replace(idx.get(), ArenaSparseNode::Free);
+        let node = self.nodes.take_slot(idx.get());
         assert!(is_occupied(&node), "drained a free arena slot");
         node
     }
@@ -80,7 +80,7 @@ impl NodeArena {
     /// Removes and returns the node at `idx`, recycling its slot.
     /// Returns `None` if the slot is out of bounds or free.
     pub(super) fn remove(&mut self, idx: Index) -> Option<ArenaSparseNode> {
-        let node = self.nodes.replace_if(idx.get(), ArenaSparseNode::Free, is_occupied)?;
+        let node = self.nodes.take_if(idx.get(), is_occupied)?;
         self.free.push(idx);
         Some(node)
     }
@@ -92,7 +92,7 @@ impl NodeArena {
     /// Panics if the slot is out of bounds or free.
     pub(super) fn discard(&mut self, idx: Index) {
         assert!(
-            self.nodes.set_if(idx.get(), ArenaSparseNode::Free, is_occupied),
+            self.nodes.vacate_if(idx.get(), is_occupied),
             "cannot discard an unoccupied arena slot"
         );
         self.free.push(idx);
@@ -178,7 +178,7 @@ impl NodeArena {
     pub(super) fn discard_blinded(&mut self, child: BranchChild) {
         let slot = child.blinded_slot().expect("child is revealed");
         assert!(
-            self.blinded.set_if(slot as usize, None, Option::is_some),
+            self.blinded.vacate_if(slot as usize, Option::is_some),
             "cannot discard an unoccupied blinded slot"
         );
         self.blinded_free.push(slot);
@@ -488,6 +488,10 @@ impl fmt::Debug for BranchChild {
             None => write!(f, "Revealed({})", self.0),
         }
     }
+}
+
+impl VacantSlot for ArenaSparseNode {
+    const VACANT: Self = Self::Free;
 }
 
 const fn is_occupied(node: &ArenaSparseNode) -> bool {

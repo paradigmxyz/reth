@@ -152,54 +152,65 @@ impl<T: Clone> Slots<T> {
         }
     }
 
-    /// Overwrites a slot and returns its previous value, cloning it if shared.
+    /// Vacates a slot and returns its previous value, cloning it if shared.
     /// Panics if the index is out of bounds.
     #[track_caller]
-    pub(super) fn replace(&mut self, index: usize, value: T) -> T {
+    pub(super) fn take_slot(&mut self, index: usize) -> T
+    where
+        T: VacantSlot,
+    {
         match self.storage_mut() {
-            SlotStorage::Dense(values) => core::mem::replace(dense_slot_mut(values, index), value),
-            SlotStorage::Layered(layered) => layered.replace(index, value),
+            SlotStorage::Dense(values) => {
+                core::mem::replace(dense_slot_mut(values, index), T::VACANT)
+            }
+            SlotStorage::Layered(layered) => {
+                layered.check_index(index);
+                layered.take(index)
+            }
         }
     }
 
-    /// Overwrites an existing slot if the predicate passes, without copying the old value.
+    /// Vacates an existing slot if the predicate passes, without copying the old value.
     /// Returns `false` if the index is out of bounds or the predicate rejects the value.
-    pub(super) fn set_if(
-        &mut self,
-        index: usize,
-        value: T,
-        predicate: impl FnOnce(&T) -> bool,
-    ) -> bool {
+    pub(super) fn vacate_if(&mut self, index: usize, predicate: impl FnOnce(&T) -> bool) -> bool
+    where
+        T: VacantSlot,
+    {
         match self.storage_mut() {
             SlotStorage::Dense(values) => {
                 if let Some(slot) = values.get_mut(index) &&
                     predicate(slot)
                 {
-                    *slot = value;
+                    *slot = T::VACANT;
                     true
                 } else {
                     false
                 }
             }
-            SlotStorage::Layered(layered) => layered.set_if(index, value, predicate),
+            SlotStorage::Layered(layered) => {
+                if layered.get(index).is_some_and(predicate) {
+                    drop(layered.vacate(index));
+                    true
+                } else {
+                    false
+                }
+            }
         }
     }
 
-    /// Overwrites an existing slot if the predicate passes and returns the previous value.
+    /// Vacates an existing slot if the predicate passes and returns the previous value.
     /// Returns `None` if the index is out of bounds or the predicate rejects the value.
-    pub(super) fn replace_if(
-        &mut self,
-        index: usize,
-        value: T,
-        predicate: impl FnOnce(&T) -> bool,
-    ) -> Option<T> {
+    pub(super) fn take_if(&mut self, index: usize, predicate: impl FnOnce(&T) -> bool) -> Option<T>
+    where
+        T: VacantSlot,
+    {
         match self.storage_mut() {
             SlotStorage::Dense(values) => {
                 let slot = values.get_mut(index)?;
-                predicate(slot).then(|| core::mem::replace(slot, value))
+                predicate(slot).then(|| core::mem::replace(slot, T::VACANT))
             }
             SlotStorage::Layered(layered) => {
-                predicate(layered.get(index)?).then(|| layered.replace(index, value))
+                predicate(layered.get(index)?).then(|| layered.take(index))
             }
         }
     }
@@ -235,7 +246,7 @@ impl<T: Clone> Slots<Option<T>> {
     pub(super) fn take(&mut self, index: usize) -> Option<T> {
         match &mut self.0 {
             SlotStorage::Dense(values) => values.get_mut(index)?.take(),
-            SlotStorage::Layered(_) => self.replace_if(index, None, Option::is_some).flatten(),
+            SlotStorage::Layered(_) => self.take_if(index, Option::is_some).flatten(),
         }
     }
 }
@@ -304,6 +315,16 @@ impl<T> DerefMut for ExclusiveSlots<'_, T> {
     }
 }
 
+/// The single value that represents an unoccupied slot in an arena table.
+pub(super) trait VacantSlot {
+    /// The value to write when freeing a slot.
+    const VACANT: Self;
+}
+
+impl<T> VacantSlot for Option<T> {
+    const VACANT: Self = None;
+}
+
 #[derive(Debug, Clone)]
 enum SlotStorage<T> {
     Dense(Vec<T>),
@@ -342,6 +363,8 @@ impl<T: Clone> SlotStorage<T> {
 struct LayeredSlots<T> {
     base: Arc<Vec<T>>,
     overrides: SlotOverrides<T>,
+    /// Vacated slots in this table reuse one allocation, even across directory pages.
+    vacancy: Option<Arc<T>>,
     root_shift: usize,
     len: usize,
 }
@@ -353,6 +376,7 @@ impl<T> LayeredSlots<T> {
             len: base.len(),
             base: Arc::new(base),
             overrides: SlotOverrides::Empty,
+            vacancy: None,
             root_shift: 0,
         }
     }
@@ -423,29 +447,27 @@ impl<T: Clone> LayeredSlots<T> {
     }
 
     #[inline(never)]
-    #[track_caller]
-    fn replace(&mut self, index: usize, value: T) -> T {
-        self.check_index(index);
-        self.grow_overrides_for(index);
-        self.overrides
-            .slot_mut(index, self.root_shift)
-            .replace(Arc::new(value))
-            .map_or_else(|| self.base_value(index).clone(), Arc::unwrap_or_clone)
-    }
-
-    fn set_if(&mut self, index: usize, value: T, predicate: impl FnOnce(&T) -> bool) -> bool {
-        if self.get(index).is_some_and(predicate) {
-            self.write_override(index, value);
-            true
-        } else {
-            false
-        }
+    fn take(&mut self, index: usize) -> T
+    where
+        T: VacantSlot,
+    {
+        self.vacate(index).map_or_else(|| self.base_value(index).clone(), Arc::unwrap_or_clone)
     }
 
     #[inline(never)]
     fn write_override(&mut self, index: usize, value: T) {
         self.grow_overrides_for(index);
         *self.overrides.slot_mut(index, self.root_shift) = Some(Arc::new(value));
+    }
+
+    /// Writes the shared vacant value at an existing index, without copying the old value.
+    fn vacate(&mut self, index: usize) -> Option<Arc<T>>
+    where
+        T: VacantSlot,
+    {
+        self.grow_overrides_for(index);
+        let vacancy = self.vacancy.get_or_insert_with(|| Arc::new(T::VACANT));
+        self.overrides.slot_mut(index, self.root_shift).replace(Arc::clone(vacancy))
     }
 
     /// Extends only this version's directory far enough to address an edited slot.
@@ -622,7 +644,8 @@ mod tests {
             } else {
                 let index = op % expected.len();
                 if op % 3 == 1 {
-                    assert_eq!(slots.replace(index, step), expected[index]);
+                    assert_eq!(slots[index], expected[index]);
+                    slots.set(index, step);
                     expected[index] = step;
                 } else {
                     slots[index] += step;
@@ -714,13 +737,18 @@ mod tests {
     }
 
     #[test]
-    fn guarded_set_does_not_clone_shared_values() {
+    fn guarded_vacate_does_not_clone_shared_values() {
         struct NoClone(u8);
 
         impl Clone for NoClone {
             fn clone(&self) -> Self {
-                panic!("set_if must not clone the previous value");
+                assert_eq!(self.0, 2, "vacating must not clone the previous value");
+                Self::VACANT
             }
+        }
+
+        impl VacantSlot for NoClone {
+            const VACANT: Self = Self(2);
         }
 
         let mut original = Slots::new();
@@ -729,14 +757,47 @@ mod tests {
         let mut snapshot = original.clone();
 
         assert!(snapshot.exclusive_slots().is_none());
-        assert!(!snapshot.set_if(1, NoClone(1), |_| true));
-        assert!(!snapshot.set_if(0, NoClone(1), |_| false));
-        assert!(snapshot.set_if(0, NoClone(2), |old| old.0 == 0));
+        assert!(!snapshot.vacate_if(1, |_| true));
+        assert!(!snapshot.vacate_if(0, |_| false));
+        assert!(snapshot.vacate_if(0, |old| old.0 == 0));
         assert_eq!(snapshot[0].0, 2);
         assert_eq!(original[0].0, 0);
 
         drop(original);
         assert_eq!(snapshot.exclusive_slots().unwrap()[0].0, 2);
+    }
+
+    #[test]
+    fn snapshot_vacancies_share_storage_across_pages() {
+        let mut original = Slots::new();
+        for value in 0..RADIX {
+            original.push(Some(value));
+        }
+        original.prepare_snapshot();
+        let mut fork = original.clone();
+        assert_eq!(fork.push(Some(RADIX)), RADIX);
+
+        assert!(fork.vacate_if(0, Option::is_some));
+        assert!(!fork.vacate_if(0, Option::is_some));
+        assert_eq!(fork.take(1), Some(1));
+        assert_eq!(fork.take_slot(RADIX), Some(RADIX));
+        assert!(core::ptr::eq(&raw const fork[0], &raw const fork[1]));
+        assert!(core::ptr::eq(&raw const fork[0], &raw const fork[RADIX]));
+        assert_eq!(original[0], Some(0));
+        assert_eq!(original.get(RADIX), None);
+
+        let mut next = fork.clone();
+        next.set(0, Some(RADIX + 1));
+        assert_eq!(fork[0], None);
+        assert_eq!(next[0], Some(RADIX + 1));
+        assert_eq!(next[RADIX], None);
+
+        drop(original);
+        drop(fork);
+        let dense = next.exclusive_slots().unwrap();
+        assert_eq!(dense.len(), RADIX + 1);
+        assert_eq!(dense[0], Some(RADIX + 1));
+        assert_eq!(dense[RADIX], None);
     }
 
     #[test]
