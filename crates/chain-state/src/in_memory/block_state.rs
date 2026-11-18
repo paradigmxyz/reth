@@ -130,6 +130,12 @@ impl<N: NodePrimitives> BlockState<N> {
         std::iter::successors(Some(self), |state| state.parent.clone())
     }
 
+    /// Returns the hashes of [`Self::chain`] from newest to oldest, followed by the hash of the
+    /// block the chain builds on, see [`Self::anchor`].
+    pub fn chain_hashes(&self) -> impl Iterator<Item = B256> + '_ {
+        std::iter::once(self.hash()).chain(self.chain().map(Self::parent_hash))
+    }
+
     /// Tries to find a block by [`BlockHashOrNumber`] in the chain ending at this block.
     pub fn block_on_chain(&self, hash_or_num: BlockHashOrNumber) -> Option<&Self> {
         self.chain().find(|block| match hash_or_num {
@@ -294,6 +300,21 @@ mod tests {
         let block_state_chain = chain[0].chain().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 1);
         assert_eq!(block_state_chain[0].block().recovered_block().number, 1);
+    }
+
+    #[test]
+    fn test_block_state_chain_hashes() {
+        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
+        let chain = create_mock_state_chain(&mut test_block_builder, 3);
+
+        assert_eq!(
+            chain[2].chain_hashes().collect::<Vec<_>>(),
+            [chain[2].hash(), chain[1].hash(), chain[0].hash(), chain[2].anchor().hash]
+        );
+        assert_eq!(
+            chain[0].chain_hashes().collect::<Vec<_>>(),
+            [chain[0].hash(), chain[0].anchor().hash]
+        );
     }
 
     fn block_state_chain(depth: usize, mut parent: Option<Arc<BlockState>>) -> Arc<BlockState> {

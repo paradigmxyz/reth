@@ -144,10 +144,15 @@ where
                 self.persistence_state.last_persisted_block.hash,
                 Some(backfill_num_hash),
             );
-            // The executed blocks that do not conflict with the backfill block stay in the
-            // in-memory state like they stay in the tree state, but none of them is canonical.
-            self.canonical_in_memory_state.demote_canonical_chain();
+            // The in-memory state drops the blocks the tree state dropped above. The executed
+            // blocks that do not conflict with the backfill block stay in it like they stay in the
+            // tree state, but none of them is canonical.
+            self.canonical_in_memory_state.remove_canonical_until(
+                self.persistence_state.last_persisted_block.hash,
+                backfill_height,
+            );
             self.canonical_in_memory_state.prune_conflicting_with_finalized(backfill_num_hash);
+            self.canonical_in_memory_state.demote_canonical_chain();
         }
 
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
