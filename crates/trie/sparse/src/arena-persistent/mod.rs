@@ -30,8 +30,8 @@
 //!
 //! Leaf updates and removals are applied via
 //! [`SparseTrie::update_leaves`](crate::SparseTrie::update_leaves). The method walks the upper trie
-//! to route each update to the correct subtrie, then processes subtries in parallel when the update
-//! count exceeds [`PersistentArenaParallelismThresholds::min_updates`].
+//! to route each update to the correct subtrie, then processes eligible subtries in parallel
+//! according to [`PersistentArenaParallelismThresholds::min_updates`].
 //!
 //! After updates, structural changes (branch collapse, subtrie unwrapping) are handled by
 //! propagating dirty state back up through the upper trie.
@@ -41,7 +41,7 @@
 //! Root hash computation follows a bottom-up approach:
 //!
 //! 1. **`update_subtrie_hashes`**: Takes dirty subtries from the upper arena and hashes them in
-//!    parallel (when dirty leaf count meets
+//!    parallel (when the total dirty leaf count meets
 //!    [`PersistentArenaParallelismThresholds::min_dirty_leaves`]), then walks the upper trie to
 //!    restore hashed subtries and inline-hash any remaining dirty nodes.
 //! 2. **[`SparseTrie::root`](crate::SparseTrie::root)**: Calls `update_subtrie_hashes`, then
@@ -211,9 +211,15 @@ enum RemoveLeafResult {
     Removed,
     /// No leaf was found at the given path (no-op).
     NotFound,
-    /// The branch collapse requires revealing a blinded sibling. The caller must request a
-    /// proof for the given key below the revealed logical parent branch.
-    NeedsProof { key: B256, proof_key: B256, parent: ProofV2TargetParent },
+    /// Branch collapse requires revealing a blinded sibling before retrying the removal.
+    NeedsProof {
+        /// Leaf key whose removal must be retried.
+        key: B256,
+        /// Padded path of the blinded sibling to request a proof for.
+        proof_key: B256,
+        /// Revealed parent of the blinded sibling.
+        parent: ProofV2TargetParent,
+    },
 }
 
 /// A proof request generated during leaf updates when a blinded node is encountered.
@@ -272,7 +278,7 @@ pub struct PersistentArenaParallelSparseTrie {
     upper_arena: NodeArena,
     /// The root node of the upper trie.
     root: NodeIndex,
-    /// Reusable buffers for traversal, RLP encoding, and update actions.
+    /// Reusable traversal and RLP scratch, plus an optional trie update accumulator.
     buffers: ArenaTrieBuffers,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: PersistentArenaParallelismThresholds,
@@ -303,7 +309,6 @@ impl PersistentArenaParallelSparseTrie {
             return;
         }
 
-        // Only branch and leaf nodes can become subtrie roots.
         if !matches!(
             self.upper_arena[child_idx],
             ArenaSparseNode::Branch(_) |
@@ -359,7 +364,7 @@ impl PersistentArenaParallelSparseTrie {
 
     /// Checks whether the subtrie at the cursor head has become empty after updates.
     /// If the subtrie's root is [`ArenaSparseNode::EmptyRoot`] (all leaves were removed), the
-    /// child slot is removed from the parent branch entirely, the subtrie is recycled, and
+    /// child slot is removed from the parent branch entirely, the subtrie is dropped, and
     /// if the parent is left with a single revealed child, it is collapsed via
     /// `collapse_branch`.
     ///
@@ -582,16 +587,9 @@ impl PersistentArenaParallelSparseTrie {
 
     /// Computes and caches `RlpNode` for all dirty nodes reachable from `root` in `arena`.
     ///
-    /// Uses the cursor's stack to walk dirty branches depth-first. For each branch,
-    /// children are iterated left-to-right:
-    /// - Blinded, cached, and leaf children have their `RlpNode` pushed directly onto
-    ///   `rlp_node_buf`.
-    /// - Dirty branch children are pushed onto `stack` and processed recursively first.
-    ///
-    /// When a dirty branch child finishes and is popped, the parent resumes iteration after
-    /// the child's nibble. Once all children of a branch are processed, the branch is encoded
-    /// via `BranchNodeRef` using the last N entries on `rlp_node_buf`, then replaced with a
-    /// single result `RlpNode`.
+    /// Walks uncached branches in post-order. For each branch, the cursor visits uncached
+    /// child branches first. Then the encoder fills `rlp_node_buf` in nibble order with the
+    /// blinded, cached, or newly encoded leaf children for that branch.
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(base_path = ?base_path), ret)]
     fn update_cached_rlp(
         arena: &mut NodeArena,
@@ -774,8 +772,7 @@ impl PersistentArenaParallelSparseTrie {
             branch.state = ArenaSparseNodeState::Cached { rlp_node, epoch: node_epoch };
             branch.branch_masks = new_branch_masks;
 
-            // Record trie updates for dirty branches only.
-            // Skip the root node (empty logical path) as PST does.
+            // Only dirty branches below the logical root contribute trie updates.
             if let Some(trie_updates) = updates.as_mut().filter(|_| was_dirty) {
                 let mut logical_path = head_path;
                 logical_path.extend(&short_key);
@@ -1134,28 +1131,38 @@ impl PersistentArenaParallelSparseTrie {
     /// Inserts a proof node, splitting a combined `BranchNodeV2` into an extension and its branch
     /// child when its short key is non-empty.
     fn insert_proof_node(arena: &mut NodeArena, proof_node: ProofTrieNodeV2) -> NodeIndex {
-        let ProofTrieNodeV2 { path, node, masks } = proof_node;
-        let TrieNodeV2::Branch(branch) = node else {
-            let node =
-                ArenaSparseNode::from_proof_node(arena, ProofTrieNodeV2 { path, node, masks });
-            return arena.insert(node);
+        let ProofTrieNodeV2 { node, masks, .. } = proof_node;
+        let node = match node {
+            TrieNodeV2::EmptyRoot => {
+                ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Revealed }
+            }
+            TrieNodeV2::Leaf(leaf) => ArenaSparseNode::Leaf {
+                state: ArenaSparseNodeState::Revealed,
+                key: leaf.key,
+                value: leaf.value,
+            },
+            TrieNodeV2::Branch(branch) => {
+                let children = branch.stack[..branch.state_mask.count_bits() as usize]
+                    .iter()
+                    .map(|rlp| arena.insert_blinded(rlp.clone()))
+                    .collect();
+                let node = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+                    state: ArenaSparseNodeState::Revealed,
+                    children,
+                    state_mask: branch.state_mask,
+                    branch_masks: masks.unwrap_or_default(),
+                });
+                if branch.key.is_empty() {
+                    node
+                } else {
+                    ArenaSparseNode::Extension { key: branch.key, child: arena.insert(node) }
+                }
+            }
+            TrieNodeV2::Extension(_) => {
+                panic!("Extension nodes should be merged into branches by TrieNodeV2")
+            }
         };
-
-        let children = branch.stack[..branch.state_mask.count_bits() as usize]
-            .iter()
-            .map(|rlp| arena.insert_blinded(rlp.clone()))
-            .collect();
-        let child = arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-            state: ArenaSparseNodeState::Revealed,
-            children,
-            state_mask: branch.state_mask,
-            branch_masks: masks.unwrap_or_default(),
-        }));
-        if branch.key.is_empty() {
-            child
-        } else {
-            arena.insert(ArenaSparseNode::Extension { key: branch.key, child })
-        }
+        arena.insert(node)
     }
 
     #[cfg(all(debug_assertions, not(feature = "fuzz")))]
@@ -1200,6 +1207,10 @@ impl PersistentArenaParallelSparseTrie {
 #[cfg(all(debug_assertions, not(feature = "fuzz")))]
 impl Drop for PersistentArenaParallelSparseTrie {
     fn drop(&mut self) {
+        // An interrupted mutation may leave the arena inconsistent. Keep the original panic.
+        if std::thread::panicking() {
+            return;
+        }
         Self::assert_no_orphaned_nodes(&self.upper_arena, self.root, "upper arena");
 
         for (_, node) in self.upper_arena.iter() {
@@ -1246,7 +1257,7 @@ impl Default for PersistentArenaParallelSparseTrie {
 }
 
 impl PersistentArenaParallelSparseTrie {
-    /// Hashes a subtrie at `head_idx` and collects its update actions.
+    /// Caches a subtrie root if needed and merges its buffered trie updates.
     fn update_upper_subtrie(&mut self, head_idx: NodeIndex, new_epoch: TrieNodeEpoch) {
         let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] else {
             unreachable!()

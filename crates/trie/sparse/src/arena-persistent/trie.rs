@@ -187,10 +187,7 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
                         else {
                             unreachable!("RevealedSubtrie must point to a Subtrie node")
                         };
-                        let mut subtrie_nodes: Vec<ProofTrieNodeV2> = (subtrie_start..node_idx)
-                            .map(|i| mem::replace(&mut nodes[i], ProofTrieNodeV2::empty()))
-                            .collect();
-                        subtrie.reveal_nodes(&mut subtrie_nodes);
+                        subtrie.reveal_nodes(&mut nodes[subtrie_start..node_idx]);
                     }
                 }
                 _ => {
@@ -613,7 +610,6 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
                         for &(key, _, ref update) in subtrie_updates {
                             updates.insert(key, update.clone());
                         }
-                        // Pop the subtrie entry before continuing.
                         continue;
                     }
 

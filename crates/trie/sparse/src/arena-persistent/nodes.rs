@@ -1,10 +1,10 @@
 use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseSubtrie, BranchChild, NodeArena, NodeIndex,
+    ArenaSparseSubtrie, BranchChild, NodeIndex,
 };
 use alloc::{boxed::Box, vec::Vec};
 use alloy_trie::TrieMask;
-use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2};
+use reth_trie_common::{BranchNodeMasks, Nibbles, RlpNode};
 use smallvec::SmallVec;
 use strum::AsRefStr;
 
@@ -238,43 +238,6 @@ impl ArenaSparseNode {
             }
             Self::Subtrie(s) => s.arena[s.root].hash_mask_bit(),
             _ => false,
-        }
-    }
-}
-
-impl ArenaSparseNode {
-    /// Converts a [`ProofTrieNodeV2`] into an [`ArenaSparseNode`], storing the RLP of a branch's
-    /// unrevealed children in `arena`'s blinded side table.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the node is an `Extension`, which should have been merged into a branch
-    /// by [`TrieNodeV2`].
-    pub(super) fn from_proof_node(arena: &mut NodeArena, proof_node: ProofTrieNodeV2) -> Self {
-        let ProofTrieNodeV2 { node, masks, .. } = proof_node;
-        match node {
-            TrieNodeV2::EmptyRoot => Self::EmptyRoot { state: ArenaSparseNodeState::Revealed },
-            TrieNodeV2::Leaf(leaf) => Self::Leaf {
-                state: ArenaSparseNodeState::Revealed,
-                key: leaf.key,
-                value: leaf.value,
-            },
-            TrieNodeV2::Branch(branch) => {
-                assert!(branch.key.is_empty(), "branches with a short key must be split first");
-                let children = branch.stack[..branch.state_mask.count_bits() as usize]
-                    .iter()
-                    .map(|rlp| arena.insert_blinded(rlp.clone()))
-                    .collect();
-                Self::Branch(ArenaSparseNodeBranch {
-                    state: ArenaSparseNodeState::Revealed,
-                    children,
-                    state_mask: branch.state_mask,
-                    branch_masks: masks.unwrap_or_default(),
-                })
-            }
-            TrieNodeV2::Extension(_) => {
-                panic!("Extension nodes should be merged into branches by TrieNodeV2")
-            }
         }
     }
 }

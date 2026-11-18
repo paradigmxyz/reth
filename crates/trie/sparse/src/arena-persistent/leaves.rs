@@ -18,19 +18,12 @@ use tracing::{instrument, trace};
 use super::sparse_guidance::observe_proof_target;
 
 impl PersistentArenaParallelSparseTrie {
-    /// Creates a new leaf and a new branch that splits an existing child from the new leaf at
-    /// a divergence point. Returns the index of the new branch.
+    /// Splits the leaf or extension at the cursor head and inserts a new leaf.
     ///
-    /// `new_leaf_path` is the full remaining path for the new leaf (relative to the split
-    /// point's parent).
+    /// `new_leaf_path` is relative to the cursor head's path. The two paths must diverge within
+    /// the old node's key. The split replaces the cursor head with the new branch or extension.
     ///
-    /// The old child's key (leaf) or extension key is truncated to the suffix after the
-    /// divergence nibble and its state is set to dirty.
-    ///
-    /// The top of `stack` must be the leaf or branch being split. The top of stack will be the
-    /// newly created branch once this returns.
-    /// Returns `true` if the existing node was not already dirty (i.e., the split newly dirtied
-    /// it).
+    /// Returns `true` only if the old node was a leaf and this split marked it dirty.
     fn split_and_insert_leaf(
         arena: &mut NodeArena,
         cursor: &mut ArenaCursor,
@@ -39,7 +32,8 @@ impl PersistentArenaParallelSparseTrie {
         value: &[u8],
     ) -> bool {
         let old_child_idx = cursor.head().expect("cursor must have head").index;
-        let old_child_short_key = arena[old_child_idx].short_key().expect("top of stack is a leaf");
+        let old_child_short_key =
+            arena[old_child_idx].short_key().expect("split requires a leaf or extension");
         let diverge_len = new_leaf_path.common_prefix_length(old_child_short_key);
 
         trace!(
@@ -124,10 +118,8 @@ impl PersistentArenaParallelSparseTrie {
     /// Performs a leaf upsert using a pre-computed [`SeekResult`] from
     /// [`ArenaCursor::seek`].
     ///
-    /// Handles three cases based on `find_result`:
-    /// 1. `RevealedLeaf` — the cursor head is a leaf; update in place or split into a branch.
-    /// 2. Diverged — the path diverges within an extension key, split it.
-    /// 3. `NoChild` — the target nibble has no child, insert a new leaf.
+    /// Updates an existing leaf in place, replaces an empty root, adds a missing branch
+    /// child, or splits a leaf or extension whose key diverges from the new leaf's path.
     ///
     /// The caller must handle [`SeekResult::Blinded`] and
     /// [`SeekResult::RevealedSubtrie`] before calling this function.
@@ -275,43 +267,15 @@ impl PersistentArenaParallelSparseTrie {
 
                 // Before mutating, check if removing this leaf would leave the parent
                 // branch with a single blinded sibling (requiring a proof to collapse).
-                if let Some(parent_entry) = cursor.parent() {
-                    let parent_idx = parent_entry.index;
-                    let child_nibble = head_path.last().expect("non-root leaf");
-                    let parent_branch = branch_data(arena, parent_idx);
-
-                    if parent_branch.state_mask.count_bits() == 2 &&
-                        parent_branch.sibling_child(child_nibble).is_blinded()
-                    {
-                        let sibling_nibble = parent_branch
-                            .state_mask
-                            .iter()
-                            .find(|&n| n != child_nibble)
-                            .expect("branch has two children");
-                        let mut sibling_path = cursor.parent_logical_branch_path(arena);
-                        sibling_path.push_unchecked(sibling_nibble);
-                        trace!(target: TRACE_TARGET, ?full_path, ?sibling_path, "Removal would collapse branch onto blinded sibling, requesting proof");
-                        #[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
-                        observe_proof_target(
-                            arena,
-                            Some((parent_idx, sibling_path.len() - 1)),
-                            &sibling_path,
-                            &[],
-                        );
-                        return (
-                            RemoveLeafResult::NeedsProof {
-                                key,
-                                proof_key: Self::nibbles_to_padded_b256(&sibling_path),
-                                parent: ProofV2TargetParent::new(
-                                    sibling_path
-                                        .len()
-                                        .checked_sub(1)
-                                        .expect("sibling path has a child nibble"),
-                                ),
-                            },
-                            SubtrieCounterDeltas::default(),
-                        );
-                    }
+                if let Some(proof) = Self::collapse_sibling_proof(arena, cursor) {
+                    return (
+                        RemoveLeafResult::NeedsProof {
+                            key,
+                            proof_key: proof.key,
+                            parent: proof.parent,
+                        },
+                        SubtrieCounterDeltas::default(),
+                    );
                 }
 
                 // Check if the removed leaf was dirty before removing it.
@@ -404,10 +368,18 @@ impl PersistentArenaParallelSparseTrie {
             return None;
         }
 
-        let child_nibble =
-            cursor.head_last_nibble().expect("subtrie path must have at least one nibble");
+        Self::collapse_sibling_proof(arena, cursor)
+    }
 
+    /// Returns the proof needed if removing the cursor head would collapse its parent onto a
+    /// blinded sibling. A cursor on the root has no sibling.
+    fn collapse_sibling_proof(
+        arena: &NodeArena,
+        cursor: &ArenaCursor,
+    ) -> Option<ArenaRequiredProof> {
         let parent_entry = cursor.parent()?;
+        let child_nibble =
+            cursor.head_last_nibble().expect("non-root child path must have a nibble");
         let parent_branch = branch_data(arena, parent_entry.index);
         if parent_branch.state_mask.count_bits() != 2 {
             return None;
@@ -423,20 +395,15 @@ impl PersistentArenaParallelSparseTrie {
             .find(|&n| n != child_nibble)
             .expect("branch has two children");
         let mut sibling_path = cursor.parent_logical_branch_path(arena);
+        let parent_depth = sibling_path.len();
         sibling_path.push_unchecked(sibling_nibble);
+        trace!(target: TRACE_TARGET, ?sibling_path, "Collapse onto blinded sibling requires a proof");
 
         #[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
-        observe_proof_target(
-            arena,
-            Some((parent_entry.index, sibling_path.len() - 1)),
-            &sibling_path,
-            &[],
-        );
+        observe_proof_target(arena, Some((parent_entry.index, parent_depth)), &sibling_path, &[]);
         Some(ArenaRequiredProof {
             key: Self::nibbles_to_padded_b256(&sibling_path),
-            parent: ProofV2TargetParent::new(
-                sibling_path.len().checked_sub(1).expect("sibling path has a child nibble"),
-            ),
+            parent: ProofV2TargetParent::new(parent_depth),
         })
     }
 
