@@ -21,7 +21,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Condvar, Mutex, MutexGuard,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tracing::{info, warn};
 use url::Url;
@@ -751,6 +751,30 @@ struct SegmentedWorkerContext<'a> {
     availability: Option<&'a ArchiveAvailability>,
 }
 
+impl SegmentedWorkerContext<'_> {
+    /// Returns why workers must stop: the command was cancelled, or the archive reader aborted.
+    fn stop_error(&self) -> Option<eyre::Error> {
+        if self.cancel_token.is_cancelled() {
+            return Some(eyre::eyre!("Download cancelled"))
+        }
+        self.availability
+            .is_some_and(ArchiveAvailability::is_aborted)
+            .then(|| eyre::eyre!("Archive reader stopped before the download completed"))
+    }
+
+    /// Sleeps for `delay`, waking every 100ms to return early once workers must stop.
+    fn backoff(&self, delay: Duration) {
+        let deadline = Instant::now() + delay;
+        while self.stop_error().is_none() {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return
+            }
+            std::thread::sleep(remaining.min(Duration::from_millis(100)));
+        }
+    }
+}
+
 impl SegmentedDownload {
     /// Creates the segmented download state for one archive.
     fn new(
@@ -831,11 +855,9 @@ impl SegmentedDownload {
             }
         });
 
-        let error = terminal_failure.take().or_else(|| {
-            availability
-                .is_some_and(ArchiveAvailability::is_aborted)
-                .then(|| eyre::eyre!("Archive reader stopped before the download completed"))
-        });
+        // Workers that stop between pieces exit without recording an error, so the file may be
+        // incomplete even when no worker failed.
+        let error = terminal_failure.take().or_else(|| worker_context.stop_error());
         if let Some(error) = error {
             if let Some(shared) = shared {
                 shared.sub_active_download_bytes(piece_progress_bytes.load(Ordering::Relaxed));
@@ -876,14 +898,10 @@ impl SegmentedDownload {
         {
             match Self::download_piece_with_retries(
                 client,
-                context.url,
+                context,
                 &file,
                 piece,
-                context.shared,
                 &piece_progress_bytes,
-                context.request_limiter,
-                context.cancel_token,
-                context.session,
             ) {
                 Ok(()) => {
                     let prefix = state.complete(piece);
@@ -914,22 +932,20 @@ impl SegmentedDownload {
     /// Downloads one queued piece with per-piece retry/backoff.
     ///
     /// Each attempt acquires a permit from the shared request limit so whole-file and
-    /// piece downloads use the same fixed number of HTTP request slots.
-    #[expect(clippy::too_many_arguments)]
+    /// piece downloads use the same fixed number of HTTP request slots. Stops between attempts,
+    /// and during backoff, once the download is cancelled or the archive reader aborts.
     fn download_piece_with_retries(
         client: &BlockingClient,
-        url: &str,
+        context: SegmentedWorkerContext<'_>,
         file: &std::fs::File,
         piece: DownloadPiece,
-        shared: Option<&Arc<SharedProgress>>,
         piece_progress_bytes: &AtomicU64,
-        request_limiter: &DownloadRequestLimiter,
-        cancel_token: &CancellationToken,
-        session: &DownloadSession,
     ) -> std::result::Result<(), PieceAttemptFailure> {
+        let SegmentedWorkerContext { url, shared, request_limiter, cancel_token, session, .. } =
+            context;
         for attempt in 1..=SEGMENT_RETRY_ATTEMPTS {
-            if cancel_token.is_cancelled() {
-                return Err(PieceAttemptFailure::Terminal(eyre::eyre!("Download cancelled")))
+            if let Some(error) = context.stop_error() {
+                return Err(PieceAttemptFailure::Terminal(error))
             }
 
             let _request_permit = request_limiter
@@ -948,9 +964,7 @@ impl SegmentedDownload {
                 Err(PieceAttemptFailure::Retryable { error: _, throttled })
                     if attempt < SEGMENT_RETRY_ATTEMPTS =>
                 {
-                    std::thread::sleep(
-                        session.retry_delay(piece_retry_backoff(attempt, throttled)),
-                    );
+                    context.backoff(session.retry_delay(piece_retry_backoff(attempt, throttled)));
                 }
                 Err(failure) => return Err(failure),
             }
@@ -1244,7 +1258,7 @@ enum PieceAttemptFailure {
 }
 
 /// Converts a thread panic payload into a readable message.
-fn panic_payload_message(payload: Box<dyn Any + Send + 'static>) -> String {
+pub(crate) fn panic_payload_message(payload: Box<dyn Any + Send + 'static>) -> String {
     if let Some(message) = payload.downcast_ref::<&'static str>() {
         (*message).to_string()
     } else if let Some(message) = payload.downcast_ref::<String>() {
@@ -1259,7 +1273,10 @@ mod tests {
     use super::*;
     use reqwest::StatusCode;
     use reth_cli_util::cancellation::CancellationToken;
-    use std::io::Write;
+    use std::{
+        io::{BufRead, Write},
+        net::TcpListener,
+    };
 
     #[test]
     fn segmented_plan_skips_small_files() {
@@ -1406,5 +1423,161 @@ mod tests {
 
         let error = reader.read(&mut buf).unwrap_err();
         assert_eq!(error.to_string(), "archive download stopped before completing");
+    }
+
+    #[test]
+    fn segmented_download_publishes_downloaded_prefix() {
+        let data = (0..=255u8).cycle().take(1024 * 1024 + 123).collect::<Vec<_>>();
+        let (url, _) = spawn_range_server(data.clone(), false);
+        let dir = tempfile::tempdir().unwrap();
+        let availability = ArchiveAvailability::default();
+
+        let (downloaded, read) = std::thread::scope(|scope| {
+            let reader = scope.spawn(|| {
+                let mut read = Vec::new();
+                ArchiveAvailabilityReader::new(&availability).read_to_end(&mut read).map(|_| read)
+            });
+            let downloaded = {
+                let _abort_guard = availability.abort_on_drop();
+                test_segmented_download(&url, dir.path(), data.len() as u64, test_session())
+                    .run(Some(&availability))
+            };
+            (downloaded, reader.join().unwrap())
+        });
+
+        assert_eq!(downloaded.unwrap().size, data.len() as u64);
+        assert_eq!(read.unwrap(), data);
+    }
+
+    #[test]
+    fn segmented_download_stops_once_reader_aborted() {
+        let (url, requests) = spawn_range_server(vec![0; 1024 * 1024], false);
+        let dir = tempfile::tempdir().unwrap();
+        let availability = ArchiveAvailability::default();
+        assert!(availability.abort());
+
+        let error = test_segmented_download(&url, dir.path(), 1024 * 1024, test_session())
+            .run(Some(&availability))
+            .unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "Parallel download failed: Archive reader stopped before the download completed"
+        );
+        assert_eq!(requests.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn segmented_download_backoff_stops_once_reader_aborts() {
+        let (url, requests) = spawn_range_server(Vec::new(), true);
+        let dir = tempfile::tempdir().unwrap();
+        let session = test_session().with_retry_backoff(Some(Duration::from_secs(30)));
+        let availability = ArchiveAvailability::default();
+        let started = Instant::now();
+
+        let result = std::thread::scope(|scope| {
+            let download = scope.spawn(|| {
+                test_segmented_download(&url, dir.path(), 1024 * 1024, session)
+                    .run(Some(&availability))
+            });
+            while requests.load(Ordering::SeqCst) == 0 {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(availability.abort());
+            download.join().unwrap()
+        });
+
+        assert_eq!(
+            format!("{:#}", result.unwrap_err()),
+            "Parallel download failed: Archive reader stopped before the download completed"
+        );
+        // Without stopping during backoff, workers would sleep through two 30s retry delays.
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    fn test_session() -> DownloadSession {
+        DownloadSession::new(None, Some(DownloadRequestLimiter::new(4)), CancellationToken::new())
+    }
+
+    /// Plans 64 KiB pieces so a small archive still exercises several workers.
+    fn test_segmented_download(
+        url: &str,
+        dir: &Path,
+        total_size: u64,
+        session: DownloadSession,
+    ) -> SegmentedDownload {
+        let piece_size = 64 * 1024;
+        let pieces = build_download_pieces(total_size, piece_size);
+        let plan = SegmentedDownloadPlan {
+            piece_size,
+            piece_count: pieces.len(),
+            worker_count: 4,
+            pieces,
+        };
+        SegmentedDownload::new(
+            url.to_string(),
+            DownloadPaths::from_url(url, dir),
+            total_size,
+            plan,
+            session,
+            None,
+        )
+    }
+
+    /// Serves `data` over HTTP on localhost with range support, or answers every request with
+    /// 503 when `unavailable` is set. Returns the URL and the number of requests received.
+    fn spawn_range_server(data: Vec<u8>, unavailable: bool) -> (String, Arc<AtomicU64>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/archive.tar.zst", listener.local_addr().unwrap());
+        let data = Arc::new(data);
+        let requests = Arc::new(AtomicU64::new(0));
+        let received = Arc::clone(&requests);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let (data, received) = (Arc::clone(&data), Arc::clone(&received));
+                std::thread::spawn(move || {
+                    let mut stream = stream.unwrap();
+                    let mut request = io::BufReader::new(stream.try_clone().unwrap());
+                    let mut range = None;
+                    loop {
+                        let mut line = String::new();
+                        if request.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                            break
+                        }
+                        if let Some(value) = line.to_ascii_lowercase().strip_prefix("range: bytes=")
+                        {
+                            let (start, end) = value.trim().split_once('-').unwrap();
+                            range = Some((
+                                start.parse::<usize>().unwrap(),
+                                end.parse::<usize>().unwrap(),
+                            ));
+                        }
+                    }
+                    received.fetch_add(1, Ordering::SeqCst);
+
+                    if unavailable {
+                        stream
+                            .write_all(
+                                b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\
+                                  Connection: close\r\n\r\n",
+                            )
+                            .unwrap();
+                        return
+                    }
+                    let (start, end) = range.unwrap();
+                    let body = &data[start..=end];
+                    write!(
+                        stream,
+                        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {start}-{end}/{}\r\n\
+                         Content-Length: {}\r\nConnection: close\r\n\r\n",
+                        data.len(),
+                        body.len()
+                    )
+                    .unwrap();
+                    stream.write_all(body).unwrap();
+                });
+            }
+        });
+        (url, requests)
     }
 }

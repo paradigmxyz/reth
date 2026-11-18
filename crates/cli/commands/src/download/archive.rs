@@ -1,6 +1,8 @@
 use super::{
     extract::{extract_archive_raw, streaming_download_and_extract, CompressionFormat},
-    fetch::{ArchiveAvailability, ArchiveAvailabilityReader, ArchiveFetcher},
+    fetch::{
+        panic_payload_message, ArchiveAvailability, ArchiveAvailabilityReader, ArchiveFetcher,
+    },
     manifest::SnapshotArchive,
     planning::{CheckedDownloads, PlannedArchive},
     progress::{
@@ -15,7 +17,14 @@ use eyre::Result;
 use futures::stream::{self, StreamExt};
 use reth_cli_util::cancellation::CancellationToken;
 use reth_fs_util as fs;
-use std::{io::BufReader, path::Path, sync::Arc, thread, time::Duration};
+use std::{
+    io::BufReader,
+    panic::{self, AssertUnwindSafe},
+    path::Path,
+    sync::Arc,
+    thread,
+    time::Duration,
+};
 use tracing::{debug, info, warn};
 
 const DOWNLOAD_CACHE_DIR: &str = ".download-cache";
@@ -253,7 +262,16 @@ impl ArchiveProcessor {
         let availability = ArchiveAvailability::default();
         let (download_result, extraction) = thread::scope(|scope| {
             let extraction = scope.spawn(|| {
-                let result = self.extract_cached_archive(&availability, format);
+                // A panic must also stop the download instead of letting it run to completion.
+                let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                    self.extract_cached_archive(&availability, format)
+                }))
+                .unwrap_or_else(|payload| {
+                    Err(eyre::eyre!(
+                        "Archive extraction panicked: {}",
+                        panic_payload_message(payload)
+                    ))
+                });
                 // Stops the download, which no longer has a reader.
                 let stopped_download = result.is_err() && availability.abort();
                 (result, stopped_download)
@@ -264,10 +282,16 @@ impl ArchiveProcessor {
                 let mut download_progress =
                     ArchiveDownloadProgress::new(self.ctx.session().progress());
                 let result = fetcher.download(Some(&mut download_progress), Some(&availability));
-                if let Ok(ref downloaded) = result &&
-                    download_progress.has_tracked_bytes()
-                {
-                    download_progress.complete(downloaded.size);
+                if let Ok(downloaded) = &result {
+                    if download_progress.has_tracked_bytes() {
+                        download_progress.complete(downloaded.size);
+                    }
+                    info!(target: "reth::cli",
+                        file = %self.archive().file_name,
+                        component = %self.archive.component,
+                        size = %super::progress::DownloadProgress::format_size(downloaded.size),
+                        "Archive download complete"
+                    );
                 }
                 result
             };
@@ -283,15 +307,8 @@ impl ArchiveProcessor {
         if extraction_stopped_download {
             return extract_result
         }
-        let downloaded = download_result?;
-        extract_result?;
-        info!(target: "reth::cli",
-            file = %self.archive().file_name,
-            component = %self.archive.component,
-            size = %super::progress::DownloadProgress::format_size(downloaded.size),
-            "Archive download complete"
-        );
-        Ok(())
+        download_result?;
+        extract_result
     }
 
     /// Streams the archive directly into extraction without keeping a cached copy.
