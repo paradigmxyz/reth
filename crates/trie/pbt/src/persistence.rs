@@ -1234,7 +1234,10 @@ mod tests {
         assert!(store.collect().unwrap());
         assert_eq!(pruned, PruneOutcome { block_references: 1, state_files: 21 });
         assert_eq!(other.database.leaf_count(old.root()).unwrap(), None);
-        assert!(matches!(other.load(old.root()), Err(StoreError::Io(_))));
+        assert!(matches!(
+            other.load(old.root()),
+            Err(StoreError::Artifact(ArtifactError::Invalid("missing native PBT checkpoint")))
+        ));
         assert!(!other.cache.lock().unwrap().contains(&old.root()));
         assert!(other.cache.lock().unwrap().contains(&finalized.root()));
         reth_fs_util::write(store.state_path(finalized.root()), [0; 7]).unwrap();

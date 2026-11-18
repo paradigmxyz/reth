@@ -3,6 +3,7 @@
 #![cfg(feature = "persistence")]
 
 use alloy_primitives::{Address, B256, U256};
+use pbt::persistence::STORE_VERSION;
 use reth_trie_pbt::{
     migration::{mpt_root, ArtifactError, Artifacts, DecodeLimits},
     persistence::{PruneOutcome, SnapshotStore, StoreError},
@@ -60,24 +61,22 @@ fn store_rejects_state_it_could_not_restore_under_its_limits() {
 #[test]
 fn oversized_checkpoints_and_references_are_rejected_before_reading() {
     let directory = tempfile::tempdir().unwrap();
-    let store = SnapshotStore::<Blake3Hasher>::open(
-        directory.path(),
-        DecodeLimits { max_accounts: 0, max_leaves: 0, ..Default::default() },
-    )
-    .unwrap();
-    let path = directory.path().join("states").join(B256::ZERO.to_string());
+    let limits = DecodeLimits { max_accounts: 0, max_leaves: 0, ..Default::default() };
+    let store = SnapshotStore::<Blake3Hasher>::open(directory.path(), limits).unwrap();
+    let root = store.save(&StateTree::new()).unwrap();
+    drop(store);
+    // Reopen to exercise durable marker validation instead of the full-state cache.
+    let store = SnapshotStore::<Blake3Hasher>::open(directory.path(), limits).unwrap();
+    let path = directory.path().join("states").join(root.to_string());
     // A sparse corrupt checkpoint must fail its metadata bound without allocating its length.
     let file = reth_fs_util::create_file(&path).unwrap();
     file.set_len(1 << 30).unwrap();
-    assert!(matches!(
-        store.load(B256::ZERO),
-        Err(StoreError::Artifact(ArtifactError::ResourceLimit))
-    ));
+    assert!(matches!(store.load(root), Err(StoreError::Artifact(ArtifactError::ResourceLimit))));
     reth_fs_util::write(&path, u64::MAX.to_be_bytes()).unwrap();
-    assert!(matches!(
-        store.load(B256::ZERO),
-        Err(StoreError::Artifact(ArtifactError::ResourceLimit))
-    ));
+    assert!(matches!(store.load(root), Err(StoreError::Artifact(ArtifactError::Truncated))));
+    let marker = [u64::MAX.to_be_bytes().as_slice(), &STORE_VERSION.to_be_bytes()].concat();
+    reth_fs_util::write(&path, marker).unwrap();
+    assert!(matches!(store.load(root), Err(StoreError::Artifact(ArtifactError::ResourceLimit))));
     reth_fs_util::write(directory.path().join("blocks").join(B256::ZERO.to_string()), [0; 33])
         .unwrap();
     assert!(matches!(
@@ -179,8 +178,7 @@ fn pruning_preserves_finalized_state_branches_shared_roots_and_unreferenced_stat
     );
     assert!(matches!(
         store.load(obsolete_root),
-        Err(StoreError::Io(reth_fs_util::FsPathError::Open { source, .. }))
-            if source.kind() == std::io::ErrorKind::NotFound
+        Err(StoreError::Artifact(ArtifactError::Invalid("missing native PBT checkpoint")))
     ));
     assert!(!directory.path().join("blocks").join(obsolete.to_string()).exists());
     assert!(!directory.path().join("blocks").join(obsolete_shared.to_string()).exists());

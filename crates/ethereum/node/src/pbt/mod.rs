@@ -2499,7 +2499,10 @@ mod tests {
         assert!(!store.contains_block(unknown)?);
         assert!(store.contains_block(canonical[3].block().hash())?);
         assert!(store.contains_block(genesis)?);
-        assert!(matches!(store.load(orphan.root()), Err(StoreError::Io(_))));
+        assert!(matches!(
+            store.load(orphan.root()),
+            Err(StoreError::Artifact(ArtifactError::Invalid("missing native PBT checkpoint")))
+        ));
         let verifying_store = Arc::new(SnapshotStore::<RetirementHasher>::open(
             store.path(),
             DecodeLimits::default(),
