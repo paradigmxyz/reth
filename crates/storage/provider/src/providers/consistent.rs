@@ -1395,13 +1395,18 @@ mod tests {
     use rand::Rng;
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
     use reth_db_api::{
-        models::{AccountBeforeTx, StorageSettings},
+        models::{AccountBeforeTx, StorageBeforeTx, StorageSettings},
+        table::Compress,
         tables,
         transaction::DbTxMut,
     };
     use reth_ethereum_primitives::Block;
     use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
+    use reth_nippy_jar::{NippyJar, NippyJarWriter};
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, StorageEntry};
+    use reth_static_file_types::{
+        ChangesetOffset, ChangesetOffsetWriter, SegmentHeader, SegmentRangeInclusive,
+    };
     use reth_storage_api::{
         BlockReader, BlockSource, ChangeSetReader, StateReader, StorageChangeSetReader,
         StorageSettingsCache,
@@ -2096,6 +2101,52 @@ mod tests {
             .account_changesets_range((Bound::Excluded(u64::MAX), Bound::Unbounded))?
             .is_empty());
         assert!(provider.account_changesets_range(..0)?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn static_file_changeset_ranges_include_the_last_block_number() -> eyre::Result<()> {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let static_files = factory.static_file_provider();
+        let first = u64::MAX - 1;
+        let last = u64::MAX;
+        let range = SegmentRangeInclusive::new(first, last);
+        let account = AccountBeforeTx { address: Address::ZERO, info: None };
+        let storage = StorageBeforeTx { address: Address::ZERO, key: B256::ZERO, value: U256::ONE };
+
+        // Index only the final two blocks, with one changeset per block in each segment.
+        for (segment, row) in [
+            (StaticFileSegment::AccountChangeSets, account.clone().compress()),
+            (StaticFileSegment::StorageChangeSets, storage.compress()),
+        ] {
+            let path = static_files.directory().join(segment.filename(&range));
+            let mut header = SegmentHeader::new(range, Some(range), None, segment);
+            header.set_changeset_offsets_len(2);
+            let mut jar = NippyJarWriter::new(NippyJar::new(segment.columns(), &path, header))?;
+            jar.append_rows(vec![[Ok(&row), Ok(&row)]], 2)?;
+            jar.commit()?;
+            let mut offsets = ChangesetOffsetWriter::new(path.with_extension("csoff"), 0)?;
+            offsets.append(&ChangesetOffset::new(0, 1))?;
+            offsets.append(&ChangesetOffset::new(1, 1))?;
+            offsets.sync()?;
+        }
+        static_files.initialize_index()?;
+
+        let provider = ConsistentProvider::new(factory.clone(), CanonicalInMemoryState::empty())?;
+        assert_eq!(
+            provider.account_changesets_range(first..)?,
+            [(first, account.clone()), (last, account)]
+        );
+        let entry = StorageEntry::new(storage.key, storage.value);
+        assert_eq!(
+            provider.storage_changesets_range(first..=last)?,
+            [((first, storage.address).into(), entry), ((last, storage.address).into(), entry)]
+        );
+        assert!(factory
+            .provider()?
+            .account_changesets_range((Bound::Excluded(last), Bound::Unbounded))?
+            .is_empty());
         Ok(())
     }
 }
