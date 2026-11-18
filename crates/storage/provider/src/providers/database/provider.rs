@@ -3980,18 +3980,17 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
         &self,
         segment: PruneSegment,
     ) -> ProviderResult<Option<PruneCheckpoint>> {
-        Ok(self.tx.get::<tables::PruneCheckpoints>(segment)?)
+        Ok(tables::PruneCheckpoints::read(&self.tx, segment, self.cached_storage_settings())?)
     }
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        Ok(PruneSegment::variants()
+        PruneSegment::variants()
             .filter_map(|segment| {
-                self.tx
-                    .get::<tables::PruneCheckpoints>(segment)
+                self.get_prune_checkpoint(segment)
                     .transpose()
                     .map(|chk| chk.map(|chk| (segment, chk)))
             })
-            .collect::<Result<_, _>>()?)
+            .collect()
     }
 
     fn get_prune_checkpoints_for_availability(
@@ -4074,7 +4073,12 @@ impl<TX: DbTxMut, N: NodeTypes> PruneCheckpointWriter for DatabaseProvider<TX, N
         segment: PruneSegment,
         checkpoint: PruneCheckpoint,
     ) -> ProviderResult<()> {
-        Ok(self.tx.put::<tables::PruneCheckpoints>(segment, checkpoint)?)
+        Ok(tables::PruneCheckpoints::write(
+            &self.tx,
+            segment,
+            checkpoint,
+            self.cached_storage_settings(),
+        )?)
     }
 }
 
@@ -6227,5 +6231,51 @@ mod tests {
             assert_eq!(provider.last_finalized_block_number().unwrap(), finalized);
             assert_eq!(provider.last_safe_block_number().unwrap(), safe);
         }
+    }
+
+    #[test]
+    fn legacy_mdbx_history_checkpoint_excludes_the_interrupted_block() -> eyre::Result<()> {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        let legacy = PruneCheckpoint {
+            block_number: Some(4),
+            tx_number: None,
+            prune_mode: PruneMode::Distance(100),
+        };
+        let actual = PruneCheckpoint { block_number: Some(5), ..legacy };
+        let capped = PruneCheckpoint::pruned_through(4);
+        let provider = factory.provider_rw()?;
+        for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
+            provider.tx_ref().put::<tables::PruneCheckpoints>(segment, legacy)?;
+        }
+        provider.commit()?;
+
+        let provider = factory.provider()?;
+        assert_eq!(provider.get_prune_checkpoint(PruneSegment::AccountHistory)?, Some(actual));
+        assert_eq!(
+            provider.get_prune_checkpoints()?,
+            [(PruneSegment::AccountHistory, actual), (PruneSegment::StorageHistory, actual)]
+        );
+        assert_eq!(
+            provider.tx_ref().get::<tables::PruneCheckpoints>(PruneSegment::AccountHistory)?,
+            Some(legacy)
+        );
+        drop(provider);
+
+        let provider = factory.provider_rw()?;
+        provider.save_prune_checkpoint(PruneSegment::AccountHistory, actual)?;
+        provider.tx_ref().put::<tables::PruneCheckpoints>(PruneSegment::StorageHistory, capped)?;
+        provider.commit()?;
+        let provider = factory.provider()?;
+        assert_eq!(provider.get_prune_checkpoint(PruneSegment::AccountHistory)?, Some(actual));
+        assert_eq!(provider.get_prune_checkpoint(PruneSegment::StorageHistory)?, Some(capped));
+        drop(provider);
+
+        // A v2 node already stops its prune walk on block boundaries.
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let provider = factory.provider_rw()?;
+        provider.tx_ref().put::<tables::PruneCheckpoints>(PruneSegment::StorageHistory, legacy)?;
+        assert_eq!(provider.get_prune_checkpoint(PruneSegment::StorageHistory)?, Some(legacy));
+        Ok(())
     }
 }

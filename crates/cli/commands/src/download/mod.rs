@@ -113,7 +113,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, MAINNET}
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_db::{init_db, Database};
-use reth_db_api::transaction::DbTx;
+use reth_db_api::{models::StorageSettings, transaction::DbTx};
 use reth_fs_util as fs;
 use reth_node_core::args::DefaultPruningValues;
 use reth_prune_types::{PruneMode, PruneModes};
@@ -691,7 +691,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             let tx = db.tx_mut()?;
 
             if should_write_prune {
-                config_gen::write_prune_checkpoints_tx(&tx, &config, selections, manifest.block)?;
+                config_gen::write_prune_checkpoints_tx(
+                    &tx,
+                    &config,
+                    selections,
+                    manifest.block,
+                    StorageSettings { storage_v2: manifest.storage_version >= 2 },
+                )?;
             }
 
             if should_reset_indices {
