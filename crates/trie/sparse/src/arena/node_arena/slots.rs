@@ -204,14 +204,17 @@ impl<T: Clone> Slots<T> {
     /// values and reusing the base allocation.
     #[inline]
     fn storage_mut(&mut self) -> &mut SlotStorage<T> {
-        if let SlotStorage::Layered(layered) = &self.0 &&
-            !layered.is_shared()
-        {
-            let storage = core::mem::replace(&mut self.0, SlotStorage::Dense(Vec::new()));
-            let SlotStorage::Layered(layered) = storage else { unreachable!() };
-            self.0 = SlotStorage::Dense(layered.into_dense());
+        self.0.recover_dense()
+    }
+}
+
+impl<T: Clone> Slots<Option<T>> {
+    /// Takes a value from an occupied optional slot without copying vacant slots.
+    pub(super) fn take(&mut self, index: usize) -> Option<T> {
+        match &mut self.0 {
+            SlotStorage::Dense(values) => values.get_mut(index)?.take(),
+            SlotStorage::Layered(_) => self.replace_if(index, None, Option::is_some).flatten(),
         }
-        &mut self.0
     }
 }
 
@@ -221,8 +224,13 @@ impl<T> Index<usize> for Slots<T> {
     #[inline]
     #[track_caller]
     fn index(&self, index: usize) -> &T {
-        let Some(value) = self.get(index) else { out_of_bounds(index, self.len()) };
-        value
+        match &self.0 {
+            SlotStorage::Dense(values) => {
+                let Some(value) = values.get(index) else { out_of_bounds(index, values.len()) };
+                value
+            }
+            SlotStorage::Layered(layered) => layered.index(index),
+        }
     }
 }
 
@@ -230,9 +238,9 @@ impl<T: Clone> IndexMut<usize> for Slots<T> {
     #[inline]
     #[track_caller]
     fn index_mut(&mut self, index: usize) -> &mut T {
-        match self.storage_mut() {
+        match &mut self.0 {
             SlotStorage::Dense(values) => dense_slot_mut(values, index),
-            SlotStorage::Layered(layered) => layered.value_mut(index),
+            layered @ SlotStorage::Layered(_) => layered.index_mut_layered(index),
         }
     }
 }
@@ -280,6 +288,32 @@ enum SlotStorage<T> {
     Layered(Box<LayeredSlots<T>>),
 }
 
+impl<T: Clone> SlotStorage<T> {
+    /// Outline layered mutation so direct indexing of a dense slot only does a bounds check.
+    #[inline(never)]
+    #[track_caller]
+    fn index_mut_layered(&mut self, index: usize) -> &mut T {
+        match self.recover_dense() {
+            Self::Dense(values) => dense_slot_mut(values, index),
+            Self::Layered(layered) => layered.value_mut(index),
+        }
+    }
+
+    /// Folds overrides into the base allocation once it becomes exclusively owned.
+    #[inline]
+    fn recover_dense(&mut self) -> &mut Self {
+        if let Self::Layered(layered) = &self &&
+            !layered.is_shared()
+        {
+            let Self::Layered(layered) = core::mem::replace(self, Self::Dense(Vec::new())) else {
+                unreachable!("the slot table was just checked to be layered");
+            };
+            *self = Self::Dense(layered.into_dense());
+        }
+        self
+    }
+}
+
 /// The base covers `0..base.len()`. Overrides may replace those slots and must cover every
 /// appended slot in `base.len()..len`, with no entries at or beyond `len`.
 #[derive(Debug, Clone)]
@@ -307,6 +341,13 @@ impl<T> LayeredSlots<T> {
 
     fn get(&self, index: usize) -> Option<&T> {
         (index < self.len).then(|| self.value_at(index))
+    }
+
+    #[inline(never)]
+    #[track_caller]
+    fn index(&self, index: usize) -> &T {
+        let Some(value) = self.get(index) else { out_of_bounds(index, self.len) };
+        value
     }
 
     fn value_at(&self, index: usize) -> &T {
@@ -347,6 +388,8 @@ impl<T: Clone> LayeredSlots<T> {
         self.write_override(index, value);
     }
 
+    // Keep the snapshot override machinery outside the dense indexing path.
+    #[inline(never)]
     #[track_caller]
     fn value_mut(&mut self, index: usize) -> &mut T {
         self.check_index(index);
@@ -357,6 +400,7 @@ impl<T: Clone> LayeredSlots<T> {
         Arc::make_mut(value)
     }
 
+    #[inline(never)]
     #[track_caller]
     fn replace(&mut self, index: usize, value: T) -> T {
         self.check_index(index);
@@ -376,6 +420,7 @@ impl<T: Clone> LayeredSlots<T> {
         }
     }
 
+    #[inline(never)]
     fn write_override(&mut self, index: usize, value: T) {
         self.grow_overrides_for(index);
         *self.overrides.slot_mut(index, self.root_shift) = Some(Arc::new(value));

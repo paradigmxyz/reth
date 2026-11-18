@@ -3,8 +3,7 @@ use super::{
     ArenaSparseSubtrie, BranchChild, Index, NodeArena,
 };
 use alloc::{boxed::Box, vec::Vec};
-use alloy_primitives::{keccak256, B256};
-use alloy_trie::{BranchNodeCompact, TrieMask};
+use alloy_trie::TrieMask;
 use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2};
 use smallvec::SmallVec;
 use strum::AsRefStr;
@@ -107,27 +106,6 @@ impl ArenaSparseNodeBranch {
     /// Iterates over `(nibble, child)` pairs in nibble order.
     pub(super) fn child_iter(&self) -> impl Iterator<Item = (u8, BranchChild)> + '_ {
         BranchChildIter::new(self.state_mask).map(|(idx, nibble)| (nibble, self.children[idx]))
-    }
-
-    /// Returns a [`BranchNodeCompact`] from this branch's masks and children hashes.
-    pub(super) fn branch_node_compact(&self, arena: &NodeArena) -> BranchNodeCompact {
-        let mut hashes = Vec::with_capacity(self.branch_masks.hash_mask.count_bits() as usize);
-        for (nibble, child) in self.child_iter() {
-            if self.branch_masks.hash_mask.is_bit_set(nibble) {
-                let hash = match child.revealed_index() {
-                    Some(child_idx) => arena[child_idx].cached_hash(),
-                    None => arena.blinded(child).as_hash().expect("blinded child must be a hash"),
-                };
-                hashes.push(hash);
-            }
-        }
-        BranchNodeCompact::new(
-            self.state_mask,
-            self.branch_masks.tree_mask,
-            self.branch_masks.hash_mask,
-            hashes,
-            None,
-        )
     }
 }
 
@@ -271,22 +249,6 @@ impl ArenaSparseNode {
             Self::Subtrie(s) => s.arena[s.root].hash_mask_bit(),
             _ => false,
         }
-    }
-
-    /// Returns the cached hash of this node. Panics if the node's state is not `Cached`.
-    ///
-    /// If the `RlpNode` is already a hash (>= 32 bytes encoded), returns it directly.
-    /// Otherwise keccak-hashes the RLP encoding to produce the hash. This handles the
-    /// case where a branch's RLP is small enough to be embedded rather than hashed.
-    pub(super) fn cached_hash(&self) -> B256 {
-        let rlp_node = match self {
-            Self::Branch(ArenaSparseNodeBranch { state, .. }) | Self::Leaf { state, .. } => state
-                .cached_rlp_node()
-                .expect("cached_hash called on non-Cached branch or leaf: {self:?}"),
-            Self::Subtrie(s) => return s.arena[s.root].cached_hash(),
-            _ => panic!("cached_hash called on {self:?}"),
-        };
-        rlp_node.as_hash().unwrap_or_else(|| keccak256(rlp_node.as_slice()))
     }
 }
 

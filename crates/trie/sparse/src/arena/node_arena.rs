@@ -165,11 +165,7 @@ impl NodeArena {
     /// Panics if `child` is revealed or its slot is out of bounds or free.
     pub(super) fn take_blinded(&mut self, child: BranchChild) -> RlpNode {
         let slot = child.blinded_slot().expect("child is revealed");
-        let rlp = self
-            .blinded
-            .replace_if(slot as usize, None, Option::is_some)
-            .flatten()
-            .expect("cannot take an unoccupied blinded slot");
+        let rlp = self.blinded.take(slot as usize).expect("cannot take an unoccupied blinded slot");
         self.blinded_free.push(slot);
         rlp
     }
