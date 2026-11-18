@@ -44,6 +44,12 @@ const SEGMENTED_DOWNLOAD_MAX_BACKOFF_SECS: u64 = 30;
 /// requests.
 const SEGMENTED_DOWNLOAD_REQUEST_TIMEOUT_SECS: u64 = 120;
 
+/// Bytes a piece download buffers before each write to the shared `.part` file.
+///
+/// Filesystems such as ext4 take an exclusive per-inode lock for every buffered write, so many
+/// pieces writing small chunks into one file contend on that lock instead of the disk.
+const SEGMENTED_DOWNLOAD_WRITE_BUFFER_SIZE: usize = 8 * 1024 * 1024;
+
 /// Paths for one downloaded archive and its `.part` file.
 #[derive(Debug, Clone)]
 struct DownloadPaths {
@@ -804,8 +810,10 @@ impl SegmentedDownload {
             }
         };
 
-        let mut buf = [0u8; 64 * 1024];
+        let mut buf = vec![0u8; SEGMENTED_DOWNLOAD_WRITE_BUFFER_SIZE];
+        let mut filled = 0;
         let mut reader = response.take(expected_len);
+        // File offset of `buf[0]`.
         let mut offset = piece.start;
 
         loop {
@@ -813,12 +821,16 @@ impl SegmentedDownload {
                 return Err(PieceAttemptFailure::Terminal(eyre::eyre!("Download cancelled")));
             }
 
-            match reader.read(&mut buf) {
+            match reader.read(&mut buf[filled..]) {
                 Ok(0) => break,
                 Ok(n) => {
-                    file.write_all_at(&buf[..n], offset)
-                        .map_err(|error| PieceAttemptFailure::Terminal(error.into()))?;
-                    offset += n as u64;
+                    filled += n;
+                    if filled == buf.len() {
+                        file.write_all_at(&buf, offset)
+                            .map_err(|error| PieceAttemptFailure::Terminal(error.into()))?;
+                        offset += filled as u64;
+                        filled = 0;
+                    }
                     if let Some(progress) = shared {
                         progress.record_session_fetched_bytes(n as u64);
                     }
@@ -832,6 +844,9 @@ impl SegmentedDownload {
                 }
             }
         }
+        file.write_all_at(&buf[..filled], offset)
+            .map_err(|error| PieceAttemptFailure::Terminal(error.into()))?;
+        offset += filled as u64;
 
         let downloaded_len = offset - piece.start;
         if downloaded_len == expected_len {
