@@ -151,8 +151,8 @@ where
                 self.persistence_state.last_persisted_block.hash,
                 backfill_height,
             );
-            self.canonical_in_memory_state.prune_conflicting_with_finalized(backfill_num_hash);
             self.canonical_in_memory_state.demote_canonical_chain();
+            self.canonical_in_memory_state.prune_conflicting_with_finalized(backfill_num_hash);
         }
 
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);

@@ -1820,6 +1820,40 @@ fn backfill_finish_drops_in_memory_blocks_through_the_backfill_height() {
     }
 }
 
+#[test]
+fn backfill_finish_drops_in_memory_blocks_below_the_backfill_height_off_the_persisted_chain() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..5).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+    // The last persisted block is neither an in-memory block nor the block they build on.
+    test_harness.tree.persistence_state.last_persisted_block =
+        BlockNumHash::new(0, B256::repeat_byte(0xff));
+
+    // Backfill finishes at block 2, which the tree still holds in memory.
+    let backfill_tip = blocks[2].recovered_block();
+    test_harness.provider.add_block(backfill_tip.hash(), backfill_tip.clone().into_block());
+    test_harness
+        .tree
+        .on_backfill_sync_finished(ControlFlow::Continue { block_number: backfill_tip.number })
+        .unwrap();
+
+    let tree_state = &test_harness.tree.state.tree_state;
+    let in_memory_state = tree_state.overlay_manager.in_memory_state();
+    for block in &blocks[..2] {
+        let hash = block.recovered_block().hash();
+        assert!(tree_state.executed_block_by_hash(hash).is_none());
+        assert!(in_memory_state.state_by_hash(hash).is_none());
+    }
+    // The backfill block and the blocks above stay tracked like they stay in the tree state, but
+    // are not canonical.
+    for block in &blocks[2..] {
+        let hash = block.recovered_block().hash();
+        assert!(tree_state.executed_block_by_hash(hash).is_some());
+        assert!(in_memory_state.state_by_hash(hash).is_some());
+        assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(hash).is_none());
+    }
+}
+
 #[tokio::test]
 async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
     // Test for issue where FCU with canonical ancestor doesn't update Latest block state
