@@ -1539,6 +1539,18 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     return false;
                 }
 
+                // With `Full` sender recovery the engine persists blocks without senders, but
+                // only the sender recovery stage and the pruner write the `Full` prune checkpoint.
+                // A node that never ran the pipeline has none until the pruner first runs, which
+                // the block interval, the minimum pruning distance, or a lagging ExEx can delay.
+                // With no senders on disk, checking would unwind to genesis.
+                if provider.prune_modes_ref().sender_recovery.is_some_and(|mode| mode.is_full()) &&
+                    self.get_highest_static_file_tx(segment).is_none()
+                {
+                    debug!(target: "reth::providers::static_file", ?segment, "Skipping senders segment: configured as fully pruned and empty");
+                    return false;
+                }
+
                 true
             }
             StaticFileSegment::AccountChangeSets => {
