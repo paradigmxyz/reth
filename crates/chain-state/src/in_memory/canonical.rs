@@ -303,9 +303,20 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// [`Self::remove_canonical_until`], makes every remaining canonical block an executed block
     /// that is not canonical, and removes the executed blocks that conflict with `backfill` like
     /// [`Self::prune_conflicting_with_finalized`]. Afterwards there is no pending block.
+    ///
+    /// If the canonical block at the height of `backfill` is another block, the canonical blocks
+    /// are only removed as conflicting blocks, together with the blocks built on that block.
     pub fn on_backfill_finished(&self, persisted_hash: B256, backfill: BlockNumHash) {
         self.inner.in_memory_state.update(|blocks| {
-            let removed = blocks.remove_canonical_until(persisted_hash, backfill.number);
+            let removed = if blocks
+                .canonical()
+                .hash_by_number(backfill.number)
+                .is_none_or(|hash| hash == backfill.hash)
+            {
+                blocks.remove_canonical_until(persisted_hash, backfill.number)
+            } else {
+                Vec::new()
+            };
             blocks.demote_canonical_chain();
             (removed, blocks.prune_conflicting_with_finalized(backfill))
         });
@@ -959,5 +970,34 @@ mod tests {
             assert_eq!(in_memory_state.state_by_hash(removed), None);
         }
         assert_eq!(in_memory_state.state_by_hash(hash(3)).unwrap().hash(), hash(3));
+    }
+
+    #[test]
+    fn test_on_backfill_finished_at_conflicting_block() {
+        let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
+        let in_memory_state = &state.inner.in_memory_state;
+        let mut block_builder = TestBlockBuilder::eth();
+        let blocks = block_builder.get_executed_blocks(1..4).collect::<Vec<_>>();
+        let hash = |number: usize| blocks[number - 1].recovered_block().hash();
+        let fork = block_builder.get_executed_block_with_number(2, hash(1));
+        let fork_hash = fork.recovered_block().hash();
+        let fork_child = block_builder.get_executed_block_with_number(3, fork_hash);
+        let fork_child_hash = fork_child.recovered_block().hash();
+        state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        state.insert_executed(fork.clone());
+        state.insert_executed(fork_child);
+
+        // Backfill finishes at the fork block of height 2: canonical block 2 conflicts with it
+        // and is removed together with block 3 built on it, and the fork stays tracked.
+        let generation = in_memory_state.removal_generation();
+        state.on_backfill_finished(hash(1), fork.recovered_block().num_hash());
+        assert_eq!(in_memory_state.removal_generation(), generation + 1);
+        assert_eq!(state.canonical_chain().count(), 0);
+        for removed in [hash(1), hash(2), hash(3)] {
+            assert_eq!(in_memory_state.state_by_hash(removed), None);
+        }
+        for kept in [fork_hash, fork_child_hash] {
+            assert_eq!(in_memory_state.state_by_hash(kept).unwrap().hash(), kept);
+        }
     }
 }
