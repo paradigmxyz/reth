@@ -1857,6 +1857,81 @@ mod tests {
     }
 
     #[test]
+    fn pruning_compacts_exclusive_subtries_with_a_live_snapshot() {
+        for min_leaves_for_prune in [u64::MAX, 0] {
+            let mut original = trie_with_shared_prefix_leaves();
+            let cutoff = epoch(1);
+            let original_root = original.root(cutoff);
+            let mut fork = original.snapshot();
+            fork.parallelism_thresholds.min_leaves_for_prune = min_leaves_for_prune;
+
+            // Both lower branches are created after the snapshot. Deleting the middle child
+            // leaves a hole without collapsing either branch.
+            let mut leaves: BTreeMap<B256, &[u8]> = BTreeMap::from([
+                (EDITED_KEY, &[1; 40][..]),
+                (SHARED_PREFIX_KEY, &[2; 40][..]),
+                (ADJACENT_PREFIX_KEY, &[3; 40][..]),
+                (DISTANT_BRANCH_KEY, &[4; 40][..]),
+            ]);
+            for prefix in [0x13, 0x14] {
+                let first = key_with_prefix(prefix, 0x00);
+                let middle = key_with_prefix(prefix, 0x10);
+                let last = key_with_prefix(prefix, 0x20);
+                apply_leaf_edits(
+                    &mut fork,
+                    &[(first, &[5; 40]), (middle, &[6; 40]), (last, &[7; 40])],
+                );
+                apply_leaf_edits(&mut fork, &[(middle, &[])]);
+                leaves.insert(first, &[5; 40]);
+                leaves.insert(last, &[7; 40]);
+            }
+            assert_matches_leaves(&mut fork, &leaves, cutoff);
+            let fork_root = fork.root(cutoff);
+            assert_ne!(fork_root, original_root);
+
+            let paths = [Nibbles::from_nibbles([1, 3]), Nibbles::from_nibbles([1, 4])];
+            let exclusive_subtries = |trie: &ArenaParallelSparseTrie| {
+                trie.upper_arena
+                    .iter()
+                    .filter_map(|(_, node)| match node {
+                        ArenaSparseNode::Subtrie(subtrie) if paths.contains(&subtrie.path) => {
+                            Some(subtrie)
+                        }
+                        _ => None,
+                    })
+                    .map(|subtrie| {
+                        assert!(subtrie.arena.can_compact());
+                        let dense = subtrie
+                            .arena
+                            .iter()
+                            .map(|(idx, _)| idx.get())
+                            .eq(0..subtrie.arena.len());
+                        (subtrie.root, dense)
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let before = exclusive_subtries(&fork);
+            assert_eq!(before.len(), 2);
+            assert!(before.iter().all(|(_, dense)| !dense));
+            assert!(exclusive_subtries(&original).is_empty());
+            assert!(fork.upper_arena.nodes_mutation_copies());
+
+            assert_eq!(fork.prune(TrieNodeEpoch::UNMODIFIED), 0);
+            assert_eq!(exclusive_subtries(&fork), before);
+
+            // Every node was hashed at the cutoff, so this is compaction without eviction.
+            assert_eq!(fork.prune(cutoff), 0);
+            assert_eq!(exclusive_subtries(&fork), vec![(Index::new(0), true); 2]);
+            assert_eq!(fork.root(cutoff), fork_root);
+            for (key, value) in leaves {
+                assert_eq!(leaf_value(&fork, key), value);
+            }
+            assert_eq!(original.root(cutoff), original_root);
+            assert_eq!(leaf_value(&original, EDITED_KEY), &[1; 40]);
+        }
+    }
+
+    #[test]
     fn rolling_snapshots_preserve_roots_across_arena_boundary() {
         let mut current = ArenaParallelSparseTrie::default();
         let initial: [(B256, &[u8]); 3] =

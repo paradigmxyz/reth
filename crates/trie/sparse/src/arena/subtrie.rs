@@ -81,15 +81,15 @@ impl ArenaSparseSubtrie {
     }
 
     /// Blinds descendants older than the cutoff and returns the number of revealed slots removed.
-    /// The upper trie has already verified that the trie is not dirty and that this root is kept.
+    /// The upper trie has checked the epoch cutoff, that the trie is not dirty, and that this
+    /// root is kept.
     pub(super) fn prune(&mut self, prune_before: TrieNodeEpoch) -> usize {
-        if prune_before == TrieNodeEpoch::UNMODIFIED || branch_idx(&self.arena, self.root).is_none()
-        {
-            return 0;
-        }
-
         if !self.arena.can_compact() {
             return self.plan_prune(prune_before).map_or(0, |plan| self.apply_prune_plan(plan));
+        }
+
+        if branch_idx(&self.arena, self.root).is_none() {
+            return 0;
         }
 
         // Fuse pruning with compaction on the exclusive path instead of building a plan
@@ -223,10 +223,6 @@ impl ArenaSparseSubtrie {
     /// Finds the stale descendant roots to blind, without mutating this subtrie or allocating
     /// when no child qualifies. The plan is valid only until the subtrie changes.
     pub(super) fn plan_prune(&self, prune_before: TrieNodeEpoch) -> Option<SubtriePrunePlan> {
-        if prune_before == TrieNodeEpoch::UNMODIFIED {
-            return None;
-        }
-
         let root_branch = branch_idx(&self.arena, self.root)?;
         let mut plan = SubtriePrunePlan::default();
         plan.retained_leaves = plan.collect_cuts(&self.arena, root_branch, prune_before);

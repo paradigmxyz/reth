@@ -49,6 +49,18 @@ impl<T> Slots<T> {
         matches!(&self.0, SlotStorage::Layered(layered) if layered.is_shared())
     }
 
+    /// Returns whether a valid slot would require cloning its value on mutable access.
+    pub(super) fn mutation_copies(&self, index: usize) -> bool {
+        match &self.0 {
+            SlotStorage::Dense(_) => false,
+            SlotStorage::Layered(layered) => {
+                layered.is_shared() &&
+                    (index >> layered.root_shift >= RADIX ||
+                        !layered.overrides.owns_value(index, layered.root_shift))
+            }
+        }
+    }
+
     pub(super) const fn len(&self) -> usize {
         match &self.0 {
             SlotStorage::Dense(values) => values.len(),
@@ -481,6 +493,22 @@ impl<T> SlotOverrides<T> {
             }
         }
     }
+
+    /// The value can be moved only if every directory and the page on its path are unique.
+    fn owns_value(&self, index: usize, shift: usize) -> bool {
+        let digit = (index >> shift) & (RADIX - 1);
+        match self {
+            Self::Empty => false,
+            Self::Directory(children) => {
+                Arc::strong_count(children) == 1 &&
+                    children[digit].owns_value(index, shift - RADIX_BITS)
+            }
+            Self::Page(entries) => {
+                Arc::strong_count(entries) == 1 &&
+                    entries[digit].as_ref().is_some_and(|value| Arc::strong_count(value) == 1)
+            }
+        }
+    }
 }
 
 impl<T: Clone> SlotOverrides<T> {
@@ -699,6 +727,36 @@ mod tests {
 
         drop(original);
         assert_eq!(snapshot.exclusive_slots().unwrap()[0].0, 2);
+    }
+
+    #[test]
+    fn mutation_copies_only_when_the_slot_value_is_shared() {
+        let mut original = Slots::new();
+        let high = RADIX * RADIX;
+        for val in 0..=high {
+            original.push(val);
+        }
+        assert!(!original.mutation_copies(0));
+
+        original.prepare_snapshot();
+        let mut fork = original.clone();
+        assert!(fork.mutation_copies(0));
+        assert!(fork.mutation_copies(high));
+        fork.set(0, high + 1);
+        fork.set(high, high + 2);
+        assert!(!fork.mutation_copies(0));
+        assert!(!fork.mutation_copies(high));
+
+        let mut next = fork.clone();
+        assert!(next.mutation_copies(0));
+        assert!(next.mutation_copies(high));
+        next.set(1, high + 3);
+        assert!(next.mutation_copies(0));
+        assert!(!next.mutation_copies(1));
+        assert!(next.mutation_copies(high));
+        drop(fork);
+        assert!(!next.mutation_copies(0));
+        assert!(!next.mutation_copies(high));
     }
 
     #[test]

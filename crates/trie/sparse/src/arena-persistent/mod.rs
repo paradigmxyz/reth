@@ -398,8 +398,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
     fn prune(&mut self, prune_before: TrieNodeEpoch) -> usize {
         assert!(self.root_epoch().is_some(), "prune cannot run on a dirty trie");
 
-        // Only branches and extensions can have pruneable children.
-        if branch_idx(&self.upper_arena, self.root).is_none() {
+        // No epoch is older than UNMODIFIED, and only branches and extensions have children.
+        if prune_before == TrieNodeEpoch::UNMODIFIED ||
+            branch_idx(&self.upper_arena, self.root).is_none()
+        {
             return 0;
         }
 
@@ -458,7 +460,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     }
 
                     let parallel = subtrie.num_leaves >= threshold;
-                    if plan_before_write {
+                    if plan_before_write && self.upper_arena.node_mutation_copies(head_idx) {
                         if parallel {
                             pending_plans.push(head_idx);
                         } else if let Some(plan) = subtrie.plan_prune(prune_before) {

@@ -333,6 +333,11 @@ impl NodeArena {
         self.nodes.is_shared()
     }
 
+    /// Returns whether mutating the node at a valid index requires copying its value.
+    pub(super) fn node_mutation_copies(&self, idx: Index) -> bool {
+        self.nodes.mutation_copies(idx.get())
+    }
+
     /// Copies both tables, including vacant slots, without sharing their storage.
     /// `clone_node` controls how nested subtries are copied.
     pub(super) fn deep_clone(
