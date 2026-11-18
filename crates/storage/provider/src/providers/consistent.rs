@@ -36,7 +36,7 @@ use std::{
 
 /// Type that interacts with a snapshot view of the blockchain (storage and in-memory) at time of
 /// instantiation, EXCEPT for pending, safe and finalized block which might change while holding
-/// this provider, and non-canonical blocks by hash, which are read from the live engine tree.
+/// this provider, and non-canonical blocks by hash, which are read from the live in-memory state.
 ///
 /// CAUTION: Avoid holding this provider for too long or the inner database transaction will
 /// time-out.
@@ -405,13 +405,16 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         fetch_from_db(&self.storage_provider)
     }
 
-    /// Returns a block the engine tree holds by hash, such as a side chain or reorged-out block.
+    /// Returns an executed block that is tracked in memory by hash, such as a side chain or
+    /// reorged-out block.
     ///
-    /// This reads the live tree rather than this provider's snapshot, which is safe because a hash
-    /// always identifies the same block.
+    /// This reads the live in-memory state rather than this provider's snapshot, which is safe
+    /// because a hash always identifies the same block.
     fn tree_block(&self, id: BlockHashOrNumber) -> Option<ExecutedBlock<N::Primitives>> {
         let BlockHashOrNumber::Hash(hash) = id else { return None };
-        self.storage_provider.overlay_manager().executed_block_by_hash(&hash)
+        let state =
+            self.storage_provider.overlay_manager().in_memory_state().state_by_hash(hash)?;
+        Some(state.block())
     }
 }
 
