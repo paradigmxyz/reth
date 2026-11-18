@@ -1,4 +1,4 @@
-use super::ArenaSparseNode;
+use super::{slots::Slots, ArenaSparseNode};
 use alloc::vec::Vec;
 use core::{
     fmt,
@@ -11,33 +11,38 @@ const WORD_BITS: usize = u64::BITS as usize;
 
 /// Arena of trie nodes addressed by an [`Index`].
 ///
-/// Nodes live in a flat vector; [`NodeArena::remove`] leaves an [`ArenaSparseNode::Free`] tombstone
-/// behind and pushes the slot onto a LIFO free list. Unlike a slotmap there are no generation
-/// counters, so an index handed out again refers to the new occupant: an index must not be reused
-/// across a removal unless the caller knows nothing was inserted in between.
+/// Unforked nodes live in a flat vector; [`NodeArena::remove`] leaves an [`ArenaSparseNode::Free`]
+/// tombstone behind and pushes the slot onto a LIFO free list. Unlike a slotmap there are no
+/// generation counters, so an index handed out again refers to the new occupant: an index must not
+/// be reused across a removal unless the caller knows nothing was inserted in between.
 #[derive(Debug, Clone, Default)]
 pub(super) struct NodeArena {
-    nodes: Vec<ArenaSparseNode>,
+    nodes: Slots<ArenaSparseNode>,
     free: Vec<Index>,
-    blinded: Vec<RlpNode>,
+    blinded: Slots<RlpNode>,
     blinded_free: Vec<u32>,
 }
 
 impl NodeArena {
     /// Creates an empty arena.
     pub(super) const fn new() -> Self {
-        Self { nodes: Vec::new(), free: Vec::new(), blinded: Vec::new(), blinded_free: Vec::new() }
+        Self {
+            nodes: Slots::new(),
+            free: Vec::new(),
+            blinded: Slots::new(),
+            blinded_free: Vec::new(),
+        }
     }
 
     /// Creates an empty arena with room for `capacity` nodes.
     pub(super) fn with_capacity(capacity: usize) -> Self {
-        Self { nodes: Vec::with_capacity(capacity), ..Self::new() }
+        Self { nodes: Slots::Dense(Vec::with_capacity(capacity)), ..Self::new() }
     }
 
     /// Inserts a node, reusing a free slot when one is available, and returns its index.
     pub(super) fn insert(&mut self, node: ArenaSparseNode) -> Index {
         if let Some(idx) = self.free.pop() {
-            self.nodes[idx.get()] = node;
+            self.nodes.replace(idx.get(), node);
             return idx;
         }
         let idx = Index::new(self.nodes.len());
@@ -55,20 +60,38 @@ impl NodeArena {
     ///
     /// Panics if the slot is out of bounds or free.
     pub(super) fn drain_node(&mut self, idx: Index) -> ArenaSparseNode {
-        let node = core::mem::replace(&mut self.nodes[idx.get()], ArenaSparseNode::Free);
+        let node = self.nodes.replace_get_old(idx.get(), ArenaSparseNode::Free);
         assert!(!matches!(node, ArenaSparseNode::Free), "drained a free arena slot");
         node
     }
 
     /// Removes the node at `idx`, returning it if the slot was occupied.
     pub(super) fn remove(&mut self, idx: Index) -> Option<ArenaSparseNode> {
-        let slot = self.nodes.get_mut(idx.get())?;
-        if matches!(slot, ArenaSparseNode::Free) {
-            return None;
-        }
-        let node = core::mem::replace(slot, ArenaSparseNode::Free);
+        let node = self.nodes.replace_if(idx.get(), ArenaSparseNode::Free, |node| {
+            !matches!(node, ArenaSparseNode::Free)
+        })?;
         self.free.push(idx);
         Some(node)
+    }
+
+    /// Removes a node whose value is no longer needed.
+    pub(super) fn discard(&mut self, idx: Index) {
+        debug_assert!(self.contains_key(idx));
+        self.nodes.replace(idx.get(), ArenaSparseNode::Free);
+        self.free.push(idx);
+    }
+
+    pub(super) const fn is_frozen(&self) -> bool {
+        self.nodes.is_frozen()
+    }
+
+    pub(super) fn is_shared(&self) -> bool {
+        self.nodes.is_shared() || self.blinded.is_shared()
+    }
+
+    pub(super) fn freeze(&mut self) {
+        self.nodes.freeze();
+        self.blinded.freeze();
     }
 
     /// Returns the node at `idx`, or `None` if the slot is out of bounds or free.
@@ -99,19 +122,19 @@ impl NodeArena {
             .map(|(idx, node)| (Index(idx as u32), node))
     }
 
-    /// Iterates mutably over the occupied slots.
-    pub(super) fn iter_mut(&mut self) -> impl Iterator<Item = (Index, &mut ArenaSparseNode)> + '_ {
-        self.nodes
-            .iter_mut()
-            .enumerate()
-            .filter(|(_, node)| !matches!(node, ArenaSparseNode::Free))
-            .map(|(idx, node)| (Index(idx as u32), node))
+    /// Mutates only occupied slots for which `select` returns true.
+    pub(super) fn for_each_mut_if(
+        &mut self,
+        select: impl FnMut(&ArenaSparseNode) -> bool,
+        mut visit: impl FnMut(Index, &mut ArenaSparseNode),
+    ) {
+        self.nodes.for_each_mut_if(select, |idx, node| visit(Index::new(idx), node));
     }
 
     /// Stores the RLP of an unrevealed child and returns a [`BranchChild`] referencing it.
     pub(super) fn insert_blinded(&mut self, rlp: RlpNode) -> BranchChild {
         let slot = if let Some(slot) = self.blinded_free.pop() {
-            self.blinded[slot as usize] = rlp;
+            self.blinded.replace(slot as usize, rlp);
             slot
         } else {
             let slot = self.blinded.len();
@@ -139,12 +162,19 @@ impl NodeArena {
     pub(super) fn take_blinded(&mut self, child: BranchChild) -> RlpNode {
         let slot = child.blinded_slot().expect("child is revealed");
         self.blinded_free.push(slot);
-        core::mem::take(&mut self.blinded[slot as usize])
+        self.blinded.replace_get_old(slot as usize, RlpNode::default())
+    }
+
+    /// Releases the slot of a blinded child whose RLP is no longer needed.
+    pub(super) fn discard_blinded(&mut self, child: BranchChild) {
+        let slot = child.blinded_slot().expect("child is revealed");
+        self.blinded.replace(slot as usize, RlpNode::default());
+        self.blinded_free.push(slot);
     }
 
     /// Releases the node vector's unused capacity.
     pub(super) fn shrink_nodes_to_fit(&mut self) {
-        self.nodes.shrink_to_fit();
+        self.nodes.dense_mut().shrink_to_fit();
     }
 
     /// Takes over `src`'s side table of blinded children, so that blinded [`BranchChild`]s copied
@@ -170,7 +200,8 @@ impl NodeArena {
             .rposition(|word| *word != 0)
             .map_or(0, |idx| idx * WORD_BITS + WORD_BITS - words[idx].leading_zeros() as usize);
         debug_assert!(end <= self.blinded.len(), "marked slot outside the side table");
-        self.blinded.truncate(end);
+        let blinded = self.blinded.dense_mut();
+        blinded.truncate(end);
         self.blinded_free.clear();
 
         let words = &words[..end.div_ceil(WORD_BITS)];
@@ -185,13 +216,13 @@ impl NodeArena {
                 let mut marked = word;
                 while marked != 0 {
                     let slot = idx * WORD_BITS + marked.trailing_zeros() as usize;
-                    self.blinded.swap(next, slot);
+                    blinded.swap(next, slot);
                     next += 1;
                     marked &= marked - 1;
                 }
             }
-            self.blinded.truncate(next);
-            for (_, node) in self.iter_mut() {
+            blinded.truncate(next);
+            for node in self.nodes.dense_mut() {
                 if let ArenaSparseNode::Branch(branch) = node {
                     for child in &mut branch.children {
                         if let Some(slot) = child.blinded_slot() {
@@ -204,7 +235,7 @@ impl NodeArena {
                     }
                 }
             }
-            shrink_excess_capacity(&mut self.blinded);
+            shrink_excess_capacity(blinded);
             shrink_excess_capacity(&mut self.blinded_free);
             return;
         }
@@ -227,7 +258,7 @@ impl NodeArena {
             }
         }
 
-        shrink_excess_capacity(&mut self.blinded);
+        shrink_excess_capacity(blinded);
         shrink_excess_capacity(&mut self.blinded_free);
     }
 }

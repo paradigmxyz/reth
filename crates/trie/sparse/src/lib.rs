@@ -19,6 +19,7 @@ mod traits;
 pub use traits::*;
 
 #[cfg(feature = "std")]
+#[path = "arena-persistent/mod.rs"]
 mod arena;
 #[cfg(feature = "std")]
 pub use arena::*;

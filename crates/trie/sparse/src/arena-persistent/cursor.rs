@@ -328,9 +328,7 @@ impl ArenaCursor {
                     continue;
                 }
 
-                let Some(child_idx) =
-                    arena[branch_idx].branch_ref().children[branch_child_idx].revealed_index()
-                else {
+                let Some(child_idx) = branch.children[branch_child_idx].revealed_index() else {
                     continue;
                 };
 

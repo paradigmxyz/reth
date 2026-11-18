@@ -68,6 +68,17 @@ impl LeafUpdate {
 /// This trait provides a unified interface for the core trie operations needed by
 /// `RevealableSparseTrie`.
 pub trait SparseTrie: Sized + Debug + Send + Sync {
+    /// Forks the current trie, including pending updates and cached root state.
+    ///
+    /// Both tries can subsequently be read and modified independently. The default
+    /// implementation clones the trie; implementations can share unchanged storage.
+    fn snapshot(&mut self) -> Self
+    where
+        Self: Clone,
+    {
+        self.clone()
+    }
+
     /// Configures the trie to have the given root node revealed.
     ///
     /// # Arguments
