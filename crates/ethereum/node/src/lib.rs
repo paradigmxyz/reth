@@ -33,5 +33,5 @@ pub mod engine_ssz_witness;
 
 pub mod snap;
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "pbt", not(target_family = "wasm")))]
 pub mod pbt;

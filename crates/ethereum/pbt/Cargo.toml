@@ -9,7 +9,7 @@ description = "Ethereum binary-tree fork configuration"
 license.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-reth-node-ethereum.workspace = true
+reth-node-ethereum = { workspace = true, features = ["pbt"] }
 
 # cli
 clap = { workspace = true, optional = true, features = ["derive", "env"] }

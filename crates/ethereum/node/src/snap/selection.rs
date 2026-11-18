@@ -10,15 +10,15 @@ use reth_node_builder::{
     sync::{BackfillContext, BackfillSyncBuilder, PipelineBackfill},
     NodeConfig,
 };
-use reth_provider::{
-    providers::ProviderNodeTypes, ChainSpecProvider, DatabaseProviderFactory, ProviderFactory,
-};
+use reth_provider::{providers::ProviderNodeTypes, DatabaseProviderFactory, ProviderFactory};
 use std::task::{Context, Poll};
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "pbt", not(target_family = "wasm")))]
 use crate::pbt::{activation_timestamp, open_strategy, PbtBackfill, PbtConfig};
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "pbt", not(target_family = "wasm")))]
 use reth_db_api::database::Database;
+#[cfg(all(feature = "pbt", not(target_family = "wasm")))]
+use reth_provider::ChainSpecProvider;
 
 /// Builds the Ethereum node's backfill: the staged pipeline, or snap sync with `--snap.v2`.
 #[derive(Debug, Clone)]
@@ -28,7 +28,7 @@ pub enum EthereumBackfill {
     /// Snap sync, on chains with block access lists.
     Snap,
     /// Staged verification for a chain scheduling binary-tree commitments.
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(feature = "pbt", not(target_family = "wasm")))]
     BinaryTrie {
         /// Resource limits and hashing configuration.
         config: PbtConfig,
@@ -38,7 +38,7 @@ pub enum EthereumBackfill {
 impl EthereumBackfill {
     /// Picks the backfill for `config`'s `--snap.v2` setting.
     pub fn new<ChainSpec: EthChainSpec>(config: &NodeConfig<ChainSpec>) -> Self {
-        #[cfg(not(target_family = "wasm"))]
+        #[cfg(all(feature = "pbt", not(target_family = "wasm")))]
         if config
             .chain
             .genesis()
@@ -58,7 +58,7 @@ impl EthereumBackfill {
     }
 
     /// Configures binary-tree resources without changing the chain's fork schedule.
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(feature = "pbt", not(target_family = "wasm")))]
     pub fn with_pbt_config(mut self, config: PbtConfig) -> Self {
         if let Self::BinaryTrie { config: current, .. } = &mut self {
             *current = config;
@@ -80,14 +80,14 @@ where
         ctx.provider_factory()
             .database_provider_ro()?
             .ensure_sync_mode(matches!(self, Self::Snap))?;
-        #[cfg(not(target_family = "wasm"))]
+        #[cfg(all(feature = "pbt", not(target_family = "wasm")))]
         eyre::ensure!(
             !matches!(self, Self::Snap) ||
                 activation_timestamp(&*ctx.provider_factory().chain_spec())?.is_none(),
             "snap/2 state synchronization is unsupported on a binary-tree chain"
         );
         match self {
-            #[cfg(not(target_family = "wasm"))]
+            #[cfg(all(feature = "pbt", not(target_family = "wasm")))]
             Self::BinaryTrie { config } => {
                 let chain = ctx.provider_factory().chain_spec();
                 let activation = activation_timestamp(&*chain)?

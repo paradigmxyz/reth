@@ -8,7 +8,11 @@ use crate::{EthereumAddOns, EthereumEngineValidatorBuilder, EthereumEthApiBuilde
 use alloy_eip7928::bal::DecodedBal;
 use alloy_primitives::{Bytes, B256, U256};
 use eyre::WrapErr;
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, ForkCondition, Hardfork};
+use futures::StreamExt;
+use reth_chain_state::ForkChoiceSubscriptions;
+use reth_chainspec::{
+    ChainSpec, EthChainSpec, EthereumHardforks, ForkCondition, Hardfork, Hardforks,
+};
 use reth_engine_tree::tree::{
     state_root_strategy::{pbt::PbtStateRootStrategy, StateRootStrategy},
     BasicEngineValidator, TreeConfig,
@@ -24,7 +28,8 @@ use reth_node_builder::{
 };
 use reth_primitives_traits::{AlloyBlockHeader, SealedHeader};
 use reth_provider::{
-    BalProvider, BlockIdReader, BlockNumReader, HeaderProvider, RawBal, StageCheckpointReader,
+    BalProvider, BlockIdReader, BlockNumReader, CanonStateSubscriptions, HeaderProvider, RawBal,
+    StageCheckpointReader,
 };
 use reth_storage_overlay::OverlayManager;
 use reth_trie_pbt::{migration::mpt_root, persistence::SnapshotStore, AccountData, StateTree};
@@ -53,8 +58,7 @@ mod rpc;
 
 /// Shared PBT configuration for a full Ethereum node.
 ///
-/// Standard Ethereum nodes initialize this fork from their chain schedule. This handle
-/// remains available for integrations that supply an explicit activation timestamp.
+/// Both standard Ethereum nodes and custom integrations use the chain's binary trie schedule.
 /// Keep it alive until shutdown: it owns the checkpoint-directory lock.
 #[derive(Debug)]
 pub struct PbtNode {
@@ -68,19 +72,21 @@ pub struct PbtNode {
 impl PbtNode {
     /// Opens PBT with default resource limits and MPT retirement disabled.
     /// Use [`Self::new_with_config`] to select migration inputs or explicitly enable retirement.
-    pub fn new(chain: Arc<ChainSpec>, directory: &Path, activation: u64) -> eyre::Result<Self> {
-        Self::new_with_config(chain, directory, activation, PbtConfig::default())
+    pub fn new(chain: Arc<ChainSpec>, directory: &Path) -> eyre::Result<Self> {
+        Self::new_with_config(chain, directory, PbtConfig::default())
     }
 
     /// Opens durable checkpoints with explicit node-owned settings.
-    /// Missing or inconsistent persisted state fails startup; this does not read process
-    /// environment.
+    /// The chain must schedule the binary trie fork. Missing or inconsistent persisted state
+    /// fails startup; this does not read process environment.
     pub fn new_with_config(
         chain: Arc<ChainSpec>,
         directory: &Path,
-        activation: u64,
         config: PbtConfig,
     ) -> eyre::Result<Self> {
+        let chain = configure_chain(chain)?;
+        let activation = scheduled_activation_timestamp(chain.as_ref())?
+            .ok_or_else(|| eyre::eyre!("PBT requires a binaryTrieTime fork schedule"))?;
         let directory_lock = lock_directory(directory)?;
         let mut store = SnapshotStore::open_with_limits(
             directory.join("pbt"),
@@ -91,7 +97,7 @@ impl PbtNode {
             store.set_cache_budget(bytes)?;
         }
         let store = Arc::new(store);
-        let chain = prepare_chain((*chain).clone(), activation, &store)?;
+        prepare_store(&*chain, activation, &store)?;
         let startup = Startup {
             migration: config.migration,
             catchup: config.catchup,
@@ -99,7 +105,9 @@ impl PbtNode {
             checkpoint_history: config.checkpoint_history,
         };
         let strategy = Arc::new(
-            PbtStateRootStrategy::new(store.clone(), activation).with_parallel(config.parallel),
+            PbtStateRootStrategy::new(store.clone(), activation)
+                .with_parallel(config.parallel)
+                .with_background_shadow(config.catchup.max_blocks, config.catchup.max_bal_bytes),
         );
         Ok(Self { chain, store, strategy, startup, _directory_lock: Arc::new(directory_lock) })
     }
@@ -114,7 +122,11 @@ impl PbtNode {
     pub fn with_parallel(mut self, parallel: bool) -> Self {
         self.strategy = Arc::new(
             PbtStateRootStrategy::new(self.store.clone(), self.strategy.activation_timestamp())
-                .with_parallel(parallel),
+                .with_parallel(parallel)
+                .with_background_shadow(
+                    self.startup.catchup.max_blocks,
+                    self.startup.catchup.max_bal_bytes,
+                ),
         );
         self
     }
@@ -150,12 +162,23 @@ impl PbtNode {
     }
 }
 
-/// Reads the scheduled binary-tree fork timestamp. An absent or null field leaves it unscheduled.
+/// Reads the binary-tree timestamp declared in genesis. An absent or null field leaves it unset.
 pub fn activation_timestamp(chain: &impl EthChainSpec) -> eyre::Result<Option<u64>> {
     match chain.genesis().config.extra_fields.get("binaryTrieTime") {
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(value) => Ok(Some(serde_json::from_value(value.clone())?)),
     }
+}
+
+fn scheduled_activation_timestamp(
+    chain: &(impl EthChainSpec + Hardforks),
+) -> eyre::Result<Option<u64>> {
+    let activation = chain.fork(BinaryTrie).as_timestamp();
+    eyre::ensure!(
+        activation_timestamp(chain)? == activation,
+        "binaryTrieTime does not match the chain's BinaryTrie fork schedule"
+    );
+    Ok(activation)
 }
 
 /// Applies the shared PBT genesis commitment and EIP-2124 fork schedule.
@@ -220,6 +243,7 @@ where
     N: FullNodeComponents<
         Types: NodeTypes<
             Primitives = EthPrimitives,
+            ChainSpec: Hardforks,
             Payload: reth_engine_primitives::EngineTypes<
                 ExecutionData = alloy_rpc_types_engine::ExecutionData,
             >,
@@ -243,7 +267,8 @@ where
         let prepared = if let Some(prepared) = self.prepared.get() {
             prepared
         } else {
-            let Some(activation) = activation_timestamp(&*ctx.config.chain)? else {
+            let Some(activation) = scheduled_activation_timestamp(ctx.config.chain.as_ref())?
+            else {
                 eyre::ensure!(
                     !ctx.config.datadir().data_dir().join("pbt/chain-config").try_exists()?,
                     "PBT data directory requires its original binaryTrieTime schedule"
@@ -338,8 +363,58 @@ where
                 eyre::bail!("PBT onboarding interrupted by shutdown");
             }
         }
-        let validator = self.inner.build_tree_validator(ctx, tree_config, overlay_manager).await?;
+        let validator =
+            self.inner.build_tree_validator(ctx, tree_config, overlay_manager.clone()).await?;
         if !prepared.maintenance_started.swap(true, Ordering::AcqRel) {
+            let shadow_strategy = strategy.clone();
+            let shadow_provider = ctx.node.provider().clone();
+            let shadow_lock = directory_lock.clone();
+            let mut canonical = shadow_provider.canonical_state_stream();
+            let mut finalized = shadow_provider.finalized_block_stream();
+            let span = Span::current();
+            ctx.node.task_executor().spawn_critical_with_graceful_shutdown_signal(
+                "pbt-shadow-checkpoints",
+                move |shutdown| async move {
+                    let _directory_lock = shadow_lock;
+                    let activation = shadow_strategy.activation_timestamp();
+                    tokio::pin!(shutdown);
+                    loop {
+                        let notification = tokio::select! {
+                            _ = &mut shutdown => return,
+                            notification = canonical.next() => notification,
+                            Some(header) = finalized.next() => {
+                                if header.timestamp() >= activation {
+                                    return
+                                }
+                                continue
+                            }
+                        };
+                        let Some(notification) = notification else { return };
+                        let committed = notification.committed();
+                        if committed.blocks_iter().next().is_none_or(|block| block.timestamp() >= activation) {
+                            continue
+                        }
+                        let strategy = shadow_strategy.clone();
+                        let provider = shadow_provider.clone();
+                        let overlay = overlay_manager.clone();
+                        let span = span.clone();
+                        if let Err(error) = tokio::task::spawn_blocking(move || {
+                            let _entered = span.enter();
+                            for block in committed.blocks_iter().take_while(|block| block.timestamp() < activation) {
+                                let hash = block.hash();
+                                if let Err(error) = strategy.ensure_shadow_checkpoint(hash, block.header(), &provider, &overlay) {
+                                    tracing::warn!(target: "pbt::persistence", %hash, %error, "PBT shadow checkpoint deferred");
+                                    break
+                                }
+                            }
+                        }).await {
+                            tracing::error!(target: "pbt::persistence", %error, "PBT shadow checkpoint task failed");
+                            return
+                        }
+                    }
+                },
+            );
+
             let maintenance_strategy = strategy.clone();
             let provider = ctx.node.provider().clone();
             ctx.node.task_executor().spawn_critical_with_graceful_shutdown_signal(
@@ -443,8 +518,29 @@ pub(crate) fn open_strategy(
     }
     prepare_store(chain, activation, &store)?;
     Ok(Arc::new(
-        PbtStateRootStrategy::new(Arc::new(store), activation).with_parallel(config.parallel),
+        PbtStateRootStrategy::new(Arc::new(store), activation)
+            .with_parallel(config.parallel)
+            .with_background_shadow(config.catchup.max_blocks, config.catchup.max_bal_bytes),
     ))
+}
+
+pub(crate) fn remove_mpt_rpc_methods(
+    modules: &mut reth_rpc_builder::TransportRpcModules,
+    auth: &mut reth_rpc_builder::auth::AuthRpcModule,
+) {
+    for method in [
+        "eth_getProof",
+        "eth_getMultiProof",
+        "eth_getAccount",
+        "debug_accountAt",
+        "debug_executionWitness",
+        "debug_executionWitnessByBlockHash",
+        "debug_intermediateRoots",
+        "debug_stateRootWithUpdates",
+    ] {
+        modules.remove_method_from_configured(method);
+        auth.remove_auth_method(method);
+    }
 }
 
 pub(crate) fn proof_methods(directory: &Path) -> eyre::Result<jsonrpsee::RpcModule<()>> {
@@ -473,6 +569,7 @@ fn genesis_state(chain: &impl EthChainSpec) -> eyre::Result<StateTree> {
     Ok(state)
 }
 
+#[cfg(test)]
 fn prepare_chain(
     mut chain: ChainSpec,
     activation: u64,
@@ -664,13 +761,50 @@ impl Startup {
                         }
                     }
                 }
-                self.catch_up_with_bal_fetch(strategy, provider, &header, &tip, fetch)?;
+                let checkpoint = if tip.timestamp() < strategy.activation_timestamp() {
+                    self.nearest_shadow_checkpoint(strategy, provider, &tip, header.number())?
+                } else {
+                    None
+                };
+                self.catch_up_with_bal_fetch(
+                    strategy,
+                    provider,
+                    checkpoint.as_ref().unwrap_or(&header),
+                    &tip,
+                    fetch,
+                )?;
             }
+        } else if tip.timestamp() < strategy.activation_timestamp() &&
+            !strategy.store().contains_block(tip.hash())? &&
+            let Some(checkpoint) = self.nearest_shadow_checkpoint(strategy, provider, &tip, 0)?
+        {
+            self.catch_up_with_bal_fetch(strategy, provider, &checkpoint, &tip, fetch)?;
         }
         strategy
             .restore_parent(tip.hash(), tip.state_root(), tip.timestamp())
             .wrap_err("PBT persisted tip checkpoint is missing or inconsistent")?;
         Ok(())
+    }
+
+    fn nearest_shadow_checkpoint<P: HeaderProvider>(
+        &self,
+        strategy: &PbtStateRootStrategy,
+        provider: &P,
+        tip: &SealedHeader<P::Header>,
+        min_number: u64,
+    ) -> eyre::Result<Option<SealedHeader<P::Header>>> {
+        let mut header = tip.clone();
+        for _ in 0..self.catchup.max_blocks.get() {
+            if header.number() <= min_number || header.block_access_list_hash().is_none() {
+                break
+            }
+            let Some(parent) = provider.sealed_header_by_hash(header.parent_hash())? else { break };
+            if strategy.store().contains_block(parent.hash())? {
+                return Ok(Some(parent))
+            }
+            header = parent;
+        }
+        Ok(None)
     }
 
     #[cfg(test)]
@@ -871,7 +1005,8 @@ mod tests {
         EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder,
         EthereumPayloadBuilder, EthereumPoolBuilder,
     };
-    use alloy_primitives::{hex, Address, Bytes};
+    use alloy_consensus::Header;
+    use alloy_primitives::{hex, keccak256, Address, Bytes};
     use alloy_rpc_types_engine::ForkchoiceState;
     use reth_chainspec::{EthereumHardfork, Hardforks, Head};
     use reth_db_api::{tables, transaction::DbTx};
@@ -977,8 +1112,7 @@ mod tests {
             .with_components(EthereumNode::components())
             .with_add_ons(addons(strategy, Startup::default(), None))
             .extend_rpc_modules(move |ctx| {
-                ctx.modules.remove_method_from_configured("eth_getProof");
-                ctx.auth_module.remove_auth_method("eth_getProof");
+                remove_mpt_rpc_methods(ctx.modules, ctx.auth_module);
                 ctx.auth_module.merge_auth_methods(rpc::ProofRpc::new(store).into_rpc()?)?;
                 Ok(())
             })
@@ -1308,8 +1442,7 @@ mod tests {
             })
             .with_node_builder_modifier(|builder| {
                 builder.extend_rpc_modules(|ctx| {
-                    ctx.modules.remove_method_from_configured("eth_getProof");
-                    ctx.auth_module.remove_auth_method("eth_getProof");
+                    remove_mpt_rpc_methods(ctx.modules, ctx.auth_module);
                     Ok(())
                 })
             })
@@ -1881,6 +2014,85 @@ mod tests {
     }
 
     #[test]
+    fn shadow_replay_uses_the_exact_branch_and_recovers_a_persisted_gap() -> eyre::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store = Arc::new(SnapshotStore::<Blake3Hasher>::open(
+            directory.path(),
+            DecodeLimits::default(),
+        )?);
+        let state = StateTree::new();
+        let root = mpt_root(&state);
+        let genesis = SealedHeader::seal_slow(Header { state_root: root, ..Default::default() });
+        store.save_block_with_number(genesis.hash(), 0, &state)?;
+        let raw = RawBal::new(Bytes::from_static(&[0xc0]));
+        let commitment = keccak256([0xc0]);
+        let make_block = |parent, number, timestamp| {
+            SealedHeader::seal_slow(Header {
+                parent_hash: parent,
+                number,
+                timestamp,
+                state_root: root,
+                block_access_list_hash: Some(commitment),
+                ..Default::default()
+            })
+        };
+        let first = make_block(genesis.hash(), 1, 1);
+        let fork = make_block(genesis.hash(), 1, 2);
+        let tip = make_block(fork.hash(), 2, 3);
+        let provider = catchup_provider(&genesis, &tip, Some(raw.as_raw().clone()))?;
+        for block in [&first, &fork] {
+            provider.add_header(block.hash(), block.header().clone());
+            provider.bal_store().insert(block.num_hash(), raw.clone())?;
+        }
+        provider.add_stage_checkpoint(
+            reth_stages::StageId::Finish,
+            reth_stages::StageCheckpoint::new(2),
+        );
+
+        let limits = CatchupLimits::default();
+        let strategy = PbtStateRootStrategy::new(store.clone(), 4)
+            .with_background_shadow(limits.max_blocks, limits.max_bal_bytes);
+        strategy.ensure_shadow_checkpoint(
+            fork.hash(),
+            fork.header(),
+            &provider,
+            &OverlayManager::<EthPrimitives>::default(),
+        )?;
+        assert!(store.contains_block(fork.hash())?);
+        assert!(!store.contains_block(first.hash())?);
+        assert!(!store.contains_block(tip.hash())?);
+        Startup::default().initialize(&strategy, &provider)?;
+        assert_eq!(store.verify_block(tip.hash())?, state.root());
+        Ok(())
+    }
+
+    #[test]
+    fn custom_node_uses_the_advertised_fork_schedule() -> eyre::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let ordinary = test_chain_spec(EthereumHardfork::Bogota);
+        assert_eq!(
+            PbtNode::new(ordinary.clone(), directory.path()).unwrap_err().to_string(),
+            "PBT requires a binaryTrieTime fork schedule"
+        );
+        let mut chain = (*ordinary).clone();
+        let timestamp = chain.genesis_timestamp() + 3;
+        chain.genesis.config.extra_fields.insert("binaryTrieTime".into(), timestamp.into());
+        assert_eq!(
+            scheduled_activation_timestamp(&chain).unwrap_err().to_string(),
+            "binaryTrieTime does not match the chain's BinaryTrie fork schedule"
+        );
+        let node = PbtNode::new(Arc::new(chain), directory.path())?;
+        let scheduled = node.chain_spec();
+        assert_eq!(scheduled.hardforks.fork(BinaryTrie).as_timestamp(), Some(timestamp));
+        assert_eq!(node.strategy.activation_timestamp(), timestamp);
+        assert_eq!(
+            scheduled.fork_id(&Head { timestamp: timestamp - 1, ..Default::default() }).next,
+            timestamp
+        );
+        Ok(())
+    }
+
+    #[test]
     fn pbt_genesis_matches_independent_geth_state_root() {
         let mut genesis = test_chain_spec(EthereumHardfork::Bogota).genesis.clone();
         genesis.alloc =
@@ -1984,9 +2196,24 @@ mod tests {
             let mut sender = Wallet::new(1).account(0);
             let recipient = Address::repeat_byte(0x75);
             node.set_next_payload_timestamp(genesis_timestamp + 1)?;
+            if !from_genesis {
+                let candidate = node.build_and_submit_payload().await?;
+                assert!(candidate.block().block_access_list_hash().is_some());
+                assert!(!store.contains_block(candidate.block().hash())?);
+                node.set_next_payload_timestamp(genesis_timestamp + 1)?;
+            }
             let tx = sender.transfer(recipient, U256::from(17)).await;
             let first = node.mine([tx]).await?.ensure_success()?;
-            let state = store.load_block(first.block().hash())?;
+            let hash = first.block().hash();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                let mut interval = tokio::time::interval(Duration::from_millis(10));
+                while !store.contains_block(hash)? {
+                    interval.tick().await;
+                }
+                Ok::<_, reth_trie_pbt::persistence::StoreError>(())
+            })
+            .await??;
+            let state = store.load_block(hash)?;
             let key = Bytes::copy_from_slice(&key::header_key::<Blake3Hasher>(
                 recipient,
                 key::BASIC_DATA_LEAF_KEY,

@@ -18,12 +18,21 @@ pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> 
         "dev" => DEV.clone(),
         _ => Arc::new(parse_genesis(s)?.into()),
     };
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(feature = "pbt", not(target_family = "wasm")))]
     {
         reth_node_ethereum::pbt::configure_chain(chain)
     }
-    #[cfg(target_family = "wasm")]
+    #[cfg(not(all(feature = "pbt", not(target_family = "wasm"))))]
     {
+        eyre::ensure!(
+            !chain
+                .genesis
+                .config
+                .extra_fields
+                .get("binaryTrieTime")
+                .is_some_and(|value| !value.is_null()),
+            "binaryTrieTime requires a Reth build with PBT support"
+        );
         Ok(chain)
     }
 }
@@ -53,6 +62,16 @@ mod tests {
         for &chain in EthereumChainSpecParser::SUPPORTED_CHAINS {
             assert!(<EthereumChainSpecParser as ChainSpecParser>::parse(chain).is_ok());
         }
+    }
+
+    #[test]
+    #[cfg(not(all(feature = "pbt", not(target_family = "wasm"))))]
+    fn binary_trie_schedule_requires_pbt_support() {
+        let genesis = r#"{"config":{"chainId":1,"binaryTrieTime":0},"gasLimit":"0x100000","difficulty":"0x0","alloc":{}}"#;
+        assert_eq!(
+            chain_value_parser(genesis).unwrap_err().to_string(),
+            "binaryTrieTime requires a Reth build with PBT support"
+        );
     }
 
     #[test]

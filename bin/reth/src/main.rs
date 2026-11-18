@@ -15,8 +15,10 @@ use clap::Parser;
 use reth::cli::Cli;
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_ethereum::{snap::EthereumBackfill, EthereumNode};
-use reth_node_pbt::cli::PbtArgs;
 use tracing::info;
+
+#[cfg(all(feature = "pbt", not(target_family = "wasm")))]
+use reth_node_pbt::cli::PbtArgs;
 
 fn main() {
     // Ethereum does not use account extensions, so refuse to run a binary that was built with
@@ -45,16 +47,23 @@ fn main() {
         unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
     }
 
+    #[cfg(all(feature = "pbt", not(target_family = "wasm")))]
     let cli = Cli::<EthereumChainSpecParser, PbtArgs>::parse();
+    #[cfg(not(all(feature = "pbt", not(target_family = "wasm"))))]
+    let cli = Cli::<EthereumChainSpecParser>::parse();
     if let Err(err) = cli.run(async move |builder, args| {
         info!(target: "reth::cli", "Launching node");
-        let config = args.config()?;
-        let backfill = EthereumBackfill::new(builder.config()).with_pbt_config(config.clone());
-        let handle = builder
-            .node(EthereumNode::default())
-            .map_add_ons(|addons| addons.with_pbt_config(config))
-            .launch_with_debug_capabilities_and_backfill(backfill)
-            .await?;
+        let backfill = EthereumBackfill::new(builder.config());
+        let node = builder.node(EthereumNode::default());
+        #[cfg(all(feature = "pbt", not(target_family = "wasm")))]
+        let (node, backfill) = {
+            let config = args.config()?;
+            let backfill = backfill.with_pbt_config(config.clone());
+            (node.map_add_ons(|addons| addons.with_pbt_config(config)), backfill)
+        };
+        #[cfg(not(all(feature = "pbt", not(target_family = "wasm"))))]
+        let _ = args;
+        let handle = node.launch_with_debug_capabilities_and_backfill(backfill).await?;
 
         handle.wait_for_node_exit().await
     }) {

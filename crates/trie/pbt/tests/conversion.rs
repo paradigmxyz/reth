@@ -2,7 +2,7 @@
 
 #![cfg(feature = "conversion")]
 
-use alloy_primitives::{keccak256, map::B256Map, Address, Bytes, B256, U256};
+use alloy_primitives::{b256, keccak256, map::B256Map, Address, Bytes, B256, U256};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_trie::hashed_cursor::mock::MockHashedCursorFactory;
 use reth_trie_pbt::{
@@ -52,6 +52,29 @@ fn source_conversion_matches_independent_state_and_artifacts() {
     .unwrap();
     assert_eq!(converted.root(), state.root());
     assert_eq!(Artifacts::from_state(&converted).unwrap(), artifacts);
+}
+
+#[test]
+fn migration_artifact_digests_match_eip_encoding() {
+    // The EELS single_eoa root and manually encoded EIP-8347 files fix the expected bytes.
+    let mut state = StateTree::<Blake3Hasher>::new();
+    state
+        .set_account(
+            Address::repeat_byte(0xaa),
+            AccountData {
+                nonce: 3,
+                balance: U256::from(1_000_000_000_000_000_000u64),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        Artifacts::from_state(&state).unwrap().digests(),
+        (
+            b256!("4e1421d7885790b5b78c9d09890ed646e24a593b8814c4e2c10b21fb8111c2f4"),
+            b256!("976e146c2fa7dcb1b5788051d57fdef89002020c76b3b223feb6957726d24bfa"),
+        )
+    );
 }
 
 #[test]

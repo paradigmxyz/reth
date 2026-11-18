@@ -32,9 +32,11 @@ alloy-primitives = { workspace = true, features = ["std"], optional = true }
 thiserror = { workspace = true, features = ["std"], optional = true }
 
 [dev-dependencies]
+alloy-primitives.workspace = true
 tempfile.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits.workspace = true
+serde_json.workspace = true
 
 [features]
 default = []

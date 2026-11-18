@@ -91,6 +91,12 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         }
     }
 
+    /// Returns the database factory without constructing a state overlay.
+    #[cfg(feature = "pbt")]
+    pub const fn database_factory(&self) -> &F {
+        &self.factory
+    }
+
     /// Skips managed overlay construction when this factory is used by a task that reused a sparse
     /// trie covering both durable frontiers through the parent.
     ///

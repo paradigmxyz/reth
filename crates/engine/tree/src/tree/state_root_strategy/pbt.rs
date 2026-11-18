@@ -1,7 +1,9 @@
 //! PBT commitments with MPT maintenance until finalized activation retires its node storage.
 
 use super::*;
+use alloy_eip7928::bal::DecodedBal;
 use reth_evm::EvmEnv as _;
+use reth_provider::{BalProvider, HeaderProvider, RawBal};
 use reth_trie_pbt::{
     execution::{ExecutionParent, ExecutionState},
     migration::mpt_root,
@@ -9,7 +11,7 @@ use reth_trie_pbt::{
     replay::{replay, replay_parallel},
     Blake3Hasher, StateTree, TreeHasher,
 };
-use std::time::Duration;
+use std::{num::NonZeroUsize, time::Duration};
 use tracing::info;
 
 pub use alloy_eip7928::AccountChanges;
@@ -28,6 +30,7 @@ pub struct PbtStateRootStrategy<H = Blake3Hasher> {
     activation_timestamp: u64,
     default: DefaultStateRootStrategy,
     parallel: bool,
+    shadow_replay: Option<(NonZeroUsize, NonZeroUsize)>,
 }
 
 impl<H: TreeHasher> PbtStateRootStrategy<H> {
@@ -38,6 +41,7 @@ impl<H: TreeHasher> PbtStateRootStrategy<H> {
             activation_timestamp,
             default: DefaultStateRootStrategy::default(),
             parallel: false,
+            shadow_replay: None,
         }
     }
 
@@ -77,6 +81,107 @@ impl<H: TreeHasher> PbtStateRootStrategy<H> {
             "PBT parent restore timings"
         );
         Ok(state)
+    }
+
+    /// Enables background shadow maintenance when the node runs the canonical checkpoint worker.
+    /// These limits bound recovery if the worker is behind the activation parent.
+    pub const fn with_background_shadow(
+        mut self,
+        max_blocks: NonZeroUsize,
+        max_bal_bytes: NonZeroUsize,
+    ) -> Self {
+        self.shadow_replay = Some((max_blocks, max_bal_bytes));
+        self
+    }
+
+    /// Materializes any missing pre-activation checkpoints on the branch ending at this header.
+    /// In-memory branches use validated execution output. Persisted blocks use authenticated BALs.
+    /// Headers and execution outputs must come from the node's validated chain.
+    pub fn ensure_shadow_checkpoint<N, P>(
+        &self,
+        hash: B256,
+        header: &N::BlockHeader,
+        provider: &P,
+        overlay: &OverlayManager<N>,
+    ) -> ProviderResult<()>
+    where
+        N: NodePrimitives,
+        P: BalProvider + HeaderProvider<Header = N::BlockHeader>,
+    {
+        let Some((max_blocks, max_bal_bytes)) = self.shadow_replay else { return Ok(()) };
+        if self.store.contains_block(hash).map_err(ProviderError::other)? {
+            return Ok(())
+        }
+
+        let mut hash = hash;
+        let mut header = header.clone();
+        let mut executed = overlay.executed_block_by_hash(&hash);
+        let mut missing = Vec::new();
+        loop {
+            if missing.len() == max_blocks.get() ||
+                header.number() == 0 ||
+                header.timestamp() >= self.activation_timestamp
+            {
+                return Err(ProviderError::other(std::io::Error::other(
+                    "missing PBT shadow checkpoint within the replay block budget",
+                )))
+            }
+            let parent_hash = header.parent_hash();
+            missing.push((hash, header, executed));
+            if self.store.contains_block(parent_hash).map_err(ProviderError::other)? {
+                break
+            }
+            hash = parent_hash;
+            executed = overlay.executed_block_by_hash(&hash);
+            header = if let Some(block) = &executed {
+                block.recovered_block().header().clone()
+            } else {
+                provider
+                    .sealed_header_by_hash(hash)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(hash.into()))?
+                    .into_header()
+            };
+        }
+
+        for (hash, header, executed) in missing.into_iter().rev() {
+            if self.store.contains_block(hash).map_err(ProviderError::other)? {
+                continue
+            }
+            let parent_hash = header.parent_hash();
+            if let Some(block) = executed {
+                let parent =
+                    self.store.execution_parent(parent_hash, None).map_err(ProviderError::other)?;
+                let state = parent
+                    .apply_bundle(&block.execution_outcome().state, self.parallel)
+                    .map_err(ProviderError::other)?;
+                self.store
+                    .save_execution_block(hash, header.number(), &state)
+                    .map_err(ProviderError::other)?;
+            } else {
+                let commitment = header.block_access_list_hash().ok_or_else(|| {
+                    ProviderError::other(std::io::Error::other("missing PBT shadow BAL commitment"))
+                })?;
+                let bytes = provider.bal_store().get_by_hash(hash)?.ok_or_else(|| {
+                    ProviderError::other(std::io::Error::other("missing PBT shadow BAL"))
+                })?;
+                if bytes.len() > max_bal_bytes.get() {
+                    return Err(ProviderError::other(std::io::Error::other(
+                        "PBT shadow BAL byte budget exceeded",
+                    )))
+                }
+                let raw = RawBal::new(bytes);
+                raw.ensure_hash(commitment).map_err(ProviderError::other)?;
+                let bal = DecodedBal::from_raw_bal(raw).map_err(ProviderError::other)?;
+                let parent = self.store.load_block(parent_hash).map_err(ProviderError::other)?;
+                let state = self
+                    .replay(&parent, bal.as_bal().as_slice(), commitment)
+                    .map_err(ProviderError::other)?;
+                self.store
+                    .save_block_with_number(hash, header.number(), &state)
+                    .map_err(ProviderError::other)?;
+            }
+        }
+        Ok(())
     }
 
     fn execution_parent(
@@ -158,7 +263,11 @@ impl<H: TreeHasher> PbtStateRootStrategy<H> {
 impl<N, P, Evm, H> StateRootStrategy<N, P, Evm> for PbtStateRootStrategy<H>
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory + Clone + 'static,
+    P: BalProvider
+        + DatabaseProviderFactory
+        + HeaderProvider<Header = N::BlockHeader>
+        + Clone
+        + 'static,
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
@@ -179,6 +288,22 @@ where
         self.validate_retired_parent(parent.header(), retired)?;
         let active = ctx.env().evm_env.block_env().timestamp.saturating_to::<u64>() >=
             self.activation_timestamp;
+        if !active && self.shadow_replay.is_some() && ctx.env().decoded_bal.is_some() {
+            // With retained BALs a missed notification is recoverable. The MPT alone determines
+            // validity before the fork.
+            return <DefaultStateRootStrategy as StateRootStrategy<N, P, Evm>>::prepare(
+                &self.default,
+                ctx,
+            )
+        }
+        if parent.timestamp() < self.activation_timestamp {
+            self.ensure_shadow_checkpoint(
+                parent.hash(),
+                parent.header(),
+                ctx.state_provider_factory.database_factory(),
+                ctx.overlay_manager,
+            )?;
+        }
         let (state, mpt_parent) =
             if retired.is_none() && parent.timestamp() >= self.activation_timestamp {
                 let (state, shadow) = self
@@ -238,6 +363,14 @@ where
         let parent = retired
             .and_then(|retired| {
                 self.validate_retired_parent(ctx.parent_header(), retired)?;
+                if ctx.parent_header().timestamp() < self.activation_timestamp {
+                    self.ensure_shadow_checkpoint(
+                        ctx.parent_hash(),
+                        ctx.parent_header(),
+                        ctx.state_provider_factory.database_factory(),
+                        ctx.overlay_manager,
+                    )?;
+                }
                 self.execution_parent(
                     ctx.parent_hash(),
                     ctx.parent_state_root(),
@@ -329,7 +462,11 @@ struct PbtStateRootJob<N: NodePrimitives, P, H> {
 impl<N, P, H> StateRootJob<N> for PbtStateRootJob<N, P, H>
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory + Clone + 'static,
+    P: BalProvider
+        + DatabaseProviderFactory
+        + HeaderProvider<Header = N::BlockHeader>
+        + Clone
+        + 'static,
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader

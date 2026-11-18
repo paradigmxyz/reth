@@ -9782,6 +9782,7 @@ dependencies = [
  "jsonrpsee",
  "rand 0.9.5",
  "reqwest",
+ "reth-chain-state",
  "reth-chainspec",
  "reth-consensus",
  "reth-db",
@@ -11108,6 +11109,7 @@ dependencies = [
  "reth-trie",
  "reth-trie-common",
  "rocksdb",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
 ]
