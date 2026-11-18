@@ -442,6 +442,11 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
             |db_provider| db_provider.header(block_hash),
             |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_header())),
         )
+        .map(|header| {
+            header.or_else(|| {
+                self.tree_block(block_hash.into()).map(|block| block.recovered_block().clone_header())
+            })
+        })
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
