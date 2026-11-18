@@ -170,8 +170,19 @@ impl ArchiveFetcher {
                 .header(RANGE, "bytes=0-0")
                 .send()
                 .and_then(|response| response.error_for_status());
-            // A transient failure here would permanently downgrade the archive to one stream.
-            if probe.is_ok() || attempt == SEGMENT_RETRY_ATTEMPTS {
+            // A transient failure here would permanently downgrade the archive to one stream. Some
+            // CDNs also intermittently answer a range request with the whole file, so a 200 for a
+            // file large enough to segment is retried as well.
+            let retry = match &probe {
+                Ok(response) => {
+                    response.status() == StatusCode::OK &&
+                        response
+                            .content_length()
+                            .is_some_and(|len| len >= SEGMENTED_DOWNLOAD_MIN_FILE_SIZE)
+                }
+                Err(_) => true,
+            };
+            if !retry || attempt == SEGMENT_RETRY_ATTEMPTS {
                 break probe
             }
             std::thread::sleep(self.session.retry_delay(piece_retry_backoff(attempt, false)));
@@ -1066,6 +1077,68 @@ mod tests {
         assert!(should_retry_piece_status(StatusCode::TOO_MANY_REQUESTS));
         assert!(should_retry_piece_status(StatusCode::from_u16(520).unwrap()));
         assert!(!should_retry_piece_status(StatusCode::NOT_FOUND));
+    }
+
+    #[test]
+    fn probe_retries_full_responses_for_segmentable_files() {
+        let (url, gets) = spawn_probe_server(SEGMENTED_DOWNLOAD_MIN_FILE_SIZE, 2);
+
+        let probe = test_probe(&url).unwrap();
+
+        assert!(probe.supports_ranges);
+        assert_eq!(probe.total_size, SEGMENTED_DOWNLOAD_MIN_FILE_SIZE);
+        assert_eq!(gets.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn probe_accepts_full_responses_for_small_files() {
+        let (url, gets) = spawn_probe_server(SEGMENTED_DOWNLOAD_MIN_FILE_SIZE - 1, 1);
+
+        let probe = test_probe(&url).unwrap();
+
+        assert!(!probe.supports_ranges);
+        assert_eq!(gets.load(Ordering::SeqCst), 1);
+    }
+
+    fn test_probe(url: &str) -> Result<RemoteArchiveProbe> {
+        let dir = tempfile::tempdir().unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new())
+            .with_retry_backoff(Some(Duration::ZERO));
+        ArchiveFetcher::new(url, dir.path(), session).probe(&BlockingClient::new())
+    }
+
+    /// Serves headers for a `size`-byte file on localhost, ignoring `Range` in the first
+    /// `full_responses` GET requests. Returns the URL and the number of GET requests received.
+    fn spawn_probe_server(size: u64, full_responses: u64) -> (String, Arc<AtomicU64>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/state.tar.zst", listener.local_addr().unwrap());
+        let gets = Arc::new(AtomicU64::new(0));
+        let received = Arc::clone(&gets);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let mut request = Vec::new();
+                let mut byte = [0u8];
+                while !request.ends_with(b"\r\n\r\n") && stream.read(&mut byte).unwrap() == 1 {
+                    request.push(byte[0]);
+                }
+                let response = if request.starts_with(b"GET") &&
+                    received.fetch_add(1, Ordering::SeqCst) >= full_responses
+                {
+                    format!(
+                        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-0/{size}\r\n\
+                         Content-Length: 1\r\nConnection: close\r\n\r\n0"
+                    )
+                } else {
+                    // Headers only: the probe never reads the body of a full response.
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n"
+                    )
+                };
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+        });
+        (url, gets)
     }
 
     #[test]
