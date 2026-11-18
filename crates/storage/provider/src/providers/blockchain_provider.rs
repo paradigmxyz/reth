@@ -906,7 +906,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
 
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
             // we have a pending block
-            return self.state_provider_for_state(Arc::new(pending));
+            return self.state_provider_for_state(pending);
         }
 
         // fallback to latest state if the pending block is not available
@@ -917,14 +917,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() &&
             pending.hash() == block_hash
         {
-            return self.state_provider_for_state(Arc::new(pending)).map(Some);
+            return self.state_provider_for_state(pending).map(Some);
         }
         Ok(None)
     }
 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
-            return self.state_provider_for_state(Arc::new(pending)).map(Some)
+            return self.state_provider_for_state(pending).map(Some)
         }
 
         Ok(None)
@@ -1474,7 +1474,9 @@ mod tests {
                 })
                 .collect(),
         };
-        provider.canonical_in_memory_state.update_chain(chain);
+        if !in_memory_blocks.is_empty() {
+            provider.canonical_in_memory_state.update_chain(chain);
+        }
         for state in provider.canonical_in_memory_state.canonical_chain() {
             provider.database.overlay_manager().insert_block(state.block());
         }
