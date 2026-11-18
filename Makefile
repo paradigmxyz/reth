@@ -238,6 +238,55 @@ maxperf: ## Builds `reth` with the most aggressive optimisations.
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
 	VERGEN_IDEMPOTENT=0 RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --no-default-features --features jemalloc,min-trace-logs,otlp,otlp-logs,portable,js-tracer,keccak-cache-global,gmp
 
+# Profile-guided optimisation: a two-pass build with a training run in between.
+#
+#   make pgo-instrument   # pass 1: build an instrumented reth
+#   <run it against traffic that resembles your workload, then stop it>
+#   make pgo-build        # pass 2: merge the recording, rebuild optimised
+#
+# The two passes are separate targets because the training run is yours to
+# perform: a profile only helps if it was recorded on representative traffic, so
+# there is no useful profile to ship.
+PGO_PROFILE_DIR ?= target/pgo
+PGO_PROFDATA ?= $(PGO_PROFILE_DIR)/merged.profdata
+# An explicit --target is REQUIRED, not cosmetic. Without it RUSTFLAGS also
+# applies to host artifacts, so cargo builds instrumented build scripts and proc
+# macros and then executes them during the build.
+PGO_TARGET ?= $(shell rustc -vV | awk '/^host: /{print $$2}')
+PGO_PROFDATA_BIN ?= $(shell find "$$(rustc --print sysroot)" -name llvm-profdata -type f 2>/dev/null | head -1)
+# The instrumented binary outgrows aarch64's +/-128 MB branch range, and GNU ld
+# fails with R_AARCH64_CALL26 instead of inserting range-extension thunks; lld
+# inserts them. -Ccode-model=large is not a substitute: on aarch64 it rejects
+# ELF TLS, which transitive dependencies use. This affects pass 1 only, which
+# merely has to run the training workload.
+#
+# Linux only: the failure is GNU ld's, and aarch64-apple-darwin links with ld64,
+# which does not have it. Set PGO_INSTRUMENT_LDFLAGS yourself if another target
+# needs the same treatment.
+PGO_INSTRUMENT_LDFLAGS ?= $(if $(filter aarch64-unknown-linux-%,$(PGO_TARGET)),-Clink-arg=-fuse-ld=lld,)
+
+.PHONY: pgo-instrument
+pgo-instrument: ## PGO pass 1: build an instrumented `reth` to record a profile with.
+	@[ -n "$(PGO_PROFDATA_BIN)" ] || { echo "llvm-profdata not found; run: rustup component add llvm-tools-preview"; exit 1; }
+	rm -rf "$(PGO_PROFILE_DIR)"
+	RUSTFLAGS="-C target-cpu=native -Cprofile-generate=$(abspath $(PGO_PROFILE_DIR)) $(PGO_INSTRUMENT_LDFLAGS)" \
+		cargo build --release --target $(PGO_TARGET) --bin reth
+	@echo
+	@echo "Instrumented binary: target/$(PGO_TARGET)/release/reth"
+	@echo "Run it against representative traffic, stop it, then run: make pgo-build"
+
+.PHONY: pgo-build
+pgo-build: ## PGO pass 2: merge the recorded profile and rebuild `reth` optimised.
+	@[ -n "$(PGO_PROFDATA_BIN)" ] || { echo "llvm-profdata not found; run: rustup component add llvm-tools-preview"; exit 1; }
+	@ls $(PGO_PROFILE_DIR)/*.profraw >/dev/null 2>&1 || { \
+		echo "no .profraw files in $(PGO_PROFILE_DIR)"; \
+		echo "run 'make pgo-instrument' and exercise the instrumented binary first"; exit 1; }
+	$(PGO_PROFDATA_BIN) merge -o $(PGO_PROFDATA) $(PGO_PROFILE_DIR)
+	RUSTFLAGS="-C target-cpu=native -Cprofile-use=$(abspath $(PGO_PROFDATA))" \
+		cargo build --release --target $(PGO_TARGET) --bin reth
+	@echo
+	@echo "Optimised binary: target/$(PGO_TARGET)/release/reth"
+
 fmt:
 	cargo +nightly fmt
 
