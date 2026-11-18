@@ -184,6 +184,9 @@ fn main() {
     if load_failed.load(Ordering::Relaxed) {
         std::process::exit(2);
     }
+    if results.is_empty() {
+        eprintln!("warning: no fixtures found in the supplied paths");
+    }
     if !results.iter().all(|result| result.pass) {
         std::process::exit(1);
     }
