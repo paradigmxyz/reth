@@ -342,8 +342,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
         });
     }
 
-    /// Drops the cached overlays that can no longer be requested, if blocks were removed from
-    /// the in-memory state since this was done last.
+    /// Drops the cached overlays that can no longer be built from the in-memory state, if blocks
+    /// were removed from it since this was done last.
     fn prune_overlays_if_blocks_removed(&self) {
         let generation = self.inner.in_memory_state.removal_generation();
         if self.inner.pruned_generation.swap(generation, Ordering::Relaxed) != generation {
@@ -745,7 +745,8 @@ impl Default for OverlayCacheConfig {
     }
 }
 
-/// Error returned when a state trie overlay cannot be built from the manager's current block set.
+/// Error returned when a state trie overlay cannot be built from the blocks of the in-memory
+/// state.
 #[derive(Debug)]
 pub(crate) struct StateTrieOverlayError {
     /// Requested in-memory tip hash.

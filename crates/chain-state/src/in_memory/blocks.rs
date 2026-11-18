@@ -227,23 +227,23 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
     }
 
     /// Removes the canonical blocks up to and including `remove_until` and returns their states,
-    /// oldest first, or `None` if `persisted_hash` is neither a canonical block nor the block
-    /// the canonical chain builds on.
+    /// oldest first.
     ///
-    /// Clears the pending block if it was removed.
+    /// Removes nothing if `persisted_hash` is neither a canonical block nor the block the
+    /// canonical chain builds on. Clears the pending block if it was removed.
     pub(super) fn remove_canonical_until(
         &mut self,
         persisted_hash: B256,
         remove_until: BlockNumber,
-    ) -> Option<Vec<Arc<BlockState<N>>>> {
+    ) -> Vec<Arc<BlockState<N>>> {
         // If the persisted hash is not on the canonical chain, canonical blocks were not actually
         // persisted. This can happen if persisting takes a long time while a reorg is happening.
         if !self.canonical.contains_or_builds_on(&persisted_hash) {
-            return None
+            return Vec::new()
         }
         let removed = self.canonical.remove_until(remove_until);
         self.finish_removal(&removed);
-        Some(removed)
+        removed
     }
 
     /// Removes the non-canonical blocks that can never become canonical once `finalized` is
@@ -692,7 +692,7 @@ mod tests {
         let trimmed = inserted[..2].iter().map(Arc::downgrade).collect::<Vec<_>>();
         drop(inserted);
         let persisted = canonical[1].recovered_block().num_hash();
-        let removed = blocks.remove_canonical_until(persisted.hash, persisted.number).unwrap();
+        let removed = blocks.remove_canonical_until(persisted.hash, persisted.number);
         assert_eq!(
             removed.iter().map(|state| state.hash()).collect::<Vec<_>>(),
             vec![hash(&canonical[0]), hash(&canonical[1])]
@@ -756,7 +756,7 @@ mod tests {
         let fork = builder.get_executed_block_with_number(2, hash(&chain[0]));
         blocks.insert_executed(fork.clone());
         let persisted = chain[0].recovered_block().num_hash();
-        blocks.remove_canonical_until(persisted.hash, persisted.number).unwrap();
+        blocks.remove_canonical_until(persisted.hash, persisted.number);
         assert!(blocks.get(&hash(&fork)).unwrap().parent.is_none());
         assert_eq!(blocks.canonical().head().unwrap().chain().count(), 2);
 

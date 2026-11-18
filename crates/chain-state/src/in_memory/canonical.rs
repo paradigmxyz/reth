@@ -324,8 +324,9 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// provided block as the persisted tip.
     ///
     /// Blocks above the persisted block are never removed, and the pending block is kept. If the
-    /// persisted block is not in the in-memory state, it is still reported as the persisted tip,
-    /// but no blocks are removed.
+    /// persisted block is neither a canonical in-memory block nor the block the in-memory
+    /// canonical chain builds on, it is still reported as the persisted tip, but no blocks are
+    /// removed.
     pub fn remove_persisted_blocks_until(
         &self,
         persisted_num_hash: BlockNumHash,

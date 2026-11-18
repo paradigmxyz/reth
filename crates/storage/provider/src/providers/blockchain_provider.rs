@@ -139,7 +139,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// Returns a state provider for the post-state of an already resolved in-memory chain.
     ///
     /// This is the post-state of `state.hash()`. Because the caller already holds the in-memory
-    /// chain, the overlay manager does not have to rebuild an identical one from its block graph.
+    /// chain, the overlay manager does not have to look it up again.
     fn state_provider_for_state(
         &self,
         state: Arc<BlockState<N::Primitives>>,
@@ -241,8 +241,8 @@ impl<N: ProviderNodeTypes> BalProvider for BlockchainProvider<N> {
         self.get_bals_by_hashes_with_limit(block_hashes, GetBlockAccessListLimit::None)
     }
 
-    /// Falls back to the blocks the engine tree holds, because the store only buffers side chain
-    /// BALs briefly and never persists them.
+    /// Falls back to the executed blocks tracked in memory, because the store only buffers side
+    /// chain BALs briefly and never persists them.
     fn get_bals_by_hashes_with_limit(
         &self,
         block_hashes: &[BlockHash],
