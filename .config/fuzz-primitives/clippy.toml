@@ -16,7 +16,7 @@ doc-valid-idents = [
 ]
 allow-dbg-in-tests = true
 
-# Used only by scripts/lint-fuzz-primitives.py, never by native builds.
+# Loaded only by the fuzz primitive CI step, never by native builds.
 # Tokio channels are temporarily exempt in all builds; retain their existing
 # async/blocking APIs instead of replacing them with selected sync channels.
 # These native waits are not controlled by the fuzz scheduler.
