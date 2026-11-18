@@ -319,7 +319,7 @@ impl NodeArena {
 
     /// Returns whether both slot tables are ready for a snapshot. A table may be ready even
     /// if no other arena currently shares it.
-    const fn is_snapshot_ready(&self) -> bool {
+    pub(super) const fn is_snapshot_ready(&self) -> bool {
         self.nodes.is_layered() && self.blinded.is_layered()
     }
 
@@ -336,6 +336,13 @@ impl NodeArena {
     /// Returns whether mutating the node at a valid index requires copying its value.
     pub(super) fn node_mutation_copies(&self, idx: Index) -> bool {
         self.nodes.mutation_copies(idx.get())
+    }
+
+    /// Reclaims superseded values from exclusively owned snapshot tables.
+    #[inline]
+    pub(super) fn reclaim_snapshot_overrides(&mut self) {
+        self.nodes.reclaim_snapshot_overrides();
+        self.blinded.reclaim_snapshot_overrides();
     }
 
     /// Copies both tables, including vacant slots, without sharing their storage.

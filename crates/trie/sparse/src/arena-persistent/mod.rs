@@ -398,6 +398,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
     fn prune(&mut self, prune_before: TrieNodeEpoch) -> usize {
         assert!(self.root_epoch().is_some(), "prune cannot run on a dirty trie");
 
+        // A previous prune could only override shared upper slots. Once their last peer
+        // drops, reclaim their old values even if this pass has nothing left to prune.
+        self.upper_arena.reclaim_snapshot_overrides();
+
         // No epoch is older than UNMODIFIED, and only branches and extensions have children.
         if prune_before == TrieNodeEpoch::UNMODIFIED ||
             branch_idx(&self.upper_arena, self.root).is_none()

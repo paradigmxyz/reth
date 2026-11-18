@@ -212,6 +212,16 @@ impl<T: Clone> Slots<T> {
         }
     }
 
+    /// Drops superseded base values if no other version owns the base, without changing indices.
+    #[inline]
+    pub(super) fn reclaim_snapshot_overrides(&mut self) {
+        if let SlotStorage::Layered(layered) = &self.0 &&
+            !matches!(layered.overrides, SlotOverrides::Empty)
+        {
+            self.storage_mut();
+        }
+    }
+
     /// Recovers dense storage when the base becomes exclusively owned, reclaiming superseded
     /// values and reusing the base allocation.
     #[inline]

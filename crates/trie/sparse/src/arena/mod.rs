@@ -1856,6 +1856,34 @@ mod tests {
     }
 
     #[test]
+    fn pruning_reclaims_exclusive_snapshot_storage_without_new_evictions() {
+        let prune_epoch = epoch(2);
+        for cleanup_epoch in [prune_epoch, TrieNodeEpoch::UNMODIFIED] {
+            let mut original = trie_with_shared_prefix_leaves();
+            let root = original.root(epoch(1));
+            let mut fork = original.snapshot();
+
+            assert!(fork.prune(prune_epoch) > 0);
+            assert_eq!(fork.upper_arena.len(), 1);
+            assert_eq!(fork.prune(cleanup_epoch), 0);
+            assert!(fork.upper_arena.is_snapshot_ready());
+            assert_eq!(leaf_value(&original, EDITED_KEY), &[1; 40]);
+            assert_eq!(original.root(prune_epoch), root);
+
+            drop(original);
+            assert!(fork.upper_arena.is_snapshot_ready());
+            assert_eq!(fork.prune(cleanup_epoch), 0);
+            assert!(!fork.upper_arena.is_snapshot_ready());
+            assert_eq!(fork.upper_arena.len(), 1);
+            assert!(matches!(
+                fork.find_leaf(&Nibbles::unpack(EDITED_KEY), None),
+                Err(LeafLookupError::BlindedNode { .. })
+            ));
+            assert_eq!(fork.root(prune_epoch), root);
+        }
+    }
+
+    #[test]
     fn applying_a_prune_plan_to_an_exclusive_subtrie_compacts_live_nodes() {
         let mut trie = trie_with_shared_prefix_leaves();
         let adjacent = key_with_prefix(0x11, 0x01);
