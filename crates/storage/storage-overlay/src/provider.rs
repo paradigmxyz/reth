@@ -427,10 +427,11 @@ where
                 // the lowest changeset file: a node bootstrapped without changesets from genesis
                 // has no prune checkpoint, yet its indices only cover blocks with changesets.
                 // Without this floor, keys untouched since then would read as never written.
+                // A checkpoint with no completed block means genesis is already partially pruned.
                 let account_history_block_number = self
                     .provider()
                     .get_prune_checkpoint(PruneSegment::AccountHistory)?
-                    .and_then(|checkpoint| checkpoint.block_number)
+                    .map(|checkpoint| checkpoint.block_number.unwrap_or_default())
                     .max(self.provider().lowest_account_changeset_block()?)
                     .map(|block_number| block_number + 1);
                 if account_history_block_number.is_some_and(|lowest| block_number < lowest) {
@@ -440,7 +441,7 @@ where
                 let storage_history_block_number = self
                     .provider()
                     .get_prune_checkpoint(PruneSegment::StorageHistory)?
-                    .and_then(|checkpoint| checkpoint.block_number)
+                    .map(|checkpoint| checkpoint.block_number.unwrap_or_default())
                     .max(self.provider().lowest_storage_changeset_block()?)
                     .map(|block_number| block_number + 1);
                 if storage_history_block_number.is_some_and(|lowest| block_number < lowest) {
@@ -1141,14 +1142,15 @@ mod tests {
         transaction::DbTxMut,
         BlockNumberList,
     };
-    use reth_primitives_traits::Account;
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
         BlockWriter, ProviderFactory, StaticFileProviderFactory, StaticFileSegment,
         StaticFileWriter, StorageSettings,
     };
+    use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
-    use reth_storage_api::StageCheckpointWriter;
+    use reth_storage_api::{PruneCheckpointWriter, StageCheckpointWriter};
     use reth_trie::{
         updates::TrieUpdatesSorted, BranchNodeCompact, HashedPostState, HashedStorage, Nibbles,
         SortedTrieData,
@@ -1533,5 +1535,40 @@ mod tests {
             Err(ProviderError::InsufficientChangesets { requested: 1, available })
                 if available == (2..=3)
         ));
+    }
+
+    #[test]
+    fn historical_reads_during_genesis_pruning() -> ProviderResult<()> {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        let address = Address::with_last_byte(1);
+        let slot = B256::with_last_byte(2);
+        let balance = U256::from(10);
+        let storage = U256::from(20);
+        let provider_rw = factory.provider_rw()?;
+
+        // The last write to this account and slot was at genesis. Pruning has removed their
+        // index entries, but other genesis changesets still need to be processed.
+        let partial_genesis =
+            PruneCheckpoint { block_number: None, tx_number: None, prune_mode: PruneMode::Full };
+        for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
+            provider_rw.save_prune_checkpoint(segment, partial_genesis)?;
+        }
+        provider_rw
+            .tx_ref()
+            .put::<tables::PlainAccountState>(address, Account { balance, ..Default::default() })?;
+        provider_rw
+            .tx_ref()
+            .put::<tables::PlainStorageState>(address, StorageEntry::new(slot, storage))?;
+        provider_rw.commit()?;
+
+        let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
+            factory,
+            OverlayManager::default().overlay_builder(blocks[0].recovered_block().hash()),
+        );
+        let provider = state_provider_factory.database_provider_ro()?;
+        assert_eq!(provider.basic_account(&address)?.map(|account| account.balance), Some(balance));
+        assert_eq!(provider.storage(address, slot)?, Some(storage));
+        Ok(())
     }
 }

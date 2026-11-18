@@ -414,7 +414,8 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         self.storage_provider.overlay_manager().executed_block_by_hash(&hash)
     }
 
-    /// Rejects database changesets at or below the recorded pruning boundary.
+    /// Rejects database changesets at or below the pruning boundary. A checkpoint with no
+    /// completed block means some genesis changesets may already have been removed.
     fn ensure_changesets_available(
         &self,
         segment: PruneSegment,
@@ -423,8 +424,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         if self
             .storage_provider
             .get_prune_checkpoint(segment)?
-            .and_then(|checkpoint| checkpoint.block_number)
-            .is_some_and(|pruned| block <= pruned)
+            .is_some_and(|checkpoint| block <= checkpoint.block_number.unwrap_or_default())
         {
             return Err(ProviderError::StateAtBlockPruned(block))
         }
@@ -1393,7 +1393,7 @@ mod tests {
     use alloy_primitives::{B256, U256};
     use itertools::Itertools;
     use rand::Rng;
-    use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, NewCanonicalChain};
     use reth_db_api::{
         models::{AccountBeforeTx, StorageBeforeTx, StorageSettings},
         table::Compress,
@@ -1404,12 +1404,13 @@ mod tests {
     use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
     use reth_nippy_jar::{NippyJar, NippyJarWriter};
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, StorageEntry};
+    use reth_prune_types::PruneMode;
     use reth_static_file_types::{
         ChangesetOffset, ChangesetOffsetWriter, SegmentHeader, SegmentRangeInclusive,
     };
     use reth_storage_api::{
-        BlockReader, BlockSource, ChangeSetReader, StateReader, StorageChangeSetReader,
-        StorageSettingsCache,
+        BlockReader, BlockSource, ChangeSetReader, PruneCheckpointWriter, StateReader,
+        StorageChangeSetReader, StorageSettingsCache,
     };
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
@@ -2067,6 +2068,47 @@ mod tests {
         assert_eq!(consistent_provider.account_changesets_range(1..=1)?.as_slice(), &accounts[..1]);
         assert_eq!(consistent_provider.account_changesets_range(2..)?.as_slice(), &accounts[1..]);
 
+        Ok(())
+    }
+
+    #[test]
+    fn partially_pruned_genesis_changesets_are_unavailable() -> eyre::Result<()> {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        let provider_rw = factory.provider_rw()?;
+        let partial_genesis =
+            PruneCheckpoint { block_number: None, tx_number: None, prune_mode: PruneMode::Full };
+        provider_rw.save_prune_checkpoint(PruneSegment::AccountHistory, partial_genesis)?;
+        provider_rw.commit()?;
+
+        let canonical = CanonicalInMemoryState::empty();
+        canonical.update_chain(NewCanonicalChain::Commit {
+            new: vec![TestBlockBuilder::eth().get_executed_block_with_number(1, B256::ZERO)],
+        });
+        let provider = ConsistentProvider::new(factory.clone(), canonical.clone())?;
+        for error in [
+            provider.account_block_changeset(0).unwrap_err(),
+            provider.get_account_before_block(0, Address::ZERO).unwrap_err(),
+            provider.account_changesets_range(0..=1).unwrap_err(),
+        ] {
+            assert!(matches!(error, ProviderError::StateAtBlockPruned(0)));
+        }
+        assert!(provider.storage_changesets_range(0..=0)?.is_empty());
+        assert!(provider.account_changesets_range(1..=1)?.is_empty());
+        drop(provider);
+
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.save_prune_checkpoint(PruneSegment::StorageHistory, partial_genesis)?;
+        provider_rw.commit()?;
+        let provider = ConsistentProvider::new(factory, canonical)?;
+        for error in [
+            provider.storage_changeset(0).unwrap_err(),
+            provider.get_storage_before_block(0, Address::ZERO, B256::ZERO).unwrap_err(),
+            provider.storage_changesets_range(0..=1).unwrap_err(),
+        ] {
+            assert!(matches!(error, ProviderError::StateAtBlockPruned(0)));
+        }
+        assert!(provider.storage_changesets_range(1..=1)?.is_empty());
         Ok(())
     }
 
