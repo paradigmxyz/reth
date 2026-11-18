@@ -116,8 +116,9 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     /// Configures the walker to treat every child of a matching branch path as unskippable.
     ///
     /// When deletions are retained, also collects stored descendants hidden by a matching
-    /// branch's tree mask. These keys appear in the deletion set even if traversal never visits
-    /// them. Root calculations can replace these deletions with regenerated branch updates.
+    /// branch's tree mask or left beside an extension's child. These keys appear in the deletion
+    /// set even if traversal never visits them. Root calculations can replace these deletions with
+    /// regenerated branch updates.
     pub const fn with_walk_all_changed_branch_children(mut self, enabled: bool) -> Self {
         self.walk_all_changed_branch_children = enabled;
         self
@@ -322,10 +323,10 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             return Ok(())
         };
 
-        // Overwrite the root node's first nibble
-        // We need to sync the stack with the trie structure when consuming a new node. This is
-        // necessary for proper traversal and accurately representing the trie in the stack.
-        if !key.is_empty() && !self.stack.is_empty() {
+        // Only the top-level cursor follows the first nibble of a newly consumed branch.
+        // A deeper seek can leave its child interval when a cached tree bit is stale; changing
+        // an ancestor here would skip the subtree containing the seek result.
+        if !key.is_empty() && self.stack.len() == 1 {
             self.stack[0].set_nibble(key.get_unchecked(0));
         }
 
@@ -342,7 +343,11 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             return Ok(())
         }
 
-        self.remove_orphaned_descendants(key, node.tree_mask)?;
+        self.remove_orphaned_descendants(
+            self.stack.last().map_or(key, |node| *node.full_key()),
+            key,
+            node.tree_mask,
+        )?;
 
         // Create a new CursorSubNode and push it to the stack.
         let subnode = CursorSubNode::new(key, Some(node));
@@ -406,42 +411,68 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
         Ok(())
     }
 
-    /// Removes cached descendants hidden by a changed branch's tree mask during recovery.
+    /// Removes stored nodes skipped by masks or extensions during recovery.
     ///
-    /// For example, a change under `0x3a` can leave stored `0x3c` and `0x3c4...` entries while
-    /// parent `0x3` has tree-mask bit `c` clear. The walker skips those entries and therefore never
-    /// records their keys for deletion.
+    /// When the first stored branch below a changed child is reached through an extension,
+    /// traversal will skip from that branch's subtree to the end of the logical child. Collect
+    /// any stale siblings in that gap before advancing, just as missing tree bits require
+    /// collecting hidden descendants. Bound each scan so live subtrees remain reusable.
     ///
-    /// Collect the hidden cache keys without using their hashes; regenerated branch updates take
-    /// precedence over these deletions. The cursor must be positioned on this parent; restore that
-    /// position afterwards so traversal continues unchanged.
+    /// Regenerated branch updates take precedence over these deletions. Restore the cursor to
+    /// the consumed node afterwards so traversal and checkpoint resumption remain unchanged.
     fn remove_orphaned_descendants(
         &mut self,
+        child_path: Nibbles,
         key: Nibbles,
         tree_mask: TrieMask,
     ) -> Result<(), DatabaseError> {
-        let missing_children = !tree_mask;
-        if self.walk_all_changed_branch_children &&
-            !missing_children.is_empty() &&
-            let Some(removed_keys) = &mut self.removed_keys &&
-            self.changes.contains(&key)
-        {
-            for nibble in missing_children.iter() {
-                let mut prefix = key;
-                prefix.push(nibble);
-                let mut entry = self.cursor.seek(prefix)?;
+        if self.walk_all_changed_branch_children && self.removed_keys.is_some() {
+            let mut cursor_moved = if key.len() > child_path.len() &&
+                self.changes.contains(&child_path) &&
+                let Some(start) = key.next_without_prefix()
+            {
+                self.remove_nodes_in_range(start, child_path.next_without_prefix())?;
+                true
+            } else {
+                false
+            };
+
+            let missing_children = !tree_mask;
+            if !missing_children.is_empty() && self.changes.contains(&key) {
+                for nibble in missing_children.iter() {
+                    let mut prefix = key;
+                    prefix.push(nibble);
+                    self.remove_nodes_in_range(prefix, prefix.next_without_prefix())?;
+                }
+                cursor_moved = true;
+            }
+
+            if cursor_moved {
+                self.cursor.seek_exact(key)?;
                 #[cfg(feature = "metrics")]
                 self.metrics.inc_branch_nodes_seeked();
-                while let Some((path, _)) = entry &&
-                    path.starts_with(&prefix)
-                {
-                    removed_keys.insert(path);
-                    entry = self.cursor.next()?;
-                }
             }
-            self.cursor.seek_exact(key)?;
+        }
+        Ok(())
+    }
+
+    /// Collects stored paths in `[start, end)` for deletion without trusting their hashes.
+    /// A missing end covers the remainder of the trie. Leaves the cursor at the range boundary.
+    fn remove_nodes_in_range(
+        &mut self,
+        start: Nibbles,
+        end: Option<Nibbles>,
+    ) -> Result<(), DatabaseError> {
+        if let Some(removed_keys) = &mut self.removed_keys {
+            let mut entry = self.cursor.seek(start)?;
             #[cfg(feature = "metrics")]
             self.metrics.inc_branch_nodes_seeked();
+            while let Some((path, _)) = entry &&
+                end.is_none_or(|end| path < end)
+            {
+                removed_keys.insert(path);
+                entry = self.cursor.next()?;
+            }
         }
         Ok(())
     }
@@ -692,7 +723,7 @@ mod tests {
                 .with_deletions_retained(true);
         walker.cursor.seek_exact(parent).unwrap();
         factory.visited_account_keys().clear();
-        walker.remove_orphaned_descendants(parent, tree_mask).unwrap();
+        walker.remove_orphaned_descendants(parent, parent, tree_mask).unwrap();
 
         assert_eq!(walker.take_removed_keys(), HashSet::from_iter(orphans));
         assert_eq!(walker.cursor.current().unwrap(), Some(parent));
