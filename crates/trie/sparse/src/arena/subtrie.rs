@@ -243,9 +243,7 @@ impl ArenaSparseSubtrie {
                 cached_rlp_node = ?cut.rlp_node,
                 "pruning node",
             );
-            if !compact {
-                release_subtree(&mut self.arena, cut.root);
-            }
+            release_subtree(&mut self.arena, cut.root);
             let blinded = self.arena.insert_blinded(cut.rlp_node);
             self.arena[cut.parent].branch_mut().children[cut.position] = blinded;
         }

@@ -213,9 +213,8 @@ fn move_node(dst: &mut NodeArena, src: &mut NodeArena, idx: Index) -> Index {
     new_idx
 }
 
-/// Compacts an arena by BFS-copying all reachable nodes into a fresh arena, dropping
-/// unreachable (pruned) slots. Parents are stored before children for cache-friendly top-down
-/// traversal.
+/// Moves reachable nodes into a fresh arena in BFS order, with parents before children for
+/// cache-friendly top-down traversal. The caller must already have released detached nodes.
 fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
     let mut new_arena = NodeArena::with_capacity(arena.len());
     let mut marks = new_arena.adopt_blinded(arena);
@@ -1854,6 +1853,38 @@ mod tests {
         snapshot.clear();
         assert_eq!(snapshot.root(epoch), EMPTY_ROOT_HASH);
         assert_eq!(leaf_value(&original, EDITED_KEY), &[1; 40]);
+    }
+
+    #[test]
+    fn applying_a_prune_plan_to_an_exclusive_subtrie_compacts_live_nodes() {
+        let mut trie = trie_with_shared_prefix_leaves();
+        let adjacent = key_with_prefix(0x11, 0x01);
+        apply_leaf_edits(&mut trie, &[(adjacent, &[5; 40])]);
+        trie.root(epoch(1));
+        apply_leaf_edits(&mut trie, &[(SHARED_PREFIX_KEY, &[6; 40])]);
+        let cutoff = epoch(2);
+        let root = trie.root(cutoff);
+
+        let path = Nibbles::from_nibbles([1, 1]);
+        let (subtrie_idx, plan) = trie
+            .upper_arena
+            .iter()
+            .find_map(|(idx, node)| match node {
+                ArenaSparseNode::Subtrie(subtrie) if subtrie.path == path => {
+                    subtrie.plan_prune(cutoff).map(|plan| (idx, plan))
+                }
+                _ => None,
+            })
+            .unwrap();
+        let ArenaSparseNode::Subtrie(subtrie) = &mut trie.upper_arena[subtrie_idx] else {
+            unreachable!()
+        };
+        assert!(subtrie.arena.can_compact());
+        assert_eq!(subtrie.apply_prune_plan(plan), 3);
+        assert_eq!(subtrie.num_leaves, 1);
+        assert!(subtrie.arena.iter().map(|(idx, _)| idx.get()).eq(0..subtrie.arena.len()));
+        assert_eq!(trie.root(cutoff), root);
+        assert_eq!(leaf_value(&trie, SHARED_PREFIX_KEY), &[6; 40]);
     }
 
     #[test]
