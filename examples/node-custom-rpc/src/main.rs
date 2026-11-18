@@ -233,7 +233,8 @@ mod tests {
         let mut call = client.request("txpoolExt_subscribeTransactionCount", (None::<u64>,));
         call.set_is_subscription();
         let sub_id: B256 = call.await.expect("failed to subscribe");
-        let mut sub = client.get_subscription::<usize>(sub_id).await;
+        let mut sub =
+            client.get_subscription::<usize>(sub_id).await.expect("failed to get subscription");
 
         let first = sub.recv().await.unwrap();
         assert_eq!(first, 0, "expected initial count to be 0");

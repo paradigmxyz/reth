@@ -1128,7 +1128,7 @@ fn into_database_error(error: ProviderError) -> DatabaseError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ExecutionOverlay, OverlayManager};
+    use crate::{test_utils::canonical_state_for, ExecutionOverlay, OverlayManager};
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{Address, U256};
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
@@ -1227,8 +1227,9 @@ mod tests {
         reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 3);
             let manager = OverlayManager::default();
+            let canonical_state = canonical_state_for(&manager);
             for block in &blocks[2..=3] {
-                manager.insert_block(block.clone());
+                canonical_state.insert_executed(block.clone());
             }
             let state_provider_factory = OverlayStateProviderFactory::new(
                 factory.clone(),
@@ -1267,8 +1268,9 @@ mod tests {
         reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 3);
             let manager = OverlayManager::default();
+            let canonical_state = canonical_state_for(&manager);
             for block in &blocks[2..=3] {
-                manager.insert_block(block.clone());
+                canonical_state.insert_executed(block.clone());
             }
             let state_provider_factory = OverlayStateProviderFactory::new(
                 factory,
@@ -1296,8 +1298,9 @@ mod tests {
         reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 3);
             let manager = OverlayManager::default();
+            let canonical_state = canonical_state_for(&manager);
             for block in &blocks[2..=3] {
-                manager.insert_block(block.clone());
+                canonical_state.insert_executed(block.clone());
             }
             let state_provider_factory = OverlayStateProviderFactory::new(
                 factory,
@@ -1333,8 +1336,9 @@ mod tests {
         reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 1);
             let manager = OverlayManager::default();
+            let canonical_state = canonical_state_for(&manager);
             for block in &blocks[2..=3] {
-                manager.insert_block(block.clone());
+                canonical_state.insert_executed(block.clone());
             }
             let state_provider_factory = OverlayStateProviderFactory::new(
                 factory,
@@ -1342,7 +1346,11 @@ mod tests {
             );
             let provider = state_provider_factory.database_provider_ro().unwrap();
 
-            manager.remove_blocks(blocks[2..=3].iter().map(|block| block.recovered_block().hash()));
+            canonical_state.clear_state();
+            for block in &blocks[2..=3] {
+                let hash = block.recovered_block().hash();
+                assert!(manager.in_memory_state().state_by_hash(hash).is_none());
+            }
 
             let (execution_overlay, _) = provider.execution_overlay().unwrap();
             assert_eq!(
@@ -1361,7 +1369,8 @@ mod tests {
         reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(3, 3);
             let manager = OverlayManager::default();
-            manager.insert_block(blocks[4].clone());
+            let canonical_state = canonical_state_for(&manager);
+            canonical_state.insert_executed(blocks[4].clone());
             let state_provider_factory = OverlayStateProviderFactory::new(
                 factory,
                 manager

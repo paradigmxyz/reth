@@ -546,10 +546,10 @@ mod tests {
         let requests = block_requests_from_receipts(
             SpecId::PRAGUE,
             BlockExecutionContext {
-                system_calls: Some(BlockSystemCalls {
+                system_calls: BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(B256::ZERO),
-                }),
+                },
                 ommers: None,
                 withdrawals: None,
                 deposit_contract_address: None,

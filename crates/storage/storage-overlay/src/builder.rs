@@ -191,8 +191,8 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     overlay_manager: OverlayManager<N>,
     /// Snapshot of the in-memory chain ending at the requested parent.
     ///
-    /// This is shared with the caller so that a chain that is already maintained elsewhere (for
-    /// example the canonical in-memory chain) can be reused instead of rebuilt.
+    /// This is shared with the caller so that a chain the caller already holds (for example the
+    /// canonical in-memory chain) can be reused instead of looked up again.
     parent_state: Option<Arc<BlockState<N>>>,
     /// Anchor hash of the reused sparse trie, if this task reused one.
     reused_sparse_trie_anchor_hash: Option<B256>,
@@ -493,7 +493,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     let start = Instant::now();
                     let finish_state = self
                         .overlay_manager
-                        .block_state(finish_tip_block.hash)
+                        .in_memory_state()
+                        .state_by_hash(finish_tip_block.hash)
                         .ok_or_else(|| {
                             ProviderError::other(StateTrieOverlayError {
                                 tip_hash: finish_tip_block.hash,
@@ -850,11 +851,10 @@ enum AnchorForParent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::canonical_state_for;
     use alloy_primitives::{keccak256, map::HashMap, Address, U256};
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
-    use reth_chain_state::{
-        test_utils::TestBlockBuilder, CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
-    };
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, NewCanonicalChain};
     use reth_db::{
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
@@ -941,16 +941,6 @@ mod tests {
         provider_rw.commit().unwrap();
 
         (factory, blocks)
-    }
-
-    /// Tracks `blocks` in a [`CanonicalInMemoryState`] the way the engine does, so the resulting
-    /// `Arc<BlockState>` chain matches what state providers hold.
-    fn canonical_in_memory_state(
-        blocks: &[ExecutedBlock<EthPrimitives>],
-    ) -> CanonicalInMemoryState<EthPrimitives> {
-        let state = CanonicalInMemoryState::empty();
-        state.update_chain(NewCanonicalChain::Commit { new: blocks.to_vec() });
-        state
     }
 
     const fn anchor_num_hash(anchor: &AnchorForParent) -> BlockNumHash {
@@ -1052,18 +1042,17 @@ mod tests {
             // chain straddles the state-masking frontier.
             let (factory, blocks) = setup_frontiers(1, 3);
             let manager = OverlayManager::default();
-            for block in &blocks[2..=4] {
-                manager.insert_block(block.clone());
-            }
-            let canonical = canonical_in_memory_state(&blocks[2..=4]);
+            let canonical_state = canonical_state_for(&manager);
+            canonical_state.update_chain(NewCanonicalChain::Commit { new: blocks[2..=4].to_vec() });
             let provider = factory.provider().unwrap();
 
             // The head, a block below the head, and the oldest in-memory block, whose chain no
             // longer covers the Finish frontier and therefore anchors below it.
             for index in [4usize, 3, 2] {
                 let hash = blocks[index].recovered_block().hash();
-                let state =
-                    canonical.state_by_hash(hash).expect("canonical state for in-memory block");
+                let state = canonical_state
+                    .state_by_hash(hash)
+                    .expect("canonical state for in-memory block");
                 assert_eq!(state.hash(), hash);
 
                 let from_hash = manager.overlay_builder(hash);
@@ -1117,8 +1106,9 @@ mod tests {
         reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 3);
             let manager = OverlayManager::default();
+            let canonical_state = canonical_state_for(&manager);
             for block in &blocks[2..=4] {
-                manager.insert_block(block.clone());
+                canonical_state.insert_executed(block.clone());
             }
             let provider = factory.provider().unwrap();
 
@@ -1149,7 +1139,8 @@ mod tests {
         reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(3, 3);
             let manager = OverlayManager::default();
-            manager.insert_block(blocks[4].clone());
+            let canonical_state = canonical_state_for(&manager);
+            canonical_state.insert_executed(blocks[4].clone());
             let provider = factory.provider().unwrap();
 
             let overlay = manager
@@ -1304,8 +1295,9 @@ mod tests {
         reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(1, 3);
             let manager = OverlayManager::default();
+            let canonical_state = canonical_state_for(&manager);
             for block in &blocks[2..=4] {
-                manager.insert_block(block.clone());
+                canonical_state.insert_executed(block.clone());
             }
             let provider = factory.provider().unwrap();
 
@@ -1384,8 +1376,9 @@ mod tests {
             );
 
             let manager = OverlayManager::default();
-            manager.insert_block(side_block_two.clone());
-            manager.insert_block(side_block_three.clone());
+            let canonical_state = canonical_state_for(&manager);
+            canonical_state.insert_executed(side_block_two.clone());
+            canonical_state.insert_executed(side_block_three.clone());
             let provider = factory.provider().unwrap();
 
             let (overlay, fallback_block_number) = manager
@@ -1412,7 +1405,8 @@ mod tests {
         reth_concurrency::sync::Runtime::new().run(|| {
             let (factory, blocks) = setup_frontiers(2, 3);
             let manager = OverlayManager::default();
-            manager.insert_block(blocks[1].clone());
+            let canonical_state = canonical_state_for(&manager);
+            canonical_state.insert_executed(blocks[1].clone());
             let provider = factory.provider().unwrap();
             let builder = manager.overlay_builder(blocks[1].recovered_block().hash());
             match builder.anchor_at_parent(&provider).unwrap() {
@@ -1431,9 +1425,10 @@ mod tests {
     fn builder_appends_block_to_parent_state() {
         reth_concurrency::sync::Runtime::new().run(|| {
             let manager = OverlayManager::default();
+            let canonical_state = canonical_state_for(&manager);
             let blocks = test_blocks();
             for block in &blocks[2..=4] {
-                manager.insert_block(block.clone());
+                canonical_state.insert_executed(block.clone());
             }
 
             let block = TestBlockBuilder::eth().get_executed_block_with_number(
@@ -1511,8 +1506,9 @@ mod tests {
 
             let blocks = test_blocks();
             let manager = OverlayManager::default();
+            let canonical_state = canonical_state_for(&manager);
             for block in &blocks[2..=4] {
-                manager.insert_block(block.clone());
+                canonical_state.insert_executed(block.clone());
             }
             let builder = manager
                 .overlay_builder(blocks[4].recovered_block().hash())

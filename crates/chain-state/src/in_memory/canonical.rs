@@ -17,7 +17,14 @@ use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
     BlockBody as _, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
 use tokio::sync::{broadcast, watch};
 
 /// Size of the broadcast channel used to notify canonical state events.
@@ -63,6 +70,7 @@ impl<N: NodePrimitives> InMemoryState<N> {
         let this = Self {
             inner: Arc::new(InMemoryStateInner {
                 blocks: RwLock::new(InMemoryBlocks::new(blocks, numbers, pending)),
+                removal_generation: Default::default(),
                 metrics: Default::default(),
             }),
         };
@@ -92,9 +100,9 @@ impl<N: NodePrimitives> InMemoryState<N> {
         self.inner.metrics.num_blocks.set(count as f64);
     }
 
-    /// Returns the state for a given block hash.
-    pub(crate) fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
-        self.inner.blocks.read().canonical().get(&hash).cloned()
+    /// Returns the state of the tracked block with the given hash, canonical or not.
+    pub fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
+        self.inner.blocks.read().get(&hash).cloned()
     }
 
     /// Returns the state for a given block number.
@@ -118,22 +126,34 @@ impl<N: NodePrimitives> InMemoryState<N> {
         self.inner.blocks.read().pending_state().cloned()
     }
 
+    /// Returns a counter that increases every time blocks are removed.
+    ///
+    /// State derived from the tracked blocks compares it with the value it saw last to learn that
+    /// blocks it refers to may no longer be tracked.
+    pub fn removal_generation(&self) -> u64 {
+        self.inner.removal_generation.load(Ordering::Relaxed)
+    }
+
     #[cfg(test)]
     fn block_count(&self) -> usize {
         self.inner.blocks.read().canonical().len()
     }
 
-    /// Applies `f` to the blocks under the write lock, and updates the metrics from the stats
-    /// read under the same lock.
+    /// Applies `f` to the blocks under the write lock, bumps the removal generation if `f`
+    /// removed blocks, and updates the metrics from the stats read under the same lock.
     ///
     /// Returns what `f` returns, so that the blocks it removed are dropped after the lock is
     /// released.
     fn update<R>(&self, f: impl FnOnce(&mut InMemoryBlocks<N>) -> R) -> R {
         let (result, stats) = {
             let mut blocks = self.inner.blocks.write();
+            let removed_count = blocks.removed_count();
             let result = f(&mut blocks);
             #[cfg(debug_assertions)]
             blocks.assert_invariants();
+            if blocks.removed_count() != removed_count {
+                self.inner.removal_generation.fetch_add(1, Ordering::Relaxed);
+            }
             (result, blocks.stats())
         };
         self.record_metrics(stats);
@@ -141,11 +161,13 @@ impl<N: NodePrimitives> InMemoryState<N> {
     }
 }
 
-/// The blocks of an [`InMemoryState`] with their lock, and the metrics recorded from them.
+/// The blocks of an [`InMemoryState`] with their lock, and what is derived from them.
 #[derive(Debug, Default)]
 struct InMemoryStateInner<N: NodePrimitives> {
     /// The executed blocks that are not on disk yet, canonical or not.
     blocks: RwLock<InMemoryBlocks<N>>,
+    /// Counts the updates that removed blocks.
+    removal_generation: AtomicU64,
     /// Metrics for the in-memory state.
     metrics: InMemoryStateMetrics,
 }
@@ -275,10 +297,29 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.inner.in_memory_state.update(|blocks| blocks.update_chain(new_chain));
     }
 
-    /// Makes every canonical block an executed block that is not canonical. Afterwards there is
-    /// no pending block.
-    pub fn demote_canonical_chain(&self) {
-        self.inner.in_memory_state.update(InMemoryBlocks::demote_canonical_chain);
+    /// Applies a backfill sync that finished at `backfill` without unwinding, in one update.
+    ///
+    /// Removes the canonical blocks up to and including its height like
+    /// [`Self::remove_canonical_until`], makes every remaining canonical block an executed block
+    /// that is not canonical, and removes the executed blocks that conflict with `backfill` like
+    /// [`Self::prune_conflicting_with_finalized`]. Afterwards there is no pending block.
+    ///
+    /// If the canonical block at the height of `backfill` is another block, the canonical blocks
+    /// are only removed as conflicting blocks, together with the blocks built on that block.
+    pub fn on_backfill_finished(&self, persisted_hash: B256, backfill: BlockNumHash) {
+        self.inner.in_memory_state.update(|blocks| {
+            let removed = if blocks
+                .canonical()
+                .hash_by_number(backfill.number)
+                .is_none_or(|hash| hash == backfill.hash)
+            {
+                blocks.remove_canonical_until(persisted_hash, backfill.number)
+            } else {
+                Vec::new()
+            };
+            blocks.demote_canonical_chain();
+            (removed, blocks.prune_conflicting_with_finalized(backfill))
+        });
     }
 
     /// Removes the executed blocks that are not canonical and can no longer become canonical once
@@ -302,22 +343,35 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// provided block as the persisted tip.
     ///
     /// Blocks above the persisted block are never removed, and the pending block is kept. If the
-    /// persisted block is not in the in-memory state, it is still reported as the persisted tip,
-    /// but no blocks are removed.
+    /// persisted block is neither a canonical in-memory block nor the block the in-memory
+    /// canonical chain builds on, it is still reported as the persisted tip, but no blocks are
+    /// removed.
     pub fn remove_persisted_blocks_until(
         &self,
         persisted_num_hash: BlockNumHash,
         remove_until: BlockNumber,
     ) {
         self.set_persisted(persisted_num_hash);
+        self.remove_canonical_until(
+            persisted_num_hash.hash,
+            remove_until.min(persisted_num_hash.number),
+        );
+    }
+
+    /// Removes the canonical blocks up to and including `remove_until` if `persisted_hash` is a
+    /// canonical in-memory block or the block the in-memory canonical chain builds on.
+    ///
+    /// Otherwise the canonical blocks in memory are not the ones that were persisted, and nothing
+    /// is removed. The chain info is unchanged.
+    pub fn remove_canonical_until(&self, persisted_hash: B256, remove_until: BlockNumber) {
         self.inner
             .in_memory_state
-            .update(|blocks| blocks.remove_canonical_until(persisted_num_hash, remove_until));
+            .update(|blocks| blocks.remove_canonical_until(persisted_hash, remove_until));
     }
 
     /// Returns in memory state corresponding the given hash.
     pub fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
-        self.inner.in_memory_state.state_by_hash(hash)
+        self.inner.in_memory_state.inner.blocks.read().canonical().get(&hash).cloned()
     }
 
     /// Returns in memory state corresponding the block number.
@@ -875,5 +929,108 @@ mod tests {
             state.clear_state();
             assert_eq!(state.pending_state(), None);
         });
+    }
+
+    #[test]
+    fn test_in_memory_state_removal_generation() {
+        let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
+        let in_memory_state = &state.inner.in_memory_state;
+        let mut block_builder = TestBlockBuilder::eth();
+        let blocks = block_builder.get_executed_blocks(1..4).collect::<Vec<_>>();
+        let hash = |number: usize| blocks[number - 1].recovered_block().hash();
+        let fork = block_builder.get_executed_block_with_number(2, hash(1));
+        let fork_hash = fork.recovered_block().hash();
+
+        // Tracking blocks and making them canonical removes nothing.
+        let generation = in_memory_state.removal_generation();
+        state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        state.insert_executed(fork);
+        assert_eq!(in_memory_state.removal_generation(), generation);
+
+        // The in-memory state returns a tracked block of either section, the canonical state
+        // only a canonical one.
+        assert_eq!(in_memory_state.state_by_hash(fork_hash).unwrap().hash(), fork_hash);
+        assert_eq!(in_memory_state.state_by_hash(hash(3)).unwrap().hash(), hash(3));
+        assert_eq!(state.state_by_hash(fork_hash), None);
+
+        // Nothing is removed for a block that is not on the canonical chain.
+        state.remove_canonical_until(fork_hash, 3);
+        assert_eq!(in_memory_state.removal_generation(), generation);
+        assert_eq!(state.canonical_chain().count(), 3);
+
+        // Canonical blocks are removed for a canonical block.
+        state.remove_canonical_until(hash(2), 1);
+        let after_canonical_block = in_memory_state.removal_generation();
+        assert!(after_canonical_block > generation);
+        assert_eq!(in_memory_state.state_by_hash(hash(1)), None);
+
+        // They are also removed for the block the canonical chain builds on.
+        state.remove_canonical_until(hash(1), 2);
+        let after_chain_base = in_memory_state.removal_generation();
+        assert!(after_chain_base > after_canonical_block);
+        assert_eq!(state.canonical_chain().map(|state| state.number()).collect::<Vec<_>>(), [3]);
+
+        // Removing blocks that are not canonical counts as well.
+        state.prune_conflicting_with_finalized(blocks[2].recovered_block().num_hash());
+        let after_fork = in_memory_state.removal_generation();
+        assert!(after_fork > after_chain_base);
+        assert_eq!(in_memory_state.state_by_hash(fork_hash), None);
+
+        state.clear_state();
+        assert!(in_memory_state.removal_generation() > after_fork);
+        assert_eq!(in_memory_state.state_by_hash(hash(3)), None);
+    }
+
+    #[test]
+    fn test_on_backfill_finished_is_one_update() {
+        let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
+        let in_memory_state = &state.inner.in_memory_state;
+        let mut block_builder = TestBlockBuilder::eth();
+        let blocks = block_builder.get_executed_blocks(1..4).collect::<Vec<_>>();
+        let hash = |number: usize| blocks[number - 1].recovered_block().hash();
+        let fork = block_builder.get_executed_block_with_number(2, hash(1));
+        let fork_hash = fork.recovered_block().hash();
+        state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        state.insert_executed(fork);
+
+        // Backfill finishes at block 2: the canonical blocks through it and the fork are removed
+        // in one update, and block 3 stays tracked but is no longer canonical.
+        let generation = in_memory_state.removal_generation();
+        state.on_backfill_finished(hash(1), blocks[1].recovered_block().num_hash());
+        assert_eq!(in_memory_state.removal_generation(), generation + 1);
+        assert_eq!(state.canonical_chain().count(), 0);
+        for removed in [hash(1), hash(2), fork_hash] {
+            assert_eq!(in_memory_state.state_by_hash(removed), None);
+        }
+        assert_eq!(in_memory_state.state_by_hash(hash(3)).unwrap().hash(), hash(3));
+    }
+
+    #[test]
+    fn test_on_backfill_finished_at_conflicting_block() {
+        let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
+        let in_memory_state = &state.inner.in_memory_state;
+        let mut block_builder = TestBlockBuilder::eth();
+        let blocks = block_builder.get_executed_blocks(1..4).collect::<Vec<_>>();
+        let hash = |number: usize| blocks[number - 1].recovered_block().hash();
+        let fork = block_builder.get_executed_block_with_number(2, hash(1));
+        let fork_hash = fork.recovered_block().hash();
+        let fork_child = block_builder.get_executed_block_with_number(3, fork_hash);
+        let fork_child_hash = fork_child.recovered_block().hash();
+        state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        state.insert_executed(fork.clone());
+        state.insert_executed(fork_child);
+
+        // Backfill finishes at the fork block of height 2: canonical block 2 conflicts with it
+        // and is removed together with block 3 built on it, and the fork stays tracked.
+        let generation = in_memory_state.removal_generation();
+        state.on_backfill_finished(hash(1), fork.recovered_block().num_hash());
+        assert_eq!(in_memory_state.removal_generation(), generation + 1);
+        assert_eq!(state.canonical_chain().count(), 0);
+        for removed in [hash(1), hash(2), hash(3)] {
+            assert_eq!(in_memory_state.state_by_hash(removed), None);
+        }
+        for kept in [fork_hash, fork_child_hash] {
+            assert_eq!(in_memory_state.state_by_hash(kept).unwrap().hash(), kept);
+        }
     }
 }
