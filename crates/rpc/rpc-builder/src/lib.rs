@@ -21,10 +21,11 @@
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
 use alloy_network::{Ethereum, IntoWallet};
-use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
+use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder, WsConnect};
+use alloy_rpc_client::{ClientBuilder, RpcClient};
+use alloy_transport::Authorization;
 use core::marker::PhantomData;
 use error::{ConflictingModules, RpcError, ServerKind};
-use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
     core::RegisterMethodError,
     server::{middleware::rpc::RpcServiceBuilder, AlreadyStoppedError, IdProvider, ServerHandle},
@@ -51,7 +52,8 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{
-    AuthLayer, Claims, CompressionLayer, DecompressionLayer, JwtAuthValidator, JwtSecret,
+    AuthClientLayer, AuthLayer, Claims, CompressionLayer, DecompressionLayer, JwtAuthValidator,
+    JwtSecret,
 };
 pub use reth_rpc_server_types::RethRpcModule;
 use reth_storage_api::{
@@ -951,6 +953,19 @@ where
         namespaces
             .iter()
             .map(|namespace| {
+                // `rpc` lists the namespaces of the transport it is built for, so it can't be
+                // cached in `self.modules`
+                if matches!(namespace, RethRpcModule::Rpc) {
+                    return RPCApi::new(
+                        namespaces
+                            .iter()
+                            .map(|module| (module.to_string(), "1.0".to_string()))
+                            .collect(),
+                    )
+                    .into_rpc()
+                    .into();
+                }
+
                 self.modules
                     .entry(namespace.clone())
                     .or_insert_with(|| match namespace.clone() {
@@ -1003,14 +1018,6 @@ where
                         )
                         .into_rpc()
                         .into(),
-                        RethRpcModule::Rpc => RPCApi::new(
-                            namespaces
-                                .iter()
-                                .map(|module| (module.to_string(), "1.0".to_string()))
-                                .collect(),
-                        )
-                        .into_rpc()
-                        .into(),
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
                         RethRpcModule::Reth => RethApi::new(
                             self.provider.clone(),
@@ -1026,9 +1033,10 @@ where
                                 .into_rpc()
                                 .into()
                         }
-                        // these are implementation specific and need to be handled during
-                        // initialization and should be registered via extend_rpc_modules in the
-                        // nodebuilder rpc addon stack
+                        // `rpc` is built above, the others are implementation specific and need
+                        // to be handled during initialization and should be registered via
+                        // extend_rpc_modules in the nodebuilder rpc addon stack
+                        RethRpcModule::Rpc |
                         RethRpcModule::Flashbots |
                         RethRpcModule::Testing |
                         RethRpcModule::Other(_) => Default::default(),
@@ -1104,7 +1112,7 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     /// Address where to bind the ws server to
     ws_addr: Option<SocketAddr>,
     /// Configs for JSON-RPC IPC server
-    ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
+    ipc_server_config: Option<IpcServerBuilder<Identity>>,
     /// The Endpoint where to launch the ipc server
     ipc_endpoint: Option<String>,
     /// JWT secret for authentication
@@ -1152,7 +1160,7 @@ impl RpcServerConfig {
     }
 
     /// Creates a new config with only ipc set
-    pub fn ipc(config: IpcServerBuilder<Identity, Identity>) -> Self {
+    pub fn ipc(config: IpcServerBuilder<Identity>) -> Self {
         Self::default().with_ipc(config)
     }
 
@@ -1179,7 +1187,7 @@ impl RpcServerConfig {
     ///
     /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
     /// convenience. To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
-    pub fn with_ipc(mut self, config: IpcServerBuilder<Identity, Identity>) -> Self {
+    pub fn with_ipc(mut self, config: IpcServerBuilder<Identity>) -> Self {
         self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }
@@ -2270,31 +2278,25 @@ impl RpcServerHandle {
     }
 
     /// Returns a http client connected to the server.
-    pub fn http_client(&self) -> Option<jsonrpsee::http_client::HttpClient> {
-        let url = self.http_url()?;
-
-        let client = if let Some(token) = self.bearer_token() {
-            jsonrpsee::http_client::HttpClientBuilder::default()
-                .set_headers(HeaderMap::from_iter([(AUTHORIZATION, token.parse().unwrap())]))
-                .build(url)
-        } else {
-            jsonrpsee::http_client::HttpClientBuilder::default().build(url)
+    ///
+    /// The client authenticates every request with a fresh JWT if the server has a secret.
+    pub fn http_client(&self) -> Option<RpcClient> {
+        let url = self.http_url()?.parse().expect("valid http url");
+        let client = match self.jwt_secret {
+            Some(secret) => ClientBuilder::default().layer(AuthClientLayer::new(secret)).http(url),
+            None => ClientBuilder::default().http(url),
         };
-
-        client.expect("failed to create http client").into()
+        Some(client)
     }
 
     /// Returns a ws client connected to the server.
-    pub async fn ws_client(&self) -> Option<jsonrpsee::ws_client::WsClient> {
-        let url = self.ws_url()?;
-        let mut builder = jsonrpsee::ws_client::WsClientBuilder::default();
-
+    pub async fn ws_client(&self) -> Option<RpcClient> {
+        let mut connect = WsConnect::new(self.ws_url()?);
         if let Some(token) = self.bearer_token() {
-            let headers = HeaderMap::from_iter([(AUTHORIZATION, token.parse().unwrap())]);
-            builder = builder.set_headers(headers);
+            connect = connect.with_auth(Authorization::raw(token));
         }
-
-        let client = builder.build(url).await.expect("failed to create ws client");
+        let client =
+            ClientBuilder::default().ws(connect).await.expect("failed to create ws client");
         Some(client)
     }
 
@@ -2545,7 +2547,7 @@ mod tests {
 
     fn create_test_module() -> RpcModule<()> {
         let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _, _| "succeed").unwrap();
+        module.register_method("anything", |_, _| "succeed").unwrap();
         module
     }
 
@@ -2638,7 +2640,7 @@ mod tests {
 
         // Create another module
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _, _| "fails").unwrap();
+        other_module.register_method("something", |_, _| "fails").unwrap();
 
         // Rename the method
         modules.rename("anything", other_module).expect("rename failed");
@@ -2660,13 +2662,13 @@ mod tests {
             TransportRpcModules { http: Some(create_test_module()), ..Default::default() };
 
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _, _| "fails").unwrap();
+        other_module.register_method("something", |_, _| "fails").unwrap();
 
         assert!(modules.replace_http(other_module.clone()).unwrap());
 
         assert!(modules.http.as_ref().unwrap().method("something").is_some());
 
-        other_module.register_method("anything", |_, _, _| "fails").unwrap();
+        other_module.register_method("anything", |_, _| "fails").unwrap();
         assert!(modules.replace_http(other_module.clone()).unwrap());
 
         assert!(modules.http.as_ref().unwrap().method("anything").is_some());
@@ -2677,13 +2679,13 @@ mod tests {
             TransportRpcModules { ipc: Some(create_test_module()), ..Default::default() };
 
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _, _| "fails").unwrap();
+        other_module.register_method("something", |_, _| "fails").unwrap();
 
         assert!(modules.replace_ipc(other_module.clone()).unwrap());
 
         assert!(modules.ipc.as_ref().unwrap().method("something").is_some());
 
-        other_module.register_method("anything", |_, _, _| "fails").unwrap();
+        other_module.register_method("anything", |_, _| "fails").unwrap();
         assert!(modules.replace_ipc(other_module.clone()).unwrap());
 
         assert!(modules.ipc.as_ref().unwrap().method("anything").is_some());
@@ -2694,13 +2696,13 @@ mod tests {
             TransportRpcModules { ws: Some(create_test_module()), ..Default::default() };
 
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _, _| "fails").unwrap();
+        other_module.register_method("something", |_, _| "fails").unwrap();
 
         assert!(modules.replace_ws(other_module.clone()).unwrap());
 
         assert!(modules.ws.as_ref().unwrap().method("something").is_some());
 
-        other_module.register_method("anything", |_, _, _| "fails").unwrap();
+        other_module.register_method("anything", |_, _| "fails").unwrap();
         assert!(modules.replace_ws(other_module.clone()).unwrap());
 
         assert!(modules.ws.as_ref().unwrap().method("anything").is_some());
@@ -2715,7 +2717,7 @@ mod tests {
             ..Default::default()
         };
         let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _, _| "fails").unwrap();
+        other_module.register_method("something", |_, _| "fails").unwrap();
 
         assert!(modules.replace_configured(other_module).unwrap());
 
@@ -2738,11 +2740,11 @@ mod tests {
 
         // Create HTTP module with an existing method (to test "replace")
         let mut http_module = RpcModule::new(());
-        http_module.register_method("eth_existing", |_, _, _| "original").unwrap();
+        http_module.register_method("eth_existing", |_, _| "original").unwrap();
 
         // Create WS module with the same existing method
         let mut ws_module = RpcModule::new(());
-        ws_module.register_method("eth_existing", |_, _, _| "original").unwrap();
+        ws_module.register_method("eth_existing", |_, _| "original").unwrap();
 
         // Create IPC module (empty, to ensure no changes)
         let ipc_module = RpcModule::new(());
@@ -2757,8 +2759,8 @@ mod tests {
 
         // Create new methods: one to replace an existing method, one to add a new one
         let mut new_module = RpcModule::new(());
-        new_module.register_method("eth_existing", |_, _, _| "replaced").unwrap(); // Replace
-        new_module.register_method("eth_new", |_, _, _| "added").unwrap(); // Add
+        new_module.register_method("eth_existing", |_, _| "replaced").unwrap(); // Replace
+        new_module.register_method("eth_new", |_, _| "added").unwrap(); // Add
         let new_methods: Methods = new_module.into();
 
         // Call the function for RethRpcModule::Eth
@@ -2796,7 +2798,7 @@ mod tests {
         let result = modules.merge_if_module_configured_with(RethRpcModule::Eth, || {
             closure_called = true;
             let mut methods = RpcModule::new(());
-            methods.register_method("eth_test", |_, _, _| "test").unwrap();
+            methods.register_method("eth_test", |_, _| "test").unwrap();
             methods.into()
         });
 

@@ -5,7 +5,10 @@ use clap::{
     Args,
 };
 use eyre::ensure;
-use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
+use reth_cli_util::{
+    parse_duration_from_secs_or_ms,
+    parsers::{format_duration_as_secs_or_ms, parse_duration},
+};
 use reth_engine_primitives::{
     TreeConfig, DEFAULT_BACKFILL_RUN_THRESHOLD, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
     DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_NUM_STATE_MASKING_BLOCKS,
@@ -507,7 +510,7 @@ pub struct EngineArgs {
     /// Set to 0s to disable.
     #[arg(
         long = "engine.state-root-task-timeout",
-        value_parser = humantime::parse_duration,
+        value_parser = parse_duration,
         default_value = Resettable::from(DefaultEngineValues::get_global().state_root_task_timeout.as_ref().map(|v| v.as_str().into())),
     )]
     pub state_root_task_timeout: Option<Duration>,
@@ -585,7 +588,7 @@ pub struct EngineArgs {
     #[cfg(feature = "trie-debug")]
     #[arg(
         long = "engine.proof-jitter",
-        value_parser = humantime::parse_duration,
+        value_parser = parse_duration,
     )]
     pub proof_jitter: Option<Duration>,
 }
@@ -654,7 +657,7 @@ impl Default for EngineArgs {
             disable_sparse_trie_cache_pruning,
             state_root_task_timeout: state_root_task_timeout
                 .as_deref()
-                .map(|s| humantime::parse_duration(s).expect("valid default duration")),
+                .map(|s| parse_duration(s).expect("valid default duration")),
             share_execution_cache_with_payload_builder,
             share_sparse_trie_with_payload_builder,
             suppress_persistence_during_build,

@@ -14,7 +14,6 @@ use alloy_rpc_types_engine::{
     BlobsBundleV1, BlobsBundleV2, CancunPayloadFields, ExecutionData, ExecutionPayload,
     ExecutionPayloadSidecar, PraguePayloadFields,
 };
-use async_trait::async_trait;
 use core::fmt;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::error::ErrorObject;
@@ -583,7 +582,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Provider, E, T> BlockSubmissionValidationApiServer for ValidationApi<Provider, E, T>
 where
     Provider: BlockReaderIdExt<Header = <E::Primitives as NodePrimitives>::BlockHeader>

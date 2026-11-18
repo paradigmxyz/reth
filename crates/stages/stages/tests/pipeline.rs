@@ -41,6 +41,7 @@ use reth_static_file::StaticFileProducer;
 use reth_storage_api::{
     ChangeSetReader, StateProvider, StorageChangeSetReader, StorageSettings, StorageSettingsCache,
 };
+use reth_storage_overlay::OverlayManager;
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
@@ -764,6 +765,7 @@ async fn reopen_provider_factory(
         chain_spec,
         StaticFileProvider::read_write(datadir.join("static_files"))?,
         rocksdb,
+        OverlayManager::default(),
         reth_tasks::Runtime::test(),
     )
     .map_err(Into::into)

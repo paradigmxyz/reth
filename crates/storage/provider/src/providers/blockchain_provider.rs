@@ -16,7 +16,7 @@ use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
-    BlockState, CanonicalInMemoryState, ExecutedBlock, ForkChoiceNotifications,
+    BlockState, CanonicalInMemoryState, ChainInfoHeaders, ExecutedBlock, ForkChoiceNotifications,
     ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
 };
 use reth_chainspec::ChainInfo;
@@ -30,9 +30,9 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderROFactory, NodePrimitivesProvider, RangeEnd,
-    RangeResponse, RangeResult, StateRangeProvider, StateRangeProviderFactory, StateRangeView,
-    StorageChangeSetReader, StorageRangeResult,
+    BlockBodyIndicesProvider, DatabaseProviderROFactory, GetBlockAccessListLimit,
+    NodePrimitivesProvider, RangeEnd, RangeResponse, RangeResult, StateRangeProvider,
+    StateRangeProviderFactory, StateRangeView, StorageChangeSetReader, StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::{OverlayStateProvider, OverlayStateProviderFactory, OwnedProvider};
@@ -84,30 +84,17 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockchainProvider<N> {
-    /// Create a new [`BlockchainProvider`] using only the storage, fetching the latest
-    /// header from the database to initialize the provider.
+    /// Creates a provider over `storage` and the in-memory state of `storage`, fetching the
+    /// latest, safe and finalized headers from the database to initialize the provider.
+    ///
+    /// The in-memory blocks are shared with every other handle of that in-memory state. The chain
+    /// info and the canonical state notifications belong to the returned provider and its clones.
     pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
         let provider = storage.provider()?;
         let best = provider.chain_info()?;
-        match provider.header_by_number(best.best_number)? {
-            Some(header) => {
-                drop(provider);
-                Ok(Self::with_latest(storage, SealedHeader::new(header, best.best_hash))?)
-            }
-            None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
-        }
-    }
-
-    /// Create new provider instance that wraps the database and the blockchain tree, using the
-    /// provided latest header to initialize the chain info tracker.
-    ///
-    /// This returns a `ProviderResult` since it tries the retrieve the last finalized header from
-    /// `database`.
-    pub fn with_latest(
-        storage: ProviderFactory<N>,
-        latest: SealedHeader<HeaderTy<N>>,
-    ) -> ProviderResult<Self> {
-        let provider = storage.provider()?;
+        let latest = provider
+            .header_by_number(best.best_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(best.best_number.into()))?;
         let finalized_header = provider
             .last_finalized_block_number()?
             .map(|num| provider.sealed_header(num))
@@ -123,17 +110,17 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             .map(|num| provider.sealed_header(num))
             .transpose()?
             .flatten();
+        let canonical_in_memory_state = CanonicalInMemoryState::with_head(
+            ChainInfoHeaders {
+                canonical_head: SealedHeader::new(latest, best.best_hash),
+                safe: safe_header,
+                finalized: finalized_header,
+            },
+            storage.in_memory_state().clone(),
+        );
         let bal_store = storage.bal_store().clone();
 
-        Ok(Self {
-            database: storage,
-            canonical_in_memory_state: CanonicalInMemoryState::with_head(
-                latest,
-                finalized_header,
-                safe_header,
-            ),
-            bal_store,
-        })
+        Ok(Self { database: storage, canonical_in_memory_state, bal_store })
     }
 
     /// Gets a clone of `canonical_in_memory_state`.
@@ -165,6 +152,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     }
 
     /// Returns a historical state provider using an existing database snapshot.
+    ///
+    /// Callers such as RPC choose the block, so the trie reverts it accumulates stay out of the
+    /// changeset cache the engine shares.
     pub fn state_provider_from_database(
         &self,
         provider: StateRangeDbProvider<N>,
@@ -172,7 +162,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     ) -> StateProviderBox {
         Box::new(OverlayStateProvider::new(
             provider,
-            self.database.overlay_manager().overlay_builder(block_hash),
+            self.database
+                .overlay_manager()
+                .overlay_builder(block_hash)
+                .without_trie_revert_caching(),
         ))
     }
 
@@ -238,6 +231,40 @@ impl<N: NodeTypesWithDB> NodePrimitivesProvider for BlockchainProvider<N> {
 impl<N: ProviderNodeTypes> BalProvider for BlockchainProvider<N> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
+    }
+
+    fn get_bal_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<Bytes>> {
+        Ok(self.get_bals_by_hashes(&[block_hash])?.pop().flatten())
+    }
+
+    fn get_bals_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+        self.get_bals_by_hashes_with_limit(block_hashes, GetBlockAccessListLimit::None)
+    }
+
+    /// Falls back to the blocks the engine tree holds, because the store only buffers side chain
+    /// BALs briefly and never persists them.
+    fn get_bals_by_hashes_with_limit(
+        &self,
+        block_hashes: &[BlockHash],
+        limit: GetBlockAccessListLimit,
+    ) -> ProviderResult<Vec<Option<Bytes>>> {
+        let mut bals = self.bal_store.get_by_hashes_with_limit(block_hashes, limit)?;
+        for (bal, hash) in bals.iter_mut().zip(block_hashes).filter(|(bal, _)| bal.is_none()) {
+            *bal = self
+                .database
+                .overlay_manager()
+                .executed_block_by_hash(hash)
+                .and_then(|block| block.bal().map(|bal| bal.as_raw_bal().as_raw().clone()));
+        }
+        // Filled BALs only grow the response, so the limit can only cut it shorter.
+        let mut size = 0;
+        if let Some(last) = bals.iter().position(|bal| {
+            size += bal.as_ref().map_or(1, |bytes| bytes.len());
+            limit.exceeds(size)
+        }) {
+            bals.truncate(last + 1);
+        }
+        Ok(bals)
     }
 }
 
@@ -634,6 +661,13 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
         self.consistent_provider()?.transaction_by_hash_with_meta(tx_hash)
     }
 
+    fn transaction_by_hash_with_meta_and_sender(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta, Option<Address>)>> {
+        self.consistent_provider()?.transaction_by_hash_with_meta_and_sender(tx_hash)
+    }
+
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -866,7 +900,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
 
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
             // we have a pending block
-            return self.state_provider_for_state(Arc::new(pending));
+            return self.state_provider_for_state(pending);
         }
 
         // fallback to latest state if the pending block is not available
@@ -877,14 +911,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() &&
             pending.hash() == block_hash
         {
-            return self.state_provider_for_state(Arc::new(pending)).map(Some);
+            return self.state_provider_for_state(pending).map(Some);
         }
         Ok(None)
     }
 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
-            return self.state_provider_for_state(Arc::new(pending)).map(Some)
+            return self.state_provider_for_state(pending).map(Some)
         }
 
         Ok(None)
@@ -928,25 +962,53 @@ where
         &self,
         id: BlockNumberOrTag,
     ) -> ProviderResult<Option<Self::Header>> {
-        self.consistent_provider()?.header_by_number_or_tag(id)
+        match id {
+            BlockNumberOrTag::Latest |
+            BlockNumberOrTag::Finalized |
+            BlockNumberOrTag::Safe |
+            BlockNumberOrTag::Pending => {
+                Ok(self.sealed_header_by_number_or_tag(id)?.map(|h| h.unseal()))
+            }
+            BlockNumberOrTag::Earliest | BlockNumberOrTag::Number(_) => {
+                self.consistent_provider()?.header_by_number_or_tag(id)
+            }
+        }
     }
 
     fn sealed_header_by_number_or_tag(
         &self,
         id: BlockNumberOrTag,
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.consistent_provider()?.sealed_header_by_number_or_tag(id)
+        match id {
+            BlockNumberOrTag::Latest => {
+                Ok(Some(self.canonical_in_memory_state.get_canonical_head()))
+            }
+            BlockNumberOrTag::Finalized => {
+                Ok(self.canonical_in_memory_state.get_finalized_header())
+            }
+            BlockNumberOrTag::Safe => Ok(self.canonical_in_memory_state.get_safe_header()),
+            BlockNumberOrTag::Pending => Ok(self.canonical_in_memory_state.pending_sealed_header()),
+            BlockNumberOrTag::Earliest | BlockNumberOrTag::Number(_) => {
+                self.consistent_provider()?.sealed_header_by_number_or_tag(id)
+            }
+        }
     }
 
     fn sealed_header_by_id(
         &self,
         id: BlockId,
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.consistent_provider()?.sealed_header_by_id(id)
+        match id {
+            BlockId::Number(tag) => self.sealed_header_by_number_or_tag(tag),
+            BlockId::Hash(_) => self.consistent_provider()?.sealed_header_by_id(id),
+        }
     }
 
     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Header>> {
-        self.consistent_provider()?.header_by_id(id)
+        match id {
+            BlockId::Number(tag) => self.header_by_number_or_tag(tag),
+            BlockId::Hash(_) => self.consistent_provider()?.header_by_id(id),
+        }
     }
 }
 
@@ -1097,8 +1159,8 @@ mod tests {
         BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksInput,
     };
     use alloy_consensus::constants::EMPTY_ROOT_HASH;
-    use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
-    use alloy_primitives::{keccak256, Address, BlockNumber, TxNumber, B256, U256};
+    use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
+    use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, TxNumber, B256, U256};
     use evm2::evm::AccountInfo;
     use itertools::Itertools;
     use rand::Rng;
@@ -1111,20 +1173,20 @@ mod tests {
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
-        BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
+        BlockExecutionOutput, BlockExecutionResult, Chain, DecodedEvmBal, ExecutionOutcome,
     };
     use reth_primitives_traits::{
         Account, Block as _, RecoveredBlock, SealedBlock, SignerRecoverable, StorageEntry,
     };
     use reth_stages_types::{StageCheckpoint, StageId};
     use reth_storage_api::{
-        BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
-        BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HashingWriter, HeaderProvider, MetadataWriter, RangeEnd, ReceiptProvider,
-        ReceiptProviderIdExt, StageCheckpointWriter, StateProviderFactory, StateRangeProvider,
-        StateRangeProviderFactory, StateRootProvider, StateWriteConfig, StateWriter,
-        StorageRootProvider, StorageSettings, StorageSettingsCache, TransactionVariant,
-        TransactionsProvider, TrieWriter,
+        BalProvider, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
+        BlockReader, BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider,
+        DatabaseProviderFactory, HashingWriter, HeaderProvider, MetadataWriter, RangeEnd,
+        ReceiptProvider, ReceiptProviderIdExt, StageCheckpointWriter, StateProviderFactory,
+        StateRangeProvider, StateRangeProviderFactory, StateRootProvider, StateWriteConfig,
+        StateWriter, StorageRootProvider, StorageSettings, StorageSettingsCache,
+        TransactionVariant, TransactionsProvider, TrieWriter,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -1406,7 +1468,9 @@ mod tests {
                 })
                 .collect(),
         };
-        provider.canonical_in_memory_state.update_chain(chain);
+        if !in_memory_blocks.is_empty() {
+            provider.canonical_in_memory_state.update_chain(chain);
+        }
         for state in provider.canonical_in_memory_state.canonical_chain() {
             provider.database.overlay_manager().insert_block(state.block());
         }
@@ -1700,6 +1764,74 @@ mod tests {
     }
 
     #[test]
+    fn test_block_reader_side_chain_block_by_hash() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        // A fork of the first in-memory block that the engine tree holds but is not canonical.
+        let canonical = in_memory_blocks.first().unwrap();
+        let fork = random_block(
+            &mut rng,
+            canonical.number,
+            BlockParams { parent: Some(canonical.parent_hash), ..Default::default() },
+        );
+        let fork_hash = fork.hash();
+        let recovered = RecoveredBlock::new_sealed(fork.clone(), fork.senders().unwrap());
+        let bal = Bytes::from_static(&[0xc2, 0xc0, 0xc0]);
+        provider.database.overlay_manager().insert_block(
+            ExecutedBlock { recovered_block: Arc::new(recovered.clone()), ..Default::default() }
+                .with_bal(Some(Arc::new(DecodedEvmBal::new(Arc::default(), bal.clone())))),
+        );
+
+        assert_eq!(provider.block(fork_hash.into())?, Some(fork.into_block()));
+        assert_eq!(
+            provider.recovered_block(fork_hash.into(), TransactionVariant::WithHash)?,
+            Some(recovered.clone())
+        );
+        assert_eq!(
+            provider.sealed_block_with_senders(fork_hash.into(), TransactionVariant::WithHash)?,
+            Some(recovered)
+        );
+        assert_eq!(provider.get_bal_by_hash(fork_hash)?, Some(bal.clone()));
+        assert_eq!(provider.get_bals_by_hashes(&[fork_hash])?, vec![Some(bal.clone())]);
+        // The store counts each missing BAL as one byte, the filled BAL exceeds the limit.
+        assert_eq!(
+            provider.get_bals_by_hashes_with_limit(
+                &[fork_hash, fork_hash],
+                GetBlockAccessListLimit::ResponseSizeSoftLimit(2)
+            )?,
+            vec![Some(bal)]
+        );
+
+        // Canonical lookups still only see the canonical chain.
+        assert_eq!(provider.block(canonical.number.into())?, Some(canonical.clone().into_block()));
+        assert_eq!(provider.block_number(fork_hash)?, None);
+        let fork_canonical_id = BlockId::hash_canonical(fork_hash);
+        assert_eq!(provider.block_by_id(fork_canonical_id)?, None);
+        assert_eq!(provider.block_hash_for_id(fork_canonical_id)?, None);
+        assert_eq!(
+            provider.block_with_senders_by_id(fork_canonical_id, TransactionVariant::WithHash)?,
+            None
+        );
+        assert_eq!(
+            provider.block_hash_for_id(BlockId::hash_canonical(canonical.hash()))?,
+            Some(canonical.hash())
+        );
+
+        // Once the tree drops the fork, its hash is unknown again.
+        provider.database.overlay_manager().remove_blocks([fork_hash]);
+        assert_eq!(provider.block(fork_hash.into())?, None);
+        assert_eq!(provider.get_bals_by_hashes(&[fork_hash])?, vec![None]);
+
+        Ok(())
+    }
+
+    #[test]
     fn test_block_body_indices() -> eyre::Result<()> {
         // Create a new provider
         let mut rng = generators::rng();
@@ -1968,6 +2100,38 @@ mod tests {
             Some(finalized_block.clone_sealed_header())
         );
 
+        assert_eq!(
+            provider.header_by_number_or_tag(BlockNumberOrTag::Earliest).unwrap(),
+            Some(database_block.header().clone())
+        );
+        assert_eq!(
+            provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Earliest).unwrap(),
+            Some(database_block.clone_sealed_header())
+        );
+
+        assert_eq!(provider.header_by_number_or_tag(BlockNumberOrTag::Pending)?, None);
+        assert_eq!(provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Pending)?, None);
+        let pending_block = random_block(
+            &mut rng,
+            canonical_block.number + 1,
+            BlockParams { parent: Some(canonical_block.hash()), ..Default::default() },
+        );
+        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                pending_block.clone(),
+                pending_block.senders().unwrap(),
+            )),
+            ..Default::default()
+        });
+        assert_eq!(
+            provider.header_by_number_or_tag(BlockNumberOrTag::Pending).unwrap(),
+            Some(pending_block.header().clone())
+        );
+        assert_eq!(
+            provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Pending).unwrap(),
+            Some(pending_block.clone_sealed_header())
+        );
+
         Ok(())
     }
 
@@ -2024,6 +2188,64 @@ mod tests {
         assert_eq!(
             provider.sealed_header_by_id(block_hash.into()).unwrap(),
             Some(in_memory_block.clone_sealed_header())
+        );
+
+        let safe_block = in_memory_blocks[in_memory_blocks.len() - 2].clone();
+        let finalized_block = in_memory_blocks[in_memory_blocks.len() - 3].clone();
+        assert_eq!(
+            provider.header_by_id(BlockNumberOrTag::Latest.into()).unwrap(),
+            Some(in_memory_block.header().clone())
+        );
+        assert_eq!(
+            provider.sealed_header_by_id(BlockNumberOrTag::Latest.into()).unwrap(),
+            Some(in_memory_block.clone_sealed_header())
+        );
+        assert_eq!(
+            provider.header_by_id(BlockNumberOrTag::Safe.into()).unwrap(),
+            Some(safe_block.header().clone())
+        );
+        assert_eq!(
+            provider.sealed_header_by_id(BlockNumberOrTag::Safe.into()).unwrap(),
+            Some(safe_block.clone_sealed_header())
+        );
+        assert_eq!(
+            provider.header_by_id(BlockNumberOrTag::Finalized.into()).unwrap(),
+            Some(finalized_block.header().clone())
+        );
+        assert_eq!(
+            provider.sealed_header_by_id(BlockNumberOrTag::Finalized.into()).unwrap(),
+            Some(finalized_block.clone_sealed_header())
+        );
+        assert_eq!(
+            provider.header_by_id(BlockNumberOrTag::Earliest.into()).unwrap(),
+            Some(database_block.header().clone())
+        );
+        assert_eq!(
+            provider.sealed_header_by_id(BlockNumberOrTag::Earliest.into()).unwrap(),
+            Some(database_block.clone_sealed_header())
+        );
+
+        assert_eq!(provider.header_by_id(BlockNumberOrTag::Pending.into())?, None);
+        assert_eq!(provider.sealed_header_by_id(BlockNumberOrTag::Pending.into())?, None);
+        let pending_block = random_block(
+            &mut rng,
+            in_memory_block.number + 1,
+            BlockParams { parent: Some(in_memory_block.hash()), ..Default::default() },
+        );
+        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                pending_block.clone(),
+                pending_block.senders().unwrap(),
+            )),
+            ..Default::default()
+        });
+        assert_eq!(
+            provider.header_by_id(BlockNumberOrTag::Pending.into()).unwrap(),
+            Some(pending_block.header().clone())
+        );
+        assert_eq!(
+            provider.sealed_header_by_id(BlockNumberOrTag::Pending.into()).unwrap(),
+            Some(pending_block.clone_sealed_header())
         );
 
         Ok(())
@@ -2918,6 +3140,25 @@ mod tests {
             ),
             (
                 ONE,
+                transaction_by_hash_with_meta_and_sender,
+                |block: &SealedBlock<Block>, _: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| {
+                    let tx = block.body().transactions[test_tx_index].clone();
+                    let sender = tx.recover_signer().ok();
+                    let meta = TransactionMeta {
+                        tx_hash,
+                        index: test_tx_index as u64,
+                        block_hash: block.hash(),
+                        block_number: block.number,
+                        base_fee: block.base_fee_per_gas,
+                        excess_blob_gas: block.excess_blob_gas,
+                        timestamp: block.timestamp,
+                    };
+                    (tx_hash, Some((tx, meta, sender)))
+                },
+                B256::random()
+            ),
+            (
+                ONE,
                 block_by_transaction_id,
                 |block: &SealedBlock<Block>, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     tx_num,
@@ -3751,6 +3992,23 @@ mod tests {
             let outcome = provider.get_state(number as u64)?.expect("persisted block state");
             assert_eq!(outcome.receipts, vec![receipts], "block {number}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn providers_of_one_factory_share_in_memory_blocks() -> eyre::Result<()> {
+        let factory = test_provider_factory_with_genesis()?;
+        let provider = BlockchainProvider::new(factory.clone())?;
+        let other = BlockchainProvider::new(factory)?;
+        let genesis = provider.canonical_in_memory_state.get_canonical_head();
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, genesis.hash());
+        let hash = block.recovered_block().hash();
+
+        provider
+            .canonical_in_memory_state
+            .update_chain(NewCanonicalChain::Commit { new: vec![block] });
+
+        assert!(other.canonical_in_memory_state.state_by_hash(hash).is_some());
         Ok(())
     }
 }

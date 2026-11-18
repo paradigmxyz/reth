@@ -40,7 +40,7 @@ use reth_rpc_eth_types::{
     EthApiError, RpcInvalidTransactionError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
-use reth_tasks::{cancel::is_cancelled, CancelOnDrop};
+use reth_tasks::cancel::is_cancelled;
 use std::fmt;
 use tracing::{debug, trace};
 
@@ -246,6 +246,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                         chain_id,
                         simulation_state.as_mut(),
                         this.converter(),
+                        |call, db| this.simulate_call_nonce(call, db),
                     )
                     .map_err(map_err)?;
 
@@ -547,6 +548,18 @@ pub trait Call:
         self.eth_api_settings().evm_memory_limit
     }
 
+    /// Returns the nonce for an `eth_simulateV1` call that has none.
+    ///
+    /// `db` holds the simulation state before the call, including all earlier calls. `None` falls
+    /// back to the sender's account nonce, which suits networks with a single nonce per account.
+    fn simulate_call_nonce(
+        &self,
+        _request: &RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
+        _db: &mut dyn DynDatabase,
+    ) -> Result<Option<u64>, EthApiError> {
+        Ok(None)
+    }
+
     /// Returns the max gas limit that the caller can afford given a transaction environment.
     fn caller_gas_allowance(
         &self,
@@ -642,22 +655,17 @@ pub trait Call:
                 .acquire_owned_blocking_io()
                 .await
                 .map_err(|_| EthApiError::InternalEthError)?;
-            let guard = CancelOnDrop::default();
-            let cancel = guard.clone();
             let this = self.clone();
 
-            let res = self
-                .spawn_with_call_at(request, at, overrides, move |db, evm_env, tx_env| {
-                    let _permit = permit;
-                    if cancel.is_cancelled() {
-                        // callsite dropped the guard
-                        return Err(EthApiError::InternalEthError.into())
-                    }
-                    this.transact(db, evm_env, tx_env)
-                })
-                .await;
-            drop(guard);
-            res
+            self.spawn_with_call_at(request, at, overrides, move |db, evm_env, tx_env| {
+                let _permit = permit;
+                if is_cancelled() {
+                    // callsite dropped the request
+                    return Err(EthApiError::InternalEthError.into())
+                }
+                this.transact(db, evm_env, tx_env)
+            })
+            .await
         }
     }
 

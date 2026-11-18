@@ -18,14 +18,15 @@ reth-execution-types.workspace = true
 reth-fs-util.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
-reth-rpc-api = { workspace = true, features = ["client"] }
 reth-tasks.workspace = true
 reth-trie.workspace = true
 
 # alloy
 evm2.workspace = true
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-rpc-client.workspace = true
 alloy-rpc-types-debug.workspace = true
 alloy-consensus.workspace = true
 
@@ -34,7 +35,6 @@ tokio = { workspace = true, features = ["sync"] }
 
 # misc
 eyre.workspace = true
-jsonrpsee.workspace = true
 metrics.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -42,6 +42,7 @@ similar = { workspace = true, features = ["text"] }
 tracing.workspace = true
 
 [dev-dependencies]
+alloy-rpc-client = { workspace = true, features = ["reqwest"] }
 jsonrpsee = { workspace = true, features = ["server"] }
 reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
