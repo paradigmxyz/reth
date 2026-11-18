@@ -1206,7 +1206,7 @@ mod tests {
         let registered_gas_limit = block.gas_limit();
 
         let error = test_validation_api(provider)
-            .validate_message_against_block(block, message, registered_gas_limit, None)
+            .validate_message_against_block(block, message, registered_gas_limit, true, None)
             .await
             .unwrap_err();
         assert!(
