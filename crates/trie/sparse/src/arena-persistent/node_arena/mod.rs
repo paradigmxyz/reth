@@ -7,16 +7,17 @@ use super::ArenaSparseNode;
 use alloc::vec::Vec;
 use core::{
     fmt,
-    ops::{Index as IndexOps, IndexMut},
+    ops::{Index, IndexMut},
 };
 use free_list::FreeList;
 use reth_trie_common::RlpNode;
 use slots::{Slots, VacantSlot, MAX_SLOTS};
+use smallvec::SmallVec;
 
 /// Bits per word of a [`BlindedMarks`] bitmap.
 const WORD_BITS: usize = u64::BITS as usize;
 
-/// Arena of trie nodes addressed by an [`Index`].
+/// Arena of trie nodes addressed by an [`NodeIndex`].
 ///
 /// Removing a node for reuse leaves an [`ArenaSparseNode::Free`] tombstone and puts its index
 /// on a LIFO free list. Indices have no generation counter: a reused index refers to the
@@ -28,9 +29,11 @@ const WORD_BITS: usize = u64::BITS as usize;
 #[derive(Debug, Clone, Default)]
 pub(super) struct NodeArena {
     nodes: Slots<ArenaSparseNode>,
-    free: FreeList<Index>,
+    free: FreeList<NodeIndex>,
     blinded: Slots<Option<RlpNode>>,
     blinded_free: FreeList<u32>,
+    /// Vacated by compaction, so their indices are not on `free`.
+    drained: usize,
 }
 
 impl NodeArena {
@@ -41,6 +44,7 @@ impl NodeArena {
             free: FreeList::new(),
             blinded: Slots::new(),
             blinded_free: FreeList::new(),
+            drained: 0,
         }
     }
 
@@ -54,34 +58,34 @@ impl NodeArena {
     /// # Panics
     ///
     /// Panics if `node` is a free-slot tombstone or the node table is full.
-    pub(super) fn insert(&mut self, node: ArenaSparseNode) -> Index {
+    pub(super) fn insert(&mut self, node: ArenaSparseNode) -> NodeIndex {
         assert!(is_occupied(&node), "cannot insert a free arena slot");
         if let Some(idx) = self.free.pop() {
             self.nodes.set(idx.get(), node);
             return idx;
         }
-        // Slots::push enforces the same index bound as Index::new.
-        Index(self.nodes.push(node) as u32)
+        NodeIndex::from_slot(self.nodes.push(node))
     }
 
     /// Removes the node at `idx` without recycling its slot.
     ///
     /// For an arena that is being emptied into a fresh one — pruning and compaction both do that
-    /// and then drop the source — maintaining the free list is wasted work. [`Self::len`] is no
-    /// longer accurate afterwards.
+    /// and then drop the source — recording reusable indices is wasted work. Drained slots do
+    /// not count towards [`Self::len`] and are not reused by [`Self::insert`].
     ///
     /// # Panics
     ///
     /// Panics if the slot is out of bounds or free.
-    pub(super) fn drain_node(&mut self, idx: Index) -> ArenaSparseNode {
+    pub(super) fn drain_node(&mut self, idx: NodeIndex) -> ArenaSparseNode {
         let node = self.nodes.take_slot(idx.get());
         assert!(is_occupied(&node), "drained a free arena slot");
+        self.drained += 1;
         node
     }
 
     /// Removes and returns the node at `idx`, recycling its slot.
     /// Returns `None` if the slot is out of bounds or free.
-    pub(super) fn remove(&mut self, idx: Index) -> Option<ArenaSparseNode> {
+    pub(super) fn remove(&mut self, idx: NodeIndex) -> Option<ArenaSparseNode> {
         let node = self.nodes.take_if(idx.get(), is_occupied)?;
         self.free.push(idx);
         Some(node)
@@ -92,7 +96,7 @@ impl NodeArena {
     /// # Panics
     ///
     /// Panics if the slot is out of bounds or free.
-    pub(super) fn discard(&mut self, idx: Index) {
+    pub(super) fn discard(&mut self, idx: NodeIndex) {
         assert!(
             self.nodes.vacate_if(idx.get(), is_occupied),
             "cannot discard an unoccupied arena slot"
@@ -101,28 +105,28 @@ impl NodeArena {
     }
 
     /// Returns the node at `idx`, or `None` if the slot is out of bounds or free.
-    pub(super) fn get(&self, idx: Index) -> Option<&ArenaSparseNode> {
+    pub(super) fn get(&self, idx: NodeIndex) -> Option<&ArenaSparseNode> {
         self.nodes.get(idx.get()).filter(|node| is_occupied(node))
     }
 
     /// Returns `true` if `idx` refers to an occupied slot, or `false` if it is out of bounds or
     /// free.
-    pub(super) fn contains_key(&self, idx: Index) -> bool {
+    pub(super) fn contains_key(&self, idx: NodeIndex) -> bool {
         self.get(idx).is_some()
     }
 
     /// Returns the number of occupied slots.
     pub(super) const fn len(&self) -> usize {
-        self.nodes.len() - self.free.len()
+        self.nodes.len() - self.free.len() - self.drained
     }
 
     /// Iterates over the occupied slots.
-    pub(super) fn iter(&self) -> impl Iterator<Item = (Index, &ArenaSparseNode)> + '_ {
+    pub(super) fn iter(&self) -> impl Iterator<Item = (NodeIndex, &ArenaSparseNode)> + '_ {
         self.nodes
             .iter()
             .enumerate()
             .filter(|(_, node)| is_occupied(node))
-            .map(|(idx, node)| (Index(idx as u32), node))
+            .map(|(idx, node)| (NodeIndex::from_slot(idx), node))
     }
 
     /// Calls `predicate` for occupied slots in index order, then passes each accepted slot
@@ -130,11 +134,11 @@ impl NodeArena {
     pub(super) fn for_each_mut_if(
         &mut self,
         mut predicate: impl FnMut(&ArenaSparseNode) -> bool,
-        mut visit: impl FnMut(Index, &mut ArenaSparseNode),
+        mut visit: impl FnMut(NodeIndex, &mut ArenaSparseNode),
     ) {
         self.nodes.for_each_mut_if(
             |node| is_occupied(node) && predicate(node),
-            |index, node| visit(Index(index as u32), node),
+            |index, node| visit(NodeIndex::from_slot(index), node),
         );
     }
 
@@ -186,6 +190,77 @@ impl NodeArena {
         self.blinded_free.push(slot);
     }
 
+    /// Moves reachable nodes into a fresh arena in BFS order, with parents before children for
+    /// cache-friendly top-down traversal. Updates the root to its new index.
+    ///
+    /// The caller must already have released detached nodes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the arena cannot be compacted according to [`Self::can_compact`].
+    pub(super) fn compact(&mut self, root: &mut NodeIndex) {
+        let mut new_arena = Self::with_capacity(self.len());
+        let mut marks = new_arena.adopt_blinded(self);
+        let root_node = self.drain_node(*root);
+        let new_root = new_arena.insert(root_node);
+
+        // Nodes append consecutively without removals, so the destination vector is also the BFS
+        // queue. Each visited node's children still reference the source arena until rewritten.
+        let mut next = 0;
+        while next < new_arena.len() {
+            let new_idx = NodeIndex::from_slot(next);
+            next += 1;
+            if let ArenaSparseNode::Extension { child, .. } = new_arena[new_idx] {
+                let child_node = self.drain_node(child);
+                let new_child_idx = new_arena.insert(child_node);
+                let ArenaSparseNode::Extension { child, .. } = &mut new_arena[new_idx] else {
+                    unreachable!()
+                };
+                *child = new_child_idx;
+                continue;
+            }
+
+            let old_children: SmallVec<[(usize, NodeIndex); 16]> = match &new_arena[new_idx] {
+                ArenaSparseNode::Branch(b) => b
+                    .children
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(pos, child)| match child.revealed_index() {
+                        Some(old_child_idx) => Some((pos, old_child_idx)),
+                        // A blinded child needs no rewrite, its slot survived the adoption.
+                        None => {
+                            marks.mark(*child);
+                            None
+                        }
+                    })
+                    .collect(),
+                _ => continue,
+            };
+
+            for (child_pos, old_child_idx) in old_children {
+                let child_node = self.drain_node(old_child_idx);
+                let new_child_idx = new_arena.insert(child_node);
+                debug_assert_eq!(
+                    new_child_idx.get() + 1,
+                    new_arena.len(),
+                    "compaction must append, the destination doubles as the BFS queue",
+                );
+                new_arena[new_idx].branch_mut().children[child_pos] =
+                    BranchChild::revealed(new_child_idx);
+            }
+        }
+
+        debug_assert!(
+            self.iter().next().is_none(),
+            "compact: {} orphaned nodes remaining after BFS drain",
+            self.len(),
+        );
+
+        new_arena.sweep_blinded(marks);
+        *self = new_arena;
+        *root = new_root;
+    }
+
     /// Releases unused node capacity.
     ///
     /// # Panics
@@ -203,13 +278,14 @@ impl NodeArena {
     /// The copy must record every child it carries over in the returned marks and finish with
     /// [`Self::sweep_blinded`], which reclaims unreferenced slots and may rewrite the blinded
     /// children stored in this arena. Blinded handles must not be retained across the sweep.
+    /// The source must be eligible for compaction according to [`Self::can_compact`].
     ///
     /// # Panics
     ///
-    /// Panics if the destination table is not empty or the source table is shared.
+    /// Panics if the destination table is not empty or the source cannot be compacted.
     pub(super) fn adopt_blinded(&mut self, src: &mut Self) -> BlindedMarks {
         assert!(self.blinded.is_empty(), "adopting into a non-empty side table");
-        assert!(!src.blinded.is_shared(), "cannot adopt a shared blinded table");
+        assert!(src.can_compact(), "cannot adopt from a shared arena");
         self.blinded = core::mem::take(&mut src.blinded);
         self.blinded_free = core::mem::take(&mut src.blinded_free);
         BlindedMarks { words: alloc::vec![0; self.blinded.len().div_ceil(WORD_BITS)] }
@@ -233,7 +309,7 @@ impl NodeArena {
         let mut blinded =
             self.blinded.exclusive_slots().expect("cannot sweep a shared blinded table");
         blinded.truncate(end);
-        let blinded_free = self.blinded_free.clear_for_rebuild();
+        let mut blinded_free = self.blinded_free.clear_for_rebuild();
 
         let words = &words[..end.div_ceil(WORD_BITS)];
         let live_count = words.iter().map(|word| word.count_ones() as usize).sum::<usize>();
@@ -328,9 +404,10 @@ impl NodeArena {
             self.blinded_free.is_snapshot_ready()
     }
 
-    /// Returns whether compaction can move values from both slot tables.
+    /// Returns whether compaction can move values from both slot tables and rebuild the blinded
+    /// free list. If this returns `false`, compaction may become possible after snapshots drop.
     pub(super) fn can_compact(&self) -> bool {
-        !self.nodes_mutation_copies() && !self.blinded.is_shared()
+        !self.nodes_mutation_copies() && !self.blinded.is_shared() && !self.blinded_free.is_shared()
     }
 
     /// Returns whether taking or mutating nodes can require copying their current values.
@@ -339,7 +416,7 @@ impl NodeArena {
     }
 
     /// Returns whether mutating the node at a valid index requires copying its value.
-    pub(super) fn node_mutation_copies(&self, idx: Index) -> bool {
+    pub(super) fn node_mutation_copies(&self, idx: NodeIndex) -> bool {
         self.nodes.mutation_copies(idx.get())
     }
 
@@ -361,24 +438,25 @@ impl NodeArena {
             free: self.free.deep_clone(),
             blinded: self.blinded.deep_clone(Clone::clone),
             blinded_free: self.blinded_free.deep_clone(),
+            drained: self.drained,
         }
     }
 }
 
-impl IndexOps<Index> for NodeArena {
+impl Index<NodeIndex> for NodeArena {
     type Output = ArenaSparseNode;
 
     #[inline]
-    fn index(&self, idx: Index) -> &Self::Output {
+    fn index(&self, idx: NodeIndex) -> &Self::Output {
         let node = &self.nodes[idx.get()];
         assert!(!matches!(node, ArenaSparseNode::Free), "indexed a free arena slot");
         node
     }
 }
 
-impl IndexMut<Index> for NodeArena {
+impl IndexMut<NodeIndex> for NodeArena {
     #[inline]
-    fn index_mut(&mut self, idx: Index) -> &mut Self::Output {
+    fn index_mut(&mut self, idx: NodeIndex) -> &mut Self::Output {
         let node = &mut self.nodes[idx.get()];
         assert!(!matches!(node, ArenaSparseNode::Free), "indexed a free arena slot");
         node
@@ -387,22 +465,29 @@ impl IndexMut<Index> for NodeArena {
 
 /// A reference to a node inside a [`NodeArena`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct Index(u32);
+pub(super) struct NodeIndex(u32);
 
-impl Index {
+impl NodeIndex {
     /// Creates an index that fits below the blinded-child tag bit.
     ///
     /// # Panics
     ///
     /// Panics if `index` is at least 2^31.
+    #[cfg(test)]
     pub(super) const fn new(index: usize) -> Self {
-        assert!(index < BranchChild::BLINDED as usize, "arena index overflows the blinded tag bit");
+        assert!(index < MAX_SLOTS, "arena index overflows the blinded tag bit");
         Self(index as u32)
     }
 
     /// Returns the index as a `usize`, suitable for indexing into the arena's backing vector.
     pub(super) const fn get(self) -> usize {
         self.0 as usize
+    }
+
+    /// Converts an index already bounded by [`Slots`] or a revealed [`BranchChild`].
+    const fn from_slot(index: usize) -> Self {
+        debug_assert!(index < MAX_SLOTS);
+        Self(index as u32)
     }
 }
 
@@ -432,8 +517,8 @@ impl BlindedMarks {
 
 /// A reference from a branch node to one of its children.
 ///
-/// Packs the two cases into a single `u32`: a revealed child holds an [`Index`] into the arena's
-/// nodes, a blinded child a slot in the arena's side table of unrevealed RLP. The top bit
+/// Packs the two cases into a single `u32`: a revealed child holds an [`NodeIndex`] into the
+/// arena's nodes, a blinded child a slot in the arena's side table of unrevealed RLP. The top bit
 /// discriminates, so both fit in four bytes and a branch's children stay dense and small.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct BranchChild(u32);
@@ -443,22 +528,14 @@ impl BranchChild {
     const BLINDED: u32 = MAX_SLOTS as u32;
 
     /// Returns a child referencing the revealed node at `idx`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `idx` is at least 2^31.
-    pub(super) const fn revealed(idx: Index) -> Self {
-        assert!(idx.0 & Self::BLINDED == 0, "arena index overflows the blinded tag bit");
+    pub(super) const fn revealed(idx: NodeIndex) -> Self {
         Self(idx.0)
     }
 
     /// Returns a child referencing the blinded RLP at `slot`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `slot` is at least 2^31.
     const fn blinded(slot: u32) -> Self {
-        assert!(slot & Self::BLINDED == 0, "blinded slot overflows the tag bit");
+        // Both inserted slots and ranks in a compacted table are bounded by `Slots`.
+        debug_assert!(slot & Self::BLINDED == 0);
         Self(slot | Self::BLINDED)
     }
 
@@ -468,11 +545,11 @@ impl BranchChild {
     }
 
     /// Returns the arena index of a revealed child, or `None` if it is blinded.
-    pub(super) const fn revealed_index(self) -> Option<Index> {
+    pub(super) const fn revealed_index(self) -> Option<NodeIndex> {
         if self.is_blinded() {
             None
         } else {
-            Some(Index(self.0))
+            Some(NodeIndex::from_slot(self.0 as usize))
         }
     }
 
@@ -546,12 +623,35 @@ mod tests {
         let drained = arena.insert(ArenaSparseNode::TakenSubtrie);
         assert!(arena.contains_key(removed));
         assert!(arena.contains_key(drained));
-        assert!(!arena.contains_key(Index::new(2)));
+        assert!(!arena.contains_key(NodeIndex::new(2)));
 
         arena.remove(removed);
         arena.drain_node(drained);
         assert!(!arena.contains_key(removed));
         assert!(!arena.contains_key(drained));
+    }
+
+    #[test]
+    fn drained_slots_are_excluded_from_len_but_not_recycled() {
+        let mut arena = NodeArena::new();
+        let drained = arena.insert(ArenaSparseNode::TakenSubtrie);
+        let removed = arena.insert(ArenaSparseNode::TakenSubtrie);
+        arena.drain_node(drained);
+        assert_eq!(arena.len(), 1);
+        assert_eq!(arena.iter().count(), arena.len());
+
+        arena.remove(removed);
+        assert_eq!(arena.len(), 0);
+
+        let copy = arena.deep_clone(Clone::clone);
+        assert_eq!(copy.len(), 0);
+        let mut snapshot = arena.snapshot();
+        assert_eq!(snapshot.len(), 0);
+        assert_eq!(snapshot.insert(ArenaSparseNode::TakenSubtrie), removed);
+        assert_ne!(snapshot.insert(ArenaSparseNode::TakenSubtrie), drained);
+        assert_eq!(snapshot.len(), 2);
+        assert_eq!(snapshot.iter().count(), snapshot.len());
+        assert_eq!(arena.len(), 0);
     }
 
     #[test]
@@ -583,7 +683,7 @@ mod tests {
 
     #[test]
     fn branch_child_preserves_largest_index() {
-        let index = Index::new((1 << 31) - 1);
+        let index = NodeIndex::new((1 << 31) - 1);
         assert_eq!(BranchChild::revealed(index).revealed_index(), Some(index));
         assert_eq!(BranchChild::blinded(index.0).blinded_slot(), Some(index.0));
     }
@@ -591,7 +691,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "arena index overflows the blinded tag bit")]
     fn arena_index_rejects_blinded_tag_bit() {
-        Index::new(1 << 31);
+        NodeIndex::new(1 << 31);
     }
 
     #[test]
@@ -782,6 +882,19 @@ mod tests {
         snapshot.prepare_snapshot();
         assert!(snapshot.is_snapshot_ready());
         assert!(snapshot.can_compact());
+    }
+
+    #[test]
+    fn compaction_requires_an_exclusive_blinded_free_list() {
+        let mut arena = NodeArena::new();
+        let child = arena.insert_blinded(RlpNode::default());
+        arena.discard_blinded(child);
+        arena.blinded_free.prepare_snapshot();
+
+        let free_list_snapshot = arena.blinded_free.clone();
+        assert!(!arena.can_compact());
+        drop(free_list_snapshot);
+        assert!(arena.can_compact());
     }
 
     #[test]

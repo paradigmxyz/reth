@@ -214,9 +214,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 
     /// Collapses nodes last modified before `prune_before` into hash stubs.
     ///
-    /// When trie snapshots share storage, this can blind a node without reclaiming the
-    /// memory still held by the other snapshot.
-    ///
     /// # Preconditions
     ///
     /// The trie must not be dirty. An unmodified revealed root may be pruned because
@@ -262,9 +259,8 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// those common updates only once.
     ///
     /// The default calls [`Clone::clone`], so the method is available only when `Self: Clone`.
-    /// An override may change the original's storage representation to share unchanged data
-    /// without changing its logical state. The cost of taking a snapshot depends on the
-    /// implementation; sharing can also retain memory longer and make later writes more expensive.
+    /// Implementations can prepare the source for efficient forking through the mutable receiver
+    /// without changing its logical state. Snapshot cost depends on the implementation.
     fn snapshot(&mut self) -> Self
     where
         Self: Clone,

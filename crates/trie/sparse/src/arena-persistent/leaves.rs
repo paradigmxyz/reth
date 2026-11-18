@@ -2,7 +2,7 @@
 
 use super::{
     branch_data, branch_data_mut, branch_idx, ArenaCursor, ArenaRequiredProof, ArenaSparseNode,
-    ArenaSparseNodeBranch, ArenaSparseNodeState, BranchChild, Index, NodeArena,
+    ArenaSparseNodeBranch, ArenaSparseNodeState, BranchChild, NodeArena, NodeIndex,
     PersistentArenaParallelSparseTrie, RemoveLeafResult, SeekResult, SubtrieCounterDeltas,
     UpsertLeafResult, TRACE_TARGET,
 };
@@ -15,7 +15,7 @@ use smallvec::SmallVec;
 use tracing::{instrument, trace};
 
 #[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
-use super::observe_proof_target;
+use super::sparse_guidance::observe_proof_target;
 
 impl PersistentArenaParallelSparseTrie {
     /// Creates a new leaf and a new branch that splits an existing child from the new leaf at
@@ -34,7 +34,7 @@ impl PersistentArenaParallelSparseTrie {
     fn split_and_insert_leaf(
         arena: &mut NodeArena,
         cursor: &mut ArenaCursor,
-        root: &mut Index,
+        root: &mut NodeIndex,
         new_leaf_path: Nibbles,
         value: &[u8],
     ) -> bool {
@@ -139,7 +139,7 @@ impl PersistentArenaParallelSparseTrie {
     pub(super) fn upsert_leaf(
         arena: &mut NodeArena,
         cursor: &mut ArenaCursor,
-        root: &mut Index,
+        root: &mut NodeIndex,
         full_path: &Nibbles,
         value: &[u8],
         find_result: SeekResult,
@@ -248,7 +248,7 @@ impl PersistentArenaParallelSparseTrie {
     pub(super) fn remove_leaf(
         arena: &mut NodeArena,
         cursor: &mut ArenaCursor,
-        root: &mut Index,
+        root: &mut NodeIndex,
         key: B256,
         full_path: &Nibbles,
         find_result: SeekResult,
@@ -453,7 +453,7 @@ impl PersistentArenaParallelSparseTrie {
     pub(super) fn collapse_branch(
         arena: &mut NodeArena,
         cursor: &mut ArenaCursor,
-        root: &mut Index,
+        root: &mut NodeIndex,
         updates: &mut Option<SparseTrieUpdates>,
     ) -> bool {
         let branch_node_idx = cursor.head().expect("cursor is non-empty").index;

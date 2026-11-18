@@ -1,21 +1,21 @@
 use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseNode, ArenaSparseNodeState, BranchChild, Index, NodeArena,
+    ArenaSparseNode, ArenaSparseNodeState, BranchChild, NodeArena, NodeIndex,
 };
 use alloc::vec::Vec;
 use reth_trie_common::Nibbles;
 use tracing::{instrument, trace};
 
-const TRACE_TARGET: &str = "trie::arena::cursor";
+const TRACE_TARGET: &str = "trie::arena_persistent::cursor";
 
 /// An entry on the cursor's traversal stack, tracking an ancestor node during trie walks.
 ///
 /// The node's absolute path is not stored: it is the first `path_len` nibbles of the cursor's
 /// [`ArenaCursor::path`], which every entry on the stack is a prefix of.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(super) struct ArenaCursorStackEntry {
     /// The arena index of this node.
-    pub(super) index: Index,
+    pub(super) index: NodeIndex,
     /// The nibble length of the absolute path of this node (not including an extension key).
     /// A [`Nibbles`] holds at most 64 nibbles, so this always fits in a `u8`.
     path_len: u8,
@@ -56,7 +56,7 @@ pub(super) enum NextResult {
 }
 
 /// Returns the branch node represented by an arena node.
-pub(super) fn branch_idx(arena: &NodeArena, idx: Index) -> Option<Index> {
+pub(super) fn branch_idx(arena: &NodeArena, idx: NodeIndex) -> Option<NodeIndex> {
     match &arena[idx] {
         ArenaSparseNode::Branch(_) => Some(idx),
         ArenaSparseNode::Extension { child, .. } => Some(*child),
@@ -72,7 +72,7 @@ pub(super) fn branch_idx(arena: &NodeArena, idx: Index) -> Option<Index> {
 ///
 /// The cursor borrows the arena on each method call rather than holding a
 /// reference, so the caller retains full ownership of the arena between calls.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub(super) struct ArenaCursor {
     stack: Vec<ArenaCursorStackEntry>,
     /// A path that every stack entry's path is a prefix of: the entry with `path_len` nibbles
@@ -130,7 +130,7 @@ impl ArenaCursor {
     ///
     /// The stack must contain exactly the root (depth 0) or be empty (freshly constructed).
     #[instrument(level = "trace", target = TRACE_TARGET, skip(self, arena))]
-    pub(super) fn reset(&mut self, arena: &NodeArena, idx: Index, path: Nibbles) {
+    pub(super) fn reset(&mut self, arena: &NodeArena, idx: NodeIndex, path: Nibbles) {
         debug_assert!(
             self.stack.len() <= 1 && !self.needs_pop,
             "cursor must be drained before reset; stack has {} entries, needs_pop={}",
@@ -145,7 +145,7 @@ impl ArenaCursor {
 
     /// Pushes an entry onto the stack for the node at the given index, whose absolute path is
     /// the first `path_len` nibbles of [`Self::path`].
-    fn push(&mut self, arena: &NodeArena, idx: Index, path_len: usize) {
+    fn push(&mut self, arena: &NodeArena, idx: NodeIndex, path_len: usize) {
         debug_assert!(arena.contains_key(idx), "push called with invalid arena index");
         debug_assert!(
             path_len <= self.path.len(),
@@ -250,8 +250,8 @@ impl ArenaCursor {
     pub(super) fn replace_head_index(
         &mut self,
         arena: &mut NodeArena,
-        root: &mut Index,
-        new_idx: Index,
+        root: &mut NodeIndex,
+        new_idx: NodeIndex,
     ) {
         let child_nibble = self.head_last_nibble();
         let head = self.stack.last_mut().expect("cursor must have head");

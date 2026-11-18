@@ -4,7 +4,12 @@
 //! instrumentation can distinguish it after optimization. Keep LTO disabled when collecting
 //! sanitizer coverage. The bank contains 28,672 local-neighborhood and two control buckets.
 
+use super::{
+    branch_data, ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseSubtrie, NodeArena, NodeIndex,
+};
+use alloc::boxed::Box;
 use core::hint::black_box;
+use reth_trie_common::{Nibbles, TrieMask};
 
 const NO_PARENT: usize = 28672;
 const INVALID_PROOF: usize = NO_PARENT + 1;
@@ -94,7 +99,7 @@ fn local_index(observation: &Observation, target: u8) -> usize {
 ///
 /// Masks describe its local revealed logical parent. A blinded root has no parent and
 /// passes zero masks/depth/target; it hits a separate bounded control, not the local bank.
-pub(super) fn observe_proof_target(
+fn record_proof_target(
     branch_path_len: usize,
     has_parent: bool,
     target: u8,
@@ -120,4 +125,65 @@ pub(super) fn observe_proof_target(
         return;
     }
     ARMS[local_index(&observation, target)]();
+}
+
+/// Reads revealed and leaf masks from live handles, including lower-subtrie roots.
+/// Taken update subtries have not been mutated yet, so their roots retain the observed shape.
+fn coverage_branch_masks(
+    arena: &NodeArena,
+    branch: &ArenaSparseNodeBranch,
+    taken: &[(NodeIndex, Box<ArenaSparseSubtrie>, core::ops::Range<usize>)],
+) -> (u16, u16) {
+    let mut revealed = TrieMask::default();
+    let mut leaf = TrieMask::default();
+    for (nibble, child) in branch.child_iter() {
+        if let Some(child_idx) = child.revealed_index() {
+            revealed.set_bit(nibble);
+            let mut node = &arena[child_idx];
+            if matches!(node, ArenaSparseNode::TakenSubtrie) {
+                let (_, subtrie, _) = taken
+                    .iter()
+                    .find(|(idx, _, _)| *idx == child_idx)
+                    .expect("taken child must have a pending update subtrie");
+                node = &subtrie.arena[subtrie.root];
+            }
+            while let ArenaSparseNode::Subtrie(subtrie) = node {
+                node = &subtrie.arena[subtrie.root];
+            }
+            if matches!(node, ArenaSparseNode::Leaf { .. }) {
+                leaf.set_bit(nibble);
+            }
+        }
+    }
+    (revealed.get(), leaf.get())
+}
+
+/// Observes a proof target at emission, before any mutation changes its logical parent.
+/// A blinded root has no revealed parent shape. Collapse proof parents contain only the
+/// current child and its blinded sibling, so they cannot have any taken sibling to resolve.
+pub(super) fn observe_proof_target(
+    arena: &NodeArena,
+    parent: Option<(NodeIndex, usize)>,
+    target_path: &Nibbles,
+    taken: &[(NodeIndex, Box<ArenaSparseSubtrie>, core::ops::Range<usize>)],
+) {
+    if let Some((parent_idx, depth)) = parent {
+        let branch = branch_data(arena, parent_idx);
+        let (revealed, leaf) = coverage_branch_masks(arena, branch, taken);
+        record_proof_target(
+            depth,
+            true,
+            target_path.get_unchecked(depth),
+            branch.state_mask.get(),
+            revealed,
+            leaf,
+        );
+    } else {
+        observe_blind_root_proof_target();
+    }
+}
+
+/// Observes a proof request for a blind root, which has no revealed parent shape.
+fn observe_blind_root_proof_target() {
+    record_proof_target(0, false, 0, 0, 0, 0);
 }

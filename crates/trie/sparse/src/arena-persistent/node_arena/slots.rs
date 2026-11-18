@@ -371,7 +371,7 @@ pub(super) struct LayeredSlots<T> {
 
 impl<T> LayeredSlots<T> {
     pub(super) fn new(base: Vec<T>) -> Self {
-        debug_assert!(base.len() <= MAX_SLOTS);
+        assert!(base.len() <= MAX_SLOTS, "slot base exceeds the maximum slot count");
         Self {
             len: base.len(),
             base: Arc::new(base),
@@ -401,7 +401,9 @@ impl<T> LayeredSlots<T> {
         value
     }
 
+    /// Returns a value at an index already known to be below the backing length.
     pub(super) fn value_at(&self, index: usize) -> &T {
+        debug_assert!(index < self.len);
         // Indices beyond the directory's current range can only refer to the base.
         if index >> self.root_shift < RADIX &&
             let Some(value) = self.overrides.get(index, self.root_shift)
@@ -869,6 +871,12 @@ mod tests {
     #[should_panic(expected = "slot capacity exceeds the maximum slot count")]
     fn capacity_cannot_exceed_the_slot_limit() {
         Slots::<()>::with_capacity(MAX_SLOTS + 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "slot base exceeds the maximum slot count")]
+    fn layered_base_cannot_exceed_the_slot_limit() {
+        LayeredSlots::new(Vec::from([(); MAX_SLOTS + 1]));
     }
 
     #[test]

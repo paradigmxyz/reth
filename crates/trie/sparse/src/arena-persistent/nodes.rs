@@ -1,6 +1,6 @@
 use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseSubtrie, BranchChild, Index, NodeArena,
+    ArenaSparseSubtrie, BranchChild, NodeArena, NodeIndex,
 };
 use alloc::{boxed::Box, vec::Vec};
 use alloy_trie::TrieMask;
@@ -27,11 +27,6 @@ pub(super) enum ArenaSparseNodeState {
 }
 
 impl ArenaSparseNodeState {
-    /// Converts into a [`Self::Dirty`] if it's not already.
-    pub(super) const fn to_dirty(&self) -> Self {
-        Self::Dirty
-    }
-
     /// Returns the [`RlpNode`] cached on the state, if there is one.
     pub(super) const fn cached_rlp_node(&self) -> Option<&RlpNode> {
         match self {
@@ -58,11 +53,6 @@ pub(super) struct ArenaSparseNodeBranch {
 }
 
 impl ArenaSparseNodeBranch {
-    /// Unsets the bit for `nibble` in `state_mask`, `hash_mask`, and `tree_mask`.
-    pub(super) const fn unset_child_bit(&mut self, nibble: u8) {
-        self.state_mask.unset_bit(nibble);
-    }
-
     /// Inserts a child at `nibble`, updating the state mask, children array, and marking the
     /// branch as dirty.
     pub(super) fn set_child(&mut self, nibble: u8, child: BranchChild) {
@@ -82,7 +72,7 @@ impl ArenaSparseNodeBranch {
         let child_idx =
             BranchChildIdx::new(self.state_mask, nibble).expect("nibble not found in state_mask");
         self.children.remove(child_idx.get());
-        self.unset_child_bit(nibble);
+        self.state_mask.unset_bit(nibble);
         self.state = ArenaSparseNodeState::Dirty;
     }
 
@@ -124,7 +114,7 @@ pub(super) enum ArenaSparseNode {
         /// The extension key.
         key: Nibbles,
         /// The extension's branch child in the arena.
-        child: Index,
+        child: NodeIndex,
     },
     /// A leaf node containing a value.
     Leaf {
@@ -197,7 +187,7 @@ impl ArenaSparseNode {
     }
 
     /// Returns the branch child of this extension node, if any.
-    pub(super) const fn extension_child(&self) -> Option<Index> {
+    pub(super) const fn extension_child(&self) -> Option<NodeIndex> {
         match self {
             Self::Extension { child, .. } => Some(*child),
             _ => None,

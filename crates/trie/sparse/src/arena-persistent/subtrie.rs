@@ -1,22 +1,21 @@
 //! Operations on the lower tries that can be dispatched to separate workers.
 
 use super::{
-    branch_data, branch_data_mut, branch_idx, compact_arena, move_node,
+    branch_data, branch_data_mut, branch_idx,
     trie::{prune_candidate, release_subtree},
     ArenaRequiredProof, ArenaSparseNode, ArenaSparseNodeState, ArenaTrieBuffers, BranchChild,
-    BranchChildIdx, Index, NodeArena, PersistentArenaParallelSparseTrie, RemoveLeafResult,
+    BranchChildIdx, NodeArena, NodeIndex, PersistentArenaParallelSparseTrie, RemoveLeafResult,
     SeekResult, TRACE_TARGET,
 };
 use crate::{LeafUpdate, SparseTrieUpdates, TrieNodeEpoch};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::B256;
 use alloy_trie::TrieMask;
-use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{Nibbles, ProofTrieNodeV2, ProofV2TargetParent, RlpNode};
 use tracing::{instrument, trace};
 
 #[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
-use super::observe_proof_target;
+use super::sparse_guidance::observe_proof_target;
 
 /// A subtrie within the arena-based parallel sparse trie.
 ///
@@ -26,7 +25,7 @@ pub(super) struct ArenaSparseSubtrie {
     /// The arena allocating nodes within this subtrie.
     pub(super) arena: NodeArena,
     /// The root node of this subtrie.
-    pub(super) root: Index,
+    pub(super) root: NodeIndex,
     /// The absolute path of this subtrie's root in the full trie.
     pub(super) path: Nibbles,
     /// Reusable buffers for traversal, RLP encoding, and update actions.
@@ -172,7 +171,7 @@ impl ArenaSparseSubtrie {
         return pruned;
 
         struct CopyFrame {
-            new_idx: Index,
+            new_idx: NodeIndex,
             branch_logical_path: Nibbles,
             state_mask: TrieMask,
             remaining_child_mask: TrieMask,
@@ -195,7 +194,7 @@ impl ArenaSparseSubtrie {
         /// to walk.
         fn prepare_retained_node(
             new_arena: &NodeArena,
-            new_idx: Index,
+            new_idx: NodeIndex,
             node_path: Nibbles,
             new_num_leaves: &mut u64,
         ) -> Option<CopyFrame> {
@@ -225,9 +224,9 @@ impl ArenaSparseSubtrie {
     /// when no child qualifies. The plan is valid only until the subtrie changes.
     pub(super) fn plan_prune(&self, prune_before: TrieNodeEpoch) -> Option<SubtriePrunePlan> {
         let root_branch = branch_idx(&self.arena, self.root)?;
-        let mut plan = SubtriePrunePlan::default();
-        plan.retained_leaves = plan.collect_cuts(&self.arena, root_branch, prune_before);
-        (!plan.cuts.is_empty()).then_some(plan)
+        let mut cuts = Vec::new();
+        let retained_leaves = collect_prune_cuts(&self.arena, root_branch, prune_before, &mut cuts);
+        (!cuts.is_empty()).then_some(SubtriePrunePlan { cuts, retained_leaves })
     }
 
     /// Blinds the planned descendants without copying retained nodes into a new arena unless
@@ -251,7 +250,7 @@ impl ArenaSparseSubtrie {
         // A shared upper slot may contain an exclusive lower arena, e.g. after replacing it.
         // In that case still compact; the plan has already resolved every epoch decision.
         if compact {
-            compact_arena(&mut self.arena, &mut self.root);
+            self.arena.compact(&mut self.root);
         }
         self.num_leaves = plan.retained_leaves;
         self.num_dirty_leaves = 0;
@@ -358,9 +357,9 @@ impl ArenaSparseSubtrie {
 
     /// Reveals nodes inside this subtrie. Uses [`super::cursor::ArenaCursor::seek`] to locate the
     /// ancestor node, then replaces blinded children with the proof nodes.
-    pub(super) fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()> {
+    pub(super) fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) {
         if nodes.is_empty() {
-            return Ok(());
+            return;
         }
         trace!(target: TRACE_TARGET, path = ?self.path, num_nodes = nodes.len(), "Subtrie reveal_nodes");
 
@@ -390,8 +389,6 @@ impl ArenaSparseSubtrie {
 
         #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         self.debug_assert_counters();
-
-        Ok(())
     }
 
     /// Computes and caches `RlpNode` for all dirty nodes via iterative post-order DFS.
@@ -410,40 +407,63 @@ impl ArenaSparseSubtrie {
         #[cfg(all(debug_assertions, not(feature = "fuzz")))]
         self.debug_assert_counters();
     }
+
+    /// Copies lower storage independently even if it is prepared for snapshots.
+    pub(super) fn clone_independent(&self) -> Self {
+        Self {
+            arena: self.arena.deep_clone(Clone::clone),
+            root: self.root,
+            path: self.path,
+            buffers: self.buffers.clone(),
+            required_proofs: self.required_proofs.clone(),
+            num_leaves: self.num_leaves,
+            num_dirty_leaves: self.num_dirty_leaves,
+        }
+    }
+}
+
+/// Moves a node into another arena, keeping an extension with its branch child.
+fn move_node(dst: &mut NodeArena, src: &mut NodeArena, idx: NodeIndex) -> NodeIndex {
+    let node = src.drain_node(idx);
+    let new_idx = dst.insert(node);
+    if let Some(child_idx) = dst[new_idx].extension_child() {
+        let child = src.drain_node(child_idx);
+        let new_child_idx = dst.insert(child);
+        let ArenaSparseNode::Extension { child, .. } = &mut dst[new_idx] else { unreachable!() };
+        *child = new_child_idx;
+    }
+    new_idx
 }
 
 /// Disjoint stale subtrees under a retained lower root, and its leaf count after blinding them.
-#[derive(Default)]
 pub(super) struct SubtriePrunePlan {
     cuts: Vec<PruneCut>,
     retained_leaves: u64,
 }
 
-impl SubtriePrunePlan {
-    fn collect_cuts(
-        &mut self,
-        arena: &NodeArena,
-        parent: Index,
-        prune_before: TrieNodeEpoch,
-    ) -> u64 {
-        let mut leaves = 0;
-        for (position, child) in arena[parent].branch_ref().children.iter().enumerate() {
-            let Some(root) = child.revealed_index() else { continue };
-            if let Some(rlp_node) = prune_candidate(arena, root, prune_before) {
-                self.cuts.push(PruneCut { parent, position, root, rlp_node: rlp_node.clone() });
-            } else if let Some(branch) = branch_idx(arena, root) {
-                leaves += self.collect_cuts(arena, branch, prune_before);
-            } else if matches!(&arena[root], ArenaSparseNode::Leaf { .. }) {
-                leaves += 1;
-            }
+fn collect_prune_cuts(
+    arena: &NodeArena,
+    parent: NodeIndex,
+    prune_before: TrieNodeEpoch,
+    cuts: &mut Vec<PruneCut>,
+) -> u64 {
+    let mut leaves = 0;
+    for (position, child) in arena[parent].branch_ref().children.iter().enumerate() {
+        let Some(root) = child.revealed_index() else { continue };
+        if let Some(rlp_node) = prune_candidate(arena, root, prune_before) {
+            cuts.push(PruneCut { parent, position, root, rlp_node: rlp_node.clone() });
+        } else if let Some(branch) = branch_idx(arena, root) {
+            leaves += collect_prune_cuts(arena, branch, prune_before, cuts);
+        } else if matches!(&arena[root], ArenaSparseNode::Leaf { .. }) {
+            leaves += 1;
         }
-        leaves
     }
+    leaves
 }
 
 struct PruneCut {
-    parent: Index,
+    parent: NodeIndex,
     position: usize,
-    root: Index,
+    root: NodeIndex,
     rlp_node: RlpNode,
 }

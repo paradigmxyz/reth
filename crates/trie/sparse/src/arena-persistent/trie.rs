@@ -1,10 +1,10 @@
 //! Sparse trie trait implementation and persistent pruning.
 
 use super::{
-    branch_data_mut, branch_idx, compact_arena, node_state_ref, ArenaCursor, ArenaSparseNode,
+    branch_data_mut, branch_idx, node_state_ref, ArenaCursor, ArenaSparseNode,
     ArenaSparseNodeBranch, ArenaSparseNodeState, ArenaSparseSubtrie, BranchChild, BranchChildIdx,
-    Index, NextResult, NodeArena, PersistentArenaParallelSparseTrie, RemoveLeafResult, SeekResult,
-    UpsertLeafResult, TRACE_TARGET,
+    NextResult, NodeArena, NodeIndex, PersistentArenaParallelSparseTrie, RemoveLeafResult,
+    SeekResult, UpsertLeafResult, TRACE_TARGET,
 };
 use crate::{
     LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, TrieNodeEpoch,
@@ -21,7 +21,7 @@ use smallvec::SmallVec;
 use tracing::{instrument, trace};
 
 #[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
-use super::observe_proof_target;
+use super::sparse_guidance::observe_proof_target;
 
 impl SparseTrie for PersistentArenaParallelSparseTrie {
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
@@ -86,11 +86,24 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
     }
 
     fn set_updates(&mut self, retain_updates: bool) {
-        if retain_updates {
-            self.buffers.updates.get_or_insert_with(SparseTrieUpdates::default).clear();
-        } else {
-            self.buffers.updates = None;
-        }
+        self.buffers.reset_updates(retain_updates);
+        self.upper_arena.for_each_mut_if(
+            |node| {
+                let ArenaSparseNode::Subtrie(subtrie) = node else { return false };
+                match &subtrie.buffers.updates {
+                    None => retain_updates,
+                    Some(updates) => {
+                        !retain_updates ||
+                            !updates.updated_nodes.is_empty() ||
+                            !updates.removed_nodes.is_empty()
+                    }
+                }
+            },
+            |_, node| {
+                let ArenaSparseNode::Subtrie(subtrie) = node else { unreachable!() };
+                subtrie.buffers.reset_updates(retain_updates);
+            },
+        );
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(num_nodes = nodes.len()))]
@@ -119,7 +132,7 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
         // Walk the upper trie, revealing upper nodes inline and collecting subtrie work.
         // Subtries with enough nodes to reveal are taken for parallel processing; the rest
         // are revealed inline.
-        let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>, Vec<ProofTrieNodeV2>)> = Vec::new();
+        let mut taken: Vec<(NodeIndex, Box<ArenaSparseSubtrie>, Vec<ProofTrieNodeV2>)> = Vec::new();
 
         while node_idx < nodes.len() {
             let find_result = cursor.seek(&mut self.upper_arena, &nodes[node_idx].path);
@@ -177,7 +190,7 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
                         let mut subtrie_nodes: Vec<ProofTrieNodeV2> = (subtrie_start..node_idx)
                             .map(|i| mem::replace(&mut nodes[i], ProofTrieNodeV2::empty()))
                             .collect();
-                        subtrie.reveal_nodes(&mut subtrie_nodes)?;
+                        subtrie.reveal_nodes(&mut subtrie_nodes);
                     }
                 }
                 _ => {
@@ -198,24 +211,13 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
         // Reveal taken subtries, in parallel if more than one.
         if taken.len() == 1 {
             let (_, subtrie, node_vec) = &mut taken[0];
-            subtrie.reveal_nodes(node_vec)?;
+            subtrie.reveal_nodes(node_vec);
         } else {
             let parent_span = tracing::Span::current();
-            let results: Vec<SparseTrieResult<()>> = taken
-                .par_iter_mut()
-                .map(|(_, subtrie, node_vec)| {
-                    let _guard = parent_span.enter();
-                    subtrie.reveal_nodes(node_vec)
-                })
-                .collect();
-
-            if let Some(err) = results.into_iter().find(|r| r.is_err()) {
-                // Restore before returning so we don't leave TakenSubtrie holes.
-                for (idx, subtrie, _) in taken {
-                    self.restore_taken_subtrie(idx, subtrie);
-                }
-                return err;
-            }
+            taken.par_iter_mut().for_each(|(_, subtrie, node_vec)| {
+                let _guard = parent_span.enter();
+                subtrie.reveal_nodes(node_vec);
+            });
         }
 
         // Restore taken subtries into the upper arena.
@@ -270,7 +272,7 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
 
         // Count total dirty leaves across all subtries to make one global parallelism decision.
         let mut total_dirty_leaves: u64 = 0;
-        let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>)> = Vec::new();
+        let mut taken: Vec<(NodeIndex, Box<ArenaSparseSubtrie>)> = Vec::new();
         // Select before borrowing mutably so clean shared nodes stay shared.
         self.upper_arena.for_each_mut_if(
             |node| matches!(node, ArenaSparseNode::Subtrie(s) if s.num_dirty_leaves > 0),
@@ -478,7 +480,7 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
                         taken.push((
                             head_idx,
                             take_subtrie_for_pruning(&mut self.upper_arena, head_idx),
-                            (),
+                            Some(()),
                         ));
                     } else {
                         let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx]
@@ -519,14 +521,14 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
             let taken = planned
                 .into_iter()
                 .map(|(idx, plan)| {
-                    (idx, take_subtrie_for_pruning(&mut self.upper_arena, idx), plan)
+                    (idx, take_subtrie_for_pruning(&mut self.upper_arena, idx), Some(plan))
                 })
                 .collect();
             pruned += self.prune_taken_subtries(taken, ArenaSparseSubtrie::apply_prune_plan);
         }
 
         if pruned > 0 && self.upper_arena.can_compact() {
-            compact_arena(&mut self.upper_arena, &mut self.root);
+            self.upper_arena.compact(&mut self.root);
         }
 
         pruned
@@ -559,7 +561,8 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
         cursor.reset(&self.upper_arena, self.root, Nibbles::default());
 
         // Subtries taken for parallel processing: (arena_index, subtrie, update_range).
-        let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>, core::ops::Range<usize>)> = Vec::new();
+        let mut taken: Vec<(NodeIndex, Box<ArenaSparseSubtrie>, core::ops::Range<usize>)> =
+            Vec::new();
 
         let mut update_idx = 0;
         while update_idx < sorted.len() {
@@ -883,14 +886,14 @@ impl PersistentArenaParallelSparseTrie {
     }
 
     /// Applies prepared work to taken subtries and restores their upper slots.
-    fn prune_taken_subtries<P: Default + Send>(
+    fn prune_taken_subtries<P: Send>(
         &mut self,
-        mut taken: Vec<(Index, Box<ArenaSparseSubtrie>, P)>,
+        mut taken: Vec<(NodeIndex, Box<ArenaSparseSubtrie>, Option<P>)>,
         prune: impl Fn(&mut ArenaSparseSubtrie, P) -> usize + Sync,
     ) -> usize {
         let pruned = match taken.as_mut_slice() {
             [] => return 0,
-            [(_, subtrie, plan)] => prune(subtrie, mem::take(plan)),
+            [(_, subtrie, plan)] => prune(subtrie, plan.take().expect("prune work is present")),
             _ => {
                 let parent_span = tracing::Span::current();
                 taken
@@ -903,7 +906,7 @@ impl PersistentArenaParallelSparseTrie {
                             subtrie = ?subtrie.path,
                         )
                         .entered();
-                        prune(subtrie, mem::take(plan))
+                        prune(subtrie, plan.take().expect("prune work is present"))
                     })
                     .sum()
             }
@@ -915,7 +918,7 @@ impl PersistentArenaParallelSparseTrie {
     }
 }
 
-fn take_subtrie_for_pruning(arena: &mut NodeArena, idx: Index) -> Box<ArenaSparseSubtrie> {
+fn take_subtrie_for_pruning(arena: &mut NodeArena, idx: NodeIndex) -> Box<ArenaSparseSubtrie> {
     let ArenaSparseNode::Subtrie(subtrie) =
         mem::replace(&mut arena[idx], ArenaSparseNode::TakenSubtrie)
     else {
@@ -934,7 +937,7 @@ fn release_descendants(arena: &mut NodeArena, detached: &ArenaSparseNode) {
 }
 
 /// Releases the revealed nodes and blinded child slots of a detached subtree.
-pub(super) fn release_subtree(arena: &mut NodeArena, idx: Index) {
+pub(super) fn release_subtree(arena: &mut NodeArena, idx: NodeIndex) {
     match &arena[idx] {
         ArenaSparseNode::Extension { child, .. } => release_subtree(arena, *child),
         ArenaSparseNode::Branch(branch) => {
@@ -960,7 +963,7 @@ fn release_branch_children(arena: &mut NodeArena, children: &[BranchChild]) {
 #[inline]
 pub(super) fn prune_candidate(
     arena: &NodeArena,
-    idx: Index,
+    idx: NodeIndex,
     prune_before: TrieNodeEpoch,
 ) -> Option<&RlpNode> {
     let (rlp_node, epoch) = cached_prune_state(arena, idx);
@@ -970,7 +973,7 @@ pub(super) fn prune_candidate(
 /// Pruning requires a non-dirty root. Unlike the root, revealed descendants carry cached
 /// encodings, whether they were hashed locally or revealed by a proof.
 #[inline]
-fn cached_prune_state(arena: &NodeArena, idx: Index) -> (&RlpNode, TrieNodeEpoch) {
+fn cached_prune_state(arena: &NodeArena, idx: NodeIndex) -> (&RlpNode, TrieNodeEpoch) {
     let Some(ArenaSparseNodeState::Cached { rlp_node, epoch }) = node_state_ref(arena, idx) else {
         panic!("prune must run after hashing");
     };
