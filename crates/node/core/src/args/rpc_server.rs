@@ -953,7 +953,9 @@ impl RpcServerArgs {
     ///
     /// If no explicit or instance-adjusted path is set, returns the global default.
     pub fn auth_ipc_path(&self) -> &str {
-        self.auth_ipc_path.as_deref().unwrap_or(&DefaultRpcServerArgs::get_global().auth_ipc_path)
+        self.auth_ipc_path
+            .as_deref()
+            .unwrap_or_else(|| &DefaultRpcServerArgs::get_global().auth_ipc_path)
     }
 }
 
