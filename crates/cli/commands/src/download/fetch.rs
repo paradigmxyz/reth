@@ -185,21 +185,28 @@ impl ArchiveFetcher {
             if !retry || attempt == SEGMENT_RETRY_ATTEMPTS {
                 break probe
             }
+            // Close a full-file response before the backoff instead of leaving it open.
+            drop(probe);
             std::thread::sleep(self.session.retry_delay(piece_retry_backoff(attempt, false)));
             attempt += 1;
         };
 
-        let (supports_ranges, total_size) = match probe {
-            Ok(response) if response.status() == StatusCode::PARTIAL_CONTENT => {
-                let total = response
-                    .headers()
-                    .get("Content-Range")
-                    .and_then(|value| value.to_str().ok())
-                    .and_then(|value| value.split('/').next_back())
-                    .and_then(|value| value.parse::<u64>().ok());
-                (true, total)
-            }
-            _ => {
+        let range_total = match &probe {
+            Ok(response) if response.status() == StatusCode::PARTIAL_CONTENT => response
+                .headers()
+                .get("Content-Range")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.split('/').next_back())
+                .and_then(|value| value.parse::<u64>().ok()),
+            _ => None,
+        };
+        drop(probe);
+
+        // A 206 without a total size cannot be planned into pieces, so it falls back to one
+        // stream like a server without range support.
+        let (supports_ranges, total_size) = match range_total {
+            Some(total) => (true, Some(total)),
+            None => {
                 let response = client.head(&self.url).send()?.error_for_status()?;
                 (false, response.content_length())
             }
@@ -1081,7 +1088,7 @@ mod tests {
 
     #[test]
     fn probe_retries_full_responses_for_segmentable_files() {
-        let (url, gets) = spawn_probe_server(SEGMENTED_DOWNLOAD_MIN_FILE_SIZE, 2);
+        let (url, gets) = spawn_probe_server(SEGMENTED_DOWNLOAD_MIN_FILE_SIZE, 2, true);
 
         let probe = test_probe(&url).unwrap();
 
@@ -1092,7 +1099,7 @@ mod tests {
 
     #[test]
     fn probe_accepts_full_responses_for_small_files() {
-        let (url, gets) = spawn_probe_server(SEGMENTED_DOWNLOAD_MIN_FILE_SIZE - 1, 1);
+        let (url, gets) = spawn_probe_server(SEGMENTED_DOWNLOAD_MIN_FILE_SIZE - 1, 1, true);
 
         let probe = test_probe(&url).unwrap();
 
@@ -1100,16 +1107,42 @@ mod tests {
         assert_eq!(gets.load(Ordering::SeqCst), 1);
     }
 
+    #[test]
+    fn probe_falls_back_after_full_responses_on_every_attempt() {
+        let (url, gets) = spawn_probe_server(SEGMENTED_DOWNLOAD_MIN_FILE_SIZE, u64::MAX, true);
+
+        let probe = test_probe(&url).unwrap();
+
+        assert!(!probe.supports_ranges);
+        assert_eq!(gets.load(Ordering::SeqCst), u64::from(SEGMENT_RETRY_ATTEMPTS));
+    }
+
+    #[test]
+    fn probe_falls_back_when_partial_response_lacks_total_size() {
+        let (url, gets) = spawn_probe_server(SEGMENTED_DOWNLOAD_MIN_FILE_SIZE, 1, false);
+
+        let probe = test_probe(&url).unwrap();
+
+        assert!(!probe.supports_ranges);
+        assert_eq!(gets.load(Ordering::SeqCst), 2);
+    }
+
     fn test_probe(url: &str) -> Result<RemoteArchiveProbe> {
         let dir = tempfile::tempdir().unwrap();
         let session = DownloadSession::new(None, None, CancellationToken::new())
             .with_retry_backoff(Some(Duration::ZERO));
-        ArchiveFetcher::new(url, dir.path(), session).probe(&BlockingClient::new())
+        let client = BlockingClient::builder().no_proxy().build().unwrap();
+        ArchiveFetcher::new(url, dir.path(), session).probe(&client)
     }
 
     /// Serves headers for a `size`-byte file on localhost, ignoring `Range` in the first
-    /// `full_responses` GET requests. Returns the URL and the number of GET requests received.
-    fn spawn_probe_server(size: u64, full_responses: u64) -> (String, Arc<AtomicU64>) {
+    /// `full_responses` GET requests. Partial responses report the total size only when
+    /// `range_total` is set. Returns the URL and the number of GET requests received.
+    fn spawn_probe_server(
+        size: u64,
+        full_responses: u64,
+        range_total: bool,
+    ) -> (String, Arc<AtomicU64>) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/state.tar.zst", listener.local_addr().unwrap());
         let gets = Arc::new(AtomicU64::new(0));
@@ -1125,8 +1158,9 @@ mod tests {
                 let response = if request.starts_with(b"GET") &&
                     received.fetch_add(1, Ordering::SeqCst) >= full_responses
                 {
+                    let total = if range_total { size.to_string() } else { "*".to_string() };
                     format!(
-                        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-0/{size}\r\n\
+                        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-0/{total}\r\n\
                          Content-Length: 1\r\nConnection: close\r\n\r\n0"
                     )
                 } else {
