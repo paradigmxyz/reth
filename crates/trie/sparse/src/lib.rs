@@ -23,6 +23,14 @@ mod arena;
 #[cfg(feature = "std")]
 pub use arena::*;
 
+#[cfg(feature = "std")]
+#[path = "arena-persistent/mod.rs"]
+mod arena_persistent;
+#[cfg(feature = "std")]
+pub use arena_persistent::{
+    PersistentArenaParallelSparseTrie, PersistentArenaParallelismThresholds,
+};
+
 #[cfg(feature = "metrics")]
 mod metrics;
 

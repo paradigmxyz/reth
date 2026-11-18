@@ -1,10 +1,10 @@
 //! Leaf edits and the branch changes they require.
 
 use super::{
-    branch_data, branch_data_mut, branch_idx, ArenaCursor, ArenaParallelSparseTrie,
-    ArenaRequiredProof, ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeState, BranchChild,
-    Index, NodeArena, RemoveLeafResult, SeekResult, SubtrieCounterDeltas, UpsertLeafResult,
-    TRACE_TARGET,
+    branch_data, branch_data_mut, branch_idx, ArenaCursor, ArenaRequiredProof, ArenaSparseNode,
+    ArenaSparseNodeBranch, ArenaSparseNodeState, BranchChild, Index, NodeArena,
+    PersistentArenaParallelSparseTrie, RemoveLeafResult, SeekResult, SubtrieCounterDeltas,
+    UpsertLeafResult, TRACE_TARGET,
 };
 use crate::{LeafUpdate, SparseTrieUpdates};
 use alloy_primitives::B256;
@@ -17,7 +17,7 @@ use tracing::{instrument, trace};
 #[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
 use super::observe_proof_target;
 
-impl ArenaParallelSparseTrie {
+impl PersistentArenaParallelSparseTrie {
     /// Creates a new leaf and a new branch that splits an existing child from the new leaf at
     /// a divergence point. Returns the index of the new branch.
     ///

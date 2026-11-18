@@ -311,18 +311,14 @@ impl ArenaCursor {
             let head_idx = head.index;
             let head_path_len = head.path_len as usize;
 
-            // Resolve the branch and its prefix together so shared storage is not searched
-            // again for the same arena slot.
-            let (branch, short_key) = match &arena[head_idx] {
-                ArenaSparseNode::Branch(branch) => (branch, Nibbles::default()),
-                ArenaSparseNode::Extension { key, child } => (arena[*child].branch_ref(), *key),
-                _ => {
-                    self.needs_pop = true;
-                    return NextResult::NonBranch;
-                }
+            let Some(branch_idx) = branch_idx(arena, head_idx) else {
+                self.needs_pop = true;
+                return NextResult::NonBranch;
             };
+            let branch = arena[branch_idx].branch_ref();
 
             let state_mask = branch.state_mask;
+            let short_key = arena[head_idx].extension_key().copied().unwrap_or_default();
             let start = head.next_dense_idx as usize;
             let child_depth = self.stack.len();
 
@@ -332,7 +328,9 @@ impl ArenaCursor {
                     continue;
                 }
 
-                let Some(child_idx) = branch.children[branch_child_idx].revealed_index() else {
+                let Some(child_idx) =
+                    arena[branch_idx].branch_ref().children[branch_child_idx].revealed_index()
+                else {
                     continue;
                 };
 

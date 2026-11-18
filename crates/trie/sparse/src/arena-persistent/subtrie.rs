@@ -1,10 +1,11 @@
 //! Operations on the lower tries that can be dispatched to separate workers.
 
 use super::{
-    arena_persistent::{prune_candidate, release_subtree},
-    branch_data, branch_data_mut, branch_idx, compact_arena, move_node, ArenaParallelSparseTrie,
+    branch_data, branch_data_mut, branch_idx, compact_arena, move_node,
+    trie::{prune_candidate, release_subtree},
     ArenaRequiredProof, ArenaSparseNode, ArenaSparseNodeState, ArenaTrieBuffers, BranchChild,
-    BranchChildIdx, Index, NodeArena, RemoveLeafResult, SeekResult, TRACE_TARGET,
+    BranchChildIdx, Index, NodeArena, PersistentArenaParallelSparseTrie, RemoveLeafResult,
+    SeekResult, TRACE_TARGET,
 };
 use crate::{LeafUpdate, SparseTrieUpdates, TrieNodeEpoch};
 use alloc::{boxed::Box, vec::Vec};
@@ -67,7 +68,7 @@ impl ArenaSparseSubtrie {
     #[cfg(all(debug_assertions, not(feature = "fuzz")))]
     pub(super) fn debug_assert_counters(&self) {
         let (actual_leaves, actual_dirty) =
-            ArenaParallelSparseTrie::count_leaves_and_dirty(&self.arena, self.root);
+            PersistentArenaParallelSparseTrie::count_leaves_and_dirty(&self.arena, self.root);
         debug_assert_eq!(
             self.num_leaves, actual_leaves,
             "subtrie {:?} num_leaves mismatch: stored {} vs actual {}",
@@ -311,7 +312,7 @@ impl ArenaSparseSubtrie {
             match update {
                 LeafUpdate::Changed(value) if !value.is_empty() => {
                     // Upsert: insert or update a leaf with the given value.
-                    let (_result, deltas) = ArenaParallelSparseTrie::upsert_leaf(
+                    let (_result, deltas) = PersistentArenaParallelSparseTrie::upsert_leaf(
                         &mut self.arena,
                         &mut self.buffers.cursor,
                         &mut self.root,
@@ -324,7 +325,7 @@ impl ArenaSparseSubtrie {
                         (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
                 }
                 LeafUpdate::Changed(_) => {
-                    let (result, deltas) = ArenaParallelSparseTrie::remove_leaf(
+                    let (result, deltas) = PersistentArenaParallelSparseTrie::remove_leaf(
                         &mut self.arena,
                         &mut self.buffers.cursor,
                         &mut self.root,
@@ -372,7 +373,7 @@ impl ArenaSparseSubtrie {
 
         for node in nodes.iter_mut() {
             let find_result = self.buffers.cursor.seek(&mut self.arena, &node.path);
-            if ArenaParallelSparseTrie::reveal_node(
+            if PersistentArenaParallelSparseTrie::reveal_node(
                 &mut self.arena,
                 &self.buffers.cursor,
                 node,
@@ -398,7 +399,7 @@ impl ArenaSparseSubtrie {
     ///
     /// Trie updates are written directly to `self.buffers.updates` (if `Some`).
     pub(super) fn update_cached_rlp(&mut self, new_epoch: TrieNodeEpoch) {
-        ArenaParallelSparseTrie::update_cached_rlp(
+        PersistentArenaParallelSparseTrie::update_cached_rlp(
             &mut self.arena,
             self.root,
             self.path,

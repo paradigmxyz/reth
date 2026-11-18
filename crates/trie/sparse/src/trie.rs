@@ -1,6 +1,6 @@
 use crate::{
-    ArenaParallelSparseTrie, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
-    TrieNodeEpoch,
+    LeafUpdate, PersistentArenaParallelSparseTrie, SparseTrie as SparseTrieTrait,
+    SparseTrieUpdates, TrieNodeEpoch,
 };
 use alloc::boxed::Box;
 use alloy_primitives::{map::B256Map, B256};
@@ -20,7 +20,7 @@ use reth_trie_common::{BranchNodeMasks, ProofTrieNodeV2, ProofV2TargetParent, Tr
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum RevealableSparseTrie<T = ArenaParallelSparseTrie> {
+pub enum RevealableSparseTrie<T = PersistentArenaParallelSparseTrie> {
     /// The trie is blind -- no nodes have been revealed
     ///
     /// This is the default state. In this state, the trie cannot be directly queried or modified
@@ -233,7 +233,7 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
                 // Nothing is revealed - emit proof targets for all keys without a known parent.
                 for key in updates.keys() {
                     #[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
-                    crate::arena::observe_blind_root_proof_target();
+                    crate::arena_persistent::observe_blind_root_proof_target();
                     proof_required_fn(*key, ProofV2TargetParent::NONE);
                 }
                 // All updates remain in the map for retry after proofs are fetched

@@ -360,7 +360,7 @@ impl<T: Clone> SlotStorage<T> {
 /// The base covers `0..base.len()`. Overrides may replace those slots and must cover every
 /// appended slot in `base.len()..len`, with no entries at or beyond `len`.
 #[derive(Debug, Clone)]
-struct LayeredSlots<T> {
+pub(super) struct LayeredSlots<T> {
     base: Arc<Vec<T>>,
     overrides: SlotOverrides<T>,
     /// Vacated slots in this table reuse one allocation, even across directory pages.
@@ -370,7 +370,7 @@ struct LayeredSlots<T> {
 }
 
 impl<T> LayeredSlots<T> {
-    fn new(base: Vec<T>) -> Self {
+    pub(super) fn new(base: Vec<T>) -> Self {
         debug_assert!(base.len() <= MAX_SLOTS);
         Self {
             len: base.len(),
@@ -381,8 +381,13 @@ impl<T> LayeredSlots<T> {
         }
     }
 
-    fn is_shared(&self) -> bool {
+    pub(super) fn is_shared(&self) -> bool {
         Arc::strong_count(&self.base) > 1
+    }
+
+    /// Returns the backing length, including slots past a free list's logical cursor.
+    pub(super) const fn len(&self) -> usize {
+        self.len
     }
 
     fn get(&self, index: usize) -> Option<&T> {
@@ -396,7 +401,7 @@ impl<T> LayeredSlots<T> {
         value
     }
 
-    fn value_at(&self, index: usize) -> &T {
+    pub(super) fn value_at(&self, index: usize) -> &T {
         // Indices beyond the directory's current range can only refer to the base.
         if index >> self.root_shift < RADIX &&
             let Some(value) = self.overrides.get(index, self.root_shift)
@@ -414,14 +419,23 @@ impl<T> LayeredSlots<T> {
 impl<T: Clone> LayeredSlots<T> {
     #[cold]
     fn into_dense(self) -> Vec<T> {
+        let len = self.len;
+        self.into_dense_prefix(len)
+    }
+
+    /// Recovers the exclusive base allocation and materializes only the requested prefix.
+    #[cold]
+    pub(super) fn into_dense_prefix(self, len: usize) -> Vec<T> {
+        debug_assert!(len <= self.len);
         // The base had one strong reference before the move, and no weak references are made.
         let mut values = Arc::into_inner(self.base).expect("slot base must be exclusively owned");
-        self.overrides.apply(&mut values, 0, self.root_shift);
-        assert_eq!(values.len(), self.len, "merged slot count differs from the logical length");
+        values.truncate(len);
+        self.overrides.apply(&mut values, 0, self.root_shift, len);
+        assert_eq!(values.len(), len, "merged slot count differs from the logical length");
         values
     }
 
-    fn push(&mut self, value: T) -> usize {
+    pub(super) fn push(&mut self, value: T) -> usize {
         let index = next_slot(self.len);
         self.write_override(index, value);
         self.len += 1;
@@ -429,7 +443,7 @@ impl<T: Clone> LayeredSlots<T> {
     }
 
     #[track_caller]
-    fn set(&mut self, index: usize, value: T) {
+    pub(super) fn set(&mut self, index: usize, value: T) {
         self.check_index(index);
         self.write_override(index, value);
     }
@@ -570,18 +584,23 @@ impl<T: Clone> SlotOverrides<T> {
     }
 
     /// Merges overrides in ascending index order so appended slots can reuse the base allocation.
-    fn apply(self, values: &mut Vec<T>, prefix: usize, shift: usize) {
+    fn apply(self, values: &mut Vec<T>, prefix: usize, shift: usize, len: usize) {
+        if prefix >= len {
+            return;
+        }
         match self {
             Self::Empty => {}
             Self::Directory(children) => {
                 assert!(shift >= RADIX_BITS, "unexpected slot override directory");
                 for (digit, child) in Arc::unwrap_or_clone(children).into_iter().enumerate() {
-                    child.apply(values, prefix | (digit << shift), shift - RADIX_BITS);
+                    child.apply(values, prefix | (digit << shift), shift - RADIX_BITS, len);
                 }
             }
             Self::Page(page) => {
                 assert_eq!(shift, 0, "unexpected slot override page");
-                for (offset, entry) in Arc::unwrap_or_clone(page).into_iter().enumerate() {
+                for (offset, entry) in
+                    Arc::unwrap_or_clone(page).into_iter().take(len - prefix).enumerate()
+                {
                     if let Some(entry) = entry {
                         let index = prefix | offset;
                         let value = Arc::unwrap_or_clone(entry);
