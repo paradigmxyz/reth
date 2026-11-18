@@ -636,7 +636,19 @@ where
                 info!(target: "reth::cli", codes = p.codes, translated = p.translated, mb = p.bytes >> 20, elapsed = ?p.elapsed, "Translating existing bytecode");
             }
         })?;
-        info!(target: "reth::cli", codes = done.codes, translated = done.translated, mb = done.bytes >> 20, elapsed = ?done.elapsed, "Translated existing bytecode");
+        info!(
+            target: "reth::cli",
+            codes = done.codes,
+            translated = done.translated,
+            mb = done.bytes >> 20,
+            elapsed = ?done.elapsed,
+            read_thread_time = ?done.read,
+            translate_thread_time = ?done.translate,
+            writer_waited = ?done.wait,
+            write = ?done.write,
+            commit = ?done.commit,
+            "Translated existing bytecode"
+        );
     }
     Ok(true)
 }

@@ -684,14 +684,14 @@ ipnet = "2.11"
 # evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
 # rejects a patch from the same source.
 [patch."https://github.com/alloy-rs/evm2"]
-evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "d962d25503774023788323bd8c40132f49988dbd" }
-evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "d962d25503774023788323bd8c40132f49988dbd" }
-evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "d962d25503774023788323bd8c40132f49988dbd" }
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "ebdc8309f7526556e2ff5dedbb2a46dfb168943e" }
+evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "ebdc8309f7526556e2ff5dedbb2a46dfb168943e" }
+evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "ebdc8309f7526556e2ff5dedbb2a46dfb168943e" }
 
 [patch.crates-io]
 # reth-core
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "37f36b181bd7a19111ad89a63dc8944fd09f8b4d" }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "37f36b181bd7a19111ad89a63dc8944fd09f8b4d" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "37f36b181bd7a19111ad89a63dc8944fd09f8b4d" }
-reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "37f36b181bd7a19111ad89a63dc8944fd09f8b4d" }
-reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "37f36b181bd7a19111ad89a63dc8944fd09f8b4d" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "de549c6d9d50a44c2d190399c87e6bea6eb6f4ec" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "de549c6d9d50a44c2d190399c87e6bea6eb6f4ec" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "de549c6d9d50a44c2d190399c87e6bea6eb6f4ec" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "de549c6d9d50a44c2d190399c87e6bea6eb6f4ec" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "de549c6d9d50a44c2d190399c87e6bea6eb6f4ec" }
