@@ -56,7 +56,7 @@
 mod sparse_trie;
 
 /// Experimental fork-aware PBT commitment and shadow computation.
-#[cfg(feature = "pbt")]
+#[cfg(not(target_family = "wasm"))]
 pub mod pbt;
 
 use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};

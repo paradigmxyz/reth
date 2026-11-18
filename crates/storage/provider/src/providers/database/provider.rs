@@ -3340,7 +3340,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         if trie_updates.is_empty() {
             return Ok(0)
         }
-        #[cfg(feature = "pbt")]
         if self.mpt_retired_at()?.is_some() {
             return Ok(0)
         }
@@ -3374,7 +3373,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
     ) -> ProviderResult<usize> {
         // In-flight pre-retirement jobs can finish after the disposal transaction.
-        #[cfg(feature = "pbt")]
         if self.mpt_retired_at()?.is_some() {
             return Ok(0)
         }
@@ -4125,13 +4123,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> ChainStateBlockReader for DatabaseProvide
 impl<TX: DbTxMut + DbTx, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N> {
     fn save_finalized_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
         // A delayed finality flush must not reopen the permanent retirement boundary.
-        #[cfg(feature = "pbt")]
         let retired = self
             .tx
             .get::<tables::ChainState>(tables::ChainStateKey::PbtMptRetiredBlock)?
             .unwrap_or_default();
-        #[cfg(not(feature = "pbt"))]
-        let retired = 0;
         let block_number = block_number.max(retired);
         Ok(self
             .tx
@@ -6240,7 +6235,6 @@ mod tests {
         assert!(!all_blocks.contains(&10), "block 10 should be unwound");
     }
 
-    #[cfg(feature = "pbt")]
     #[test]
     fn retirement_marker_is_not_finality_or_safety() {
         let factory = create_test_provider_factory();
@@ -6261,7 +6255,6 @@ mod tests {
         assert_eq!(provider.last_finalized_block_number().unwrap(), Some(7));
     }
 
-    #[cfg(feature = "pbt")]
     #[test]
     fn retired_mpt_rejects_late_trie_writes_and_deep_unwind() {
         let factory = create_test_provider_factory();

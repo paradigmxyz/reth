@@ -1,6 +1,6 @@
 # PBT node integration
 
-Build with `cargo build --release --bin reth --features pbt`. This enables PBT in the
+Build with `cargo build --release --bin reth`. This enables PBT in the
 regular Ethereum node. `config.binaryTrieTime` schedules activation.
 Mainnet has no scheduled PBT activation.
 
@@ -83,8 +83,9 @@ Before activation, accepted blocks with a retained BAL use the normal MPT
 validation path. A background worker follows canonical commits and reorgs to
 publish their PBT shadow checkpoints. If it lags, activation recovers the exact
 parent branch from retained execution results or authenticated BALs, then checks
-the parent against its MPT commitment. Blocks without a BAL keep synchronous
-shadow checkpoints so their state remains available after restart.
+the parent against its MPT commitment. Staged sync validates pre-BAL blocks
+against their MPT commitments. To replay across activation, it needs a verified
+checkpoint with BALs available from that checkpoint through the activation block.
 
 MPT-only RPCs are disabled on a PBT-configured chain: `eth_getProof`,
 `eth_getMultiProof`, `eth_getAccount`, `debug_accountAt`, `debug_executionWitness`,
@@ -118,7 +119,7 @@ Pre-fork shadow checks authenticate onboarding endpoints and the activation pare
 instead of rebuilding the complete MPT for every warm parent read.
 
 ```sh
-docker build --build-arg FEATURES=pbt -t reth-pbt:local .
+docker build -t reth-pbt:local .
 ```
 
 Root timing logs include `prepare_ms` (parent selection, cold restoration and

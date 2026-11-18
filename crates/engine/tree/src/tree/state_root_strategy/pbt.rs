@@ -288,9 +288,13 @@ where
         self.validate_retired_parent(parent.header(), retired)?;
         let active = ctx.env().evm_env.block_env().timestamp.saturating_to::<u64>() >=
             self.activation_timestamp;
-        if !active && self.shadow_replay.is_some() && ctx.env().decoded_bal.is_some() {
-            // With retained BALs a missed notification is recoverable. The MPT alone determines
-            // validity before the fork.
+        if !active &&
+            self.shadow_replay.is_some() &&
+            (ctx.env().decoded_bal.is_some() ||
+                !self.store.contains_block(parent.hash()).map_err(ProviderError::other)?)
+        {
+            // The MPT alone determines validity before the fork. Without a staged shadow
+            // checkpoint, ordinary validation continues until a migration anchor is available.
             return <DefaultStateRootStrategy as StateRootStrategy<N, P, Evm>>::prepare(
                 &self.default,
                 ctx,

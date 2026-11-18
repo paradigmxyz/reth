@@ -71,18 +71,17 @@ tower.workspace = true
 tracing.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-# pbt
-reth-chain-state = { workspace = true, optional = true }
-reth-trie-pbt = { workspace = true, optional = true, features = ["execution", "persistence", "bal", "conversion"] }
-reth-storage-overlay = { workspace = true, optional = true }
-reth-fs-util = { workspace = true, optional = true }
-reth-db-api = { workspace = true, optional = true }
-reth-trie = { workspace = true, optional = true }
-reth-trie-db = { workspace = true, optional = true }
-reth-network-api = { workspace = true, optional = true }
-reth-consensus = { workspace = true, optional = true }
-alloy-eip7928 = { workspace = true, optional = true }
-thiserror = { workspace = true, optional = true }
+reth-chain-state = { workspace = true }
+reth-trie-pbt = { workspace = true, features = ["execution", "persistence", "bal", "conversion"] }
+reth-storage-overlay = { workspace = true }
+reth-fs-util = { workspace = true }
+reth-db-api = { workspace = true }
+reth-trie = { workspace = true }
+reth-trie-db = { workspace = true }
+reth-network-api = { workspace = true }
+reth-consensus = { workspace = true }
+alloy-eip7928 = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 reth-db.workspace = true
@@ -124,20 +123,6 @@ reth-consensus.workspace = true
 
 [features]
 default = []
-pbt = [
-    "reth-engine-tree/pbt",
-    "dep:reth-chain-state",
-    "dep:reth-trie-pbt",
-    "dep:reth-storage-overlay",
-    "dep:reth-fs-util",
-    "dep:reth-db-api",
-    "dep:reth-trie",
-    "dep:reth-trie-db",
-    "dep:reth-network-api",
-    "dep:reth-consensus",
-    "dep:alloy-eip7928",
-    "dep:thiserror",
-]
 gmp = ["evm2/gmp", "reth-evm/gmp", "reth-evm-ethereum/gmp"]
 account-ext = [
     "reth-provider/account-ext",
@@ -200,7 +185,7 @@ test-utils = [
     "reth-network-p2p/test-utils",
     "reth-consensus/test-utils",
     "reth-engine-tree/test-utils",
-    "reth-chain-state?/test-utils",
+    "reth-chain-state/test-utils",
     "reth-stages-api/test-utils",
     "reth-payload-builder/test-utils",
 ]

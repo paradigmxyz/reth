@@ -35,7 +35,6 @@ reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
 reth-trie.workspace = true
 reth-trie-common.workspace = true
-reth-trie-pbt = { workspace = true, features = ["execution", "persistence", "bal", "parallel"], optional = true }
 reth-lru.workspace = true
 
 # alloy
@@ -71,6 +70,9 @@ reth-stages = { workspace = true, optional = true }
 reth-static-file = { workspace = true, optional = true }
 reth-tracing = { workspace = true, optional = true }
 
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+reth-trie-pbt = { workspace = true, features = ["execution", "persistence", "bal", "parallel"] }
+
 [dev-dependencies]
 # reth
 reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
@@ -99,7 +101,6 @@ rand.workspace = true
 tracing-subscriber = { workspace = true, features = ["registry"] }
 
 [features]
-pbt = ["dep:reth-trie-pbt", "reth-provider/pbt", "reth-storage-overlay/pbt"]
 asm-keccak = [
     "reth-evm/asm-keccak",
     "alloy-primitives/asm-keccak",

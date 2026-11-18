@@ -27,7 +27,6 @@ use pbt::persistence::SubtreeCache;
 
 const HASH_BYTES: usize = 32;
 const CHECKPOINT_LENGTH_BYTES: usize = 8;
-const LEGACY_CHECKPOINT_VERSION: u32 = 2;
 const PREIMAGE_ACCOUNT_BYTES: usize = 24;
 const SNAPSHOT_ACCOUNT_MAX_BYTES: usize = 130;
 const SNAPSHOT_LEAF_MAX_BYTES: usize = 68;
@@ -110,7 +109,7 @@ impl<H: TreeHasher> SnapshotStore<H> {
             return Ok(state.clone());
         }
         let Some(count) = self.native_count(root)? else {
-            // Legacy upgrades and interrupted marker publication require mutation.
+            // Recovering interrupted marker publication requires mutation.
             let state = self.load_state(root)?;
             self.cache_candidate(&state)?;
             return Ok(state)
@@ -123,7 +122,7 @@ impl<H: TreeHasher> SnapshotStore<H> {
     }
 
     /// Selects a parent for execution from a trusted PBT commitment or an accepted block
-    /// reference. Warm, legacy, and resource-limited checkpoints can use the full state.
+    /// reference. Warm and resource-limited checkpoints can use the full state.
     #[cfg(feature = "execution")]
     pub fn execution_parent(
         &self,
@@ -565,7 +564,7 @@ impl<H: TreeHasher> SnapshotStore<H> {
         Ok(outcome)
     }
 
-    /// Returns whether the store has no registered roots, legacy checkpoints, or block references.
+    /// Returns whether the store has no registered roots, checkpoint markers, or block references.
     ///
     /// Includes durable native roots whose file publication was interrupted. Filesystem or database
     /// errors are returned rather than treating an unreadable directory as empty.
@@ -709,7 +708,7 @@ impl<H: TreeHasher> SnapshotStore<H> {
     }
 
     /// Runs a short publication check and callback while a modern native reference
-    /// cannot be replaced or pruned. Returns `None` if a legacy upgrade or repair is
+    /// cannot be replaced or pruned. Returns `None` if checkpoint recovery is
     /// required; do that outside external write transactions. This checks durable
     /// publication, not complete state reconstruction. The callback must not re-enter
     /// mutation methods on this store.
@@ -742,34 +741,30 @@ impl<H: TreeHasher> SnapshotStore<H> {
     }
 
     fn native_count(&self, root: B256) -> Result<Option<usize>, StoreError> {
-        let Some(native) = self.database.leaf_count(root)? else { return Ok(None) };
+        let Some(count) = self.database.leaf_count(root)? else { return Ok(None) };
+        Ok(self.has_valid_marker(root, count)?.then_some(count))
+    }
+
+    fn has_valid_marker(&self, root: B256, native: usize) -> Result<bool, StoreError> {
         let path = self.state_path(root);
-        if !path.try_exists().map_err(|error| reth_fs_util::FsPathError::metadata(error, &path))? ||
-            reth_fs_util::metadata(&path)?.len() != (CHECKPOINT_LENGTH_BYTES + 4) as u64
-        {
-            return Ok(None)
+        if !path.try_exists().map_err(|error| reth_fs_util::FsPathError::metadata(error, &path))? {
+            return Ok(false)
         }
         let bytes = read_bounded(&path, CHECKPOINT_LENGTH_BYTES + 4)?;
         if bytes.len() != CHECKPOINT_LENGTH_BYTES + 4 {
-            return Err(ArtifactError::Truncated.into());
+            return Err(ArtifactError::Truncated.into())
         }
         let mut count = [0; CHECKPOINT_LENGTH_BYTES];
         count.copy_from_slice(&bytes[..CHECKPOINT_LENGTH_BYTES]);
         let count =
             usize::try_from(u64::from_be_bytes(count)).map_err(|_| ArtifactError::ResourceLimit)?;
         if count > self.native_limits.max_leaves {
-            return Err(ArtifactError::ResourceLimit.into());
+            return Err(ArtifactError::ResourceLimit.into())
         }
-        if count != native {
-            return Err(ArtifactError::Invalid("invalid PBT checkpoint marker").into());
+        if count != native || bytes[CHECKPOINT_LENGTH_BYTES..] != STORE_VERSION.to_be_bytes() {
+            return Err(ArtifactError::Invalid("invalid PBT checkpoint marker").into())
         }
-        if bytes[CHECKPOINT_LENGTH_BYTES..] == LEGACY_CHECKPOINT_VERSION.to_be_bytes() {
-            return Ok(None)
-        }
-        if bytes[CHECKPOINT_LENGTH_BYTES..] != STORE_VERSION.to_be_bytes() {
-            return Err(ArtifactError::Invalid("invalid PBT checkpoint marker").into());
-        }
-        Ok(Some(count))
+        Ok(true)
     }
 
     fn checkpoint_count(&self, root: B256) -> Result<usize, StoreError> {
@@ -837,84 +832,17 @@ impl<H: TreeHasher> SnapshotStore<H> {
     }
 
     fn load_state(&self, root: B256) -> Result<StateTree<H>, StoreError> {
-        let Some(count) = self.database.leaf_count(root)? else {
-            // Legacy full-artifact checkpoints are verified before upgrading them in place.
-            let state = self.load_legacy_state(root)?;
-            self.database.save(&state, self.native_limits)?;
-            self.write_marker(root, state.tree().len())?;
-            return Ok(state);
-        };
-        let path = self.state_path(root);
-        if path.try_exists().map_err(|error| reth_fs_util::FsPathError::metadata(error, &path))? {
-            if reth_fs_util::metadata(&path)?.len() > (CHECKPOINT_LENGTH_BYTES + 4) as u64 {
-                // Resume an upgrade interrupted after syncing nodes but before replacing the file.
-                let state = self.load_legacy_state(root)?;
-                self.write_marker(root, state.tree().len())?;
-                return Ok(state);
-            }
-            let (mut file, _) = open_bounded(&path, CHECKPOINT_LENGTH_BYTES + 4)?;
-            let mut bytes = [0; CHECKPOINT_LENGTH_BYTES];
-            read_exact(&mut file, &mut bytes, &path)?;
-            let stored = usize::try_from(u64::from_be_bytes(bytes))
-                .map_err(|_| ArtifactError::ResourceLimit)?;
-            if stored > self.native_limits.max_leaves {
-                return Err(ArtifactError::ResourceLimit.into());
-            }
-            let mut version = [0; 4];
-            read_exact(&mut file, &mut version, &path)?;
-            check_eof(&mut file, &path)?;
-            if stored != count {
-                return Err(ArtifactError::Invalid("invalid PBT checkpoint marker").into());
-            }
-            if version == LEGACY_CHECKPOINT_VERSION.to_be_bytes() &&
-                version != STORE_VERSION.to_be_bytes()
-            {
-                // Authenticate native nodes before upgrading the separately published marker.
-                let state = self.database.load::<H>(root, count, self.native_limits)?;
-                self.write_marker(root, count)?;
-                return Ok(state)
-            }
-            if version != STORE_VERSION.to_be_bytes() {
-                return Err(ArtifactError::Invalid("invalid PBT checkpoint marker").into());
-            }
-        } else {
-            // A crash may sync the root record before publishing its small checkpoint marker.
-            let state = self.database.load::<H>(root, count, self.native_limits)?;
+        let count = self
+            .database
+            .leaf_count(root)?
+            .ok_or(ArtifactError::Invalid("missing native PBT checkpoint"))?;
+        let marker_exists = self.has_valid_marker(root, count)?;
+        let state = self.database.load::<H>(root, count, self.native_limits)?;
+        if !marker_exists {
+            // A crash may sync the native root before publishing its marker.
             self.write_marker(root, count)?;
-            return Ok(state);
         }
-        Ok(self.database.load::<H>(root, count, self.native_limits)?)
-    }
-
-    fn load_legacy_state(&self, root: B256) -> Result<StateTree<H>, StoreError> {
-        let path = self.state_path(root);
-        let preimage_limit = preimage_byte_limit(self.limits)?;
-        let snapshot_limit = snapshot_byte_limit(self.limits)?;
-        let limit = CHECKPOINT_LENGTH_BYTES
-            .checked_add(preimage_limit)
-            .and_then(|limit| limit.checked_add(snapshot_limit))
-            .ok_or(ArtifactError::ResourceLimit)?;
-        let (mut file, length) = open_bounded(&path, limit)?;
-        let mut prefix = [0; CHECKPOINT_LENGTH_BYTES];
-        read_exact(&mut file, &mut prefix, &path)?;
-        let preimage_length = usize::try_from(u64::from_be_bytes(prefix))
-            .map_err(|_| ArtifactError::ResourceLimit)?;
-        if preimage_length > preimage_limit {
-            return Err(ArtifactError::ResourceLimit.into());
-        }
-        let snapshot_length = length
-            .checked_sub(CHECKPOINT_LENGTH_BYTES)
-            .and_then(|length| length.checked_sub(preimage_length))
-            .ok_or(ArtifactError::Truncated)?;
-        if snapshot_length > snapshot_limit {
-            return Err(ArtifactError::ResourceLimit.into());
-        }
-        let mut artifacts =
-            Artifacts { preimages: vec![0; preimage_length], snapshot: vec![0; snapshot_length] };
-        read_exact(&mut file, &mut artifacts.preimages, &path)?;
-        read_exact(&mut file, &mut artifacts.snapshot, &path)?;
-        check_eof(&mut file, &path)?;
-        Ok(artifacts.restore::<H>(root, self.limits)?)
+        Ok(state)
     }
 }
 

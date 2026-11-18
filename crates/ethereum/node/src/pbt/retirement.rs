@@ -341,7 +341,7 @@ mod tests {
             .tx_ref()
             .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, 0)?;
         database.commit()?;
-        let provider = BlockchainProvider::with_latest(provider, header.clone())?;
+        let provider = BlockchainProvider::new(provider)?;
         assert_eq!(provider.finalized_block_hash()?, Some(header.hash()));
         let node_key = |root: B256| [b"n".as_slice(), root.as_slice()].concat();
         for (available, reclaimed) in

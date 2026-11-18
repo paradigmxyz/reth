@@ -773,16 +773,21 @@ impl Startup {
                     &tip,
                     fetch,
                 )?;
+                return Ok(())
             }
         } else if tip.timestamp() < strategy.activation_timestamp() &&
             !strategy.store().contains_block(tip.hash())? &&
             let Some(checkpoint) = self.nearest_shadow_checkpoint(strategy, provider, &tip, 0)?
         {
-            self.catch_up_with_bal_fetch(strategy, provider, &checkpoint, &tip, fetch)?;
+            return self.catch_up_with_bal_fetch(strategy, provider, &checkpoint, &tip, fetch)
         }
-        strategy
-            .restore_parent(tip.hash(), tip.state_root(), tip.timestamp())
-            .wrap_err("PBT persisted tip checkpoint is missing or inconsistent")?;
+        if tip.timestamp() >= strategy.activation_timestamp() ||
+            strategy.store().contains_block(tip.hash())?
+        {
+            strategy
+                .restore_parent(tip.hash(), tip.state_root(), tip.timestamp())
+                .wrap_err("PBT persisted tip checkpoint is missing or inconsistent")?;
+        }
         Ok(())
     }
 
@@ -882,11 +887,14 @@ impl Startup {
             raw.ensure_hash(commitment)?;
             let bal = DecodedBal::from_raw_bal(raw.clone())?;
             if header.timestamp() >= strategy.activation_timestamp() &&
-                parent.timestamp() < strategy.activation_timestamp()
+                parent.timestamp() < strategy.activation_timestamp() &&
+                parent.hash() != anchor.hash()
             {
-                // Authenticate the activation parent even when preceding shadow steps
-                // skipped redundant full-state MPT reconstruction.
-                strategy.restore_parent(parent.hash(), parent.state_root(), parent.timestamp())?;
+                // Reuse the replayed state for the activation parent's MPT check.
+                eyre::ensure!(
+                    mpt_root(&state) == parent.state_root(),
+                    "PBT checkpoint does not match parent MPT commitment"
+                );
             }
             let next = strategy.replay(&state, bal.as_bal().as_slice(), commitment)?;
             let root = if header.timestamp() >= strategy.activation_timestamp() {

@@ -79,8 +79,8 @@ struct PbtMerkleStage<N: ProviderNodeTypes, C> {
     limits: CatchupLimits,
     factory: ProviderFactory<N>,
     client: C,
-    pending: Option<(ExecInput, PrepareFuture)>,
-    prepared: Option<ExecInput>,
+    pending: Option<((u64, u64), PrepareFuture)>,
+    prepared: Option<(u64, u64)>,
 }
 
 type PrepareFuture = Pin<Box<dyn Future<Output = eyre::Result<()>> + Send>>;
@@ -111,18 +111,20 @@ where
         cx: &mut Context<'_>,
         input: ExecInput,
     ) -> Poll<Result<(), StageError>> {
+        // An inner Merkle checkpoint can advance without changing the range of blocks.
+        let range = (input.checkpoint().block_number, input.target());
         if matches!(self.merkle, MerkleStage::Unwind { .. }) ||
             input.target_reached() ||
-            self.prepared == Some(input)
+            self.prepared == Some(range)
         {
             return Poll::Ready(Ok(()));
         }
-        if self.pending.as_ref().is_some_and(|(pending, _)| *pending != input) {
+        if self.pending.as_ref().is_some_and(|(pending, _)| *pending != range) {
             self.pending = None;
         }
         let (_, pending) = self.pending.get_or_insert_with(|| {
             (
-                input,
+                range,
                 Box::pin(
                     prepare(
                         self.factory.clone(),
@@ -139,7 +141,7 @@ where
         self.pending = None;
         match result {
             Ok(()) => {
-                self.prepared = Some(input);
+                self.prepared = Some(range);
                 Poll::Ready(Ok(()))
             }
             Err(error) => Poll::Ready(Err(match error.downcast::<StageError>() {
@@ -162,7 +164,18 @@ where
                 .sealed_header(input.target())?
                 .ok_or_else(|| ProviderError::HeaderNotFound(input.target().into()))?;
             self.strategy.validate_retired_parent(header.header(), Some(retired))?;
-            self.strategy.restore_parent(header.hash(), header.state_root(), header.timestamp())?;
+            let expected = header.state_root();
+            let root = self
+                .strategy
+                .store()
+                .checkpoint_root(header.hash())
+                .map_err(ProviderError::other)?;
+            if root != expected {
+                return Err(ProviderError::other(std::io::Error::other(
+                    "published PBT checkpoint does not match the target header",
+                ))
+                .into())
+            }
             return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
         }
         let strategy = &self.strategy;
@@ -197,7 +210,9 @@ where
             .sealed_header(input.unwind_to)?
             .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;
         self.strategy.validate_retired_parent(header.header(), provider.mpt_retired_at()?)?;
-        self.strategy.restore_parent(header.hash(), header.state_root(), header.timestamp())?;
+        if header.timestamp() >= self.strategy.activation_timestamp() {
+            self.strategy.restore_parent(header.hash(), header.state_root(), header.timestamp())?;
+        }
         Ok(())
     }
 }
@@ -214,12 +229,28 @@ where
     C: BlockAccessListsClient + Clone + 'static,
 {
     let mut number = input.checkpoint().block_number;
+    let activation = strategy.activation_timestamp();
     while number < input.target() {
-        let mut end =
-            number.saturating_add(u64::try_from(limits.max_blocks.get())?).min(input.target());
+        let first = factory
+            .sealed_header(number + 1)?
+            .ok_or_else(|| ProviderError::HeaderNotFound((number + 1).into()))?;
+        // Before BALs exist, the historical stage validates MPT roots without a PBT checkpoint.
+        if first.timestamp() < activation && first.block_access_list_hash().is_none() {
+            number += 1;
+            continue
+        }
         let anchor = factory
             .sealed_header(number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
+        if !strategy.store().contains_block(anchor.hash())? {
+            if first.timestamp() < activation {
+                number += 1;
+                continue
+            }
+            eyre::bail!("PBT backfill needs a verified checkpoint for the activation parent")
+        }
+        let mut end =
+            number.saturating_add(u64::try_from(limits.max_blocks.get())?).min(input.target());
         let mut fetched = B256Map::default();
         let mut remaining = limits.max_bal_bytes.get();
         for next in number + 1..=end {
@@ -227,12 +258,21 @@ where
                 end = next - 1;
                 break;
             }
-            let header = factory
-                .sealed_header(next)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(next.into()))?;
-            let commitment = header
-                .block_access_list_hash()
-                .ok_or_else(|| eyre::eyre!("PBT backfill header has no BAL commitment"))?;
+            let header = if next == number + 1 {
+                first.clone()
+            } else {
+                factory
+                    .sealed_header(next)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(next.into()))?
+            };
+            let Some(commitment) = header.block_access_list_hash() else {
+                eyre::ensure!(
+                    header.timestamp() < activation,
+                    "PBT backfill header has no BAL commitment"
+                );
+                end = next - 1;
+                break
+            };
             if let Some(raw) = factory.bal_store().get_by_hash(header.hash())? {
                 if raw.len() > remaining {
                     eyre::ensure!(next > number + 1, "PBT catch-up BAL byte budget exceeded");
@@ -296,8 +336,13 @@ fn verify<H: BlockHeader>(
     mpt: B256,
     header: SealedHeader<H>,
 ) -> Result<(), StageError> {
-    let state = strategy.restore_parent(header.hash(), header.state_root(), header.timestamp())?;
-    let expected = mpt_root(&state);
+    let expected = if header.timestamp() < strategy.activation_timestamp() {
+        header.state_root()
+    } else {
+        let state =
+            strategy.restore_parent(header.hash(), header.state_root(), header.timestamp())?;
+        mpt_root(&state)
+    };
     if mpt != expected {
         return Err(StageError::Block {
             block: Box::new(header.block_with_parent()),
@@ -324,6 +369,61 @@ mod tests {
         migration::DecodeLimits, persistence::SnapshotStore, AccountData, StateTree,
     };
     use std::num::NonZeroUsize;
+
+    #[tokio::test]
+    async fn backfill_crosses_pre_bal_history_with_a_verified_anchor() -> eyre::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store = Arc::new(SnapshotStore::open(directory.path(), DecodeLimits::default())?);
+        let factory = create_test_provider_factory();
+        let strategy = Arc::new(PbtStateRootStrategy::new(store.clone(), 3));
+        let client: NoopFullBlockClient = NoopFullBlockClient::default();
+        let raw = Bytes::from_static(&[0xc0]);
+        let state = StateTree::new();
+        let mut headers = Vec::new();
+        let mut parent = B256::ZERO;
+        for number in 0..=3 {
+            let mut header = Block::default().header;
+            header.number = number;
+            header.timestamp = number;
+            header.parent_hash = parent;
+            header.state_root = if number < 3 { mpt_root(&state) } else { state.root() };
+            header.block_access_list_hash = (number >= 2).then(|| keccak256(&raw));
+            let header = SealedHeader::seal_slow(header);
+            parent = header.hash();
+            if number >= 2 {
+                factory.bal_store().insert(header.num_hash(), RawBal::new(raw.clone()))?;
+                factory.bal_store().flush(&[header.num_hash()])?;
+            }
+            headers.push(header);
+        }
+        insert_headers(&factory, &headers);
+        let database = factory.provider_rw()?;
+        for header in &headers {
+            database.tx_ref().put::<tables::HeaderNumbers>(header.hash(), header.number())?;
+        }
+        database.commit()?;
+        let catch_up = |target| {
+            prepare(
+                factory.clone(),
+                client.clone(),
+                strategy.clone(),
+                CatchupLimits::default(),
+                ExecInput { target: Some(target), checkpoint: Some(StageCheckpoint::new(0)) },
+            )
+        };
+        catch_up(1).await?;
+        assert!(!store.contains_block(headers[1].hash())?);
+        verify(&strategy, mpt_root(&state), headers[1].clone())?;
+
+        assert_eq!(
+            catch_up(3).await.unwrap_err().to_string(),
+            "PBT backfill needs a verified checkpoint for the activation parent"
+        );
+        store.save_block_with_number(headers[1].hash(), 1, &state)?;
+        catch_up(3).await?;
+        assert_eq!(store.verify_block(headers[3].hash())?, headers[3].state_root());
+        Ok(())
+    }
 
     #[tokio::test]
     async fn replay_chunks_stop_at_the_byte_budget_but_reject_one_oversized_bal() -> eyre::Result<()>

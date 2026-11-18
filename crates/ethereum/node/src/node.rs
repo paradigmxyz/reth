@@ -66,10 +66,10 @@ use tracing::{debug, info};
 
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 
-#[cfg(all(feature = "pbt", not(target_family = "wasm")))]
+#[cfg(not(target_family = "wasm"))]
 pub use crate::pbt::EthereumTreeValidatorBuilder;
 
-#[cfg(not(all(feature = "pbt", not(target_family = "wasm"))))]
+#[cfg(target_family = "wasm")]
 pub use reth_node_builder::rpc::BasicEngineValidatorBuilder as EthereumTreeValidatorBuilder;
 
 /// Handles the legacy JIT helper subcommand hook.
@@ -230,7 +230,7 @@ where
     }
 }
 
-#[cfg(all(feature = "pbt", not(target_family = "wasm")))]
+#[cfg(not(target_family = "wasm"))]
 impl<N, EthB, PVB, EB, RpcMiddleware, AuthHttpMiddleware>
     EthereumAddOns<
         N,
@@ -388,23 +388,24 @@ where
         let testing_desired_gas_limit = ctx.config.builder.gas_limit_for(ctx.config.chain.chain());
         let testing_engine_handle = ctx.beacon_engine_handle.clone();
 
-        #[cfg(not(all(feature = "pbt", not(target_family = "wasm"))))]
-        eyre::ensure!(
-            !ctx.config.datadir().data_dir().join("pbt/chain-config").try_exists()?,
-            "this data directory requires a Reth build with PBT support"
-        );
-        #[cfg(not(all(feature = "pbt", not(target_family = "wasm"))))]
-        eyre::ensure!(
-            !ctx.config
-                .chain
-                .genesis()
-                .config
-                .extra_fields
-                .get("binaryTrieTime")
-                .is_some_and(|value| !value.is_null()),
-            "binaryTrieTime requires a Reth build with PBT support"
-        );
-        #[cfg(all(feature = "pbt", not(target_family = "wasm")))]
+        #[cfg(target_family = "wasm")]
+        {
+            eyre::ensure!(
+                !ctx.config.datadir().data_dir().join("pbt/chain-config").try_exists()?,
+                "PBT data directories are unsupported on WebAssembly"
+            );
+            eyre::ensure!(
+                !ctx.config
+                    .chain
+                    .genesis()
+                    .config
+                    .extra_fields
+                    .get("binaryTrieTime")
+                    .is_some_and(|value| !value.is_null()),
+                "binaryTrieTime is unsupported on WebAssembly"
+            );
+        }
+        #[cfg(not(target_family = "wasm"))]
         let pbt_methods = if crate::pbt::activation_timestamp(&*ctx.config.chain)?.is_some() {
             Some(crate::pbt::proof_methods(ctx.config.datadir().data_dir())?)
         } else {
@@ -412,9 +413,9 @@ where
         };
 
         let (ssz_proxy_layer, ssz_proxy_handle) = EngineSszProxyLayer::new();
-        #[cfg(all(feature = "pbt", not(target_family = "wasm")))]
+        #[cfg(not(target_family = "wasm"))]
         let pbt_enabled = pbt_methods.is_some();
-        #[cfg(not(all(feature = "pbt", not(target_family = "wasm"))))]
+        #[cfg(target_family = "wasm")]
         let pbt_enabled = false;
         // The binary witness generator still produces MPT witnesses.
         if !pbt_enabled {
@@ -433,7 +434,7 @@ where
             })
             .map_auth_http_middleware(|middleware| Stack::new(ssz_proxy_layer, middleware))
             .launch_add_ons_with(ctx, move |container| {
-                #[cfg(all(feature = "pbt", not(target_family = "wasm")))]
+                #[cfg(not(target_family = "wasm"))]
                 if let Some(methods) = pbt_methods {
                     crate::pbt::remove_mpt_rpc_methods(container.modules, container.auth_module);
                     container.auth_module.merge_auth_methods(methods)?;
