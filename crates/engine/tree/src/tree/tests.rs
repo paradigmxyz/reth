@@ -2033,6 +2033,31 @@ async fn test_fcu_rewinds_and_updates_markers_with_or_without_payload_attributes
 }
 
 #[tokio::test]
+async fn test_fcu_readopting_reverted_head_clears_pending_rewind() {
+    let mut harness = TestHarness::new(MAINNET.clone());
+    let blocks: Vec<_> = harness.block_builder.get_executed_blocks(0..4).collect();
+    harness = harness.with_blocks(blocks.clone());
+    let ancestor = blocks[1].recovered_block();
+    let first_reverted = blocks[2].recovered_block().num_hash();
+    let original_head = blocks[3].recovered_block().num_hash();
+    harness.tree.persistence_state.last_persisted_block = original_head;
+
+    let rewind = ForkchoiceState { head_block_hash: ancestor.hash(), ..Default::default() };
+    let result = harness.tree.on_forkchoice_updated(rewind, None).unwrap().outcome;
+    assert!(result.await.unwrap().payload_status.is_valid());
+    assert_eq!(
+        harness.tree.canonical_in_memory_state.first_block_in_pending_rewind(),
+        Some(first_reverted)
+    );
+
+    let restore = ForkchoiceState { head_block_hash: original_head.hash, ..Default::default() };
+    let result = harness.tree.on_forkchoice_updated(restore, None).unwrap().outcome;
+    assert!(result.await.unwrap().payload_status.is_valid());
+    harness.tree.advance_persistence().unwrap();
+    assert_eq!(harness.tree.canonical_in_memory_state.first_block_in_pending_rewind(), None);
+}
+
+#[tokio::test]
 async fn test_fcu_rewind_without_execution_history_is_rejected() {
     let chain_spec = MAINNET.clone();
     let mut builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());

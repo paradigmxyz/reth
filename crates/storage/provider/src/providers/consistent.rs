@@ -87,6 +87,11 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         Ok(Self { storage_provider, head_block, rewind_head, canonical_in_memory_state: state })
     }
 
+    /// The canonical head to use while this storage snapshot contains a reverted suffix.
+    pub(crate) const fn rewind_head(&self) -> Option<BlockNumHash> {
+        self.rewind_head
+    }
+
     /// Consumes this consistent view and returns its database provider snapshot.
     pub(crate) fn into_database_provider(
         self,

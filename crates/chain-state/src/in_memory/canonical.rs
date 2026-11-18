@@ -392,6 +392,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.inner.chain_info_tracker.first_block_in_pending_rewind()
     }
 
+    /// Clears the rewind marker when the persisted tip is on the current canonical chain.
+    pub fn clear_pending_rewind(&self) {
+        self.inner.chain_info_tracker.clear_pending_rewind();
+    }
+
     /// Safe head setter.
     pub fn set_safe(&self, header: SealedHeader<N::BlockHeader>) {
         self.inner.chain_info_tracker.set_safe(header);

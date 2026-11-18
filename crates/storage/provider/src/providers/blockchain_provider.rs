@@ -808,11 +808,11 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
             trace!(target: "providers::blockchain", "Using head state for latest state provider");
             self.state_provider_for_state(state)
         } else {
-            let head = self.canonical_in_memory_state.get_canonical_head();
-            let provider = self.database.provider()?;
-            if provider.best_block_number()? > head.number() {
-                // After a rewind the canonical head can move before persistence truncates disk.
-                return Ok(self.state_provider_from_database(provider, head.hash()))
+            let provider = self.consistent_provider()?;
+            let rewind_head = provider.rewind_head();
+            let provider = provider.into_database_provider();
+            if let Some(head) = rewind_head {
+                return Ok(self.state_provider_from_database(provider, head.hash))
             }
             trace!(target: "providers::blockchain", "Using database state for latest state provider");
             Ok(Box::new(LatestStateProvider::new(provider)))
@@ -1175,7 +1175,11 @@ mod tests {
         CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
     };
     use reth_chainspec::{ChainSpec, MAINNET};
-    use reth_db_api::models::{AccountBeforeTx, SnapAttempt, StoredBlockBodyIndices};
+    use reth_db_api::{
+        models::{AccountBeforeTx, SnapAttempt, StoredBlockBodyIndices},
+        tables,
+        transaction::DbTxMut,
+    };
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
@@ -3574,6 +3578,7 @@ mod tests {
         let factory = test_provider_factory_with_genesis()?;
         let provider_rw = factory.provider_rw()?;
         provider_rw.insert_account_for_hashing([(address, Some(account_a.clone()))])?;
+        provider_rw.tx_ref().put::<tables::PlainAccountState>(address, account_a.clone())?;
         provider_rw.commit()?;
         let persisted_root = factory.latest()?.state_root(HashedPostState::default())?;
 
@@ -3593,6 +3598,8 @@ mod tests {
         provider_rw.insert_block(&persisted_block)?;
         provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(1))?;
         provider_rw.commit()?;
+
+        let provider = BlockchainProvider::new(factory.clone())?;
 
         // State B: block 2 changes the account and becomes the database head, with a root
         // different from block 1's.
@@ -3621,7 +3628,7 @@ mod tests {
                     [(
                         address,
                         Some(account_a.clone().into()),
-                        Some(account_b.into()),
+                        Some(account_b.clone().into()),
                         Default::default(),
                     )],
                     [[(address, Some(Some(account_a.clone().into())), [])]],
@@ -3634,6 +3641,15 @@ mod tests {
         )?;
         provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2))?;
         provider_rw.commit()?;
+
+        // Forward persistence can finish before the engine publishes the new head.
+        assert_eq!(provider.best_block_number()?, 1);
+        assert_eq!(provider.latest()?.basic_account(&address)?, Some(account_b));
+        provider.canonical_in_memory_state.set_canonical_head_after_rewind(
+            persisted_block.clone_sealed_header(),
+            BlockNumHash::new(2, head_hash),
+        );
+        assert_eq!(provider.latest()?.basic_account(&address)?, Some(account_a.clone()));
 
         let provider = BlockchainProvider::new(factory)?;
 

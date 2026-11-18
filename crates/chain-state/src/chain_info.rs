@@ -128,6 +128,13 @@ where
         self.inner.canonical_head.read().first_reverted
     }
 
+    /// Clears the rewind marker after the engine verifies that disk is on the canonical chain.
+    pub(crate) fn clear_pending_rewind(&self) {
+        if self.first_block_in_pending_rewind().is_some() {
+            self.inner.canonical_head.write().first_reverted = None;
+        }
+    }
+
     /// Sets the safe header of the chain.
     pub fn set_safe(&self, header: SealedHeader<N::BlockHeader>) {
         self.inner.safe_block.send_if_modified(|current_header| {
@@ -154,12 +161,6 @@ where
 
     /// Sets the persisted block of the chain.
     pub fn set_persisted(&self, num_hash: BlockNumHash) {
-        {
-            let mut head = self.inner.canonical_head.write();
-            if head.first_reverted.is_some_and(|first| num_hash.number < first.number) {
-                head.first_reverted = None;
-            }
-        }
         self.inner.persisted_block.send_if_modified(|current| {
             if current.map(|b| b.hash) != Some(num_hash.hash) {
                 let _ = current.replace(num_hash);
