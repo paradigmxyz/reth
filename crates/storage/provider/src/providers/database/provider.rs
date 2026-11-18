@@ -1898,6 +1898,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
     }
 }
 
+impl<TX: DbTx + 'static, N: NodeTypes> reth_storage_api::DurableBlockReader
+    for DatabaseProvider<TX, N>
+{
+}
+
 impl<TX: DbTx + 'static, N: NodeTypes> BlockHashReader for DatabaseProvider<TX, N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.static_file_provider.block_hash(number)
@@ -4212,7 +4217,7 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
-    use reth_storage_api::{DatabaseProviderFactory, MetadataWriter};
+    use reth_storage_api::{DatabaseProviderFactory, DurableBlockReader, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
         bundle_state::BundleState, HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData,
@@ -4289,6 +4294,44 @@ mod tests {
             provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap().block_number,
             11
         );
+    }
+
+    #[test]
+    fn last_durable_block_num_hash_follows_finish_checkpoint() {
+        let factory = create_test_provider_factory();
+        let data = BlockchainTestData::default();
+        let genesis_hash = data.genesis.hash();
+        let provider = factory.provider_rw().unwrap();
+        provider.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
+        for (block, _) in &data.blocks {
+            provider.insert_block(block).unwrap();
+        }
+        provider.commit().unwrap();
+        let hash = |number: u64| {
+            data.blocks.iter().find(|(block, _)| block.number() == number).unwrap().0.hash()
+        };
+
+        let provider = factory.provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0)).unwrap();
+        assert_eq!(
+            provider.last_durable_block_num_hash().unwrap(),
+            BlockNumHash::new(0, genesis_hash)
+        );
+
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2)).unwrap();
+        assert_eq!(provider.last_durable_block_num_hash().unwrap(), BlockNumHash::new(2, hash(2)));
+
+        provider
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(3)
+                    .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(1) }),
+            )
+            .unwrap();
+        assert_eq!(provider.last_durable_block_num_hash().unwrap(), BlockNumHash::new(1, hash(1)));
+        provider.commit().unwrap();
+
+        assert_eq!(factory.last_durable_block_num_hash().unwrap(), BlockNumHash::new(1, hash(1)));
     }
 
     #[test]
