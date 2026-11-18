@@ -1821,6 +1821,9 @@ mod tests {
             .recv_timeout(std::time::Duration::from_secs(5))
             .expect("hashing thread is still held by the finished task");
         assert!(matches!(task.updates.try_recv(), Ok(SparseTrieTaskMessage::FinishedStateUpdates)));
+
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
     }
 
     #[test]

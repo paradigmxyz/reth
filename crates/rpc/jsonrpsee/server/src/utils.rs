@@ -34,11 +34,11 @@ use std::{
     time::Duration,
 };
 
-use crate::{ConnectionState, HttpBody};
+use crate::{ConnectionPermit, HttpBody};
 
 use futures_util::{future, ready};
 use hyper::body::{Bytes, Frame};
-use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use jsonrpsee_core::{middleware::Notification, BoxError, JsonRawValue};
 use jsonrpsee_types::TwoPointZero;
 use pin_project::pin_project;
@@ -134,7 +134,9 @@ where
     );
     let io = TokioIo::new(io);
 
-    let builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+    let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+    // Also bounds how long an idle HTTP/1 keep-alive connection waits for its next request.
+    builder.http1().timer(TokioTimer::new()).header_read_timeout(DEFAULT_FIRST_REQUEST_TIMEOUT);
     let conn = builder.serve_connection_with_upgrades(io, service);
 
     tokio::pin!(stopped, conn);
@@ -216,12 +218,12 @@ pub(crate) struct PermitBody {
     inner: HttpBody,
     /// Rest of the data frame that is being yielded in chunks.
     pending: Bytes,
-    _conn: ConnectionState,
+    _conn_permit: ConnectionPermit,
 }
 
 impl PermitBody {
-    pub(crate) fn new(inner: HttpBody, conn: ConnectionState) -> Self {
-        Self { inner, pending: Bytes::new(), _conn: conn }
+    pub(crate) fn new(inner: HttpBody, conn_permit: ConnectionPermit) -> Self {
+        Self { inner, pending: Bytes::new(), _conn_permit: conn_permit }
     }
 }
 
