@@ -208,34 +208,38 @@ mod tests {
 
     #[test]
     fn test_scope_is_cancelled() {
-        assert!(!is_cancelled());
-
-        let outer = CancelOnDrop::default();
-        let inner = CancelOnDrop::default();
-        outer.scope(|| {
+        reth_concurrency::sync::Runtime::new().run(|| {
             assert!(!is_cancelled());
-            inner.scope(|| {
-                drop(inner.clone());
-                assert!(is_cancelled());
+
+            let outer = CancelOnDrop::default();
+            let inner = CancelOnDrop::default();
+            outer.scope(|| {
+                assert!(!is_cancelled());
+                inner.scope(|| {
+                    drop(inner.clone());
+                    assert!(is_cancelled());
+                });
+                // the outer state is restored
+                assert!(!is_cancelled());
+                outer.request_finalization();
+                assert!(!is_cancelled());
             });
-            // the outer state is restored
-            assert!(!is_cancelled());
-            outer.request_finalization();
-            assert!(!is_cancelled());
-        });
 
-        // leaving the scope does not cancel
-        assert!(!is_cancelled());
-        assert!(!outer.is_cancelled());
+            // leaving the scope does not cancel
+            assert!(!is_cancelled());
+            assert!(!outer.is_cancelled());
+        });
     }
 
     #[test]
     fn test_scope_restores_on_panic() {
-        let cancel = CancelOnDrop::default();
-        drop(cancel.clone());
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let cancel = CancelOnDrop::default();
+            drop(cancel.clone());
 
-        let res = std::panic::catch_unwind(|| cancel.scope(|| panic!("scope panicked")));
-        assert!(res.is_err());
-        assert!(!is_cancelled());
+            let res = std::panic::catch_unwind(|| cancel.scope(|| panic!("scope panicked")));
+            assert!(res.is_err());
+            assert!(!is_cancelled());
+        });
     }
 }

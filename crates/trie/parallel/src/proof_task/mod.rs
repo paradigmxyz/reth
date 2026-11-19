@@ -717,42 +717,45 @@ mod tests {
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
     #[test]
     fn spawn_proof_workers_creates_handle() {
-        let chain_spec = Arc::new(ChainSpec::default());
-        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
-        let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
-        let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let chain_spec = Arc::new(ChainSpec::default());
+            let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
+            let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
+            let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
             provider_factory,
             reth_storage_overlay::OverlayManager::<
                 reth_ethereum_primitives::EthPrimitives,
             >::default()
             .overlay_builder(anchor_hash),
         );
-        let ctx = test_ctx(factory.clone());
+            let ctx = test_ctx(factory.clone());
 
-        let runtime = reth_tasks::Runtime::test();
-        let proof_worker_handle = ProofWorkerHandle::new(
-            &runtime,
-            ctx,
-            ProofWorkerCounts::full(&runtime),
-            #[cfg(feature = "metrics")]
-            Default::default(),
-        );
-        let proof_result_rx = proof_worker_handle.results().clone();
+            let runtime = reth_tasks::Runtime::test();
+            let proof_worker_handle = ProofWorkerHandle::new(
+                &runtime,
+                ctx,
+                ProofWorkerCounts::full(&runtime),
+                #[cfg(feature = "metrics")]
+                Default::default(),
+            );
+            let proof_result_rx = proof_worker_handle.results().clone();
 
-        // Workers shut down automatically when the handle is dropped.
-        drop(proof_worker_handle);
+            // Workers shut down automatically when the handle is dropped.
+            drop(proof_worker_handle);
 
-        // Keep the database alive until both pools release their providers.
-        assert_eq!(
-            proof_result_rx.recv_timeout(Duration::from_secs(30)).unwrap_err(),
-            RecvTimeoutError::Disconnected
-        );
-        drop(factory);
+            // Keep the database alive until both pools release their providers.
+            assert_eq!(
+                proof_result_rx.recv_timeout(Duration::from_secs(30)).unwrap_err(),
+                RecvTimeoutError::Disconnected
+            );
+            drop(factory);
+        });
     }
 
     /// Ensures a single pool serves quarter, half, and full-capacity worker counts.
     #[test]
     fn single_pool_serves_fractional_worker_counts() {
+        reth_concurrency::sync::Runtime::new().run(|| {
         let provider_factory =
             create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
         let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
@@ -832,12 +835,14 @@ mod tests {
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected)
             ));
         }
+    });
     }
 
     /// Ensures jobs still queued when the handle is dropped are discarded, so a cancelled block's
     /// backlog does not hold the pools that the next block's workers queue behind.
     #[test]
     fn dropped_handle_discards_queued_jobs() {
+        reth_concurrency::sync::Runtime::new().run(|| {
         let provider_factory =
             create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
         let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
@@ -881,5 +886,6 @@ mod tests {
             RecvTimeoutError::Disconnected
         );
         drop(factory);
+    });
     }
 }

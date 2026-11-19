@@ -47,6 +47,7 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 crossbeam-channel.workspace = true
 
 [dev-dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
 # reth
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
@@ -78,6 +79,7 @@ serde = [
     "rand/serde",
 ]
 test-utils = [
+    "reth-concurrency/test-utils",
     "triehash",
     "reth-tasks/test-utils",
     "reth-primitives-traits/test-utils",

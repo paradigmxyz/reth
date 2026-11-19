@@ -71,6 +71,7 @@ reth-static-file = { workspace = true, optional = true }
 reth-tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
 # reth
 reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 reth-chain-state = { workspace = true, features = ["test-utils"] }
@@ -112,6 +113,7 @@ portable = [
     "evm2/portable",
 ]
 test-utils = [
+    "reth-concurrency/test-utils",
     "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",
     "reth-consensus/test-utils",

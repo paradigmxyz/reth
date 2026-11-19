@@ -674,18 +674,20 @@ fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled(
 
 #[test]
 fn payload_build_tracker_notifies_after_last_lease_drops() {
-    let (tracker, finished) = PayloadBuildTracker::new();
-    let first = tracker.acquire();
-    let second = tracker.acquire();
+    reth_concurrency::sync::Runtime::new().run(|| {
+        let (tracker, finished) = PayloadBuildTracker::new();
+        let first = tracker.acquire();
+        let second = tracker.acquire();
 
-    assert!(tracker.is_active());
-    drop(first);
-    assert!(tracker.is_active());
-    assert!(finished.try_recv().is_err());
+        assert!(tracker.is_active());
+        drop(first);
+        assert!(tracker.is_active());
+        assert!(finished.try_recv().is_err());
 
-    drop(second);
-    assert!(!tracker.is_active());
-    assert_eq!(finished.try_recv(), Ok(()));
+        drop(second);
+        assert!(!tracker.is_active());
+        assert_eq!(finished.try_recv(), Ok(()));
+    });
 }
 
 #[test]

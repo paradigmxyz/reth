@@ -1174,29 +1174,31 @@ mod tests {
     #[cfg(feature = "rayon")]
     #[test]
     fn cpu_cores_override_sizes_cpu_pools() {
-        let runtime = RuntimeBuilder::new(
-            RuntimeConfig::default().with_cpu_cores(NonZeroUsize::new(5).unwrap()),
-        )
-        .build()
-        .unwrap();
-        assert_eq!(runtime.handle().metrics().num_workers(), 5);
-        assert_eq!(runtime.cpu_pool().current_num_threads(), 5);
-        assert_eq!(
-            runtime
-                .handle()
-                .block_on(runtime.rpc_pool().spawn(rayon::current_num_threads))
-                .unwrap(),
-            5
-        );
-        assert_eq!(runtime.prewarming_pool().current_num_threads(), 5);
-        assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 5);
-        assert_eq!(runtime.proof_storage_worker_pool().num_threads(), 20);
-        assert_eq!(runtime.proof_account_worker_pool().num_threads(), 20);
-        assert_eq!(runtime.storage_pool().current_num_threads(), DEFAULT_STORAGE_POOL_THREADS);
-        assert_eq!(
-            runtime.state_trie_overlay_worker_pool().num_threads(),
-            DEFAULT_STATE_TRIE_OVERLAY_WORKER_THREADS
-        );
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let runtime = RuntimeBuilder::new(
+                RuntimeConfig::default().with_cpu_cores(NonZeroUsize::new(5).unwrap()),
+            )
+            .build()
+            .unwrap();
+            assert_eq!(runtime.handle().metrics().num_workers(), 5);
+            assert_eq!(runtime.cpu_pool().current_num_threads(), 5);
+            assert_eq!(
+                runtime
+                    .handle()
+                    .block_on(runtime.rpc_pool().spawn(rayon::current_num_threads))
+                    .unwrap(),
+                5
+            );
+            assert_eq!(runtime.prewarming_pool().current_num_threads(), 5);
+            assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 5);
+            assert_eq!(runtime.proof_storage_worker_pool().num_threads(), 20);
+            assert_eq!(runtime.proof_account_worker_pool().num_threads(), 20);
+            assert_eq!(runtime.storage_pool().current_num_threads(), DEFAULT_STORAGE_POOL_THREADS);
+            assert_eq!(
+                runtime.state_trie_overlay_worker_pool().num_threads(),
+                DEFAULT_STATE_TRIE_OVERLAY_WORKER_THREADS
+            );
+        });
     }
 
     #[cfg(feature = "rayon")]
@@ -1227,61 +1229,69 @@ mod tests {
     #[cfg(feature = "rayon")]
     #[test]
     fn zero_cpu_threads_still_size_the_proof_pools() {
-        let rt = TokioRuntime::new().unwrap();
-        let mut config =
-            Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
-        config.rayon.cpu_threads = Some(0);
-        config.rayon.proof_storage_worker_threads = None;
-        config.rayon.proof_account_worker_threads = None;
-        let runtime = RuntimeBuilder::new(config).build().unwrap();
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let rt = TokioRuntime::new().unwrap();
+            let mut config = Runtime::test_config()
+                .with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
+            config.rayon.cpu_threads = Some(0);
+            config.rayon.proof_storage_worker_threads = None;
+            config.rayon.proof_account_worker_threads = None;
+            let runtime = RuntimeBuilder::new(config).build().unwrap();
 
-        let resolved = runtime.cpu_pool().current_num_threads();
-        assert!(resolved >= 1);
-        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), resolved * 4);
-        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), resolved * 4);
+            let resolved = runtime.cpu_pool().current_num_threads();
+            assert!(resolved >= 1);
+            assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), resolved * 4);
+            assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), resolved * 4);
+        });
     }
 
     #[cfg(feature = "rayon")]
     #[test]
     fn proof_worker_threads_keep_pinned_counts() {
-        let rt = TokioRuntime::new().unwrap();
-        for configured in [1, 8, 16, 17, 64] {
-            let mut config = Runtime::test_config()
-                .with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
-            config.rayon.proof_storage_worker_threads = Some(configured);
-            config.rayon.proof_account_worker_threads = Some(configured);
-            let runtime = RuntimeBuilder::new(config).build().unwrap();
-            assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), configured);
-            assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), configured);
-            assert_eq!(runtime.proof_storage_worker_threads_override(), Some(configured));
-            assert_eq!(runtime.proof_account_worker_threads_override(), Some(configured));
-        }
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let rt = TokioRuntime::new().unwrap();
+            for configured in [1, 8, 16, 17, 64] {
+                let mut config = Runtime::test_config()
+                    .with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
+                config.rayon.proof_storage_worker_threads = Some(configured);
+                config.rayon.proof_account_worker_threads = Some(configured);
+                let runtime = RuntimeBuilder::new(config).build().unwrap();
+                assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), configured);
+                assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), configured);
+                assert_eq!(runtime.proof_storage_worker_threads_override(), Some(configured));
+                assert_eq!(runtime.proof_account_worker_threads_override(), Some(configured));
+            }
+        });
     }
 
     #[cfg(feature = "rayon")]
     #[test]
     fn zero_proof_worker_threads_use_the_default() {
-        let rt = TokioRuntime::new().unwrap();
-        let mut config =
-            Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
-        config.rayon.proof_storage_worker_threads = Some(0);
-        config.rayon.proof_account_worker_threads = Some(0);
-        let runtime = RuntimeBuilder::new(config).build().unwrap();
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let rt = TokioRuntime::new().unwrap();
+            let mut config = Runtime::test_config()
+                .with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
+            config.rayon.proof_storage_worker_threads = Some(0);
+            config.rayon.proof_account_worker_threads = Some(0);
+            let runtime = RuntimeBuilder::new(config).build().unwrap();
 
-        let default = runtime.cpu_pool().current_num_threads() * 4;
-        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), default);
-        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), default);
-        assert_eq!(runtime.proof_storage_worker_threads_override(), None);
-        assert_eq!(runtime.proof_account_worker_threads_override(), None);
+            let default = runtime.cpu_pool().current_num_threads() * 4;
+            assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), default);
+            assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), default);
+            assert_eq!(runtime.proof_storage_worker_threads_override(), None);
+            assert_eq!(runtime.proof_account_worker_threads_override(), None);
+        });
     }
 
     #[test]
     fn test_runtime_builder() {
-        let rt = TokioRuntime::new().unwrap();
-        let config =
-            Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
-        let runtime = RuntimeBuilder::new(config).build().unwrap();
-        let _ = runtime.handle();
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let rt = TokioRuntime::new().unwrap();
+            let config = Runtime::test_config()
+                .with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
+            let runtime = RuntimeBuilder::new(config).build().unwrap();
+            let _ = runtime.handle();
+        });
     }
 
     #[tokio::test]
@@ -1335,58 +1345,65 @@ mod tests {
 
     #[test]
     fn critical_os_thread_uses_requested_name() {
-        let runtime = Runtime::test();
-        let (tx, rx) = std::sync::mpsc::channel();
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let runtime = Runtime::test();
+            let (tx, rx) = std::sync::mpsc::channel();
 
-        let handle = runtime.spawn_critical_os_thread(
-            "critical-os-test",
-            "critical os thread test",
-            async move {
-                let name = thread::current().name().unwrap().to_string();
-                tx.send(name).unwrap();
-            },
-        );
+            let handle = runtime.spawn_critical_os_thread(
+                "critical-os-test",
+                "critical os thread test",
+                async move {
+                    let name = thread::current().name().unwrap().to_string();
+                    tx.send(name).unwrap();
+                },
+            );
 
-        let name = rx.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert_eq!(name, "critical-os-test");
-        handle.join().unwrap();
+            let name = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(name, "critical-os-test");
+            handle.join().unwrap();
+        });
     }
 
     #[test]
     fn critical_os_thread_panic_is_reported() {
-        let runtime = Runtime::test();
-        let manager_handle = runtime.take_task_manager_handle().unwrap();
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let runtime = Runtime::test();
+            let manager_handle = runtime.take_task_manager_handle().unwrap();
 
-        let handle = runtime.spawn_critical_os_thread(
-            "critical-os-panic",
-            "critical os thread panic test",
-            async { panic!("critical os thread panic") },
-        );
+            let handle = runtime.spawn_critical_os_thread(
+                "critical-os-panic",
+                "critical os thread panic test",
+                async { panic!("critical os thread panic") },
+            );
 
-        let err =
-            runtime.handle().block_on(async move { manager_handle.await.unwrap().unwrap_err() });
-        assert_eq!(err.task_name, "critical os thread panic test");
-        assert_eq!(err.error, Some("critical os thread panic".to_string()));
-        handle.join().unwrap();
+            let err = runtime
+                .handle()
+                .block_on(async move { manager_handle.await.unwrap().unwrap_err() });
+            assert_eq!(err.task_name, "critical os thread panic test");
+            assert_eq!(err.error, Some("critical os thread panic".to_string()));
+            handle.join().unwrap();
+        });
     }
 
     #[cfg(feature = "rayon")]
     #[test]
     fn test_worker_pools_are_lazy() {
-        let runtime = Runtime::test();
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let runtime = Runtime::test();
 
-        // Worker pools are lazy — not initialized until first access.
-        assert!(!runtime.0.bal_streaming_pool.is_initialized());
-        assert!(!runtime.0.proof_storage_worker_pool.is_initialized());
-        assert!(!runtime.0.state_trie_overlay_worker_pool.is_initialized());
+            // Worker pools are lazy — not initialized until first access.
+            assert!(!runtime.0.bal_streaming_pool.is_initialized());
+            assert!(!runtime.0.proof_storage_worker_pool.is_initialized());
+            assert!(!runtime.0.state_trie_overlay_worker_pool.is_initialized());
 
-        // Accessing them triggers initialization and returns the configured thread count.
-        assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 2);
-        assert!(runtime.0.bal_streaming_pool.is_initialized());
+            // Accessing them triggers initialization and returns the configured thread count.
+            assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 2);
+            assert!(runtime.0.bal_streaming_pool.is_initialized());
 
-        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), 2);
-        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), 2);
-        assert_eq!(runtime.prewarming_pool().current_num_threads(), 2);
-        assert_eq!(runtime.state_trie_overlay_worker_pool().current_num_threads(), 2);
+            assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), 2);
+            assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), 2);
+            assert_eq!(runtime.prewarming_pool().current_num_threads(), 2);
+            assert_eq!(runtime.state_trie_overlay_worker_pool().current_num_threads(), 2);
+        });
     }
 }
