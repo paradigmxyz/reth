@@ -30,7 +30,7 @@ const LOG_TARGET: &str = "jsonrpsee-core";
 
 use std::{
     future::Future,
-    io,
+    io::{self, Write},
     panic::AssertUnwindSafe,
     pin::Pin,
     sync::{
@@ -492,6 +492,34 @@ impl ResponseSink {
         }
         self.parts.send(part)
     }
+
+    /// Serializes `value` after `prefix` and queues it as the next part.
+    ///
+    /// Serialization stops once the part exceeds the response size limit, so an oversized value is
+    /// never written in full. Fails with an I/O error once the response was dropped or the part
+    /// would exceed the limit, so the producer can stop, and with a serialization error if `value`
+    /// can't be serialized.
+    pub fn send_json<T: Serialize + ?Sized>(
+        &self,
+        prefix: &[u8],
+        value: &T,
+    ) -> Result<(), serde_json::Error> {
+        // `send` keeps one byte for the closing brace.
+        let max_len = self.remaining.load(Ordering::Relaxed).saturating_sub(1);
+        let mut writer = BoundedWriter::new(max_len, 128);
+        let written = (&mut writer)
+            .write_all(prefix)
+            .map_err(serde_json::Error::io)
+            .and_then(|()| serde_json::to_writer(&mut writer, value));
+        if let Err(err) = written {
+            if err.is_io() {
+                self.remaining.store(0, Ordering::Relaxed);
+            }
+            return Err(err)
+        }
+        self.send(writer.into_bytes().into())
+            .map_err(|_| serde_json::Error::io(io::ErrorKind::BrokenPipe.into()))
+    }
 }
 
 /// Represent the outcome of a method call success or failed.
@@ -761,6 +789,30 @@ mod tests {
         let stream = ResponseStream::new(move |_| async move { panics() });
         let rp = MethodResponse::stream(Id::Number(1), stream, usize::MAX).await;
         assert_eq!(rp.as_error_code(), Some(ErrorCode::InternalError.code()));
+    }
+
+    #[tokio::test]
+    async fn send_json_stops_at_limit() {
+        /// A list of 1000 numbers that counts how many of them were serialized.
+        struct Counted(Arc<AtomicUsize>);
+
+        impl Serialize for Counted {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serializer.collect_seq((0..1000).inspect(|_| {
+                    self.0.fetch_add(1, Ordering::Relaxed);
+                }))
+            }
+        }
+
+        let serialized = Arc::new(AtomicUsize::new(0));
+        let counted = Counted(serialized.clone());
+        let stream = ResponseStream::new(move |sink| async move {
+            sink.send_json(b"", &counted).map_err(|_| ErrorCode::InternalError)
+        });
+        // The envelope leaves 30 bytes, so `[0,1,...,12` fits and `,13` crosses the limit.
+        let rp = MethodResponse::stream(Id::Number(1), stream, 64).await;
+        assert_eq!(rp.as_error_code(), Some(OVERSIZED_RESPONSE_CODE));
+        assert_eq!(serialized.load(Ordering::Relaxed), 14);
     }
 
     #[tokio::test]

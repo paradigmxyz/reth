@@ -388,14 +388,12 @@ where
             let parts = tx.clone();
             let first = this
                 .trace_block_with(block, evm_env, opts, permit, true, move |first, result| {
-                    let mut part = vec![if std::mem::take(first) { b'[' } else { b',' }];
-                    serde_json::to_writer(&mut part, &result).map_err(|err| {
+                    let prefix: &[u8] = if std::mem::take(first) { b"[" } else { b"," };
+                    // If the response was dropped or exceeds the size limit, the client gets
+                    // that instead of this error.
+                    parts.send_json(prefix, &result).map_err(|err| {
                         Eth::Error::from_eth_err(EthApiError::Internal(RethError::other(err)))
-                    })?;
-                    // A dropped response stops the replay, so nobody receives this error.
-                    parts
-                        .send(part.into())
-                        .map_err(|_| Eth::Error::from_eth_err(EthApiError::InternalEthError))
+                    })
                 })
                 .await?;
             let end: &'static [u8] = if first { b"[]" } else { b"]" };
