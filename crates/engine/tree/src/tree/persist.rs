@@ -381,21 +381,28 @@ where
         }
 
         // First fetch the finalized block number.
-        let finalized =
-            if let Some(hash) = self.state.forkchoice_state_tracker.last_valid_finalized() {
-                self.provider.block_number(hash)?.map(|number| BlockNumHash { number, hash })
-            } else {
-                None
-            };
+        let finalized = self
+            .state
+            .forkchoice_state_tracker
+            .last_valid_finalized()
+            .map(|hash| {
+                self.provider
+                    .block_number(hash)
+                    .map(|number| number.map(|number| BlockNumHash { number, hash }))
+            })
+            .transpose()
+            .map(Option::flatten);
         debug!(target: "engine::tree", upper_bound=?in_memory_persisted_block, ?finalized, "Removing blocks from the in-memory state");
         // Trims the canonical chain to the state/trie frontier and prunes the blocks that are not
-        // canonical and conflict with the finalized block.
+        // canonical and conflict with the finalized block. If the finalized block number could not
+        // be fetched, the canonical chain is still trimmed and the error is returned afterwards.
         self.canonical_in_memory_state.on_blocks_persisted(
             self.persistence_state.last_persisted_block,
             in_memory_persisted_block,
-            finalized,
+            finalized.as_ref().copied().unwrap_or_default(),
         );
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
+        finalized?;
         // Persistence changes the overlay anchor. Prepare the remaining canonical range before
         // the next payload needs to read execution state against the new durable frontier.
         self.state.tree_state.overlay_manager.precompute_execution_overlay(
