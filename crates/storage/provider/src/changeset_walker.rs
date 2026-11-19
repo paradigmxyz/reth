@@ -9,7 +9,7 @@ use reth_primitives_traits::StorageEntry;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
 use std::{
     ops::{Bound, RangeBounds, RangeInclusive},
-    vec,
+    vec::IntoIter,
 };
 
 /// Iterator that walks account changesets from static files in a block range.
@@ -24,7 +24,7 @@ pub struct StaticFileAccountChangesetWalker<P> {
     /// Block number attached to the buffered account changesets.
     current_block: BlockNumber,
     /// Remaining changesets for the current block.
-    current_changesets: vec::IntoIter<AccountBeforeTx>,
+    current_changesets: IntoIter<AccountBeforeTx>,
 }
 
 impl<P> StaticFileAccountChangesetWalker<P> {
@@ -74,7 +74,7 @@ pub struct StaticFileStorageChangesetWalker<P> {
     /// Blocks still to be fetched.
     blocks: RangeInclusive<BlockNumber>,
     /// Remaining changesets for the current block.
-    current_changesets: vec::IntoIter<(BlockNumberAddress, StorageEntry)>,
+    current_changesets: IntoIter<(BlockNumberAddress, StorageEntry)>,
 }
 
 impl<P> StaticFileStorageChangesetWalker<P> {

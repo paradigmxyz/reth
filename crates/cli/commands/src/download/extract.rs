@@ -506,7 +506,8 @@ fn download_and_extract(
 ) -> Result<()> {
     let quiet = session.progress().is_some();
     let fetcher = ArchiveFetcher::new(url.to_string(), target_dir, session.clone());
-    let DownloadedArchive { path: downloaded_path, size: total_size } = fetcher.download(None)?;
+    let DownloadedArchive { path: downloaded_path, size: total_size } =
+        fetcher.download(None, None)?;
 
     let file_name =
         downloaded_path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();

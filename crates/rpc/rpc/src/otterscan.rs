@@ -446,13 +446,13 @@ fn otterscan_traces(nodes: Vec<CallTraceNode>) -> Vec<TraceEntry> {
         while selfdestructs.last().is_some_and(|entry| entry.depth > trace.depth as u32) {
             entries.push(selfdestructs.pop().expect("checked above"));
         }
-        if let Some(to) = trace.selfdestruct_refund_target {
+        if let Some(to) = trace.selfdestruct_refund_target() {
             selfdestructs.push(TraceEntry {
                 r#type: "SELFDESTRUCT".to_string(),
                 depth: trace.depth as u32 + 1,
-                from: trace.selfdestruct_address.unwrap_or(trace.address),
+                from: trace.selfdestruct_address().unwrap_or(trace.address),
                 to,
-                value: trace.selfdestruct_transferred_value,
+                value: trace.selfdestruct_transferred_value(),
                 input: Bytes::new(),
                 output: Bytes::new(),
             });
@@ -484,7 +484,10 @@ mod tests {
         evm::{AccountInfo, InMemoryDB},
         SpecId,
     };
-    use evm2_inspectors::tracing::{types::CallTrace, TracingInspector};
+    use evm2_inspectors::tracing::{
+        types::{CallTrace, SelfdestructTrace},
+        TracingInspector,
+    };
     use reth_chainspec::MAINNET;
     use reth_evm::{ConfigureEvm, Evm};
     use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv};
@@ -853,9 +856,13 @@ mod tests {
                 trace: CallTrace {
                     depth,
                     address: Address::with_last_byte(idx as u8),
-                    selfdestruct_address: (idx < 3).then_some(Address::with_last_byte(idx as u8)),
-                    selfdestruct_refund_target: (idx < 3).then_some(Address::with_last_byte(0xff)),
-                    selfdestruct_transferred_value: (idx < 3).then_some(U256::ZERO),
+                    selfdestruct: (idx < 3).then(|| {
+                        Box::new(SelfdestructTrace {
+                            address: Some(Address::with_last_byte(idx as u8)),
+                            refund_target: Some(Address::with_last_byte(0xff)),
+                            transferred_value: Some(U256::ZERO),
+                        })
+                    }),
                     ..Default::default()
                 },
                 ..Default::default()

@@ -325,7 +325,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     }
 
     /// Returns the in-memory state of the overlay manager of this factory, which holds the
-    /// canonical blocks that are not on disk yet.
+    /// executed blocks that are not on disk yet, canonical or not.
     pub fn in_memory_state(&self) -> &InMemoryState<N::Primitives> {
         self.overlay_manager.in_memory_state()
     }
@@ -918,6 +918,13 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ProviderFactory<N> {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
         self.provider()?.block_body_indices_range(range)
+    }
+}
+
+impl<N: ProviderNodeTypes> reth_storage_api::DurableBlockReader for ProviderFactory<N> {
+    fn last_durable_block_num_hash(&self) -> ProviderResult<alloy_eips::BlockNumHash> {
+        // Read the database, not in-memory blocks that may be on an unpersisted fork.
+        self.provider()?.last_durable_block_num_hash()
     }
 }
 

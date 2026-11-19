@@ -94,12 +94,23 @@ impl<R: RangeBounds<BlockNumber>> From<R> for BlockNumberAddressRange {
     fn from(r: R) -> Self {
         let start = match r.start_bound() {
             Bound::Included(n) => Bound::Included(BlockNumberAddress((*n, Address::ZERO))),
-            Bound::Excluded(n) => Bound::Included(BlockNumberAddress((n + 1, Address::ZERO))),
+            Bound::Excluded(n) => {
+                let Some(next) = n.checked_add(1) else {
+                    // No key precedes the first (block, address) pair.
+                    return Self {
+                        start: Bound::Unbounded,
+                        end: Bound::Excluded((0, Address::ZERO).into()),
+                    }
+                };
+                Bound::Included((next, Address::ZERO).into())
+            }
             Bound::Unbounded => Bound::Unbounded,
         };
 
         let end = match r.end_bound() {
-            Bound::Included(n) => Bound::Excluded(BlockNumberAddress((n + 1, Address::ZERO))),
+            Bound::Included(n) => n
+                .checked_add(1)
+                .map_or(Bound::Unbounded, |next| Bound::Excluded((next, Address::ZERO).into())),
             Bound::Excluded(n) => Bound::Excluded(BlockNumberAddress((*n, Address::ZERO))),
             Bound::Unbounded => Bound::Unbounded,
         };
