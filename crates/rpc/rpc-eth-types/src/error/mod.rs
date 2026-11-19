@@ -124,8 +124,8 @@ pub enum EthApiError {
     /// Thrown when an `AccountOverride` contains conflicting `state` and `stateDiff` fields
     #[error("account {0:?} has both 'state' and 'stateDiff'")]
     BothStateAndStateDiffInOverride(Address),
-    /// Thrown when a call method gets a block override that only `eth_simulateV1` applies, such
-    /// as `beaconRoot` or `withdrawals`. Holds the override's JSON field name.
+    /// Thrown when a call method gets a block override it doesn't support, such as `beaconRoot`
+    /// or `withdrawals`. Holds the override's JSON field name.
     #[error("block override \"{0}\" is not supported for this RPC method")]
     UnsupportedBlockOverride(&'static str),
     /// Other internal error

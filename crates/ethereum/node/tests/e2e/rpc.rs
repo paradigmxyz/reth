@@ -1173,8 +1173,8 @@ async fn eth_call_without_gas_with_max_rpc_gas_cap() -> eyre::Result<()> {
     Ok(())
 }
 
-/// Only `eth_simulateV1` applies the `beaconRoot` and `withdrawals` block overrides. The call
-/// methods reject them, as geth does, instead of ignoring them.
+/// The call methods don't support the `beaconRoot` and `withdrawals` block overrides, so they
+/// reject them, as geth does, instead of ignoring them.
 #[tokio::test]
 async fn call_methods_reject_simulate_only_block_overrides() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();

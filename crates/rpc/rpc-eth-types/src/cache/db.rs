@@ -86,8 +86,8 @@ pub fn apply_block_overrides<DB>(
     }
 }
 
-/// Rejects the block overrides that only `eth_simulateV1` applies, matching geth's
-/// `BlockOverrides.Apply` for call methods.
+/// Rejects the block overrides that call methods don't support, matching geth's
+/// `BlockOverrides.Apply`.
 ///
 /// Returns [`EthApiError::UnsupportedBlockOverride`] with the JSON field name of the first
 /// override set, checking `beaconRoot` before `withdrawals`.
