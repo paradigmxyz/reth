@@ -11,7 +11,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     database::Database,
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
-    table::{Compress, Decompress, DupSort, Table},
+    table::{Compress, Decompress, DupSort, Encode, Table},
     tables,
     transaction::DbTx,
     RawKey, RawTable, TableViewer,
@@ -637,14 +637,15 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
             let Some(subkey) = self.subkey.as_deref() else {
                 eyre::bail!("a subkey is required for dupsort tables");
             };
-            let subkey = RawKey::from(table_subkey::<T>(subkey)?);
+            let encoded_subkey = table_subkey::<T>(subkey)?.encode();
+            let subkey = encoded_subkey.as_ref();
 
             // MDBX can return the next duplicate. Each table encodes its full, fixed-width subkey
             // at the start of the value, so raw reads can check it without decoding the payload.
             let value = self
                 .tool
-                .get_dup::<RawDupSort<T>>(key.into(), subkey.clone())?
-                .filter(|value| value.raw_value().starts_with(subkey.raw_key()));
+                .get_dup::<RawDupSort<T>>(key.into(), RawKey::from_vec(subkey.to_vec()))?
+                .filter(|value| value.raw_value().starts_with(subkey));
             let content = match value {
                 Some(value) if self.raw => Some(hex::encode_prefixed(value.raw_value())),
                 Some(value) => Some(serde_json::to_string_pretty(&value.value()?)?),
