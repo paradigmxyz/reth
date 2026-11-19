@@ -15,7 +15,7 @@ use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
-use reth_primitives_traits::{AlloyBlockHeader, FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, PruneCheckpointReader, StageCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
@@ -415,9 +415,12 @@ impl ChangesetCache {
         // Forward updates are a best-effort optimization to speed up compute_range_trie_changesets,
         // missing blocks do not affect correctness.
         let mut forward_updates = overlay_manager
-            .parent_chain(finish.hash)
-            .take_while(|block| block.recovered_block().number() >= start_block)
-            .map(|block| (block.recovered_block().number(), block.trie_updates()))
+            .in_memory_state()
+            .state_by_hash(finish.hash)
+            .iter()
+            .flat_map(|state| state.chain())
+            .take_while(|state| state.number() >= start_block)
+            .map(|state| (state.number(), state.block_ref().trie_updates()))
             .collect::<Vec<_>>();
         forward_updates.reverse();
 
@@ -637,7 +640,7 @@ impl ChangesetCacheInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::StateTrieOverlay;
+    use crate::{test_utils::canonical_state_for, StateTrieOverlay};
     use alloy_consensus::Header;
     use alloy_primitives::{
         keccak256,
@@ -925,12 +928,13 @@ mod tests {
         provider_rw.commit().unwrap();
 
         let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+        let canonical_state = canonical_state_for(&manager);
         for (block, updates) in [
             (&blocks[1], Arc::new(storage_updates(vec![(removed, Some(node))]))),
             (&blocks[2], Arc::clone(&finish_updates)),
             (&blocks[3], Arc::default()),
         ] {
-            manager.insert_block(ExecutedBlock::new(
+            canonical_state.insert_executed(ExecutedBlock::new(
                 Arc::clone(&block.recovered_block),
                 Arc::clone(&block.execution_output),
                 SortedTrieData::new(Arc::default(), updates),
