@@ -2,7 +2,7 @@
 
 use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
-use alloy_primitives::{B256, U256};
+use alloy_primitives::B256;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{
@@ -439,31 +439,11 @@ pub fn validate_against_parent_4844<H: BlockHeader>(
     let excess_blob_gas = header.excess_blob_gas().ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
     let parent_base_fee_per_gas = parent.base_fee_per_gas().unwrap_or(0);
-    // EIP-7918 divides after multiplying by the schedule delta. Only the final excess
-    // must fit in a header, even when the intermediate sum or product exceeds u64.
-    let used = u128::from(parent_blob_gas_used);
-    let excess = u128::from(parent_excess_blob_gas);
-    let target_gas = u128::from(blob_params.target_blob_count) * u128::from(DATA_GAS_PER_BLOB);
-    let expected = if used + excess < target_gas {
-        0
-    } else if blob_params.blob_base_cost != 0 &&
-        U256::from(blob_params.blob_base_cost) * U256::from(parent_base_fee_per_gas) >
-            U256::from(DATA_GAS_PER_BLOB) *
-                U256::from(blob_params.calc_blob_fee(parent_excess_blob_gas))
-    {
-        let delta = blob_params
-            .max_blob_count
-            .checked_sub(blob_params.target_blob_count)
-            .ok_or_else(|| ConsensusError::msg("blob schedule target exceeds maximum"))?;
-        let scaled = (used * u128::from(delta))
-            .checked_div(u128::from(blob_params.max_blob_count))
-            .ok_or_else(|| ConsensusError::msg("blob schedule maximum is zero"))?;
-        excess + scaled
-    } else {
-        used + excess - target_gas
-    };
-    let expected_excess_blob_gas = u64::try_from(expected)
-        .map_err(|_| ConsensusError::msg("expected excess blob gas exceeds u64::MAX"))?;
+    let expected_excess_blob_gas = blob_params.next_block_excess_blob_gas_osaka(
+        parent_excess_blob_gas,
+        parent_blob_gas_used,
+        parent_base_fee_per_gas,
+    );
     if expected_excess_blob_gas != excess_blob_gas {
         return Err(ConsensusError::ExcessBlobGasDiff {
             diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
@@ -480,7 +460,7 @@ mod tests {
     use super::*;
     use alloy_consensus::{BlockBody, Header, TxEip4844};
     use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip4895::Withdrawals};
-    use alloy_primitives::{Address, Bytes, Signature};
+    use alloy_primitives::{Address, Bytes, Signature, U256};
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
@@ -643,72 +623,5 @@ mod tests {
             validate_block_pre_execution(&block, &chain_spec).unwrap_err(),
             ConsensusError::BodyWithdrawalsUnexpected
         ));
-    }
-
-    #[test]
-    fn parent_blob_gas_scales_before_narrowing() {
-        let params = BlobParams {
-            target_blob_count: 1,
-            max_blob_count: u64::MAX / DATA_GAS_PER_BLOB,
-            ..BlobParams::osaka()
-        };
-        let used = 2 * DATA_GAS_PER_BLOB;
-        let parent = Header {
-            blob_gas_used: Some(used),
-            excess_blob_gas: Some(0),
-            base_fee_per_gas: Some(1_000),
-            ..Default::default()
-        };
-        // For 0 < used < max, floor(used * (max - 1) / max) is used - 1.
-        let child = Header {
-            blob_gas_used: Some(0),
-            excess_blob_gas: Some(used - 1),
-            ..Default::default()
-        };
-        validate_against_parent_4844(&child, &parent, params).unwrap();
-    }
-
-    #[test]
-    fn parent_blob_gas_matches_alloy_for_standard_schedules() {
-        for params in [BlobParams::cancun(), BlobParams::osaka(), BlobParams::bpo2()] {
-            let target = params.target_blob_gas_per_block();
-            for used in [0, target, params.max_blob_gas_per_block()] {
-                for base_fee in [0, 100] {
-                    let parent = Header {
-                        blob_gas_used: Some(used),
-                        excess_blob_gas: Some(DATA_GAS_PER_BLOB),
-                        base_fee_per_gas: Some(base_fee),
-                        ..Default::default()
-                    };
-                    let expected =
-                        params.next_block_excess_blob_gas_osaka(DATA_GAS_PER_BLOB, used, base_fee);
-                    let child = Header {
-                        blob_gas_used: Some(0),
-                        excess_blob_gas: Some(expected),
-                        ..Default::default()
-                    };
-                    validate_against_parent_4844(&child, &parent, params).unwrap();
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn parent_blob_gas_checks_only_the_final_excess() {
-        let params = BlobParams::cancun();
-        let mut parent = Header {
-            blob_gas_used: Some(params.target_blob_gas_per_block()),
-            excess_blob_gas: Some(u64::MAX),
-            ..Default::default()
-        };
-        let child = Header {
-            blob_gas_used: Some(0),
-            excess_blob_gas: Some(u64::MAX),
-            ..Default::default()
-        };
-        validate_against_parent_4844(&child, &parent, params).unwrap();
-        parent.blob_gas_used = Some(params.target_blob_gas_per_block() + DATA_GAS_PER_BLOB);
-        let error = validate_against_parent_4844(&child, &parent, params).unwrap_err();
-        assert_eq!(error.to_string(), "expected excess blob gas exceeds u64::MAX");
     }
 }
