@@ -328,12 +328,6 @@ impl Subscription {
             (SubscriptionKind::TransactionReceipts, Params::None) => {
                 Ok(Self::TransactionReceipts(Default::default()))
             }
-            // Alloy decodes `{}` as the default log filter.
-            (SubscriptionKind::TransactionReceipts, Params::Logs(filter))
-                if *filter == Filter::default() =>
-            {
-                Ok(Self::TransactionReceipts(Default::default()))
-            }
             _ => Err(invalid_params_rpc_err(format!("Invalid params for {kind}"))),
         }
     }
@@ -757,7 +751,9 @@ mod tests {
         let mut receipts = Vec::new();
         for params in [
             r#"["transactionReceipts"]"#,
+            r#"["transactionReceipts", []]"#,
             r#"["transactionReceipts", {}]"#,
+            r#"["transactionReceipts", {"transactionHashes": null}]"#,
             r#"["transactionReceipts", {"transactionHashes": []}]"#,
         ] {
             receipts.push(subscribe(&module, params).await);
