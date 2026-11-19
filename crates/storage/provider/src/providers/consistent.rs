@@ -2016,11 +2016,11 @@ mod tests {
                     state: BundleState::new(
                         [(
                             address,
-                            Some(account.into()),
-                            Some(account.into()),
+                            Some(account.clone().into()),
+                            Some(account.clone().into()),
                             HashMap::from_iter([(slot, (previous, U256::from(next)))]),
                         )],
-                        [[(address, Some(Some(account.into())), vec![(slot, previous)])]],
+                        [[(address, Some(Some(account.clone().into())), vec![(slot, previous)])]],
                         [],
                     ),
                     result: Default::default(),
