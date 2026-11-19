@@ -4,7 +4,7 @@ use crate::{
 };
 use alloy_primitives::map::foldhash::fast::FixedState;
 use clap::Parser;
-use reth_chainspec::{EthereumHardforks, OP_MAINNET_BEDROCK_BLOCK, OVM_HEADER_1_HASH};
+use reth_chainspec::EthereumHardforks;
 use reth_db::{static_file::iter_static_files, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO,
@@ -21,7 +21,6 @@ use reth_provider::{
     providers::{ProviderNodeTypes, StaticFileProvider},
     DBProvider, ProviderError, StaticFileProviderFactory,
 };
-use reth_prune_types::PruneSegment;
 use reth_static_file_types::{ChangesetOffset, SegmentRangeInclusive, StaticFileSegment};
 use std::{
     hash::{BuildHasher, Hasher},
@@ -267,29 +266,7 @@ fn partial_transaction_rows(
             .checked_add(indices.tx_count)
             .ok_or_else(|| eyre::eyre!("Transaction index overflow at block {block}"))
     };
-    let mut start = blocks.start();
-    if segment.is_receipts() &&
-        start < OP_MAINNET_BEDROCK_BLOCK &&
-        tx.get::<tables::HeaderNumbers>(OVM_HEADER_1_HASH)?.is_some()
-    {
-        // Migration can pad a post-Bedrock receipt file with empty pre-Bedrock blocks.
-        let last_legacy = OP_MAINNET_BEDROCK_BLOCK - 1;
-        let checkpoint = tx.get::<tables::PruneCheckpoints>(PruneSegment::Receipts)?;
-        let padded = checkpoint.is_some_and(|cp| {
-            cp.block_number.is_some_and(|b| (last_legacy..blocks.end()).contains(&b)) ||
-            // A limited pruner checkpoints the block before its last deleted receipt.
-            (cp.block_number == Some(last_legacy - 1) &&
-                cp.tx_number.is_some_and(|n| n.checked_add(1) == Some(txs.start()))) ||
-            // The v2 pruner may replace the checkpoint when deleting older empty jars.
-            (cp.tx_number.is_none() && cp.block_number.is_some_and(|b| b < start))
-        });
-        eyre::ensure!(
-            padded && blocks.contains(OP_MAINNET_BEDROCK_BLOCK),
-            "Cannot determine per-block receipt rows in legacy OVM static file {blocks}"
-        );
-        start = OP_MAINNET_BEDROCK_BLOCK;
-    }
-
+    let start = blocks.start();
     if segment.is_receipts() {
         // Imported receipts can have extra rows even when the requested blocks are indexed.
         eyre::ensure!(
@@ -297,12 +274,9 @@ fn partial_transaction_rows(
                 txs.end() < next_tx(blocks.end())?,
             "{segment} transaction range {txs} does not fit blocks {blocks}"
         );
-        if last < start {
-            return Ok(0..0)
-        }
     }
     let offset = |n: u64| n.saturating_sub(txs.start()).min(txs.len());
-    let from = if first <= start { 0 } else { offset(body(first)?.first_tx_num) };
+    let from = if first == start { 0 } else { offset(body(first)?.first_tx_num) };
     let to = if last == blocks.end() { txs.len() } else { offset(next_tx(last)?) };
     eyre::ensure!(from <= to, "Decreasing transaction offsets for blocks {first}..={last}");
     Ok(from..to)
@@ -545,7 +519,6 @@ mod tests {
     };
     use reth_node_api::NodeTypes;
     use reth_provider::{test_utils::MockNodeTypes, StaticFileProviderBuilder, StaticFileWriter};
-    use reth_prune_types::PruneCheckpoint;
 
     fn test_files(
         dir: &tempfile::TempDir,
@@ -669,16 +642,17 @@ mod tests {
         }
         writer.commit().unwrap();
         tx.commit().unwrap();
-        let partial = || checksum_static_file(&files, &db, segment, Some(4), Some(4), Some(1));
+        let block = |n| checksum_static_file(&files, &db, segment, Some(n), Some(n), Some(1));
+        assert_eq!(block(3).unwrap(), (checksum_hasher().finish(), 0));
         let mut expected = checksum_hasher();
         expected.write(&receipt(4).compress());
-        assert_eq!(partial().unwrap(), (expected.finish(), 1));
+        assert_eq!(block(4).unwrap(), (expected.finish(), 1));
         for (start, end) in [(2, 3), (5, 6)] {
             writer.user_header_mut().set_tx_range(start, end);
             writer.commit().unwrap();
             assert_eq!(checksum_static_file(&files, &db, segment, None, None, None).unwrap().1, 2);
             assert_eq!(
-                partial().unwrap_err().to_string(),
+                block(4).unwrap_err().to_string(),
                 format!("Receipts transaction range {start}..={end} does not fit blocks 3..=5")
             );
         }
@@ -688,67 +662,7 @@ mod tests {
         ] {
             writer.user_header_mut().set_tx_range(start, end);
             writer.commit().unwrap();
-            assert_eq!(partial().unwrap_err().to_string(), error);
+            assert_eq!(block(4).unwrap_err().to_string(), error);
         }
-    }
-
-    #[test]
-    fn checksum_imported_ovm_receipts() {
-        let dir = tempfile::tempdir().unwrap();
-        let files = test_files(&dir, 2);
-        let db = create_test_rw_db();
-        let segment = StaticFileSegment::Receipts;
-        let bedrock = OP_MAINNET_BEDROCK_BLOCK;
-        let legacy = bedrock - 1;
-        let mut writer = files.get_writer(bedrock - 3, segment).unwrap();
-        let tx = db.tx_mut().unwrap();
-        tx.put::<tables::HeaderNumbers>(OVM_HEADER_1_HASH, 1).unwrap();
-        for (tx_num, block) in (0..).zip(bedrock - 3..=bedrock + 2) {
-            tx.put::<tables::BlockBodyIndices>(
-                block,
-                StoredBlockBodyIndices { first_tx_num: tx_num, tx_count: 1 },
-            )
-            .unwrap();
-            writer.increment_block(block).unwrap();
-            if block != legacy {
-                writer.append_receipt(tx_num, &Default::default()).unwrap();
-            }
-        }
-        writer.commit().unwrap();
-        drop(writer);
-        tx.commit().unwrap();
-
-        let query = |start, end| checksum_static_file(&files, &db, segment, start, end, None);
-        let block = |n| query(Some(n), Some(n));
-        assert_eq!(query(None, None).unwrap().1, 5);
-        assert_eq!(block(bedrock + 1).unwrap().1, 1);
-        for (requested, start) in [(bedrock - 3, bedrock - 3), (bedrock, legacy)] {
-            let range = SegmentRangeInclusive::new(start, start + 1);
-            assert_eq!(
-                block(requested).unwrap_err().to_string(),
-                format!(
-                    "Cannot determine per-block receipt rows in legacy OVM static file {range}"
-                )
-            );
-        }
-        for (checkpoint, tx_number) in
-            [(legacy, Some(2)), (legacy, None), (legacy - 1, None), (legacy - 1, Some(2))]
-        {
-            db.update(|tx| {
-                tx.put::<tables::PruneCheckpoints>(
-                    PruneSegment::Receipts,
-                    PruneCheckpoint { tx_number, ..PruneCheckpoint::pruned_through(checkpoint) },
-                )
-            })
-            .unwrap()
-            .unwrap();
-            assert_eq!(block(bedrock).unwrap().1, 1);
-            assert_eq!(block(legacy).unwrap().1, 0);
-        }
-        db.update(|tx| tx.delete::<tables::BlockBodyIndices>(bedrock, None)).unwrap().unwrap();
-        assert!(matches!(
-            block(bedrock).unwrap_err().downcast_ref::<ProviderError>(),
-            Some(ProviderError::BlockBodyIndicesNotFound(OP_MAINNET_BEDROCK_BLOCK))
-        ));
     }
 }

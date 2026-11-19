@@ -15,11 +15,11 @@ use alloy_consensus::{
     Header,
 };
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
+use alloy_primitives::{b256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, NamedChain, OVM_HEADER_1_HASH};
+use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, NamedChain};
 use reth_db::{
     lockfile::StorageLock,
     static_file::{
@@ -1351,13 +1351,17 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         // If we detect an OVM import was done (block #1 <https://optimistic.etherscan.io/block/1>), skip it.
         // More on [#11099](https://github.com/paradigmxyz/reth/pull/11099).
         if provider.chain_spec().is_optimism() &&
-            reth_chainspec::Chain::optimism_mainnet() == provider.chain_spec().chain_id() &&
-            provider.block_number(OVM_HEADER_1_HASH)?.is_some()
+            reth_chainspec::Chain::optimism_mainnet() == provider.chain_spec().chain_id()
         {
-            info!(target: "reth::cli",
-                "Skipping storage verification for OP mainnet, expected inconsistency in OVM chain"
-            );
-            return Ok(None);
+            // check whether we have the first OVM block: <https://optimistic.etherscan.io/block/0xbee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453>
+            const OVM_HEADER_1_HASH: B256 =
+                b256!("0xbee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453");
+            if provider.block_number(OVM_HEADER_1_HASH)?.is_some() {
+                info!(target: "reth::cli",
+                    "Skipping storage verification for OP mainnet, expected inconsistency in OVM chain"
+                );
+                return Ok(None);
+            }
         }
 
         info!(target: "reth::cli", "Verifying storage consistency.");
