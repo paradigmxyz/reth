@@ -1,5 +1,6 @@
 use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes};
 use crate::{
+    changeset_walker::changeset_block_range,
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
     ChainSpecProvider, ChangeSetReader, HeaderProvider, ProviderError, PruneCheckpointReader,
@@ -439,32 +440,21 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         segment: PruneSegment,
         fetch_db: impl FnOnce(
             &DatabaseProviderRO<N::DB, N>,
-            (Bound<BlockNumber>, Bound<BlockNumber>),
+            RangeInclusive<BlockNumber>,
         ) -> ProviderResult<Vec<T>>,
         append_block: impl Fn(&BlockState<N::Primitives>, &mut Vec<T>),
     ) -> ProviderResult<Vec<T>> {
-        let start = match range.start_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => {
-                let Some(start) = n.checked_add(1) else { return Ok(Vec::new()) };
-                start
-            }
-            Bound::Unbounded => 0,
-        };
-        // An unbounded exclusive end also represents an inclusive u64::MAX.
-        let mut db_end = match range.end_bound() {
-            Bound::Included(&n) => n.checked_add(1),
-            Bound::Excluded(&n) => Some(n),
-            Bound::Unbounded => None,
-        };
-        if db_end.is_some_and(|end| start >= end) {
+        let range = changeset_block_range(range, BlockNumber::MAX);
+        if range.is_empty() {
             return Ok(Vec::new())
         }
 
+        let start = *range.start();
+        let mut first_in_memory = None;
         let mut memory = Vec::new();
         for state in self.head_block.iter().flat_map(|head| head.chain()) {
             let block = state.number();
-            db_end = Some(db_end.map_or(block, |end| end.min(block)));
+            first_in_memory = Some(block);
             if range.contains(&block) {
                 memory.push(state);
             }
@@ -472,12 +462,11 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
                 break
             }
         }
-        let mut changesets = if db_end.is_none_or(|end| start < end) {
+        let mut changesets = if first_in_memory.is_none_or(|block| start < block) {
             self.ensure_changesets_available(segment, start)?;
-            fetch_db(
-                &self.storage_provider,
-                (Bound::Included(start), db_end.map_or(Bound::Unbounded, Bound::Excluded)),
-            )?
+            let end = *range.end();
+            let db_end = first_in_memory.map_or(end, |block| end.min(block - 1));
+            fetch_db(&self.storage_provider, start..=db_end)?
         } else {
             Vec::new()
         };
@@ -1975,7 +1964,7 @@ mod tests {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v1());
 
-        let (database_blocks, in_memory_blocks) = random_blocks(&mut rng, 2, 1, None, None, 0..1);
+        let (database_blocks, in_memory_blocks) = random_blocks(&mut rng, 2, 2, None, None, 0..1);
 
         let address = alloy_primitives::Address::with_last_byte(1);
         let account = reth_primitives_traits::Account {
@@ -2017,55 +2006,64 @@ mod tests {
 
         let provider = BlockchainProvider::new(factory)?;
 
-        let in_mem_block = in_memory_blocks.first().unwrap();
-        let senders = in_mem_block.senders().expect("failed to recover senders");
-        let chain = NewCanonicalChain::Commit {
-            new: vec![ExecutedBlock {
-                recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                    in_mem_block.clone(),
-                    senders,
-                )),
+        let mut new = Vec::new();
+        for (block, (previous, next)) in in_memory_blocks.into_iter().zip([(100, 200), (200, 300)])
+        {
+            let previous = U256::from(previous);
+            new.push(ExecutedBlock {
+                recovered_block: Arc::new(block.try_recover()?),
                 execution_output: Arc::new(BlockExecutionOutput {
                     state: BundleState::new(
-                        [(address, None, Some(account.clone().into()), {
-                            let mut s = HashMap::default();
-                            s.insert(slot, (U256::from(100), U256::from(200)));
-                            s
-                        })],
-                        [[(address, Some(Some(account.into())), vec![(slot, U256::from(100))])]],
+                        [(
+                            address,
+                            Some(account.into()),
+                            Some(account.into()),
+                            HashMap::from_iter([(slot, (previous, U256::from(next)))]),
+                        )],
+                        [[(address, Some(Some(account.into())), vec![(slot, previous)])]],
                         [],
                     ),
-                    result: BlockExecutionResult {
-                        receipts: Default::default(),
-                        requests: Default::default(),
-                        gas_used: 0,
-                        blob_gas_used: 0,
-                    },
+                    result: Default::default(),
                 }),
                 ..Default::default()
-            }],
-        };
-        provider.canonical_in_memory_state.update_chain(chain);
+            });
+        }
+        provider.canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new });
 
         let consistent_provider = provider.consistent_provider()?;
 
-        let storage = consistent_provider.storage_changesets_range(0..=2)?;
+        let storage = consistent_provider.storage_changesets_range(0..=3)?;
         assert_eq!(
-            storage.iter().map(|(key, entry)| (key.block_number(), entry.key)).collect_vec(),
-            [(1, B256::from(slot)), (2, B256::from(slot))],
+            storage,
+            [(1, 0), (2, 100), (3, 200)].map(|(block, previous)| (
+                (block, address).into(),
+                StorageEntry::new(slot.into(), U256::from(previous)),
+            ))
         );
         assert_eq!(consistent_provider.storage_changesets_range(..=1)?.as_slice(), &storage[..1]);
         assert_eq!(consistent_provider.storage_changesets_range(2..)?.as_slice(), &storage[1..]);
+        assert_eq!(consistent_provider.storage_changesets_range(2..=2)?.as_slice(), &storage[1..2]);
+        let only_block_two = (Bound::Excluded(1), Bound::Included(2));
+        assert_eq!(
+            consistent_provider.storage_changesets_range(only_block_two)?.as_slice(),
+            &storage[1..2]
+        );
+        assert_eq!(consistent_provider.storage_changesets_range(3..)?.as_slice(), &storage[2..]);
         assert!(consistent_provider.storage_changesets_range(..1)?.is_empty());
-        assert!(consistent_provider.storage_changesets_range(3..)?.is_empty());
+        assert!(consistent_provider.storage_changesets_range(4..)?.is_empty());
 
-        let accounts = consistent_provider.account_changesets_range(1..=2)?;
+        let accounts = consistent_provider.account_changesets_range(1..=3)?;
         assert_eq!(
             accounts.iter().map(|(block, row)| (*block, row.address)).collect_vec(),
-            [(1, address), (2, address),]
+            [(1, address), (2, address), (3, address)]
         );
         assert_eq!(consistent_provider.account_changesets_range(1..=1)?.as_slice(), &accounts[..1]);
         assert_eq!(consistent_provider.account_changesets_range(2..)?.as_slice(), &accounts[1..]);
+        assert_eq!(
+            consistent_provider.account_changesets_range(only_block_two)?.as_slice(),
+            &accounts[1..2]
+        );
+        assert_eq!(consistent_provider.account_changesets_range(3..)?.as_slice(), &accounts[2..]);
 
         Ok(())
     }
@@ -2084,6 +2082,13 @@ mod tests {
         provider_rw.commit()?;
 
         let db = factory.provider()?;
+        assert_eq!(
+            db.storage_changesets_range(..=u64::MAX)?,
+            [((u64::MAX, Address::ZERO).into(), slot)]
+        );
+        assert!(db
+            .storage_changesets_range((Bound::Excluded(u64::MAX), Bound::Unbounded))?
+            .is_empty());
         assert_eq!(
             db.account_changesets_range((Bound::Excluded(u64::MAX - 1), Bound::Unbounded))?,
             [(u64::MAX, account.clone())]
