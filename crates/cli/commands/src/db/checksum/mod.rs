@@ -162,7 +162,7 @@ fn checksum_static_file<N: NodePrimitives>(
     );
 
     for (block_range, header) in ranges {
-        if checksummer.total == limit {
+        if checksummer.total == limit || block_range.start() > end_block {
             break;
         }
         let first = block_range.start().max(start_block);
