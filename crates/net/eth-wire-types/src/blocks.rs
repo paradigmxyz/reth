@@ -297,6 +297,7 @@ mod tests {
                 requests_hash: None,
                 block_access_list_hash: None,
                 slot_number: None,
+                recursive_stark: None,
             }]),
         }
         .encode(&mut data);
@@ -335,6 +336,7 @@ mod tests {
                 requests_hash: None,
                 block_access_list_hash: None,
                 slot_number: None,
+                recursive_stark: None,
             }]),
         };
         let result = RequestPair::decode(&mut &data[..]);
@@ -442,6 +444,7 @@ mod tests {
                             requests_hash: None,
                             block_access_list_hash: None,
                             slot_number: None,
+                            recursive_stark: None,
                         },
                     ],
                     withdrawals: None,
@@ -521,6 +524,7 @@ mod tests {
                             requests_hash: None,
                             block_access_list_hash: None,
                             slot_number: None,
+                            recursive_stark: None,
                         },
                     ],
                     withdrawals: None,

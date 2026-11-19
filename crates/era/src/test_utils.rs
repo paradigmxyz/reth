@@ -37,6 +37,7 @@ pub(crate) fn create_header() -> Header {
         requests_hash: None,
         block_access_list_hash: None,
         slot_number: None,
+        recursive_stark: None,
     }
 }
 
@@ -146,6 +147,7 @@ pub(crate) fn create_test_block_with_compressed_data(number: BlockNumber) -> Blo
         requests_hash: None,
         block_access_list_hash: None,
         slot_number: None,
+        recursive_stark: None,
     };
 
     // Create test body

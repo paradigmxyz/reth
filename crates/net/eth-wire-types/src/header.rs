@@ -152,6 +152,7 @@ mod tests {
             requests_hash: None,
             block_access_list_hash: None,
             slot_number: None,
+            recursive_stark: None,
         };
         assert_eq!(header.hash_slow(), expected_hash);
     }
@@ -254,6 +255,7 @@ mod tests {
             requests_hash: None,
             block_access_list_hash: None,
             slot_number: None,
+            recursive_stark: None,
         };
 
         let header = Header::decode(&mut data.as_slice()).unwrap();
@@ -294,6 +296,7 @@ mod tests {
             requests_hash: None,
             block_access_list_hash: None,
             slot_number: None,
+            recursive_stark: None,
         };
 
         let header = Header::decode(&mut data.as_slice()).unwrap();
