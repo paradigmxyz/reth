@@ -67,7 +67,13 @@ jobs:
           digest=$(jq -er '.digest | capture("^sha256:(?<hash>[0-9a-f]{64})$").hash' <<< "$asset")
           echo "$digest  fixtures.tar.gz" | sha256sum --check
           tar -xzf fixtures.tar.gz --wildcards --wildcards-match-slash \
-            'fixtures/blockchain_tests/*.json' 'fixtures/blockchain_tests_engine/*.json'
+            'fixtures/blockchain_tests/*.json' 'fixtures/blockchain_tests_engine/*.json' 'fixtures/.meta/index.json'
+          for format in blockchain_tests blockchain_tests_engine; do
+            jq -c --arg prefix "$format/" '
+              reduce (.test_cases[] | select(.json_path | startswith($prefix))) as $case
+                ({}; .[$case.id] = ($case.json_path | ltrimstr($prefix)))
+            ' fixtures/.meta/index.json > "fixtures/$format/fixture-paths"
+          done
 
       - name: Split Engine fixtures across four jobs per mode
         run: |
@@ -78,7 +84,7 @@ jobs:
           for shard in 0 1 2 3; do
             list="$RUNNER_TEMP/engine-$shard"
             test -s "$list"
-            tar -I 'zstd -1 -T2' -cf "$GITHUB_WORKSPACE/engine-$shard.tar.zst" --null -T "$list"
+            tar -I 'zstd -1 -T2' -cf "$GITHUB_WORKSPACE/engine-$shard.tar.zst" --null -T "$list" fixture-paths
           done
       - uses: *upload
         with: {path: blocktest.tar.zst, archive: false, retention-days: 1}
@@ -125,7 +131,7 @@ jobs:
           args=("${MODE%-sequential}" --progress)
           if [[ "$MODE" == enginetest-sequential ]]; then args+=(--bal-sequential); fi
           status=0
-          ./ef-test-runner "${args[@]}" fixtures > results.json 2> >(awk '
+          RUST_LOG='' ./ef-test-runner "${args[@]}" fixtures > results.json 2> >(awk '
             /^PASS / { if (++passed % 5000 == 0) { printf "\033[32mPASS\033[0m %d fixtures\n", passed; fflush() }; next }
             /^FAIL / { next }
             { print; fflush() }
@@ -133,11 +139,13 @@ jobs:
           if (( status > 1 )); then exit "$status"; fi
           echo "status=$status" >> "$GITHUB_OUTPUT"
 
-      - name: List failed fixtures
+      - name: List failed fixtures and replay with client logs
         env:
           MODE: ${{ matrix.mode }}
           FIXTURE_SHARD: ${{ matrix.fixtures }}
           RUNNER_STATUS: ${{ steps.fixtures.outputs.status }}
+          RUST_LOG: info,engine::tree=debug
+          TMPDIR: /dev/shm/reth-fixtures
         run: /usr/bin/python3 report-ef-fixtures.py "$MODE" "$RUNNER_STATUS" results.json expected_failures.yaml
 
       - name: Upload full fixture results

@@ -16,7 +16,7 @@ clap = { workspace = true, features = ["derive"] }
 ef-tests.path = "../ef-tests"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-tracing-subscriber = { workspace = true, features = ["registry", "std"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 tracing.workspace = true
 
 [build-dependencies]

@@ -1,4 +1,4 @@
-//! Reports which executor ran each block, as one JSON object per line on stderr.
+//! Writes client logs and optional per-block execution path reports to stderr.
 
 use serde::Serialize;
 use std::{fmt, io::Write};
@@ -10,16 +10,26 @@ use tracing_subscriber::{
     filter::Targets,
     layer::{Context, SubscriberExt},
     util::SubscriberInitExt,
-    Layer,
+    EnvFilter, Layer,
 };
 
-/// Installs the global subscriber that prints the engine's execution path events.
-pub(crate) fn init() {
-    tracing_subscriber::registry()
-        .with(ExecutionPathLayer.with_filter(
+/// Enables client logs via `RUST_LOG` and filters the structured BAL report independently.
+pub(crate) fn init(bal_report: bool) {
+    let client = std::env::var_os(EnvFilter::DEFAULT_ENV).filter(|v| !v.is_empty()).map(|value| {
+        tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr)
+            .with_ansi(false)
+            .with_filter(EnvFilter::new(value.to_string_lossy()))
+    });
+    if client.is_none() && !bal_report {
+        return
+    }
+    let bal = bal_report.then(|| {
+        ExecutionPathLayer.with_filter(
             Targets::new().with_target("engine::tree::bal_execution_path", Level::DEBUG),
-        ))
-        .init();
+        )
+    });
+    tracing_subscriber::registry().with(client).with(bal).init();
 }
 
 /// Prints each execution-path event as a `balExecution` line.

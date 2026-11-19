@@ -31,6 +31,7 @@ mod report;
 #[command(
     name = "ef-test-runner",
     version = version_metadata().short_version.as_ref(),
+    after_help = "Set RUST_LOG to write client logs to stderr (for example, info,engine::tree=debug).",
     propagate_version = true,
     args_conflicts_with_subcommands = true,
     arg_required_else_help = true
@@ -121,6 +122,7 @@ fn main() {
         .expect("runner version metadata is initialized once before parsing arguments");
     let cmd = TestRunnerCommand::parse();
     let Some(command) = cmd.command else {
+        report::init(false);
         let suite_path = cmd.suite_path.expect("a suite path or a command is required");
         BlockchainTests::new(suite_path.join("blockchain_tests")).run();
         return
@@ -130,9 +132,7 @@ fn main() {
         Command::BlockTest(BlockTestArgs { run, .. }) |
         Command::EngineTest(EngineTestArgs { run, .. }) => run,
     };
-    if args.bal_report {
-        report::init();
-    }
+    report::init(args.bal_report);
     let progress = args.progress;
     let results = Mutex::new(Vec::new());
     let load_failed = AtomicBool::new(false);
