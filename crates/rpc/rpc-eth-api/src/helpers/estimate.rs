@@ -18,7 +18,7 @@ use reth_evm::{
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::{apply_block_overrides, apply_state_overrides},
+    cache::db::{apply_block_overrides, apply_state_overrides, ensure_call_block_overrides},
     error::api::{FromEvmHalt, FromRevert},
     EthApiError, RpcInvalidTransactionError,
 };
@@ -81,6 +81,7 @@ pub trait EstimateCall: Call {
         // Mirrors geth's behavior, see:
         // <https://github.com/ethereum/go-ethereum/pull/30695>
         if let Some(block_overrides) = overrides.block {
+            ensure_call_block_overrides(&block_overrides)?;
             apply_block_overrides(*block_overrides, &mut db, &mut evm_env);
         }
 

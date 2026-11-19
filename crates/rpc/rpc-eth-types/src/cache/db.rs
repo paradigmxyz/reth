@@ -1,6 +1,6 @@
 //! EVM database types and state/block override helpers used by the RPC state cache.
 
-use crate::error::StateOverrideError;
+use crate::error::{EthApiError, StateOverrideError};
 use alloy_eip7928::{bal::DecodedBal, BlockAccessIndex};
 use alloy_primitives::{map::DefaultHashBuilder, Bytes, U256};
 use alloy_rpc_types_eth::{state::StateOverride, BlockOverrides};
@@ -84,6 +84,21 @@ pub fn apply_block_overrides<DB>(
     if let Some(blob_base_fee) = blob_base_fee {
         block.blob_basefee = U256::from(blob_base_fee.saturating_to::<u128>());
     }
+}
+
+/// Rejects the block overrides that only `eth_simulateV1` applies, matching geth's
+/// `BlockOverrides.Apply` for call methods.
+///
+/// Returns [`EthApiError::UnsupportedBlockOverride`] with the JSON field name of the first
+/// override set, checking `beaconRoot` before `withdrawals`.
+pub const fn ensure_call_block_overrides(overrides: &BlockOverrides) -> Result<(), EthApiError> {
+    if overrides.beacon_root.is_some() {
+        return Err(EthApiError::UnsupportedBlockOverride("beaconRoot"))
+    }
+    if overrides.withdrawals.is_some() {
+        return Err(EthApiError::UnsupportedBlockOverride("withdrawals"))
+    }
+    Ok(())
 }
 
 /// Applies RPC state overrides to an evm2 state cache.

@@ -1173,6 +1173,45 @@ async fn eth_call_without_gas_with_max_rpc_gas_cap() -> eyre::Result<()> {
     Ok(())
 }
 
+/// Only `eth_simulateV1` applies the `beaconRoot` and `withdrawals` block overrides. The call
+/// methods reject them, as geth does, instead of ignoring them.
+#[tokio::test]
+async fn call_methods_reject_simulate_only_block_overrides() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider();
+
+    let call = serde_json::json!({ "to": Address::with_last_byte(0x42) });
+    for (field, block_overrides) in [
+        ("beaconRoot", serde_json::json!({ "beaconRoot": B256::ZERO })),
+        ("withdrawals", serde_json::json!({ "withdrawals": [] })),
+    ] {
+        for (method, params) in [
+            ("eth_call", serde_json::json!([call, "latest", null, block_overrides])),
+            ("eth_estimateGas", serde_json::json!([call, "latest", null, block_overrides])),
+            (
+                "debug_traceCall",
+                serde_json::json!([call, "latest", { "blockOverrides": block_overrides }]),
+            ),
+        ] {
+            let err = provider
+                .raw_request::<_, serde_json::Value>(method.into(), params)
+                .await
+                .unwrap_err();
+            let err = err.as_error_resp().expect("expected JSON-RPC error response");
+            assert_eq!(err.code, -32602, "{method} {field}");
+            assert_eq!(
+                err.message,
+                format!("block override \"{field}\" is not supported for this RPC method"),
+                "{method} {field}"
+            );
+        }
+    }
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_test_account_tx_builder() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
