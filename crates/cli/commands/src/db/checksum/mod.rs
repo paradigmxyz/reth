@@ -21,6 +21,7 @@ use reth_provider::{
     providers::{ProviderNodeTypes, StaticFileProvider},
     DBProvider, ProviderError, StaticFileProviderFactory,
 };
+use reth_prune_types::PruneSegment;
 use reth_static_file_types::{ChangesetOffset, StaticFileSegment};
 use std::{
     hash::{BuildHasher, Hasher},
@@ -180,6 +181,11 @@ fn checksum_static_file(
             !block_range.is_empty(),
             "Invalid block range {block_range} in {segment} static file"
         );
+        eyre::ensure!(
+            fixed_block_range.contains(block_range.start()) &&
+                fixed_block_range.contains(block_range.end()),
+            "Block range {block_range} outside {segment} static file {fixed_block_range}"
+        );
         let first = block_range.start().max(start_block);
         let last = block_range.end().min(end_block);
         if first > last {
@@ -241,28 +247,56 @@ fn checksum_static_file(
                 (first > block_range.start() || last < block_range.end())
             {
                 let tx = db.tx()?;
-                let through = |block, cap| transaction_rows_through(&tx, txs.start(), block, cap);
-                // Legacy imports may have extra receipts. A pruned prefix is valid, but all
-                // retained receipt numbers must still belong to blocks in this file.
-                if segment.is_receipts() {
-                    let start = block_range.start();
-                    // OVM imports could duplicate receipts within a jar. Its tx range alone
-                    // cannot identify per-block row boundaries even when both ends fit.
-                    eyre::ensure!(
-                        start >= OP_MAINNET_BEDROCK_BLOCK ||
-                            tx.get::<tables::HeaderNumbers>(OVM_HEADER_1_HASH)?.is_none(),
+                let start = block_range.start();
+                // Migration can pad a post-Bedrock receipt file with pruned pre-Bedrock blocks.
+                if segment.is_receipts() &&
+                    start < OP_MAINNET_BEDROCK_BLOCK &&
+                    tx.get::<tables::HeaderNumbers>(OVM_HEADER_1_HASH)?.is_some()
+                {
+                    let last_legacy = OP_MAINNET_BEDROCK_BLOCK - 1;
+                    let checkpoint = tx.get::<tables::PruneCheckpoints>(PruneSegment::Receipts)?;
+                    let padded = if let Some(cp) = checkpoint &&
+                        cp.block_number.is_some_and(|block| {
+                            (last_legacy..block_range.end()).contains(&block)
+                        }) {
+                        match transaction_in_block_prefix(&tx, txs.start(), last_legacy)? {
+                            Some(legacy) => !legacy,
+                            None => cp.tx_number.is_some_and(|pruned| pruned < txs.start()),
+                        }
+                    } else {
+                        false
+                    };
+                    eyre::ensure!(padded,
                         "Cannot determine per-block receipt rows in legacy OVM static file {block_range}"
                     );
-                    eyre::ensure!(
-                        (start == 0 || through(start - 1, expected)? == 0) &&
-                            through(block_range.end(), expected)? == expected,
-                        "Receipt range {txs} does not fit body indices for blocks {block_range}"
-                    );
                 }
-                if first > block_range.start() {
-                    rows.start = through(first - 1, expected)?;
+                let before = match start.checked_sub(1) {
+                    Some(block) => transaction_in_block_prefix(&tx, txs.start(), block)?,
+                    None => Some(false),
+                };
+                let through_end = transaction_in_block_prefix(&tx, txs.end(), block_range.end())?;
+                eyre::ensure!(
+                    before != Some(true) && through_end != Some(false),
+                    "{segment} transaction range {txs} does not fit blocks {block_range}"
+                );
+                // Imported receipts can have extra rows even when the query itself is indexed.
+                if segment.is_receipts() && (before.is_none() || through_end.is_none()) {
+                    let missing = if before.is_none() { start - 1 } else { block_range.end() };
+                    return Err(ProviderError::BlockBodyIndicesNotFound(missing).into())
                 }
-                if last < block_range.end() {
+                // An unproven file edge cannot stand in for the requested (possibly capped)
+                // boundary.
+                let through = |block, cap| {
+                    transaction_rows_through(&tx, txs.start(), block, cap)?.ok_or_else(|| {
+                        eyre::Report::from(ProviderError::BlockBodyIndicesNotFound(block))
+                    })
+                };
+                if let Some(block) = first.checked_sub(1) &&
+                    (first > start || before.is_none())
+                {
+                    rows.start = through(block, expected)?;
+                }
+                if last < block_range.end() || through_end.is_none() {
                     let remaining = u64::try_from(limit - checksummer.total)?;
                     let cap = rows.start.saturating_add(remaining).min(expected);
                     rows.end = through(last, cap)?;
@@ -299,53 +333,71 @@ fn checksum_static_file(
     Ok((checksum, total))
 }
 
-/// Returns the number of file rows through `block`, capped at the last row boundary needed.
+/// Whether `tx_num` belongs to a block at or before `block`, if either index proves it.
+fn transaction_in_block_prefix(
+    tx: &impl DbTx,
+    tx_num: u64,
+    block: u64,
+) -> eyre::Result<Option<bool>> {
+    if let Some(rows) = transaction_rows_through(tx, tx_num, block, 1)? {
+        return Ok(Some(rows == 1))
+    }
+
+    // Keys are the last transaction in each indexed block. Across a gap only use the side
+    // proved by the nearest entry; a seek can skip over expired history.
+    let mut cursor = tx.cursor_read::<tables::TransactionBlocks>()?;
+    let next = cursor.seek(tx_num)?;
+    if let Some((last_tx, owner)) = next &&
+        (last_tx == tx_num || owner <= block)
+    {
+        return Ok(Some(owner <= block))
+    }
+    let previous = if next.is_some() { cursor.prev()? } else { cursor.last()? };
+    Ok(previous.is_some_and(|(_, owner)| owner >= block).then_some(false))
+}
+
+/// Returns the capped row count through `block`, or `None` if missing indices leave it ambiguous.
 fn transaction_rows_through(
     tx: &impl DbTx,
     first_tx: u64,
     block: u64,
     cap: u64,
-) -> eyre::Result<u64> {
-    let offset = |next_tx: u64| next_tx.saturating_sub(first_tx).min(cap);
+) -> eyre::Result<Option<u64>> {
     let mut cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
-    let (previous, upper) = match cursor.seek(block)? {
-        exact @ Some((number, _)) if number == block => (exact, None),
-        Some((number, body)) if number == block.saturating_add(1) => {
-            return Ok(offset(body.first_tx_num()))
-        }
-        Some((_, body)) => (cursor.prev()?, Some(offset(body.first_tx_num()))),
-        None => (cursor.last()?, Some(cap)),
+    let (previous, next) = match cursor.seek(block)? {
+        exact @ Some((number, _)) if number == block => (exact, cursor.next()?),
+        next @ Some(_) => (cursor.prev()?, next),
+        None => (cursor.last()?, None),
     };
     let lower = if let Some((number, body)) = previous {
-        let next_tx = body
-            .first_tx_num()
+        body.first_tx_num()
             .checked_add(body.tx_count())
-            .ok_or_else(|| eyre::eyre!("Transaction index overflow at block {number}"))?;
-        if number == block &&
-            let Some((next, next_body)) = cursor.next()? &&
-            Some(next) == block.checked_add(1)
-        {
-            eyre::ensure!(
-                next_tx == next_body.first_tx_num(),
-                "Conflicting transaction boundary between blocks {block} and {next}: {next_tx} != {}",
-                next_body.first_tx_num()
-            );
-        }
-        offset(next_tx)
+            .ok_or_else(|| eyre::eyre!("Transaction index overflow at block {number}"))?
     } else {
         0
     };
-    // Across missing body indices, both neighbors must imply the same capped row offset.
-    if let Some(upper) = upper &&
-        lower != upper
-    {
+    let offset = |n: u64| n.saturating_sub(first_tx).min(cap);
+    if let Some((next, body)) = next {
+        let upper = body.first_tx_num();
+        if let Some((prev, _)) = previous &&
+            prev.checked_add(1) == Some(next)
+        {
+            eyre::ensure!(
+                lower == upper,
+                "Conflicting transaction boundary between blocks {prev} and {next}: {lower} != {upper}"
+            );
+        }
         eyre::ensure!(
-            lower < upper,
-            "Decreasing transaction row offsets {lower}..{upper} around block {block}"
+            lower <= upper,
+            "Decreasing transaction indices {lower}..{upper} around block {block}"
         );
-        return Err(ProviderError::BlockBodyIndicesNotFound(block).into())
+        if block.checked_add(1) == Some(next) {
+            return Ok(Some(offset(upper)))
+        }
     }
-    Ok(lower)
+    let lower = offset(lower);
+    let upper = next.map_or(cap, |(_, body)| offset(body.first_tx_num()));
+    Ok((previous.is_some_and(|(number, _)| number == block) || lower == upper).then_some(lower))
 }
 
 pub(crate) struct ChecksumViewer<'a, N: NodeTypesWithDB> {
@@ -591,6 +643,7 @@ mod tests {
     };
     use reth_node_api::NodeTypes;
     use reth_provider::{test_utils::MockNodeTypes, StaticFileProviderBuilder, StaticFileWriter};
+    use reth_prune_types::PruneCheckpoint;
     use reth_static_file_types::{SegmentHeader, SegmentRangeInclusive};
 
     fn test_files(
@@ -673,6 +726,21 @@ mod tests {
                 "start={start:?} end={end:?} limit={limit:?}",
             );
         }
+
+        // The last nonempty sender file holds transactions 3 and 4 in blocks 3..=5.
+        let reopened = test_files(&dir, 3);
+        let mut writer = reopened.get_writer(3, segment).unwrap();
+        writer.user_header_mut().set_tx_range(4, 5);
+        writer.commit().unwrap();
+        let err =
+            checksum_static_file(&reopened, &bodies, segment, Some(5), Some(5), None).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "TransactionSenders transaction range 4..=5 does not fit blocks 3..=5"
+        );
+        writer.user_header_mut().set_tx_range(3, 4);
+        writer.commit().unwrap();
+        drop(writer);
 
         for (block, first_tx_num, tx_count, error) in [
             (4, 3, 0, "Conflicting transaction boundary between blocks 3 and 4: 3 != 4"),
@@ -773,6 +841,10 @@ mod tests {
                 Some(SegmentRangeInclusive::new(3, 2)),
                 "Invalid block range 3..=2 in Headers static file",
             ),
+            (
+                Some(SegmentRangeInclusive::new(1, 2)),
+                "Block range 1..=2 outside Headers static file 2..=3",
+            ),
         ] {
             *writer.user_header_mut() = SegmentHeader::new(expected, actual, None, segment);
             writer.commit().unwrap();
@@ -823,14 +895,34 @@ mod tests {
                 checksum_static_file(&files, &db, segment, Some(4), Some(4), Some(1)).unwrap_err();
             assert_eq!(
                 err.to_string(),
-                format!("Receipt range {start}..={end} does not fit body indices for blocks 3..=5")
+                format!("Receipts transaction range {start}..={end} does not fit blocks 3..=5")
             );
         }
+
+        writer.user_header_mut().set_tx_range(4, 5);
+        writer.commit().unwrap();
+        let tx = db.tx_mut().unwrap();
+        tx.delete::<tables::BlockBodyIndices>(5, None).unwrap();
+        tx.put::<tables::TransactionBlocks>(9, 8).unwrap();
+        tx.commit().unwrap();
+        let query = || checksum_static_file(&files, &db, segment, Some(4), Some(4), Some(1));
+        assert!(matches!(
+            query().unwrap_err().downcast_ref::<ProviderError>(),
+            Some(ProviderError::BlockBodyIndicesNotFound(5))
+        ));
+        let tx = db.tx_mut().unwrap();
+        tx.put::<tables::TransactionBlocks>(5, 5).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(query().unwrap().1, 1);
     }
 
     #[test]
     fn checksum_imported_ovm_receipts() {
-        for first in [0, OP_MAINNET_BEDROCK_BLOCK + 1] {
+        for (first, pruned) in [
+            (0, false),
+            (OP_MAINNET_BEDROCK_BLOCK + 1, false),
+            (OP_MAINNET_BEDROCK_BLOCK - 1, true),
+        ] {
             let dir = tempfile::tempdir().unwrap();
             let files = test_files(&dir, 2);
             let db = create_test_rw_db();
@@ -846,21 +938,40 @@ mod tests {
                 )
                 .unwrap();
                 writer.increment_block(block).unwrap();
-                writer.append_receipt(tx_num, &Default::default()).unwrap();
+                if !pruned || tx_num != 0 {
+                    writer.append_receipt(tx_num, &Default::default()).unwrap();
+                }
             }
             writer.commit().unwrap();
             drop(writer);
             tx.commit().unwrap();
-            assert_eq!(checksum_static_file(&files, &db, segment, None, None, None).unwrap().1, 2);
-            let partial =
-                checksum_static_file(&files, &db, segment, Some(first), Some(first), None);
-            if first == 0 {
+            assert_eq!(
+                checksum_static_file(&files, &db, segment, None, None, None).unwrap().1,
+                if pruned { 1 } else { 2 }
+            );
+            let partial = || {
+                checksum_static_file(&files, &db, segment, Some(first + 1), Some(first + 1), None)
+            };
+            if first < OP_MAINNET_BEDROCK_BLOCK {
                 assert_eq!(
-                    partial.unwrap_err().to_string(),
-                    "Cannot determine per-block receipt rows in legacy OVM static file 0..=1"
+                    partial().unwrap_err().to_string(),
+                    format!("Cannot determine per-block receipt rows in legacy OVM static file {first}..={}", first+1)
                 );
-            } else {
-                assert_eq!(partial.unwrap().1, 1);
+            }
+            if pruned {
+                for tx_number in [Some(0), None] {
+                    let tx = db.tx_mut().unwrap();
+                    tx.put::<tables::PruneCheckpoints>(
+                        PruneSegment::Receipts,
+                        PruneCheckpoint { tx_number, ..PruneCheckpoint::pruned_through(first) },
+                    )
+                    .unwrap();
+                    tx.commit().unwrap();
+                    assert_eq!(partial().unwrap().1, 1);
+                }
+            }
+            if first >= OP_MAINNET_BEDROCK_BLOCK {
+                assert_eq!(partial().unwrap().1, 1);
             }
         }
     }
@@ -927,8 +1038,14 @@ mod tests {
         )
         .unwrap();
         tx.commit().unwrap();
-        let err = checksum_static_file(&files, &db, segment, None, Some(12), None).unwrap_err();
-        assert_eq!(err.to_string(), "Decreasing transaction row offsets 1..0 around block 12");
+        for boundary in [10, 12, 13] {
+            let err = checksum_static_file(&files, &db, segment, None, Some(boundary), Some(2))
+                .unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                format!("Decreasing transaction indices 2..1 around block {boundary}")
+            );
+        }
     }
 
     #[test]
