@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{
     state::{AccountOverride, StateOverride, StateOverridesBuilder},
     BlockOverrides, TransactionRequest, TransactionTrait as _,
 };
-use reth_chainspec::EthereumHardfork;
+use reth_chainspec::{EthereumHardfork, ForkCondition};
 use reth_e2e_test_utils::{test_chain_spec_builder, E2ETestSetupExt};
 use reth_node_ethereum::EthereumNode;
 use std::sync::Arc;
@@ -375,7 +375,15 @@ async fn test_simulate_v1_blockhash_reads_prior_simulated_block() -> eyre::Resul
 async fn test_simulate_v1_applies_withdrawals_override() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    // The first simulated block moves to Shanghai on top of the pre-Shanghai genesis.
+    let shanghai_time = 100;
+    let chain_spec = Arc::new(
+        test_chain_spec_builder()
+            .paris_activated()
+            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(shanghai_time))
+            .build(),
+    );
+    let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let provider = node.rpc_provider();
 
     let recipient = address!("0x00000000000000000000000000000000000000aa");
@@ -389,6 +397,7 @@ async fn test_simulate_v1_applies_withdrawals_override() -> eyre::Result<()> {
     let balance_of = Address::with_last_byte(0xc3);
     let payload = SimulatePayload::default()
         .extend(SimBlock::default().with_block_overrides(BlockOverrides {
+            time: Some(shanghai_time),
             withdrawals: Some(withdrawals.clone()),
             ..Default::default()
         }))
