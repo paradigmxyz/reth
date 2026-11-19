@@ -38,10 +38,14 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo build --locked --profile hivetests -p ef-test-runner --features ef-tests/asm-keccak
+      - name: Bundle the runner and its CI reporter
+        run: |
+          mkdir runner
+          cp target/hivetests/ef-test-runner .github/scripts/report-ef-fixtures.py .github/scripts/hive/expected_failures.yaml runner/
       - uses: &upload actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ef-test-runner
-          path: target/hivetests/ef-test-runner
+          path: runner/
           compression-level: 1
           if-no-files-found: error
           retention-days: 1
@@ -109,6 +113,7 @@ jobs:
         with:
           name: ${{ matrix.fixtures }}.tar.zst
       - name: Run fixtures
+        id: fixtures
         env:
           MODE: ${{ matrix.mode }}
           FIXTURES: ${{ matrix.fixtures }}
@@ -119,4 +124,27 @@ jobs:
           chmod +x ef-test-runner
           args=("${MODE%-sequential}" --progress)
           if [[ "$MODE" == enginetest-sequential ]]; then args+=(--bal-sequential); fi
-          ./ef-test-runner "${args[@]}" fixtures > /dev/null
+          status=0
+          ./ef-test-runner "${args[@]}" fixtures > results.json 2> >(awk '
+            /^PASS / { if (++passed % 5000 == 0) { printf "\033[32mPASS\033[0m %d fixtures\n", passed; fflush() }; next }
+            /^FAIL / { next }
+            { print; fflush() }
+          ' >&2) || status=$?
+          if (( status > 1 )); then exit "$status"; fi
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: List failed fixtures
+        env:
+          MODE: ${{ matrix.mode }}
+          FIXTURE_SHARD: ${{ matrix.fixtures }}
+          RUNNER_STATUS: ${{ steps.fixtures.outputs.status }}
+        run: /usr/bin/python3 report-ef-fixtures.py "$MODE" "$RUNNER_STATUS" results.json expected_failures.yaml
+
+      - name: Upload full fixture results
+        if: ${{ !cancelled() && steps.fixtures.outputs.status != '' }}
+        uses: *upload
+        with:
+          name: results-${{ matrix.mode }}-${{ matrix.fixtures }}
+          path: results.json
+          compression-level: 1
+          retention-days: 1
