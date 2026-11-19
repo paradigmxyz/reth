@@ -505,6 +505,23 @@ pub enum ConsensusError {
     /// Any additional consensus error, for example L2-specific errors.
     #[error(transparent)]
     Other(#[from] Arc<dyn Error + Send + Sync>),
+    /// Dependency-proof fields are invalid before the explicit devnet activation.
+    #[error("unexpected EIP-8288 dependency proof")]
+    UnexpectedDependencyProof,
+    /// Activated blocks require a dependency-proof header entry, including empty blocks.
+    #[error("missing EIP-8288 dependency proof")]
+    MissingDependencyProof,
+    /// Header proof bytes exceed the experimental profile's limit.
+    #[error("EIP-8288 proof size {size} exceeds limit {limit}")]
+    DependencyProofTooLarge {
+        /// Encoded proof length.
+        size: usize,
+        /// Maximum accepted proof length.
+        limit: usize,
+    },
+    /// The selected build cannot verify dependency proofs.
+    #[error("EIP-8288 proof verification requires std")]
+    DependencyProofUnsupported,
 }
 
 impl ConsensusError {

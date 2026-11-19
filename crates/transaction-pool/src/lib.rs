@@ -277,6 +277,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 pub use imbl::OrdMap;
+pub use reth_eip8288::{DependencyEvidence, ProofError};
 
 pub use crate::{
     batcher::{BatchTxProcessor, BatchTxRequest},
@@ -481,6 +482,14 @@ where
 
     fn block_info(&self) -> BlockInfo {
         self.pool.block_info()
+    }
+
+    fn dependency_aggregate(&self) -> Option<Arc<reth_eip8288::DependencyEvidence>> {
+        self.pool.dependency_aggregate.read().clone()
+    }
+
+    fn set_dependency_aggregate(&self, evidence: Option<Arc<reth_eip8288::DependencyEvidence>>) {
+        *self.pool.dependency_aggregate.write() = evidence;
     }
 
     async fn add_transaction_and_subscribe(

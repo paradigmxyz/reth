@@ -17,6 +17,7 @@ reth-chainspec.workspace = true
 reth-consensus-common.workspace = true
 reth-primitives-traits.workspace = true
 reth-consensus.workspace = true
+reth-eip8288 = { workspace = true, optional = true }
 
 # alloy
 alloy-eips.workspace = true
@@ -28,6 +29,7 @@ tracing.workspace = true
 [features]
 default = ["std"]
 std = [
+    "dep:reth-eip8288",
     "alloy-consensus/std",
     "alloy-eips/std",
     "alloy-primitives/std",

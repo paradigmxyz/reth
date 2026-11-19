@@ -1,6 +1,6 @@
 //! Transactions management for the p2p network.
 
-use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, transaction::TxHashRef};
+use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, transaction::TxHashRef, Transaction};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use smallvec::SmallVec;
 
@@ -1754,10 +1754,19 @@ impl PropagationMode {
     }
 }
 
+/// Whether a transaction must travel with its dependency proof wrapper.
+fn requires_dependency_wrapper(transaction: &impl Transaction) -> bool {
+    transaction.frame_transaction().is_some_and(|tx| {
+        tx.frames.iter().any(|frame| frame.mode == alloy_eips::eip8141::FrameMode::DependencyVerify)
+    })
+}
+
 /// A transaction that's about to be propagated to multiple peers.
 #[derive(Debug, Clone)]
 struct PropagateTransaction {
     is_broadcastable_in_full: bool,
+    /// Dependency transactions are announced by the wrapper capability.
+    requires_dependency_wrapper: bool,
     /// Size advertised in `NewPooledTransactionHashes` metadata and used for full broadcast
     /// soft-limit accounting.
     ///
@@ -1780,6 +1789,7 @@ impl PropagateTransaction {
 
         Self {
             is_broadcastable_in_full,
+            requires_dependency_wrapper: requires_dependency_wrapper(&transaction),
             propagation_size,
             transaction: LazyEncoded::new(transaction),
         }
@@ -1795,6 +1805,9 @@ impl PropagateTransaction {
         let propagation_size = tx.encoded_length();
         Self {
             is_broadcastable_in_full,
+            requires_dependency_wrapper: requires_dependency_wrapper(
+                tx.transaction.consensus_ref().into_inner(),
+            ),
             propagation_size,
             transaction: LazyEncoded::new(PropagatePooledTransactionEncoder::new(tx)),
         }
@@ -1984,6 +1997,9 @@ impl FullTransactionsBuilder {
     /// to list of pooled transactions, (e.g. 4844 transactions).
     /// See also [`SignedTransaction::is_broadcastable_in_full`].
     fn push(&mut self, transaction: &PropagateTransaction) {
+        if transaction.requires_dependency_wrapper {
+            return
+        }
         // Do not send full 4844 transaction hashes to peers.
         //
         //  Nodes MUST NOT automatically broadcast blob transactions to their peers.
@@ -2071,6 +2087,9 @@ impl PooledTransactionsHashesBuilder {
     }
 
     fn push(&mut self, tx: &PropagateTransaction) {
+        if tx.requires_dependency_wrapper {
+            return
+        }
         match self {
             Self::Eth66(msg) => msg.push(*tx.tx_hash()),
             Self::Eth68(msg) => {
@@ -2513,6 +2532,34 @@ mod tests {
             }
             .seal_slow(),
         )
+    }
+
+    #[test]
+    fn dependency_transactions_require_wrapper_gossip() {
+        let transaction = TransactionSigned::Eip8141(
+            TxEip8141 {
+                frames: vec![alloy_eips::eip8141::Frame {
+                    mode: alloy_eips::eip8141::FrameMode::DependencyVerify,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }
+            .seal_slow(),
+        );
+        let dependency = PropagateTransaction::new(transaction);
+        let ordinary = PropagateTransaction::new(frame_transaction(false));
+        for version in [EthVersion::Eth66, EthVersion::Eth68, EthVersion::Eth72] {
+            let mut full = FullTransactionsBuilder::new(version);
+            full.push(&dependency);
+            assert!(full.is_empty());
+            full.push(&ordinary);
+            assert!(!full.is_empty());
+            let mut hashes = PooledTransactionsHashesBuilder::new(version);
+            hashes.push(&dependency);
+            assert!(hashes.is_empty());
+            hashes.push(&ordinary);
+            assert!(!hashes.is_empty());
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]

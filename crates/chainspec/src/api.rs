@@ -84,6 +84,22 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     }
 }
 
+/// Whether Bogota and the explicitly configured experimental dependency-proof profile are active.
+/// `eip8288Time` is a numeric timestamp in genesis config; absence leaves the profile disabled.
+pub fn is_eip8288_active_at_timestamp<C: EthChainSpec + EthereumHardforks>(
+    chain_spec: &C,
+    timestamp: u64,
+) -> bool {
+    chain_spec.is_bogota_active_at_timestamp(timestamp) &&
+        chain_spec
+            .genesis()
+            .config
+            .extra_fields
+            .get("eip8288Time")
+            .and_then(|activation| activation.as_u64())
+            .is_some_and(|activation| timestamp >= activation)
+}
+
 impl<H: BlockHeader> EthChainSpec for ChainSpec<H> {
     type Header = H;
 

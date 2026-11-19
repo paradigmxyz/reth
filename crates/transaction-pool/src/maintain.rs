@@ -24,7 +24,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives_traits::{
-    transaction::signed::SignedTransaction, NodePrimitives, SealedHeader,
+    transaction::signed::SignedTransaction, BlockBody, NodePrimitives, SealedHeader,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
@@ -396,11 +396,45 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 // update the pool then re-inject the pruned transactions
                 // find all transactions that were mined in the old chain but not in the new chain
                 let pruned_old_transactions = old_blocks
-                    .transactions_with_sender()
-                    .filter(|(_, tx)| !new_mined_transactions.contains(tx.tx_hash()))
-                    .filter_map(|(signer, tx)| {
+                    .iter()
+                    .flat_map(|(_, block)| {
+                        // The old canonical block's proof is sufficient evidence after reorg.
+                        let evidence = block
+                            .header()
+                            .recursive_stark()
+                            .filter(|proof| !proof.stark_proof.is_empty())
+                            .and_then(|proof| {
+                                let deps = match reth_eip8288::transaction_dependencies(
+                                    block.body().transactions(),
+                                ) {
+                                    Ok(deps) => deps,
+                                    Err(error) => {
+                                        debug!(target: "txpool", %error, "Cannot reconstruct reorg dependency evidence");
+                                        return None;
+                                    }
+                                };
+                                match reth_eip8288::DependencyEvidence::aggregate(
+                                    deps,
+                                    proof.stark_proof.clone(),
+                                ) {
+                                    Ok(evidence) => Some(Arc::new(evidence)),
+                                    Err(error) => {
+                                        debug!(target: "txpool", %error, "Cannot retain reorg dependency evidence");
+                                        None
+                                    }
+                                }
+                            });
+                        block
+                            .transactions_with_sender()
+                            .map(move |(sender, tx)| (sender, tx, evidence.clone()))
+                    })
+                    .filter(|(_, tx, _)| !new_mined_transactions.contains(tx.tx_hash()))
+                    .filter_map(|(signer, tx, evidence)| {
                         let tx = tx.clone().with_signer(*signer);
-                        if tx.blob_versioned_hashes().is_some_and(|hashes| !hashes.is_empty()) {
+                        let mut transaction = if tx
+                            .blob_versioned_hashes()
+                            .is_some_and(|hashes| !hashes.is_empty())
+                        {
                             // reorged blobs no longer include the blob, which is necessary for
                             // validating the transaction. Even though the transaction could have
                             // been validated previously, we still need the blob in order to
@@ -415,7 +449,16 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                                 })
                         } else {
                             <P as TransactionPool>::Transaction::try_from_consensus(tx).ok()
+                        }?;
+                        if transaction.frame_transaction().is_some_and(|tx| {
+                            tx.frames.iter().any(|frame| {
+                                frame.mode == alloy_eips::eip8141::FrameMode::DependencyVerify
+                            })
+                        }) && let Err(error) = transaction.set_dependency_evidence(evidence?) {
+                            debug!(target: "txpool", %error, "Cannot attach reorg dependency evidence");
+                            return None;
                         }
+                        Some(transaction)
                     })
                     .collect::<Vec<_>>();
 

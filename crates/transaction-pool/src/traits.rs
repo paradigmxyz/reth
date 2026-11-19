@@ -129,6 +129,15 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// This tracks the block that the pool has last seen.
     fn block_info(&self) -> BlockInfo;
 
+    /// Returns the most recent bounded aggregate available to payload construction.
+    fn dependency_aggregate(&self) -> Option<Arc<reth_eip8288::DependencyEvidence>> {
+        None
+    }
+
+    /// Replaces the single aggregate retained as a proving optimization.
+    /// Payload construction independently verifies coverage and the proof.
+    fn set_dependency_aggregate(&self, _evidence: Option<Arc<reth_eip8288::DependencyEvidence>>) {}
+
     /// Imports an _external_ transaction.
     ///
     /// This is intended to be used by the network to insert incoming transactions received over the
@@ -1526,6 +1535,19 @@ pub trait PoolTransaction:
         None
     }
 
+    /// Returns immutable dependency evidence attached by wrapper admission.
+    fn dependency_evidence(&self) -> Option<&Arc<reth_eip8288::DependencyEvidence>> {
+        None
+    }
+
+    /// Attaches wrapper evidence. Admission independently checks coverage and validity.
+    fn set_dependency_evidence(
+        &mut self,
+        _evidence: Arc<reth_eip8288::DependencyEvidence>,
+    ) -> Result<(), reth_eip8288::ProofError> {
+        Err(reth_eip8288::ProofError::MissingEvidence)
+    }
+
     /// Attaches frame validation metadata.
     fn set_frame_validation(
         &mut self,
@@ -1711,6 +1733,8 @@ pub struct EthPooledTransaction<T = TransactionSigned> {
 
     /// Optional validation metadata for an EIP-8141 frame transaction.
     pub frame_validation: Option<Arc<FrameValidation>>,
+    /// Shared immutable witnesses for EIP-8288 dependencies, excluded from the transaction hash.
+    pub dependency_evidence: Option<Arc<reth_eip8288::DependencyEvidence>>,
 }
 
 impl<T: SignedTransaction> EthPooledTransaction<T> {
@@ -1756,6 +1780,7 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
             blob_sidecar,
             blob_cell_availability,
             frame_validation: None,
+            dependency_evidence: None,
         }
     }
 
@@ -1830,6 +1855,21 @@ impl PoolTransaction for EthPooledTransaction {
         self.frame_validation.as_ref()
     }
 
+    fn dependency_evidence(&self) -> Option<&Arc<reth_eip8288::DependencyEvidence>> {
+        self.dependency_evidence.as_ref()
+    }
+
+    fn set_dependency_evidence(
+        &mut self,
+        evidence: Arc<reth_eip8288::DependencyEvidence>,
+    ) -> Result<(), reth_eip8288::ProofError> {
+        if !self.is_eip8141() {
+            return Err(reth_eip8288::ProofError::Coverage);
+        }
+        self.dependency_evidence = Some(evidence);
+        Ok(())
+    }
+
     fn set_frame_validation(&mut self, metadata: Arc<FrameValidation>) -> Result<(), &'static str> {
         if !self.is_eip8141() {
             return Err("frame validation metadata requires an EIP-8141 transaction");
@@ -1871,6 +1911,7 @@ impl<T: InMemorySize> InMemorySize for EthPooledTransaction<T> {
     #[inline]
     fn size(&self) -> usize {
         self.in_memory_size +
+            self.dependency_evidence.as_ref().map_or(0, |evidence| evidence.size()) +
             self.frame_validation.as_ref().map_or(0, |metadata| {
                 // Admission metadata can exceed the wire payload for code/storage-heavy prefixes.
                 // Include its allocation in pool pressure accounting without changing encoded

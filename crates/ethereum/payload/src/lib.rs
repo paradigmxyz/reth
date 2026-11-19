@@ -33,7 +33,9 @@ use reth_execution_cache::{CachedStateMetrics, CachedStateMetricsSource, CachedS
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes as _;
-use reth_primitives_traits::transaction::error::InvalidTransactionError;
+use reth_primitives_traits::{
+    transaction::error::InvalidTransactionError, RecoveredBlock, SealedBlock,
+};
 use reth_storage_api::{EvmStateProvider, StateProvider, StateProviderFactory};
 use reth_transaction_pool::{
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
@@ -260,6 +262,10 @@ where
         .map(|user_limit| std::cmp::min(user_limit, protocol_max_blob_count).max(1))
         .unwrap_or(protocol_max_blob_count);
     let is_osaka = chain_spec.is_osaka_active_at_timestamp(attributes.timestamp());
+    let dependencies_active =
+        reth_chainspec::is_eip8288_active_at_timestamp(chain_spec.as_ref(), attributes.timestamp());
+    let mut dependency_inputs = Vec::new();
+    let mut dependency_input_ids = std::collections::HashSet::new();
     let withdrawals_rlp_length =
         attributes.withdrawals.as_ref().map(|withdrawals| withdrawals.length()).unwrap_or(0);
 
@@ -377,6 +383,26 @@ where
         }
 
         let tx_hash = *tx.tx_hash();
+        let needs_dependency_proof = dependencies_active &&
+            tx.frame_transaction().is_some_and(|frame| {
+                frame
+                    .frames
+                    .iter()
+                    .any(|frame| frame.mode == alloy_eips::eip8141::FrameMode::DependencyVerify)
+            });
+        let dependency_input =
+            pool_tx.transaction.dependency_evidence().filter(|_| needs_dependency_proof).cloned();
+        if needs_dependency_proof && dependency_input.is_none() {
+            best_txs.mark_invalid(
+                &pool_tx,
+                InvalidPoolTransactionError::Eip8141(
+                    reth_transaction_pool::error::Eip8141PoolTransactionError::DependencyEvidence(
+                        reth_eip8288::ProofError::MissingEvidence,
+                    ),
+                ),
+            );
+            continue;
+        }
         let mut transaction_fees = U256::ZERO;
         let gas_output = match builder
             .execute_transaction_with_commit_condition(tx.as_recovered_ref(), |result, _| {
@@ -444,6 +470,11 @@ where
         }
 
         block_transactions_rlp_length += tx_rlp_len;
+        if let Some(evidence) = dependency_input &&
+            dependency_input_ids.insert(Arc::as_ptr(&evidence) as usize)
+        {
+            dependency_inputs.push(evidence);
+        }
 
         // update and add to total fees
         let gas_used = gas_output.tx_gas_used();
@@ -501,6 +532,32 @@ where
         })?
     } else {
         builder.finish(state_provider.as_ref(), None)?
+    };
+
+    let block = if dependencies_active {
+        let dependencies = reth_eip8288::transaction_dependencies(&block.body().transactions)
+            .map_err(PayloadBuilderError::other)?;
+        if let Some(aggregate) = pool.dependency_aggregate() &&
+            dependencies.iter().any(|dep| aggregate.dependencies().binary_search(dep).is_ok())
+        {
+            if dependencies.iter().all(|dep| aggregate.dependencies().binary_search(dep).is_ok()) {
+                dependency_inputs.clear();
+            }
+            if !dependency_inputs.iter().any(|input| Arc::ptr_eq(input, &aggregate)) {
+                dependency_inputs.push(aggregate);
+            }
+        }
+        let proof = reth_eip8288::prove(&dependencies, &dependency_inputs)
+            .map_err(PayloadBuilderError::other)?;
+        if cancel.is_cancelled() {
+            return Ok(BuildOutcome::Cancelled);
+        }
+        let (block, senders) = block.split_sealed();
+        let mut block = block.into_block();
+        block.header.recursive_stark = Some(Box::new(proof));
+        RecoveredBlock::new_sealed(SealedBlock::seal_slow(block), senders)
+    } else {
+        block
     };
 
     let requests = chain_spec

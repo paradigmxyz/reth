@@ -569,6 +569,25 @@ where
                 .validate_eip8141_structure()
                 .map_err(Eip8141PoolTransactionError::InvalidTransaction)?;
 
+            if let Some(frame) = transaction.frame_transaction() &&
+                frame
+                    .frames
+                    .iter()
+                    .any(|frame| frame.mode == alloy_eips::eip8141::FrameMode::DependencyVerify)
+            {
+                let dependencies = frame
+                    .dependencies()
+                    .map_err(reth_eip8288::ProofError::from)
+                    .map_err(Eip8141PoolTransactionError::DependencyEvidence)?;
+                transaction
+                    .dependency_evidence()
+                    .ok_or(Eip8141PoolTransactionError::DependencyEvidence(
+                        reth_eip8288::ProofError::MissingEvidence,
+                    ))?
+                    .covers(&dependencies)
+                    .map_err(Eip8141PoolTransactionError::DependencyEvidence)?;
+            }
+
             // Generic validators fail closed without the node's prefix executor. Explicitly
             // local/private transactions retain their non-propagating devnet behavior.
             if origin.is_external() && self.frame_validation.is_none() {

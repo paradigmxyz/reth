@@ -21,7 +21,10 @@ use reth_evm_ethereum::RethEvmFactory;
 use reth_evm_ethereum::{
     JitBackend, JitMetrics, JitMode, RethEvmFactory, RuntimeConfig, RuntimeTuning,
 };
-use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
+use reth_network::{
+    primitives::BasicNetworkPrimitives, protocol::IntoRlpxSubProtocol, NetworkHandle,
+    NetworkProtocols, PeersInfo,
+};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
     PayloadAttributesBuilder, PrimitivesTy, TxTy,
@@ -62,7 +65,7 @@ use reth_transaction_pool::{
 use std::{marker::PhantomData, sync::Arc, time::SystemTime};
 #[cfg(feature = "jit")]
 use tracing::warn;
-use tracing::{debug, info};
+use tracing::{debug, info, Instrument};
 
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 
@@ -351,6 +354,17 @@ where
         let eth_config =
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
 
+        let dependency_rpc = ctx
+            .config
+            .chain
+            .genesis()
+            .config
+            .extra_fields
+            .get("eip8288Time")
+            .and_then(serde_json::Value::as_u64)
+            .map(|_| crate::eip8288::Admission::new(ctx.node.pool().clone()).rpc())
+            .transpose()?;
+
         let testing_skip_invalid_transactions = ctx.config.rpc.testing_skip_invalid_transactions;
         let testing_gas_limit_override = ctx.config.rpc.testing_gas_limit;
         let testing_desired_gas_limit = ctx.config.builder.gas_limit_for(ctx.config.chain.chain());
@@ -371,6 +385,9 @@ where
             })
             .map_auth_http_middleware(|middleware| Stack::new(ssz_proxy_layer, middleware))
             .launch_add_ons_with(ctx, move |container| {
+                if let Some(module) = dependency_rpc {
+                    container.modules.merge_if_module_configured(RethRpcModule::Eth, module)?;
+                }
                 container.modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
                     validation_api.into_rpc(),
@@ -768,7 +785,35 @@ where
         pool: Pool,
     ) -> eyre::Result<Self::Network> {
         let network = ctx.network_builder().await?;
+        let dependencies_configured = ctx
+            .chain_spec()
+            .genesis()
+            .config
+            .extra_fields
+            .get("eip8288Time")
+            .and_then(serde_json::Value::as_u64)
+            .is_some();
+        let admission =
+            dependencies_configured.then(|| crate::eip8288::Admission::new(pool.clone()));
         let handle = ctx.start_network(network, pool);
+        if let Some(admission) = admission &&
+            !handle.tx_gossip_disabled()
+        {
+            let (handler, events) = crate::eip8288::protocol();
+            info!(target: "reth::eip8288", profile = reth_eip8288::PROFILE,
+                "Enabled experimental dependency wrapper transport");
+            handle.add_rlpx_sub_protocol(handler.into_rlpx_sub_protocol());
+            let span = tracing::Span::current();
+            ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
+                "eip8288-aggregation",
+                move |shutdown| async move {
+                    tokio::select! {
+                        _ = shutdown => {},
+                        _ = crate::eip8288::run(admission, events).instrument(span) => {},
+                    }
+                },
+            );
+        }
         info!(target: "reth::cli", enode=%handle.local_node_record(), "P2P networking initialized");
         Ok(handle)
     }

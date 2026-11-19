@@ -7,15 +7,19 @@ use alloy_eips::{
         TransactionFees, ATOMIC_BATCH_FLAG, EXPIRY_VERIFIER, EXPIRY_VERIFIER_RUNTIME,
     },
     eip8250::{nonce_slot, NONCE_MANAGER, NONCE_MANAGER_CODE},
+    eip8288::{Dependency, LEANSPHINCS_SCHEME},
     Decodable2718,
 };
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
+use lean_vm::lean_sphincs;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{test_genesis, wait::poll_until, wallet::Wallet, E2ETestSetupExt};
+use reth_eip8288::{DependencyEvidence, DependencyWrapper};
 use reth_node_ethereum::EthereumNode;
 use reth_rpc_eth_api::helpers::LoadPendingBlock;
+use reth_transaction_pool::TransactionPool;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -29,7 +33,14 @@ const fn recipient() -> Address {
 }
 
 fn chain_spec() -> Arc<reth_chainspec::ChainSpec> {
+    frame_chain_spec(false)
+}
+
+fn frame_chain_spec(dependencies: bool) -> Arc<reth_chainspec::ChainSpec> {
     let mut genesis = test_genesis();
+    if dependencies {
+        genesis.config.extra_fields.insert("eip8288Time".into(), json!(0));
+    }
     genesis.gas_limit = 1_000_000;
     // Devnet contracts are ordinary genesis allocations, not fork-installed code. The nonce
     // manager must be nonempty so EIP-161 does not clear its keyed-nonce storage after execution.
@@ -423,6 +434,107 @@ async fn keyed_nonce_query_requires_activation() -> eyre::Result<()> {
                 assert_eq!(response["result"], "0x0", "{response}");
             }
         }
+    }
+    Ok(())
+}
+
+fn lean_sphincs_wrapper(signer: &PrivateKeySigner) -> eyre::Result<DependencyWrapper> {
+    let seed = [7; lean_sphincs::SECRET_KEY_LEN];
+    let key = lean_sphincs::key_gen(&seed);
+    let declared = Dependency {
+        scheme: LEANSPHINCS_SCHEME,
+        data_hash: B256::ZERO,
+        verification_key_hash: B256::from(key.to_bytes()),
+    };
+    let raw = frame_tx(
+        signer,
+        0,
+        vec![
+            Frame {
+                mode: FrameMode::DependencyVerify,
+                limits: FrameLimits { execution: 3_000, state: 0 },
+                data: Bytes::copy_from_slice(&declared.encode()),
+                ..Default::default()
+            },
+            self_verify_frame(),
+            sender_frame(recipient()),
+        ],
+    );
+    let tx = TxEip8141::decode_2718_exact(&raw)?;
+    let dependencies = tx.dependencies()?;
+    let signature = lean_sphincs::sign(&seed, &tx.signature_hash().0);
+    Ok(DependencyWrapper {
+        transactions: vec![raw],
+        evidence: Arc::new(DependencyEvidence::direct(
+            dependencies,
+            vec![Bytes::copy_from_slice(&signature.to_bytes())],
+        )?),
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lean_sphincs_wrapper_is_gossiped_and_mined() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let (mut nodes, wallet) = EthereumNode::test_setup(2, frame_chain_spec(true)).build().await?;
+    let follower = nodes.pop().unwrap();
+    let mut producer = nodes.pop().unwrap();
+    let wrapper = lean_sphincs_wrapper(&wallet.signer(0))?;
+    let response: serde_json::Value = reqwest::Client::new()
+        .post(producer.rpc_url())
+        .json(&json!({"jsonrpc":"2.0", "id":1, "method":"eth_sendDependencyWrapper",
+            "params":[wrapper.encode()?]}))
+        .send()
+        .await?
+        .json()
+        .await?;
+    eyre::ensure!(response.get("error").is_none(), "{response}");
+    let hashes: Vec<B256> = serde_json::from_value(response["result"].clone())?;
+    assert_eq!(hashes.len(), 1);
+    follower.wait_for_pooled(hashes.iter().copied()).await?;
+    let aggregate = producer.inner.pool.dependency_aggregate().unwrap();
+    let payload = producer.new_payload().await?;
+    assert_eq!(payload.block().body().transactions.len(), 1);
+    assert!(!payload.block().recursive_stark.as_ref().unwrap().stark_proof.is_empty());
+    assert_eq!(
+        payload.block().recursive_stark.as_ref().unwrap().stark_proof.as_ref(),
+        aggregate.wire_witnesses().1[0].as_ref()
+    );
+    follower.import_payload(payload.clone()).await?;
+    producer.import_payload(payload).await?;
+    producer.wait_for_pool_removal(hashes).await?;
+    let empty = producer.advance_block().await?;
+    assert!(empty.block().recursive_stark.as_ref().unwrap().stark_proof.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn invalid_dependency_wrappers_never_admit_transactions() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let (node, wallet) = EthereumNode::test_setup(1, frame_chain_spec(true)).build_single().await?;
+    let mut forged = lean_sphincs_wrapper(&wallet.signer(0))?;
+    forged.evidence = Arc::new(DependencyEvidence::direct(
+        forged.evidence.dependencies().to_vec(),
+        vec![Bytes::from(vec![0; lean_vm::lean_sphincs::SIG_SIZE])],
+    )?);
+    let missing = DependencyWrapper {
+        transactions: vec![Bytes::copy_from_slice(B256::repeat_byte(0x55).as_slice())],
+        evidence: Arc::new(DependencyEvidence::direct(vec![], vec![])?),
+    };
+    for (wrapper, expected) in [
+        (missing, "wrapper references an unknown transaction"),
+        (forged, "invalid leanSPHINCS dependency signature"),
+    ] {
+        let response: serde_json::Value = reqwest::Client::new()
+            .post(node.rpc_url())
+            .json(&json!({"jsonrpc":"2.0", "id":1, "method":"eth_sendDependencyWrapper",
+                "params":[wrapper.encode()?]}))
+            .send()
+            .await?
+            .json()
+            .await?;
+        assert_eq!(response["error"]["code"], -32000);
+        assert_eq!(response["error"]["message"], expected);
+        assert_eq!(node.inner.pool.pool_size().total, 0);
     }
     Ok(())
 }
