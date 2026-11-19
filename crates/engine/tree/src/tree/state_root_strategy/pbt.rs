@@ -97,6 +97,8 @@ impl<H: TreeHasher> PbtStateRootStrategy<H> {
     /// Materializes any missing pre-activation checkpoints on the branch ending at this header.
     /// In-memory branches use validated execution output. Persisted blocks use authenticated BALs.
     /// Headers and execution outputs must come from the node's validated chain.
+    /// Both budgets apply to the complete recovery call; completed checkpoints remain
+    /// available if the byte budget is exhausted before reaching the target.
     pub fn ensure_shadow_checkpoint<N, P>(
         &self,
         hash: B256,
@@ -143,6 +145,7 @@ impl<H: TreeHasher> PbtStateRootStrategy<H> {
             };
         }
 
+        let mut remaining_bal_bytes = max_bal_bytes.get();
         for (hash, header, executed) in missing.into_iter().rev() {
             if self.store.contains_block(hash).map_err(ProviderError::other)? {
                 continue
@@ -164,11 +167,12 @@ impl<H: TreeHasher> PbtStateRootStrategy<H> {
                 let bytes = provider.bal_store().get_by_hash(hash)?.ok_or_else(|| {
                     ProviderError::other(std::io::Error::other("missing PBT shadow BAL"))
                 })?;
-                if bytes.len() > max_bal_bytes.get() {
-                    return Err(ProviderError::other(std::io::Error::other(
-                        "PBT shadow BAL byte budget exceeded",
-                    )))
-                }
+                remaining_bal_bytes =
+                    remaining_bal_bytes.checked_sub(bytes.len()).ok_or_else(|| {
+                        ProviderError::other(std::io::Error::other(
+                            "PBT shadow BAL byte budget exceeded",
+                        ))
+                    })?;
                 let raw = RawBal::new(bytes);
                 raw.ensure_hash(commitment).map_err(ProviderError::other)?;
                 let bal = DecodedBal::from_raw_bal(raw).map_err(ProviderError::other)?;

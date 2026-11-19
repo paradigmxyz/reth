@@ -2,7 +2,8 @@
 
 #![cfg(feature = "execution")]
 
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{keccak256, Address, B256, KECCAK256_EMPTY, U256};
+use reth_primitives_traits::Bytecode;
 use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState, StorageSlot};
 use reth_trie_pbt::{
     execution::{apply_bundle, ExecutionError},
@@ -159,6 +160,68 @@ fn inconsistent_embedded_code_is_rejected_instead_of_using_parent_code() {
         Err(ExecutionError::MissingCode(hash)) if hash == code_hash
     ));
     assert_eq!(parent.root(), root);
+}
+
+#[test]
+fn nonempty_code_with_an_empty_hash_is_rejected() {
+    for hash in [KECCAK256_EMPTY, B256::ZERO] {
+        for embedded in [false, true] {
+            let address = Address::repeat_byte(1);
+            let mut account = BundleAccount::new(
+                None,
+                Some(Default::default()),
+                Default::default(),
+                AccountStatus::InMemoryChange,
+            );
+            let info = account.info.as_mut().unwrap();
+            info.nonce = 1;
+            info.code_hash = hash;
+            let code = Bytecode::new_raw(vec![0x60, 0x01].into()).0;
+            info.code = embedded.then(|| code.clone());
+            let mut bundle = BundleState::default();
+            bundle.state.insert(address, account);
+            if !embedded {
+                bundle.contracts.insert(hash, code);
+            }
+            let parent = StateTree::<Blake3Hasher>::new();
+            assert!(matches!(
+                apply_bundle(&parent, &bundle),
+                Err(ExecutionError::MissingCode(actual)) if actual == hash
+            ));
+            assert_eq!(parent.root(), B256::ZERO);
+            #[cfg(feature = "persistence")]
+            {
+                let directory = tempfile::tempdir().unwrap();
+                let mut store = SnapshotStore::open_with_limits(
+                    directory.path(),
+                    DecodeLimits::default(),
+                    DecodeLimits::native(),
+                )
+                .unwrap();
+                store.set_cache_budget(0).unwrap();
+                let anchor = B256::repeat_byte(1);
+                store.save_block_with_number(anchor, 0, &parent).unwrap();
+                let cold = store.execution_parent(anchor, Some(parent.root())).unwrap();
+                assert!(matches!(&cold, ExecutionParent::Disk(_)));
+                assert!(matches!(
+                    cold.apply_bundle(&bundle, false),
+                    Err(ExecutionError::MissingCode(actual)) if actual == hash
+                ));
+                assert_eq!(store.verify_block(anchor).unwrap(), parent.root());
+            }
+            bundle.state.get_mut(&address).unwrap().info.as_mut().unwrap().code =
+                embedded.then(Default::default);
+            if !embedded {
+                bundle.contracts.insert(hash, Default::default());
+            }
+            assert!(apply_bundle(&parent, &bundle)
+                .unwrap()
+                .account(address)
+                .unwrap()
+                .code
+                .is_empty());
+        }
+    }
 }
 
 #[test]

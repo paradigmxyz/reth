@@ -206,6 +206,11 @@ fn supplied_code(
     code: Option<impl FnOnce() -> Bytes>,
 ) -> Result<Option<Bytes>, ExecutionError> {
     if hash == KECCAK256_EMPTY || hash.is_zero() {
+        if let Some(code) = code &&
+            !code().is_empty()
+        {
+            return Err(ExecutionError::MissingCode(hash))
+        }
         return Ok(Some(Bytes::new()))
     }
     if let Some(code) = code {

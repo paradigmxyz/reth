@@ -2075,6 +2075,54 @@ mod tests {
     }
 
     #[test]
+    fn shadow_replay_bal_budget_bounds_the_complete_gap() -> eyre::Result<()> {
+        let state = StateTree::<Blake3Hasher>::new();
+        let root = mpt_root(&state);
+        let genesis = SealedHeader::seal_slow(Header { state_root: root, ..Default::default() });
+        let raw = RawBal::new(Bytes::from_static(&[0xc0]));
+        let first = SealedHeader::seal_slow(Header {
+            parent_hash: genesis.hash(),
+            number: 1,
+            timestamp: 1,
+            state_root: root,
+            block_access_list_hash: Some(keccak256(raw.as_raw())),
+            ..Default::default()
+        });
+        let mut tip = first.clone().into_header();
+        tip.parent_hash = first.hash();
+        tip.number = 2;
+        tip.timestamp = 2;
+        let tip = SealedHeader::seal_slow(tip);
+        let provider = catchup_provider(&genesis, &tip, Some(raw.as_raw().clone()))?;
+        provider.add_header(first.hash(), first.header().clone());
+        provider.bal_store().insert(first.num_hash(), raw)?;
+        let overlay = OverlayManager::<EthPrimitives>::default();
+        for max_bytes in [1, 2] {
+            let directory = tempfile::tempdir()?;
+            let store = Arc::new(SnapshotStore::open(directory.path(), DecodeLimits::default())?);
+            store.save_block_with_number(genesis.hash(), 0, &state)?;
+            let strategy = PbtStateRootStrategy::new(store.clone(), 3).with_background_shadow(
+                CatchupLimits::default().max_blocks,
+                NonZeroUsize::new(max_bytes).unwrap(),
+            );
+            if max_bytes == 1 {
+                assert_eq!(
+                    strategy
+                        .ensure_shadow_checkpoint(tip.hash(), tip.header(), &provider, &overlay)
+                        .unwrap_err()
+                        .to_string(),
+                    "PBT shadow BAL byte budget exceeded"
+                );
+                assert!(store.contains_block(first.hash())?);
+                assert!(!store.contains_block(tip.hash())?);
+            }
+            strategy.ensure_shadow_checkpoint(tip.hash(), tip.header(), &provider, &overlay)?;
+            assert_eq!(store.verify_block(tip.hash())?, state.root());
+        }
+        Ok(())
+    }
+
+    #[test]
     fn custom_node_uses_the_advertised_fork_schedule() -> eyre::Result<()> {
         let directory = tempfile::tempdir()?;
         let ordinary = test_chain_spec(EthereumHardfork::Bogota);
