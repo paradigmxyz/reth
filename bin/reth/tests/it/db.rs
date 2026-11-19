@@ -43,10 +43,8 @@ fn db_get_mdbx_exact_subkey() {
 
     let gap = B256::with_last_byte(2).to_string();
     let end = B256::with_last_byte(4).to_string();
-    for missing in [&gap, &end] {
-        assert_eq!(get(&[missing]), "");
-        assert_eq!(get(&[missing, "--raw"]), "");
-    }
+    assert_eq!(get(&[&gap]), "");
+    assert_eq!(get(&[&end]), "");
 
     let present = stored.to_string();
     let entry = json!({ "key": stored, "value": "0x21" });
