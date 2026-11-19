@@ -550,12 +550,23 @@ async fn can_set_the_max_response_size() {
     let server = ServerBuilder::with_config(config).build(addr).await.unwrap();
     let mut module = RpcModule::new(());
     module.register_method("anything", |_p, _cx| "a".repeat(101)).unwrap();
+    module
+        .register_streaming_method("stream_error", |_, _| async move {
+            Err(ErrorObjectOwned::owned(1, "a".repeat(101), None::<()>))
+        })
+        .unwrap();
     let addr = server.local_addr().unwrap();
     let uri = to_http_uri(addr);
     let handle = server.start(module);
 
     // Oversized response.
     let req = r#"{"jsonrpc":"2.0", "method":"anything", "id":1}"#;
+    let response =
+        http_request(req.into(), uri.clone()).with_default_timeout().await.unwrap().unwrap();
+    assert_eq!(response.body, oversized_response(Id::Num(1), 100));
+
+    // Oversized error of a streaming method.
+    let req = r#"{"jsonrpc":"2.0", "method":"stream_error", "id":1}"#;
     let response =
         http_request(req.into(), uri.clone()).with_default_timeout().await.unwrap().unwrap();
     assert_eq!(response.body, oversized_response(Id::Num(1), 100));

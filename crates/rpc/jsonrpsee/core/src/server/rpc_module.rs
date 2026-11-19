@@ -532,7 +532,7 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
                 let future = async move {
                     match callback(params, ctx).await {
                         Ok(stream) => MethodResponse::stream(id, stream, max_response_size).await,
-                        Err(err) => MethodResponse::error(id, err),
+                        Err(err) => MethodResponse::bounded_error(id, err, max_response_size),
                     }
                 };
                 future.boxed()

@@ -148,7 +148,7 @@ impl MethodResponse {
         while let Some(part) = stream.next().await {
             match part {
                 Ok(part) => json.extend_from_slice(&part),
-                Err(err) => return Self::error(stream.id, err),
+                Err(err) => return Self::bounded_error(stream.id, err, stream.max_response_size),
             }
         }
         let Ok(json) = String::from_utf8(json) else {
@@ -290,6 +290,12 @@ impl MethodResponse {
         }
     }
 
+    /// Same as [`MethodResponse::error`], but if the serialization of `err` exceeds
+    /// `max_response_size`, the response is changed to the oversized response error.
+    pub(crate) fn bounded_error(id: Id, err: ErrorObjectOwned, max_response_size: usize) -> Self {
+        Self::response(id, ResponsePayload::<()>::error(err), max_response_size)
+    }
+
     /// Create notification response which is a response that doesn't expect a reply.
     pub fn notification() -> Self {
         Self {
@@ -335,7 +341,7 @@ impl MethodResponse {
             // A producer that finished without a part yields the closing brace and is done, but a
             // result needs at least one part to be a JSON value.
             Some(Ok(first)) if !stream.done => first,
-            Some(Err(err)) => return Self::error(stream.id, err),
+            Some(Err(err)) => return Self::bounded_error(stream.id, err, max_response_size),
             _ => return Self::error(stream.id, ErrorCode::InternalError),
         };
         stream.head = Bytes::from([json.as_bytes(), &first].concat());
@@ -724,6 +730,13 @@ mod tests {
             let rp = stream(&["[1", ",2", "]"], Ok(()), limit).await;
             assert_eq!(rp.buffer().await.as_error_code(), Some(OVERSIZED_RESPONSE_CODE));
         }
+        // An error that exceeds the limit, before and after the first part.
+        let big = ErrorObject::owned(1, "custom", Some("a".repeat(ok.len())));
+        let rp = stream(&[], Err(big.clone()), ok.len()).await;
+        assert_eq!(rp.as_error_code(), Some(OVERSIZED_RESPONSE_CODE));
+        let rp = stream(&["[1"], Err(big), ok.len()).await;
+        assert_eq!(rp.buffer().await.as_error_code(), Some(OVERSIZED_RESPONSE_CODE));
+
         // A part past the limit isn't queued, and the producer learns it.
         let (sent_tx, sent_rx) = std::sync::mpsc::channel();
         let stream = ResponseStream::new(move |tx| async move {
