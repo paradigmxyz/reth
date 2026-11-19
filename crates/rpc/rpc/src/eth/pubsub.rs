@@ -1,6 +1,6 @@
 //! `eth_` `PubSub` RPC handler implementation
 
-use std::sync::Arc;
+use std::{future::ready, sync::Arc};
 
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
@@ -31,7 +31,10 @@ use reth_transaction_pool::{
     NewTransactionEvent, TransactionPool,
 };
 use serde::Serialize;
-use tokio::sync::broadcast::{self, error::RecvError};
+use tokio::sync::{
+    broadcast::{self, error::RecvError},
+    oneshot,
+};
 use tokio_stream::{
     wrappers::{BroadcastStream, ReceiverStream},
     Stream,
@@ -101,12 +104,13 @@ where
         kind: SubscriptionKind,
         params: Option<Params>,
     ) -> Result<(), ErrorObject<'static>> {
-        self.run_subscription(accepted_sink, Subscription::from_params(kind, params)?).await
+        self.run_subscription(ready(Ok(accepted_sink)), Subscription::from_params(kind, params)?)
+            .await
     }
 
     async fn run_subscription(
         &self,
-        accepted_sink: SubscriptionSink,
+        sink: impl Future<Output = Result<SubscriptionSink, ErrorObject<'static>>>,
         subscription: Subscription,
     ) -> Result<(), ErrorObject<'static>> {
         match subscription {
@@ -115,12 +119,13 @@ where
                     |feeds| &feeds.new_heads,
                     |pubsub| pubsub.new_headers_stream().boxed(),
                 );
-                pipe_from_shared(accepted_sink, results).await;
+                pipe_from_shared(sink.await?, results).await;
                 Ok(())
             }
             Subscription::Logs(filter) => {
                 let filter = filter.map(|filter| *filter).unwrap_or_default();
-                pipe_from_stream(accepted_sink, self.log_stream(filter)).await
+                let logs = self.log_stream(filter);
+                pipe_from_stream(sink.await?, logs).await
             }
             Subscription::FullPendingTransactions => {
                 let results = self.subscribe_shared(
@@ -141,12 +146,12 @@ where
                                             None
                                         }
                                     };
-                                std::future::ready(tx_value)
+                                ready(tx_value)
                             })
                             .boxed()
                     },
                 );
-                pipe_from_shared(accepted_sink, results).await;
+                pipe_from_shared(sink.await?, results).await;
                 Ok(())
             }
             Subscription::PendingTransactionHashes => {
@@ -154,7 +159,7 @@ where
                     |feeds| &feeds.pending_transaction_hashes,
                     |pubsub| pubsub.pending_transaction_hashes_stream().boxed(),
                 );
-                pipe_from_shared(accepted_sink, results).await;
+                pipe_from_shared(sink.await?, results).await;
                 Ok(())
             }
             Subscription::Syncing => {
@@ -162,6 +167,7 @@ where
                 let mut canon_state = BroadcastStream::new(
                     self.inner.eth_api.provider().subscribe_to_canonical_state(),
                 );
+                let accepted_sink = sink.await?;
                 // get current sync status
                 let mut initial_sync_status = self.inner.eth_api.network().is_syncing();
                 let current_sub_res = self.sync_status(initial_sync_status);
@@ -226,15 +232,12 @@ where
                                 .boxed()
                         },
                     );
-                    pipe_from_shared(accepted_sink, results).await;
+                    pipe_from_shared(sink.await?, results).await;
                     return Ok(())
                 }
 
-                pipe_from_stream(
-                    accepted_sink,
-                    self.inner.eth_api.transaction_receipts_stream(filter),
-                )
-                .await
+                let receipts = self.inner.eth_api.transaction_receipts_stream(filter);
+                pipe_from_stream(sink.await?, receipts).await
             }
         }
     }
@@ -281,13 +284,21 @@ where
                 return Ok(())
             }
         };
-        let sink = pending.accept().await?;
+        let (send_sink, sink) = oneshot::channel();
         let pubsub = self.clone();
-        self.inner.subscription_task_spawner.spawn_task(async move {
+        let mut forward = Box::pin(async move {
+            let sink = async { sink.await.map_err(|err| internal_rpc_err(err.to_string())) };
             if let Err(err) = pubsub.run_subscription(sink, subscription).await {
-                error!(target: "rpc", %err, "Failed to serialize subscription notification");
+                error!(target: "rpc", %err, "Failed to forward subscription notification");
             }
         });
+        // The first poll attaches the source and waits for the accepted sink. Events arriving
+        // after the acknowledgement are buffered even if the forwarding task has not run yet.
+        if forward.as_mut().now_or_never().is_some() {
+            return Err("subscription ended before acceptance".into())
+        }
+        send_sink.send(pending.accept().await?).map_err(|_| "subscription receiver closed")?;
+        self.inner.subscription_task_spawner.spawn_task(forward);
 
         Ok(())
     }
@@ -814,27 +825,24 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn receipt_subscription_delivers_only_selected_hash() {
-        let provider = test_provider();
-        let module = test_pubsub(provider.clone(), testing_pool()).into_rpc().remove_context();
+    #[test]
+    fn receipt_subscription_delivers_only_selected_hash() {
+        let rpc = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let forward = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let provider = rpc.block_on(async { test_provider() });
+        let module = forward.block_on(async {
+            test_pubsub(provider.clone(), testing_pool()).into_rpc().remove_context()
+        });
         let chain = chain_with_logs(1);
-        let hash = chain.transaction_hashes().nth(1).unwrap();
+        let hash = *chain.transaction_hashes().nth(1).unwrap();
         let params = serde_json::json!(["transactionReceipts", { "transactionHashes": [hash] }]);
-        let (_, mut notifications) = subscribe(&module, &params.to_string()).await;
+        let (_, mut notifications) = rpc.block_on(async {
+            tokio::time::timeout(TIMEOUT, subscribe(&module, &params.to_string())).await.unwrap()
+        });
 
-        // The subscription task may start listening after the acknowledgement.
-        let msg = tokio::time::timeout(TIMEOUT, async {
-            loop {
-                commit(&provider, chain.clone());
-                tokio::select! {
-                    msg = notifications.recv() => break msg.unwrap(),
-                    _ = tokio::task::yield_now() => {}
-                }
-            }
-        })
-        .await
-        .unwrap();
+        // Publish once, after acknowledgement but before the forwarding task can run.
+        commit(&provider, chain);
+        let msg = forward.block_on(next_notification(&mut notifications));
         let notification: Value = serde_json::from_str(&msg).unwrap();
         let receipts = notification["params"]["result"].as_array().unwrap();
         assert_eq!(receipts.len(), 1);
