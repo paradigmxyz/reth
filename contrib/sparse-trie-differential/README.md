@@ -52,7 +52,11 @@ The preparation configuration accepts only `{}`. The script generates a
 **session**: JSON settings telling Rift which library to load and how to search. `RUN_DIR` must be outside the checkout. Preparation refuses to replace an existing
 session. Optional `CARGO_BUILD_JOBS` (default 2) and `CARGO_TARGET_DIR` control
 build resources, not execution concurrency. The script compiles the exact supplied
-tree **on the execution machine**, using `--locked`. A script-generated Cargo `RUSTC_WRAPPER`
+tree **on the execution machine**, using `--locked --profile fuzz`. The independent
+`fuzz` profile inherits release optimizations, enables debug assertions and overflow
+checks, retains full debug symbols, and uses unwinding panics. Preparation copies
+the library from the target directory's `fuzz/` subdirectory and records the profile
+in `build-info.json`. A script-generated Cargo `RUSTC_WRAPPER`
 enables `--cfg reth_sparse_trie_coverage` and appends
 `-Cpasses=sancov-module -Cllvm-args=-sanitizer-coverage-level=3
 -Cllvm-args=-sanitizer-coverage-inline-8bit-counters` only when compiling

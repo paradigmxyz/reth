@@ -29,8 +29,14 @@ reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "
 reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
 reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
 
-[profile.release]
+[profile.fuzz]
+inherits = "release"
+debug = "full"
+strip = "none"
+debug-assertions = true
+overflow-checks = true
 panic = "unwind"
+# Preserve the distinct sparse-trie coverage bucket functions.
 lto = false
 
 # Keep all inherited evm2 users on the public workspace's single pinned revision.

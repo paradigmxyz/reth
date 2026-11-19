@@ -109,13 +109,13 @@ if command -v rustup >/dev/null 2>&1; then
 else
     cargo_bin=$(command -v cargo)
 fi
-"$cargo_bin" rustc --locked --release --manifest-path "$script_dir/Cargo.toml" --lib -- \
+"$cargo_bin" rustc --locked --profile fuzz --manifest-path "$script_dir/Cargo.toml" --lib -- \
     -C 'link-arg=-Wl,-rpath,$ORIGIN/lib' -C link-arg=-Wl,-Bsymbolic-functions
 if [[ $(source_digest) != "$source_sha256" ]]; then
     echo 'source changed during compilation; prepare a fresh session from a stable checkout' >&2
     exit 1
 fi
-cp -- "$CARGO_TARGET_DIR/release/libsparse_trie_differential_workload.so" "$bundle/libworkload.so"
+cp -- "$CARGO_TARGET_DIR/fuzz/libsparse_trie_differential_workload.so" "$bundle/libworkload.so"
 
 # Retain the native dependencies and exact source needed to inspect or rebuild this execution.
 python3 - "$bundle" "$root" "$source_sha256" <<'PY'
@@ -161,7 +161,7 @@ status = subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain
 files = {str(p.relative_to(bundle)): hashlib.sha256(p.read_bytes()).hexdigest()
          for p in bundle.rglob('*') if p.is_file()}
 provenance = {'source_commit': commit, 'source_status': status,
-              'source_tree_sha256': sys.argv[3],
+              'source_tree_sha256': sys.argv[3], 'profile': 'fuzz',
               'rustc': subprocess.check_output(['rustc', '--version'], text=True).strip(),
               'cargo': subprocess.check_output(['cargo', '--version'], text=True).strip(),
               'coverage': {'kind': 'llvm-sancov-inline-8bit-counters',
