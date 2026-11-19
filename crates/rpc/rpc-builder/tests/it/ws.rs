@@ -150,17 +150,42 @@ async fn test_eth_subscribe_invalid_params_rejected() {
     let handle = launch_ws_eth().await;
     let mut client = WebSocketTestClient::new(handle.ws_local_addr().unwrap()).await.unwrap();
 
+    let unknown_field = |key, column| {
+        Some(format!(
+            "unknown field `{key}`, expected `transactionHashes` at line 1 column {column}"
+        ))
+    };
     for (kind, params, detail) in [
         ("logs", serde_json::json!(true), None),
-        ("transactionReceipts", serde_json::json!(true), None),
-        ("transactionReceipts", serde_json::json!({"fromBlock": "latest"}), None),
-        ("transactionReceipts", serde_json::json!({"topics": []}), None),
-        ("transactionReceipts", serde_json::json!({"address": []}), None),
-        ("transactionReceipts", serde_json::json!({"transactionHashes": [], "topics": []}), None),
+        (
+            "transactionReceipts",
+            serde_json::json!({"transactionHash": []}),
+            unknown_field("transactionHash", 18),
+        ),
+        (
+            "transactionReceipts",
+            serde_json::json!(true),
+            Some(
+                "invalid type: boolean `true`, expected a receipt filter object at line 1 column 4"
+                    .into(),
+            ),
+        ),
+        (
+            "transactionReceipts",
+            serde_json::json!({"fromBlock": "latest"}),
+            unknown_field("fromBlock", 12),
+        ),
+        ("transactionReceipts", serde_json::json!({"topics": []}), unknown_field("topics", 9)),
+        ("transactionReceipts", serde_json::json!({"address": []}), unknown_field("address", 10)),
+        (
+            "transactionReceipts",
+            serde_json::json!({"topics": [], "transactionHashes": []}),
+            unknown_field("topics", 9),
+        ),
         (
             "transactionReceipts",
             serde_json::json!({"transactionHashes": ["0x01"]}),
-            Some("invalid string length"),
+            Some("invalid string length at line 1 column 28".into()),
         ),
         ("newPendingTransactions", serde_json::json!({}), None),
     ] {

@@ -1,6 +1,7 @@
 //! `eth_` RPC API for pubsub subscription.
 
 use alloy_json_rpc::RpcObject;
+use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::pubsub::{Params, SubscriptionKind, TransactionReceiptsParams};
 use jsonrpsee::{
     core::{__reexports::log_fail_parse, SubscriptionResult},
@@ -10,8 +11,8 @@ use jsonrpsee_types::{
     params::{invalid_params_with_data, ParamsSequence},
     ErrorObjectOwned,
 };
-use reth_rpc_server_types::result::invalid_params_rpc_err;
-use serde_json::Value;
+use serde::Deserialize;
+use serde_json::value::RawValue;
 
 /// Ethereum pub-sub RPC interface.
 pub trait EthPubSubApiServer<T: RpcObject>: Sized + Send + Sync + 'static {
@@ -63,16 +64,44 @@ fn decode_subscription(
 }
 
 fn decode_receipt_filter(mut args: ParamsSequence<'_>) -> Result<Option<Params>, ErrorObjectOwned> {
-    const INVALID_FILTER: &str = "Invalid params for transactionReceipts";
-    match args.optional_next::<Value>()? {
-        None => Ok(None),
-        // Alloy serializes Params::None as an empty array.
-        Some(Value::Array(items)) if items.is_empty() => Ok(Some(Params::None)),
-        Some(Value::Object(fields)) if fields.keys().all(|key| key == "transactionHashes") => {
-            let filter = serde_json::from_value::<TransactionReceiptsParams>(Value::Object(fields))
-                .map_err(|err| invalid_params_with_data(INVALID_FILTER, err))?;
-            Ok(Some(Params::TransactionReceipts(filter)))
-        }
-        _ => Err(invalid_params_rpc_err(INVALID_FILTER)),
+    let Some(raw) = args.optional_next::<&RawValue>()? else { return Ok(None) };
+    // Alloy serializes Params::None as an empty array.
+    let filter = if raw.get().starts_with('[') {
+        <[(); 0]>::deserialize(raw).map(|[]| Params::None)
+    } else {
+        ReceiptFilter::deserialize(raw).map(Params::TransactionReceipts)
+    };
+    filter
+        .map(Some)
+        .map_err(|err| invalid_params_with_data("Invalid params for transactionReceipts", err))
+}
+
+/// Enforces the receipt filter's wire fields before any JSON object normalization.
+#[derive(Deserialize)]
+#[serde(
+    remote = "TransactionReceiptsParams",
+    rename_all = "camelCase",
+    deny_unknown_fields,
+    expecting = "a receipt filter object"
+)]
+struct ReceiptFilter {
+    transaction_hashes: Option<Vec<TxHash>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn receipt_filter_rejects_duplicate_hash_fields() {
+        let args = jsonrpsee_types::Params::new(Some(
+            r#"["transactionReceipts", {"transactionHashes":null,"transactionHashes":[]}]"#,
+        ));
+        let err = decode_subscription(args).unwrap_err();
+        assert_eq!(err.code(), jsonrpsee_types::error::INVALID_PARAMS_CODE);
+        assert_eq!(
+            err.data().unwrap().get(),
+            r#""duplicate field `transactionHashes` at line 1 column 45""#
+        );
     }
 }
