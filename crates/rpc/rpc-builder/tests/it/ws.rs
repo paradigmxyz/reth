@@ -146,6 +146,37 @@ async fn test_eth_subscribe_invalid_kind_rejected() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_eth_subscribe_invalid_params_rejected() {
+    let handle = launch_ws_eth().await;
+    let mut client = WebSocketTestClient::new(handle.ws_local_addr().unwrap()).await.unwrap();
+
+    for (kind, params) in [
+        ("logs", serde_json::json!(true)),
+        ("transactionReceipts", serde_json::json!(true)),
+        ("newPendingTransactions", serde_json::json!({})),
+    ] {
+        let response =
+            ws_call(&mut client, "eth_subscribe", serde_json::json!([kind, params])).await;
+        assert_eq!(
+            response,
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "error": {
+                    "code": jsonrpsee::types::error::INVALID_PARAMS_CODE,
+                    "message": format!("Invalid params for {kind}"),
+                },
+            })
+        );
+    }
+
+    let response =
+        ws_call(&mut client, "eth_subscribe", serde_json::json!(["newPendingTransactions", true]))
+            .await;
+    assert!(response["result"].is_string(), "{response}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_eth_subscribe_server_survives_client_disconnect() {
     reth_tracing::init_test_tracing();
 
@@ -272,7 +303,11 @@ async fn test_eth_subscribe_syncing_releases_permit_on_unsubscribe() {
 async fn ws_call(client: &mut WebSocketTestClient, method: &str, params: Value) -> Value {
     let request =
         serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
-    let response = client.send_request_text(request.to_string()).await.unwrap();
+    let response =
+        tokio::time::timeout(Duration::from_secs(5), client.send_request_text(request.to_string()))
+            .await
+            .expect("timed out waiting for WebSocket response")
+            .unwrap();
     serde_json::from_str(&response).unwrap()
 }
 

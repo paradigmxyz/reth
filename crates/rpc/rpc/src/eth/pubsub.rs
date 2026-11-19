@@ -93,16 +93,24 @@ where
         self.inner.eth_api.log_stream(filter)
     }
 
-    /// The actual handler for an accepted [`EthPubSub::subscribe`] call.
+    /// Forwards notifications to an already accepted sink. Returns an error if the parameters
+    /// are invalid for the subscription kind or a notification cannot be serialized.
     pub async fn handle_accepted(
         &self,
         accepted_sink: SubscriptionSink,
         kind: SubscriptionKind,
         params: Option<Params>,
     ) -> Result<(), ErrorObject<'static>> {
-        #[allow(unreachable_patterns)]
-        match kind {
-            SubscriptionKind::NewHeads => {
+        self.run_subscription(accepted_sink, Subscription::from_params(kind, params)?).await
+    }
+
+    async fn run_subscription(
+        &self,
+        accepted_sink: SubscriptionSink,
+        subscription: Subscription,
+    ) -> Result<(), ErrorObject<'static>> {
+        match subscription {
+            Subscription::NewHeads => {
                 let results = self.subscribe_shared(
                     |feeds| &feeds.new_heads,
                     |pubsub| pubsub.new_headers_stream().boxed(),
@@ -110,60 +118,38 @@ where
                 pipe_from_shared(accepted_sink, results).await;
                 Ok(())
             }
-            SubscriptionKind::Logs => {
-                // if no params are provided, used default filter params
-                let filter = match params {
-                    Some(Params::Logs(filter)) => *filter,
-                    Some(Params::Bool(_)) => {
-                        return Err(invalid_params_rpc_err("Invalid params for logs"))
-                    }
-                    _ => Default::default(),
-                };
+            Subscription::Logs(filter) => {
+                let filter = filter.map(|filter| *filter).unwrap_or_default();
                 pipe_from_stream(accepted_sink, self.log_stream(filter)).await
             }
-            SubscriptionKind::NewPendingTransactions => {
-                if let Some(params) = params {
-                    match params {
-                        Params::Bool(true) => {
-                            // full transaction objects requested
-                            let results = self.subscribe_shared(
-                                |feeds| &feeds.full_pending_transactions,
-                                |pubsub| {
-                                    let converter = pubsub.inner.eth_api.converter();
-                                    pubsub
-                                        .full_pending_transaction_stream()
-                                        .filter_map(move |tx| {
-                                            let tx_value = match converter
-                                                .fill_pending(tx.transaction.to_consensus())
-                                            {
-                                                Ok(tx) => Some(tx),
-                                                Err(err) => {
-                                                    error!(target = "rpc",
-                                                        %err,
-                                                        "Failed to fill transaction with block context"
-                                                    );
-                                                    None
-                                                }
-                                            };
-                                            std::future::ready(tx_value)
-                                        })
-                                        .boxed()
-                                },
-                            );
-                            pipe_from_shared(accepted_sink, results).await;
-                            return Ok(())
-                        }
-                        Params::Bool(false) | Params::None => {
-                            // only hashes requested
-                        }
-                        _ => {
-                            return Err(invalid_params_rpc_err(
-                                "Invalid params for newPendingTransactions",
-                            ))
-                        }
-                    }
-                }
-
+            Subscription::FullPendingTransactions => {
+                let results = self.subscribe_shared(
+                    |feeds| &feeds.full_pending_transactions,
+                    |pubsub| {
+                        let converter = pubsub.inner.eth_api.converter();
+                        pubsub
+                            .full_pending_transaction_stream()
+                            .filter_map(move |tx| {
+                                let tx_value =
+                                    match converter.fill_pending(tx.transaction.to_consensus()) {
+                                        Ok(tx) => Some(tx),
+                                        Err(err) => {
+                                            error!(target = "rpc",
+                                                %err,
+                                                "Failed to fill transaction with block context"
+                                            );
+                                            None
+                                        }
+                                    };
+                                std::future::ready(tx_value)
+                            })
+                            .boxed()
+                    },
+                );
+                pipe_from_shared(accepted_sink, results).await;
+                Ok(())
+            }
+            Subscription::PendingTransactionHashes => {
                 let results = self.subscribe_shared(
                     |feeds| &feeds.pending_transaction_hashes,
                     |pubsub| pubsub.pending_transaction_hashes_stream().boxed(),
@@ -171,7 +157,7 @@ where
                 pipe_from_shared(accepted_sink, results).await;
                 Ok(())
             }
-            SubscriptionKind::Syncing => {
+            Subscription::Syncing => {
                 // get new block subscription
                 let mut canon_state = BroadcastStream::new(
                     self.inner.eth_api.provider().subscribe_to_canonical_state(),
@@ -227,15 +213,7 @@ where
 
                 Ok(())
             }
-            SubscriptionKind::TransactionReceipts => {
-                let filter = match params {
-                    Some(Params::TransactionReceipts(filter)) => filter,
-                    None | Some(Params::None) => TransactionReceiptsParams::default(),
-                    _ => {
-                        return Err(invalid_params_rpc_err("Invalid params for transactionReceipts"))
-                    }
-                };
-
+            Subscription::TransactionReceipts(filter) => {
                 if filter.transaction_hashes.as_ref().is_none_or(Vec::is_empty) {
                     // Without hashes every receipt matches, so all such subscribers get the same.
                     let results = self.subscribe_shared(
@@ -258,7 +236,6 @@ where
                 )
                 .await
             }
-            _ => Err(invalid_params_rpc_err("Unsupported subscription kind")),
         }
     }
 
@@ -290,20 +267,69 @@ impl<Eth> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Et
 where
     Eth: EthSubscriptions,
 {
-    /// Handler for `eth_subscribe`
+    /// Rejects invalid subscription parameters before returning a subscription ID.
     async fn subscribe(
         &self,
         pending: PendingSubscriptionSink,
         kind: SubscriptionKind,
         params: Option<Params>,
     ) -> jsonrpsee::core::SubscriptionResult {
+        let subscription = match Subscription::from_params(kind, params) {
+            Ok(subscription) => subscription,
+            Err(err) => {
+                pending.reject(err).await;
+                return Ok(())
+            }
+        };
         let sink = pending.accept().await?;
         let pubsub = self.clone();
         self.inner.subscription_task_spawner.spawn_task(async move {
-            let _ = pubsub.handle_accepted(sink, kind, params).await;
+            if let Err(err) = pubsub.run_subscription(sink, subscription).await {
+                error!(target: "rpc", %err, "Failed to serialize subscription notification");
+            }
         });
 
         Ok(())
+    }
+}
+
+/// An `eth_subscribe` request with its parameters resolved for the requested kind.
+enum Subscription {
+    NewHeads,
+    Logs(Option<Box<Filter>>),
+    FullPendingTransactions,
+    PendingTransactionHashes,
+    Syncing,
+    TransactionReceipts(TransactionReceiptsParams),
+}
+
+impl Subscription {
+    fn from_params(
+        kind: SubscriptionKind,
+        params: Option<Params>,
+    ) -> Result<Self, ErrorObject<'static>> {
+        match (kind, params.unwrap_or_default()) {
+            (SubscriptionKind::NewHeads, _) => Ok(Self::NewHeads),
+            (SubscriptionKind::Logs, Params::Logs(filter)) => Ok(Self::Logs(Some(filter))),
+            // A receipt filter has historically selected the default log filter.
+            (SubscriptionKind::Logs, Params::None | Params::TransactionReceipts(_)) => {
+                Ok(Self::Logs(None))
+            }
+            (SubscriptionKind::NewPendingTransactions, Params::Bool(true)) => {
+                Ok(Self::FullPendingTransactions)
+            }
+            (SubscriptionKind::NewPendingTransactions, Params::Bool(false) | Params::None) => {
+                Ok(Self::PendingTransactionHashes)
+            }
+            (SubscriptionKind::Syncing, _) => Ok(Self::Syncing),
+            (SubscriptionKind::TransactionReceipts, Params::TransactionReceipts(filter)) => {
+                Ok(Self::TransactionReceipts(filter))
+            }
+            (SubscriptionKind::TransactionReceipts, Params::None) => {
+                Ok(Self::TransactionReceipts(Default::default()))
+            }
+            _ => Err(invalid_params_rpc_err(format!("Invalid params for {kind}"))),
+        }
     }
 }
 
