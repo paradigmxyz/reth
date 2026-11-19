@@ -38,7 +38,7 @@ use alloy_eips::eip2124::Head;
 use alloy_primitives::{BlockNumber, B256};
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
-use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks, OP_MAINNET_BEDROCK_BLOCK};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{
@@ -1128,8 +1128,7 @@ where
             self.chain_id() == Chain::optimism_mainnet()
         {
             let latest = self.blockchain_db().last_block_number()?;
-            // bedrock height
-            if latest < 105235063 {
+            if latest < OP_MAINNET_BEDROCK_BLOCK {
                 error!(
                     "Op-mainnet has been launched without importing the pre-Bedrock state. The chain can't progress without this. See also https://reth.rs/run/sync-op-mainnet.html?minimal-bootstrap-recommended"
                 );
