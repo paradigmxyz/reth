@@ -149,7 +149,7 @@ pub mod response {
             ResponseBody::Json(json) => HttpBody::from(json),
             ResponseBody::Stream(stream) => HttpBody::new(StreamBody::new(stream.map(|part| {
                 part.map(Frame::data).inspect_err(|err| {
-                    tracing::warn!(target: LOG_TARGET, %err, "Aborting streamed response");
+                    tracing::warn!(target: LOG_TARGET, code = err.code(), "Aborting streamed response");
                 })
             }))),
         };
