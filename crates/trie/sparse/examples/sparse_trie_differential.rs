@@ -13,6 +13,7 @@ use reth_trie_sparse::{
     LeafLookupError, LeafUpdate, PersistentArenaParallelSparseTrie,
     PersistentArenaParallelismThresholds, SparseTrie, SparseTrieUpdates, TrieNodeEpoch,
 };
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
@@ -67,6 +68,109 @@ impl Evidence {
     fn hit(&mut self, operation: &'static str) {
         assert!(COVERAGE_OPERATIONS.contains(&operation), "unregistered coverage operation");
         *self.operations.entry(operation).or_default() += 1;
+    }
+}
+
+/// Version of the explicit, locally mutable workload input.
+pub const INPUT_VERSION: u8 = 2;
+
+/// A generated fixture plus an explicit action sequence for each mandatory round.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Input {
+    /// Serialized shape version; older seed-only inputs are not accepted.
+    pub version: u8,
+    /// Seed for the fixed trait-check spine, never used to regenerate explicit actions.
+    pub fixture_seed: u64,
+    /// Exactly sixteen rounds; an empty action list leaves that round's fixed checks intact.
+    pub rounds: Vec<Vec<Action>>,
+}
+
+/// A locally mutable action, executed in order after a round's mandatory checks.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Action {
+    /// Apply a batch (empty is a no-op); repeated keys use the last value in this batch.
+    UpdateBatch {
+        /// At most four key/value changes, with zero values representing deletion.
+        updates: Vec<Change>,
+    },
+    /// Reveal a valid model-derived proof, including for an absent key.
+    Reveal {
+        /// Prehashed key, not a database lookup or a proof supplied by the fuzzer.
+        key: [u8; 32],
+    },
+    /// Blind nodes older than the supplied epoch.
+    Prune {
+        /// Absolute epoch cutoff; zero retains all nodes.
+        cutoff: u64,
+    },
+    /// Snapshot and verify the current root without modifying the source.
+    Snapshot,
+    /// Clone and verify the current root without modifying the source.
+    Clone,
+    /// Reset retained-update tracking and verify its accumulator is empty.
+    TrackingReset,
+}
+
+/// An explicit storage-leaf change; arrays keep serialization independent of alloy features.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Change {
+    /// Already hashed, full-width trie key.
+    pub key: [u8; 32],
+    /// Big-endian integer; zero deletes, nonzero is canonically RLP encoded by the driver.
+    pub value: [u8; 32],
+}
+
+impl Input {
+    /// Generates the explicit tape once; execution consumes it without drawing actions again.
+    pub fn generate(seed: u64) -> Self {
+        let mut generator = Generator(seed ^ 0x494e_5055_5400_0002);
+        let rounds = (0..16)
+            .map(|round| {
+                let mut actions = vec![Action::UpdateBatch {
+                    updates: (0..=round % 2)
+                        .map(|_| Change {
+                            key: generator.key().0,
+                            value: generator.value().to_be_bytes(),
+                        })
+                        .collect(),
+                }];
+                actions.push(match generator.next() % 5 {
+                    0 => Action::Prune { cutoff: if round % 2 == 0 { 0 } else { 18 + round * 10 } },
+                    1 => Action::Reveal { key: generator.key().0 },
+                    2 => Action::Snapshot,
+                    3 => Action::Clone,
+                    _ => Action::TrackingReset,
+                });
+                actions
+            })
+            .collect();
+        Self { version: INPUT_VERSION, fixture_seed: seed, rounds }
+    }
+
+    /// Checks shape bounds before executing either backend; no target work occurs on failure.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.version != INPUT_VERSION {
+            return Err("unsupported input version");
+        }
+        if self.rounds.len() != 16 {
+            return Err("input requires sixteen rounds");
+        }
+        for actions in &self.rounds {
+            if actions.len() > 8 {
+                return Err("round exceeds eight actions");
+            }
+            for action in actions {
+                if let Action::UpdateBatch { updates } = action &&
+                    updates.len() > 4
+                {
+                    return Err("batch exceeds four updates");
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -368,35 +472,29 @@ fn prune<T: SparseTrie>(trie: &mut T, cutoff: u64, evidence: &mut Evidence) -> u
 fn randomized_actions<T: SparseTrie + Clone>(
     trie: &mut T,
     harness: &mut TrieTestHarness,
-    generator: &mut Generator,
+    actions: &[Action],
     at: u64,
     evidence: &mut Evidence,
 ) -> Result<(), DifferentialFailure> {
-    for _ in 0..(1 + generator.next() % 5) {
-        let action = generator.next() % 8;
+    for action in actions {
         evidence.hit("scheduled_actions");
-        evidence.transcript.push(format!("scheduled-action={action}"));
+        evidence.transcript.push(format!("scheduled-action={action:?}"));
         match action {
-            0 => {
-                prune(trie, 0, evidence);
-                evidence.features.insert("schedule_prune_zero");
+            Action::Prune { cutoff } => {
+                prune(trie, *cutoff, evidence);
+                evidence.features.insert(if *cutoff == 0 {
+                    "schedule_prune_zero"
+                } else {
+                    "schedule_prune_recent"
+                });
             }
-            1 => {
-                prune(trie, at, evidence);
-                evidence.features.insert("schedule_prune_recent");
-            }
-            2 => {
-                if let Some(key) = harness
-                    .storage()
-                    .keys()
-                    .nth((generator.next() % harness.storage().len() as u64) as usize)
-                {
-                    reveal(trie, harness, &mut [ProofV2Target::new(*key)], evidence)?;
-                }
+            Action::Reveal { key } => {
+                reveal(trie, harness, &mut [ProofV2Target::new(B256::from(*key))], evidence)?;
                 evidence.features.insert("schedule_reveal");
             }
-            3 | 4 => {
-                let mut fork = if action == 3 {
+            Action::Snapshot | Action::Clone => {
+                let snapshot = matches!(action, Action::Snapshot);
+                let mut fork = if snapshot {
                     evidence.hit("snapshot");
                     trie.snapshot()
                 } else {
@@ -405,13 +503,13 @@ fn randomized_actions<T: SparseTrie + Clone>(
                 };
                 root(&mut fork, harness.original_root(), at, evidence)?;
                 drop(fork);
-                evidence.features.insert(if action == 3 {
+                evidence.features.insert(if snapshot {
                     "schedule_snapshot"
                 } else {
                     "schedule_clone"
                 });
             }
-            5 => {
+            Action::TrackingReset => {
                 trie.set_updates(true);
                 evidence.hit("set_updates");
                 equal(
@@ -421,26 +519,20 @@ fn randomized_actions<T: SparseTrie + Clone>(
                 )?;
                 evidence.features.insert("schedule_tracking_reset");
             }
-            _ => {
-                let key = if action == 6 && !harness.storage().is_empty() {
-                    *harness
-                        .storage()
-                        .keys()
-                        .nth((generator.next() % harness.storage().len() as u64) as usize)
-                        .expect("bounded existing key")
-                } else {
-                    generator.key()
-                };
-                let value =
-                    if generator.next().is_multiple_of(3) { U256::ZERO } else { generator.value() };
-                evidence.hit(if value.is_zero() {
-                    "delete"
-                } else if harness.storage().contains_key(&key) {
-                    "modify"
-                } else {
-                    "insert"
-                });
-                let changes = BTreeMap::from([(key, value)]);
+            Action::UpdateBatch { updates } => {
+                let changes = updates
+                    .iter()
+                    .map(|change| (B256::from(change.key), U256::from_be_bytes(change.value)))
+                    .collect::<BTreeMap<_, _>>();
+                for (key, value) in &changes {
+                    evidence.hit(if value.is_zero() {
+                        "delete"
+                    } else if harness.storage().contains_key(key) {
+                        "modify"
+                    } else {
+                        "insert"
+                    });
+                }
                 apply(trie, harness, &mut leaf_updates(&changes), evidence)?;
                 let expected = oracle(&model_after(harness.storage(), &changes));
                 root(trie, expected, at, evidence)?;
@@ -498,9 +590,10 @@ fn generated(seed: u64) -> BTreeMap<B256, U256> {
 }
 
 fn exercise<T: SparseTrie + Clone>(
-    seed: u64,
+    input: &Input,
     factory: fn() -> T,
 ) -> Result<Evidence, DifferentialFailure> {
+    let seed = input.fixture_seed;
     let mut evidence = Evidence::default();
     let mut generator = Generator(seed ^ 0xa0761d6478bd642f);
     let mut harness = TrieTestHarness::new(generated(seed));
@@ -576,7 +669,7 @@ fn exercise<T: SparseTrie + Clone>(
         }
         let mut changes = BTreeMap::new();
         let keys = harness.storage().keys().copied().collect::<Vec<_>>();
-        for _ in 0..12 {
+        for _ in 0..if keys.is_empty() { 0 } else { 12 } {
             let key = keys[(generator.next() % keys.len() as u64) as usize];
             let value =
                 if generator.next().is_multiple_of(3) { U256::ZERO } else { generator.value() };
@@ -707,7 +800,13 @@ fn exercise<T: SparseTrie + Clone>(
             root(old, oracle(model), at + 7, &mut evidence)?;
             equal(old.root_epoch(), *old_epoch, "historical-epoch")?;
         }
-        randomized_actions(&mut trie, &mut harness, &mut generator, at + 8, &mut evidence)?;
+        randomized_actions(
+            &mut trie,
+            &mut harness,
+            &input.rounds[round as usize],
+            at + 8,
+            &mut evidence,
+        )?;
     }
     evidence.features.extend([
         "snapshot_dirty",
@@ -1058,7 +1157,20 @@ fn root_and_fork_isolation<T: SparseTrie + Clone>(
 /// mismatch returns `Err`; unexpected backend/harness panics are deliberately not caught.
 /// The seed fully determines valid generated inputs. There are no external side effects.
 pub fn run(seed: u64) -> Result<String, DifferentialFailure> {
-    let arena = exercise(seed, || {
+    run_input(&Input::generate(seed))
+}
+
+/// Runs the same validated tape on both backends with every fixed trait oracle enabled.
+///
+/// Invalid shapes fail before target execution. No action generation, I/O or worker spawning
+/// occurs.
+pub fn run_input(input: &Input) -> Result<String, DifferentialFailure> {
+    input.validate().map_err(|details| DifferentialFailure {
+        signature: "sparse-trie/invalid-input".into(),
+        details: details.into(),
+    })?;
+    let seed = input.fixture_seed;
+    let arena = exercise(input, || {
         ArenaParallelSparseTrie::default().with_parallelism_thresholds(ArenaParallelismThresholds {
             min_dirty_leaves: u64::MAX,
             min_revealed_nodes: usize::MAX,
@@ -1070,7 +1182,7 @@ pub fn run(seed: u64) -> Result<String, DifferentialFailure> {
         failure.details = format!("seed={seed}; backend=arena; {}", failure.details);
         failure
     })?;
-    let persistent = exercise(seed, || {
+    let persistent = exercise(input, || {
         PersistentArenaParallelSparseTrie::default().with_parallelism_thresholds(
             PersistentArenaParallelismThresholds {
                 min_dirty_leaves: u64::MAX,
@@ -1135,5 +1247,48 @@ mod tests {
             let first = run(seed).expect("differential workload");
             equal(&first, &run(seed).expect("replay"), "reproducible-report").expect("determinism");
         }
+    }
+
+    #[test]
+    fn explicit_batch_data_and_order_reach_the_oracles() {
+        let key = B256::repeat_byte(0x10);
+        let mut harness = TrieTestHarness::new(BTreeMap::from([(key, U256::ONE)]));
+        let mut trie = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+            ArenaParallelismThresholds {
+                min_dirty_leaves: u64::MAX,
+                min_revealed_nodes: usize::MAX,
+                min_updates: usize::MAX,
+                min_leaves_for_prune: u64::MAX,
+            },
+        );
+        let mut evidence = Evidence::default();
+        initialize(&mut trie, &harness, true, &mut evidence).unwrap();
+        let change = |value: u64| Change { key: key.0, value: U256::from(value).to_be_bytes() };
+        let actions = [
+            Action::UpdateBatch { updates: vec![change(2), change(3)] },
+            Action::Snapshot,
+            Action::Clone,
+            Action::TrackingReset,
+            Action::Prune { cutoff: u64::MAX },
+            Action::Reveal { key: key.0 },
+            Action::UpdateBatch { updates: vec![] },
+            Action::UpdateBatch { updates: vec![change(0)] },
+        ];
+        randomized_actions(&mut trie, &mut harness, &actions, 8, &mut evidence).unwrap();
+        assert!(harness.storage().is_empty());
+        assert_eq!(evidence.checkpoints[0].0, oracle(&BTreeMap::from([(key, U256::from(3))])));
+        assert_eq!(evidence.checkpoints[1].0, evidence.checkpoints[0].0);
+        assert_eq!(evidence.checkpoints[2].0, EMPTY_ROOT_HASH);
+        // Deleting the last leaf does not prevent the next explicit insertion or proof.
+        randomized_actions(
+            &mut trie,
+            &mut harness,
+            &[Action::UpdateBatch { updates: vec![change(128)] }, Action::Reveal { key: key.0 }],
+            9,
+            &mut evidence,
+        )
+        .unwrap();
+        assert_eq!(harness.storage(), &BTreeMap::from([(key, U256::from(128))]));
+        assert_ne!(evidence.checkpoints[3].0, evidence.checkpoints[0].0);
     }
 }

@@ -18,7 +18,7 @@ alloy-rlp = { version = "0.3.16", default-features = false, features = ["std", "
 alloy-trie = { version = "0.9.9", default-features = false, features = ["std"] }
 reth-trie = { path = "../../crates/trie/trie", features = ["test-utils"] }
 reth-trie-common = { path = "../../crates/trie/common", features = ["test-utils", "arbitrary"] }
-reth-trie-sparse = { path = "../../crates/trie/sparse", default-features = false, features = ["std"] }
+reth-trie-sparse = { path = "../../crates/trie/sparse", default-features = false, features = ["std", "fuzz"] }
 serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
 
@@ -31,6 +31,7 @@ reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev 
 
 [profile.release]
 panic = "unwind"
+lto = false
 
 # Keep all inherited evm2 users on the public workspace's single pinned revision.
 [patch."https://github.com/alloy-rs/evm2"]

@@ -77,11 +77,16 @@ def values(flag):
 
 codegen = [arg for index, arg in enumerate(args)
            if arg.startswith('-C') or (index > 0 and args[index - 1] == '-C')]
+codegen += list(values('--codegen'))
 if any('sanitizer-coverage' in arg or 'sancov' in arg for arg in codegen):
     raise SystemExit('external SanCov flags would instrument the adapter; remove them')
 crate = next(values('--crate-name'), None)
 if crate == 'reth_trie_sparse':
-    args += ['-Cpasses=sancov-module', '-Cllvm-args=-sanitizer-coverage-level=3',
+    if 'feature="fuzz"' not in values('--cfg'):
+        raise SystemExit('reth_trie_sparse must enable the fuzz feature')
+    args += ['--cfg', 'reth_sparse_trie_coverage',
+             '--check-cfg=cfg(reth_sparse_trie_coverage)',
+             '-Cpasses=sancov-module', '-Cllvm-args=-sanitizer-coverage-level=3',
              '-Cllvm-args=-sanitizer-coverage-inline-8bit-counters']
 elif crate == 'sparse_trie_differential_workload':
     target = next((value.split('=', 1)[1] for value in values('--extern')
@@ -116,6 +121,16 @@ cp -- "$CARGO_TARGET_DIR/release/libsparse_trie_differential_workload.so" "$bund
 python3 - "$bundle" "$root" "$source_sha256" <<'PY'
 import hashlib, json, pathlib, shutil, subprocess, sys, tarfile
 bundle, root = map(pathlib.Path, sys.argv[1:3])
+symbols = subprocess.check_output(
+    ['nm', '--defined-only', '--demangle', str(bundle / 'libworkload.so')], text=True)
+# Fail closed if either cfg-gated bank was omitted or optimized out of the actual library.
+bucket_arms = {
+    backend: sum(f'reth_trie_sparse::{backend}::sparse_guidance::coverage_arm::<' in line
+                 for line in symbols.splitlines())
+    for backend in ('arena', 'arena_persistent')
+}
+if any(count != 28674 for count in bucket_arms.values()):
+    raise SystemExit(f'missing sparse-trie coverage bucket bodies: {bucket_arms}')
 linked = subprocess.check_output(['ldd', str(bundle / 'libworkload.so')], text=True)
 if 'not found' in linked:
     raise SystemExit('unresolved native dependency:\n' + linked)
@@ -150,10 +165,12 @@ provenance = {'source_commit': commit, 'source_status': status,
               'rustc': subprocess.check_output(['rustc', '--version'], text=True).strip(),
               'cargo': subprocess.check_output(['cargo', '--version'], text=True).strip(),
               'coverage': {'kind': 'llvm-sancov-inline-8bit-counters',
-                           'crate': 'reth_trie_sparse', 'adapter_instrumented': False},
+                           'crate': 'reth_trie_sparse', 'adapter_instrumented': False,
+                           'fuzz_feature': True, 'reth_sparse_trie_coverage': True,
+                           'bucket_arms': bucket_arms},
               'sha256': files}
 (bundle / 'build-info.json').write_text(json.dumps(provenance, indent=2) + '\n')
-session = {'version': 2, 'library': './libworkload.so', 'args': {}, 'workers': 1,
+session = {'version': 2, 'library': './libworkload.so', 'args': {},
            'search': {'max_seeds': 0, 'finalize_every': 1, 'corpus_injection_every': 100}}
 (bundle / 'fuzz-session.json').write_text(json.dumps(session, indent=2) + '\n')
 PY

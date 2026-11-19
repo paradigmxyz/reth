@@ -17,6 +17,8 @@ use std::{
 #[expect(dead_code, reason = "The shared example also has a standalone main function.")]
 mod core;
 
+mod input;
+
 struct Workload {
     poisoned: bool,
     pending: Option<Value>,
@@ -52,7 +54,6 @@ static NATIVE_COUNTERS: Mutex<CounterRegistry> =
 const MAX_REQUEST_BYTES: usize = 65_536;
 const SEED_COUNT: u64 = 72;
 const EXTRA_SEEDS: [u64; 8] = [64, 127, 128, 255, 256, 65_535, u64::MAX - 1, u64::MAX];
-const OPERATORS: [&str; 3] = ["flip-bit", "add", "replace"];
 
 type Reply = unsafe extern "C" fn(*mut c_void, *const u8, usize);
 
@@ -92,12 +93,6 @@ struct Config {
 #[serde(deny_unknown_fields)]
 struct Search {
     finalize_every: u64,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Input {
-    seed: u64,
 }
 
 #[derive(Deserialize)]
@@ -149,22 +144,17 @@ impl Workload {
                 None => Ok(json!({"count": SEED_COUNT})),
                 Some(index) if index < SEED_COUNT => {
                     let seed = if index < 64 { index } else { EXTRA_SEEDS[(index - 64) as usize] };
-                    Ok(json!({"input": input_text(seed)}))
+                    Ok(json!({"input": input::generated(seed)?}))
                 }
                 Some(_) => Err(Error::Invalid("seed index is out of range")),
             },
             Request::FreshInput { args: Empty {}, seed } => {
-                Ok(json!({"input": input_text(mix(seed))}))
+                Ok(json!({"input": input::generated(mix(seed))?}))
             }
-            Request::MutationOperators { args: Empty {} } => Ok(json!([
-                {"name": "flip-bit", "weight": 4},
-                {"name": "add", "weight": 2},
-                {"name": "replace", "weight": 1}
-            ])),
+            Request::MutationOperators { args: Empty {} } => Ok(input::operators()),
             Request::MutationSites { args: Empty {}, input, operator } => {
-                let _: Input = serde_json::from_str(&input)?;
-                check_operator(&operator)?;
-                Ok(json!([{"operator": operator, "path": ["seed"]}]))
+                let input = input::parse(&input)?;
+                Ok(serde_json::to_value(input::sites(&input, &operator)?)?)
             }
             Request::MutateInput {
                 args: Empty {},
@@ -175,36 +165,25 @@ impl Workload {
                 donor,
                 donor_path,
             } => {
-                let input: Input = serde_json::from_str(&input)?;
-                check_operator(&operator)?;
-                if path != ["seed"] || donor.is_some() || donor_path.is_some_and(|p| !p.is_empty())
-                {
-                    return Err(Error::Invalid("mutation requires path [seed] and no donor"));
-                }
-                let random = mix(seed);
-                let seed = match operator.as_str() {
-                    "flip-bit" => input.seed ^ (1 << (random % 64)),
-                    "add" => input.seed.wrapping_add(random | 1),
-                    "replace" => {
-                        if random == input.seed {
-                            !random
-                        } else {
-                            random
-                        }
+                let input = input::parse(&input)?;
+                let donor = match (donor, donor_path) {
+                    (Some(other), Some(path)) => Some((input::parse(&other)?, path)),
+                    (None, None) => None,
+                    (None, Some(path)) if path.is_empty() => None,
+                    _ => {
+                        return Err(Error::Invalid("donor and donor_path must be supplied together"))
                     }
-                    _ => return Err(Error::Invalid("unknown mutation operator")),
                 };
-                Ok(Value::String(input_text(seed)))
+                Ok(Value::String(input::mutate(input, &operator, &path, seed, donor)?))
             }
             Request::Execute { input, seed: _execution_seed, out } => {
-                let input: Input = serde_json::from_str(&input)?;
+                let input = input::parse(&input)?;
                 if !Path::new(&out).is_absolute() {
                     return Err(Error::Invalid("out must be an absolute path"));
                 }
-                // The input seed alone determines execution; orchestration randomness is
-                // irrelevant.
+                // The complete input determines execution; orchestration randomness is ignored.
                 let started = Instant::now();
-                let (result, native) = run_measured(input.seed)?;
+                let (result, native) = run_measured(&input)?;
                 let duration = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
                 let result = execution_result(result, duration, native)?;
                 Ok(self.retain_execution(result))
@@ -221,18 +200,6 @@ impl Workload {
             result["pending"] = json!(true);
         }
         result
-    }
-}
-
-fn input_text(seed: u64) -> String {
-    format!("{{\"seed\":{seed}}}")
-}
-
-fn check_operator(operator: &str) -> Result<(), Error> {
-    if OPERATORS.contains(&operator) {
-        Ok(())
-    } else {
-        Err(Error::Invalid("unknown mutation operator"))
     }
 }
 
@@ -524,7 +491,7 @@ impl CounterRegistry {
 }
 
 fn run_measured(
-    seed: u64,
+    input: &core::Input,
 ) -> Result<(Result<String, core::DifferentialFailure>, NativeCoverage), Error> {
     let registry = NATIVE_COUNTERS
         .lock()
@@ -538,7 +505,7 @@ fn run_measured(
     // SAFETY: Loader registration guarantees static allocations. The mutex spans the complete
     // reset/run/read transaction. The adapter and core driver are deliberately uninstrumented.
     unsafe { registry.clear() };
-    let result = core::run(seed);
+    let result = core::run_input(input);
     // SAFETY: The core has returned and no target code can concurrently update the counters.
     let native = unsafe { registry.snapshot() };
     Ok((result, native))
@@ -547,6 +514,20 @@ fn run_measured(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_null_donor_and_empty_path_are_accepted() {
+        let input = input::generated(0).unwrap();
+        let path =
+            input::sites(&input::parse(&input).unwrap(), "key.update").unwrap().remove(0).path;
+        let request = json!({"method":"mutate-input","params":{
+            "args":{},"input":input,"seed":99,"operator":"key.update","path":path,
+            "donor":null,"donor_path":[]
+        }});
+        let mut workload = Workload { poisoned: false, pending: None };
+        let result = workload.call(serde_json::from_value(request).unwrap()).unwrap();
+        assert_ne!(result.as_str().unwrap(), input);
+    }
 
     #[test]
     fn differences_are_objectives_not_errors() {
@@ -562,23 +543,6 @@ mod tests {
         assert_eq!(result["objective_signatures"], json!(["root/mismatch"]));
         assert_eq!(result["verdict"]["status"], "difference");
         assert_eq!(result["finalized"], true);
-    }
-
-    #[test]
-    fn mutation_is_deterministic_and_changes_seed() {
-        let mut workload = Workload { poisoned: false, pending: None };
-        for operator in OPERATORS {
-            for seed in [0, 1, u64::MAX] {
-                let request = || {
-                    serde_json::from_value(json!({"method":"mutate-input", "params":{
-                    "args":{},"input":input_text(seed),"seed":seed,"operator":operator,"path":["seed"]
-                }})).unwrap()
-                };
-                let first = workload.call(request()).unwrap();
-                assert_eq!(first, workload.call(request()).unwrap());
-                assert_ne!(first, Value::String(input_text(seed)));
-            }
-        }
     }
 
     #[test]

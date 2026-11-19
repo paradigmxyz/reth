@@ -56,15 +56,35 @@ def main():
         assert len(set(inputs)) == count
         invoke(handle, 'seed-inputs', {**args, 'index': count}, 'seed index is out of range')
         operators = invoke(handle, 'mutation-operators', args)
+        mutated = []
+        expected_operators = {
+            'action.insert', 'action.remove', 'action.duplicate', 'action.crossover', 'action.swap',
+            'update.insert', 'update.remove', 'update.duplicate', 'update.crossover',
+            'key.update', 'key.prefix', 'value.update', 'prune.update',
+        }
+        assert {operator['name'] for operator in operators} == expected_operators
         for operator in operators:
+            assert 'selector' not in operator, 'dynamic sites must not be bypassed'
             name = operator['name']
-            assert invoke(handle, 'mutation-sites', {**args, 'input': inputs[0], 'operator': name}) == [
-                {'operator': name, 'path': ['seed']}]
-            mutation = {**args, 'input': inputs[0], 'seed': 99, 'operator': name, 'path': ['seed']}
+            sites = invoke(handle, 'mutation-sites', {**args, 'input': inputs[0], 'operator': name})
+            assert sites and all(site['operator'] == name for site in sites), name
+            mutation = {**args, 'input': inputs[0], 'seed': 99, 'operator': name,
+                        'path': sites[0]['path'], 'donor': None, 'donor_path': []}
+            if operator['donor']:
+                donors = invoke(handle, 'mutation-sites', {**args, 'input': inputs[1], 'operator': name})
+                mutation.update(donor=inputs[1], donor_path=donors[0]['path'])
             result = invoke(handle, 'mutate-input', mutation)
-            assert isinstance(result, str) and result != inputs[0]
+            assert isinstance(result, str) and result != inputs[0], name
             assert result == invoke(handle, 'mutate-input', mutation)
-            assert isinstance(json.loads(result)['seed'], int)
+            original, changed = json.loads(inputs[0]), json.loads(result)
+            assert changed['version'] == 2 and changed['fixture_seed'] == original['fixture_seed']
+            round_index = int(sites[0]['path'][1])
+            assert all(changed['rounds'][i] == original['rounds'][i]
+                       for i in range(16) if i != round_index), name
+            mutated.append(result)
+        invoke(handle, 'mutate-input', {**args, 'input': inputs[0], 'seed': 99,
+               'operator': 'key.update', 'path': ['rounds', '99', '0', 'key']},
+               'invalid mutation path')
         fresh = invoke(handle, 'fresh-input', {**args, 'seed': 123})
         assert fresh == invoke(handle, 'fresh-input', {**args, 'seed': 123})
         invoke(handle, 'finish', {'admitted': False, 'n': 0}, 'no execution is pending')
@@ -78,7 +98,7 @@ def main():
             # The workload must never create the artifact directory or any execution file.
             before = set(pathlib.Path(temporary).iterdir())
             threads = len(list(pathlib.Path('/proc/self/task').iterdir()))
-            cases = inputs if '--all-seeds' in sys.argv[2:] else [inputs[0], inputs[1], inputs[-1], fresh['input']]
+            cases = (inputs if '--all-seeds' in sys.argv[2:] else [inputs[0], inputs[1], inputs[-1], fresh['input']]) + mutated
             objectives = 0
             layouts = set()
             edge_maps = set()
@@ -130,7 +150,7 @@ def main():
             assert set(pathlib.Path(temporary).iterdir()) == before
             assert len(list(pathlib.Path('/proc/self/task').iterdir())) == threads, 'execution spawned threads'
         print(f'Native ABI smoke passed ({len(cases)} executions; {count} corpus entries; '
-              f'{objectives} differential objectives; {len(native_slots)} native slots observed / '
+              f'{len(mutated)} structured mutations; {objectives} differential objectives; {len(native_slots)} native slots observed / '
               f'{next(iter(layouts))[1]} registered; deterministic semantic replay '
               f'({replay_counter_changes} native counts varied); no files or threads).')
     finally:
