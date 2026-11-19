@@ -284,23 +284,24 @@ where
                 return Ok(())
             }
         };
-        // Only the forwarding task knows when its upstream is attached and it can take the sink.
-        let (initialized, ready) = oneshot::channel();
+        let (mut accepted, acknowledgement) = oneshot::channel();
         let pubsub = self.clone();
         self.inner.subscription_task_spawner.spawn_task(async move {
+            // Canceling the forwarder must also cancel an acknowledgement waiting for room.
             let sink = async {
-                let (send_sink, sink) = oneshot::channel();
-                initialized.send(send_sink).map_err(|_| PendingSubscriptionAcceptError)?;
-                sink.await.map_err(|_| PendingSubscriptionAcceptError)
+                let sink = tokio::select! {
+                    biased;
+                    _ = accepted.closed() => return Err(PendingSubscriptionAcceptError),
+                    sink = pending.accept() => sink?,
+                };
+                accepted.send(()).map_err(|_| PendingSubscriptionAcceptError)?;
+                Ok(sink)
             };
             if let Err(err) = pubsub.run_subscription(sink, subscription).await {
                 error!(target: "rpc", %err, "Failed to forward subscription notification");
             }
         });
-
-        let send_sink = ready.await?;
-        send_sink.send(pending.accept().await?).map_err(|_| "subscription receiver closed")?;
-        Ok(())
+        acknowledgement.await.map_err(|_| PendingSubscriptionAcceptError.into())
     }
 }
 
@@ -624,8 +625,16 @@ mod tests {
     use crate::EthApiBuilder;
     use alloy_consensus::Transaction as _;
     use futures::stream;
-    use jsonrpsee::RpcModule;
-    use jsonrpsee_types::{SubscriptionId, SubscriptionPayload, SubscriptionResponse};
+    use jsonrpsee::{
+        server::{
+            BoundedSubscriptions, ConnectionId, MethodCallback, MethodSink,
+            RandomIntegerIdProvider, SubscriptionState,
+        },
+        RpcModule,
+    };
+    use jsonrpsee_types::{
+        error::ErrorCode, Id, SubscriptionId, SubscriptionPayload, SubscriptionResponse,
+    };
     use reth_chain_state::CanonStateNotification;
     use reth_chainspec::ChainSpecProvider;
     use reth_db_common::init::init_genesis;
@@ -1098,5 +1107,57 @@ mod tests {
             pubsub.subscribe_shared(|feeds| &feeds.new_heads, |_| stream::iter([1]).boxed()).await;
         assert!(matches!(ended.try_recv(), Err(broadcast::error::TryRecvError::Closed)));
         tokio::time::timeout(TIMEOUT, reopened.recv()).await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn canceled_subscription_startup_answers_in_process_request() {
+        let pubsub = test_pubsub(test_provider(), testing_pool());
+        let runtime = &pubsub.inner.subscription_task_spawner;
+        runtime.graceful_shutdown();
+        tokio::time::timeout(TIMEOUT, runtime.on_shutdown_signal().clone()).await.unwrap();
+
+        let module = pubsub.into_rpc();
+        let request = r#"{"jsonrpc":"2.0","id":1,"method":"eth_subscribe","params":["newHeads"]}"#;
+        let (response, _) = tokio::time::timeout(TIMEOUT, module.raw_json_request(request, 1))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            response,
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"Internal error"}}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn canceled_subscription_startup_cannot_send_blocked_ack() {
+        let pubsub = test_pubsub(test_provider(), testing_pool());
+        let module = pubsub.clone().into_rpc();
+        let Some(MethodCallback::Subscription(subscribe)) = module.method("eth_subscribe") else {
+            panic!("expected a subscription")
+        };
+        let (tx, mut messages) = mpsc::channel(1);
+        let full = tx.try_reserve().unwrap();
+        let response = subscribe(
+            Id::Number(1),
+            jsonrpsee_types::Params::new(Some(r#"["newHeads"]"#)),
+            MethodSink::new(tx.clone()),
+            SubscriptionState {
+                conn_id: ConnectionId::IN_PROCESS,
+                id_provider: &RandomIntegerIdProvider,
+                subscription_permit: BoundedSubscriptions::new(1).acquire().unwrap(),
+            },
+        );
+
+        // The source is attached, but the connection has no room for the acknowledgement.
+        let feed = &pubsub.inner.feeds.new_heads;
+        wait_for_producers(&[(feed, 1)]).await;
+        let producer = feed.sender.lock().await.clone().unwrap();
+        pubsub.inner.subscription_task_spawner.graceful_shutdown();
+        wait_until_stopped(&producer).await;
+        drop(full);
+
+        let response = tokio::time::timeout(TIMEOUT, response).await.unwrap();
+        assert_eq!(response.as_error_code(), Some(ErrorCode::InternalError.code()));
+        assert_eq!(messages.try_recv(), Err(mpsc::error::TryRecvError::Empty));
     }
 }
