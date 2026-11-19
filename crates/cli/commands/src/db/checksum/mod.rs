@@ -20,9 +20,9 @@ use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::{ProviderNodeTypes, StaticFileProvider},
-    DBProvider, ProviderError, ProviderResult, StaticFileProviderFactory,
+    DBProvider, ProviderError, StaticFileProviderFactory,
 };
-use reth_static_file_types::{ChangesetOffset, SegmentRangeInclusive, StaticFileSegment};
+use reth_static_file_types::{ChangesetOffset, StaticFileSegment};
 use std::{
     hash::{BuildHasher, Hasher},
     ops::Bound,
@@ -168,6 +168,10 @@ fn checksum_static_file(
         if reached_limit {
             break;
         }
+        eyre::ensure!(
+            !block_range.is_empty(),
+            "Invalid block range {block_range} in {segment} static file"
+        );
         let first = block_range.start().max(start_block);
         let last = block_range.end().min(end_block);
         if first > last {
@@ -207,8 +211,14 @@ fn checksum_static_file(
         } else {
             let expected = if segment.is_headers() {
                 block_range.len()
+            } else if let Some(txs) = header.tx_range() {
+                eyre::ensure!(
+                    !txs.is_empty(),
+                    "Invalid transaction range {txs} in {segment} static file {block_range}"
+                );
+                txs.len()
             } else {
-                header.tx_len().unwrap_or_default()
+                0
             };
             let actual = jar_provider.rows();
             eyre::ensure!(
@@ -221,11 +231,17 @@ fn checksum_static_file(
                 rows = (first - block_range.start())..(last - block_range.start() + 1);
             } else if let Some(txs) = header.tx_range() {
                 if first > block_range.start() {
-                    rows.start = transaction_rows_through(db, txs, first - 1)?;
+                    rows.start = transaction_rows_through(db, txs.start(), first - 1, expected)?;
                 }
                 if last < block_range.end() {
-                    rows.end = transaction_rows_through(db, txs, last)?;
+                    let remaining = u64::try_from(limit - checksummer.total)?;
+                    let cap = rows.start.saturating_add(remaining).min(expected);
+                    rows.end = transaction_rows_through(db, txs.start(), last, cap)?;
                 }
+                eyre::ensure!(
+                    rows.start <= rows.end,
+                    "Decreasing transaction row offsets {rows:?} for blocks {first}..={last}"
+                );
             }
             for index in rows {
                 let row = cursor.row_by_number(usize::try_from(index)?)?.ok_or_else(|| {
@@ -254,26 +270,44 @@ fn checksum_static_file(
     Ok((checksum, total))
 }
 
-/// Returns the number of transaction rows in this file up to and including `block`.
+/// Returns the number of file rows through `block`, capped at the last row boundary needed.
 fn transaction_rows_through(
     db: &impl Database,
-    txs: SegmentRangeInclusive,
+    first_tx: u64,
     block: u64,
-) -> ProviderResult<u64> {
+    cap: u64,
+) -> eyre::Result<u64> {
+    let offset = |next_tx: u64| next_tx.saturating_sub(first_tx).min(cap);
     let tx = db.tx()?;
-    let next = match tx.cursor_read::<tables::BlockBodyIndices>()?.seek(block)? {
-        Some((number, body)) if number == block => body.next_tx_num(),
-        // `init-state --without-evm` skips body indices for its dummy blocks. A later
-        // body starting at or before this file's first transaction proves the gap has no rows
-        // in this file. The immediate successor always gives the exact boundary.
-        Some((number, body))
-            if number == block.saturating_add(1) || body.first_tx_num() <= txs.start() =>
-        {
-            body.first_tx_num()
+    let mut cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+    let (previous, upper) = match cursor.seek(block)? {
+        exact @ Some((number, _)) if number == block => (exact, None),
+        Some((number, body)) if number == block.saturating_add(1) => {
+            return Ok(offset(body.first_tx_num()))
         }
-        _ => return Err(ProviderError::BlockBodyIndicesNotFound(block)),
+        Some((_, body)) => (cursor.prev()?, Some(offset(body.first_tx_num()))),
+        None => (cursor.last()?, Some(cap)),
     };
-    Ok(next.saturating_sub(txs.start()).min(txs.len()))
+    let lower = if let Some((number, body)) = previous {
+        offset(
+            body.first_tx_num()
+                .checked_add(body.tx_count())
+                .ok_or_else(|| eyre::eyre!("Transaction index overflow at block {number}"))?,
+        )
+    } else {
+        0
+    };
+    // Across missing body indices, both neighbors must imply the same capped row offset.
+    if let Some(upper) = upper &&
+        lower != upper
+    {
+        eyre::ensure!(
+            lower < upper,
+            "Decreasing transaction row offsets {lower}..{upper} around block {block}"
+        );
+        return Err(ProviderError::BlockBodyIndicesNotFound(block).into())
+    }
+    Ok(lower)
 }
 
 pub(crate) struct ChecksumViewer<'a, N: NodeTypesWithDB> {
@@ -601,6 +635,22 @@ mod tests {
             );
         }
 
+        for (first_tx_num, tx_count, error) in [
+            (3, 0, "Decreasing transaction row offsets 3..1 for blocks 1..=1"),
+            (u64::MAX, 1, "Transaction index overflow at block 0"),
+        ] {
+            let tx = bodies.tx_mut().unwrap();
+            tx.put::<tables::BlockBodyIndices>(
+                0,
+                StoredBlockBodyIndices { first_tx_num, tx_count },
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            let err =
+                checksum_static_file(&files, &bodies, segment, Some(1), Some(1), None).unwrap_err();
+            assert_eq!(err.to_string(), error);
+        }
+
         let no_indices = create_test_rw_db();
         assert_eq!(
             checksum_static_file(&files, &no_indices, segment, None, None, None).unwrap().1,
@@ -615,7 +665,7 @@ mod tests {
     }
 
     #[test]
-    fn checksum_rejects_inconsistent_row_counts() {
+    fn checksum_rejects_inconsistent_segment_metadata() {
         let dir = tempfile::tempdir().unwrap();
         let files = test_files(&dir, 3);
         let segment = StaticFileSegment::Headers;
@@ -638,64 +688,95 @@ mod tests {
         let mut writer = files.get_writer(0, segment).unwrap();
         writer.increment_block(0).unwrap();
         writer.append_transaction_sender(0, &Address::ZERO).unwrap();
-        writer.user_header_mut().set_tx_range(0, 1);
         writer.commit().unwrap();
         drop(writer);
 
-        let err = checksum_static_file(&files, &create_test_rw_db(), segment, None, None, Some(1))
-            .unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Row count mismatch in TransactionSenders static file 0..=0: expected 2, got 1"
-        );
+        for (block_start, tx_start, tx_end, error) in [
+            (
+                0,
+                0,
+                1,
+                "Row count mismatch in TransactionSenders static file 0..=0: expected 2, got 1",
+            ),
+            (0, 1, 0, "Invalid transaction range 1..=0 in TransactionSenders static file 0..=0"),
+            (1, 0, 0, "Invalid block range 1..=0 in TransactionSenders static file"),
+        ] {
+            let mut writer = files.get_writer(0, segment).unwrap();
+            writer.user_header_mut().set_block_range(block_start, 0);
+            writer.user_header_mut().set_tx_range(tx_start, tx_end);
+            writer.commit().unwrap();
+            drop(writer);
+            let err =
+                checksum_static_file(&files, &create_test_rw_db(), segment, None, None, Some(1))
+                    .unwrap_err();
+            assert_eq!(err.to_string(), error);
+        }
     }
 
     #[test]
-    fn checksum_transaction_rows_after_dummy_blocks() {
+    fn checksum_sparse_transaction_boundaries() {
         let dir = tempfile::tempdir().unwrap();
         let files = test_files(&dir, 10);
         let db = create_test_rw_db();
         let segment = StaticFileSegment::TransactionSenders;
-        let sender = Address::repeat_byte(6);
         let mut writer = files.get_writer(0, segment).unwrap();
-        writer.ensure_at_block(6).unwrap();
-        writer.append_transaction_sender(0, &sender).unwrap();
-        writer.increment_block(7).unwrap();
+        for (tx_num, block) in (0u8..).zip([6, 10, 16]) {
+            writer.ensure_at_block(block).unwrap();
+            writer
+                .append_transaction_sender(u64::from(tx_num), &Address::repeat_byte(tx_num))
+                .unwrap();
+        }
+        writer.ensure_at_block(19).unwrap();
         writer.commit().unwrap();
         drop(writer);
 
-        // Blocks 1 through 3 are dummy blocks. Block 6 has a transaction but its index is missing.
+        // Dummy blocks 1..=3 and nonempty blocks 6 and 16 have no body indices.
         let tx = db.tx_mut().unwrap();
-        tx.put::<tables::BlockBodyIndices>(0, Default::default()).unwrap();
-        tx.put::<tables::BlockBodyIndices>(4, Default::default()).unwrap();
+        for (block, first_tx_num, tx_count) in
+            [(0, 0, 0), (4, 0, 0), (7, 1, 0), (10, 1, 1), (14, 2, 0), (17, 3, 0)]
+        {
+            tx.put::<tables::BlockBodyIndices>(
+                block,
+                StoredBlockBodyIndices { first_tx_num, tx_count },
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+
+        for (start, end, limit, txs) in [
+            (None, Some(2), None, 0..0),
+            (Some(3), None, None, 0..3),
+            (None, Some(6), None, 0..1),
+            (None, Some(12), None, 0..2), // Equal bounds across a gap.
+            (None, Some(15), Some(2), 0..2), // One row was already hashed in the first file.
+            (Some(15), Some(18), Some(1), 2..3), // Limit relative to a nonzero file offset.
+            (None, Some(18), None, 0..3), // Exhausted file with unindexed trailing blocks.
+        ] {
+            let mut expected = checksum_hasher();
+            for tx in txs.clone() {
+                expected.write(Address::repeat_byte(tx).as_slice());
+            }
+            assert_eq!(
+                checksum_static_file(&files, &db, segment, start, end, limit).unwrap(),
+                (expected.finish(), txs.len())
+            );
+        }
+        for (end, limit) in [(5, None), (15, Some(3))] {
+            let err =
+                checksum_static_file(&files, &db, segment, None, Some(end), limit).unwrap_err();
+            assert!(matches!(err.downcast_ref::<ProviderError>(),
+                Some(ProviderError::BlockBodyIndicesNotFound(block)) if *block == end));
+        }
+
+        let tx = db.tx_mut().unwrap();
         tx.put::<tables::BlockBodyIndices>(
-            7,
+            14,
             StoredBlockBodyIndices { first_tx_num: 1, tx_count: 0 },
         )
         .unwrap();
         tx.commit().unwrap();
-
-        let mut expected = checksum_hasher();
-        expected.write(sender.as_slice());
-        assert_eq!(
-            checksum_static_file(&files, &db, segment, None, Some(2), None).unwrap(),
-            (checksum_hasher().finish(), 0)
-        );
-        assert_eq!(
-            checksum_static_file(&files, &db, segment, Some(3), None, None).unwrap(),
-            (expected.finish(), 1)
-        );
-
-        // A later index with a higher transaction number leaves the boundary ambiguous.
-        let err = checksum_static_file(&files, &db, segment, None, Some(5), None).unwrap_err();
-        assert!(matches!(
-            err.downcast_ref::<ProviderError>(),
-            Some(ProviderError::BlockBodyIndicesNotFound(5))
-        ));
-        assert_eq!(
-            checksum_static_file(&files, &db, segment, None, Some(6), None).unwrap(),
-            (expected.finish(), 1)
-        );
+        let err = checksum_static_file(&files, &db, segment, None, Some(12), None).unwrap_err();
+        assert_eq!(err.to_string(), "Decreasing transaction row offsets 1..0 around block 12");
     }
 
     #[test]
