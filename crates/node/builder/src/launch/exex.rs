@@ -156,14 +156,15 @@ impl<Node: FullNodeComponents> ExExLauncher<Node> {
 
         // send notifications from the blockchain tree to exex manager
         let mut canon_state_notifications = components.provider().subscribe_to_canonical_state();
-        let mut handle = exex_manager_handle.clone();
+        let handle = exex_manager_handle.clone();
         components.task_executor().spawn_critical_task(
             "exex manager blockchain tree notifications",
             async move {
                 while let Ok(notification) = canon_state_notifications.recv().await {
+                    // Don't wait for buffer capacity: the manager spills tree notifications to
+                    // the WAL, and waiting would make this subscription lag behind a slow ExEx.
                     handle
-                        .send_async(ExExNotificationSource::BlockchainTree, notification.into())
-                        .await
+                        .send(ExExNotificationSource::BlockchainTree, notification.into())
                         .expect("blockchain tree notification could not be sent to exex manager");
                 }
             },

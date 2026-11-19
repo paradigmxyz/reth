@@ -55,7 +55,9 @@ where
     }
 
     /// Commits the notification to WAL.
-    pub fn commit(&self, notification: &ExExNotification<N>) -> WalResult<()> {
+    ///
+    /// Returns the ID of the file the notification was written to.
+    pub fn commit(&self, notification: &ExExNotification<N>) -> WalResult<u32> {
         self.inner.commit(notification)
     }
 
@@ -64,7 +66,17 @@ where
     /// The caller should check that all ExExes are on the canonical chain and will not need any
     /// blocks from the WAL below the provided block, inclusive.
     pub fn finalize(&self, to_block: BlockNumHash) -> WalResult<()> {
-        self.inner.finalize(to_block)
+        self.inner.finalize(to_block, None)
+    }
+
+    /// Finalizes the WAL like [`Self::finalize`], but keeps notifications with file IDs of at
+    /// least `retain_from`, if any.
+    pub(crate) fn finalize_retaining(
+        &self,
+        to_block: BlockNumHash,
+        retain_from: Option<u32>,
+    ) -> WalResult<()> {
+        self.inner.finalize(to_block, retain_from)
     }
 
     /// Returns an iterator over all notifications in the WAL.
@@ -77,6 +89,15 @@ where
     /// Returns the number of blocks in the WAL.
     pub fn num_blocks(&self) -> usize {
         self.inner.block_cache().num_blocks()
+    }
+
+    /// Reads a notification retained for delivery by the manager.
+    pub(crate) fn read_notification(&self, file_id: u32) -> WalResult<ExExNotification<N>> {
+        self.inner
+            .storage
+            .read_notification(file_id)?
+            .map(|(notification, _)| notification)
+            .ok_or(WalError::FileNotFound(file_id))
     }
 }
 
@@ -148,7 +169,7 @@ where
         reverted_block_range = ?notification.reverted_chain().as_ref().map(|chain| chain.range()),
         committed_block_range = ?notification.committed_chain().as_ref().map(|chain| chain.range())
     ))]
-    fn commit(&self, notification: &ExExNotification<N>) -> WalResult<()> {
+    fn commit(&self, notification: &ExExNotification<N>) -> WalResult<u32> {
         let mut block_cache = self.block_cache.write();
 
         let file_id = self.next_file_id.fetch_add(1, Ordering::Relaxed);
@@ -159,13 +180,13 @@ where
 
         self.update_metrics(&block_cache, size as i64);
 
-        Ok(())
+        Ok(file_id)
     }
 
     #[instrument(skip(self))]
-    fn finalize(&self, to_block: BlockNumHash) -> WalResult<()> {
+    fn finalize(&self, to_block: BlockNumHash, retain_from: Option<u32>) -> WalResult<()> {
         let mut block_cache = self.block_cache.write();
-        let file_ids = block_cache.remove_before(to_block.number);
+        let file_ids = block_cache.remove_before(to_block.number, retain_from);
 
         // Remove notifications from the storage.
         if file_ids.is_empty() {
