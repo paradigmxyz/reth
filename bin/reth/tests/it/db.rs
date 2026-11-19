@@ -1,0 +1,89 @@
+use super::*;
+use alloy_primitives::{Address, B256, U256};
+use reth_db::{
+    mdbx::DatabaseArguments,
+    open_db,
+    tables::{PackedStoragesTrie, PlainStorageState},
+    transaction::DbTxMut,
+    Database, RawDupSort, RawValue,
+};
+use reth_primitives_traits::StorageEntry;
+use serde_json::{json, Value};
+
+fn db_get_mdbx(datadir: &str, table: &str, key: &str, args: &[&str]) -> String {
+    let mut cmd = vec!["db", "--chain", "dev", "--datadir", datadir, "get", "mdbx", table, key];
+    cmd.extend_from_slice(args);
+    reth_ok(&cmd)
+}
+
+#[test]
+fn db_get_mdbx_exact_subkey() {
+    let dir = tempfile::tempdir().unwrap();
+    let datadir = dir.path().to_str().unwrap();
+    reth_ok(&["init", "--chain", "dev", "--datadir", datadir, "--storage.v2=false"]);
+
+    let address = Address::with_last_byte(0xaa);
+    let stored = B256::with_last_byte(3);
+    // Include a leading zero in the stored integer to distinguish raw output from re-encoding.
+    let raw = [stored.as_slice(), &[0, 0x21]].concat();
+    open_db(dir.path().join("db"), DatabaseArguments::test())
+        .unwrap()
+        .update(|tx| {
+            tx.put::<PlainStorageState>(
+                address,
+                StorageEntry::new(B256::with_last_byte(1), U256::from(11)),
+            )?;
+            tx.put::<RawDupSort<PlainStorageState>>(address.into(), RawValue::from_vec(raw))
+        })
+        .unwrap()
+        .unwrap();
+
+    let key = address.to_string();
+    let get = |args: &[&str]| db_get_mdbx(datadir, "PlainStorageState", &key, args);
+
+    let gap = B256::with_last_byte(2).to_string();
+    let end = B256::with_last_byte(4).to_string();
+    for missing in [&gap, &end] {
+        assert_eq!(get(&[missing]), "");
+        assert_eq!(get(&[missing, "--raw"]), "");
+    }
+
+    let present = stored.to_string();
+    let entry = json!({ "key": stored, "value": "0x21" });
+    assert_eq!(serde_json::from_str::<Value>(&get(&[&present])).unwrap(), entry);
+    assert_eq!(get(&[&present, "--raw"]), format!("{present}0021\n"));
+
+    let range = get(&[&gap, &key, &end]);
+    assert_eq!(
+        serde_json::from_str::<Value>(&range).unwrap(),
+        json!({ "key": address, "val": entry })
+    );
+}
+
+#[test]
+fn db_get_mdbx_packed_storage_trie_subkey() {
+    let dir = tempfile::tempdir().unwrap();
+    let datadir = dir.path().to_str().unwrap();
+    reth_ok(&["init", "--chain", "dev", "--datadir", datadir, "--storage.v2=true"]);
+
+    let key = B256::with_last_byte(1);
+    let entry = json!({
+        "nibbles": "0xa0",
+        "node": { "state_mask": 3, "tree_mask": 0, "hash_mask": 0, "hashes": [], "root_hash": null }
+    });
+    open_db(dir.path().join("db"), DatabaseArguments::test())
+        .unwrap()
+        .update(|tx| {
+            tx.put::<PackedStoragesTrie>(key, serde_json::from_value(entry.clone()).unwrap())
+        })
+        .unwrap()
+        .unwrap();
+
+    let key = key.to_string();
+    let get = |args: &[&str]| db_get_mdbx(datadir, "StoragesTrie", &key, args);
+    assert_eq!(serde_json::from_str::<Value>(&get(&["0xa0"])).unwrap(), entry);
+    // The packed paths for 0xa and 0xa0 differ only in the encoded nibble count.
+    assert_eq!(get(&["0xa", "--raw"]), "");
+    let range = get(&["0xa", &key, "0xb"]);
+    assert_eq!(serde_json::from_str::<Value>(&range).unwrap(), json!({ "key": key, "val": entry }));
+}

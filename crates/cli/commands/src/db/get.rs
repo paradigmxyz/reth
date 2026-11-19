@@ -25,7 +25,8 @@ use reth_provider::{
     StaticFileProviderFactory,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::StorageChangeSetReader;
+use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
+use reth_trie_db::TrieTableAdapter;
 use tracing::error;
 
 /// The arguments for the `reth db get` command
@@ -133,7 +134,14 @@ impl Command {
     pub fn execute<N: ProviderNodeTypes>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         match self.subcommand {
             Subcommand::Mdbx { table, key, subkey, end_key, end_subkey, raw } => {
-                table.view(&GetValueViewer { tool, key, subkey, end_key, end_subkey, raw })?
+                let viewer = GetValueViewer { tool, key, subkey, end_key, end_subkey, raw };
+                if table == tables::Tables::StoragesTrie {
+                    reth_trie_db::with_adapter!(tool.provider_factory, |A| {
+                        viewer.view_dupsort::<<A as TrieTableAdapter>::StorageTrieTable>()
+                    })?;
+                } else {
+                    table.view(&viewer)?;
+                }
             }
             Subcommand::Rocksdb { table, key, block, storage_key, all_shards, raw } => {
                 get_rocksdb(tool, table, &key, block, storage_key.as_deref(), all_shards, raw)?;
@@ -629,18 +637,18 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
             let Some(subkey) = self.subkey.as_deref() else {
                 eyre::bail!("a subkey is required for dupsort tables");
             };
-            let subkey = table_subkey::<T>(subkey)?;
+            let subkey = RawKey::from(table_subkey::<T>(subkey)?);
 
-            let content = if self.raw {
-                self.tool
-                    .get_dup::<RawDupSort<T>>(RawKey::from(key), RawKey::from(subkey))?
-                    .map(|content| hex::encode_prefixed(content.raw_value()))
-            } else {
-                self.tool
-                    .get_dup::<T>(key, subkey)?
-                    .as_ref()
-                    .map(serde_json::to_string_pretty)
-                    .transpose()?
+            // MDBX can return the next duplicate. Each table encodes its full, fixed-width subkey
+            // at the start of the value, so raw reads can check it without decoding the payload.
+            let value = self
+                .tool
+                .get_dup::<RawDupSort<T>>(key.into(), subkey.clone())?
+                .filter(|value| value.raw_value().starts_with(subkey.raw_key()));
+            let content = match value {
+                Some(value) if self.raw => Some(hex::encode_prefixed(value.raw_value())),
+                Some(value) => Some(serde_json::to_string_pretty(&value.value()?)?),
+                None => None,
             };
 
             print_content(content, "subkey");
