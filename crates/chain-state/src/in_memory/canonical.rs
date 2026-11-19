@@ -275,14 +275,6 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         Self { inner: Arc::new(inner) }
     }
 
-    /// Returns `true` if a block written through this state is read through `in_memory_state`.
-    ///
-    /// This is the case if both share the same blocks, which is decided by the identity of the
-    /// two handles and not by the blocks they hold.
-    pub fn writes_to(&self, in_memory_state: &InMemoryState<N>) -> bool {
-        Arc::ptr_eq(&self.inner.in_memory_state.inner, &in_memory_state.inner)
-    }
-
     /// Returns the block hash corresponding to the given number.
     pub fn hash_by_number(&self, number: u64) -> Option<B256> {
         self.inner.in_memory_state.hash_by_number(number)
@@ -1133,15 +1125,5 @@ mod tests {
             assert!(in_memory_state.contains(&block.recovered_block().hash()));
         }
         assert!(!in_memory_state.contains(&B256::random()));
-    }
-
-    #[test]
-    fn test_writes_to() {
-        let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
-        let other: CanonicalInMemoryState = CanonicalInMemoryState::empty();
-
-        // Clones share the blocks, separately created states do not.
-        assert!(state.clone().writes_to(&state.inner.in_memory_state.clone()));
-        assert!(!state.writes_to(&other.inner.in_memory_state));
     }
 }

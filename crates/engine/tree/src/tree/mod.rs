@@ -357,12 +357,6 @@ where
     V: EngineValidator<T> + WaitForCaches,
 {
     /// Creates a new [`EngineApiTreeHandler`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if `canonical_in_memory_state` and the overlay manager of `state` do not share one
-    /// [`InMemoryState`](reth_chain_state::InMemoryState): the engine writes the executed blocks
-    /// through the former and reads them through the latter.
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
@@ -379,10 +373,6 @@ where
         evm_config: C,
         runtime: reth_tasks::Runtime,
     ) -> Self {
-        assert!(
-            canonical_in_memory_state.writes_to(state.tree_state.overlay_manager.in_memory_state()),
-            "the canonical in-memory state and the overlay manager do not share one in-memory state"
-        );
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
         let (payload_builds, payload_build_finished) = PayloadBuildTracker::new();
@@ -416,11 +406,6 @@ where
     ///
     /// Returns the sender through which incoming requests can be sent to the task and the receiver
     /// end of a [`EngineApiEvent`] unbounded channel to receive events from the engine.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `canonical_in_memory_state` and `overlay_manager` do not share one
-    /// [`InMemoryState`](reth_chain_state::InMemoryState), see [`Self::new`].
     #[expect(clippy::complexity)]
     pub fn spawn_new(
         provider: P,
