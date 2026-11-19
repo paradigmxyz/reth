@@ -1677,6 +1677,23 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
         }
     }
 
+    fn for_each_storage_changeset(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        mut f: impl FnMut(BlockNumberAddress, StorageEntry),
+    ) -> ProviderResult<()> {
+        if self.cached_storage_settings().storage_v2 {
+            self.static_file_provider.for_each_storage_changeset(range, f)
+        } else {
+            let mut cursor = self.tx.cursor_dup_read::<tables::StorageChangeSets>()?;
+            for entry in cursor.walk_range(BlockNumberAddressRange::from(range))? {
+                let (block_address, storage_entry) = entry?;
+                f(block_address, storage_entry);
+            }
+            Ok(())
+        }
+    }
+
     fn lowest_storage_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
         // Only storage v2 keeps changesets in static files.
         if !self.cached_storage_settings().storage_v2 {
@@ -1740,6 +1757,23 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
                 .walk_range(to_range(range))?
                 .map(|r| r.map_err(Into::into))
                 .collect()
+        }
+    }
+
+    fn for_each_account_changeset(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        mut f: impl FnMut(BlockNumber, AccountBeforeTx),
+    ) -> ProviderResult<()> {
+        if self.cached_storage_settings().storage_v2 {
+            self.static_file_provider.for_each_account_changeset(range, f)
+        } else {
+            let mut cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
+            for entry in cursor.walk_range(to_range(range))? {
+                let (block_number, changeset) = entry?;
+                f(block_number, changeset);
+            }
+            Ok(())
         }
     }
 

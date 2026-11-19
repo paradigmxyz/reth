@@ -20,8 +20,8 @@ use reth_trie::{
 /// Load prefix sets using a provider that implements [`ChangeSetReader`]. This function can read
 /// changesets from both static files and database.
 ///
-/// Changesets are read one block at a time. Addresses and storage slots are deduplicated across
-/// blocks before they are hashed.
+/// The provider streams the changesets of the range. Addresses and storage slots are deduplicated
+/// across blocks before they are hashed.
 pub fn load_prefix_sets_with_provider<Provider>(
     provider: &Provider,
     range: RangeInclusive<BlockNumber>,
@@ -30,17 +30,13 @@ where
     Provider: ChangeSetReader + StorageChangeSetReader + DBProvider,
 {
     let mut account_addresses = AddressSet::default();
+    provider.for_each_account_changeset(range.clone(), |_, AccountBeforeTx { address, .. }| {
+        account_addresses.insert(address);
+    })?;
     let mut storage_slots = AddressMap::<B256Set>::default();
-    for block_number in range {
-        for AccountBeforeTx { address, .. } in provider.account_block_changeset(block_number)? {
-            account_addresses.insert(address);
-        }
-        for (BlockNumberAddress((_, address)), storage_entry) in
-            provider.storage_changeset(block_number)?
-        {
-            storage_slots.entry(address).or_default().insert(storage_entry.key);
-        }
-    }
+    provider.for_each_storage_changeset(range, |BlockNumberAddress((_, address)), entry| {
+        storage_slots.entry(address).or_default().insert(entry.key);
+    })?;
 
     let mut prefix_sets = TriePrefixSetsMut::default();
 
@@ -90,8 +86,11 @@ mod tests {
     use reth_storage_api::StorageSettingsCache;
     use std::collections::BTreeSet;
 
-    /// Changed addresses and `(address, slot)` pairs of one block, as indices.
-    type BlockChanges = (BTreeSet<u8>, BTreeSet<(u8, u8)>);
+    /// Changed addresses of each block, as indices.
+    type AccountBlocks = Vec<BTreeSet<u8>>;
+
+    /// Changed `(address, slot)` pairs of each block, as indices.
+    type StorageBlocks = Vec<BTreeSet<(u8, u8)>>;
 
     /// The implementation before changesets were streamed and deduplicated, kept as the reference.
     fn load_prefix_sets_reference<Provider>(
@@ -156,10 +155,16 @@ mod tests {
         }
     }
 
-    /// Writes `blocks` as v1 or v2 changesets plus `HashedAccounts` rows for `existing`, then
-    /// compares both implementations over the full range and over a range without the first
-    /// block.
-    fn check_against_reference(blocks: &[BlockChanges], existing: &BTreeSet<u8>, v2: bool) {
+    /// Writes the blocks as v1 or v2 changesets plus `HashedAccounts` rows for `existing`, then
+    /// compares both implementations over the full range, over a range without the first block,
+    /// and over a range that ends past both tips. The two tables can end at different blocks, so
+    /// on v2 the segments have different tips.
+    fn check_against_reference(
+        account_blocks: &AccountBlocks,
+        storage_blocks: &StorageBlocks,
+        existing: &BTreeSet<u8>,
+        v2: bool,
+    ) {
         let address = |index: u8| Address::with_last_byte(index);
         let slot = |index: u8| B256::with_last_byte(index);
 
@@ -183,17 +188,18 @@ mod tests {
                 static_file_provider.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
             let mut storage_writer =
                 static_file_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
-            for (block_number, (accounts, slots)) in blocks.iter().enumerate() {
-                let block_number = block_number as BlockNumber;
+            for (block_number, accounts) in account_blocks.iter().enumerate() {
                 account_writer
                     .append_account_changeset(
                         accounts
                             .iter()
                             .map(|&a| AccountBeforeTx { address: address(a), info: None })
                             .collect(),
-                        block_number,
+                        block_number as BlockNumber,
                     )
                     .unwrap();
+            }
+            for (block_number, slots) in storage_blocks.iter().enumerate() {
                 storage_writer
                     .append_storage_changeset(
                         slots
@@ -204,29 +210,30 @@ mod tests {
                                 value: U256::ZERO,
                             })
                             .collect(),
-                        block_number,
+                        block_number as BlockNumber,
                     )
                     .unwrap();
             }
             account_writer.commit().unwrap();
             storage_writer.commit().unwrap();
         } else {
-            for (block_number, (accounts, slots)) in blocks.iter().enumerate() {
-                let block_number = block_number as BlockNumber;
+            for (block_number, accounts) in account_blocks.iter().enumerate() {
                 for &a in accounts {
                     provider
                         .tx_ref()
                         .put::<tables::AccountChangeSets>(
-                            block_number,
+                            block_number as BlockNumber,
                             AccountBeforeTx { address: address(a), info: None },
                         )
                         .unwrap();
                 }
+            }
+            for (block_number, slots) in storage_blocks.iter().enumerate() {
                 for &(a, s) in slots {
                     provider
                         .tx_ref()
                         .put::<tables::StorageChangeSets>(
-                            BlockNumberAddress((block_number, address(a))),
+                            BlockNumberAddress((block_number as BlockNumber, address(a))),
                             StorageEntry { key: slot(s), value: U256::ZERO },
                         )
                         .unwrap();
@@ -236,33 +243,42 @@ mod tests {
         provider.commit().unwrap();
 
         let provider = factory.provider().unwrap();
-        let last_block = blocks.len() as BlockNumber - 1;
-        for range in [0..=last_block, 1.min(last_block)..=last_block] {
+        let last_block = account_blocks.len().max(storage_blocks.len()) as BlockNumber - 1;
+        for range in [0..=last_block, 1.min(last_block)..=last_block, 0..=last_block + 2] {
             let actual = load_prefix_sets_with_provider(&provider, range.clone()).unwrap();
             let expected = load_prefix_sets_reference(&provider, range).unwrap();
             assert_prefix_sets_eq(&actual, &expected);
         }
     }
 
-    fn blocks_strategy() -> impl Strategy<Value = Vec<BlockChanges>> {
-        // Few distinct indices, so addresses and slots repeat across blocks.
-        prop::collection::vec(
-            (btree_set(0u8..12, 0..6), btree_set((0u8..12, 0u8..6), 0..10)),
-            1..12,
-        )
+    // Few distinct indices, so addresses and slots repeat across blocks.
+    fn account_blocks_strategy() -> impl Strategy<Value = AccountBlocks> {
+        prop::collection::vec(btree_set(0u8..12, 0..6), 1..12)
+    }
+
+    fn storage_blocks_strategy() -> impl Strategy<Value = StorageBlocks> {
+        prop::collection::vec(btree_set((0u8..12, 0u8..6), 0..10), 1..12)
     }
 
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(32))]
 
         #[test]
-        fn matches_reference_v1(blocks in blocks_strategy(), existing in btree_set(0u8..12, 0..12)) {
-            check_against_reference(&blocks, &existing, false);
+        fn matches_reference_v1(
+            account_blocks in account_blocks_strategy(),
+            storage_blocks in storage_blocks_strategy(),
+            existing in btree_set(0u8..12, 0..12),
+        ) {
+            check_against_reference(&account_blocks, &storage_blocks, &existing, false);
         }
 
         #[test]
-        fn matches_reference_v2(blocks in blocks_strategy(), existing in btree_set(0u8..12, 0..12)) {
-            check_against_reference(&blocks, &existing, true);
+        fn matches_reference_v2(
+            account_blocks in account_blocks_strategy(),
+            storage_blocks in storage_blocks_strategy(),
+            existing in btree_set(0u8..12, 0..12),
+        ) {
+            check_against_reference(&account_blocks, &storage_blocks, &existing, true);
         }
     }
 }
