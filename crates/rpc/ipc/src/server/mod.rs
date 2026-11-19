@@ -354,6 +354,7 @@ where
                     request.as_bytes(),
                     is_single.unwrap_or(true),
                     BatchRequestConfig::Unlimited,
+                    max_request_body_size,
                     &conn.rpc_service,
                 )
                 .await

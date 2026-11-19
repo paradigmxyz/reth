@@ -58,6 +58,8 @@ use alloy_rpc_types_trace::geth::{
 };
 #[cfg(feature = "js-tracer")]
 use evm2_inspectors::tracing::js::JsInspectorInterrupt;
+#[cfg(feature = "js-tracer")]
+use jiff::fmt::friendly::SpanParser;
 
 /// `debug` API implementation.
 ///
@@ -1676,9 +1678,13 @@ impl JsTraceInterrupt {
             runs_js_tracer(tracer, &opts.tracer_config)
         {
             let timeout = match &opts.timeout {
-                Some(timeout) => humantime::parse_duration(timeout).map_err(|err| {
-                    EthApiError::InvalidParams(format!("invalid tracer timeout {timeout:?}: {err}"))
-                })?,
+                Some(timeout) => {
+                    SpanParser::new().parse_unsigned_duration(timeout).map_err(|err| {
+                        EthApiError::InvalidParams(format!(
+                            "invalid tracer timeout {timeout:?}: {err}"
+                        ))
+                    })?
+                }
                 None => DEFAULT_JS_TRACER_TIMEOUT,
             };
             return Ok(Self { js: Some((JsInspectorInterrupt::new(), timeout)) })

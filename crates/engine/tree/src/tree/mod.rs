@@ -711,7 +711,13 @@ where
                         if is_pending {
                             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
                             self.canonical_in_memory_state.set_pending_block(block.clone());
+                        } else {
+                            self.canonical_in_memory_state.insert_executed(block.clone());
                         }
+                        self.state
+                            .tree_state
+                            .overlay_manager
+                            .precompute_child_execution_overlays(block_num_hash.hash);
 
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(

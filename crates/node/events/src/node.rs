@@ -8,6 +8,7 @@ use alloy_consensus::{
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
+use reth_cli_util::parsers::format_duration;
 use reth_engine_primitives::{ConsensusEngineEvent, ForkchoiceStatus, SlowBlockInfo};
 use reth_network_api::PeersInfo;
 use reth_primitives_traits::{format_gas, format_gas_throughput, BlockBody, NodePrimitives};
@@ -666,9 +667,7 @@ impl Display for Eta {
                 return write!(
                     f,
                     "{}",
-                    humantime::format_duration(Duration::from_secs(remaining.as_secs()))
-                        .to_string()
-                        .replace(' ', "")
+                    format_duration(Duration::from_secs(remaining.as_secs())).replace(' ', "")
                 )
             }
         }

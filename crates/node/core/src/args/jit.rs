@@ -1,7 +1,7 @@
 //! clap [`Args`] for JIT configuration.
 
 use clap::Args;
-use humantime::parse_duration;
+use reth_cli_util::parsers::{format_duration, parse_duration};
 use std::time::Duration;
 
 /// Parameters for JIT compilation of EVM bytecode.
@@ -44,7 +44,7 @@ pub struct JitArgs {
     /// Duration after which a compiled program with no lookup hits is evicted.
     #[arg(
         long = "jit.idle-evict-duration",
-        default_value = humantime::format_duration(Self::DEFAULT_IDLE_EVICT_DURATION).to_string(),
+        default_value = format_duration(Self::DEFAULT_IDLE_EVICT_DURATION),
         help_heading = "JIT",
         value_parser = parse_duration,
     )]
