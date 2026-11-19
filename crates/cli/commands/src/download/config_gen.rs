@@ -641,10 +641,10 @@ mod tests {
             None::<&reth_chainspec::ChainSpec>,
         );
         let desc = describe_prune_config(&config);
-        assert!(desc.contains(&"sender_recovery=\"full\"".to_string()));
+        assert!(desc.iter().any(|d| d == "sender_recovery=\"full\""));
         // Bodies follows tx selection
-        assert!(desc.contains(&"bodies_history={ distance = 10064 }".to_string()));
-        assert!(desc.contains(&"receipts={ distance = 64 }".to_string()));
+        assert!(desc.iter().any(|d| d == "bodies_history={ distance = 10064 }"));
+        assert!(desc.iter().any(|d| d == "receipts={ distance = 64 }"));
     }
 
     #[test]
