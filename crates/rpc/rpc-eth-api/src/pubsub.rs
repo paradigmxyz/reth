@@ -93,15 +93,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn receipt_filter_rejects_duplicate_hash_fields() {
-        let args = jsonrpsee_types::Params::new(Some(
-            r#"["transactionReceipts", {"transactionHashes":null,"transactionHashes":[]}]"#,
-        ));
-        let err = decode_subscription(args).unwrap_err();
-        assert_eq!(err.code(), jsonrpsee_types::error::INVALID_PARAMS_CODE);
-        assert_eq!(
-            err.data().unwrap().get(),
-            r#""duplicate field `transactionHashes` at line 1 column 45""#
-        );
+    fn receipt_filter_rejects_invalid_fields() {
+        for (filter, detail) in [
+            (
+                r#"{"transactionHash":[]}"#,
+                "unknown field `transactionHash`, expected `transactionHashes` at line 1 column 18",
+            ),
+            (
+                r#"{"address":[]}"#,
+                "unknown field `address`, expected `transactionHashes` at line 1 column 10",
+            ),
+            (
+                r#"{"topics":[],"transactionHashes":[]}"#,
+                "unknown field `topics`, expected `transactionHashes` at line 1 column 9",
+            ),
+            (
+                r#"{"transactionHashes":null,"transactionHashes":[]}"#,
+                "duplicate field `transactionHashes` at line 1 column 45",
+            ),
+        ] {
+            let raw = format!(r#"["transactionReceipts",{filter}]"#);
+            let err = decode_subscription(jsonrpsee_types::Params::new(Some(&raw))).unwrap_err();
+            assert_eq!(err.code(), jsonrpsee_types::error::INVALID_PARAMS_CODE);
+            assert_eq!(err.data().unwrap().get(), serde_json::to_string(detail).unwrap());
+        }
     }
 }

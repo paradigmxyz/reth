@@ -20,7 +20,7 @@ use reth_transaction_pool::{
     test_utils::{TestPool, TestPoolBuilder},
     PoolTransaction, TransactionOrigin, TransactionPool,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::time::Instant;
 
@@ -150,64 +150,39 @@ async fn test_eth_subscribe_invalid_params_rejected() {
     let handle = launch_ws_eth().await;
     let mut client = WebSocketTestClient::new(handle.ws_local_addr().unwrap()).await.unwrap();
 
-    let unknown_field = |key, column| {
-        Some(format!(
-            "unknown field `{key}`, expected `transactionHashes` at line 1 column {column}"
-        ))
-    };
+    let receipts = "transactionReceipts";
     for (kind, params, detail) in [
-        ("logs", serde_json::json!(true), None),
+        ("logs", json!(true), None),
+        ("newPendingTransactions", json!({}), None),
         (
-            "transactionReceipts",
-            serde_json::json!({"transactionHash": []}),
-            unknown_field("transactionHash", 18),
-        ),
-        (
-            "transactionReceipts",
-            serde_json::json!(true),
+            receipts,
+            json!(true),
             Some(
-                "invalid type: boolean `true`, expected a receipt filter object at line 1 column 4"
-                    .into(),
+                "invalid type: boolean `true`, expected a receipt filter object at line 1 column 4",
             ),
         ),
         (
-            "transactionReceipts",
-            serde_json::json!({"fromBlock": "latest"}),
-            unknown_field("fromBlock", 12),
-        ),
-        ("transactionReceipts", serde_json::json!({"topics": []}), unknown_field("topics", 9)),
-        ("transactionReceipts", serde_json::json!({"address": []}), unknown_field("address", 10)),
-        (
-            "transactionReceipts",
-            serde_json::json!({"topics": [], "transactionHashes": []}),
-            unknown_field("topics", 9),
+            receipts,
+            json!({"fromBlock": "latest"}),
+            Some("unknown field `fromBlock`, expected `transactionHashes` at line 1 column 12"),
         ),
         (
-            "transactionReceipts",
-            serde_json::json!({"transactionHashes": ["0x01"]}),
-            Some("invalid string length at line 1 column 28".into()),
+            receipts,
+            json!({"transactionHashes": ["0x01"]}),
+            Some("invalid string length at line 1 column 28"),
         ),
-        ("newPendingTransactions", serde_json::json!({}), None),
     ] {
-        let response =
-            ws_call(&mut client, "eth_subscribe", serde_json::json!([kind, params])).await;
-        let mut expected = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "error": {
-                "code": jsonrpsee::types::error::INVALID_PARAMS_CODE,
-                "message": format!("Invalid params for {kind}"),
-            },
-        });
-        if let Some(detail) = detail {
-            expected["error"]["data"] = detail.into();
-        }
-        assert_eq!(response, expected);
+        let response = ws_call(&mut client, "eth_subscribe", json!([kind, params])).await;
+        let error = jsonrpsee::types::ErrorObject::owned(
+            jsonrpsee::types::error::INVALID_PARAMS_CODE,
+            format!("Invalid params for {kind}"),
+            detail,
+        );
+        assert_eq!(response, json!({"jsonrpc": "2.0", "id": 1, "error": error}));
     }
 
     let response =
-        ws_call(&mut client, "eth_subscribe", serde_json::json!(["newPendingTransactions", true]))
-            .await;
+        ws_call(&mut client, "eth_subscribe", json!(["newPendingTransactions", true])).await;
     assert!(response["result"].is_string(), "{response}");
 }
 
