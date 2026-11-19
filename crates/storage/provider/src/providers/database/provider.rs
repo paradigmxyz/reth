@@ -1,5 +1,6 @@
 use super::SaveBlocksInput;
 use crate::{
+    changeset_walker::changeset_block_range,
     changesets_utils::StorageRevertsIter,
     providers::{
         database::{chain::ChainStorage, metrics, DatabaseProviderMetrics},
@@ -1735,9 +1736,13 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         if self.cached_storage_settings().storage_v2 {
             self.static_file_provider.account_changesets_range(range)
         } else {
+            let range = changeset_block_range(range, BlockNumber::MAX);
+            if range.is_empty() {
+                return Ok(Vec::new())
+            }
             self.tx
                 .cursor_read::<tables::AccountChangeSets>()?
-                .walk_range(to_range(range))?
+                .walk_range(range)?
                 .map(|r| r.map_err(Into::into))
                 .collect()
         }
