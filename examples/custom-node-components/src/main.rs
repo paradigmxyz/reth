@@ -53,7 +53,7 @@ pub struct CustomPoolBuilder {
 impl<Node, Evm> PoolBuilder<Node, Evm> for CustomPoolBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
-    Evm: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
+    Evm: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 {
     type Pool = EthTransactionPool<Node::Provider, InMemoryBlobStore, Evm>;
 

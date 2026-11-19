@@ -1,30 +1,31 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
 use alloy_consensus::BlockHeader;
+use alloy_eip7928::bal::Bal;
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
-use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
+use reth_evm::{
+    database::StateProviderDatabase, execute::Executor, metrics::ExecutorMetrics, ConfigureEvm,
+};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriteConfig, StateWriter,
-    StaticFileProviderFactory, StatsReader, StoragePath, StorageSettingsCache, TransactionVariant,
+    BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HashedPostStateProvider,
+    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateProvider,
+    StateWriteConfig, StateWriter, StaticFileProviderFactory, StatsReader, StoragePath,
+    StorageSettingsCache, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
     ExecutionCheckpoint, ExecutionStageThresholds, Stage, StageCheckpoint, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_trie::{hashed_cursor::zero_destroyed_account_storage, KeccakKeyHasher};
-use reth_trie_db::DatabaseHashedCursorFactory;
 use std::{
     cmp::{max, Ordering},
     collections::BTreeMap,
@@ -193,11 +194,7 @@ where
         unwind_to: Option<u64>,
     ) -> Result<(), StageError>
     where
-        Provider: StaticFileProviderFactory
-            + DBProvider
-            + BlockReader
-            + HeaderProvider
-            + StorageSettingsCache,
+        Provider: StaticFileProviderFactory + DBProvider + BlockReader + StorageSettingsCache,
     {
         // On old nodes, if there's any receipts pruning configured, receipts are written directly
         // to database and inconsistencies are expected.
@@ -272,7 +269,6 @@ where
         > + StaticFileProviderFactory<
             Primitives: NodePrimitives<BlockHeader: reth_db_api::table::Value>,
         > + StatsReader
-        + BlockHashReader
         + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>
         + StorageSettingsCache
         + StoragePath
@@ -305,7 +301,8 @@ where
 
         self.ensure_consistency(provider, input.checkpoint().block_number, None)?;
 
-        let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
+        let db =
+            StateProviderDatabase(LatestStateProviderRef::new(provider).into_evm_state_provider());
         let mut executor = self.evm_config.batch_executor(db);
 
         // Progress tracking
@@ -334,6 +331,8 @@ where
 
         let mut blocks = Vec::new();
         let mut results = Vec::new();
+        // Reused across blocks for BAL hash encoding.
+        let mut bal_buf = Vec::new();
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -360,8 +359,19 @@ where
                 })
             })?;
 
+            let built_bal = executor.take_bal().map(Bal::from);
+            if let Some(bal) = &built_bal &&
+                let Err(err) = bal.validate_gas_limit(block.header().gas_limit())
+            {
+                return Err(StageError::Block {
+                    block: Box::new(block.block_with_parent()),
+                    error: BlockErrorKind::Validation(err.into()),
+                })
+            }
+            let bal_hash = built_bal.as_ref().map(|bal| bal.compute_hash_with_buf(&mut bal_buf));
+
             if let Err(err) =
-                self.consensus.validate_block_post_execution(&block, &result, None, None)
+                self.consensus.validate_block_post_execution(&block, &result, None, bal_hash)
             {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
@@ -409,11 +419,7 @@ where
 
         // prepare execution output for writing
         let time = Instant::now();
-        let mut state = ExecutionOutcome::from_blocks(
-            start_block,
-            executor.into_state().take_bundle(),
-            results,
-        );
+        let mut state = ExecutionOutcome::from_blocks(start_block, executor.into_state(), results);
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed
@@ -425,30 +431,21 @@ where
             "Finished executing block range"
         );
 
-        // Prepare the input for post execute commit hook, where an `ExExNotification` will be sent.
-        //
-        // Note: Since we only write to `blocks` if there are any ExExes, we don't need to perform
-        // the `has_exexs` check here as well
-        if !blocks.is_empty() {
-            let previous_input = self.post_execute_commit_input.replace(Chain::new(
-                blocks,
-                state.clone(),
-                BTreeMap::new(),
-            ));
-
-            if previous_input.is_some() {
-                // Not processing the previous post execute commit input is a critical error, as it
-                // means that we didn't send the notification to ExExes
-                return Err(StageError::PostExecuteCommit(
-                    "Previous post execute commit input wasn't processed",
-                ))
-            }
-        }
+        // The ExEx notification must carry the outcome as executed, so a copy is only taken if the
+        // state is modified below before it is written.
+        let mut exex_state = None;
 
         let time = Instant::now();
 
         if self.can_prune_changesets(provider, start_block, max_block)? {
             let prune_modes = provider.prune_modes_ref();
+
+            if !blocks.is_empty() &&
+                prune_modes.account_history.is_some() &&
+                prune_modes.storage_history.is_some()
+            {
+                exex_state = Some(state.clone());
+            }
 
             // Iterate over all reverts and clear them if pruning is configured.
             for block_number in start_block..=max_block {
@@ -485,6 +482,9 @@ where
 
             let path = provider.storage_path().join("preimage");
             if !provider.chain_spec().is_cancun_active_at_timestamp(start_header.timestamp()) {
+                if !blocks.is_empty() && exex_state.is_none() {
+                    exex_state = Some(state.clone());
+                }
                 slot_preimages::inject_plain_wipe_slots(&path, provider, &mut state)?;
             } else if path.exists() {
                 // Post-Cancun: no more self-destructs, preimage db is no longer needed.
@@ -498,12 +498,8 @@ where
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         if provider.cached_storage_settings().use_hashed_state() {
-            let mut hashed_state = state.hash_state_slow::<KeccakKeyHasher>();
-            zero_destroyed_account_storage(
-                &DatabaseHashedCursorFactory::new(provider.tx_ref()),
-                state.bundle.state(),
-                &mut hashed_state,
-            )?;
+            let hashed_state =
+                LatestStateProviderRef::new(provider).hashed_post_state(&state.bundle)?;
             provider.write_hashed_state(&hashed_state.into_sorted())?;
         }
 
@@ -516,6 +512,26 @@ where
             write = ?db_write_duration,
             "Execution time"
         );
+
+        // Prepare the input for post execute commit hook, where an `ExExNotification` will be sent.
+        //
+        // Note: Since we only write to `blocks` if there are any ExExes, we don't need to perform
+        // the `has_exexs` check here as well
+        if !blocks.is_empty() {
+            let previous_input = self.post_execute_commit_input.replace(Chain::new(
+                blocks,
+                exex_state.unwrap_or(state),
+                BTreeMap::new(),
+            ));
+
+            if previous_input.is_some() {
+                // Not processing the previous post execute commit input is a critical error, as it
+                // means that we didn't send the notification to ExExes
+                return Err(StageError::PostExecuteCommit(
+                    "Previous post execute commit input wasn't processed",
+                ))
+            }
+        }
 
         let done = stage_progress == max_block;
         Ok(ExecOutput {
@@ -552,7 +568,7 @@ where
             })
         }
 
-        reject_cancun_boundary_unwind(provider, input.checkpoint.block_number, unwind_to)?;
+        reject_cancun_boundary_unwind(provider, input.checkpoint.block_number, input.unwind_to)?;
 
         self.ensure_consistency(provider, input.checkpoint.block_number, Some(unwind_to))?;
 
@@ -610,6 +626,14 @@ where
         );
 
         Ok(())
+    }
+
+    fn validate_unwind(
+        &mut self,
+        provider: &Provider,
+        input: UnwindInput,
+    ) -> Result<(), StageError> {
+        reject_cancun_boundary_unwind(provider, input.checkpoint.block_number, input.unwind_to)
     }
 }
 
@@ -774,10 +798,9 @@ mod tests {
     };
     use reth_prune::PruneModes;
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
-    use reth_revm::revm::database::{AccountStatus, BundleAccount};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators;
-    use reth_trie::HashedPostState;
+    use reth_trie::bundle_state::{AccountStatus, BundleAccount};
     use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthEvmConfig> {
@@ -806,22 +829,21 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
         let address = Address::repeat_byte(0x11);
         let hashed_address = keccak256(address);
-        let retained_slot = B256::repeat_byte(0x22);
-        let deleted_slot = B256::repeat_byte(0x33);
-        let retained_value = U256::from(1);
+        let first_slot = B256::repeat_byte(0x22);
+        let second_slot = B256::repeat_byte(0x33);
 
         provider
             .tx_ref()
             .put::<tables::HashedStorages>(
                 hashed_address,
-                StorageEntry { key: retained_slot, value: U256::from(2) },
+                StorageEntry { key: first_slot, value: U256::from(2) },
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::HashedStorages>(
                 hashed_address,
-                StorageEntry { key: deleted_slot, value: U256::from(3) },
+                StorageEntry { key: second_slot, value: U256::from(3) },
             )
             .unwrap();
 
@@ -830,31 +852,17 @@ mod tests {
             address,
             BundleAccount::new(
                 Some(Default::default()),
-                Some(Default::default()),
+                None,
                 Default::default(),
-                AccountStatus::DestroyedChanged,
+                AccountStatus::Destroyed,
             ),
         );
 
-        let mut hashed_state = HashedPostState::default();
-        hashed_state
-            .storages
-            .entry(hashed_address)
-            .or_default()
-            .storage
-            .insert(retained_slot, retained_value);
-
-        zero_destroyed_account_storage(
-            &DatabaseHashedCursorFactory::new(provider.tx_ref()),
-            state.bundle.state(),
-            &mut hashed_state,
-        )
-        .unwrap();
+        let hashed_state = provider.latest().hashed_post_state(&state.bundle).unwrap();
 
         let storage = &hashed_state.storages[&hashed_address];
-        assert!(!storage.wiped);
-        assert_eq!(storage.storage[&retained_slot], retained_value);
-        assert_eq!(storage.storage[&deleted_slot], U256::ZERO);
+        assert_eq!(storage.storage[&first_slot], U256::ZERO);
+        assert_eq!(storage.storage[&second_slot], U256::ZERO);
         assert!(state.bundle.reverts.is_empty());
     }
 
@@ -1036,16 +1044,13 @@ mod tests {
         db_tx
             .put::<tables::PlainAccountState>(
                 acc1,
-                Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
+                Account { bytecode_hash: Some(code_hash), ..Default::default() },
             )
             .unwrap();
         db_tx
-            .put::<tables::PlainAccountState>(
-                acc2,
-                Account { nonce: 0, balance, bytecode_hash: None },
-            )
+            .put::<tables::PlainAccountState>(acc2, Account { balance, ..Default::default() })
             .unwrap();
-        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
+        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.into())).unwrap();
         provider.commit().unwrap();
 
         // execute
@@ -1096,18 +1101,15 @@ mod tests {
                 // check post state
                 let account1 = address!("0x1000000000000000000000000000000000000000");
                 let account1_info =
-                    Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: Some(code_hash) };
+                    Account { bytecode_hash: Some(code_hash), ..Default::default() };
                 let account2 = address!("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
-                let account2_info = Account {
-                    balance: U256::from(0x1bc16d674ece94bau128),
-                    nonce: 0x00,
-                    bytecode_hash: None,
-                };
+                let account2_info =
+                    Account { balance: U256::from(0x1bc16d674ece94bau128), ..Default::default() };
                 let account3 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
                 let account3_info = Account {
                     balance: U256::from(0x3635c9adc5de996b46u128),
                     nonce: 0x01,
-                    bytecode_hash: None,
+                    ..Default::default()
                 };
 
                 // assert accounts
@@ -1146,6 +1148,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::clone_on_copy)]
     async fn sanity_execute_unwind() {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
@@ -1180,13 +1183,13 @@ mod tests {
 
         let db_tx = provider.tx_ref();
         let acc1 = address!("0x1000000000000000000000000000000000000000");
-        let acc1_info = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
+        let acc1_info = Account { bytecode_hash: Some(code_hash), ..Default::default() };
         let acc2 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
-        let acc2_info = Account { nonce: 0, balance, bytecode_hash: None };
+        let acc2_info = Account { balance, ..Default::default() };
 
-        db_tx.put::<tables::PlainAccountState>(acc1, acc1_info).unwrap();
-        db_tx.put::<tables::PlainAccountState>(acc2, acc2_info).unwrap();
-        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
+        db_tx.put::<tables::PlainAccountState>(acc1, acc1_info.clone()).unwrap();
+        db_tx.put::<tables::PlainAccountState>(acc2, acc2_info.clone()).unwrap();
+        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.into())).unwrap();
         provider.commit().unwrap();
 
         // execute
@@ -1217,7 +1220,7 @@ mod tests {
             // Test Unwind
             provider = factory.database_provider_rw().unwrap();
             let mut stage = stage();
-            provider.set_prune_modes(mode.clone().unwrap_or_default());
+            provider.set_prune_modes(mode.unwrap_or_default());
 
             let result = stage
                 .unwind(
@@ -1267,44 +1270,16 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
 
         let mut rng = generators::rng();
-        let mut genesis = generators::random_block(
-            &mut rng,
-            0,
-            generators::BlockParams { tx_count: Some(0), ..Default::default() },
-        )
-        .unseal();
-        genesis.header.timestamp = 0;
-        let genesis = genesis.seal_slow();
-
-        let mut block_1 = generators::random_block(
-            &mut rng,
-            1,
-            generators::BlockParams {
-                parent: Some(genesis.hash()),
-                tx_count: Some(0),
-                ..Default::default()
-            },
-        )
-        .unseal();
-        block_1.header.timestamp = 10;
-        let block_1 = block_1.seal_slow();
-
-        let mut block_2 = generators::random_block(
-            &mut rng,
-            2,
-            generators::BlockParams {
-                parent: Some(block_1.hash()),
-                tx_count: Some(0),
-                ..Default::default()
-            },
-        )
-        .unseal();
-        block_2.header.timestamp = 20;
-        let block_2 = block_2.seal_slow();
-
-        provider.insert_block(&genesis.try_recover().unwrap()).unwrap();
-        provider.insert_block(&block_1.try_recover().unwrap()).unwrap();
-        provider.insert_block(&block_2.try_recover().unwrap()).unwrap();
+        for number in 0..=4 {
+            let mut block = generators::random_block(
+                &mut rng,
+                number,
+                generators::BlockParams { tx_count: Some(0), ..Default::default() },
+            )
+            .unseal();
+            block.header.timestamp = number * 10;
+            provider.insert_block(&block.seal_slow().try_recover().unwrap()).unwrap();
+        }
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -1313,18 +1288,34 @@ mod tests {
             .unwrap();
 
         let mut execution_stage = stage();
-        let err = execution_stage
-            .unwind(
-                &provider,
-                UnwindInput { checkpoint: StageCheckpoint::new(2), unwind_to: 1, bad_block: None },
-            )
-            .unwrap_err();
-
-        assert_matches!(err, StageError::Fatal(_));
-        assert!(err.to_string().contains("across Cancun activation boundary"));
+        execution_stage.thresholds.max_blocks = Some(1);
+        // From block 4, the first batch stays Cancun-active. Reject the final pre-Cancun
+        // target on the very first call, before consistency checks or state writes.
+        for checkpoint in [2, 4] {
+            let input = UnwindInput {
+                checkpoint: StageCheckpoint::new(checkpoint),
+                unwind_to: 1,
+                bad_block: None,
+            };
+            if checkpoint == 4 {
+                assert!(input.unwind_block_range_with_threshold(1).1 >= 2);
+            }
+            for err in [
+                execution_stage.validate_unwind(&provider, input).unwrap_err(),
+                execution_stage.unwind(&provider, input).unwrap_err(),
+            ] {
+                assert_matches!(err, StageError::Fatal(_));
+                assert_eq!(err.to_string(), format!(
+                    "execution unwind across Cancun activation boundary is not allowed: checkpoint \
+                     block #{checkpoint} (ts={}) is Cancun-active but unwind target #1 (ts=10) is pre-Cancun",
+                    checkpoint * 10,
+                ));
+            }
+        }
     }
 
     #[tokio::test]
+    #[allow(clippy::clone_on_copy)]
     async fn test_selfdestruct() {
         let test_db = TestStageDB::default();
         let provider = test_db.factory.database_provider_rw().unwrap();
@@ -1360,20 +1351,22 @@ mod tests {
         let code_hash = keccak256(code);
 
         // pre state
-        let caller_info = Account { nonce: 0, balance, bytecode_hash: None };
-        let destroyed_info =
-            Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
+        let caller_info = Account { balance, ..Default::default() };
+        let destroyed_info = Account { bytecode_hash: Some(code_hash), ..Default::default() };
 
         // set account
         let provider = test_db.factory.provider_rw().unwrap();
-        provider.tx_ref().put::<tables::PlainAccountState>(caller_address, caller_info).unwrap();
         provider
             .tx_ref()
-            .put::<tables::PlainAccountState>(destroyed_address, destroyed_info)
+            .put::<tables::PlainAccountState>(caller_address, caller_info.clone())
             .unwrap();
         provider
             .tx_ref()
-            .put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into()))
+            .put::<tables::PlainAccountState>(destroyed_address, destroyed_info.clone())
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.into()))
             .unwrap();
         // set storage to check when account gets destroyed.
         provider
@@ -1387,7 +1380,7 @@ mod tests {
             .tx_ref()
             .put::<tables::PlainStorageState>(
                 destroyed_address,
-                StorageEntry { key: B256::with_last_byte(1), value: U256::from(1u64) },
+                StorageEntry { key: B256::with_last_byte(1), value: U256::ONE },
             )
             .unwrap();
 
@@ -1417,18 +1410,14 @@ mod tests {
             vec![
                 (
                     beneficiary_address,
-                    Account {
-                        nonce: 0,
-                        balance: U256::from(0x1bc16d674eca30a0u64),
-                        bytecode_hash: None
-                    }
+                    Account { balance: U256::from(0x1bc16d674eca30a0u64), ..Default::default() }
                 ),
                 (
                     caller_address,
                     Account {
                         nonce: 1,
                         balance: U256::from(0xde0b6b3a761cf60u64),
-                        bytecode_hash: None
+                        ..Default::default()
                     }
                 )
             ]
@@ -1462,7 +1451,7 @@ mod tests {
                 ),
                 (
                     (block.number, destroyed_address).into(),
-                    StorageEntry { key: B256::with_last_byte(1), value: U256::from(1u64) }
+                    StorageEntry { key: B256::with_last_byte(1), value: U256::ONE }
                 )
             ]
         );

@@ -29,6 +29,7 @@ use reth_provider::{
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
+use reth_storage_overlay::OverlayManager;
 use reth_testing_utils::generators::ChangeSet;
 use std::{collections::BTreeMap, fmt::Debug, path::Path};
 use tempfile::TempDir;
@@ -54,6 +55,7 @@ impl Default for TestStageDB {
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
                 RocksDBProvider::builder(rocksdb_dir_path).with_default_tables().build().unwrap(),
+                OverlayManager::default(),
                 reth_tasks::Runtime::test(),
             )
             .expect("failed to create test provider factory"),
@@ -74,6 +76,7 @@ impl TestStageDB {
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
                 RocksDBProvider::builder(rocksdb_dir_path).with_default_tables().build().unwrap(),
+                OverlayManager::default(),
                 reth_tasks::Runtime::test(),
             )
             .expect("failed to create test provider factory"),
@@ -404,6 +407,7 @@ impl TestStageDB {
     }
 
     /// Insert collection of ([Address], [Account]) into corresponding tables.
+    #[allow(clippy::clone_on_copy)]
     pub fn insert_accounts_and_storages<I, S>(&self, accounts: I) -> ProviderResult<()>
     where
         I: IntoIterator<Item = (Address, (Account, S))>,
@@ -414,7 +418,7 @@ impl TestStageDB {
                 let hashed_address = keccak256(address);
 
                 // Insert into account tables.
-                tx.put::<tables::PlainAccountState>(address, account)?;
+                tx.put::<tables::PlainAccountState>(address, account.clone())?;
                 tx.put::<tables::HashedAccounts>(hashed_address, account)?;
 
                 // Insert into storage tables.

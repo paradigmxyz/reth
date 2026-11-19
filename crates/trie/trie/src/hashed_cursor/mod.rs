@@ -1,8 +1,7 @@
 use alloy_primitives::{keccak256, Address, B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
-use reth_trie_common::HashedPostState;
-use revm::database::BundleAccount;
+use reth_trie_common::{bundle_state::BundleAccount, HashedPostState};
 
 /// Implementation of hashed state cursor traits for the post state.
 mod post_state;
@@ -16,10 +15,14 @@ pub mod noop;
 pub mod mock;
 
 /// Metrics tracking hashed cursor implementations.
+#[cfg(feature = "metrics")]
 pub mod metrics;
 #[cfg(feature = "metrics")]
-pub use metrics::HashedCursorMetrics;
-pub use metrics::{HashedCursorMetricsCache, InstrumentedHashedCursor};
+pub use metrics::{HashedCursorMetrics, InstrumentedHashedCursor, InstrumentedHashedCursorFactory};
+
+/// Uses the underlying factory directly when cursor metrics are disabled.
+#[cfg(not(feature = "metrics"))]
+pub type InstrumentedHashedCursorFactory<F> = F;
 
 /// The factory trait for creating cursors over the hashed state.
 #[auto_impl::auto_impl(&)]
@@ -67,19 +70,22 @@ pub trait HashedCursor {
 /// The cursor for iterating over hashed storage entries.
 #[auto_impl::auto_impl(&mut)]
 pub trait HashedStorageCursor: HashedCursor {
-    /// Returns `true` if there are no entries for a given key.
+    /// Returns `true` if the current hashed address has no storage entries.
+    ///
+    /// May be called immediately after [`Self::set_hashed_address`], without first seeking.
+    /// This may change the cursor position; seek before iterating entries afterward.
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError>;
 
     /// Set the hashed address for the storage cursor.
     ///
-    /// # Important
-    ///
-    /// After calling this method, the subsequent operation MUST be a [`HashedCursor::seek`] call.
+    /// Call [`HashedCursor::seek`] before iterating entries with [`HashedCursor::next`].
+    /// [`Self::is_storage_empty`] may be called before seeking.
     fn set_hashed_address(&mut self, hashed_address: B256);
 }
 
 /// Materializes storage deletions for destroyed accounts as explicit zero-valued slot updates.
 ///
+/// Accounts absent from the bundle pre-state are skipped because they cannot have parent storage.
 /// Final bundle values take precedence so that destroy-then-recreate transitions retain storage
 /// written by the recreated account.
 pub fn zero_destroyed_account_storage<'a>(
@@ -89,7 +95,7 @@ pub fn zero_destroyed_account_storage<'a>(
 ) -> Result<(), DatabaseError> {
     let mut destroyed_accounts = accounts
         .into_iter()
-        .filter(|(_, account)| account.was_destroyed())
+        .filter(|(_, account)| account.was_destroyed() && account.original_info.is_some())
         .map(|(address, _)| keccak256(address));
     let Some(mut hashed_address) = destroyed_accounts.next() else { return Ok(()) };
     let mut cursor = cursor_factory.hashed_storage_cursor(hashed_address)?;
@@ -109,4 +115,26 @@ pub fn zero_destroyed_account_storage<'a>(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_trie_common::bundle_state::AccountStatus;
+
+    #[test]
+    fn zero_destroyed_storage_skips_new_accounts() {
+        let address = Address::with_last_byte(1);
+        let account = BundleAccount::new(None, None, Default::default(), AccountStatus::Destroyed);
+        let mut hashed_state = HashedPostState::default();
+
+        zero_destroyed_account_storage(
+            &mock::MockHashedCursorFactory::default(),
+            [(&address, &account)],
+            &mut hashed_state,
+        )
+        .unwrap();
+
+        assert!(hashed_state.storages.is_empty());
+    }
 }

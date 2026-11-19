@@ -1,7 +1,7 @@
-use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_eips::{eip7928::BlockAccessList, BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, Bytes, B256, U256, U64};
 use alloy_rpc_types_eth::{
-    state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, SyncStatus,
+    state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Index, SyncStatus,
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::core::RpcResult as Result;
@@ -13,7 +13,6 @@ use reth_rpc_eth_api::{
     EngineEthFilter, FullEthApiTypes, QueryLimits, RpcBlock, RpcFilledTransaction, RpcHeader,
     RpcLog, RpcReceipt, RpcTransaction,
 };
-use serde_json::Value;
 use tracing_futures::Instrument;
 
 macro_rules! engine_span {
@@ -37,7 +36,6 @@ impl<Eth, EthFilter> EngineEthApi<Eth, EthFilter> {
     }
 }
 
-#[async_trait::async_trait]
 impl<Eth, EthFilter>
     EngineEthApiServer<
         RpcTxReq<Eth::NetworkTypes>,
@@ -121,6 +119,30 @@ where
         self.eth.block_receipts(block_id).instrument(engine_span!()).await
     }
 
+    /// Handler for: `eth_getRawTransactionByBlockHashAndIndex`
+    async fn raw_transaction_by_block_hash_and_index(
+        &self,
+        hash: B256,
+        index: Index,
+    ) -> Result<Option<Bytes>> {
+        self.eth
+            .raw_transaction_by_block_hash_and_index(hash, index)
+            .instrument(engine_span!())
+            .await
+    }
+
+    /// Handler for: `eth_getRawTransactionByBlockNumberAndIndex`
+    async fn raw_transaction_by_block_number_and_index(
+        &self,
+        number: BlockNumberOrTag,
+        index: Index,
+    ) -> Result<Option<Bytes>> {
+        self.eth
+            .raw_transaction_by_block_number_and_index(number, index)
+            .instrument(engine_span!())
+            .await
+    }
+
     /// Handler for: `eth_sendRawTransaction`
     async fn send_raw_transaction(&self, bytes: Bytes) -> Result<B256> {
         self.eth.send_raw_transaction(bytes).instrument(engine_span!()).await
@@ -158,7 +180,7 @@ where
     }
 
     /// Handler for `eth_getBlockAccessListByBlockHash`
-    async fn block_access_list_by_block_hash(&self, hash: B256) -> Result<Option<Value>> {
+    async fn block_access_list_by_block_hash(&self, hash: B256) -> Result<Option<BlockAccessList>> {
         self.eth.block_access_list_by_block_hash(hash).instrument(engine_span!()).await
     }
 
@@ -166,12 +188,12 @@ where
     async fn block_access_list_by_block_number(
         &self,
         block_number: BlockNumberOrTag,
-    ) -> Result<Option<Value>> {
+    ) -> Result<Option<BlockAccessList>> {
         self.eth.block_access_list_by_block_number(block_number).instrument(engine_span!()).await
     }
 
     /// Handler for `eth_getBlockAccessList`
-    async fn block_access_list(&self, block_id: BlockId) -> Result<Option<Value>> {
+    async fn block_access_list(&self, block_id: BlockId) -> Result<Option<BlockAccessList>> {
         self.eth.block_access_list(block_id).instrument(engine_span!()).await
     }
 

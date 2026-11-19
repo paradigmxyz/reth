@@ -134,7 +134,7 @@ where
                             Some(num) => {
                                 // if there was a block number before this, push receipts for that
                                 // block
-                                receipts.push(receipts_for_block);
+                                receipts.push(std::mem::take(&mut receipts_for_block));
                                 // block with no txns
                                 block_number = num + receipts.len() as u64;
                             }
@@ -152,7 +152,7 @@ where
                             }
                         }
 
-                        receipts_for_block = vec![];
+                        receipts_for_block.clear();
                     }
                 }
 
@@ -214,7 +214,7 @@ pub struct ReceiptWithBlockNumber<R> {
 #[cfg(test)]
 mod test {
     use alloy_primitives::{
-        address, b256,
+        address, b256, bytes,
         bytes::{Buf, BytesMut},
         hex, Bytes, Log, LogData,
     };
@@ -339,9 +339,7 @@ mod test {
                     b256!("0x0000000000000000000000000000000000000000000000000000000000014218"),
                     b256!("0x00000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d"),
                 ],
-                Bytes::from(hex!(
-                    "00000000000000000000000000000000000000000000000000000000618d8837"
-                )),
+                bytes!("00000000000000000000000000000000000000000000000000000000618d8837"),
             )
             .unwrap(),
         };

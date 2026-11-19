@@ -33,7 +33,9 @@ use reth_primitives_traits::{
 };
 
 mod validation;
-pub use validation::validate_block_post_execution;
+pub use validation::{
+    compare_receipts_root_and_logs_bloom, validate_block_post_execution, verify_receipts,
+};
 
 /// Ethereum beacon consensus
 ///
@@ -110,7 +112,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
 
 impl<ChainSpec, N> FullConsensus<N> for EthBeaconConsensus<ChainSpec>
 where
-    ChainSpec: Send + Sync + EthChainSpec<Header = N::BlockHeader> + EthereumHardforks + Debug,
+    ChainSpec: Send + EthChainSpec<Header = N::BlockHeader> + EthereumHardforks,
     N: NodePrimitives,
 {
     fn validate_block_post_execution(
@@ -120,29 +122,22 @@ where
         receipt_root_bloom: Option<ReceiptRootBloom>,
         block_access_list_hash: Option<B256>,
     ) -> Result<(), ConsensusError> {
-        let res = validation::validate_block_post_execution_with_bal_hashes(
+        validation::validate_block_post_execution_with_bal_hashes(
             block,
             &self.chain_spec,
             result,
             receipt_root_bloom,
             block_access_list_hash,
             self.allow_bal_hashes,
-        );
-
-        if self.skip_requests_hash_check &&
-            let Err(ConsensusError::BodyRequestsHashDiff(_)) = &res
-        {
-            return Ok(());
-        }
-
-        res
+            self.skip_requests_hash_check,
+        )
     }
 }
 
 impl<B, ChainSpec> Consensus<B> for EthBeaconConsensus<ChainSpec>
 where
     B: Block,
-    ChainSpec: EthChainSpec<Header = B::Header> + EthereumHardforks + Debug + Send + Sync,
+    ChainSpec: EthChainSpec<Header = B::Header> + EthereumHardforks,
 {
     fn validate_body_against_header(
         &self,
@@ -168,7 +163,7 @@ where
 impl<H, ChainSpec> HeaderValidator<H> for EthBeaconConsensus<ChainSpec>
 where
     H: BlockHeader,
-    ChainSpec: EthChainSpec<Header = H> + EthereumHardforks + Debug + Send + Sync,
+    ChainSpec: EthChainSpec<Header = H> + EthereumHardforks,
 {
     fn validate_header(&self, header: &SealedHeader<H>) -> Result<(), ConsensusError> {
         let header = header.header();
@@ -541,5 +536,56 @@ mod tests {
         assert!(EthBeaconConsensus::new(chain_spec)
             .validate_header(&SealedHeader::seal_slow(header,))
             .is_ok());
+    }
+
+    #[test]
+    fn amsterdam_post_execution_requires_computed_block_access_list_hash() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let block = prague_recovered_block_with_bal_hash(B256::ZERO);
+        let result = BlockExecutionResult::<Receipt>::default();
+        let consensus = EthBeaconConsensus::new(chain_spec);
+
+        assert!(matches!(
+            FullConsensus::<EthPrimitives>::validate_block_post_execution(
+                &consensus, &block, &result, None, None,
+            )
+            .unwrap_err(),
+            ConsensusError::BlockAccessListHashMissing
+        ));
+    }
+
+    #[test]
+    fn skip_requests_hash_check_still_validates_block_access_list_hash() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let mut header = valid_prague_header();
+        header.block_access_list_hash = Some(B256::ZERO);
+        header.requests_hash = Some(B256::with_last_byte(1));
+        let block =
+            RecoveredBlock::new_unhashed(EthBlock { header, body: Default::default() }, Vec::new());
+        let result = BlockExecutionResult::<Receipt>::default();
+        let computed_bal_hash = B256::with_last_byte(2);
+
+        let consensus = EthBeaconConsensus::new(chain_spec).with_skip_requests_hash_check(true);
+        assert!(matches!(
+            FullConsensus::<EthPrimitives>::validate_block_post_execution(
+                &consensus,
+                &block,
+                &result,
+                None,
+                Some(computed_bal_hash),
+            )
+            .unwrap_err(),
+            ConsensusError::BlockAccessListHashMismatch(_)
+        ));
+
+        // A requests hash mismatch alone is skipped.
+        assert!(FullConsensus::<EthPrimitives>::validate_block_post_execution(
+            &consensus,
+            &block,
+            &result,
+            None,
+            Some(B256::ZERO),
+        )
+        .is_ok());
     }
 }

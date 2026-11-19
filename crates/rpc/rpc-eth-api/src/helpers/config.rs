@@ -5,22 +5,19 @@ use alloy_eips::{
     eip7840::BlobParams,
     eip7910::{EthConfig, EthForkConfig, SystemContract},
 };
-use alloy_evm::precompiles::Precompile;
 use alloy_primitives::Address;
+use evm2::evm::EmptyDB;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks, Head};
 use reth_errors::{ProviderError, RethError};
-use reth_evm::{precompiles::PrecompilesMap, ConfigureEvm, Evm};
-use reth_node_api::NodePrimitives;
-use reth_primitives_traits::header::HeaderMut;
-use reth_revm::db::EmptyDB;
+use reth_evm::{ConfigureEvm, Evm};
+use reth_primitives_traits::{header::HeaderMut, NodePrimitives};
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::BlockReaderIdExt;
 use std::collections::BTreeMap;
 
 /// RPC endpoint support for [EIP-7910](https://eips.ethereum.org/EIPS/eip-7910)
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
+#[rpc(server, namespace = "eth")]
 pub trait EthConfigApi {
     /// Returns an object with data about recent and upcoming fork configurations.
     #[method(name = "config")]
@@ -65,6 +62,10 @@ where
         if chain_spec.is_prague_active_at_timestamp(timestamp) {
             system_contracts
                 .extend(SystemContract::prague(chain_spec.deposit_contract().map(|c| c.address)));
+        }
+
+        if chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
+            system_contracts.extend(SystemContract::amsterdam());
         }
 
         // Fork config only exists for timestamp-based hardforks.
@@ -169,14 +170,6 @@ where
     }
 }
 
-fn evm_to_precompiles_map(
-    evm: impl Evm<Precompiles = PrecompilesMap>,
-) -> BTreeMap<String, Address> {
-    let precompiles = evm.precompiles();
-    precompiles
-        .addresses()
-        .filter_map(|address| {
-            Some((precompiles.get(address)?.precompile_id().name().to_string(), *address))
-        })
-        .collect()
+fn evm_to_precompiles_map(evm: impl Evm) -> BTreeMap<String, Address> {
+    evm.precompile_ids().into_iter().map(|(address, id)| (id.name().to_string(), address)).collect()
 }

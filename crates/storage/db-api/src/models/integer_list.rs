@@ -2,10 +2,11 @@
 
 use crate::table::{Compress, Decompress};
 use bytes::BufMut;
-use core::fmt;
+use core::{fmt, ops::RangeBounds};
 use derive_more::Deref;
 use reth_codecs::DecompressError;
 use roaring::RoaringTreemap;
+use serde::ser::SerializeSeq;
 
 /// A data structure that uses Roaring Bitmaps to efficiently store a list of integers.
 ///
@@ -68,6 +69,11 @@ impl IntegerList {
         self.0.clear();
     }
 
+    /// Removes the integers in the given range, returning how many were removed.
+    pub fn remove_range<R: RangeBounds<u64>>(&mut self, range: R) -> u64 {
+        self.0.remove_range(range)
+    }
+
     /// Serializes an [`IntegerList`] into a sequence of bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut vec = Vec::with_capacity(self.0.serialized_size());
@@ -93,8 +99,6 @@ impl serde::Serialize for IntegerList {
     where
         S: serde::Serializer,
     {
-        use serde::ser::SerializeSeq;
-
         let mut seq = serializer.serialize_seq(Some(self.len() as usize))?;
         for e in &self.0 {
             seq.serialize_element(&e)?;

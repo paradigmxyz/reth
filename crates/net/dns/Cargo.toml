@@ -16,6 +16,7 @@ workspace = true
 reth-ethereum-forks.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
 reth-tokio-util = { workspace = true, features = ["time"] }
+reth-lru.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
@@ -33,7 +34,6 @@ hickory-resolver = { workspace = true, features = ["tokio"] }
 dashmap = { workspace = true, features = ["inline"] }
 data-encoding.workspace = true
 linked_hash_set.workspace = true
-schnellru.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 serde = { workspace = true, optional = true }

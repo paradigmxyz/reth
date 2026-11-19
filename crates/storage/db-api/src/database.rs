@@ -1,8 +1,4 @@
-use crate::{
-    table::TableImporter,
-    transaction::{DbTx, DbTxMut},
-    DatabaseError,
-};
+use crate::{table::TableImporter, transaction::DbTx, DatabaseError};
 use std::{fmt::Debug, path::PathBuf, sync::Arc};
 
 /// Main Database trait that can open read-only and read-write transactions.
@@ -10,9 +6,9 @@ use std::{fmt::Debug, path::PathBuf, sync::Arc};
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for consumption.
 pub trait Database: Send + Sync + Debug {
     /// Read-Only database transaction
-    type TX: DbTx + Send + Sync + Debug + 'static;
+    type TX: DbTx + Sync + 'static;
     /// Read-Write database transaction
-    type TXMut: DbTxMut + DbTx + TableImporter + Send + Sync + Debug + 'static;
+    type TXMut: DbTx + TableImporter + Sync + 'static;
 
     /// Create read only transaction.
     #[track_caller]

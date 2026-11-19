@@ -1,4 +1,5 @@
 use crate::{Claims, JwtSecret};
+use alloy_json_rpc::RequestPacket;
 use http::{header::AUTHORIZATION, HeaderValue};
 use std::{
     task::{Context, Poll},
@@ -6,7 +7,8 @@ use std::{
 };
 use tower::{Layer, Service};
 
-/// A layer that adds a new JWT token to every request using `AuthClientService`.
+/// A layer for alloy RPC clients that adds a new JWT token to every request using
+/// `AuthClientService`.
 #[derive(Debug)]
 pub struct AuthClientLayer {
     secret: JwtSecret,
@@ -40,9 +42,9 @@ impl<S> AuthClientService<S> {
     }
 }
 
-impl<S, B> Service<http::Request<B>> for AuthClientService<S>
+impl<S> Service<RequestPacket> for AuthClientService<S>
 where
-    S: Service<http::Request<B>>,
+    S: Service<RequestPacket>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -52,8 +54,16 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, mut request: http::Request<B>) -> Self::Future {
-        request.headers_mut().insert(AUTHORIZATION, secret_to_bearer_header(&self.secret));
+    fn call(&mut self, mut request: RequestPacket) -> Self::Future {
+        // HTTP transports merge the headers of all requests in a packet, so a batch only needs the
+        // header once.
+        let first = match &mut request {
+            RequestPacket::Single(request) => Some(request),
+            RequestPacket::Batch(requests) => requests.first_mut(),
+        };
+        if let Some(first) = first {
+            first.headers_mut().insert(AUTHORIZATION, secret_to_bearer_header(&self.secret));
+        }
         self.inner.call(request)
     }
 }
@@ -73,6 +83,6 @@ pub fn secret_to_bearer_header(secret: &JwtSecret) -> HeaderValue {
             })
             .unwrap()
     )
-    .parse()
+    .try_into()
     .unwrap()
 }

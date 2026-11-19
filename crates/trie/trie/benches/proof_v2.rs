@@ -10,6 +10,8 @@ use reth_trie::{
     proof::StorageProof,
     proof_v2::StorageProofCalculator,
     trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
+    updates::StorageTrieUpdates,
+    StateRoot,
 };
 use reth_trie_common::{HashedPostState, HashedStorage};
 
@@ -27,7 +29,7 @@ fn generate_test_data(
     let mut runner = TestRunner::deterministic();
 
     // Use a fixed hashed address for the storage trie
-    let hashed_address = B256::from([0x42; 32]);
+    let hashed_address = B256::repeat_byte(0x42);
 
     // Generate random storage slots (key -> value)
     let storage_strategy =
@@ -43,10 +45,8 @@ fn generate_test_data(
 
     // Create HashedPostState with single account's storage
     let mut storages = B256Map::default();
-    let hashed_storage = HashedStorage {
-        wiped: false,
-        storage: storage_map.iter().map(|(k, v)| (*k, *v)).collect(),
-    };
+    let hashed_storage =
+        HashedStorage { storage: storage_map.iter().map(|(k, v)| (*k, *v)).collect() };
     storages.insert(hashed_address, hashed_storage);
 
     let hashed_post_state = HashedPostState { accounts: B256Map::default(), storages };
@@ -84,8 +84,6 @@ fn generate_test_data(
 fn create_cursor_factories(
     post_state: &HashedPostState,
 ) -> (MockTrieCursorFactory, MockHashedCursorFactory) {
-    use reth_trie::{updates::StorageTrieUpdates, StateRoot};
-
     // Create empty trie cursor factory to serve as the initial state for StateRoot
     // Ensure that there's a storage trie dataset for every storage account
     let storage_tries: B256Map<_> = post_state

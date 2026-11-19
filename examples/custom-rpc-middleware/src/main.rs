@@ -70,20 +70,9 @@ pub struct ResponseMutationService<S> {
 
 impl<S> RpcServiceT for ResponseMutationService<S>
 where
-    S: RpcServiceT<
-            MethodResponse = jsonrpsee::MethodResponse,
-            BatchResponse = jsonrpsee::MethodResponse,
-            NotificationResponse = jsonrpsee::MethodResponse,
-        > + Send
-        + Sync
-        + Clone
-        + 'static,
+    S: RpcServiceT + Send + Sync + Clone + 'static,
 {
-    type MethodResponse = S::MethodResponse;
-    type NotificationResponse = S::NotificationResponse;
-    type BatchResponse = S::BatchResponse;
-
-    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
+    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
         tracing::info!("processed call {:?}", req);
         let service = self.service.clone();
         async move {
@@ -104,14 +93,14 @@ where
         }
     }
 
-    fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+    fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
         self.service.batch(req)
     }
 
     fn notification<'a>(
         &self,
         n: Notification<'a>,
-    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+    ) -> impl Future<Output = MethodResponse> + Send + 'a {
         self.service.notification(n)
     }
 }

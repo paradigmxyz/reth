@@ -4,34 +4,6 @@ pub use alloy_eip7928::bal::RawBal;
 use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use reth_storage_errors::provider::ProviderResult;
-use revm::database::state::bal::Bal as RevmBal;
-
-/// Notification emitted when a new BAL is inserted into the store.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BalNotification {
-    /// Number and hash of the block the BAL belongs to.
-    pub num_hash: NumHash,
-    /// Raw BAL RLP payload.
-    pub bal: RawBal,
-}
-
-impl BalNotification {
-    /// Creates a new [`BalNotification`].
-    pub const fn new(num_hash: NumHash, bal: RawBal) -> Self {
-        Self { num_hash, bal }
-    }
-}
-
-#[cfg(feature = "std")]
-pub use self::subscriptions::BalNotificationStream;
-
-#[cfg(feature = "std")]
-mod subscriptions {
-    use super::BalNotification;
-
-    /// A stream of [`BalNotification`]s.
-    pub type BalNotificationStream = reth_tokio_util::EventStream<BalNotification>;
-}
 
 /// Store for Block Access Lists (BALs).
 ///
@@ -56,10 +28,10 @@ pub trait BalStore: Send + Sync + 'static {
         Ok(())
     }
 
-    /// Flushes any pending BALs to the backing store.
+    /// Flushes pending BALs for the given canonical blocks to the backing store.
     ///
     /// In-memory implementations may treat this as a no-op.
-    fn flush(&self) -> ProviderResult<()> {
+    fn flush(&self, _blocks: &[NumHash]) -> ProviderResult<()> {
         Ok(())
     }
 
@@ -84,22 +56,6 @@ pub trait BalStore: Send + Sync + 'static {
             .map(DecodedBal::from_rlp_bytes)
             .transpose()
             .map_err(Into::into)
-    }
-
-    /// Fetches the BAL for the given block hash in revm representation.
-    fn revm_bal_by_hash(
-        &self,
-        block_hash: BlockHash,
-    ) -> ProviderResult<Option<DecodedBal<Arc<RevmBal>>>> {
-        self.get_decoded_by_hash(block_hash)?
-            .map(|decoded| {
-                decoded.try_map(|bal| {
-                    RevmBal::try_from(Vec::from(bal))
-                        .map(Arc::new)
-                        .map_err(reth_storage_errors::provider::ProviderError::other)
-                })
-            })
-            .transpose()
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
@@ -138,13 +94,6 @@ pub trait BalStore: Send + Sync + 'static {
         }
         Ok(())
     }
-
-    /// Returns a stream of BAL insert notifications.
-    ///
-    /// Notifications are emitted only after a BAL has been successfully inserted into the store.
-    /// They do not imply canonicality.
-    #[cfg(feature = "std")]
-    fn bal_stream(&self) -> BalNotificationStream;
 }
 
 /// The limit to enforce for [`BalStore::get_by_hashes_with_limit`].
@@ -196,10 +145,10 @@ impl BalStoreHandle {
         self.inner.insert_many(entries)
     }
 
-    /// Flushes any pending BALs to the backing store.
+    /// Flushes pending BALs for the given canonical blocks to the backing store.
     #[inline]
-    pub fn flush(&self) -> ProviderResult<()> {
-        self.inner.flush()
+    pub fn flush(&self, blocks: &[NumHash]) -> ProviderResult<()> {
+        self.inner.flush(blocks)
     }
 
     /// Prunes expired BALs according to the store's retention policy and the given chain tip.
@@ -226,15 +175,6 @@ impl BalStoreHandle {
         self.inner.get_decoded_by_hash(block_hash)
     }
 
-    /// Fetches the BAL for the given block hash in revm representation.
-    #[inline]
-    pub fn revm_bal_by_hash(
-        &self,
-        block_hash: BlockHash,
-    ) -> ProviderResult<Option<DecodedBal<Arc<RevmBal>>>> {
-        self.inner.revm_bal_by_hash(block_hash)
-    }
-
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
     /// exceeded.
     #[inline]
@@ -256,13 +196,6 @@ impl BalStoreHandle {
     ) -> ProviderResult<()> {
         self.inner.append_by_hashes_with_limit(block_hashes, limit, out)
     }
-
-    /// Returns a stream of BAL insert notifications.
-    #[cfg(feature = "std")]
-    #[inline]
-    pub fn bal_stream(&self) -> BalNotificationStream {
-        self.inner.bal_stream()
-    }
 }
 
 impl Default for BalStoreHandle {
@@ -282,6 +215,26 @@ impl core::fmt::Debug for BalStoreHandle {
 pub trait BalProvider {
     /// Returns the configured BAL store handle.
     fn bal_store(&self) -> &BalStoreHandle;
+
+    /// Fetches the BAL for the given block hash.
+    fn get_bal_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<Bytes>> {
+        self.bal_store().get_by_hash(block_hash)
+    }
+
+    /// Fetches BALs for the given block hashes.
+    fn get_bals_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+        self.bal_store().get_by_hashes(block_hashes)
+    }
+
+    /// Fetches BAL response entries for the given block hashes, stopping after the soft limit is
+    /// exceeded.
+    fn get_bals_by_hashes_with_limit(
+        &self,
+        block_hashes: &[BlockHash],
+        limit: GetBlockAccessListLimit,
+    ) -> ProviderResult<Vec<Option<Bytes>>> {
+        self.bal_store().get_by_hashes_with_limit(block_hashes, limit)
+    }
 }
 
 /// No-op BAL store used as the default wiring target until a concrete implementation is injected.
@@ -322,19 +275,12 @@ impl BalStore for NoopBalStore {
         }
         Ok(())
     }
-
-    #[cfg(feature = "std")]
-    fn bal_stream(&self) -> BalNotificationStream {
-        reth_tokio_util::EventSender::new(1).new_listener()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::B256;
-    #[cfg(feature = "std")]
-    use tokio_stream::StreamExt;
 
     const EMPTY_LIST_CODE: u8 = 0xc0;
 
@@ -354,7 +300,7 @@ mod tests {
     fn noop_store_flush_is_noop() {
         let store = BalStoreHandle::default();
 
-        store.flush().unwrap();
+        store.flush(&[]).unwrap();
     }
 
     #[test]
@@ -376,10 +322,7 @@ mod tests {
 
         assert_eq!(decoded.as_raw(), &raw_bal);
 
-        let revm_bal = store.revm_bal_by_hash(hash).unwrap().unwrap();
-
-        assert_eq!(revm_bal.as_raw(), &raw_bal);
-        assert!(revm_bal.as_bal().accounts.is_empty());
+        assert!(decoded.as_bal().is_empty());
     }
 
     #[test]
@@ -405,15 +348,6 @@ mod tests {
         assert!(size_limit_2mb.exceeds(3 * 1024 * 1024));
     }
 
-    #[cfg(feature = "std")]
-    #[tokio::test]
-    async fn noop_store_stream_is_empty() {
-        let store = BalStoreHandle::default();
-        let mut stream = store.bal_stream();
-
-        assert!(stream.next().await.is_none());
-    }
-
     #[derive(Debug)]
     struct TestBalStore {
         hash: B256,
@@ -434,11 +368,6 @@ mod tests {
                 .iter()
                 .map(|hash| (*hash == self.hash).then(|| self.raw_bal.clone()))
                 .collect())
-        }
-
-        #[cfg(feature = "std")]
-        fn bal_stream(&self) -> BalNotificationStream {
-            reth_tokio_util::EventSender::new(1).new_listener()
         }
     }
 }

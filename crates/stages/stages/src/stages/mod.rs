@@ -46,13 +46,14 @@ mod tests {
     use crate::test_utils::{StorageKind, TestStageDB};
     use alloy_consensus::{SignableTransaction, TxLegacy};
     use alloy_primitives::{
-        address, hex_literal::hex, keccak256, BlockNumber, Signature, B256, U256,
+        address, hex_literal::hex, keccak256, Address, BlockNumber, Signature, B256, U256,
     };
     use alloy_rlp::Decodable;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::mdbx::{cursor::Cursor, RW};
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW},
+        models::StorageSettings,
         table::Table,
         tables,
         transaction::{DbTx, DbTxMut},
@@ -67,14 +68,15 @@ mod tests {
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::MockNodeTypesWithDB,
         AccountExtReader, BlockBodyIndicesProvider, BlockWriter, DatabaseProviderFactory,
-        ProviderFactory, ProviderResult, ReceiptProvider, StageCheckpointWriter,
-        StaticFileProviderFactory, StorageReader,
+        ProviderFactory, ProviderResult, PruneCheckpointWriter, ReceiptProvider,
+        StageCheckpointWriter, StaticFileProviderFactory, StorageReader,
     };
-    use reth_prune_types::{PruneMode, PruneModes};
+    use reth_prune_types::{PruneCheckpoint, PruneMode, PruneModes, PruneSegment};
     use reth_stages_api::{
         ExecInput, ExecutionStageThresholds, PipelineTarget, Stage, StageCheckpoint, StageId,
     };
     use reth_static_file_types::StaticFileSegment;
+    use reth_storage_api::StorageSettingsCache;
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_receipt, BlockRangeParams,
     };
@@ -123,23 +125,19 @@ mod tests {
             .tx_ref()
             .put::<tables::PlainAccountState>(
                 address!("0x1000000000000000000000000000000000000000"),
-                Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
+                Account { bytecode_hash: Some(code_hash), ..Default::default() },
             )
             .unwrap();
         provider_rw
             .tx_ref()
             .put::<tables::PlainAccountState>(
                 address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
-                Account {
-                    nonce: 0,
-                    balance: U256::from(0x3635c9adc5dea00000u128),
-                    bytecode_hash: None,
-                },
+                Account { balance: U256::from(0x3635c9adc5dea00000u128), ..Default::default() },
             )
             .unwrap();
         provider_rw
             .tx_ref()
-            .put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into()))
+            .put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.into()))
             .unwrap();
         provider_rw.commit().unwrap();
 
@@ -291,6 +289,42 @@ mod tests {
         provider_rw.commit()?;
 
         Ok(db)
+    }
+
+    fn seed_v2_data() -> TestStageDB {
+        let db = seed_data(90).unwrap();
+        db.factory.set_storage_settings_cache(StorageSettings::v2());
+        db
+    }
+
+    fn save_prune_checkpoints(
+        db: &TestStageDB,
+        checkpoints: impl IntoIterator<Item = (PruneSegment, BlockNumber, PruneMode)>,
+    ) {
+        let provider_rw = db.factory.provider_rw().unwrap();
+        for (segment, block_number, prune_mode) in checkpoints {
+            provider_rw
+                .save_prune_checkpoint(
+                    segment,
+                    PruneCheckpoint {
+                        block_number: Some(block_number),
+                        tx_number: None,
+                        prune_mode,
+                    },
+                )
+                .unwrap();
+        }
+        provider_rw.commit().unwrap();
+    }
+
+    fn assert_consistency(db: &TestStageDB, expected: Option<PipelineTarget>) {
+        assert_eq!(
+            db.factory
+                .static_file_provider()
+                .check_consistency(&db.factory.database_provider_ro().unwrap())
+                .unwrap(),
+            expected
+        );
     }
 
     /// Simulates losing data to corruption and compare the check consistency result
@@ -533,5 +567,118 @@ mod tests {
 
         // Fill the gap, and ensure no unwind is necessary.
         update_db_and_check::<tables::Receipts>(&db, current + 1, None);
+    }
+
+    #[test]
+    fn test_consistency_pruned_v2_segments() {
+        for prune_mode in [PruneMode::Distance(2_000_000), PruneMode::Before(90)] {
+            let db = seed_v2_data();
+
+            // Without prune checkpoints the missing v2 segments look like data loss.
+            assert_consistency(&db, Some(PipelineTarget::Unwind(0)));
+
+            save_prune_checkpoints(
+                &db,
+                [
+                    PruneSegment::SenderRecovery,
+                    PruneSegment::AccountHistory,
+                    PruneSegment::StorageHistory,
+                ]
+                .map(|segment| (segment, 89, prune_mode)),
+            );
+            assert_consistency(&db, None);
+        }
+    }
+
+    #[test]
+    fn test_consistency_full_sender_pruning_without_checkpoint() {
+        let mut db = seed_v2_data();
+
+        // Only the history segments have prune checkpoints, so senders decide the outcome.
+        save_prune_checkpoints(
+            &db,
+            [PruneSegment::AccountHistory, PruneSegment::StorageHistory]
+                .map(|segment| (segment, 89, PruneMode::Distance(2_000_000))),
+        );
+
+        // Without `Full` sender pruning, the missing senders look like data loss.
+        assert_consistency(&db, Some(PipelineTarget::Unwind(0)));
+
+        // A node that persisted blocks without senders because `sender_recovery` is `Full`, before
+        // the pruner first ran and recorded a `Full` prune checkpoint, is consistent.
+        db.factory = db.factory.with_prune_modes(PruneModes {
+            sender_recovery: Some(PruneMode::Full),
+            ..Default::default()
+        });
+        assert_consistency(&db, None);
+
+        // Once the segment holds senders, it is still checked, so senders above the stage
+        // checkpoint are pruned instead of being served.
+        let static_file_provider = db.factory.static_file_provider();
+        let first_block = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::TransactionSenders)
+            .map_or(0, |block| block + 1);
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::TransactionSenders).unwrap();
+            for block in first_block..=10 {
+                writer.increment_block(block).unwrap();
+                let indices = db.factory.block_body_indices(block).unwrap().unwrap();
+                for tx_num in indices.tx_num_range() {
+                    writer.append_transaction_sender(tx_num, &Address::ZERO).unwrap();
+                }
+            }
+            writer.commit().unwrap();
+        }
+        let checkpoint_block = 5;
+        let provider_rw = db.factory.provider_rw().unwrap();
+        provider_rw
+            .save_stage_checkpoint(StageId::SenderRecovery, StageCheckpoint::new(checkpoint_block))
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        assert_consistency(&db, None);
+        assert_eq!(
+            static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::TransactionSenders),
+            Some(checkpoint_block)
+        );
+    }
+
+    #[test]
+    fn test_consistency_unwind_bounded_by_prune_checkpoint() {
+        let db = seed_v2_data();
+
+        // Senders are only pruned up to block 50 while the stage checkpoint is at the tip:
+        // blocks 51..=89 did lose data, so an unwind is still required, but bounded by the
+        // prune checkpoint instead of going all the way to 0.
+        save_prune_checkpoints(
+            &db,
+            [
+                (PruneSegment::SenderRecovery, 50, PruneMode::Distance(39)),
+                (PruneSegment::AccountHistory, 89, PruneMode::Distance(2_000_000)),
+                (PruneSegment::StorageHistory, 89, PruneMode::Distance(2_000_000)),
+            ],
+        );
+        assert_consistency(&db, Some(PipelineTarget::Unwind(50)));
+    }
+
+    #[test]
+    fn test_consistency_receipts_distance_prune_checkpoint() {
+        let db = seed_data(90).unwrap();
+        let static_file_provider = db.factory.static_file_provider();
+
+        // Remove all receipts static files, like a node whose receipts have been
+        // distance-pruned away.
+        while let Some(block) =
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts)
+        {
+            static_file_provider.delete_jar(StaticFileSegment::Receipts, block).unwrap();
+        }
+
+        assert_consistency(&db, Some(PipelineTarget::Unwind(0)));
+
+        save_prune_checkpoints(&db, [(PruneSegment::Receipts, 89, PruneMode::Distance(2_000_000))]);
+        assert_consistency(&db, None);
     }
 }

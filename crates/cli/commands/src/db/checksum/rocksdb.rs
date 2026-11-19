@@ -15,7 +15,7 @@ use tracing::info;
 
 /// RocksDB tables that can be checksummed.
 #[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum RocksDbTable {
+pub(crate) enum RocksDbTable {
     /// Transaction hash to transaction number mapping
     TransactionHashNumbers,
     /// Account history indices

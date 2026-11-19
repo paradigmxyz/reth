@@ -85,7 +85,7 @@ fn includes_empty_node_preimage() {
             accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
             storages: HashMap::from_iter([(
                 hashed_address,
-                HashedStorage::from_iter(false, [(hashed_slot, U256::from(1))]),
+                HashedStorage::from_iter([(hashed_slot, U256::ONE)]),
             )]),
         })
         .unwrap();
@@ -104,7 +104,7 @@ fn includes_empty_node_preimage() {
             accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
             storages: HashMap::from_iter([(
                 hashed_address,
-                HashedStorage::from_iter(false, [(hashed_slot, U256::from(1))]),
+                HashedStorage::from_iter([(hashed_slot, U256::ONE)]),
             )]),
         })
         .unwrap();
@@ -129,7 +129,7 @@ fn includes_nodes_for_destroyed_storage_nodes() {
     // Insert account and slot into database
     provider.insert_account_for_hashing([(address, Some(Account::default()))]).unwrap();
     provider
-        .insert_storage_for_hashing([(address, [StorageEntry { key: slot, value: U256::from(1) }])])
+        .insert_storage_for_hashing([(address, [StorageEntry { key: slot, value: U256::ONE }])])
         .unwrap();
 
     reth_trie_db::with_adapter!(provider, |A| {
@@ -142,19 +142,18 @@ fn includes_nodes_for_destroyed_storage_nodes() {
             )]))
             .unwrap();
 
-        let witness =
-            TrieWitness::new(
-                DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()),
-                DatabaseHashedCursorFactory::new(provider.tx_ref()),
-            )
-            .compute(HashedPostState {
-                accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
-                storages: HashMap::from_iter([(
-                    hashed_address,
-                    HashedStorage::from_iter(true, []),
-                )]), // destroyed
-            })
-            .unwrap();
+        let witness = TrieWitness::new(
+            DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref()),
+            DatabaseHashedCursorFactory::new(provider.tx_ref()),
+        )
+        .compute(HashedPostState {
+            accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
+            storages: HashMap::from_iter([(
+                hashed_address,
+                HashedStorage::from_iter([(hashed_slot, U256::ZERO)]),
+            )]),
+        })
+        .unwrap();
         assert!(witness.contains_key(&state_root));
         for node in multiproof.account_subtree.values() {
             assert_eq!(witness.get(&keccak256(node)), Some(node));
@@ -180,10 +179,10 @@ fn correctly_decodes_branch_node_values() {
     let mut hashed_storage_cursor =
         provider.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
     hashed_storage_cursor
-        .upsert(hashed_address, &StorageEntry { key: hashed_slot1, value: U256::from(1) })
+        .upsert(hashed_address, &StorageEntry { key: hashed_slot1, value: U256::ONE })
         .unwrap();
     hashed_storage_cursor
-        .upsert(hashed_address, &StorageEntry { key: hashed_slot2, value: U256::from(1) })
+        .upsert(hashed_address, &StorageEntry { key: hashed_slot2, value: U256::ONE })
         .unwrap();
 
     reth_trie_db::with_adapter!(provider, |A| {
@@ -205,7 +204,6 @@ fn correctly_decodes_branch_node_values() {
             storages: HashMap::from_iter([(
                 hashed_address,
                 HashedStorage::from_iter(
-                    false,
                     [hashed_slot1, hashed_slot2].map(|hashed_slot| (hashed_slot, U256::from(2))),
                 ),
             )]),
@@ -233,7 +231,7 @@ fn skips_storage_root_node_for_account_only_changes_in_canonical_mode() {
     provider
         .insert_account_for_hashing([(
             address,
-            Some(Account { balance: U256::from(1), ..Default::default() }),
+            Some(Account { balance: U256::ONE, ..Default::default() }),
         )])
         .unwrap();
     provider
@@ -321,7 +319,7 @@ fn canonical_mode_handles_mixed_storage_inserts_and_removals() {
     let mut hashed_storage_cursor =
         provider.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
     hashed_storage_cursor
-        .upsert(hashed_address, &StorageEntry { key: removed_slot, value: U256::from(1) })
+        .upsert(hashed_address, &StorageEntry { key: removed_slot, value: U256::ONE })
         .unwrap();
     hashed_storage_cursor
         .upsert(hashed_address, &StorageEntry { key: retained_slot, value: U256::from(2) })
@@ -347,10 +345,10 @@ fn canonical_mode_handles_mixed_storage_inserts_and_removals() {
             accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
             storages: HashMap::from_iter([(
                 hashed_address,
-                HashedStorage::from_iter(
-                    false,
-                    [(removed_slot, U256::ZERO), (inserted_slot, U256::from(3))],
-                ),
+                HashedStorage::from_iter([
+                    (removed_slot, U256::ZERO),
+                    (inserted_slot, U256::from(3)),
+                ]),
             )]),
         };
 

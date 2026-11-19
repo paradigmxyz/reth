@@ -17,9 +17,9 @@ reth-db-api.workspace = true
 reth-fs-util.workspace = true
 reth-storage-errors.workspace = true
 reth-nippy-jar.workspace = true
-reth-tracing.workspace = true
 tracing.workspace = true
 reth-static-file-types.workspace = true
+reth-primitives-traits = { workspace = true, optional = true, features = ["quanta"] }
 
 # ethereum
 alloy-primitives.workspace = true
@@ -31,7 +31,6 @@ eyre = { workspace = true, optional = true }
 # metrics
 reth-metrics = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
-quanta = { workspace = true, optional = true }
 
 # misc
 page_size = { workspace = true, optional = true }
@@ -68,12 +67,13 @@ proptest.workspace = true
 assert_matches.workspace = true
 
 [features]
+fuzz = ["reth-libmdbx?/fuzz"]
 default = ["mdbx"]
 mdbx = [
     "dep:reth-libmdbx",
     "dep:eyre",
     "dep:page_size",
-    "dep:quanta",
+    "dep:reth-primitives-traits",
     "reth-metrics",
     "dep:metrics",
     "dep:strum",

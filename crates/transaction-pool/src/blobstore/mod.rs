@@ -4,7 +4,7 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
 };
-use alloy_primitives::{TxHash, B128, B256};
+use alloy_primitives::{TxHash, B256};
 pub use converter::BlobSidecarConverter;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
@@ -207,7 +207,7 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     fn get_by_versioned_hashes_v4(
         &self,
         versioned_hashes: &[B256],
-        indices_bitarray: B128,
+        cell_mask: BlobCellMask,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
 
     /// Return whether each requested blob versioned hash is available.
@@ -217,7 +217,7 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
 
     /// Returns all requested cells for all blobs belonging to the transaction.
     ///
-    /// The `indices_bitarray` is applied independently to every blob in the tx.
+    /// The `cell_mask` is applied independently to every blob in the tx.
     ///
     /// Returned cells are flattened in blob order, then cell-index order.
     ///
@@ -238,7 +238,7 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     fn get_cells(
         &self,
         tx_hash: TxHash,
-        indices_bitarray: B128,
+        cell_mask: BlobCellMask,
     ) -> Result<Option<Vec<Cell>>, BlobStoreError>;
 
     /// Data size of all transactions in the blob store.
@@ -329,23 +329,10 @@ pub struct BlobStoreCleanupStat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarEip7594};
 
     #[expect(dead_code)]
     struct DynStore {
         store: Box<dyn BlobStore>,
-    }
-
-    #[test]
-    fn pooled_blob_sidecar_defaults_to_full_availability() {
-        let sidecars = [
-            BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::default()),
-            BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::default()),
-        ];
-
-        for sidecar in sidecars {
-            assert!(PooledBlobSidecar::from(sidecar).availability().is_full());
-        }
     }
 
     #[test]

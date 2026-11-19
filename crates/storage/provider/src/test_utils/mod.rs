@@ -3,16 +3,18 @@ use crate::{
         NodeTypesForProvider, ProviderNodeTypes, RocksDBBuilder, StaticFileProvider,
         StaticFileProviderBuilder,
     },
-    HashingWriter, ProviderFactory, TrieWriter,
+    HashingWriter, ProviderFactory, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    TrieWriter,
 };
 use alloy_primitives::B256;
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
 use reth_db::{mdbx::DatabaseArguments, test_utils::TempDatabase, DatabaseEnv};
 use reth_errors::ProviderResult;
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_node_types::NodeTypesWithDBAdapter;
-use reth_primitives_traits::{Account, StorageEntry};
+use reth_node_types::{HeaderTy, NodeTypesWithDBAdapter};
+use reth_primitives_traits::{Account, SealedHeader, StorageEntry};
 use reth_storage_api::StorageSettingsCache;
+use reth_storage_overlay::OverlayManager;
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
 use std::sync::Arc;
@@ -104,6 +106,7 @@ fn create_test_provider_factory_with_node_types_and_genesis<N: NodeTypesForProvi
             .with_default_tables()
             .build()
             .expect("failed to create test RocksDB provider"),
+        OverlayManager::default(),
         reth_tasks::Runtime::test(),
     )
     .expect("failed to create test provider factory")
@@ -136,6 +139,7 @@ pub fn create_test_provider_factory_with_chain_spec_and_db_args(
             .with_default_tables()
             .build()
             .expect("failed to create test RocksDB provider"),
+        OverlayManager::default(),
         reth_tasks::Runtime::test(),
     )
     .expect("failed to create test provider factory")
@@ -173,4 +177,21 @@ pub fn insert_genesis<N: ProviderNodeTypes<ChainSpec = ChainSpec>>(
     provider.commit()?;
 
     Ok(root)
+}
+
+/// Appends `headers` to the headers static files and commits them.
+pub fn insert_headers<N: ProviderNodeTypes>(
+    factory: &ProviderFactory<N>,
+    headers: &[SealedHeader<HeaderTy<N>>],
+) {
+    let provider = factory.provider_rw().expect("failed to create provider");
+    let static_file_provider = provider.static_file_provider();
+    let mut writer = static_file_provider
+        .latest_writer(StaticFileSegment::Headers)
+        .expect("failed to create writer");
+    for header in headers {
+        writer.append_header(header.header(), &header.hash()).expect("failed to append header");
+    }
+    drop(writer);
+    provider.commit().expect("failed to commit");
 }

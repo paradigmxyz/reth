@@ -56,7 +56,7 @@ pub trait BlockNumReader: BlockHashReader + Send {
 /// The resulting block numbers can be converted to hashes using the underlying [`BlockNumReader`]
 /// methods, and vice versa.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockIdReader: BlockNumReader + Send + Sync {
+pub trait BlockIdReader: BlockNumReader + Sync {
     /// Converts the `BlockNumberOrTag` variants to a block number.
     fn convert_block_number(&self, num: BlockNumberOrTag) -> ProviderResult<Option<BlockNumber>> {
         let num = match num {
@@ -79,8 +79,14 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
     }
 
     /// Get the hash of the block by matching the given id.
+    ///
+    /// Returns `None` for a hash with `require_canonical` set when [`BlockNumReader::block_number`]
+    /// does not find it.
     fn block_hash_for_id(&self, block_id: BlockId) -> ProviderResult<Option<B256>> {
         match block_id {
+            BlockId::Hash(hash) if hash.require_canonical == Some(true) => {
+                Ok(self.block_number(hash.block_hash)?.map(|_| hash.block_hash))
+            }
             BlockId::Hash(hash) => Ok(Some(hash.into())),
             BlockId::Number(num) => match num {
                 BlockNumberOrTag::Latest => Ok(Some(self.chain_info()?.best_hash)),

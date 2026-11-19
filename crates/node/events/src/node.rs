@@ -8,6 +8,7 @@ use alloy_consensus::{
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
+use reth_cli_util::parsers::format_duration;
 use reth_engine_primitives::{ConsensusEngineEvent, ForkchoiceStatus, SlowBlockInfo};
 use reth_network_api::PeersInfo;
 use reth_primitives_traits::{format_gas, format_gas_throughput, BlockBody, NodePrimitives};
@@ -252,8 +253,8 @@ impl NodeState {
                     gas_used=%format_gas(block.gas_used()),
                     gas_throughput=%format_gas_throughput(block.gas_used(), elapsed),
                     gas_limit=%format_gas(block.gas_limit()),
-                    full=%format!("{:.1}%", full),
-                    base_fee=%format!("{:.2}Gwei", block.base_fee_per_gas().unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
+                    full=%format_args!("{:.1}%", full),
+                    base_fee=%format_args!("{:.2}Gwei", block.base_fee_per_gas().unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
                     blobs=block.blob_gas_used().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
                     excess_blobs=block.excess_blob_gas().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
                     ?elapsed,
@@ -666,9 +667,7 @@ impl Display for Eta {
                 return write!(
                     f,
                     "{}",
-                    humantime::format_duration(Duration::from_secs(remaining.as_secs()))
-                        .to_string()
-                        .replace(' ', "")
+                    format_duration(Duration::from_secs(remaining.as_secs())).replace(' ', "")
                 )
             }
         }

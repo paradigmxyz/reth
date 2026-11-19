@@ -4,8 +4,8 @@ use reth_primitives_traits::Account;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{
     updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
-    AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    AccountProof, DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState, HashedStorage,
+    MultiProof, MultiProofTargets, MultiProofTargetsV2, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// A type that can compute the state root of a given post state.
@@ -161,6 +161,21 @@ pub trait StateProofProvider {
         input: TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof>;
+
+    /// Generate a V2 decoded multiproof for target hashed accounts and storage slots against the
+    /// provider's state.
+    ///
+    /// A storage address with no slot targets requests its storage root node. Empty targets return
+    /// an empty proof.
+    ///
+    /// Set `requires_masks` when the hash and tree masks of returned branch nodes must match the
+    /// stored trie, as required to produce trie updates from them. Otherwise node hashes are still
+    /// exact, but masks are not guaranteed to match.
+    fn multiproof_v2(
+        &self,
+        targets: MultiProofTargetsV2,
+        requires_masks: bool,
+    ) -> ProviderResult<DecodedMultiProofV2>;
 
     /// Get trie witness for provided state using the given witness generation mode.
     fn witness(

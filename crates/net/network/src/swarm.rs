@@ -1,4 +1,5 @@
 use crate::{
+    budget::DEFAULT_BUDGET_PRIORITIZED_EVENTS,
     listener::{ConnectionListener, ListenerEvent},
     message::PeerMessage,
     peers::{InboundConnectionError, PeersManager},
@@ -55,6 +56,8 @@ pub(crate) struct Swarm<N: NetworkPrimitives = EthNetworkPrimitives> {
     sessions: SessionManager<N>,
     /// Tracks the entire state of the network and handles events received from the sessions.
     state: NetworkState<N>,
+    /// Number of session events handled since the listener was last polled.
+    session_events_in_row: u32,
 }
 
 // === impl Swarm ===
@@ -66,7 +69,7 @@ impl<N: NetworkPrimitives> Swarm<N> {
         sessions: SessionManager<N>,
         state: NetworkState<N>,
     ) -> Self {
-        Self { incoming, sessions, state }
+        Self { incoming, sessions, state, session_events_in_row: 0 }
     }
 
     /// Adds a protocol handler to the `RLPx` sub-protocol list.
@@ -111,9 +114,15 @@ impl<N: NetworkPrimitives> Swarm<N> {
 }
 
 impl<N: NetworkPrimitives> Swarm<N> {
-    /// Triggers a new outgoing connection to the given node
-    pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) {
-        self.sessions.dial_outbound(remote_addr, remote_id)
+    /// Triggers an outgoing connection, returning whether a session was started.
+    pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) -> bool {
+        if let Err(err) = self.sessions.try_dial_outbound(remote_addr, remote_id) {
+            trace!(target: "net", %err, "Outgoing connection rejected, capacity already reached.");
+            // Leave retries to the refill timer so a saturated session manager cannot busy-loop.
+            self.peers_mut().on_outgoing_pending_session_gracefully_closed(&remote_id);
+            return false
+        }
+        true
     }
 
     /// Handles a polled [`SessionEvent`]
@@ -138,6 +147,7 @@ impl<N: NetworkPrimitives> Swarm<N> {
                 self.state.on_session_activated(SessionActivation {
                     peer: peer_id,
                     capabilities: capabilities.clone(),
+                    version,
                     status: status.clone(),
                     request_tx: messages.clone(),
                     timeout,
@@ -239,8 +249,9 @@ impl<N: NetworkPrimitives> Swarm<N> {
     fn on_state_action(&mut self, event: StateAction<N>) -> Option<SwarmEvent<N>> {
         match event {
             StateAction::Connect { remote_addr, peer_id } => {
-                self.dial_outbound(remote_addr, peer_id);
-                return Some(SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id })
+                if self.dial_outbound(remote_addr, peer_id) {
+                    return Some(SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id })
+                }
             }
             StateAction::Disconnect { peer_id, reason } => {
                 self.sessions.disconnect(peer_id, reason);
@@ -319,7 +330,9 @@ impl<N: NetworkPrimitives> Stream for Swarm<N> {
 
         // This loop advances the network's state prioritizing local work [NetworkState] over work
         // coming in from the network [SessionManager], [ConnectionListener]
-        // Existing connections are prioritized over new __incoming__ connections
+        // Existing connections are prioritized over new __incoming__ connections, but after
+        // `DEFAULT_BUDGET_PRIORITIZED_EVENTS` session events in a row the listener is polled first
+        // once
         loop {
             while let Poll::Ready(action) = this.state.poll(cx) {
                 if let Some(event) = this.on_state_action(action) {
@@ -327,10 +340,24 @@ impl<N: NetworkPrimitives> Stream for Swarm<N> {
                 }
             }
 
+            if this.session_events_in_row >= DEFAULT_BUDGET_PRIORITIZED_EVENTS {
+                this.session_events_in_row = 0;
+                if let Poll::Ready(event) = Pin::new(&mut this.incoming).poll(cx) {
+                    if let Some(event) = this.on_connection(event) {
+                        return Poll::Ready(Some(event))
+                    }
+                    continue
+                }
+            }
+
             // poll all sessions
-            match this.sessions.poll(cx) {
+            match this
+                .sessions
+                .poll(cx, |peer_id| this.state.peers().inbound_session_rejection(peer_id))
+            {
                 Poll::Pending => {}
                 Poll::Ready(event) => {
+                    this.session_events_in_row += 1;
                     if let Some(event) = this.on_session_event(event) {
                         return Poll::Ready(Some(event))
                     }
@@ -339,6 +366,7 @@ impl<N: NetworkPrimitives> Stream for Swarm<N> {
             }
 
             // poll listener for incoming connections
+            this.session_events_in_row = 0;
             match Pin::new(&mut this.incoming).poll(cx) {
                 Poll::Pending => {}
                 Poll::Ready(event) => {

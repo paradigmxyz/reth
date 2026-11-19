@@ -13,9 +13,6 @@ use reth_trie_common::{
     BranchNodeMasks, Nibbles, ProofTrieNodeV2, ProofV2TargetParent, TrieNodeV2,
 };
 
-#[cfg(feature = "trie-debug")]
-use crate::debug_recorder::TrieDebugRecorder;
-
 /// Modification epoch assigned to cached sparse trie nodes.
 ///
 /// Epochs must increase monotonically. Nodes materialized from the parent state without being
@@ -81,7 +78,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// # Returns
     ///
-    /// `Ok(())` if successful, or an error if revealing fails.
+    /// `Ok(())` if successful, or an error if revealing fails. Implementations may reject
+    /// unsupported root variants. The arena implementation requires extensions to be merged
+    /// into branch nodes and returns an error for standalone [`TrieNodeV2::Extension`] roots.
     ///
     /// # Panics
     ///
@@ -106,9 +105,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 
     /// Reveals one or more trie nodes if they have not been revealed before.
     ///
-    /// This function decodes trie nodes and inserts them into the trie structure. It handles
-    /// different node types (leaf, extension, branch) by appropriately adding them to the trie and
-    /// recursively revealing their children.
+    /// Attaches supplied nodes where their paths identify blinded nodes in the current trie.
+    /// Nodes already revealed, paths diverging from the trie, and paths naming absent children
+    /// may be skipped.
     ///
     /// # Arguments
     ///
@@ -117,7 +116,8 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// # Returns
     ///
-    /// `Ok(())` if successful, or an error if any of the nodes was not revealed.
+    /// `Ok(())` if processing succeeds, including when nodes are skipped, or an error if
+    /// revelation fails. Success does not guarantee that every supplied node was incorporated.
     ///
     /// # Note
     ///
@@ -206,15 +206,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// The accumulated updates, or an empty set if updates weren't being tracked.
     fn take_updates(&mut self) -> SparseTrieUpdates;
 
-    /// Removes all nodes and values from the trie, resetting it to a blank state
-    /// with only an empty root node. This is used when a storage root is deleted.
-    ///
-    /// This should not be used when intending to reuse the trie for a fresh account/storage root;
-    /// use `clear` for that.
-    ///
-    /// Note: All previously tracked changes to the trie are also removed.
-    fn wipe(&mut self);
-
     /// This clears all data structures in the sparse trie, keeping the backing data structures
     /// allocated. An empty root node is inserted at the root.
     ///
@@ -232,15 +223,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// The number of nodes converted to hash stubs.
     fn prune(&mut self, prune_before: TrieNodeEpoch) -> usize;
-
-    /// Takes the debug recorder out of this trie, replacing it with an empty one.
-    ///
-    /// Returns the recorder containing all recorded mutations since the last reset.
-    /// The default implementation returns an empty recorder.
-    #[cfg(feature = "trie-debug")]
-    fn take_debug_recorder(&mut self) -> TrieDebugRecorder {
-        TrieDebugRecorder::default()
-    }
 
     /// Applies leaf updates to the sparse trie.
     ///
@@ -277,8 +259,6 @@ pub struct SparseTrieUpdates {
     pub updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
     /// Collection of removed intermediate nodes indexed by full path.
     pub removed_nodes: HashSet<Nibbles>,
-    /// Flag indicating whether the trie was wiped.
-    pub wiped: bool,
 }
 
 impl SparseTrieUpdates {
@@ -287,7 +267,6 @@ impl SparseTrieUpdates {
         Self {
             updated_nodes: HashMap::with_capacity_and_hasher(num_updated_nodes, Default::default()),
             removed_nodes: HashSet::with_capacity_and_hasher(num_removed_nodes, Default::default()),
-            wiped: false,
         }
     }
 }

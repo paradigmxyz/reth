@@ -21,8 +21,7 @@ use tower::Layer;
 /// Metrics for the RPC server.
 ///
 /// Metrics are divided into two categories:
-/// - Connection metrics: metrics for the connection (e.g. number of connections opened, relevant
-///   for WS and IPC)
+/// - Connection metrics: metrics for the connection (e.g. number of connections opened)
 /// - Request metrics: metrics for each RPC method (e.g. number of calls started, time taken to
 ///   process a call)
 #[derive(Default, Debug, Clone)]
@@ -106,33 +105,31 @@ impl<S> RpcRequestMetricsService<S> {
 
 impl<S> RpcServiceT for RpcRequestMetricsService<S>
 where
-    S: RpcServiceT<MethodResponse = MethodResponse> + Send + Sync + Clone + 'static,
+    S: RpcServiceT + Send + Sync + Clone + 'static,
 {
-    type MethodResponse = S::MethodResponse;
-    type NotificationResponse = S::NotificationResponse;
-    type BatchResponse = S::BatchResponse;
-
-    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = S::MethodResponse> + Send + 'a {
+    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
         self.metrics.inner.connection_metrics.requests_started_total.increment(1);
         let call_metrics = self.metrics.inner.call_metrics.get_key_value(req.method.as_ref());
         if let Some((_, call_metrics)) = &call_metrics {
             call_metrics.started_total.increment(1);
         }
+        // Sync methods and the params decoding of async methods run inside `call`.
+        let started_at = Instant::now();
         MeteredRequestFuture {
             fut: self.inner.call(req),
-            started_at: Instant::now(),
+            started_at,
             metrics: self.metrics.clone(),
             method: call_metrics.map(|(method, _)| *method),
         }
     }
 
-    fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+    fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = MethodResponse> + Send + 'a {
         self.metrics.inner.connection_metrics.batches_started_total.increment(1);
 
         for batch_entry in req.iter().flatten() {
             let method_name = batch_entry.method_name();
             if let Some(call_metrics) = self.metrics.inner.call_metrics.get(method_name) {
-                call_metrics.started_total.increment(1);
+                call_metrics.batched_total.increment(1);
             }
         }
 
@@ -146,7 +143,7 @@ where
     fn notification<'a>(
         &self,
         n: Notification<'a>,
-    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+    ) -> impl Future<Output = MethodResponse> + Send + 'a {
         self.inner.notification(n)
     }
 }
@@ -299,6 +296,12 @@ struct RpcServerCallMetrics {
     successful_total: Counter,
     /// The number of failed calls
     failed_total: Counter,
+    /// The number of calls received as batch entries.
+    ///
+    /// jsonrpsee dispatches batch entries internally without invoking this middleware's `call`,
+    /// so only their per-method volume can be tracked; batched calls are excluded from
+    /// `started_total`, `successful_total`, `failed_total` and `time_seconds`.
+    batched_total: Counter,
     /// Response for a single call
     time_seconds: Histogram,
 }

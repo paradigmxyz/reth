@@ -3,17 +3,17 @@
 //! This module reconstructs trie changesets from database state. The resulting changesets contain
 //! the old trie node values needed to revert a block or contiguous range of blocks.
 
-use crate::{
-    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory, TrieTableAdapter,
-};
+use crate::DatabaseHashedPostState;
 use alloy_primitives::BlockNumber;
-use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, StorageChangeSetReader, StorageSettingsCache,
-};
+use reth_storage_api::{BlockNumReader, ChangeSetReader, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderError;
-use reth_trie::TrieInputSorted;
-use reth_trie_common::updates::TrieUpdatesSorted;
-use std::{ops::RangeInclusive, sync::Arc};
+use reth_trie::{
+    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
+    trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
+    HashedPostStateSorted, StateRoot,
+};
+use reth_trie_common::{updates::TrieUpdatesSorted, TrieInputSorted};
+use std::{iter::once, ops::RangeInclusive, sync::Arc};
 use tracing::debug;
 
 /// Computes trie changesets for a block.
@@ -25,72 +25,63 @@ use tracing::debug;
 ///
 /// Returns an error if the block exceeds the database tip, database access fails, or state root
 /// computation fails.
-pub fn compute_block_trie_changesets<Provider>(
+pub fn compute_block_trie_changesets<Provider, StateTrieProvider>(
     provider: &Provider,
+    state_trie_provider: &StateTrieProvider,
     block_number: BlockNumber,
 ) -> Result<TrieUpdatesSorted, ProviderError>
 where
-    Provider: DBProvider
-        + ChangeSetReader
-        + StorageChangeSetReader
-        + BlockNumReader
-        + StorageSettingsCache,
+    Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader,
+    StateTrieProvider: TrieCursorFactory + HashedCursorFactory,
 {
     let db_tip_block = provider.best_block_number()?;
-    crate::with_adapter!(provider, |A| {
-        compute_range_trie_changesets_inner::<_, A>(
-            provider,
-            block_number..=block_number,
-            db_tip_block,
-        )
-    })
+    compute_range_trie_changesets(
+        provider,
+        state_trie_provider,
+        &[],
+        block_number..=block_number,
+        db_tip_block,
+    )
 }
 
 /// Computes aggregate trie changesets for an inclusive block range.
 ///
-/// The returned changesets restore the trie from the state after `range.end()` to the state before
-/// `range.start()`. `db_tip_block` must be the current database tip for `provider`.
+/// Returns the value before `range.start()` of every trie node touched by a block in `range`,
+/// including nodes created and removed within it.
+///
+/// `state_trie_provider` must expose the complete trie and hashed state at `db_tip_block`.
+///
+/// `forward_updates` contains original executed-block trie updates on that same chain, sorted by
+/// strictly increasing block number. Consecutive available blocks are reverted together, preserving
+/// forward paths omitted by the aggregate calculation. Missing blocks are reverted individually so
+/// transient nodes are retained.
 ///
 /// # Errors
 ///
 /// Returns an error if the range exceeds `db_tip_block`, database access fails, or state root
 /// computation fails.
-pub fn compute_range_trie_changesets<Provider>(
+pub fn compute_range_trie_changesets<Provider, StateTrieProvider>(
     provider: &Provider,
+    state_trie_provider: &StateTrieProvider,
+    forward_updates: &[(BlockNumber, Arc<TrieUpdatesSorted>)],
     range: RangeInclusive<BlockNumber>,
     db_tip_block: BlockNumber,
 ) -> Result<TrieUpdatesSorted, ProviderError>
 where
-    Provider: DBProvider
-        + ChangeSetReader
-        + StorageChangeSetReader
-        + BlockNumReader
-        + StorageSettingsCache,
+    Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader,
+    StateTrieProvider: TrieCursorFactory + HashedCursorFactory,
 {
-    crate::with_adapter!(provider, |A| {
-        compute_range_trie_changesets_inner::<_, A>(provider, range, db_tip_block)
-    })
-}
+    debug_assert!(
+        forward_updates.is_sorted_by(|(a, _), (b, _)| a < b),
+        "forward updates must have strictly increasing block numbers"
+    );
 
-fn compute_range_trie_changesets_inner<Provider, A>(
-    provider: &Provider,
-    range: RangeInclusive<BlockNumber>,
-    db_tip_block: BlockNumber,
-) -> Result<TrieUpdatesSorted, ProviderError>
-where
-    Provider: DBProvider
-        + ChangeSetReader
-        + StorageChangeSetReader
-        + BlockNumReader
-        + StorageSettingsCache,
-    A: TrieTableAdapter,
-{
-    let start_block = *range.start();
-    let end_block = *range.end();
-
-    if start_block > end_block {
+    if range.is_empty() {
         return Ok(TrieUpdatesSorted::default())
     }
+
+    let start_block = *range.start();
+    let end_block = *range.end();
 
     if end_block > db_tip_block {
         return Err(ProviderError::InsufficientChangesets {
@@ -107,69 +98,109 @@ where
         "Computing range trie changesets from database state"
     );
 
-    // Collect the state revert for the requested range.
-    let range_state_revert = crate::state::from_reverts_auto(provider, range)?;
-    let range_prefix_sets = range_state_revert.construct_prefix_sets();
+    let mut overlay = TrieInputSorted::default();
+    // Rewind later blocks to reconstruct the trie at the end of the requested range.
+    if end_block < db_tip_block {
+        rewind_trie_range(
+            provider,
+            state_trie_provider,
+            forward_updates,
+            (end_block + 1)..=db_tip_block,
+            &mut overlay,
+            &mut None,
+        )?;
+    }
 
-    type DbStateRoot<'a, TX, A> = reth_trie::StateRoot<
-        DatabaseTrieCursorFactory<&'a TX, A>,
-        DatabaseHashedCursorFactory<&'a TX>,
-    >;
-
-    let (range_nodes, range_state) = if end_block == db_tip_block {
-        debug!(
-            target: "trie::changesets",
-            start_block,
-            end_block,
-            db_tip_block,
-            "Skipping tail trie revert computation for tip-ended range"
-        );
-
-        (Arc::default(), Arc::new(range_state_revert))
-    } else {
-        // Collect the state revert from the database tip to just after the range.
-        let tail_state_revert = end_block
-            .checked_add(1)
-            .map(|next_block| crate::state::from_reverts_auto(provider, next_block..))
-            .transpose()?
-            .unwrap_or_default();
-
-        // Compute trie reverts from the database tip to just after the range.
-        let tail_input = TrieInputSorted::new(
-            Arc::default(),
-            Arc::new(tail_state_revert.clone()),
-            tail_state_revert.construct_prefix_sets(),
-        );
-        let tail_trie_revert = DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(
-            provider.tx_ref(),
-            tail_input,
-        )
-        .map_err(ProviderError::other)?
-        .1
-        .into_sorted();
-
-        // Overlay the post-range trie and compute the trie revert to the pre-range state.
-        let mut pre_range_state_revert = tail_state_revert;
-        pre_range_state_revert.extend_ref_and_sort(&range_state_revert);
-
-        (Arc::new(tail_trie_revert), Arc::new(pre_range_state_revert))
-    };
-
-    let range_input = TrieInputSorted::new(range_nodes, range_state, range_prefix_sets);
-    let range_trie_revert =
-        DbStateRoot::<_, A>::overlay_root_from_nodes_with_updates(provider.tx_ref(), range_input)
-            .map_err(ProviderError::other)?
-            .1
-            .into_sorted();
+    let mut reverts = Some(TrieUpdatesSorted::default());
+    rewind_trie_range(
+        provider,
+        state_trie_provider,
+        forward_updates,
+        range,
+        &mut overlay,
+        &mut reverts,
+    )?;
+    let reverts = reverts.expect("revert collection is enabled");
 
     debug!(
         target: "trie::changesets",
         start_block,
         end_block,
-        num_account_nodes = range_trie_revert.account_nodes_ref().len(),
-        num_storage_tries = range_trie_revert.storage_tries_ref().len(),
+        num_account_nodes = reverts.account_nodes_ref().len(),
+        num_storage_tries = reverts.storage_tries_ref().len(),
         "Computed range trie changesets successfully"
     );
 
-    Ok(range_trie_revert)
+    Ok(reverts)
+}
+
+/// Rewinds the current state and trie views, accumulating changesets when `reverts` is `Some`.
+fn rewind_trie_range<Provider, StateTrieProvider>(
+    provider: &Provider,
+    state_trie_provider: &StateTrieProvider,
+    forward_updates: &[(BlockNumber, Arc<TrieUpdatesSorted>)],
+    blocks: RangeInclusive<BlockNumber>,
+    overlay: &mut TrieInputSorted,
+    reverts: &mut Option<TrieUpdatesSorted>,
+) -> Result<(), ProviderError>
+where
+    Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader,
+    StateTrieProvider: TrieCursorFactory + HashedCursorFactory,
+{
+    let mut end = *blocks.end();
+    while end >= *blocks.start() {
+        let mut start = end;
+        let mut segment_range = 0..0;
+
+        // Select updates of consecutive blocks iterating backwards from `end`.
+        // Without the original updates, reverting one block at a time preserves nodes that
+        // appear and disappear inside the range. An endpoint-only calculation would omit them.
+        if let Ok(index) = forward_updates.binary_search_by_key(&end, |(block, _)| *block) {
+            segment_range = index..index + 1;
+            while segment_range.start > 0 && start > *blocks.start() {
+                if forward_updates[segment_range.start - 1].0 != start - 1 {
+                    break
+                }
+                segment_range.start -= 1;
+                start -= 1;
+            }
+        }
+
+        // Collect reverts for the segment and use them to generate the trie reverts for the
+        // segment.
+        let segment_state_reverts = HashedPostStateSorted::from_reverts(provider, start..=end)?;
+        let prefixes = segment_state_reverts.construct_prefix_sets().freeze();
+        Arc::make_mut(&mut overlay.state).extend_ref_and_sort(&segment_state_reverts);
+
+        let segment_trie_reverts = StateRoot::new(
+            InMemoryTrieCursorFactory::new(state_trie_provider, overlay.nodes.as_ref()),
+            HashedPostStateCursorFactory::new(state_trie_provider, overlay.state.as_ref()),
+        )
+        .with_prefix_sets(prefixes)
+        .root_with_updates()
+        .map_err(ProviderError::other)?
+        .1
+        .into_sorted();
+
+        // A path missing from the calculated reverts has the same value at both segment ends, so
+        // its newest forward update is also its value before the segment. Merging the forward
+        // updates keeps nodes that appear and disappear inside the segment, e.g. a node created
+        // in block 6 and deleted in block 8 when reverting 6..=8.
+        let segment_trie_forward =
+            forward_updates[segment_range].iter().rev().map(|(_, updates)| updates.as_ref());
+        let segment_trie_reverts =
+            TrieUpdatesSorted::merge_iter(once(&segment_trie_reverts).chain(segment_trie_forward));
+
+        Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(&segment_trie_reverts);
+        if let Some(reverts) = reverts {
+            reverts.extend_ref_and_sort(&segment_trie_reverts);
+        }
+
+        if start == *blocks.start() {
+            break
+        }
+        end = start - 1;
+    }
+
+    Ok(())
 }

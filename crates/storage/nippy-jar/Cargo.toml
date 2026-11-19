@@ -24,6 +24,7 @@ lz4_flex.workspace = true
 
 memmap2.workspace = true
 bincode.workspace = true
+smallvec.workspace = true
 serde = { workspace = true, features = ["derive"] }
 tracing.workspace = true
 anyhow.workspace = true

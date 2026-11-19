@@ -6,8 +6,9 @@ use reth_ethereum::{
     node::EthereumNode,
     primitives::{AlloyBlockHeader, SealedBlock, SealedHeader},
     provider::{
-        providers::ReadOnlyConfig, AccountReader, BlockNumReader, BlockReader, BlockSource,
-        HeaderProvider, ReceiptProvider, StateProvider, TransactionVariant, TransactionsProvider,
+        providers::{BlockchainProvider, ReadOnlyConfig},
+        BlockNumReader, BlockReader, BlockSource, HeaderProvider, ReceiptProvider, StateProvider,
+        StateProviderFactory, TransactionVariant, TransactionsProvider,
     },
     rpc::eth::primitives::Filter,
     TransactionSigned,
@@ -44,7 +45,11 @@ fn main() -> eyre::Result<()> {
     receipts_provider_example(&provider)?;
 
     state_provider_example(factory.latest()?, &provider, provider.best_block_number()?)?;
-    state_provider_example(factory.history_by_block_number(block_num)?, &provider, block_num)?;
+    state_provider_example(
+        BlockchainProvider::new(factory.clone())?.history_by_block_number(block_num)?,
+        &provider,
+        block_num,
+    )?;
 
     // Closes the RO transaction opened in the `factory.provider()` call. This is optional and
     // would happen anyway at the end of the function scope.
@@ -212,7 +217,7 @@ fn receipts_provider_example<
 }
 
 /// The `StateProvider` allows querying the state tables.
-fn state_provider_example<T: StateProvider + AccountReader, H: HeaderProvider>(
+fn state_provider_example<T: StateProvider, H: HeaderProvider>(
     provider: T,
     headers: &H,
     number: u64,

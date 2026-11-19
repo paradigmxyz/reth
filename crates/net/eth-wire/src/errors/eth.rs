@@ -5,7 +5,7 @@ use crate::{
 };
 use alloy_chains::Chain;
 use alloy_primitives::B256;
-use reth_eth_wire_types::{snap::SnapProtocolError, EthVersion};
+use reth_eth_wire_types::{snap::SnapProtocolError, EthMessageID, EthVersion};
 use reth_ethereum_forks::ValidationError;
 use reth_primitives_traits::{GotExpected, GotExpectedBoxed};
 use std::io;
@@ -52,6 +52,30 @@ pub enum EthStreamError {
         /// The identifier of the unknown Ethereum message.
         message_id: u8,
     },
+    /// Received a response that answers no request sent on this stream.
+    ///
+    /// The response is rejected before its items are decoded.
+    #[error("received unsolicited {message_id:?} response with request id {request_id}")]
+    UnsolicitedResponse {
+        /// The message id of the response.
+        message_id: EthMessageID,
+        /// The request id the response carried.
+        request_id: u64,
+    },
+    /// Received a response with more items than its request asked for.
+    ///
+    /// The response is rejected before its items are decoded.
+    #[error(
+        "{message_id:?} response with request id {request_id} exceeds the {max_items} requested items"
+    )]
+    ResponseExceedsRequest {
+        /// The message id of the response.
+        message_id: EthMessageID,
+        /// The request id the response carried.
+        request_id: u64,
+        /// The number of items the request asked for.
+        max_items: usize,
+    },
 }
 
 // === impl EthStreamError ===
@@ -78,12 +102,17 @@ impl EthStreamError {
                 Self::MessageTooBig(_) |
                 Self::TransactionHashesInvalidLenOfFields { .. } |
                 Self::UnsupportedMessage { .. } |
+                Self::UnsolicitedResponse { .. } |
+                Self::ResponseExceedsRequest { .. } |
                 Self::P2PStreamError(
                     P2PStreamError::Rlp(_) |
                         P2PStreamError::Snap(_) |
                         P2PStreamError::MessageTooBig { .. } |
                         P2PStreamError::UnknownReservedMessageId(_) |
+                        P2PStreamError::UnknownSubprotocolMessageId(_) |
                         P2PStreamError::EmptyProtocolMessage |
+                        P2PStreamError::InvalidPingPongPayload(_) |
+                        P2PStreamError::TooManyPings |
                         P2PStreamError::UnknownDisconnectReason(_)
                 )
         )

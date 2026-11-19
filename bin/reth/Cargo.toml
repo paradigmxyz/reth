@@ -21,6 +21,7 @@ assets = [
     ["../../LICENSE-APACHE", "usr/share/doc/reth/", "644"],
     ["../../LICENSE-MIT", "usr/share/doc/reth/", "644"],
     ["../../LICENSES/*", "usr/share/doc/reth/LICENSES/", "644"],
+    ["../../crates/rpc/jsonrpsee/LICENSE", "usr/share/doc/reth/LICENSES/jsonrpsee-MIT.txt", "644"],
 ]
 systemd-units = { enable = false, start = false, unit-name = "reth", unit-scripts = "../../pkg/reth/debian" }
 
@@ -35,7 +36,6 @@ reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-provider.workspace = true
-reth-revm.workspace = true
 reth-transaction-pool.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
@@ -43,7 +43,7 @@ reth-consensus-common.workspace = true
 reth-rpc-builder.workspace = true
 reth-rpc.workspace = true
 reth-rpc-convert.workspace = true
-reth-rpc-api = { workspace = true, features = ["client"] }
+reth-rpc-api.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
@@ -75,6 +75,10 @@ alloy-node-bindings.workspace = true
 alloy-provider = { workspace = true, features = ["reqwest"] }
 alloy-rpc-types-eth.workspace = true
 backon.workspace = true
+blake3.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["server", "http1"] }
+hyper-util = { workspace = true, features = ["tokio"] }
 serde_json.workspace = true
 tar.workspace = true
 tempfile.workspace = true
@@ -82,18 +86,21 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 toml.workspace = true
 zstd.workspace = true
 
+[build-dependencies]
+reth-node-version-build.workspace = true
+
 [features]
 default = [
     "jemalloc",
     "otlp",
     "otlp-logs",
-    "reth-revm/portable",
     "js-tracer",
     "jit",
     "keccak-cache-global",
     "asm-keccak",
     "gmp",
     "min-trace-logs",
+    "portable",
 ]
 
 jit = [
@@ -103,7 +110,6 @@ jit = [
 gmp = [
     "reth-ethereum-cli/gmp",
     "reth-node-ethereum/gmp",
-    "reth-revm/gmp",
 ]
 
 otlp = [
@@ -129,6 +135,7 @@ asm-keccak = [
     "reth-node-ethereum/asm-keccak",
     "alloy-primitives/asm-keccak",
 ]
+portable = ["reth-node-ethereum/portable"]
 keccak-cache-global = [
     "reth-node-core/keccak-cache-global",
     "reth-node-ethereum/keccak-cache-global",
@@ -139,7 +146,6 @@ jemalloc = [
     "reth-node-core/jemalloc",
     "reth-node-metrics/jemalloc",
     "reth-ethereum-cli/jemalloc",
-    "reth-provider/jemalloc",
 ]
 jemalloc-prof = [
     "jemalloc",
@@ -199,7 +205,6 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 
-partial-persistence = ["reth-node-core/partial-persistence"]
 trie-debug = ["reth-node-builder/trie-debug", "reth-node-core/trie-debug"]
 
 [[bin]]

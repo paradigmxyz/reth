@@ -5,7 +5,9 @@
 use alloy_primitives::bytes::BytesMut;
 use futures::Stream;
 use reth_eth_wire::{
-    capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
+    capability::SharedCapabilities,
+    multiplex::ProtocolConnection,
+    protocol::{Protocol, ProtocolIngressLimits},
 };
 use reth_network_api::{Direction, PeerId};
 use std::{
@@ -50,6 +52,11 @@ pub trait ConnectionHandler: Send + Sync + 'static {
     /// This will be negotiated with the remote peer.
     fn protocol(&self) -> Protocol;
 
+    /// Returns local resource limits for inbound messages of this protocol.
+    fn inbound_limits(&self) -> ProtocolIngressLimits {
+        ProtocolIngressLimits::default()
+    }
+
     /// Invoked when the `RLPx` connection has been established by the peer does not share the
     /// protocol.
     fn on_unsupported_by_peer(
@@ -59,7 +66,12 @@ pub trait ConnectionHandler: Send + Sync + 'static {
         peer_id: PeerId,
     ) -> OnNotSupported;
 
-    /// Invoked when the `RLPx` connection was established.
+    /// Invoked when the `RLPx` connection was established and the eth `Status` handshake
+    /// succeeded.
+    ///
+    /// Messages arriving before `Status` completes are queued within [`Self::inbound_limits`]
+    /// and an aggregate handshake budget of 256 KiB or 64 messages, whichever is reached first.
+    /// The callback runs when the authenticated connection is first polled.
     ///
     /// The returned future should resolve when the connection should disconnect.
     fn into_connection(
@@ -92,7 +104,7 @@ pub trait IntoRlpxSubProtocol {
 
 impl<T> IntoRlpxSubProtocol for T
 where
-    T: ProtocolHandler + Send + Sync + 'static,
+    T: ProtocolHandler,
 {
     fn into_rlpx_sub_protocol(self) -> RlpxSubProtocol {
         RlpxSubProtocol(Box::new(self))
@@ -200,6 +212,8 @@ impl<T: ProtocolHandler> DynProtocolHandler for T {
 pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
     fn protocol(&self) -> Protocol;
 
+    fn inbound_limits(&self) -> ProtocolIngressLimits;
+
     fn on_unsupported_by_peer(
         self: Box<Self>,
         supported: &SharedCapabilities,
@@ -218,6 +232,10 @@ pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
 impl<T: ConnectionHandler> DynConnectionHandler for T {
     fn protocol(&self) -> Protocol {
         T::protocol(self)
+    }
+
+    fn inbound_limits(&self) -> ProtocolIngressLimits {
+        T::inbound_limits(self)
     }
 
     fn on_unsupported_by_peer(

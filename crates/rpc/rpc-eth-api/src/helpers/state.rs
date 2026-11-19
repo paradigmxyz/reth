@@ -1,9 +1,11 @@
 //! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
 //! RPC methods.
 
-use super::{EthApiSpec, LoadBlock, LoadPendingBlock, SpawnBlocking};
+use super::{
+    pending_block::PendingStateSource, EthApiSpec, LoadBlock, LoadPendingBlock, SpawnBlocking,
+};
 use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
-use alloy_consensus::constants::KECCAK_EMPTY;
+use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
 use alloy_eips::BlockId;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Account, AccountInfo, EIP1186AccountProofResponse};
@@ -17,18 +19,20 @@ use reth_rpc_eth_types::{
     error::{FromEvmError, IntoEthApiError},
     EthApiError, PendingBlockEnv, RpcInvalidTransactionError, SignError,
 };
-use reth_rpc_server_types::constants::DEFAULT_MAX_STORAGE_VALUES_SLOTS;
+use reth_rpc_server_types::constants::{DEFAULT_MAX_PROOF_SLOTS, DEFAULT_MAX_STORAGE_VALUES_SLOTS};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, StateProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::TransactionPool;
-use reth_trie_common::MultiProofTargets;
+use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use std::{collections::HashMap, sync::Arc};
 
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
     /// Returns the maximum number of blocks into the past for generating state proofs.
-    fn max_proof_window(&self) -> u64;
+    fn max_proof_window(&self) -> u64 {
+        self.eth_api_settings().eth_proof_window
+    }
 
     /// Validates that the given block is within the configured proof window.
     ///
@@ -77,10 +81,8 @@ pub trait EthState: LoadState + SpawnBlocking {
         address: Address,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        self.spawn_blocking_io_fut(async move |this| {
-            Ok(this
-                .state_at_block_id_or_latest(block_id)
-                .await?
+        self.spawn_blocking_io_with_state(block_id.unwrap_or_default(), move |_, state| {
+            Ok(state
                 .account_balance(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default())
@@ -94,14 +96,12 @@ pub trait EthState: LoadState + SpawnBlocking {
         index: JsonStorageKey,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
-        self.spawn_blocking_io_fut(async move |this| {
-            Ok(B256::new(
-                this.state_at_block_id_or_latest(block_id)
-                    .await?
+        self.spawn_blocking_io_with_state(block_id.unwrap_or_default(), move |_, state| {
+            Ok(B256::from(
+                state
                     .storage(address, index.as_b256())
                     .map_err(Self::Error::from_eth_err)?
-                    .unwrap_or_default()
-                    .to_be_bytes(),
+                    .unwrap_or_default(),
             ))
         })
     }
@@ -130,9 +130,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 )));
             }
 
-            self.spawn_blocking_io_fut(async move |this| {
-                let state = this.state_at_block_id_or_latest(block_id).await?;
-
+            self.spawn_blocking_io_with_state(block_id.unwrap_or_default(), move |_, state| {
                 let mut result = HashMap::with_capacity(requests.len());
                 for (address, slots) in requests {
                     let mut values = Vec::with_capacity(slots.len());
@@ -141,7 +139,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                             .storage(address, slot.as_b256())
                             .map_err(Self::Error::from_eth_err)?
                             .unwrap_or_default();
-                        values.push(B256::new(value.to_be_bytes()));
+                        values.push(B256::from(value));
                     }
                     result.insert(address, values);
                 }
@@ -153,6 +151,9 @@ pub trait EthState: LoadState + SpawnBlocking {
     }
 
     /// Returns values stored of given account, with Merkle-proof, at given blocknumber.
+    ///
+    /// Enforces a cap of [`DEFAULT_MAX_PROOF_SLOTS`] on the number of requested keys, before a
+    /// proof permit is acquired.
     fn get_proof(
         &self,
         address: Address,
@@ -165,8 +166,15 @@ pub trait EthState: LoadState + SpawnBlocking {
     where
         Self: EthApiSpec,
     {
+        if keys.len() > DEFAULT_MAX_PROOF_SLOTS {
+            return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(format!(
+                "storage key count {} exceeds limit {DEFAULT_MAX_PROOF_SLOTS}",
+                keys.len(),
+            ))));
+        }
+
         Ok(async move {
-            let _permit = self
+            let permit = self
                 .acquire_owned_tracing()
                 .await
                 .map_err(RethError::other)
@@ -175,19 +183,22 @@ pub trait EthState: LoadState + SpawnBlocking {
             let block_id = block_id.unwrap_or_default();
             self.ensure_within_proof_window(block_id)?;
 
-            self.spawn_blocking_io_fut(async move |this| {
-                let state = this.state_at_block_id(block_id).await?;
+            self.spawn_blocking_io_with_state(block_id, move |_, state| {
+                let _permit = permit;
                 let storage_keys = keys.iter().map(|key| key.as_b256()).collect::<Vec<_>>();
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
                     .map_err(Self::Error::from_eth_err)?;
-                Ok(proof.into_eip1186_response(keys))
+                Ok(proof.into_eip1186_response_with(keys, true))
             })
             .await
         })
     }
 
     /// Returns account and storage proofs for multiple targets at the given block number.
+    ///
+    /// Enforces a cap of [`DEFAULT_MAX_PROOF_SLOTS`] on both the number of targets and the total
+    /// slot count across all targets, before a proof permit is acquired.
     fn get_multi_proof(
         &self,
         targets: Vec<(Address, Vec<B256>)>,
@@ -199,8 +210,21 @@ pub trait EthState: LoadState + SpawnBlocking {
     where
         Self: EthApiSpec,
     {
+        if targets.len() > DEFAULT_MAX_PROOF_SLOTS {
+            return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(format!(
+                "target count {} exceeds limit {DEFAULT_MAX_PROOF_SLOTS}",
+                targets.len(),
+            ))));
+        }
+        let total_slots: usize = targets.iter().map(|(_, slots)| slots.len()).sum();
+        if total_slots > DEFAULT_MAX_PROOF_SLOTS {
+            return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(format!(
+                "total slot count {total_slots} exceeds limit {DEFAULT_MAX_PROOF_SLOTS}",
+            ))));
+        }
+
         Ok(async move {
-            let _permit = self
+            let permit = self
                 .acquire_owned_tracing()
                 .await
                 .map_err(RethError::other)
@@ -209,19 +233,25 @@ pub trait EthState: LoadState + SpawnBlocking {
             let block_id = block_id.unwrap_or_default();
             self.ensure_within_proof_window(block_id)?;
 
-            self.spawn_blocking_io_fut(async move |this| {
-                let state = this.state_at_block_id(block_id).await?;
-                let mut proof_targets = MultiProofTargets::with_capacity(targets.len());
+            self.spawn_blocking_io_with_state(block_id, move |_, state| {
+                let _permit = permit;
+                let mut proof_targets = MultiProofTargetsV2::default();
+                proof_targets.account_targets.reserve(targets.len());
+                proof_targets.storage_targets.reserve(targets.len());
                 for (address, slots) in &targets {
-                    proof_targets
-                        .entry(keccak256(address))
-                        .or_default()
-                        .extend(slots.iter().map(keccak256));
+                    let hashed_address = keccak256(address);
+                    proof_targets.account_targets.push(ProofV2Target::new(hashed_address));
+                    if !slots.is_empty() {
+                        proof_targets
+                            .storage_targets
+                            .entry(hashed_address)
+                            .or_default()
+                            .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
+                    }
                 }
 
-                let multiproof = state
-                    .multiproof(Default::default(), proof_targets)
-                    .map_err(Self::Error::from_eth_err)?;
+                let multiproof =
+                    state.multiproof_v2(proof_targets, false).map_err(Self::Error::from_eth_err)?;
 
                 targets
                     .into_iter()
@@ -232,7 +262,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                             .map_err(Self::Error::from_eth_err)?;
                         let storage_keys =
                             slots.into_iter().map(JsonStorageKey::from).collect::<Vec<_>>();
-                        Ok(proof.into_eip1186_response(storage_keys))
+                        Ok(proof.into_eip1186_response_with(storage_keys, true))
                     })
                     .collect::<Result<Vec<_>, Self::Error>>()
             })
@@ -252,14 +282,9 @@ pub trait EthState: LoadState + SpawnBlocking {
         async move {
             self.ensure_within_proof_window(block_id)?;
 
-            self.spawn_blocking_io_fut(async move |this| {
-                let state = this.state_at_block_id(block_id).await?;
+            self.spawn_blocking_io_with_state(block_id, move |_, state| {
                 let account = state.basic_account(&address).map_err(Self::Error::from_eth_err)?;
                 let Some(account) = account else { return Ok(None) };
-
-                let balance = account.balance;
-                let nonce = account.nonce;
-                let code_hash = account.bytecode_hash.unwrap_or(KECCAK_EMPTY);
 
                 // Provide a default `HashedStorage` value in order to
                 // get the storage root hash of the current state.
@@ -267,20 +292,20 @@ pub trait EthState: LoadState + SpawnBlocking {
                     .storage_root(address, Default::default())
                     .map_err(Self::Error::from_eth_err)?;
 
-                Ok(Some(Account { balance, nonce, code_hash, storage_root }))
+                Ok(Some(account.into_trie_account(storage_root)))
             })
             .await
         }
     }
 
     /// Retrieves the account's balance, nonce, and code for a given address.
+    #[allow(clippy::needless_update)]
     fn get_account_info(
         &self,
         address: Address,
         block_id: BlockId,
     ) -> impl Future<Output = Result<AccountInfo, Self::Error>> + Send {
-        self.spawn_blocking_io_fut(async move |this| {
-            let state = this.state_at_block_id(block_id).await?;
+        self.spawn_blocking_io_with_state(block_id, move |_, state| {
             let account = state
                 .basic_account(&address)
                 .map_err(Self::Error::from_eth_err)?
@@ -298,7 +323,14 @@ pub trait EthState: LoadState + SpawnBlocking {
                     .original_bytes()
             };
 
-            Ok(AccountInfo { balance, nonce, code })
+            Ok(AccountInfo {
+                balance,
+                nonce,
+                code,
+                #[cfg(feature = "account-ext")]
+                extension: account.extension,
+                ..Default::default()
+            })
         })
     }
 }
@@ -318,10 +350,15 @@ pub trait LoadState:
         self.provider().history_by_block_hash(block_hash).map_err(Self::Error::from_eth_err)
     }
 
-    /// Returns the state at the given [`BlockId`] enum.
+    /// Returns the state at the given [`BlockId`], preferring locally built state for `pending`.
     ///
-    /// Note: if not [`BlockNumberOrTag::Pending`](alloy_eips::BlockNumberOrTag) then this
-    /// will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
+    /// If local pending state is unavailable or fails to build, falls back to the provider's
+    /// pending state. Other block IDs resolve only canonical state. See
+    /// <https://github.com/paradigmxyz/reth/issues/4515>.
+    ///
+    /// Pending block construction may spawn blocking work, so await this outside a blocking task.
+    /// The fallback provider lookup is synchronous on the calling task; RPC handlers should use
+    /// [`Self::spawn_blocking_io_with_state`] to keep that read on the blocking pool.
     fn state_at_block_id(
         &self,
         at: BlockId,
@@ -361,6 +398,49 @@ pub trait LoadState:
             } else {
                 Ok(self.latest_state()?)
             }
+        }
+    }
+
+    /// Executes `f` with the state at the given [`BlockId`] on a blocking IO task.
+    ///
+    /// Resolves the chain's pending-state source before occupying a blocking thread, since
+    /// building a pending block may need a blocking thread of its own.
+    fn spawn_blocking_io_with_state<F, R>(
+        &self,
+        at: BlockId,
+        f: F,
+    ) -> impl Future<Output = Result<R, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+        F: FnOnce(Self, StateProviderBox) -> Result<R, Self::Error> + Send + 'static,
+        R: Send + 'static,
+    {
+        async move {
+            let pending = if at.is_pending() {
+                self.local_pending_block_or_state().await.ok().flatten()
+            } else {
+                None
+            };
+
+            self.spawn_blocking_io(move |this| {
+                let state = match pending {
+                    Some(PendingStateSource::Block(pending)) => this
+                        .provider()
+                        .state_with_block_appended(
+                            pending.block().parent_hash(),
+                            pending.executed_block,
+                        )
+                        .or_else(|_| this.provider().state_by_block_id(BlockId::pending()))
+                        .map_err(Self::Error::from_eth_err)?,
+                    Some(PendingStateSource::State(state)) => state,
+                    None if at.is_latest() => this.latest_state()?,
+                    None => {
+                        this.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)?
+                    }
+                };
+                f(this, state)
+            })
+            .await
         }
     }
 
@@ -424,7 +504,7 @@ pub trait LoadState:
         >,
     > + Send
     where
-        Self: SpawnBlocking + LoadBlock,
+        Self: LoadBlock,
     {
         async move {
             if at.is_pending() {
@@ -502,41 +582,52 @@ pub trait LoadState:
     where
         Self: SpawnBlocking,
     {
-        self.spawn_blocking_io_fut(async move |this| {
-            // first fetch the on chain nonce of the account
-            let on_chain_account_nonce = this
-                .state_at_block_id_or_latest(block_id)
-                .await?
-                .account_nonce(&address)
-                .map_err(Self::Error::from_eth_err)?
-                .unwrap_or_default();
+        let at = block_id.unwrap_or_default();
+        self.spawn_blocking_io_with_state(at, move |this, state| {
+            this.transaction_count_with_state(address, at, &state)
+        })
+    }
 
-            if block_id == Some(BlockId::pending()) {
-                // for pending tag we need to find the highest nonce of txn in the pending state.
-                if let Some(highest_pool_tx) = this
-                    .pool()
-                    .get_highest_consecutive_transaction_by_sender(address, on_chain_account_nonce)
+    /// Returns the number of transactions sent from an address, given the state at `at`.
+    ///
+    /// If `at` is the pending tag, this accounts for the sender's pool transactions that follow
+    /// the account's nonce in `state` without a gap. Called by [`Self::transaction_count`] once
+    /// the state is open, so implementations can choose the state the nonce is read from.
+    fn transaction_count_with_state(
+        &self,
+        address: Address,
+        at: BlockId,
+        state: &StateProviderBox,
+    ) -> Result<U256, Self::Error> {
+        // first fetch the on chain nonce of the account
+        let on_chain_account_nonce =
+            state.account_nonce(&address).map_err(Self::Error::from_eth_err)?.unwrap_or_default();
+
+        if at.is_pending() {
+            // for pending tag we need to find the highest nonce of txn in the pending state.
+            if let Some(highest_pool_tx) = self
+                .pool()
+                .get_highest_consecutive_transaction_by_sender(address, on_chain_account_nonce)
+            {
                 {
-                    {
-                        // and the corresponding txcount is nonce + 1 of the highest tx in the pool
-                        // (on chain nonce is increased after tx)
-                        let next_tx_nonce =
-                            highest_pool_tx.nonce().checked_add(1).ok_or_else(|| {
-                                Self::Error::from(EthApiError::InvalidTransaction(
-                                    RpcInvalidTransactionError::NonceMaxValue,
-                                ))
-                            })?;
+                    // and the corresponding txcount is nonce + 1 of the highest tx in the pool
+                    // (on chain nonce is increased after tx)
+                    let next_tx_nonce =
+                        highest_pool_tx.nonce().checked_add(1).ok_or_else(|| {
+                            Self::Error::from(EthApiError::InvalidTransaction(
+                                RpcInvalidTransactionError::NonceMaxValue,
+                            ))
+                        })?;
 
-                        // guard against drifts in the pool
-                        let next_tx_nonce = on_chain_account_nonce.max(next_tx_nonce);
+                    // guard against drifts in the pool
+                    let next_tx_nonce = on_chain_account_nonce.max(next_tx_nonce);
 
-                        let tx_count = on_chain_account_nonce.max(next_tx_nonce);
-                        return Ok(U256::from(tx_count));
-                    }
+                    let tx_count = on_chain_account_nonce.max(next_tx_nonce);
+                    return Ok(U256::from(tx_count));
                 }
             }
-            Ok(U256::from(on_chain_account_nonce))
-        })
+        }
+        Ok(U256::from(on_chain_account_nonce))
     }
 
     /// Returns code of given account, at the given identifier.
@@ -548,10 +639,8 @@ pub trait LoadState:
     where
         Self: SpawnBlocking,
     {
-        self.spawn_blocking_io_fut(async move |this| {
-            Ok(this
-                .state_at_block_id_or_latest(block_id)
-                .await?
+        self.spawn_blocking_io_with_state(block_id.unwrap_or_default(), move |_, state| {
+            Ok(state
                 .account_code(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default()

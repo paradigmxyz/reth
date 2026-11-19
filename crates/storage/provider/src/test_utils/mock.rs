@@ -12,14 +12,14 @@ use alloy_consensus::{
     transaction::{TransactionMeta, TxHashRef},
     BlockHeader,
 };
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{
     keccak256,
     map::{AddressMap, B256Map, HashMap},
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use parking_lot::Mutex;
-use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
+use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions, ExecutedBlock};
 use reth_chainspec::{ChainInfo, EthChainSpec};
 use reth_db::transaction::DbTx;
 use reth_db_api::{
@@ -27,7 +27,7 @@ use reth_db_api::{
     models::{AccountBeforeTx, StorageSettings, StoredBlockBodyIndices},
 };
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{ExecutionOutcome, RecoveredBlockAndExecutionOutput};
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
     SignerRecoverable, StorageEntry,
@@ -35,9 +35,10 @@ use reth_primitives_traits::{
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
-    StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
+    BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory, DbTxProvider,
+    DurableBlockReader, HashedPostStateProvider, HistoryInfo, HistoryReader,
+    NodePrimitivesProvider, StageCheckpointReader, StateProofProvider, StorageChangeSetReader,
+    StorageRootProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -73,8 +74,14 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     pub state_roots: Arc<Mutex<Vec<B256>>>,
     /// Local block body indices store
     pub block_body_indices: Arc<Mutex<HashMap<BlockNumber, StoredBlockBodyIndices>>>,
+    /// Local stage checkpoints
+    stage_checkpoints: Arc<Mutex<HashMap<StageId, StageCheckpoint>>>,
+    /// The engine's pending block, if any
+    pending_block_num_hash: Arc<Mutex<Option<BlockNumHash>>>,
     /// Local BAL store handle
     pub bal_store: BalStoreHandle,
+    /// Whether database provider creation succeeds.
+    database_provider_available: Arc<AtomicBool>,
     /// Whether snap state reads should fail for handler error-path tests.
     snap_state_reads_fail: Arc<AtomicBool>,
     /// Whether a snap state range view is available.
@@ -125,7 +132,10 @@ where
             chain_spec: self.chain_spec.clone(),
             state_roots: self.state_roots.clone(),
             block_body_indices: self.block_body_indices.clone(),
+            stage_checkpoints: self.stage_checkpoints.clone(),
+            pending_block_num_hash: self.pending_block_num_hash.clone(),
             bal_store: self.bal_store.clone(),
+            database_provider_available: self.database_provider_available.clone(),
             snap_state_reads_fail: self.snap_state_reads_fail.clone(),
             snap_state_range_available: self.snap_state_range_available.clone(),
             snap_state_range_resolutions: self.snap_state_range_resolutions.clone(),
@@ -152,7 +162,10 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             chain_spec: Arc::new(reth_chainspec::ChainSpecBuilder::mainnet().build()),
             state_roots: Default::default(),
             block_body_indices: Default::default(),
+            stage_checkpoints: Default::default(),
+            pending_block_num_hash: Default::default(),
             bal_store: Default::default(),
+            database_provider_available: Default::default(),
             snap_state_reads_fail: Default::default(),
             snap_state_range_available: Default::default(),
             snap_state_range_resolutions: Default::default(),
@@ -169,6 +182,11 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
 }
 
 impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
+    /// Allows database provider creation to return this mock.
+    pub fn enable_database_provider(&self) {
+        self.database_provider_available.store(true, Ordering::Relaxed);
+    }
+
     /// Makes snap state reads return provider errors when `fail` is true.
     pub fn set_snap_state_reads_fail(&self, fail: bool) {
         self.snap_state_reads_fail.store(fail, Ordering::Relaxed);
@@ -296,6 +314,16 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
         self.block_body_indices.lock().insert(block_number, indices);
     }
 
+    /// Adds a stage checkpoint to the local store.
+    pub fn add_stage_checkpoint(&self, id: StageId, checkpoint: StageCheckpoint) {
+        self.stage_checkpoints.lock().insert(id, checkpoint);
+    }
+
+    /// Sets the pending block the engine holds
+    pub fn set_pending_block_num_hash(&self, num_hash: Option<BlockNumHash>) {
+        *self.pending_block_num_hash.lock() = num_hash;
+    }
+
     /// Add state root to local state root store
     pub fn add_state_root(&self, state_root: B256) {
         self.state_roots.lock().push(state_root);
@@ -311,7 +339,10 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             chain_spec: Arc::new(chain_spec),
             state_roots: self.state_roots,
             block_body_indices: self.block_body_indices,
+            stage_checkpoints: self.stage_checkpoints,
+            pending_block_num_hash: self.pending_block_num_hash,
             bal_store: self.bal_store,
+            database_provider_available: self.database_provider_available,
             snap_state_reads_fail: self.snap_state_reads_fail,
             snap_state_range_available: self.snap_state_range_available,
             snap_state_range_resolutions: self.snap_state_range_resolutions,
@@ -442,7 +473,7 @@ impl ExtendedAccount {
     /// Create new instance of extended account
     pub fn new(nonce: u64, balance: U256) -> Self {
         Self {
-            account: Account { nonce, balance, bytecode_hash: None },
+            account: Account { nonce, balance, ..Default::default() },
             bytecode: None,
             storage: Default::default(),
         }
@@ -465,6 +496,16 @@ impl ExtendedAccount {
         self.storage.extend(storage);
         self
     }
+
+    /// Sets the account extension.
+    #[cfg(feature = "account-ext")]
+    pub fn with_extension(
+        mut self,
+        extension: impl Into<reth_primitives_traits::AccountExtension>,
+    ) -> Self {
+        self.account.extension = extension.into();
+        self
+    }
 }
 
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + Clone + 'static> DatabaseProviderFactory
@@ -475,23 +516,58 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Clone + 'static> DatabaseProvi
     type ProviderRW = Self;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
-        Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+        if self.database_provider_available.load(Ordering::Relaxed) {
+            Ok(self.clone())
+        } else {
+            Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+        }
     }
 
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
-        Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+        if self.database_provider_available.load(Ordering::Relaxed) {
+            Ok(self.clone())
+        } else {
+            Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+        }
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HistoryReader
+    for MockEthProvider<T, ChainSpec>
+{
+    fn account_history_info(
+        &self,
+        _address: Address,
+        _block_number: BlockNumber,
+        _lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        Ok(HistoryInfo::InPlainState)
+    }
+
+    fn storage_history_info(
+        &self,
+        _address: Address,
+        _storage_key: B256,
+        _block_number: BlockNumber,
+        _lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        Ok(HistoryInfo::InPlainState)
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DbTxProvider
+    for MockEthProvider<T, ChainSpec>
+{
+    type Tx = TxMock;
+
+    fn tx(&self) -> &Self::Tx {
+        &self.tx
     }
 }
 
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider
     for MockEthProvider<T, ChainSpec>
 {
-    type Tx = TxMock;
-
-    fn tx_ref(&self) -> &Self::Tx {
-        &self.tx
-    }
-
     fn tx_mut(&mut self) -> &mut Self::Tx {
         &mut self.tx
     }
@@ -509,7 +585,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider
     }
 }
 
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> HeaderProvider
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HeaderProvider
     for MockEthProvider<T, ChainSpec>
 {
     type Header = <T::Block as Block>::Header;
@@ -561,7 +637,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> HeaderP
 impl<T, ChainSpec> ChainSpecProvider for MockEthProvider<T, ChainSpec>
 where
     T: NodePrimitives,
-    ChainSpec: EthChainSpec + 'static + Debug + Send + Sync,
+    ChainSpec: EthChainSpec + 'static,
 {
     type ChainSpec = ChainSpec;
 
@@ -829,11 +905,11 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> BlockNumReader
     }
 }
 
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockIdReader
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> BlockIdReader
     for MockEthProvider<T, ChainSpec>
 {
     fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
-        Ok(None)
+        Ok(*self.pending_block_num_hash.lock())
     }
 
     fn safe_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
@@ -846,7 +922,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockId
 }
 
 //look
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockReader
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> BlockReader
     for MockEthProvider<T, ChainSpec>
 {
     type Block = T::Block;
@@ -869,30 +945,32 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
         }
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         Ok(None)
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<T::Receipt>)>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, T::Receipt>>> {
         Ok(None)
     }
 
     fn recovered_block(
         &self,
-        _id: BlockHashOrNumber,
+        id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
+        self.block(id)?
+            .map(|block| block.try_into_recovered().map_err(ProviderError::other))
+            .transpose()
     }
 
     fn sealed_block_with_senders(
         &self,
-        _id: BlockHashOrNumber,
-        _transaction_kind: TransactionVariant,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
+        self.recovered_block(id, transaction_kind)
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
@@ -929,7 +1007,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
 
 impl<T, ChainSpec> BlockReaderIdExt for MockEthProvider<T, ChainSpec>
 where
-    ChainSpec: EthChainSpec + Send + Sync + 'static,
+    ChainSpec: EthChainSpec + 'static,
     T: NodePrimitives,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<T::Block>> {
@@ -960,11 +1038,16 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> AccountReader for MockEthProvide
     }
 }
 
+impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> DurableBlockReader
+    for MockEthProvider<T, ChainSpec>
+{
+}
+
 impl<T: NodePrimitives, ChainSpec: Send + Sync> StageCheckpointReader
     for MockEthProvider<T, ChainSpec>
 {
-    fn get_stage_checkpoint(&self, _id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
-        Ok(None)
+    fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
+        Ok(self.stage_checkpoints.lock().get(&id).copied())
     }
 
     fn get_stage_checkpoint_progress(&self, _id: StageId) -> ProviderResult<Option<Vec<u8>>> {
@@ -972,7 +1055,12 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StageCheckpointReader
     }
 
     fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
-        Ok(vec![])
+        Ok(self
+            .stage_checkpoints
+            .lock()
+            .iter()
+            .map(|(id, checkpoint)| (id.to_string(), *checkpoint))
+            .collect())
     }
 }
 
@@ -1075,6 +1163,14 @@ where
         Ok(MultiProof::default())
     }
 
+    fn multiproof_v2(
+        &self,
+        _targets: reth_trie::MultiProofTargetsV2,
+        _requires_masks: bool,
+    ) -> ProviderResult<reth_trie::DecodedMultiProofV2> {
+        Ok(reth_trie::DecodedMultiProofV2::default())
+    }
+
     fn witness(
         &self,
         _input: TrieInput,
@@ -1088,15 +1184,18 @@ where
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvider
     for MockEthProvider<T, ChainSpec>
 {
-    fn hashed_post_state(&self, _state: &revm::database::BundleState) -> HashedPostState {
-        HashedPostState::default()
+    fn hashed_post_state(
+        &self,
+        _bundle_state: &reth_trie::bundle_state::BundleState,
+    ) -> ProviderResult<HashedPostState> {
+        Ok(HashedPostState::default())
     }
 }
 
 impl<T, ChainSpec> StateProvider for MockEthProvider<T, ChainSpec>
 where
     T: NodePrimitives,
-    ChainSpec: EthChainSpec + Send + Sync + 'static,
+    ChainSpec: EthChainSpec + 'static,
 {
     fn storage(
         &self,
@@ -1136,12 +1235,22 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageSettingsCache
     fn set_storage_settings_cache(&self, _settings: StorageSettings) {}
 }
 
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StateProviderFactory
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> StateProviderFactory
     for MockEthProvider<T, ChainSpec>
 {
+    type Primitives = T;
+
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         self.ensure_snap_state_reads_succeed()?;
         Ok(Box::new(self.clone()))
+    }
+
+    fn state_with_block_appended(
+        &self,
+        _parent_hash: BlockHash,
+        _block: ExecutedBlock<T>,
+    ) -> ProviderResult<StateProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn state_by_block_number_or_tag(
@@ -1276,6 +1385,8 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StateReader for MockEthProvider<
 impl<T: NodePrimitives, ChainSpec: Send + Sync> CanonStateSubscriptions
     for MockEthProvider<T, ChainSpec>
 {
+    type Primitives = T;
+
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<T> {
         broadcast::channel(1).1
     }

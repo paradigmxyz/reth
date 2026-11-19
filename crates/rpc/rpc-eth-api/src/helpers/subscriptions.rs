@@ -66,7 +66,8 @@ pub trait EthSubscriptions:
                 .committed()
                 .blocks_iter()
                 .filter_map(|block| {
-                    match converter.convert_header(block.clone_sealed_header(), block.rlp_length())
+                    match converter
+                        .convert_header(block.clone_sealed_header(), Some(block.rlp_length()))
                     {
                         Ok(header) => Some(header),
                         Err(err) => {
@@ -139,7 +140,7 @@ pub trait EthSubscriptions:
                         return None;
                     }
 
-                    match converter.convert_receipts(inputs, block.sealed_block()) {
+                    match converter.convert_receipts_with_block(inputs, block.sealed_block()) {
                         Ok(rpc_receipts) => Some(rpc_receipts),
                         Err(err) => {
                             error!(target = "rpc", %err, "Failed to convert receipts");

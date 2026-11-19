@@ -183,6 +183,9 @@ pub struct TransactionsManagerMetrics {
     /* ================ POOL IMPORTS ================ */
     /// Number of transactions about to be imported into the pool.
     pub(crate) pending_pool_imports: Gauge,
+    /// Encoded byte size of the transactions about to be imported into the pool, including blob
+    /// sidecars.
+    pub(crate) pending_pool_imports_bytes: Gauge,
     /// Total number of bad imports, imports that fail because the transaction is badly formed
     /// (i.e. have no chance of passing validation, unlike imports that fail due to e.g. nonce
     /// gaps).
@@ -192,6 +195,10 @@ pub struct TransactionsManagerMetrics {
     /// capacity. Note, this is not a limit to the number of inflight requests, but a health
     /// measure.
     pub(crate) capacity_pending_pool_imports: Counter,
+    /// Encoded byte size of pending pool imports at which the
+    /// [`TransactionPool`](reth_transaction_pool::TransactionPool) is considered to be at
+    /// capacity. Like [`Self::capacity_pending_pool_imports`], this is a health measure.
+    pub(crate) capacity_pending_pool_imports_bytes: Counter,
     /// Total number of transactions ignored because pending pool imports are at capacity.
     pub(crate) skipped_transactions_pending_pool_imports_at_capacity: Counter,
     /// The time it took to prepare transactions for import. This is mostly sender recovery.
@@ -277,18 +284,18 @@ pub struct TransactionFetcherMetrics {
     /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) responses, that weren't
     /// requested.
     pub(crate) unsolicited_transactions: Counter,
-    /* ================ SEARCH DURATION ================ */
-    /// Time spent searching for an idle peer in call to
-    /// [`TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash`](crate::transactions::TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash).
-    ///
-    /// Duration in seconds.
-    pub(crate) duration_find_idle_fallback_peer_for_any_pending_hash: Gauge,
-
-    /// Time spent searching for hashes pending fetch, announced by a given peer in
-    /// [`TransactionFetcher::fill_request_from_hashes_pending_fetch`](crate::transactions::TransactionFetcher::fill_request_from_hashes_pending_fetch).
-    ///
-    /// Duration in seconds.
-    pub(crate) duration_fill_request_from_hashes_pending_fetch: Gauge,
+    /// Total number of pending hashes that were evicted for newly announced hashes because the
+    /// fetcher already tracks the maximum number of hashes.
+    pub(crate) hashes_evicted_at_capacity: Counter,
+    /// Total number of announced hashes that were dropped because the fetcher already tracks the
+    /// maximum number of hashes and no pending eviction victim was found within the search budget.
+    pub(crate) announced_hashes_dropped_at_capacity: Counter,
+    /// Total number of announced hashes that were dropped because the announcing peer is already
+    /// a candidate for the maximum number of hashes.
+    pub(crate) announced_hashes_dropped_peer_limit: Counter,
+    /// Total number of tracked hashes dropped because no candidate remains or the bounded
+    /// fetch-attempt budget was exhausted.
+    pub(crate) hashes_dropped_no_candidate_peers: Counter,
 }
 
 /// Measures the duration of executing the given code block. The duration is added to the given
@@ -562,6 +569,10 @@ pub struct EthRequestHandlerMetrics {
 
     /// Number of `snap/2` (EIP-8189) requests received
     pub(crate) snap_requests_received_total: Counter,
+
+    /// Number of `snap/2` state range requests answered empty without being served: the queue
+    /// was full, the peer already held a place in it, or the request waited too long
+    pub(crate) snap_state_range_requests_unserved_total: Counter,
 
     /// Duration in seconds of call to poll
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).

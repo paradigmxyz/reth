@@ -358,6 +358,10 @@ pub enum ConsensusError {
     #[error("missing withdrawals")]
     BodyWithdrawalsMissing,
 
+    /// Error when withdrawals are present in a block body before Shanghai.
+    #[error("unexpected withdrawals")]
+    BodyWithdrawalsUnexpected,
+
     /// Error when requests are missing.
     #[error("missing requests")]
     BodyRequestsMissing,
@@ -498,9 +502,6 @@ pub enum ConsensusError {
     /// EIP-7928: Error when the block access list hash doesn't match the expected value.
     #[error("block access list hash mismatch: {0}")]
     BlockAccessListHashMismatch(GotExpectedBoxed<B256>),
-    /// EIP-7928: Error when the block access list cannot be decoded or converted.
-    #[error("invalid block access list: {0}")]
-    BlockAccessListInvalid(String),
     /// Any additional consensus error, for example L2-specific errors.
     #[error(transparent)]
     Other(#[from] Arc<dyn Error + Send + Sync>),
@@ -542,7 +543,7 @@ impl ConsensusError {
 
     /// Returns `true` if this type is a [`ConsensusError::Other`] of that error type.
     pub fn is_other<T: Error + 'static>(&self) -> bool {
-        self.as_other().map(|err| err.is::<T>()).unwrap_or(false)
+        self.as_other().is_some_and(|err| err.is::<T>())
     }
 }
 

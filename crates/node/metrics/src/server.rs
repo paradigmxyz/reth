@@ -9,13 +9,19 @@ use crate::{
 use bytes::Bytes;
 use eyre::WrapErr;
 use http::{header::CONTENT_TYPE, HeaderValue, Request, Response, StatusCode};
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use metrics::describe_gauge;
 use metrics_process::Collector;
 use reqwest::Client;
 use reth_metrics::metrics::Unit;
 use reth_tasks::TaskExecutor;
 use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use tokio::sync::Semaphore;
+use tower::Service;
+use tower_http::compression::Compression;
+
+/// Bound rendering and compression work across all metrics connections.
+const MAX_CONCURRENT_METRICS_REQUESTS: usize = 4;
 
 /// Configuration for the [`MetricServer`]
 #[derive(Debug)]
@@ -95,9 +101,13 @@ impl MetricServer {
         } = &self.config;
 
         let hooks_for_endpoint = hooks.clone();
+        let executor_for_hooks = task_executor.clone();
         self.start_endpoint(
             *listen_addr,
-            Arc::new(move || hooks_for_endpoint.iter().for_each(|hook| hook())),
+            Arc::new(move || {
+                hooks_for_endpoint.refresh_background(&executor_for_hooks);
+                hooks_for_endpoint.iter().for_each(|hook| hook());
+            }),
             task_executor.clone(),
             pprof_dump_dir.clone(),
         )
@@ -132,7 +142,7 @@ impl MetricServer {
         Ok(())
     }
 
-    async fn start_endpoint<F: Hook + 'static>(
+    async fn start_endpoint<F: Hook>(
         &self,
         listen_addr: SocketAddr,
         hook: Arc<F>,
@@ -146,6 +156,7 @@ impl MetricServer {
         tracing::info!(target: "reth::cli", "Starting metrics endpoint at {}", listener.local_addr().unwrap());
 
         let executor = task_executor.clone();
+        let requests = Arc::new(Semaphore::new(MAX_CONCURRENT_METRICS_REQUESTS));
         task_executor.spawn_with_graceful_shutdown_signal(async move |mut signal| loop {
             let io = tokio::select! {
                 _ = &mut signal => break,
@@ -164,6 +175,7 @@ impl MetricServer {
             let hook = hook.clone();
             let pprof_dump_dir = pprof_dump_dir.clone();
             let executor = executor.clone();
+            let compression_executor = executor.clone();
             let service = tower::service_fn(move |req: Request<_>| {
                 let hook = hook.clone();
                 let pprof_dump_dir = pprof_dump_dir.clone();
@@ -173,6 +185,50 @@ impl MetricServer {
                         handle_request(req.uri().path(), hook, executor, handle, &pprof_dump_dir)
                             .await;
                     Ok::<_, Infallible>(response)
+                }
+            });
+
+            let service = Compression::new(service).gzip(true).no_br().no_deflate().no_zstd();
+            let requests = requests.clone();
+            let service = tower::service_fn(move |req| {
+                let mut service = service.clone();
+                let executor = compression_executor.clone();
+                let permit = requests.clone().try_acquire_owned();
+                async move {
+                    let Ok(permit) = permit else {
+                        return Ok::<_, Infallible>(metrics_error_response(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "Metrics collection is busy. Try again later.",
+                        ))
+                    };
+                    let response = service.call(req).await?;
+                    // CompressionBody performs CPU work when polled. Fully collect it on a
+                    // blocking worker so Hyper only polls the completed bytes on Tokio workers.
+                    let span = tracing::Span::current();
+                    let result = executor
+                        .spawn_blocking(move || {
+                            let _entered = span.enter();
+                            // Keep the concurrency slot even if the client disconnects.
+                            let _permit = permit;
+                            tokio::runtime::Handle::current().block_on(async move {
+                                let (parts, body) = response.into_parts();
+                                body.collect().await.map(|body| {
+                                    Response::from_parts(parts, Full::new(body.to_bytes()))
+                                })
+                            })
+                        })
+                        .await;
+                    let response = match result {
+                        Ok(Ok(response)) => response,
+                        error => {
+                            tracing::error!(target: "reth::cli", ?error, "Failed to encode metrics response");
+                            metrics_error_response(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Failed to encode metrics response.",
+                            )
+                        }
+                    };
+                    Ok(response)
                 }
             });
 
@@ -209,6 +265,7 @@ impl MetricServer {
                         break;
                     }
                     _ = tokio::time::sleep(interval) => {
+                        hooks.refresh_background(&executor);
                         let hooks = hooks.clone();
                         let metrics_handle = handle.handle().clone();
                         let metrics = match executor.spawn_blocking(move || {
@@ -240,6 +297,12 @@ impl MetricServer {
         });
         Ok(())
     }
+}
+
+fn metrics_error_response(status: StatusCode, message: &'static str) -> Response<Full<Bytes>> {
+    let mut response = Response::new(Full::new(Bytes::from_static(message.as_bytes())));
+    *response.status_mut() = status;
+    response
 }
 
 fn describe_db_metrics() {
@@ -484,10 +547,19 @@ async fn handle_tokio_dump() -> Response<Full<Bytes>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flate2::read::GzDecoder;
+    use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, VARY};
     use reqwest::Client;
     use reth_tasks::Runtime;
     use socket2::{Domain, Socket, Type};
-    use std::net::{SocketAddr, TcpListener};
+    use std::{
+        io::Read,
+        net::{SocketAddr, TcpListener},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            mpsc, Mutex,
+        },
+    };
 
     fn get_random_available_addr() -> SocketAddr {
         let addr = &"127.0.0.1:0".parse::<SocketAddr>().unwrap().into();
@@ -535,12 +607,22 @@ mod tests {
         )
         .with_storage_settings_info(storage_settings_info);
 
-        MetricServer::new(config).serve().await.unwrap();
+        let server = MetricServer::new(config);
+        server.serve().await.unwrap();
 
         // Send request to the metrics endpoint
         let url = format!("http://{listen_addr}");
-        let response = Client::new().get(&url).send().await.unwrap();
+        let client = Client::builder()
+            .no_gzip()
+            .no_brotli()
+            .no_deflate()
+            .no_zstd()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
+        let response = client.get(&url).send().await.unwrap();
         assert!(response.status().is_success());
+        assert_eq!(response.headers().get(CONTENT_ENCODING), None);
 
         // Check the response body
         let body = response.text().await.unwrap();
@@ -552,7 +634,170 @@ mod tests {
         assert!(body.contains("pruning_mode=\"archive\""), "expected pruning mode label");
         assert!(body.contains("prune_config="), "expected prune config label");
 
+        let storage_metric =
+            body.lines().find(|line| line.starts_with("reth_storage_settings{")).unwrap();
+        for (accept_encoding, gzip) in [
+            ("gzip", true),
+            ("br, gzip;q=0.5", true),
+            ("gzip;q=0", false),
+            ("identity", false),
+            ("br", false),
+        ] {
+            let response =
+                client.get(&url).header(ACCEPT_ENCODING, accept_encoding).send().await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()[CONTENT_TYPE], "text/plain");
+            assert_eq!(response.headers()[VARY], "accept-encoding");
+            assert_eq!(
+                response.headers().get(CONTENT_ENCODING),
+                gzip.then_some(&HeaderValue::from_static("gzip")),
+                "Accept-Encoding: {accept_encoding}"
+            );
+            let bytes = response.bytes().await.unwrap();
+            let decoded = if gzip {
+                let mut decoded = String::new();
+                GzDecoder::new(bytes.as_ref()).read_to_string(&mut decoded).unwrap();
+                decoded
+            } else {
+                String::from_utf8(bytes.to_vec()).unwrap()
+            };
+            assert_eq!(
+                decoded.lines().find(|line| line.starts_with("reth_storage_settings{")),
+                Some(storage_metric)
+            );
+        }
+
+        // Fill all request slots with blocked collectors on separate connections. Excess
+        // scrapes must fail promptly without starting more blocking work.
+        let busy_addr = get_random_available_addr();
+        let started = Arc::new(Semaphore::new(0));
+        let (release, wait_for_release) = mpsc::channel::<()>();
+        let wait_for_release = Mutex::new(wait_for_release);
+        let hook = {
+            let started = started.clone();
+            Arc::new(move || {
+                started.add_permits(1);
+                assert_eq!(
+                    wait_for_release.lock().unwrap().recv_timeout(Duration::from_secs(10)),
+                    Err(mpsc::RecvTimeoutError::Disconnected)
+                );
+            })
+        };
+        server
+            .start_endpoint(busy_addr, hook, runtime.clone(), std::env::temp_dir())
+            .await
+            .unwrap();
+        let busy_url = format!("http://{busy_addr}");
+        let mut scrapes = tokio::task::JoinSet::new();
+        for _ in 0..MAX_CONCURRENT_METRICS_REQUESTS {
+            let client = client.clone();
+            let url = busy_url.clone();
+            scrapes.spawn(async move {
+                let response =
+                    client.get(url).header(ACCEPT_ENCODING, "gzip").send().await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                assert_eq!(response.headers()[CONTENT_ENCODING], "gzip");
+                response.bytes().await.unwrap();
+            });
+        }
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            started.acquire_many(MAX_CONCURRENT_METRICS_REQUESTS as u32),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+        let response = tokio::time::timeout(
+            Duration::from_secs(10),
+            client.get(&busy_url).header(ACCEPT_ENCODING, "gzip").send(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(started.available_permits(), 0);
+        // Closing the channel releases every collector, including during panic unwinding.
+        drop(release);
+        while let Some(result) =
+            tokio::time::timeout(Duration::from_secs(10), scrapes.join_next()).await.unwrap()
+        {
+            result.unwrap();
+        }
+        assert_eq!(client.get(&busy_url).send().await.unwrap().status(), StatusCode::OK);
+
         // Make sure the runtime is dropped after the test runs.
+        drop(runtime);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_background_hooks_do_not_block_collection() {
+        install_prometheus_recorder();
+
+        let collections = Arc::new(AtomicUsize::new(0));
+        let (release, wait_for_release) = mpsc::channel();
+        let wait_for_release = Mutex::new(Some(wait_for_release));
+        let completed = Arc::new(tokio::sync::Notify::new());
+        let hooks = Hooks::builder()
+            .with_background_interval(Duration::from_secs(60))
+            .with_background_hook({
+                let collections = collections.clone();
+                let completed = completed.clone();
+                move || {
+                    // Dropping the sender also unblocks the hook if a scrape assertion fails.
+                    if let Some(wait_for_release) = wait_for_release.lock().unwrap().take() &&
+                        wait_for_release.recv().is_err()
+                    {
+                        return
+                    }
+                    let collections = collections.fetch_add(1, Ordering::Relaxed) + 1;
+                    metrics::gauge!("test_background_hook_collections").set(collections as f64);
+                    completed.notify_one();
+                }
+            })
+            .build();
+
+        let runtime = Runtime::test();
+        let listen_addr = get_random_available_addr();
+        let config = MetricServerConfig::new(
+            listen_addr,
+            VersionInfo {
+                version: "test",
+                build_timestamp: "test",
+                cargo_features: "test",
+                git_sha: "test",
+                target_triple: "test",
+                build_profile: "test",
+            },
+            ChainSpecInfo { name: "test".to_string() },
+            runtime.clone(),
+            hooks,
+            std::env::temp_dir(),
+        );
+
+        MetricServer::new(config).serve().await.unwrap();
+
+        // the first scrape kicks off the background hook but must not wait for it
+        let url = format!("http://{listen_addr}");
+        let started = std::time::Instant::now();
+        let response =
+            Client::new().get(&url).timeout(Duration::from_millis(500)).send().await.unwrap();
+        assert!(response.status().is_success());
+        assert!(started.elapsed() < Duration::from_secs(1), "scrape waited for the hook");
+        assert_eq!(collections.load(Ordering::Relaxed), 0);
+
+        // once it completes, its values are rendered by the following scrape
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(10), completed.notified()).await.unwrap();
+        let body = Client::new().get(&url).send().await.unwrap().text().await.unwrap();
+        assert!(
+            body.contains("test_background_hook_collections"),
+            "background hook metric missing: {body}"
+        );
+
+        // and scrapes within the interval do not collect again
+        assert_eq!(collections.load(Ordering::Relaxed), 1);
+
         drop(runtime);
     }
 }

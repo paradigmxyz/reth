@@ -23,7 +23,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_ethereum_primitives::{Block, BlockBody, Transaction, TransactionSigned};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_libmdbx::{Environment, EnvironmentFlags, Mode};
 use reth_network_p2p::{
@@ -31,35 +31,34 @@ use reth_network_p2p::{
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
 use reth_primitives_traits::{
-    crypto::secp256k1::public_key_to_address,
     proofs::{calculate_receipt_root, calculate_transaction_root},
     RecoveredBlock, SealedBlock,
 };
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockNumReader, DBProvider,
-    DatabaseProviderFactory, HeaderProvider, OriginalValuesKnown, StateWriter, StoragePath,
+    DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, OriginalValuesKnown,
+    StateWriter, StoragePath,
 };
 use reth_prune_types::PruneModes;
-use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
     sets::{ExecutionStages, HashingStages, OnlineStages},
     stages::FinishStage,
 };
 use reth_stages_api::{Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
-use reth_storage_api::{StorageChangeSetReader, StorageSettings, StorageSettingsCache};
-use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
-use reth_trie::{
-    hashed_cursor::zero_destroyed_account_storage, HashedPostState, KeccakKeyHasher, StateRoot,
+use reth_storage_api::{
+    StateProvider, StorageChangeSetReader, StorageSettings, StorageSettingsCache,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
+use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
+use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
+use reth_trie_db::DatabaseStateRoot;
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 use tokio::sync::watch;
 
 type TestProviderFactory =
     reth_provider::ProviderFactory<reth_provider::test_utils::MockNodeTypesWithDB>;
 
-const TEST_SELFDESTRUCT_BENEFICIARY: Address = Address::new([0x77; 20]);
+const TEST_SELFDESTRUCT_BENEFICIARY: Address = Address::repeat_byte(0x77);
 const TEST_CREATE2_SALT: B256 = B256::with_last_byte(0x42);
 
 /// Scenario coverage:
@@ -160,10 +159,10 @@ async fn test_pipeline_v2_selfdestruct_changesets_use_plain_slots() -> eyre::Res
 
 /// Prefunding ensures the CREATE2 target has original account state, while its init code performs
 /// no `SSTORE`. This verifies that destruction alone does not create an otherwise-empty
-/// [`reth_trie::HashedStorage`] solely to carry `wiped = true`.
+/// [`reth_trie::HashedStorage`] update.
 #[tokio::test(flavor = "multi_thread")]
-async fn test_pipeline_v2_prefunded_create2_selfdestruct_does_not_wipe_storage() -> eyre::Result<()>
-{
+async fn test_pipeline_v2_prefunded_create2_selfdestruct_does_not_create_storage_update(
+) -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let scenario = setup_create2_selfdestruct_scenario()?;
@@ -194,8 +193,8 @@ async fn test_pipeline_v2_prefunded_create2_selfdestruct_does_not_wipe_storage()
 }
 
 /// Scenario coverage:
-/// 1. Single execution batch (`1..=2`) where block 1 writes and block 2 wipes.
-/// 2. Block-by-block storage changesets still contain plain keys for wipe entries.
+/// 1. Single execution batch (`1..=2`) where block 1 writes and block 2 destroys the account.
+/// 2. Block-by-block storage changesets still contain plain keys for destroyed entries.
 ///
 /// Regression coverage for single execution-batch behavior.
 #[tokio::test(flavor = "multi_thread")]
@@ -229,11 +228,11 @@ async fn test_pipeline_v2_single_batch_write_then_selfdestruct_changesets_plain_
 
 /// Scenario coverage:
 /// 1. A slot appears only in intermediate reverts (not final bundle state).
-/// 2. A later block in the same execution batch wipes the account.
-/// 3. Wipe changesets still contain the required plain slot key/value.
+/// 2. A later block in the same execution batch destroys the account.
+/// 3. Destroyed-storage changesets still contain the required plain slot key/value.
 ///
 /// Covers the edge case where a slot appears in intermediate block reverts but not in the final
-/// bundle state, then gets wiped by a later selfdestruct in the same execution batch.
+/// bundle state, then is destroyed by a later selfdestruct in the same execution batch.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_pipeline_v2_single_batch_reverted_slot_then_selfdestruct_changesets_plain_slots(
 ) -> eyre::Result<()> {
@@ -403,8 +402,9 @@ struct Create2SelfdestructScenario {
 fn setup_selfdestruct_scenario() -> eyre::Result<SelfdestructScenario> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
-    let signer_address = public_key_to_address(key_pair.public_key());
-    let selfdestruct_contract = Address::new([0x66; 20]);
+    let signer_address =
+        Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
+    let selfdestruct_contract = Address::repeat_byte(0x66);
     let chain_spec = build_selfdestruct_chain_spec(signer_address, selfdestruct_contract);
     let blocks = {
         // Build blocks via direct execution first, so each header has a valid state root.
@@ -444,7 +444,7 @@ fn setup_selfdestruct_scenario() -> eyre::Result<SelfdestructScenario> {
                 Bytes::new(),
                 TxKind::Call(TEST_SELFDESTRUCT_BENEFICIARY),
                 21_000_u64,
-                U256::from(1),
+                U256::ONE,
             ),
         ] {
             // Block behavior by timestamp:
@@ -492,10 +492,11 @@ fn setup_selfdestruct_scenario() -> eyre::Result<SelfdestructScenario> {
 fn setup_create2_selfdestruct_scenario() -> eyre::Result<Create2SelfdestructScenario> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
-    let signer_address = public_key_to_address(key_pair.public_key());
-    let factory_contract = Address::new([0xaa; 20]);
+    let signer_address =
+        Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
+    let factory_contract = Address::repeat_byte(0xaa);
     let child_init = CREATE2_SELFDESTRUCT_INIT_CODE;
-    let child_contract = create2_address(factory_contract, TEST_CREATE2_SALT, &child_init);
+    let child_contract = factory_contract.create2_from_code(TEST_CREATE2_SALT, &child_init);
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
@@ -553,7 +554,7 @@ fn setup_create2_selfdestruct_scenario() -> eyre::Result<Create2SelfdestructScen
     let output = {
         let provider = provider_factory.database_provider_rw()?;
         let state_provider = provider.latest();
-        let db = StateProviderDatabase::new(&*state_provider);
+        let db = StateProviderDatabase::new((&*state_provider).into_evm_state_provider());
         evm_config.batch_executor(db).execute(&preview_block)?
     };
     let child_was_destroyed =
@@ -612,8 +613,9 @@ struct IntraBlockAndIntraTxSelfdestructScenario {
 fn setup_reverted_slot_selfdestruct_scenario() -> eyre::Result<RevertedSlotSelfdestructScenario> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
-    let signer_address = public_key_to_address(key_pair.public_key());
-    let selfdestruct_contract = Address::new([0x33; 20]);
+    let signer_address =
+        Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
+    let selfdestruct_contract = Address::repeat_byte(0x33);
     let slot = B256::with_last_byte(0x03);
     let original_value = B256::with_last_byte(0x07);
 
@@ -658,7 +660,7 @@ fn setup_reverted_slot_selfdestruct_scenario() -> eyre::Result<RevertedSlotSelfd
 
         for (block_num, timestamp, nonce, value) in [
             (1_u64, 12_u64, 0_u64, U256::ZERO),
-            (2_u64, 18_u64, 1_u64, U256::from(1_u64)),
+            (2_u64, 18_u64, 1_u64, U256::ONE),
             (3_u64, 24_u64, 2_u64, U256::from(2_u64)),
         ] {
             let tx = sign_tx_with_key_pair(
@@ -702,10 +704,11 @@ fn setup_reverted_slot_selfdestruct_scenario() -> eyre::Result<RevertedSlotSelfd
 fn setup_same_address_double_wipe_scenario() -> eyre::Result<SameAddressDoubleWipeScenario> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
-    let signer_address = public_key_to_address(key_pair.public_key());
-    let factory_contract = Address::new([0xaa; 20]);
+    let signer_address =
+        Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
+    let factory_contract = Address::repeat_byte(0xaa);
     let child_init = init_code_for_runtime(&WRITE_OR_SELFDESTRUCT_RUNTIME_CODE);
-    let child_contract = create2_address(factory_contract, TEST_CREATE2_SALT, &child_init);
+    let child_contract = factory_contract.create2_from_code(TEST_CREATE2_SALT, &child_init);
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
@@ -798,10 +801,11 @@ fn setup_same_address_recreate_and_write_same_block_then_wipe_scenario(
 ) -> eyre::Result<SameAddressDifferentSlotsDoubleWipeScenario> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
-    let signer_address = public_key_to_address(key_pair.public_key());
-    let factory_contract = Address::new([0xaa; 20]);
+    let signer_address =
+        Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
+    let factory_contract = Address::repeat_byte(0xaa);
     let child_init = init_code_for_runtime(&WRITE_TWO_SLOT_SETS_OR_SELFDESTRUCT_RUNTIME_CODE);
-    let child_contract = create2_address(factory_contract, TEST_CREATE2_SALT, &child_init);
+    let child_contract = factory_contract.create2_from_code(TEST_CREATE2_SALT, &child_init);
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
@@ -886,7 +890,7 @@ fn setup_same_address_recreate_and_write_same_block_then_wipe_scenario(
             parent_hash,
             3,
             12,
-            vec![mk_tx(2, TxKind::Call(child_contract), U256::from(1), Bytes::new())],
+            vec![mk_tx(2, TxKind::Call(child_contract), U256::ONE, Bytes::new())],
         )?;
         parent_hash = block3.hash();
 
@@ -912,7 +916,7 @@ fn setup_same_address_recreate_and_write_same_block_then_wipe_scenario(
             parent_hash,
             5,
             20,
-            vec![mk_tx(5, TxKind::Call(child_contract), U256::from(1), Bytes::new())],
+            vec![mk_tx(5, TxKind::Call(child_contract), U256::ONE, Bytes::new())],
         )?;
 
         vec![block1, block2, block3, block4, block5]
@@ -943,9 +947,10 @@ fn setup_intra_block_and_intra_tx_selfdestruct_scenario(
 ) -> eyre::Result<IntraBlockAndIntraTxSelfdestructScenario> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
-    let signer_address = public_key_to_address(key_pair.public_key());
-    let multi_tx_contract = Address::new([0x44; 20]);
-    let intra_tx_contract = Address::new([0x55; 20]);
+    let signer_address =
+        Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
+    let multi_tx_contract = Address::repeat_byte(0x44);
+    let intra_tx_contract = Address::repeat_byte(0x55);
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
@@ -1095,19 +1100,13 @@ fn execute_and_commit_block(
 
     let output = {
         let state_provider = provider.latest();
-        let db = StateProviderDatabase::new(&*state_provider);
+        let db = StateProviderDatabase::new((&*state_provider).into_evm_state_provider());
         let executor = evm_config.batch_executor(db);
         executor.execute(&block_with_senders)?
     };
 
     let gas_used = output.gas_used;
-    let mut hashed_state =
-        HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
-    zero_destroyed_account_storage(
-        &DatabaseHashedCursorFactory::new(provider.tx_ref()),
-        output.state.state(),
-        &mut hashed_state,
-    )?;
+    let hashed_state = provider.latest().hashed_post_state(&output.state)?;
     type TestStateRoot<'a, TX, A> = StateRoot<
         reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
         reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
@@ -1461,18 +1460,6 @@ const CREATE2_FACTORY_RUNTIME_CODE: Bytes = bytes!(
     "7f0000000000000000000000000000000000000000000000000000000000000042" // PUSH32 salt
     "3660006000f500" // CREATE2(0, 0, calldatasize, salt); STOP
 );
-
-fn create2_address(factory: Address, salt: B256, init_code: &Bytes) -> Address {
-    let init_hash = keccak256(init_code.as_ref());
-    let mut preimage = [0_u8; 85];
-    preimage[0] = 0xff;
-    preimage[1..21].copy_from_slice(factory.as_slice());
-    preimage[21..53].copy_from_slice(salt.as_slice());
-    preimage[53..85].copy_from_slice(init_hash.as_slice());
-
-    let hash = keccak256(preimage);
-    Address::from_slice(&hash.as_slice()[12..])
-}
 
 fn assert_preimage_rows(preimage_path: &Path, slots: &[B256]) -> eyre::Result<()> {
     let mut builder = Environment::builder();

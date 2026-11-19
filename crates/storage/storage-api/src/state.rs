@@ -1,17 +1,18 @@
 use super::{
-    AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
-    StorageRootProvider,
+    AccountReader, BlockHashReader, BlockIdReader, EvmStateProviderAdapter, StateProofProvider,
+    StateRootProvider, StorageRootProvider,
 };
 use alloc::boxed::Box;
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
 use auto_impl::auto_impl;
+#[cfg(feature = "chain-state")]
+use reth_chain_state::ExecutedBlock;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::Bytecode;
+use reth_primitives_traits::{Bytecode, NodePrimitives};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie_common::HashedPostState;
-use revm::database::BundleState;
+use reth_trie_common::{bundle_state::BundleState, HashedPostState};
 
 /// This just receives state, or [`ExecutionOutcome`], from the provider
 #[auto_impl::auto_impl(&, Arc, Box)]
@@ -88,6 +89,17 @@ pub trait StateProvider:
         // Returns None if acc doesn't exist
         self.basic_account(addr)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.nonce)))
     }
+
+    /// Wraps this provider for EVM execution without allocating or cloning it.
+    ///
+    /// Call this on a reference to borrow the provider, or on a box to retain ownership.
+    #[auto_impl(keep_default_for(&, Arc, Box))]
+    fn into_evm_state_provider(self) -> EvmStateProviderAdapter<Self>
+    where
+        Self: Sized,
+    {
+        EvmStateProviderAdapter(self)
+    }
 }
 
 /// Minimal requirements to read a full account, for example, to validate its new transactions
@@ -97,8 +109,12 @@ impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
 /// Trait that provides the hashed state from various sources.
 #[auto_impl(&, Arc, Box)]
 pub trait HashedPostStateProvider {
-    /// Returns the `HashedPostState` of the provided [`BundleState`].
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState;
+    /// Returns the [`HashedPostState`] of the provided [`BundleState`], materializing zero-valued
+    /// updates for parent storage of accounts that were destroyed but remain in the post-state.
+    ///
+    /// Providers backed by an exact parent-state view also materialize terminally destroyed
+    /// accounts with explicit zero-valued storage updates.
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> ProviderResult<HashedPostState>;
 }
 
 /// Trait for reading bytecode associated with a given code hash.
@@ -106,15 +122,6 @@ pub trait HashedPostStateProvider {
 pub trait BytecodeReader {
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>>;
-}
-
-/// Trait implemented for database providers that can be converted into a historical state provider.
-pub trait TryIntoHistoricalStateProvider {
-    /// Returns a historical [`StateProvider`] indexed by the given historic block number.
-    fn try_into_history_at_block(
-        self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<StateProviderBox>;
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given
@@ -141,9 +148,20 @@ pub trait TryIntoHistoricalStateProvider {
 /// the parent block. For example, in order to trace block `n`, the state after block `n - 1` needs
 /// to be used, since block `n` was executed on its parent block's state.
 #[auto_impl(&, Box, Arc)]
-pub trait StateProviderFactory: BlockIdReader + Send {
+pub trait StateProviderFactory: BlockIdReader {
+    /// The node primitive types.
+    type Primitives: NodePrimitives;
+
     /// Storage provider for latest block.
     fn latest(&self) -> ProviderResult<StateProviderBox>;
+
+    /// Returns a state provider after applying `block` to `parent_hash`.
+    #[cfg(feature = "chain-state")]
+    fn state_with_block_appended(
+        &self,
+        parent_hash: BlockHash,
+        block: ExecutedBlock<Self::Primitives>,
+    ) -> ProviderResult<StateProviderBox>;
 
     /// Returns a [`StateProvider`] indexed by the given [`BlockId`].
     ///
@@ -175,9 +193,9 @@ pub trait StateProviderFactory: BlockIdReader + Send {
     /// Note: this only looks at historical blocks, not pending blocks.
     fn history_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
 
-    /// Returns _any_ [StateProvider] with matching block hash.
+    /// Returns _any_ [`StateProvider`] with matching block hash.
     ///
-    /// This will return a [StateProvider] for either a historical or pending block.
+    /// This will return a [`StateProvider`] for either a historical or pending block.
     fn state_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
 
     /// Storage provider for pending state.

@@ -9,7 +9,7 @@ use crate::{
     Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
 use imbl::OrdMap;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::{cmp::Ordering, collections::hash_map::Entry, ops::Bound::Unbounded, sync::Arc};
 use tokio::sync::broadcast;
 
@@ -178,14 +178,17 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         // Drain and iterate over all transactions.
         let mut transactions_iter = self.clear_transactions().into_iter().peekable();
+        let mut highest: Option<TransactionId> = None;
         while let Some((id, tx)) = transactions_iter.next() {
+            self.flush_highest_nonce(&mut highest, Some(id.sender));
             if tx.transaction.is_eip4844() && tx.transaction.max_fee_per_blob_gas() < Some(blob_fee)
             {
                 // Add this tx to the removed collection since it no longer satisfies the blob fee
                 // condition. Decrease the total pool size.
                 removed.push(Arc::clone(&tx.transaction));
 
-                // Remove all dependent transactions.
+                // Remove all dependent transactions. Draining the rest of the sender here is what
+                // keeps the tracked `highest` correct, see `flush_highest_nonce`.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
                         break 'this
@@ -195,10 +198,15 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 }
             } else {
                 self.size_of += tx.transaction.size();
-                self.update_independents_and_highest_nonces(&tx);
+                if highest.is_none() {
+                    // first kept transaction of this sender, hence the independent one
+                    self.independent_transactions.insert(id.sender, tx.clone());
+                }
+                highest = Some(id);
                 self.by_id.insert(id, tx);
             }
         }
+        self.flush_highest_nonce(&mut highest, None);
 
         removed
     }
@@ -221,13 +229,16 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         // Drain and iterate over all transactions.
         let mut transactions_iter = self.clear_transactions().into_iter().peekable();
+        let mut highest: Option<TransactionId> = None;
         while let Some((id, mut tx)) = transactions_iter.next() {
+            self.flush_highest_nonce(&mut highest, Some(id.sender));
             if tx.transaction.max_fee_per_gas() < base_fee as u128 {
                 // Add this tx to the removed collection since it no longer satisfies the base fee
                 // condition. Decrease the total pool size.
                 removed.push(Arc::clone(&tx.transaction));
 
-                // Remove all dependent transactions.
+                // Remove all dependent transactions. Draining the rest of the sender here is what
+                // keeps the tracked `highest` correct, see `flush_highest_nonce`.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
                         break 'this
@@ -240,12 +251,37 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 tx.priority = self.ordering.priority(&tx.transaction.transaction, base_fee);
 
                 self.size_of += tx.transaction.size();
-                self.update_independents_and_highest_nonces(&tx);
+                if highest.is_none() {
+                    // first kept transaction of this sender, hence the independent one
+                    self.independent_transactions.insert(id.sender, tx.clone());
+                }
+                highest = Some(id);
                 self.by_id.insert(id, tx);
             }
         }
+        self.flush_highest_nonce(&mut highest, None);
 
         removed
+    }
+
+    /// Writes the transaction tracked by a rebuild loop (`update_base_fee`, `update_blob_fee`) to
+    /// `highest_nonces` if the loop has moved on to `next_sender`.
+    ///
+    /// The pool is drained in ascending `(sender, nonce)` order, so the highest kept nonce of a
+    /// sender is only known once the drain reaches the next sender or the end of the pool. This
+    /// relies on the loops removing all remaining transactions of a sender once one of them no
+    /// longer satisfies the fee, otherwise the tracked transaction would not be the highest kept
+    /// one.
+    fn flush_highest_nonce(
+        &mut self,
+        tracked: &mut Option<TransactionId>,
+        next_sender: Option<SenderId>,
+    ) {
+        if let Some(id) = tracked.take_if(|id| Some(id.sender) != next_sender) &&
+            let Some(tx) = self.by_id.get(&id).cloned()
+        {
+            self.highest_nonces.insert(id.sender, tx);
+        }
     }
 
     /// Updates the independent transaction and highest nonces set, assuming the given transaction
@@ -340,7 +376,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                             id.sender.start_bound(),
                             std::ops::Bound::Included(TransactionId::new(id.sender, u64::MAX)),
                         ))
-                        .last()
+                        .next_back()
                     {
                         // insert the new highest nonce for this sender
                         entry.insert(new_highest.clone());
@@ -387,23 +423,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
         remove_locals: bool,
         end_removed: &mut Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
     ) {
-        // This serves as a termination condition for the loop - it represents the number of
-        // _valid_ unique senders that might have descendants in the pool.
-        //
-        // If `remove_locals` is false, a value of zero means that there are no non-local txs in the
-        // pool that can be removed.
-        //
-        // If `remove_locals` is true, a value of zero means that there are no txs in the pool that
-        // can be removed.
-        let mut non_local_senders = self.highest_nonces.len();
-
-        // keeps track of unique senders from previous iterations, to understand how many unique
-        // senders were removed in the last iteration
-        let mut unique_senders = self.highest_nonces.len();
-
-        // keeps track of which senders we've marked as local
-        let mut local_senders = FxHashSet::default();
-
         // keep track of transactions to remove and how many have been removed so far
         let original_length = self.len();
         let mut removed = Vec::new();
@@ -414,32 +433,33 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let mut total_size = 0;
 
         loop {
-            // check how many unique senders were removed last iteration
-            let unique_removed = unique_senders - self.highest_nonces.len();
-
-            // the new number of unique senders
-            unique_senders = self.highest_nonces.len();
-            non_local_senders -= unique_removed;
-
             // we can reuse the temp array
             removed.clear();
 
             // we prefer removing transactions with lower ordering
-            let mut worst_transactions = self.highest_nonces.values().collect::<Vec<_>>();
+            let mut worst_transactions = self
+                .highest_nonces
+                .values()
+                .filter(|tx| remove_locals || !tx.transaction.is_local())
+                .collect::<Vec<_>>();
+
+            // no eligible transactions left to remove
+            if worst_transactions.is_empty() {
+                return
+            }
 
             // Each pass removes at most one transaction per sender (its highest nonce), so only
             // the worst few senders can be relevant in this pass. Selecting them is O(n)
-            // instead of sorting all senders. The estimate may fall short for size-based limits
-            // or skipped local senders, in which case the outer loop runs another pass.
+            // instead of sorting all senders. The estimate may fall short for size-based limits, in
+            // which case the outer loop runs another pass.
             let current_len = original_length - total_removed;
             let current_size = original_size - total_size;
             let excess_txs = current_len.saturating_sub(limit.max_txs);
             let avg_tx_size = (current_size / current_len.max(1)).max(1);
             let excess_size_txs = current_size.saturating_sub(limit.max_size).div_ceil(avg_tx_size);
             // Number of worst senders to consider for removal in this pass: enough to cover the
-            // count and (estimated) size excess, widened by known local senders since those are
-            // skipped below.
-            let removal_candidates = excess_txs.max(excess_size_txs).max(1) + local_senders.len();
+            // count and (estimated) size excess.
+            let removal_candidates = excess_txs.max(excess_size_txs).max(1);
 
             if removal_candidates < worst_transactions.len() {
                 // keep only the `removal_candidates` worst senders, in O(n) without a full sort
@@ -451,9 +471,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             // loop through the highest nonces set, removing transactions until we reach the limit
             for tx in worst_transactions {
                 // return early if the pool is under limits
-                if !limit.is_exceeded(original_length - total_removed, original_size - total_size) ||
-                    non_local_senders == 0
-                {
+                if !limit.is_exceeded(original_length - total_removed, original_size - total_size) {
                     // need to remove remaining transactions before exiting
                     for id in &removed {
                         if let Some(tx) = self.remove_transaction(id) {
@@ -462,14 +480,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
                     }
 
                     return
-                }
-
-                if !remove_locals && tx.transaction.is_local() {
-                    let sender_id = tx.transaction.sender_id();
-                    if local_senders.insert(sender_id) {
-                        non_local_senders -= 1;
-                    }
-                    continue
                 }
 
                 total_size += tx.transaction.size();
@@ -484,9 +494,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 }
             }
 
-            // return if either the pool is under limits or there are no more _eligible_
-            // transactions to remove
-            if !self.exceeds(limit) || non_local_senders == 0 {
+            if !self.exceeds(limit) {
                 return
             }
         }
@@ -583,16 +591,16 @@ impl<T: TransactionOrdering> PendingPool<T> {
             .map(|(tx_id, _)| tx_id)
     }
 
-    /// Returns all transactions for the given sender, using a `BTree` range query.
+    /// Returns an iterator over all transactions for the given sender, using a `BTree` range
+    /// query.
     pub(crate) fn txs_by_sender(
         &self,
         sender: SenderId,
-    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
         self.by_id
             .range((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
             .map(|(_, tx)| tx.transaction.clone())
-            .collect()
     }
 
     /// Retrieves a transaction with the given ID from the pool, if it exists.
@@ -606,21 +614,56 @@ impl<T: TransactionOrdering> PendingPool<T> {
         &self.independent_transactions
     }
 
-    /// Asserts that the bijection between `by_id` and `all` is valid.
+    /// Asserts that the per-sender side maps are consistent with `by_id`.
+    ///
+    /// Every sender in `by_id` must be tracked with its lowest nonce transaction in
+    /// `independent_transactions` and its highest nonce transaction in `highest_nonces`, no other
+    /// sender may be tracked, and the tracked size must match the size of all transactions.
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn assert_invariants(&self) {
-        assert!(
-            self.independent_transactions.len() <= self.by_id.len(),
-            "independent_transactions.len() > by_id.len()"
-        );
-        assert!(
-            self.highest_nonces.len() <= self.by_id.len(),
-            "highest_nonces.len() > by_id.len()"
+        let mut senders = 0;
+        let mut txs = self.by_id.iter().peekable();
+        while let Some((lowest_id, lowest)) = txs.next() {
+            let sender = lowest_id.sender;
+            senders += 1;
+
+            let mut highest = lowest;
+            while let Some((_, tx)) = txs.next_if(|(id, _)| id.sender == sender) {
+                highest = tx;
+            }
+
+            let independent = self
+                .independent_transactions
+                .get(&sender)
+                .unwrap_or_else(|| panic!("no independent transaction tracked for {sender:?}"));
+            assert_eq!(
+                independent, lowest,
+                "independent transaction of {sender:?} does not match its lowest nonce pool entry"
+            );
+            let tracked_highest = self
+                .highest_nonces
+                .get(&sender)
+                .unwrap_or_else(|| panic!("no highest nonce tracked for {sender:?}"));
+            assert_eq!(
+                tracked_highest, highest,
+                "highest nonce of {sender:?} does not match its highest nonce pool entry"
+            );
+        }
+
+        assert_eq!(
+            self.independent_transactions.len(),
+            senders,
+            "independent_transactions tracks senders without transactions"
         );
         assert_eq!(
             self.highest_nonces.len(),
-            self.independent_transactions.len(),
-            "highest_nonces.len() != independent_transactions.len()"
+            senders,
+            "highest_nonces tracks senders without transactions"
+        );
+        assert_eq!(
+            self.size(),
+            self.by_id.values().map(|tx| tx.transaction.size()).sum::<usize>(),
+            "size_of does not match the size of all transactions"
         );
     }
 }
@@ -680,13 +723,14 @@ impl<T: TransactionOrdering> Ord for PendingTransaction<T> {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::{
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
-        PoolTransaction,
+        PoolTransaction, TransactionOrigin,
     };
     use alloy_consensus::{Transaction, TxType};
-    use alloy_primitives::address;
+    use alloy_primitives::Address;
     use std::collections::HashSet;
 
     #[test]
@@ -748,6 +792,59 @@ mod tests {
     }
 
     #[test]
+    fn test_enforce_basefee_tracks_highest_nonce_of_partially_removed_sender() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // sender a keeps its first transaction but its descendant is priced out
+        let a = MockTransaction::eip1559().inc_price_by(20);
+        let a0 = f.validated_arc(a.clone());
+        let a1 = f.validated_arc(a.inc_nonce().rng_hash().decr_price_by(15));
+        // sender b keeps both of its transactions
+        let b = MockTransaction::eip1559().inc_price_by(20);
+        let b0 = f.validated_arc(b.clone());
+        let b1 = f.validated_arc(b.inc_nonce().rng_hash());
+
+        for tx in [&a0, &a1, &b0, &b1] {
+            pool.add_transaction(tx.clone(), 0);
+        }
+
+        let removed = pool.update_base_fee((a1.max_fee_per_gas() + 1) as u64);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].hash(), a1.hash());
+
+        pool.assert_invariants();
+        assert_eq!(pool.highest_nonces[&a0.sender_id()].transaction.nonce(), a0.nonce());
+        assert_eq!(pool.independent_transactions[&a0.sender_id()].transaction.nonce(), a0.nonce());
+        assert_eq!(pool.highest_nonces[&b1.sender_id()].transaction.nonce(), b1.nonce());
+        assert_eq!(pool.independent_transactions[&b0.sender_id()].transaction.nonce(), b0.nonce());
+    }
+
+    #[test]
+    fn test_enforce_blobfee_tracks_highest_nonce_of_partially_removed_sender() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // sender a keeps its first transaction but its descendant is priced out
+        let a = MockTransaction::eip4844().with_blob_fee(150);
+        let a0 = f.validated_arc(a.clone());
+        let a1 = f.validated_arc(a.inc_nonce().rng_hash().with_blob_fee(50));
+        // sender b keeps both of its transactions
+        let b = MockTransaction::eip4844().with_blob_fee(150);
+        let b0 = f.validated_arc(b.clone());
+        let b1 = f.validated_arc(b.inc_nonce().rng_hash());
+
+        for tx in [&a0, &a1, &b0, &b1] {
+            pool.add_transaction(tx.clone(), 0);
+        }
+
+        let removed = pool.update_blob_fee(100);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].hash(), a1.hash());
+        pool.assert_invariants();
+    }
+
+    #[test]
     fn evict_worst() {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
@@ -776,10 +873,10 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
 
-        let a_sender = address!("0x000000000000000000000000000000000000000a");
-        let b_sender = address!("0x000000000000000000000000000000000000000b");
-        let c_sender = address!("0x000000000000000000000000000000000000000c");
-        let d_sender = address!("0x000000000000000000000000000000000000000d");
+        let a_sender = Address::with_last_byte(0x0a);
+        let b_sender = Address::with_last_byte(0x0b);
+        let c_sender = Address::with_last_byte(0x0c);
+        let d_sender = Address::with_last_byte(0x0d);
 
         // create a chain of transactions by sender A, B, C
         let mut tx_set = MockTransactionSet::dependent(a_sender, 0, 4, TxType::Eip1559);
@@ -825,10 +922,10 @@ mod tests {
         let mut pool = PendingPool::new(MockOrdering::default());
 
         // Addresses for simulated senders A, B, C, and D.
-        let a = address!("0x000000000000000000000000000000000000000a");
-        let b = address!("0x000000000000000000000000000000000000000b");
-        let c = address!("0x000000000000000000000000000000000000000c");
-        let d = address!("0x000000000000000000000000000000000000000d");
+        let a = Address::with_last_byte(0x0a);
+        let b = Address::with_last_byte(0x0b);
+        let c = Address::with_last_byte(0x0c);
+        let d = Address::with_last_byte(0x0d);
 
         // Create transaction chains for senders A, B, C, and D.
         let a_txs = MockTransactionSet::sequential_transactions_by_sender(a, 4, TxType::Eip1559);
@@ -902,6 +999,57 @@ mod tests {
         let pending =
             pending.into_iter().map(|tx| (tx.sender(), tx.nonce())).collect::<HashSet<_>>();
         assert_eq!(pending, expected_pending);
+    }
+
+    #[test]
+    fn truncate_skips_local_heads_ranked_below_non_local() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // many local senders that rank below every non-local sender
+        let num_locals = 3_000;
+        for _ in 0..num_locals {
+            let tx = f.validated_with_origin(TransactionOrigin::Local, MockTransaction::eip1559());
+            pool.add_transaction(Arc::new(tx), 0);
+        }
+
+        let non_locals: Vec<_> = (1..=3u128)
+            .map(|i| {
+                let tx = f.validated_arc(MockTransaction::eip1559().inc_price_by(10 * i));
+                pool.add_transaction(tx.clone(), 0);
+                tx
+            })
+            .collect();
+        pool.assert_invariants();
+
+        let removed =
+            pool.truncate_pool(SubPoolLimit { max_txs: num_locals + 2, max_size: usize::MAX });
+        pool.assert_invariants();
+
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].hash(), non_locals[0].hash());
+        assert_eq!(pool.len(), num_locals + 2);
+    }
+
+    #[test]
+    fn truncate_removes_non_local_head_above_local_tx() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // the sender's highest nonce tx is non-local, so it is removed even though a local tx
+        // of the same sender stays behind
+        let local = MockTransaction::eip1559();
+        let local_tx = f.validated_with_origin(TransactionOrigin::Local, local.clone());
+        let head_tx = f.validated_arc(local.inc_nonce().rng_hash());
+        pool.add_transaction(Arc::new(local_tx), 0);
+        pool.add_transaction(head_tx.clone(), 0);
+
+        let removed = pool.truncate_pool(SubPoolLimit { max_txs: 1, max_size: usize::MAX });
+        pool.assert_invariants();
+
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].hash(), head_tx.hash());
+        assert_eq!(pool.len(), 1);
     }
 
     // <https://github.com/paradigmxyz/reth/issues/12340>
@@ -1053,9 +1201,9 @@ mod tests {
         let mut pool = PendingPool::new(MockOrdering::default());
 
         // Addresses for simulated senders A, B, C
-        let a = address!("0x000000000000000000000000000000000000000a");
-        let b = address!("0x000000000000000000000000000000000000000b");
-        let c = address!("0x000000000000000000000000000000000000000c");
+        let a = Address::with_last_byte(0x0a);
+        let b = Address::with_last_byte(0x0b);
+        let c = Address::with_last_byte(0x0c);
 
         // sender A (local) - 11+ transactions (large enough to keep limit exceeded)
         // sender B (external) - 2 transactions
@@ -1100,7 +1248,7 @@ mod tests {
     fn test_remove_non_highest_keeps_highest() {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
-        let sender = address!("0x00000000000000000000000000000000000000aa");
+        let sender = Address::with_last_byte(0xaa);
         let txs = MockTransactionSet::dependent(sender, 0, 3, TxType::Eip1559).into_vec();
         for tx in txs {
             pool.add_transaction(f.validated_arc(tx), 0);
@@ -1118,7 +1266,7 @@ mod tests {
     fn test_cascade_removal_recomputes_highest() {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
-        let sender = address!("0x00000000000000000000000000000000000000bb");
+        let sender = Address::with_last_byte(0xbb);
         let txs = MockTransactionSet::dependent(sender, 0, 4, TxType::Eip1559).into_vec();
         for tx in txs {
             pool.add_transaction(f.validated_arc(tx), 0);
@@ -1140,7 +1288,7 @@ mod tests {
     fn test_remove_only_tx_clears_highest() {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
-        let sender = address!("0x00000000000000000000000000000000000000cc");
+        let sender = Address::with_last_byte(0xcc);
         let txs = MockTransactionSet::dependent(sender, 0, 1, TxType::Eip1559).into_vec();
         for tx in txs {
             pool.add_transaction(f.validated_arc(tx), 0);

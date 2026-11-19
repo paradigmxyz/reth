@@ -51,6 +51,15 @@ For efficient storage iteration, the example uses database cursors:
 - `seek_exact` - Positions cursor at specific key
 - `next_dup` - Iterates through duplicate entries
 
+### Hashed State
+Depending on `cached_storage_settings().use_hashed_state()`, a node keeps
+either `PlainStorageState` (keyed by the raw 32-byte slot) or
+`HashedStorages` (keyed by `keccak256(slot)`) up to date -- the table that
+isn't active for the running node is simply empty, not an error. This
+example checks that flag and reads the right table; in hashed mode the
+printed keys are `keccak256(slot)`, not the original slot number, since
+hashed-only storage doesn't retain a plain-key mirror to recover it from.
+
 ## Output
 
 The example will print:

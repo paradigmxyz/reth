@@ -1,6 +1,12 @@
 #![allow(missing_docs)]
 
+use alloy_node_bindings::Reth;
+use alloy_primitives::{Address, U256};
+use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_types_eth::TransactionRequest;
 use std::{fs, path::Path, process::Command};
+
+mod download;
 
 const RETH: &str = env!("CARGO_BIN_EXE_reth");
 
@@ -25,8 +31,6 @@ fn reth_ok(args: &[&str]) -> String {
 /// isolated.  Each call gets a unique temporary data directory so that
 /// concurrent test runs never collide on the default `reth/dev/` path.
 fn spawn_dev() -> (alloy_node_bindings::RethInstance, tempfile::TempDir) {
-    use alloy_node_bindings::Reth;
-
     let datadir = tempfile::tempdir().expect("failed to create temp dir");
 
     let instance = Reth::at(RETH)
@@ -95,8 +99,6 @@ fn unknown_flag() {
 
 #[tokio::test]
 async fn dev_node_eth_syncing() {
-    use alloy_provider::{Provider, ProviderBuilder};
-
     let (reth, _datadir) = spawn_dev();
     let provider = ProviderBuilder::new().connect_http(reth.endpoint().parse().unwrap());
 
@@ -287,10 +289,6 @@ fn dump_genesis_sepolia_valid_json() {
 
 #[tokio::test]
 async fn dev_node_send_tx_and_mine() {
-    use alloy_primitives::{Address, U256};
-    use alloy_provider::{Provider, ProviderBuilder};
-    use alloy_rpc_types_eth::TransactionRequest;
-
     let (reth, _datadir) = spawn_dev();
     let provider = ProviderBuilder::new().connect_http(reth.endpoint().parse().unwrap());
 

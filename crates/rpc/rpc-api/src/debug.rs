@@ -5,14 +5,13 @@ use alloy_primitives::{Address, Bytes, B256, U64};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{Account, AccountInfo, Bundle, Index, StateContext};
 use alloy_rpc_types_trace::geth::{
-    BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
+    GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
 
 /// Debug rpc interface.
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "debug"))]
+#[rpc(server, namespace = "debug")]
 pub trait DebugApi<TxReq: RpcObject> {
     /// Returns an RLP-encoded header.
     #[method(name = "getRawHeader")]
@@ -48,14 +47,20 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "clearTxpool")]
     async fn debug_clear_txpool(&self) -> RpcResult<()>;
 
-    /// Returns the structured logs created during the execution of EVM between two blocks
-    /// (excluding start) as a JSON object.
-    #[method(name = "traceChain")]
-    async fn debug_trace_chain(
+    /// Subscribes to structured logs created during EVM execution between two blocks, excluding
+    /// the start block and including the end block.
+    #[subscription(
+        name = "subscribe" => "subscription",
+        unsubscribe = "unsubscribe",
+        item = alloy_rpc_types_trace::geth::ChainBlockTraceResult
+    )]
+    async fn debug_subscribe(
         &self,
+        subscription: String,
         start_exclusive: BlockNumberOrTag,
         end_inclusive: BlockNumberOrTag,
-    ) -> RpcResult<Vec<BlockTraceResult>>;
+        opts: Option<GethDebugTracingOptions>,
+    ) -> jsonrpsee::core::SubscriptionResult;
 
     /// The `debug_traceBlock` method will return a full stack trace of all invoked opcodes of all
     /// transaction that were included in this block.
@@ -286,8 +291,8 @@ pub trait DebugApi<TxReq: RpcObject> {
         end_number: u64,
     ) -> RpcResult<()>;
 
-    /// Executes a block (bad- or canon- or side-), and returns a list of intermediate roots: the
-    /// stateroot after each transaction.
+    /// Executes a canonical or bad block, and returns a list of intermediate roots: the stateroot
+    /// after each transaction up to the first invalid one.
     #[method(name = "intermediateRoots")]
     async fn debug_intermediate_roots(
         &self,

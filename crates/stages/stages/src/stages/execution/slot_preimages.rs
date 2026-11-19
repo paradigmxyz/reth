@@ -10,8 +10,8 @@ use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, SyncMode, WriteFlags, RO,
 };
 use reth_provider::{DBProvider, ExecutionOutcome};
-use reth_revm::revm::database::states::RevertToSlot;
 use reth_stages_api::StageError;
+use reth_trie::bundle_state::{AccountRevert, RevertToSlot};
 use std::path::Path;
 use tracing::trace;
 
@@ -140,7 +140,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     let mut seen_hashes = HashSet::new();
     for account in state.bundle.state().values() {
         for &slot_key in account.storage.keys() {
-            let plain = B256::from(slot_key.to_be_bytes());
+            let plain = B256::from(slot_key);
             let hashed = keccak256(plain);
             if seen_hashes.insert(hashed) {
                 preimage_entries.push((hashed, plain));
@@ -150,7 +150,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     for block_reverts in state.bundle.reverts.iter() {
         for (_, revert) in block_reverts {
             for &slot_key in revert.storage.keys() {
-                let plain = B256::from(slot_key.to_be_bytes());
+                let plain = B256::from(slot_key);
                 let hashed = keccak256(plain);
                 if seen_hashes.insert(hashed) {
                     preimage_entries.push((hashed, plain));
@@ -202,7 +202,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
 /// into the account revert if not already present.
 fn inject_preimage_entry(
     reader: &SlotPreimagesReader,
-    revert: &mut reth_revm::revm::database::AccountRevert,
+    revert: &mut AccountRevert,
     address: alloy_primitives::Address,
     hashed_slot: B256,
     value: alloy_primitives::U256,

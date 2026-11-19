@@ -55,6 +55,7 @@ exclude_crates=(
   # The following are not supposed to be working
   reth # all of the crates below
   reth-bb # binary-only, uses tokio features unsupported on wasm
+  reth-trie-dst # native workload: MDBX, threads, and provider test utilities
   reth-storage-rpc-provider
   reth-invalid-block-hooks # reth-provider
   reth-libmdbx # mdbx
@@ -63,6 +64,7 @@ exclude_crates=(
   reth-provider # tokio
   reth-prune # tokio
   reth-prune-static-files # reth-provider
+  reth-snap-sync # reth-tasks, reth-downloaders
   reth-tasks # tokio rt-multi-thread
   reth-stages-api # reth-provider, reth-prune
   reth-static-file # tokio

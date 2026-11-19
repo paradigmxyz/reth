@@ -207,7 +207,8 @@ impl From<EthVersion> for Capability {
 impl<'a> arbitrary::Arbitrary<'a> for Capability {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let version = u.int_in_range(66..=71)?; // Valid eth protocol versions are 66-71
-                                                // Only generate valid eth protocol name for now since it's the only supported protocol
+                                                // Only generate valid eth protocol name for now
+                                                // since it's the only supported protocol
         Ok(Self::new_static("eth", version))
     }
 }
@@ -347,6 +348,10 @@ impl From<Vec<Capability>> for Capabilities {
 }
 
 impl Encodable for Capabilities {
+    fn length(&self) -> usize {
+        self.inner.length()
+    }
+
     fn encode(&self, out: &mut dyn BufMut) {
         self.inner.encode(out)
     }
@@ -366,5 +371,28 @@ impl Decodable for Capabilities {
             eth_72: inner.iter().any(Capability::is_eth_v72),
             inner,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn capabilities_rlp_roundtrip_and_length(
+            versions in proptest::collection::vec(66usize..=72, 0..32),
+        ) {
+            let capabilities = Capabilities::new(
+                versions.into_iter().map(|version| Capability::new_static("eth", version)).collect(),
+            );
+            let encoded = alloy_rlp::encode(&capabilities);
+            prop_assert_eq!(capabilities.length(), encoded.len());
+            let mut buf = encoded.as_slice();
+            let decoded = Capabilities::decode(&mut buf)?;
+            prop_assert_eq!(decoded, capabilities);
+            prop_assert!(buf.is_empty());
+        }
     }
 }

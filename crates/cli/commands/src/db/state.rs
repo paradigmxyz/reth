@@ -8,9 +8,11 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_db_common::DbTool;
-use reth_node_builder::NodeTypesWithDB;
-use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
-use reth_storage_api::{BlockNumReader, StateProvider, StorageSettingsCache};
+use reth_provider::{
+    providers::{BlockchainProvider, ProviderNodeTypes},
+    StaticFileProviderFactory,
+};
+use reth_storage_api::{BlockNumReader, StateProvider, StateProviderFactory, StorageSettingsCache};
 use reth_tasks::spawn_scoped_os_thread;
 use std::{
     collections::BTreeSet,
@@ -43,10 +45,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db state` command
-    pub fn execute<N: NodeTypesWithDB + ProviderNodeTypes>(
-        self,
-        tool: &DbTool<N>,
-    ) -> eyre::Result<()> {
+    pub fn execute<N: ProviderNodeTypes>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         let address = self.address;
         let limit = self.limit;
 
@@ -57,7 +56,7 @@ impl Command {
         }
     }
 
-    fn execute_current<N: NodeTypesWithDB + ProviderNodeTypes>(
+    fn execute_current<N: ProviderNodeTypes>(
         &self,
         tool: &DbTool<N>,
         address: Address,
@@ -75,7 +74,7 @@ impl Command {
                 let mut last_log = Instant::now();
                 for (idx, entry) in walker.enumerate() {
                     let (_, storage_entry) = entry?;
-                    if storage_entry.value != U256::ZERO {
+                    if !storage_entry.value.is_zero() {
                         entries.push((storage_entry.key, storage_entry.value));
                     }
                     if entries.len() >= limit {
@@ -102,7 +101,7 @@ impl Command {
                 let mut last_log = Instant::now();
                 for (idx, entry) in walker.enumerate() {
                     let (_, storage_entry) = entry?;
-                    if storage_entry.value != U256::ZERO {
+                    if !storage_entry.value.is_zero() {
                         entries.push((storage_entry.key, storage_entry.value));
                     }
                     if entries.len() >= limit {
@@ -131,14 +130,15 @@ impl Command {
         Ok(())
     }
 
-    fn execute_historical<N: NodeTypesWithDB + ProviderNodeTypes>(
+    fn execute_historical<N: ProviderNodeTypes>(
         &self,
         tool: &DbTool<N>,
         address: Address,
         block: BlockNumber,
         limit: usize,
     ) -> eyre::Result<()> {
-        let provider = tool.provider_factory.history_by_block_number(block)?;
+        let provider = BlockchainProvider::new(tool.provider_factory.clone())?
+            .history_by_block_number(block)?;
 
         // Get account info at that block
         let account = provider.basic_account(&address)?;
@@ -172,7 +172,7 @@ impl Command {
 
         for (idx, key) in storage_keys.iter().enumerate() {
             match provider.storage(address, *key) {
-                Ok(Some(value)) if value != U256::ZERO => {
+                Ok(Some(value)) if !value.is_zero() => {
                     entries.push((*key, value));
                 }
                 _ => {}
@@ -202,7 +202,7 @@ impl Command {
     }
 
     /// Collects storage keys from static file StorageChangeSets (storage_v2).
-    fn collect_staticfile_storage_keys<N: NodeTypesWithDB + ProviderNodeTypes>(
+    fn collect_staticfile_storage_keys<N: ProviderNodeTypes>(
         &self,
         tool: &DbTool<N>,
         address: Address,
@@ -259,7 +259,7 @@ impl Command {
     }
 
     /// Collects storage keys from MDBX StorageChangeSets using parallel block range scanning.
-    fn collect_mdbx_storage_keys_parallel<N: NodeTypesWithDB + ProviderNodeTypes>(
+    fn collect_mdbx_storage_keys_parallel<N: ProviderNodeTypes>(
         &self,
         tool: &DbTool<N>,
         address: Address,
@@ -337,14 +337,12 @@ impl Command {
                                 let mut local_keys = BTreeSet::new();
                                 let mut entries_in_chunk = 0usize;
 
-                                if let Ok(walker) = changeset_cursor.walk_range(start_key..=end_key)
-                                {
-                                    for (block_addr, storage_entry) in walker.flatten() {
-                                        if block_addr.address() == address {
-                                            local_keys.insert(storage_entry.key);
-                                        }
-                                        entries_in_chunk += 1;
+                                for entry in changeset_cursor.walk_range(start_key..=end_key)? {
+                                    let (block_addr, storage_entry) = entry?;
+                                    if block_addr.address() == address {
+                                        local_keys.insert(storage_entry.key);
                                     }
+                                    entries_in_chunk += 1;
                                 }
 
                                 // Merge into global state
@@ -464,6 +462,7 @@ pub enum OutputFormat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::address;
 
     #[test]
     fn parse_state_args() {
@@ -474,10 +473,7 @@ mod tests {
             "1000000",
         ])
         .unwrap();
-        assert_eq!(
-            cmd.address,
-            "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045".parse::<Address>().unwrap()
-        );
+        assert_eq!(cmd.address, address!("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"));
         assert_eq!(cmd.block, Some(1000000));
     }
 

@@ -1,8 +1,12 @@
 //! Perform DNS lookups
 
+use crate::tree::has_entry_prefix;
 use dashmap::DashMap;
 pub use hickory_resolver::{net::NetError, TokioResolver};
-use hickory_resolver::{proto::rr::RData, ConnectionProvider};
+use hickory_resolver::{
+    proto::rr::{rdata::TXT, RData, Record},
+    ConnectionProvider,
+};
 use std::future::Future;
 use tracing::trace;
 
@@ -22,16 +26,31 @@ impl<P: ConnectionProvider> Resolver for hickory_resolver::Resolver<P> {
                 trace!(target: "disc::dns", %err, ?query, "dns lookup failed");
                 None
             }
-            Ok(lookup) => {
-                let txt = lookup.answers().iter().find_map(|r| match &r.data {
-                    RData::TXT(txt) => Some(txt),
-                    _ => None,
-                })?;
-                let entry = txt.txt_data.first()?;
-                String::from_utf8(entry.to_vec()).ok()
-            }
+            Ok(lookup) => find_txt_entry(lookup.answers()),
         }
     }
+}
+
+/// Returns the first TXT record with a recognized EIP-1459 entry prefix.
+fn find_txt_entry(records: &[Record]) -> Option<String> {
+    records
+        .iter()
+        .filter_map(|record| {
+            let RData::TXT(txt) = &record.data else { return None };
+            txt_entry(txt)
+        })
+        .find(|entry| has_entry_prefix(entry))
+}
+
+/// Joins all `<character-string>`s of a TXT record into a single entry.
+///
+/// [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035#section-3.3) limits a single
+/// `<character-string>` to 255 bytes, while an
+/// [EIP-1459](https://eips.ethereum.org/EIPS/eip-1459) entry is only bounded by the 512 byte DNS
+/// UDP limit. Entries above 255 bytes are therefore published as several `<character-string>`s
+/// which have to be rejoined without a separator to recover the entry.
+fn txt_entry(txt: &TXT) -> Option<String> {
+    String::from_utf8(txt.txt_data.concat()).ok()
 }
 
 /// An asynchronous DNS resolver
@@ -112,5 +131,122 @@ impl Resolver for TimeoutResolver {
     async fn lookup_txt(&self, _query: &str) -> Option<String> {
         tokio::time::sleep(self.0).await;
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::keccak256;
+    use data_encoding::BASE32_NOPAD;
+    use hickory_resolver::{
+        config::{ConnectionConfig, NameServerConfig, ResolverConfig},
+        net::runtime::TokioRuntimeProvider,
+        proto::{
+            op::{Message, OpCode},
+            rr::{Name, Record},
+            serialize::binary::{BinDecodable, BinEncodable},
+        },
+    };
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio::net::UdpSocket;
+
+    /// Maximum size of a single RFC 1035 `<character-string>`.
+    const MAX_CHARACTER_STRING: usize = 255;
+
+    /// A branch entry of the size go-ethereum's writer emits, which exceeds what a single
+    /// `<character-string>` can hold.
+    fn long_branch_entry() -> String {
+        let children = (0u8..13)
+            .map(|i| BASE32_NOPAD.encode(&keccak256([i]).as_slice()[..16]))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("enrtree-branch:{children}")
+    }
+
+    fn character_strings(entry: &str) -> Vec<String> {
+        entry
+            .as_bytes()
+            .chunks(MAX_CHARACTER_STRING)
+            .map(|chunk| String::from_utf8(chunk.to_vec()).unwrap())
+            .collect()
+    }
+
+    /// Answers every query with a single TXT record made up of `strings`.
+    async fn spawn_txt_server(strings: Vec<String>) -> SocketAddr {
+        let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let addr = socket.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 512];
+            while let Ok((len, from)) = socket.recv_from(&mut buf).await {
+                let request = Message::from_bytes(&buf[..len]).unwrap();
+                let query = request.queries.first().unwrap().clone();
+
+                let mut response = Message::response(request.metadata.id, OpCode::Query);
+                response.metadata.authoritative = true;
+                response.metadata.recursion_desired = request.metadata.recursion_desired;
+                response.metadata.recursion_available = true;
+                response.answers.push(Record::from_rdata(
+                    query.name().clone(),
+                    60,
+                    RData::TXT(TXT::new(strings.clone())),
+                ));
+                response.queries.push(query);
+
+                socket.send_to(&response.to_bytes().unwrap(), from).await.unwrap();
+            }
+        });
+        addr
+    }
+
+    fn resolver_for(addr: SocketAddr) -> DnsResolver {
+        let mut connection = ConnectionConfig::udp();
+        connection.port = addr.port();
+        let config = ResolverConfig::from_parts(
+            None,
+            vec![],
+            vec![NameServerConfig::new(addr.ip(), true, vec![connection])],
+        );
+        DnsResolver::new(
+            TokioResolver::builder_with_config(config, TokioRuntimeProvider::default())
+                .build()
+                .unwrap(),
+        )
+    }
+
+    #[test]
+    fn txt_entry_joins_character_strings() {
+        let entry = long_branch_entry();
+        let strings = character_strings(&entry);
+        assert!(entry.len() > MAX_CHARACTER_STRING);
+        assert!(strings.len() > 1);
+
+        assert_eq!(txt_entry(&TXT::new(strings)), Some(entry));
+    }
+
+    #[tokio::test]
+    async fn lookup_txt_reads_record_split_over_character_strings() {
+        let entry = long_branch_entry();
+        let addr = spawn_txt_server(character_strings(&entry)).await;
+
+        let resolved = resolver_for(addr).lookup_txt("YNEGZIWHOM7TOOSUATAPTM.example.org").await;
+
+        assert_eq!(resolved, Some(entry));
+    }
+
+    fn txt_record(entry: &str) -> Record {
+        Record::from_rdata(Name::root(), 60, RData::TXT(TXT::new(vec![entry.to_string()])))
+    }
+
+    #[test]
+    fn find_txt_entry_skips_unrelated_records() {
+        let entry = "enrtree-root:v1 e=enr-root l=link-root seq=1 sig=signature";
+        let records = [
+            txt_record("v=spf1 -all"),
+            txt_record(entry),
+            txt_record("enrtree-branch:YNEGZIWHOM7TOOSUATAPTM"),
+        ];
+
+        assert_eq!(find_txt_entry(&records).as_deref(), Some(entry));
     }
 }

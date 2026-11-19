@@ -3,8 +3,7 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_network_peers::{AnyNode, NodeRecord};
 
 /// Admin namespace rpc interface that gives access to several non-standard RPC methods.
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "admin"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "admin"))]
+#[rpc(server, namespace = "admin")]
 pub trait AdminApi {
     /// Adds the given node record to the peerset.
     #[method(name = "addPeer")]

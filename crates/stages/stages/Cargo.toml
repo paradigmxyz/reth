@@ -36,15 +36,16 @@ reth-prune.workspace = true
 reth-prune-types.workspace = true
 reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
-reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-static-file-types.workspace = true
 reth-tasks.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 
+reth-storage-overlay = { workspace = true, optional = true }
 reth-testing-utils = { workspace = true, optional = true }
 
+alloy-eip7928.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
@@ -72,13 +73,14 @@ reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
 reth-ethereum-primitives = { workspace = true, features = ["test-utils"] }
 reth-ethereum-consensus.workspace = true
-reth-evm-ethereum.workspace = true
+reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-downloaders = { workspace = true, features = ["file-client"] }
 reth-static-file.workspace = true
 reth-stages-api = { workspace = true, features = ["test-utils"] }
 reth-storage-api.workspace = true
+reth-storage-overlay.workspace = true
 reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
@@ -109,13 +111,13 @@ test-utils = [
     "reth-evm/test-utils",
     "reth-downloaders/test-utils",
     "reth-primitives-traits/test-utils",
-    "reth-revm/test-utils",
     "reth-codecs/test-utils",
     "reth-db-api/test-utils",
     "reth-trie-db/test-utils",
     "reth-trie/test-utils",
     "reth-prune-types/test-utils",
     "dep:reth-ethereum-primitives",
+    "dep:reth-storage-overlay",
     "reth-ethereum-primitives?/test-utils",
     "reth-evm-ethereum/test-utils",
     "reth-tasks/test-utils",
