@@ -593,7 +593,6 @@ mod tests {
         let chain_spec =
             Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
-        let overlays = factory.overlay_manager().clone();
         init_genesis(&factory).unwrap();
         let provider = BlockchainProvider::new(factory).unwrap();
         let pool = testing_pool();
@@ -608,7 +607,6 @@ mod tests {
 
         // Make the locally built block the provider's pending block.
         let pending = eth_api.pool_pending_block().await.unwrap().unwrap().executed_block;
-        overlays.insert_block(pending.clone());
         provider.canonical_in_memory_state().set_pending_block(pending);
 
         let request = TransactionRequest::default().to(contract);
