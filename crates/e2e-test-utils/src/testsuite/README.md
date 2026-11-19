@@ -1,5 +1,8 @@
 # E2E Test Suite Framework
 
+New tests should use the `NodeTestContext` API described in the [crate guide](../../README.md),
+which also explains when this framework fits.
+
 This directory contains the framework for writing end-to-end (e2e) tests in Reth. The framework provides utilities for setting up test environments, performing actions, and verifying blockchain behavior.
 
 ## Test Organization

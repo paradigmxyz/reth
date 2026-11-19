@@ -10,12 +10,7 @@ use tokio::sync::oneshot;
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockDownloaderProvider {
     /// The client this type can provide.
-    type Client: BlockClient<Header: Debug, Body: Debug>
-        + BlockAccessListsClient
-        + Send
-        + Sync
-        + Clone
-        + 'static;
+    type Client: BlockClient<Header: Debug, Body: Debug> + BlockAccessListsClient + 'static;
 
     /// Returns a new [`BlockClient`], used for fetching blocks from peers.
     ///

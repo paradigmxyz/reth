@@ -6,15 +6,16 @@ use crate::{
 };
 use alloy_primitives::{Bytes, B256};
 use eyre::Result;
-use jsonrpsee::http_client::HttpClient;
-use reth_node_api::{EngineTypes, PayloadTypes};
+use reth_node_api::{EngineTypes, PayloadAttrTy, PayloadTypes};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadId};
 use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
 pub mod setup;
 use crate::testsuite::setup::Setup;
 use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
+use reth_chainspec::ChainSpec;
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_provider::{BlockNumReader, ProviderResult};
 use reth_rpc_builder::auth::AuthServerHandle;
@@ -28,7 +29,7 @@ where
     Payload: PayloadTypes,
 {
     /// Regular JSON-RPC client
-    pub rpc: HttpClient,
+    pub rpc: RpcClient,
     /// Engine API client
     pub engine: AuthServerHandle,
     /// Beacon consensus engine handle for direct interaction with the consensus engine
@@ -46,7 +47,7 @@ where
     Payload: PayloadTypes,
 {
     /// Instantiates a new [`NodeClient`] with the given handles and RPC URL
-    pub fn new(rpc: HttpClient, engine: AuthServerHandle, url: Url) -> Self {
+    pub fn new(rpc: RpcClient, engine: AuthServerHandle, url: Url) -> Self {
         let provider =
             Arc::new(ProviderBuilder::new().connect_http(url)) as Arc<dyn Provider + Send + Sync>;
         Self {
@@ -61,7 +62,7 @@ where
 
     /// Instantiates a new [`NodeClient`] with the given handles, RPC URL, and beacon engine handle
     pub fn new_with_beacon_engine(
-        rpc: HttpClient,
+        rpc: RpcClient,
         engine: AuthServerHandle,
         url: Url,
         beacon_engine_handle: ConsensusEngineHandle<Payload>,
@@ -345,7 +346,7 @@ where
 
 impl<I> TestBuilder<I>
 where
-    I: EngineTypes + 'static,
+    I: EngineTypes,
 {
     /// Create a new test builder
     pub fn new() -> Self {
@@ -358,7 +359,7 @@ where
         self
     }
 
-    /// Set the test setup with chain import from RLP file
+    /// Set the test setup with chain import from RLP file, see [`Setup::apply_with_import`].
     pub fn with_setup_and_import(
         mut self,
         mut setup: Setup<I>,
@@ -391,7 +392,8 @@ where
     /// Run the test scenario
     pub async fn run<N>(mut self) -> Result<()>
     where
-        N: NodeBuilderHelper<Payload = I>,
+        N: NodeBuilderHelper<Payload = I, ChainSpec: From<ChainSpec>>,
+        PayloadAttrTy<N>: From<PayloadAttributes>,
     {
         let mut setup = self.setup.take();
 

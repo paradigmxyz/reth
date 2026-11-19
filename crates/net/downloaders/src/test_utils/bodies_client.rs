@@ -59,11 +59,9 @@ impl TestBodiesClient {
     /// This will only return true if `empty_response_mod` is `Some`, and `times_requested %
     /// empty_response_mod == 0`.
     pub(crate) fn should_respond_empty(&self) -> bool {
-        if let Some(empty_response_mod) = self.empty_response_mod {
+        self.empty_response_mod.is_some_and(|empty_response_mod| {
             self.times_requested.load(Ordering::Relaxed).is_multiple_of(empty_response_mod)
-        } else {
-            false
-        }
+        })
     }
 }
 

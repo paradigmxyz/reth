@@ -15,7 +15,7 @@ use reth_storage_errors::provider::ProviderResult;
 #[auto_impl::auto_impl(&)]
 pub trait DbTxProvider {
     /// Underlying database transaction held by the provider.
-    type Tx: DbTx;
+    type Tx: DbTx + 'static;
 
     /// Returns the underlying database transaction.
     fn tx(&self) -> &Self::Tx;

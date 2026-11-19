@@ -10,7 +10,7 @@ use reth_cli_commands::{
     common::{CliComponentsBuilder, CliNodeTypes, HeaderMut},
     launcher::{FnLauncher, Launcher},
 };
-use reth_cli_runner::CliRunner;
+use reth_cli_runner::{CliRunner, CliRunnerConfig};
 use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
@@ -31,6 +31,7 @@ pub struct CliApp<
 > {
     cli: Cli<Spec, Ext, Rpc, SubCmd>,
     runner: Option<CliRunner>,
+    runner_config: Option<CliRunnerConfig>,
     layers: Option<Layers>,
     guard: Option<TracingGuards>,
 }
@@ -43,7 +44,7 @@ where
     SubCmd: ExtendedCommand + Subcommand + fmt::Debug,
 {
     pub(crate) fn new(cli: Cli<C, Ext, Rpc, SubCmd>) -> Self {
-        Self { cli, runner: None, layers: Some(Layers::new()), guard: None }
+        Self { cli, runner: None, runner_config: None, layers: Some(Layers::new()), guard: None }
     }
 
     /// Sets the runner for the CLI commander.
@@ -51,6 +52,15 @@ where
     /// This replaces any existing runner with the provided one.
     pub fn set_runner(&mut self, runner: CliRunner) {
         self.runner = Some(runner);
+    }
+
+    /// Sets the [`CliRunnerConfig`] of the runner this app builds when none was set with
+    /// [`Self::set_runner`].
+    ///
+    /// Unlike [`Self::set_runner`], this keeps the runtime configuration derived from the command,
+    /// such as the node's CPU and worker thread settings.
+    pub const fn set_runner_config(&mut self, config: CliRunnerConfig) {
+        self.runner_config = Some(config);
     }
 
     /// Access to tracing layers.
@@ -77,7 +87,7 @@ where
         let components = move |spec: Arc<ChainSpec>| {
             let (evm_config, _) =
                 reth_node_ethereum::node::build_evm_config(spec.clone(), &jit_args, None)
-                    .expect("failed to start revmc JIT backend");
+                    .expect("failed to build EVM config");
             (evm_config, Arc::new(EthBeaconConsensus::new(spec)))
         };
 
@@ -108,17 +118,26 @@ where
             None => {
                 let runtime_config = match &self.cli.command {
                     Commands::Node(command) => {
-                        reth_tasks::RuntimeConfig::default().with_rayon(RayonConfig {
+                        let config = reth_tasks::RuntimeConfig::default().with_rayon(RayonConfig {
                             reserved_cpu_cores: command.engine.reserved_cpu_cores,
                             proof_storage_worker_threads: command.engine.storage_worker_count,
                             proof_account_worker_threads: command.engine.account_worker_count,
                             prewarming_threads: command.engine.prewarming_threads,
                             ..Default::default()
-                        })
+                        });
+                        if let Some(cpu_cores) = command.engine.cpu_cores {
+                            config.with_cpu_cores(cpu_cores)
+                        } else {
+                            config
+                        }
                     }
                     _ => reth_tasks::RuntimeConfig::default(),
                 };
-                CliRunner::try_with_runtime_config(runtime_config)?
+                let runner = CliRunner::try_with_runtime_config(runtime_config)?;
+                match self.runner_config.take() {
+                    Some(config) => runner.with_config(config),
+                    None => runner,
+                }
             }
         };
 

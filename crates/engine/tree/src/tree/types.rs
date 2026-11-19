@@ -1,11 +1,11 @@
 //! Shared types for blockchain tree validation.
 
-use crate::tree::error::InsertPayloadError;
+use crate::tree::{error::InsertPayloadError, payload_processor::reuse::PoolSeeds};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::B256;
 use reth_chain_state::{ExecutedBlock, ExecutionTimingStats};
-use reth_evm::{ConfigureEvm, EvmEnvFor};
+use reth_evm::{ConfigureEvm, EvmEnvFor, EvmTypesFor};
 use reth_execution_cache::TxPoolPrewarmCacheSnapshot;
 use reth_primitives_traits::{BlockTy, NodePrimitives};
 use std::sync::Arc;
@@ -19,9 +19,7 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub hash: B256,
     /// Hash of the parent block.
     pub parent_hash: B256,
-    /// State root of the parent block.
-    /// Used for sparse trie continuation: if the preserved trie's anchor matches this,
-    /// the trie can be reused directly.
+    /// State root of the parent block, used as the base state for execution.
     pub parent_state_root: B256,
     /// Number of transactions in the block.
     /// Used to determine parallel worker count for prewarming.
@@ -39,6 +37,12 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     ///
     /// Can be None if txpool prewarming is disabled or the snapshot is not ready for some reason.
     pub txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
+    /// Results of pool transactions executed on top of the parent state that prewarming may
+    /// reuse.
+    ///
+    /// None if txpool prewarming does not record results or the block environment differs from
+    /// the predicted one.
+    pub(crate) pool_seeds: Option<PoolSeeds<EvmTypesFor<Evm>>>,
 }
 
 impl<Evm: ConfigureEvm> ExecutionEnv<Evm>
@@ -58,6 +62,7 @@ where
             withdrawals: None,
             decoded_bal: None,
             txpool_snapshot: None,
+            pool_seeds: None,
         }
     }
 }

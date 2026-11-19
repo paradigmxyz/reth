@@ -19,7 +19,7 @@ use reth_rpc_eth_types::{
     error::{FromEvmError, IntoEthApiError},
     EthApiError, PendingBlockEnv, RpcInvalidTransactionError, SignError,
 };
-use reth_rpc_server_types::constants::DEFAULT_MAX_STORAGE_VALUES_SLOTS;
+use reth_rpc_server_types::constants::{DEFAULT_MAX_PROOF_SLOTS, DEFAULT_MAX_STORAGE_VALUES_SLOTS};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, StateProvider, StateProviderBox, StateProviderFactory,
 };
@@ -97,12 +97,11 @@ pub trait EthState: LoadState + SpawnBlocking {
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         self.spawn_blocking_io_with_state(block_id.unwrap_or_default(), move |_, state| {
-            Ok(B256::new(
+            Ok(B256::from(
                 state
                     .storage(address, index.as_b256())
                     .map_err(Self::Error::from_eth_err)?
-                    .unwrap_or_default()
-                    .to_be_bytes(),
+                    .unwrap_or_default(),
             ))
         })
     }
@@ -140,7 +139,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                             .storage(address, slot.as_b256())
                             .map_err(Self::Error::from_eth_err)?
                             .unwrap_or_default();
-                        values.push(B256::new(value.to_be_bytes()));
+                        values.push(B256::from(value));
                     }
                     result.insert(address, values);
                 }
@@ -152,6 +151,9 @@ pub trait EthState: LoadState + SpawnBlocking {
     }
 
     /// Returns values stored of given account, with Merkle-proof, at given blocknumber.
+    ///
+    /// Enforces a cap of [`DEFAULT_MAX_PROOF_SLOTS`] on the number of requested keys, before a
+    /// proof permit is acquired.
     fn get_proof(
         &self,
         address: Address,
@@ -164,6 +166,13 @@ pub trait EthState: LoadState + SpawnBlocking {
     where
         Self: EthApiSpec,
     {
+        if keys.len() > DEFAULT_MAX_PROOF_SLOTS {
+            return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(format!(
+                "storage key count {} exceeds limit {DEFAULT_MAX_PROOF_SLOTS}",
+                keys.len(),
+            ))));
+        }
+
         Ok(async move {
             let permit = self
                 .acquire_owned_tracing()
@@ -180,13 +189,16 @@ pub trait EthState: LoadState + SpawnBlocking {
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
                     .map_err(Self::Error::from_eth_err)?;
-                Ok(proof.into_eip1186_response(keys))
+                Ok(proof.into_eip1186_response_with(keys, true))
             })
             .await
         })
     }
 
     /// Returns account and storage proofs for multiple targets at the given block number.
+    ///
+    /// Enforces a cap of [`DEFAULT_MAX_PROOF_SLOTS`] on both the number of targets and the total
+    /// slot count across all targets, before a proof permit is acquired.
     fn get_multi_proof(
         &self,
         targets: Vec<(Address, Vec<B256>)>,
@@ -198,6 +210,19 @@ pub trait EthState: LoadState + SpawnBlocking {
     where
         Self: EthApiSpec,
     {
+        if targets.len() > DEFAULT_MAX_PROOF_SLOTS {
+            return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(format!(
+                "target count {} exceeds limit {DEFAULT_MAX_PROOF_SLOTS}",
+                targets.len(),
+            ))));
+        }
+        let total_slots: usize = targets.iter().map(|(_, slots)| slots.len()).sum();
+        if total_slots > DEFAULT_MAX_PROOF_SLOTS {
+            return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(format!(
+                "total slot count {total_slots} exceeds limit {DEFAULT_MAX_PROOF_SLOTS}",
+            ))));
+        }
+
         Ok(async move {
             let permit = self
                 .acquire_owned_tracing()
@@ -216,16 +241,17 @@ pub trait EthState: LoadState + SpawnBlocking {
                 for (address, slots) in &targets {
                     let hashed_address = keccak256(address);
                     proof_targets.account_targets.push(ProofV2Target::new(hashed_address));
-                    proof_targets
-                        .storage_targets
-                        .entry(hashed_address)
-                        .or_default()
-                        .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
+                    if !slots.is_empty() {
+                        proof_targets
+                            .storage_targets
+                            .entry(hashed_address)
+                            .or_default()
+                            .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
+                    }
                 }
 
-                let multiproof = state
-                    .multiproof_v2(Default::default(), proof_targets)
-                    .map_err(Self::Error::from_eth_err)?;
+                let multiproof =
+                    state.multiproof_v2(proof_targets, false).map_err(Self::Error::from_eth_err)?;
 
                 targets
                     .into_iter()
@@ -236,7 +262,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                             .map_err(Self::Error::from_eth_err)?;
                         let storage_keys =
                             slots.into_iter().map(JsonStorageKey::from).collect::<Vec<_>>();
-                        Ok(proof.into_eip1186_response(storage_keys))
+                        Ok(proof.into_eip1186_response_with(storage_keys, true))
                     })
                     .collect::<Result<Vec<_>, Self::Error>>()
             })
@@ -260,23 +286,20 @@ pub trait EthState: LoadState + SpawnBlocking {
                 let account = state.basic_account(&address).map_err(Self::Error::from_eth_err)?;
                 let Some(account) = account else { return Ok(None) };
 
-                let balance = account.balance;
-                let nonce = account.nonce;
-                let code_hash = account.bytecode_hash.unwrap_or(KECCAK_EMPTY);
-
                 // Provide a default `HashedStorage` value in order to
                 // get the storage root hash of the current state.
                 let storage_root = state
                     .storage_root(address, Default::default())
                     .map_err(Self::Error::from_eth_err)?;
 
-                Ok(Some(Account { balance, nonce, code_hash, storage_root }))
+                Ok(Some(account.into_trie_account(storage_root)))
             })
             .await
         }
     }
 
     /// Retrieves the account's balance, nonce, and code for a given address.
+    #[allow(clippy::needless_update)]
     fn get_account_info(
         &self,
         address: Address,
@@ -300,7 +323,14 @@ pub trait EthState: LoadState + SpawnBlocking {
                     .original_bytes()
             };
 
-            Ok(AccountInfo { balance, nonce, code })
+            Ok(AccountInfo {
+                balance,
+                nonce,
+                code,
+                #[cfg(feature = "account-ext")]
+                extension: account.extension,
+                ..Default::default()
+            })
         })
     }
 }
@@ -474,7 +504,7 @@ pub trait LoadState:
         >,
     > + Send
     where
-        Self: SpawnBlocking + LoadBlock,
+        Self: LoadBlock,
     {
         async move {
             if at.is_pending() {
@@ -554,38 +584,50 @@ pub trait LoadState:
     {
         let at = block_id.unwrap_or_default();
         self.spawn_blocking_io_with_state(at, move |this, state| {
-            // first fetch the on chain nonce of the account
-            let on_chain_account_nonce = state
-                .account_nonce(&address)
-                .map_err(Self::Error::from_eth_err)?
-                .unwrap_or_default();
+            this.transaction_count_with_state(address, at, &state)
+        })
+    }
 
-            if at.is_pending() {
-                // for pending tag we need to find the highest nonce of txn in the pending state.
-                if let Some(highest_pool_tx) = this
-                    .pool()
-                    .get_highest_consecutive_transaction_by_sender(address, on_chain_account_nonce)
+    /// Returns the number of transactions sent from an address, given the state at `at`.
+    ///
+    /// If `at` is the pending tag, this accounts for the sender's pool transactions that follow
+    /// the account's nonce in `state` without a gap. Called by [`Self::transaction_count`] once
+    /// the state is open, so implementations can choose the state the nonce is read from.
+    fn transaction_count_with_state(
+        &self,
+        address: Address,
+        at: BlockId,
+        state: &StateProviderBox,
+    ) -> Result<U256, Self::Error> {
+        // first fetch the on chain nonce of the account
+        let on_chain_account_nonce =
+            state.account_nonce(&address).map_err(Self::Error::from_eth_err)?.unwrap_or_default();
+
+        if at.is_pending() {
+            // for pending tag we need to find the highest nonce of txn in the pending state.
+            if let Some(highest_pool_tx) = self
+                .pool()
+                .get_highest_consecutive_transaction_by_sender(address, on_chain_account_nonce)
+            {
                 {
-                    {
-                        // and the corresponding txcount is nonce + 1 of the highest tx in the pool
-                        // (on chain nonce is increased after tx)
-                        let next_tx_nonce =
-                            highest_pool_tx.nonce().checked_add(1).ok_or_else(|| {
-                                Self::Error::from(EthApiError::InvalidTransaction(
-                                    RpcInvalidTransactionError::NonceMaxValue,
-                                ))
-                            })?;
+                    // and the corresponding txcount is nonce + 1 of the highest tx in the pool
+                    // (on chain nonce is increased after tx)
+                    let next_tx_nonce =
+                        highest_pool_tx.nonce().checked_add(1).ok_or_else(|| {
+                            Self::Error::from(EthApiError::InvalidTransaction(
+                                RpcInvalidTransactionError::NonceMaxValue,
+                            ))
+                        })?;
 
-                        // guard against drifts in the pool
-                        let next_tx_nonce = on_chain_account_nonce.max(next_tx_nonce);
+                    // guard against drifts in the pool
+                    let next_tx_nonce = on_chain_account_nonce.max(next_tx_nonce);
 
-                        let tx_count = on_chain_account_nonce.max(next_tx_nonce);
-                        return Ok(U256::from(tx_count));
-                    }
+                    let tx_count = on_chain_account_nonce.max(next_tx_nonce);
+                    return Ok(U256::from(tx_count));
                 }
             }
-            Ok(U256::from(on_chain_account_nonce))
-        })
+        }
+        Ok(U256::from(on_chain_account_nonce))
     }
 
     /// Returns code of given account, at the given identifier.

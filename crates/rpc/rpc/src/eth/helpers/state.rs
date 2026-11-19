@@ -1,12 +1,15 @@
 //! Contains RPC handler implementations specific to state.
 
 use crate::EthApi;
+use alloy_eips::BlockId;
+use alloy_primitives::{Address, U256};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{EthState, LoadPendingBlock, LoadState},
-    RpcNodeCore,
+    helpers::{EthState, LoadPendingBlock, LoadState, SpawnBlocking},
+    FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
+use reth_storage_api::StateProviderFactory;
 
 impl<N, Rpc> EthState for EthApi<N, Rpc>
 where
@@ -22,6 +25,29 @@ where
     Rpc: RpcConvert<Primitives = N::Primitives>,
     Self: LoadPendingBlock,
 {
+    /// Reads the nonce from the provider's state instead of a locally built pending block.
+    ///
+    /// A local pending block only applies pool transactions on top of the latest state, and the
+    /// pool lookup for the pending tag already accounts for the sender's transactions, so
+    /// building the block and its state overlay only to read one nonce is redundant.
+    fn transaction_count(
+        &self,
+        address: Address,
+        block_id: Option<BlockId>,
+    ) -> impl Future<Output = Result<U256, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+    {
+        let at = block_id.unwrap_or_default();
+        self.spawn_blocking_io(move |this| {
+            let state = if at.is_latest() {
+                this.latest_state()?
+            } else {
+                this.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)?
+            };
+            this.transaction_count_with_state(address, at, &state)
+        })
+    }
 }
 
 #[cfg(test)]
@@ -35,6 +61,7 @@ mod tests {
         Address, StorageKey, StorageValue, B256, U256,
     };
     use alloy_rpc_types_eth::TransactionRequest;
+    use alloy_serde::JsonStorageKey;
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::Block;
     use reth_evm_ethereum::EthEvmConfig;
@@ -49,12 +76,16 @@ mod tests {
         EthApiTypes,
     };
     use reth_rpc_eth_types::{EthApiSettings, EthStateCache, PendingBlock};
+    use reth_rpc_server_types::constants::DEFAULT_MAX_PROOF_SLOTS;
     use reth_storage_api::{StateProviderBox, StateProviderFactory};
     use reth_tasks::{
         pool::{BlockingTaskGuard, BlockingTaskPool},
         Runtime,
     };
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_transaction_pool::{
+        test_utils::{testing_pool, MockTransaction, TestPool},
+        TransactionOrigin, TransactionPool,
+    };
     use std::{future::Future, sync::Arc, time::Duration};
     use tokio::sync::{Mutex, Semaphore};
 
@@ -114,6 +145,84 @@ mod tests {
         let address = Address::random();
         let account = eth_api.get_account(address, Default::default()).await.unwrap();
         assert!(account.is_none());
+    }
+
+    #[test]
+    fn test_get_proof_key_cap() {
+        let eth_api = noop_eth_api();
+        let address = Address::random();
+        let keys = |len| vec![JsonStorageKey::from(B256::ZERO); len];
+
+        assert!(eth_api.get_proof(address, keys(DEFAULT_MAX_PROOF_SLOTS), None).is_ok());
+
+        let Err(err) = eth_api.get_proof(address, keys(DEFAULT_MAX_PROOF_SLOTS + 1), None) else {
+            panic!("expected over-limit request to be rejected");
+        };
+        assert_eq!(err.to_string(), "storage key count 1025 exceeds limit 1024");
+    }
+
+    #[test]
+    fn test_get_multi_proof_cap() {
+        let eth_api = noop_eth_api();
+        let address = Address::random();
+
+        // Exactly at the limit, on both axes.
+        let targets = vec![(address, vec![B256::ZERO; DEFAULT_MAX_PROOF_SLOTS])];
+        assert!(eth_api.get_multi_proof(targets, None).is_ok());
+        let targets = vec![(address, Vec::new()); DEFAULT_MAX_PROOF_SLOTS];
+        assert!(eth_api.get_multi_proof(targets, None).is_ok());
+
+        // Too many slots in a single target.
+        let targets = vec![(address, vec![B256::ZERO; DEFAULT_MAX_PROOF_SLOTS + 1])];
+        let Err(err) = eth_api.get_multi_proof(targets, None) else {
+            panic!("expected over-limit request to be rejected");
+        };
+        assert_eq!(err.to_string(), "total slot count 1025 exceeds limit 1024");
+
+        // Too many slots in total, spread across targets.
+        let targets = vec![
+            (address, vec![B256::ZERO; DEFAULT_MAX_PROOF_SLOTS]),
+            (Address::random(), vec![B256::ZERO]),
+        ];
+        let Err(err) = eth_api.get_multi_proof(targets, None) else {
+            panic!("expected over-limit request to be rejected");
+        };
+        assert_eq!(err.to_string(), "total slot count 1025 exceeds limit 1024");
+
+        // Too many targets without any slots.
+        let targets = vec![(address, Vec::new()); DEFAULT_MAX_PROOF_SLOTS + 1];
+        let Err(err) = eth_api.get_multi_proof(targets, None) else {
+            panic!("expected over-limit request to be rejected");
+        };
+        assert_eq!(err.to_string(), "target count 1025 exceeds limit 1024");
+    }
+
+    #[cfg(feature = "account-ext")]
+    #[tokio::test]
+    async fn test_get_account_extension() {
+        let address = Address::random();
+        let extension = reth_primitives_traits::AccountExtension::copy_from_slice(&[0x01]);
+        let eth_api = mock_eth_api(AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(0, U256::ZERO).with_extension(extension.clone()),
+        )]));
+        eth_api.provider().add_block(B256::ZERO, Block::default());
+
+        // An account whose only non-default field is its extension still exists.
+        let info = eth_api.get_account_info(address, Default::default()).await.unwrap();
+        assert!(!info.is_empty());
+        assert_eq!(info.extension, extension);
+        let json = serde_json::to_value(&info).unwrap();
+        assert_eq!(json["extension"], "0x01");
+        assert_eq!(serde_json::from_value::<alloy_rpc_types_eth::AccountInfo>(json).unwrap(), info);
+
+        let account = eth_api.get_account(address, Default::default()).await.unwrap().unwrap();
+        assert_eq!(account.extension, extension);
+
+        let missing =
+            eth_api.get_account_info(Address::random(), Default::default()).await.unwrap();
+        assert!(missing.is_empty());
+        assert!(serde_json::to_value(missing).unwrap().get("extension").is_none());
     }
 
     #[test]
@@ -268,5 +377,36 @@ mod tests {
             U256::from(42)
         );
         assert_eq!(eth_api.balance(address, None).await.unwrap(), U256::from(1337));
+    }
+
+    #[tokio::test]
+    async fn pending_transaction_count_skips_local_pending_block() {
+        let address = Address::random();
+        let accounts = AddressMap::from_iter([(address, ExtendedAccount::new(7, U256::ZERO))]);
+        let eth_api = mock_eth_api(accounts);
+        let mut block = Block::default();
+        block.header.number = 13_000_000;
+        block.header.timestamp = 1_629_000_000;
+        block.header.gas_limit = 30_000_000;
+        block.header.base_fee_per_gas = Some(1_000_000_000);
+        eth_api.provider().add_block(B256::ZERO, block);
+
+        let pending = Some(BlockId::pending());
+        let count = EthState::transaction_count(&eth_api, address, pending).await.unwrap();
+        assert_eq!(count, U256::from(7));
+
+        // Nonces 7 and 8 follow the account nonce, nonce 10 is gapped.
+        for nonce in [7, 8, 10] {
+            let tx = MockTransaction::eip1559().with_sender(address).with_nonce(nonce);
+            eth_api.pool().add_transaction(TransactionOrigin::External, tx).await.unwrap();
+        }
+        let count = EthState::transaction_count(&eth_api, address, pending).await.unwrap();
+        assert_eq!(count, U256::from(9));
+        assert_eq!(
+            EthState::transaction_count(&eth_api, address, None).await.unwrap(),
+            U256::from(7)
+        );
+
+        assert!(eth_api.pending_block().lock().await.is_none());
     }
 }

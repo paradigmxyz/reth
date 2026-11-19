@@ -1,6 +1,6 @@
 use crate::{
-    BlockBodyIndicesProvider, BlockNumReader, HeaderProvider, ReceiptProvider,
-    ReceiptProviderIdExt, TransactionVariant, TransactionsProvider,
+    BlockBodyIndicesProvider, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt,
+    TransactionVariant, TransactionsProvider,
 };
 use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -48,13 +48,12 @@ pub type ProviderBlock<P> = <P as BlockReader>::Block;
 ///
 /// If not requested otherwise, implementers of this trait should prioritize fetching blocks from
 /// the database.
+///
+/// Lookups by hash may also return non-canonical blocks the engine tree still holds, such as side
+/// chain or reorged-out blocks. Use [`Self::find_block_by_hash`] with [`BlockSource::Canonical`]
+/// when only canonical blocks are wanted.
 pub trait BlockReader:
-    BlockNumReader
-    + HeaderProvider
-    + BlockBodyIndicesProvider
-    + TransactionsProvider
-    + ReceiptProvider
-    + Send
+    HeaderProvider + BlockBodyIndicesProvider + TransactionsProvider + ReceiptProvider
 {
     /// The block type this provider reads.
     type Block: reth_primitives_traits::Block<
@@ -166,7 +165,7 @@ pub trait BlockReader:
     fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>>;
 }
 
-impl<T: BlockReader + Send + Sync> BlockReader for Arc<T> {
+impl<T: BlockReader + Sync> BlockReader for Arc<T> {
     type Block = T::Block;
 
     fn find_block_by_hash(
@@ -234,7 +233,7 @@ impl<T: BlockReader + Send + Sync> BlockReader for Arc<T> {
     }
 }
 
-impl<T: BlockReader + Send + Sync> BlockReader for &T {
+impl<T: BlockReader + Sync> BlockReader for &T {
     type Block = T::Block;
 
     fn find_block_by_hash(
@@ -325,7 +324,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
     fn pending_header(&self) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.sealed_header_by_id(BlockNumberOrTag::Pending.into())
+        self.sealed_header_by_id(BlockId::pending())
     }
 
     /// Returns the latest block header if available
@@ -333,7 +332,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
     fn latest_header(&self) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.sealed_header_by_id(BlockNumberOrTag::Latest.into())
+        self.sealed_header_by_id(BlockId::latest())
     }
 
     /// Returns the safe block header if available
@@ -341,7 +340,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
     fn safe_header(&self) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.sealed_header_by_id(BlockNumberOrTag::Safe.into())
+        self.sealed_header_by_id(BlockId::safe())
     }
 
     /// Returns the finalized block header if available
@@ -349,7 +348,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
     fn finalized_header(&self) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.sealed_header_by_id(BlockNumberOrTag::Finalized.into())
+        self.sealed_header_by_id(BlockId::finalized())
     }
 
     /// Returns the block with the matching [`BlockId`] from the database.
@@ -368,7 +367,10 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         match id {
-            BlockId::Hash(hash) => self.recovered_block(hash.block_hash.into(), transaction_kind),
+            BlockId::Hash(_) => self.block_hash_for_id(id)?.map_or_else(
+                || Ok(None),
+                |hash| self.recovered_block(hash.into(), transaction_kind),
+            ),
             BlockId::Number(num) => self
                 .convert_block_number(num)?
                 .map_or_else(|| Ok(None), |num| self.recovered_block(num.into(), transaction_kind)),

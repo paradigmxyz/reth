@@ -1,5 +1,9 @@
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
+use jiff::{
+    fmt::friendly::{SpanParser, SpanPrinter},
+    SignedDuration, Span, SpanRelativeTo, SpanRound, Unit,
+};
 use reth_fs_util::FsPathError;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
@@ -38,6 +42,31 @@ pub fn format_duration_as_secs_or_ms(duration: Duration) -> String {
         format!("{}", duration.as_secs())
     } else {
         format!("{}ms", duration.as_millis())
+    }
+}
+
+/// Parses a human-readable duration such as `30s`, `500ms`, `5min`, `1h 30m` or `2d`.
+///
+/// Days are 24 hours and weeks are 7 days. Months and years are rejected because their length
+/// varies. A bare `0` is accepted as zero.
+pub fn parse_duration(arg: &str) -> Result<Duration, jiff::Error> {
+    if arg.trim() == "0" {
+        return Ok(Duration::ZERO)
+    }
+    let span = SpanParser::new().parse_span(arg)?;
+    span.to_duration(SpanRelativeTo::days_are_24_hours())?.try_into()
+}
+
+/// Formats a [Duration] in the format parsed by [`parse_duration`], e.g. `1d 2h 30m 500ms`.
+pub fn format_duration(duration: Duration) -> String {
+    let printer = SpanPrinter::new();
+    let span = SignedDuration::try_from(duration)
+        .and_then(Span::try_from)
+        .and_then(|span| span.round(SpanRound::new().largest(Unit::Day).days_are_24_hours()));
+    match span {
+        Ok(span) => printer.span_to_string(&span),
+        // A span holds at most ~20,000 years, so longer durations are printed in hours.
+        Err(_) => printer.unsigned_duration_to_string(&duration),
     }
 }
 
@@ -178,5 +207,50 @@ mod tests {
 
         // Test invalid input fails
         assert!(parse_ether_value("abc").is_err());
+    }
+
+    #[test]
+    fn parse_human_durations() {
+        for (value, expected) in [
+            ("0", Duration::ZERO),
+            ("0s", Duration::ZERO),
+            ("500ms", Duration::from_millis(500)),
+            ("1.5s", Duration::from_millis(1500)),
+            ("30sec", Duration::from_secs(30)),
+            ("5min", Duration::from_secs(300)),
+            ("1h 30m", Duration::from_secs(5400)),
+            ("1h30m", Duration::from_secs(5400)),
+            ("12hours", Duration::from_secs(12 * 3600)),
+            ("2d", Duration::from_secs(2 * 86400)),
+            ("1d 2h", Duration::from_secs(86400 + 7200)),
+            ("1week", Duration::from_secs(7 * 86400)),
+            ("100us", Duration::from_micros(100)),
+        ] {
+            assert_eq!(parse_duration(value).unwrap(), expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn parse_duration_rejects_invalid() {
+        for value in ["", "3600", "1month", "1y", "-1s"] {
+            assert!(parse_duration(value).is_err(), "{value}");
+        }
+    }
+
+    #[test]
+    fn format_human_durations() {
+        for (duration, expected) in [
+            (Duration::ZERO, "0s"),
+            (Duration::from_millis(500), "500ms"),
+            (Duration::from_millis(1500), "1s 500ms"),
+            (Duration::from_secs(90), "1m 30s"),
+            (Duration::from_secs(3600), "1h"),
+            (Duration::from_secs(7 * 86400 + 5), "7d 5s"),
+            (Duration::new(3725, 1_000_500), "1h 2m 5s 1ms 500ns"),
+        ] {
+            assert_eq!(format_duration(duration), expected);
+            assert_eq!(parse_duration(expected).unwrap(), duration);
+        }
+        assert_eq!(format_duration(Duration::from_secs(u64::MAX)), "5124095576030431h 15s");
     }
 }

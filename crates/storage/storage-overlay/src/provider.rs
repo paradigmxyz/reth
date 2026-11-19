@@ -1,5 +1,8 @@
-use crate::{database_state_frontiers, ExecutionOverlay, OverlayBuilder, StateTrieOverlay};
-use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
+use crate::{
+    database_state_frontiers, multiproof_calculator::OverlayMultiProofCalculator, ExecutionOverlay,
+    OverlayBuilder, StateTrieOverlay,
+};
+use alloy_primitives::{map::B256Map, Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx, DatabaseError};
 use reth_errors::{ProviderError, ProviderResult};
@@ -22,6 +25,7 @@ use reth_trie::{
         zero_destroyed_account_storage, HashedCursorFactory, HashedPostStateCursorFactory,
     },
     proof::{Proof, StorageProof as TrieStorageProof},
+    proof_v2::ProofCursorMetrics,
     trie_cursor::{
         InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
         TrieStorageCursor,
@@ -39,7 +43,15 @@ use reth_trie_db::{
     DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
     PackedStoragesTrie,
 };
-use std::{cell::OnceCell, fmt, ops::Deref, sync::Arc, time::Instant};
+use std::{
+    cell::{OnceCell, RefCell},
+    fmt,
+    marker::PhantomPinned,
+    ops::Deref,
+    pin::Pin,
+    sync::Arc,
+    time::Instant,
+};
 use tracing::instrument;
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
@@ -59,25 +71,47 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     state_trie_overlay_cache: StateTrieOverlayCache,
     /// Metrics for provider factory operations.
     metrics: OverlayStateProviderFactoryMetrics,
+    /// Cursor metric handles shared by the multiproof calculators of every provider.
+    proof_cursor_metrics: ProofCursorMetrics,
+    /// Revealed storage roots from the reused sparse trie, shared across proof workers.
+    known_storage_roots: Arc<B256Map<B256>>,
 }
 
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     /// Create a new overlay state provider factory.
     pub fn new(factory: F, overlay_builder: OverlayBuilder<N>) -> Self {
+        let manager = overlay_builder.overlay_manager();
         Self {
             factory,
+            metrics: manager.provider_metrics().clone(),
+            proof_cursor_metrics: manager.proof_cursor_metrics().clone(),
             overlay_builder,
             state_trie_overlay_cache: Default::default(),
-            metrics: Default::default(),
+            known_storage_roots: Default::default(),
         }
     }
 
     /// Skips managed overlay construction when this factory is used by a task that reused a sparse
     /// trie covering both durable frontiers through the parent.
-    pub fn with_skip_overlay_for_reused_sparse_trie(mut self, anchor_hash: B256) -> Self {
+    ///
+    /// Trie and hashed cursors then read durable database state only. V2 account proofs use the
+    /// supplied storage roots, which is valid solely for revealing nodes into that reused sparse
+    /// trie. Methods that layer the overlay into their input, such as state
+    /// and storage roots, account and storage proofs, V1 multiproofs, witnesses and
+    /// [`HashedPostStateProvider::hashed_post_state`], return
+    /// [`ProviderError::UnsupportedProvider`].
+    ///
+    /// `known_storage_roots` must contain the revealed storage roots at this factory's parent,
+    /// keyed by hashed account address. Account proofs reuse them to avoid root calculation.
+    pub fn with_skip_overlay_for_reused_sparse_trie(
+        mut self,
+        anchor_hash: B256,
+        known_storage_roots: B256Map<B256>,
+    ) -> Self {
         self.overlay_builder =
             self.overlay_builder.with_skip_overlay_for_reused_sparse_trie(anchor_hash);
         self.state_trie_overlay_cache = Default::default();
+        self.known_storage_roots = Arc::new(known_storage_roots);
         self
     }
 }
@@ -112,61 +146,64 @@ where
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new_with_caches(
-            provider,
-            self.overlay_builder.clone(),
-            Arc::clone(&self.state_trie_overlay_cache),
+        Ok(OverlayStateProvider::from_parts(
+            OwnedProvider(provider),
+            Some(self.overlay_builder.clone()),
+            Some(Arc::clone(&self.state_trie_overlay_cache)),
             self.metrics.clone(),
+            self.proof_cursor_metrics.clone(),
+            self.known_storage_roots.clone(),
             is_v2,
         ))
     }
 }
 
 /// State provider with lazily resolved state trie and execution overlays.
-pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives> {
-    provider: Provider,
+pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives>
+where
+    Provider: Deref,
+    Provider::Target: DBProvider,
+{
+    /// Multiproof calculator reused across requests with the same `requires_masks` flag.
+    ///
+    /// It borrows `provider`'s transaction and the state trie overlays, so `Drop` releases it
+    /// first.
+    multiproof_calculator:
+        RefCell<Option<CachedMultiProofCalculator<<Provider::Target as DbTxProvider>::Tx>>>,
+    /// The `!Unpin` pointee preserves cached transaction borrows when the owning box moves.
+    provider: Pin<Box<(Provider, PhantomPinned)>>,
     overlay_builder: Option<OverlayBuilder<N>>,
-    state_trie_overlay_cache: StateTrieOverlayCache,
+    /// Overlay cache shared with the factory that created this provider, if any.
+    state_trie_overlay_cache: Option<StateTrieOverlayCache>,
     metrics: OverlayStateProviderFactoryMetrics,
+    proof_cursor_metrics: ProofCursorMetrics,
+    /// Revealed storage roots from the reused sparse trie, shared across proof workers.
+    known_storage_roots: Arc<B256Map<B256>>,
     state_trie_overlay: OnceCell<StateTrieOverlay>,
     state_trie_overlay_with_trie_changesets: OnceCell<StateTrieOverlay>,
     execution_overlay: OnceCell<CachedExecutionOverlay>,
     is_v2: bool,
 }
 
-impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, N> {
+impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, N> {
     /// Creates an overlay state provider over an already-open database provider.
     pub fn new(provider: Provider, overlay_builder: OverlayBuilder<N>) -> Self
     where
         Provider: StorageSettingsCache,
     {
         let is_v2 = provider.cached_storage_settings().is_v2();
-        Self::new_with_caches(
-            provider,
-            overlay_builder,
-            Default::default(),
+        let manager = overlay_builder.overlay_manager();
+        let metrics = manager.provider_metrics().clone();
+        let proof_cursor_metrics = manager.proof_cursor_metrics().clone();
+        Self::from_parts(
+            OwnedProvider(provider),
+            Some(overlay_builder),
+            None,
+            metrics,
+            proof_cursor_metrics,
             Default::default(),
             is_v2,
         )
-    }
-
-    const fn new_with_caches(
-        provider: Provider,
-        overlay_builder: OverlayBuilder<N>,
-        state_trie_overlay_cache: StateTrieOverlayCache,
-        metrics: OverlayStateProviderFactoryMetrics,
-        is_v2: bool,
-    ) -> Self {
-        Self {
-            provider: OwnedProvider(provider),
-            overlay_builder: Some(overlay_builder),
-            state_trie_overlay_cache,
-            metrics,
-            state_trie_overlay: OnceCell::new(),
-            state_trie_overlay_with_trie_changesets: OnceCell::new(),
-            execution_overlay: OnceCell::new(),
-            is_v2,
-        }
     }
 
     #[cfg(test)]
@@ -175,39 +212,42 @@ impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, 
         execution_overlay: Arc<ExecutionOverlay>,
         is_v2: bool,
     ) -> Self {
-        Self {
-            provider: OwnedProvider(provider),
-            overlay_builder: None,
-            state_trie_overlay_cache: Default::default(),
-            metrics: Default::default(),
-            state_trie_overlay: OnceCell::new(),
-            state_trie_overlay_with_trie_changesets: OnceCell::new(),
-            execution_overlay: OnceCell::from(CachedExecutionOverlay {
-                overlay: execution_overlay,
-                historical_fallback: None,
-            }),
+        let mut provider = Self::from_parts(
+            OwnedProvider(provider),
+            None,
+            None,
+            Default::default(),
+            Default::default(),
+            Default::default(),
             is_v2,
-        }
+        );
+        provider.execution_overlay = OnceCell::from(CachedExecutionOverlay {
+            overlay: execution_overlay,
+            historical_fallback: None,
+        });
+        provider
     }
 }
 
-impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
+impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
     /// Creates an overlay state provider over a borrowed database provider.
     pub fn new_ref(provider: &'a Provider, overlay_builder: OverlayBuilder<N>) -> Self
     where
         Provider: StorageSettingsCache,
     {
         let is_v2 = provider.cached_storage_settings().is_v2();
-        Self {
+        let manager = overlay_builder.overlay_manager();
+        let metrics = manager.provider_metrics().clone();
+        let proof_cursor_metrics = manager.proof_cursor_metrics().clone();
+        Self::from_parts(
             provider,
-            overlay_builder: Some(overlay_builder),
-            state_trie_overlay_cache: Default::default(),
-            metrics: Default::default(),
-            state_trie_overlay: OnceCell::new(),
-            state_trie_overlay_with_trie_changesets: OnceCell::new(),
-            execution_overlay: OnceCell::new(),
+            Some(overlay_builder),
+            None,
+            metrics,
+            proof_cursor_metrics,
+            Default::default(),
             is_v2,
-        }
+        )
     }
 
     pub(crate) fn new_with_state_trie(
@@ -215,26 +255,54 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
         state_trie_overlay: StateTrieOverlay,
         is_v2: bool,
     ) -> Self {
-        Self {
+        let mut provider = Self::from_parts(
             provider,
-            overlay_builder: None,
-            state_trie_overlay_cache: Default::default(),
-            metrics: Default::default(),
-            state_trie_overlay: OnceCell::from(state_trie_overlay.clone()),
-            state_trie_overlay_with_trie_changesets: OnceCell::from(state_trie_overlay),
-            execution_overlay: OnceCell::new(),
+            None,
+            None,
+            Default::default(),
+            Default::default(),
+            Default::default(),
             is_v2,
-        }
+        );
+        provider.state_trie_overlay = OnceCell::from(state_trie_overlay.clone());
+        provider.state_trie_overlay_with_trie_changesets = OnceCell::from(state_trie_overlay);
+        provider
     }
 }
 
 impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: Sized,
+    Provider::Target: DBProvider,
 {
+    /// Creates a provider whose overlays resolve lazily and that has no cached multiproof
+    /// calculator.
+    fn from_parts(
+        provider: Provider,
+        overlay_builder: Option<OverlayBuilder<N>>,
+        state_trie_overlay_cache: Option<StateTrieOverlayCache>,
+        metrics: OverlayStateProviderFactoryMetrics,
+        proof_cursor_metrics: ProofCursorMetrics,
+        known_storage_roots: Arc<B256Map<B256>>,
+        is_v2: bool,
+    ) -> Self {
+        Self {
+            multiproof_calculator: RefCell::new(None),
+            provider: Box::pin((provider, PhantomPinned)),
+            overlay_builder,
+            state_trie_overlay_cache,
+            metrics,
+            proof_cursor_metrics,
+            known_storage_roots,
+            state_trie_overlay: OnceCell::new(),
+            state_trie_overlay_with_trie_changesets: OnceCell::new(),
+            execution_overlay: OnceCell::new(),
+            is_v2,
+        }
+    }
+
     fn provider(&self) -> &Provider::Target {
-        &self.provider
+        &self.provider.as_ref().get_ref().0
     }
 
     fn state_trie_overlay(&self, trie_changesets: bool) -> ProviderResult<&StateTrieOverlay>
@@ -253,29 +321,34 @@ where
         }
 
         let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(self.provider())?;
-        let overlay = match self.state_trie_overlay_cache.entry((
-            state_trie_tip_block.hash,
-            finish_tip_block.hash,
-            trie_changesets,
-        )) {
-            dashmap::Entry::Occupied(entry) => entry.get().clone(),
-            dashmap::Entry::Vacant(entry) => {
-                self.metrics.state_trie_overlay_cache_misses.increment(1);
-                let overlay = self
-                    .overlay_builder
-                    .as_ref()
-                    .expect("state trie overlay must be initialized or lazily resolvable")
-                    .build_state_trie_overlay_at_frontiers(
-                        self.provider(),
-                        state_trie_tip_block,
-                        finish_tip_block,
-                        trie_changesets,
-                    )?;
-                if !overlay.skipped_for_reused_sparse_trie() {
-                    entry.insert(overlay.clone());
+        let build = || {
+            self.overlay_builder
+                .as_ref()
+                .expect("state trie overlay must be initialized or lazily resolvable")
+                .build_state_trie_overlay_at_frontiers(
+                    self.provider(),
+                    state_trie_tip_block,
+                    finish_tip_block,
+                    trie_changesets,
+                )
+        };
+        let overlay = match &self.state_trie_overlay_cache {
+            Some(cache) => match cache.entry((
+                state_trie_tip_block.hash,
+                finish_tip_block.hash,
+                trie_changesets,
+            )) {
+                dashmap::Entry::Occupied(entry) => entry.get().clone(),
+                dashmap::Entry::Vacant(entry) => {
+                    self.metrics.state_trie_overlay_cache_misses.increment(1);
+                    let overlay = build()?;
+                    if !overlay.skipped_for_reused_sparse_trie() {
+                        entry.insert(overlay.clone());
+                    }
+                    overlay
                 }
-                overlay
-            }
+            },
+            None => build()?,
         };
         let _ = state_trie_overlay.set(overlay);
         Ok(state_trie_overlay.get().expect("state trie overlay was just initialized"))
@@ -350,10 +423,16 @@ where
             )?;
         let historical_fallback = fallback_block_number
             .map(|block_number| {
+                // History is available above the prune checkpoint and above the first block of
+                // the lowest changeset file: a node bootstrapped without changesets from genesis
+                // has no prune checkpoint, yet its indices only cover blocks with changesets.
+                // Without this floor, keys untouched since then would read as never written.
+                // A checkpoint with no completed block means genesis is already partially pruned.
                 let account_history_block_number = self
                     .provider()
                     .get_prune_checkpoint(PruneSegment::AccountHistory)?
-                    .and_then(|checkpoint| checkpoint.block_number)
+                    .map(|checkpoint| checkpoint.block_number.unwrap_or_default())
+                    .max(self.provider().lowest_account_changeset_block()?)
                     .map(|block_number| block_number + 1);
                 if account_history_block_number.is_some_and(|lowest| block_number < lowest) {
                     return Err(ProviderError::StateAtBlockPruned(block_number))
@@ -362,7 +441,8 @@ where
                 let storage_history_block_number = self
                     .provider()
                     .get_prune_checkpoint(PruneSegment::StorageHistory)?
-                    .and_then(|checkpoint| checkpoint.block_number)
+                    .map(|checkpoint| checkpoint.block_number.unwrap_or_default())
+                    .max(self.provider().lowest_storage_changeset_block()?)
                     .map(|block_number| block_number + 1);
                 if storage_history_block_number.is_some_and(|lowest| block_number < lowest) {
                     return Err(ProviderError::StateAtBlockPruned(block_number))
@@ -382,10 +462,21 @@ where
     }
 }
 
+impl<Provider, N: NodePrimitives> Drop for OverlayStateProvider<Provider, N>
+where
+    Provider: Deref,
+    Provider::Target: DBProvider,
+{
+    fn drop(&mut self) {
+        // The calculator borrows the transaction and overlays, so release it before the fields.
+        self.multiproof_calculator.get_mut().take();
+    }
+}
+
 impl<Provider, N: NodePrimitives> fmt::Debug for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: fmt::Debug + Sized,
+    Provider::Target: DBProvider + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OverlayStateProvider")
@@ -462,9 +553,7 @@ where
 impl<Provider, N: NodePrimitives> BlockHashReader for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: BlockHashReader
-        + DBProvider
-        + Sized
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -516,7 +605,11 @@ where
         if let Some(bytecode) = overlay.code_hashes().get(code_hash) {
             return Ok(Some(reth_primitives_traits::Bytecode(bytecode.clone())));
         }
-        self.provider().tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
+        self.provider()
+            .tx()
+            .prefetch(true)
+            .get_by_encoded_key::<tables::Bytecodes>(code_hash)
+            .map_err(Into::into)
     }
 }
 
@@ -664,13 +757,7 @@ where
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
-            let input = TrieInput::new(
-                Arc::unwrap_or_clone(nodes).into(),
-                Arc::unwrap_or_clone(state).into(),
-                prefix_sets,
-            );
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.provider().tx());
             proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
         })
@@ -682,13 +769,7 @@ where
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
-            let input = TrieInput::new(
-                Arc::unwrap_or_clone(nodes).into(),
-                Arc::unwrap_or_clone(state).into(),
-                prefix_sets,
-            );
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.provider().tx());
             proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
         })
@@ -696,20 +777,38 @@ where
 
     fn multiproof_v2(
         &self,
-        input: TrieInput,
         targets: MultiProofTargetsV2,
+        requires_masks: bool,
     ) -> ProviderResult<DecodedMultiProofV2> {
-        reth_trie_db::with_adapter!(self.provider(), |A| {
-            let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
-            let input = TrieInput::new(
-                Arc::unwrap_or_clone(nodes).into(),
-                Arc::unwrap_or_clone(state).into(),
-                prefix_sets,
-            );
-            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.provider().tx());
-            proof.overlay_multiproof_v2(input, targets).map_err(ProviderError::from)
-        })
+        // Avoid resolving the overlay when there is nothing to prove.
+        if targets.is_empty() {
+            return Ok(DecodedMultiProofV2::default())
+        }
+        let mut calculator_slot = self.multiproof_calculator.borrow_mut();
+        let cached = match &mut *calculator_slot {
+            Some(cached) if cached.requires_masks == requires_masks => cached,
+            slot => {
+                let input = self.state_trie_overlay(requires_masks)?.input();
+                // SAFETY: The transaction lives behind `provider`, which is pinned or borrowed for
+                // the provider's lifetime, and the overlay allocations live in `OnceCell`s that are
+                // never reset. `Drop` releases the calculator before either, and the calculator
+                // never leaves this provider, which is not `Sync`. An owned
+                // transaction therefore only moves between threads together with
+                // the calculator. A borrowed provider is `Send` only if it is
+                // `Sync`, in which case its transaction may be shared.
+                let calculator = unsafe {
+                    OverlayMultiProofCalculator::new(
+                        self.provider().tx(),
+                        input,
+                        self.is_v2,
+                        self.proof_cursor_metrics.clone(),
+                        self.known_storage_roots.clone(),
+                    )
+                };
+                slot.insert(CachedMultiProofCalculator { requires_masks, calculator })
+            }
+        };
+        cached.calculator.multiproof(targets)
     }
 
     fn witness(
@@ -757,7 +856,7 @@ where
 {
     fn hashed_post_state(
         &self,
-        bundle_state: &revm::database::BundleState,
+        bundle_state: &reth_trie_common::bundle_state::BundleState,
     ) -> ProviderResult<HashedPostState> {
         let mut hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
@@ -787,7 +886,6 @@ where
     Provider: Deref,
     Provider::Target: DBProvider
         + HistoryReader
-        + BlockHashReader
         + StorageSettingsCache
         + StageCheckpointReader
         + PruneCheckpointReader
@@ -997,11 +1095,8 @@ type DbStateRoot<'a, TX, A> =
     StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 type DbStorageRoot<'a, TX, A> =
     StorageRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
-type DbStorageProof<'a, TX, A> = TrieStorageProof<
-    'static,
-    DatabaseTrieCursorFactory<&'a TX, A>,
-    DatabaseHashedCursorFactory<&'a TX>,
->;
+type DbStorageProof<'a, TX, A> =
+    TrieStorageProof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 type DbProof<'a, TX, A> =
     Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 
@@ -1017,6 +1112,13 @@ impl<Provider> Deref for OwnedProvider<Provider> {
     }
 }
 
+/// Multiproof calculator cached by [`OverlayStateProvider`].
+struct CachedMultiProofCalculator<TX: DbTx + 'static> {
+    /// Whether the calculator returns masks that match the stored trie.
+    requires_masks: bool,
+    calculator: OverlayMultiProofCalculator<TX>,
+}
+
 fn into_database_error(error: ProviderError) -> DatabaseError {
     match error {
         ProviderError::Database(error) => error,
@@ -1027,9 +1129,10 @@ fn into_database_error(error: ProviderError) -> DatabaseError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ExecutionOverlay, OverlayManager};
+    use crate::{test_utils::canonical_state_for, ExecutionOverlay, OverlayManager};
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{Address, U256};
+    use evm2::{bytecode::Bytecode, evm::AccountInfo};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db_api::{
         models::{
@@ -1039,18 +1142,19 @@ mod tests {
         transaction::DbTxMut,
         BlockNumberList,
     };
-    use reth_primitives_traits::Account;
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-        BlockWriter, ProviderFactory,
+        BlockWriter, ProviderFactory, StaticFileProviderFactory, StaticFileSegment,
+        StaticFileWriter, StorageSettings,
     };
+    use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
-    use reth_storage_api::StageCheckpointWriter;
+    use reth_storage_api::{PruneCheckpointWriter, StageCheckpointWriter};
     use reth_trie::{
-        updates::TrieUpdatesSorted, BranchNodeCompact, ComputedTrieData, HashedPostState,
-        HashedStorage, Nibbles,
+        updates::TrieUpdatesSorted, BranchNodeCompact, HashedPostState, HashedStorage, Nibbles,
+        SortedTrieData,
     };
-    use revm::{bytecode::Bytecode as RevmBytecode, state::AccountInfo};
 
     fn with_unique_trie_data(
         block: &ExecutedBlock<EthPrimitives>,
@@ -1076,7 +1180,7 @@ mod tests {
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
             Arc::clone(&block.execution_output),
-            ComputedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
+            SortedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
         )
     }
 
@@ -1124,8 +1228,9 @@ mod tests {
     fn overlay_cache_is_keyed_by_both_durable_frontiers() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
+        let canonical_state = canonical_state_for(&manager);
         for block in &blocks[2..=3] {
-            manager.insert_block(block.clone());
+            canonical_state.insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory.clone(),
@@ -1159,8 +1264,9 @@ mod tests {
     fn overlays_are_computed_lazily() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
+        let canonical_state = canonical_state_for(&manager);
         for block in &blocks[2..=3] {
-            manager.insert_block(block.clone());
+            canonical_state.insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
@@ -1186,8 +1292,9 @@ mod tests {
     fn state_trie_overlay_cache_is_keyed_by_trie_changesets() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
+        let canonical_state = canonical_state_for(&manager);
         for block in &blocks[2..=3] {
-            manager.insert_block(block.clone());
+            canonical_state.insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
@@ -1219,8 +1326,9 @@ mod tests {
     fn lazy_overlays_survive_manager_block_removal() {
         let (factory, blocks) = setup_frontiers(1, 1);
         let manager = OverlayManager::default();
+        let canonical_state = canonical_state_for(&manager);
         for block in &blocks[2..=3] {
-            manager.insert_block(block.clone());
+            canonical_state.insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
@@ -1228,7 +1336,11 @@ mod tests {
         );
         let provider = state_provider_factory.database_provider_ro().unwrap();
 
-        manager.remove_blocks(blocks[2..=3].iter().map(|block| block.recovered_block().hash()));
+        canonical_state.clear_state();
+        for block in &blocks[2..=3] {
+            let hash = block.recovered_block().hash();
+            assert!(manager.in_memory_state().state_by_hash(hash).is_none());
+        }
 
         let (execution_overlay, _) = provider.execution_overlay().unwrap();
         assert_eq!(
@@ -1245,7 +1357,8 @@ mod tests {
     fn skipped_state_trie_overlay_is_not_cached_or_used_for_state_roots() {
         let (factory, blocks) = setup_frontiers(3, 3);
         let manager = OverlayManager::default();
-        manager.insert_block(blocks[4].clone());
+        let canonical_state = canonical_state_for(&manager);
+        canonical_state.insert_executed(blocks[4].clone());
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
             manager
@@ -1272,7 +1385,7 @@ mod tests {
         let storage_key = B256::with_last_byte(4);
         let storage_value = U256::from(5);
         let code_hash = B256::with_last_byte(6);
-        let bytecode = RevmBytecode::new_raw([0x60, 0x01].into());
+        let bytecode = Bytecode::new_raw([0x60, 0x01].into());
         let mut execution_overlay = ExecutionOverlay::default();
         execution_overlay.accounts_mut().insert(address, Some(account_info.clone()));
         execution_overlay.block_hashes_mut().push(BlockNumHash::new(1, block_hash));
@@ -1288,7 +1401,7 @@ mod tests {
             false,
         );
 
-        assert_eq!(provider.basic_account(&address).unwrap(), Some(Account::from(account_info)));
+        assert_eq!(provider.basic_account(&address).unwrap(), Some(Account::from(&account_info)));
         assert!(provider.basic_account(&Address::with_last_byte(2)).unwrap().is_none());
         assert_eq!(provider.block_hash(1).unwrap(), Some(block_hash));
         assert_eq!(provider.canonical_hashes_range(1, 2).unwrap(), vec![block_hash]);
@@ -1300,6 +1413,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn historical_execution_reads_use_history_indexes() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let address = Address::with_last_byte(1);
@@ -1317,7 +1431,10 @@ mod tests {
             .unwrap();
         provider_rw
             .tx_ref()
-            .put::<tables::AccountChangeSets>(2, AccountBeforeTx { address, info: Some(account) })
+            .put::<tables::AccountChangeSets>(
+                2,
+                AccountBeforeTx { address, info: Some(account.clone()) },
+            )
             .unwrap();
         provider_rw
             .tx_ref()
@@ -1360,5 +1477,107 @@ mod tests {
 
         assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
         assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage));
+    }
+
+    #[test]
+    #[allow(clippy::clone_on_copy)]
+    fn history_starts_above_lowest_changeset_file() {
+        let (factory, blocks) = setup_frontiers(2, 3);
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let address = Address::with_last_byte(1);
+        let storage_key = B256::with_last_byte(2);
+        let account =
+            Account { bytecode_hash: Some(B256::with_last_byte(3)), ..Default::default() };
+        let storage = U256::from(10);
+
+        // The changeset files start at block 2 and hold nothing for it, as on a node bootstrapped
+        // without older changesets, and no history prune checkpoint exists.
+        let static_file_provider = factory.static_file_provider();
+        for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
+        {
+            let mut writer = static_file_provider.get_writer(2, segment).unwrap();
+            writer.initialize_pruned_anchor(2).unwrap();
+            writer.commit().unwrap();
+        }
+
+        // The account and slot were last written before the changeset files start, so they have
+        // no history index entry and only live in plain state.
+        let hashed_address = alloy_primitives::keccak256(address);
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedAccounts>(hashed_address, account.clone())
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                reth_primitives_traits::StorageEntry {
+                    key: alloy_primitives::keccak256(storage_key),
+                    value: storage,
+                },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
+            factory.clone(),
+            OverlayManager::default().overlay_builder(blocks[2].recovered_block().hash()),
+        );
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+        assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
+        assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage));
+
+        // Reverting to block 1 needs the changesets of block 2, which were never stored.
+        let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
+            factory,
+            OverlayManager::default().overlay_builder(blocks[1].recovered_block().hash()),
+        );
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+        assert!(matches!(
+            provider.basic_account(&address),
+            Err(ProviderError::InsufficientChangesets { requested: 1, available })
+                if available == (2..=3)
+        ));
+        assert!(matches!(
+            provider.state_root(HashedPostState::default()),
+            Err(ProviderError::InsufficientChangesets { requested: 1, available })
+                if available == (2..=3)
+        ));
+    }
+
+    #[test]
+    fn historical_reads_during_genesis_pruning() -> ProviderResult<()> {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        let address = Address::with_last_byte(1);
+        let slot = B256::with_last_byte(2);
+        let balance = U256::from(10);
+        let storage = U256::from(20);
+        let provider_rw = factory.provider_rw()?;
+
+        // The last write to this account and slot was at genesis. Pruning has removed their
+        // index entries, but other genesis changesets still need to be processed.
+        let partial_genesis =
+            PruneCheckpoint { block_number: None, tx_number: None, prune_mode: PruneMode::Full };
+        for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
+            provider_rw.save_prune_checkpoint(segment, partial_genesis)?;
+        }
+        provider_rw
+            .tx_ref()
+            .put::<tables::PlainAccountState>(address, Account { balance, ..Default::default() })?;
+        provider_rw
+            .tx_ref()
+            .put::<tables::PlainStorageState>(address, StorageEntry::new(slot, storage))?;
+        provider_rw.commit()?;
+
+        let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
+            factory,
+            OverlayManager::default().overlay_builder(blocks[0].recovered_block().hash()),
+        );
+        let provider = state_provider_factory.database_provider_ro()?;
+        assert_eq!(provider.basic_account(&address)?.map(|account| account.balance), Some(balance));
+        assert_eq!(provider.storage(address, slot)?, Some(storage));
+        Ok(())
     }
 }

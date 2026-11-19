@@ -22,7 +22,7 @@ use crate::{
         BlockRangeInfo, EthVersion, SessionId,
     },
 };
-use alloy_eips::merge::EPOCH_SLOTS;
+use alloy_eips::merge::{EPOCH_DURATION, EPOCH_SLOTS};
 use alloy_primitives::Sealable;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::{Counter, Gauge};
@@ -56,7 +56,7 @@ use tracing::{debug, trace};
 ///
 /// Updates are only sent when the block height has advanced by at least one epoch (32 blocks)
 /// since the last update. The interval is set to one epoch duration in seconds.
-pub(super) const RANGE_UPDATE_INTERVAL: Duration = Duration::from_secs(EPOCH_SLOTS * 12);
+pub(super) const RANGE_UPDATE_INTERVAL: Duration = EPOCH_DURATION;
 
 // Constants for timeout updating.
 
@@ -237,9 +237,13 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// poll.
     ///
     /// Returns `true` if at least one message was handed to the connection.
+    ///
+    /// A readiness error closes the session: a satellite connection reports messages it already
+    /// accepted but the wire rejected through its readiness.
     fn poll_send_queued(&mut self, cx: &mut Context<'_>) -> Result<bool, EthStreamError> {
         let mut progress = false;
-        while self.conn.poll_ready_unpin(cx).is_ready() {
+        while let Poll::Ready(ready) = self.conn.poll_ready_unpin(cx) {
+            ready?;
             let Some(msg) = self.queued_outgoing.pop_front() else { break };
             progress = true;
             let res = match msg {
@@ -520,7 +524,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         let request_id = self.next_id();
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
         let msg = match request.create_request_message(request_id) {
-            RequestMessage::Eth(msg) => msg.map_versioned(version).into(),
+            RequestMessage::Eth(msg) => msg.into(),
             RequestMessage::Snap(msg) => OutgoingMessage::Snap(msg),
         };
 
@@ -993,12 +997,11 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             // Check if we should send a range update based on block height changes
             while interval.poll_tick(cx).is_ready() {
                 let current_latest = this.local_range_info.latest();
-                let should_send = if let Some(last_sent) = this.last_sent_latest_block {
-                    // Only send if block height has advanced by at least one epoch (32 blocks)
+                // The first update is always sent; after that, only send if block height has
+                // advanced by at least one epoch (32 blocks).
+                let should_send = this.last_sent_latest_block.is_none_or(|last_sent| {
                     current_latest.saturating_sub(last_sent) >= EPOCH_SLOTS
-                } else {
-                    true // First update, always send
-                };
+                });
 
                 if should_send {
                     this.queued_outgoing.push_back(
@@ -1325,7 +1328,7 @@ mod tests {
     use super::*;
     use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
     use alloy_eips::eip2124::ForkFilter;
-    use alloy_primitives::B256;
+    use alloy_primitives::{B128, B256};
     use futures::task::noop_waker;
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
@@ -1333,7 +1336,7 @@ mod tests {
         handshake::EthHandshake, protocol::Protocol, BlockBodies, BlockHeaders,
         EthNetworkPrimitives, EthStream, GetBlockAccessLists, GetBlockBodies,
         HelloMessageWithProtocols, P2PStream, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
-        UnifiedStatus,
+        UnifiedStatus, MAX_PAYLOAD_SIZE,
     };
     use reth_eth_wire_types::{
         message::MAX_MESSAGE_SIZE,
@@ -1347,7 +1350,7 @@ mod tests {
     use reth_network_p2p::error::RequestResult;
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
-    use secp256k1::{SecretKey, SECP256K1};
+    use secp256k1::SecretKey;
     use tokio::{
         net::{TcpListener, TcpStream},
         sync::mpsc,
@@ -1355,7 +1358,7 @@ mod tests {
 
     /// Returns a testing `HelloMessage` and new secretkey
     fn eth_hello(server_key: &SecretKey) -> HelloMessageWithProtocols {
-        HelloMessageWithProtocols::builder(pk2id(&server_key.public_key(SECP256K1))).build()
+        HelloMessageWithProtocols::builder(pk2id(&server_key.public_key())).build()
     }
 
     struct SessionBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
@@ -1392,8 +1395,8 @@ mod tests {
             let fork_filter = self.fork_filter.clone();
             let local_peer_id = self.local_peer_id;
             let mut hello = self.hello.clone();
-            let key = SecretKey::new(&mut rand_08::thread_rng());
-            hello.id = pk2id(&key.public_key(SECP256K1));
+            let key = SecretKey::new(&mut rand::rng());
+            hello.id = pk2id(&key.public_key());
             Box::pin(async move {
                 let outgoing = TcpStream::connect(local_addr).await.unwrap();
                 let sink = ECIESStream::connect(outgoing, key, local_peer_id).await.unwrap();
@@ -1420,6 +1423,7 @@ mod tests {
             tokio::task::spawn(start_pending_incoming_session(
                 Arc::new(EthHandshake::default()),
                 MAX_MESSAGE_SIZE,
+                MAX_PAYLOAD_SIZE,
                 disconnect_rx,
                 session_id,
                 stream,
@@ -1501,7 +1505,7 @@ mod tests {
         fn default() -> Self {
             let (active_session_tx, active_session_rx) = mpsc::channel(100);
 
-            let (secret_key, pk) = SECP256K1.generate_keypair(&mut rand_08::thread_rng());
+            let (secret_key, pk) = secp256k1::generate_keypair(&mut rand::rng());
             let local_peer_id = pk2id(&pk);
 
             Self {
@@ -1604,6 +1608,41 @@ mod tests {
                 ))
                 .unwrap();
             client_stream.flush().await.unwrap();
+
+            let msg = client_stream.next().await.unwrap().unwrap_err();
+            assert_eq!(msg.as_disconnected(), Some(DisconnectReason::ProtocolBreach));
+        });
+
+        let (tx, rx) = oneshot::channel();
+
+        tokio::task::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            let session = builder.connect_incoming(incoming).await;
+            session.await;
+
+            tx.send(()).unwrap();
+        });
+
+        fut.await;
+        rx.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_unsolicited_response_disconnects_with_protocol_breach() {
+        let mut builder = SessionBuilder::default();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+
+        let fut = builder.with_client_stream(local_addr, async move |mut client_stream| {
+            assert_eq!(client_stream.version(), EthVersion::Eth71);
+            client_stream
+                .send(EthMessage::BlockAccessLists(RequestPair {
+                    request_id: 7,
+                    message: BlockAccessLists(vec![None; 1024]),
+                }))
+                .await
+                .unwrap();
 
             let msg = client_stream.next().await.unwrap().unwrap_err();
             assert_eq!(msg.as_disconnected(), Some(DisconnectReason::ProtocolBreach));
@@ -1793,35 +1832,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn snap_request_times_out() {
-        let mut builder = snap_session_builder();
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_addr = listener.local_addr().unwrap();
-        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
-            let _client_stream = client_stream;
-            tokio::time::sleep(Duration::from_secs(60)).await;
-        });
-        tokio::task::spawn(fut);
-        let (incoming, _) = listener.accept().await.unwrap();
-        let mut session = builder.connect_incoming(incoming).await;
-
-        // Tiny timeout so the deadline (computed at insert) is already in the past.
-        session.internal_request_timeout.store(1, Ordering::Relaxed);
-        let (id, rx) = dispatch_snap_request(&mut session, 0);
-
-        // The first check resolves the caller with a timeout but keeps the entry so the session
-        // can escalate to a protocol breach.
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        assert!(!session.check_timed_out_requests(Instant::now()));
-        assert!(session.inflight_requests.contains_key(&id));
-        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::Timeout);
-
-        // Once the breach timeout passes without a response, the session flags a protocol breach.
-        session.protocol_breach_request_timeout = Duration::from_millis(1);
-        assert!(session.check_timed_out_requests(Instant::now()));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
     async fn late_snap_response_is_consumed_without_penalty() {
         let mut builder = snap_session_builder();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1835,9 +1845,10 @@ mod tests {
         let mut session = builder.connect_incoming(incoming).await;
 
         session.internal_request_timeout.store(1, Ordering::Relaxed);
-        let (id, _rx) = dispatch_snap_request(&mut session, 0);
+        let (id, rx) = dispatch_snap_request(&mut session, 0);
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert!(!session.check_timed_out_requests(Instant::now()));
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::Timeout);
 
         // A response arriving after the timeout clears the entry without a bad-message report.
         let outcome = session.on_incoming_snap_message(SnapProtocolMessage::BlockAccessLists(
@@ -2063,8 +2074,6 @@ mod tests {
 
     #[test]
     fn eth72_coalescing_preserves_cell_masks() {
-        use alloy_primitives::B128;
-
         let masks =
             [None, Some(B128::repeat_byte(0xff)), Some(B128::from(1u128)), Some(B128::from(2u128))];
         for existing_mask in masks {
@@ -2141,7 +2150,7 @@ mod tests {
         let local_addr = listener.local_addr().unwrap();
 
         let fut = builder.with_client_stream(local_addr, async move |mut client_stream| {
-            let _ = tokio::time::timeout(Duration::from_secs(5), client_stream.next()).await;
+            let _ = tokio::time::timeout(Duration::from_secs(1), client_stream.next()).await;
             client_stream.into_inner().disconnect(DisconnectReason::UselessPeer).await.unwrap();
         });
 

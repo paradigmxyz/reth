@@ -3,7 +3,9 @@ use super::{
     StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
 };
 use crate::{
-    changeset_walker::{StaticFileAccountChangesetWalker, StaticFileStorageChangesetWalker},
+    changeset_walker::{
+        changeset_block_range, StaticFileAccountChangesetWalker, StaticFileStorageChangesetWalker,
+    },
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
     EitherWriterDestination, HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader,
     TransactionVariant, TransactionsProvider, TransactionsProviderExt,
@@ -54,7 +56,7 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWri
 use std::{
     collections::BTreeMap,
     fmt::Debug,
-    ops::{Bound, Deref, Range, RangeBounds, RangeInclusive},
+    ops::{Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -594,7 +596,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
                         StorageBeforeTx {
                             address: revert.address,
-                            key: B256::from(key.to_be_bytes()),
+                            key: key.into(),
                             value: revert_to_slot.to_previous_value(),
                         }
                     })
@@ -1539,6 +1541,18 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     return false;
                 }
 
+                // With `Full` sender recovery the engine persists blocks without senders, but
+                // only the sender recovery stage and the pruner write the `Full` prune checkpoint.
+                // A node that never ran the pipeline has none until the pruner first runs, which
+                // the block interval, the minimum pruning distance, or a lagging ExEx can delay.
+                // With no senders on disk, checking would unwind to genesis.
+                if provider.prune_modes_ref().sender_recovery.is_some_and(|mode| mode.is_full()) &&
+                    self.get_highest_static_file_tx(segment).is_none()
+                {
+                    debug!(target: "reth::providers::static_file", ?segment, "Skipping senders segment: configured as fully pruned and empty");
+                    return false;
+                }
+
                 true
             }
             StaticFileSegment::AccountChangeSets => {
@@ -1570,6 +1584,29 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             .ok()
             .flatten()
             .is_some_and(|checkpoint| checkpoint.prune_mode.is_full())
+    }
+
+    /// Returns the first transaction number after `block`, or `None` if it can't be derived.
+    ///
+    /// Falls back to the `Bodies` prune checkpoint when bodies through `block` were never stored,
+    /// e.g. below a snap sync pivot, where transaction numbers restart at 0.
+    fn next_tx_num_after<Provider>(
+        provider: &Provider,
+        block: BlockNumber,
+    ) -> ProviderResult<Option<TxNumber>>
+    where
+        Provider: BlockReader + PruneCheckpointReader,
+    {
+        if let Some(indices) = provider.block_body_indices(block)? {
+            return Ok(Some(indices.next_tx_num()))
+        }
+        Ok(provider
+            .get_prune_checkpoint(PruneSegment::Bodies)?
+            .filter(|pruned| {
+                pruned.tx_number.is_none() &&
+                    pruned.block_number.is_some_and(|pruned| pruned >= block)
+            })
+            .map(|_| 0))
     }
 
     /// Checks consistency of the latest static file segment and throws an
@@ -1806,8 +1843,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             StaticFileSegment::Transactions |
             StaticFileSegment::Receipts |
             StaticFileSegment::TransactionSenders => {
-                if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
-                    let number = highest_static_file_entry - block.last_tx_num();
+                if let Some(next_tx_num) =
+                    Self::next_tx_num_after(provider, checkpoint_block_number)?
+                {
+                    // `last_tx_num()` saturates to zero for an empty genesis block, but row zero
+                    // belongs to the first non-empty block and must be removed as well.
+                    let number =
+                        highest_static_file_entry.saturating_add(1).saturating_sub(next_tx_num);
                     debug!(target: "reth::providers::static_file", prune_count = number, checkpoint_block_number, "Pruning transaction based segment");
 
                     match segment {
@@ -1992,6 +2034,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.earliest_history_height.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Sets the earliest available block number, matching what [`Self::initialize_index`] derives.
+    pub(crate) fn set_earliest_history_height(&self, block: BlockNumber) {
+        self.earliest_history_height.store(block, std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// Gets the lowest static file's block range if it exists for a static file segment.
     ///
     /// If there is nothing on disk for the given segment, this will return [`None`].
@@ -2035,20 +2082,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         range: impl RangeBounds<BlockNumber>,
         segment: StaticFileSegment,
     ) -> RangeInclusive<BlockNumber> {
-        let highest_block = self.get_highest_static_file_block(segment).unwrap_or(0);
-
-        let start = match range.start_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => n.saturating_add(1),
-            Bound::Unbounded => 0,
-        };
-        let end = match range.end_bound() {
-            Bound::Included(&n) => n.min(highest_block),
-            Bound::Excluded(&n) => n.saturating_sub(1).min(highest_block),
-            Bound::Unbounded => highest_block,
-        };
-
-        start..=end
+        changeset_block_range(range, self.get_highest_static_file_block(segment).unwrap_or(0))
     }
 
     /// Gets the highest static file transaction.
@@ -3148,6 +3182,44 @@ mod tests {
 
     use super::StaticFileWriter;
     use crate::{providers::StaticFileProvider, BlockHashReader, StaticFileProviderBuilder};
+    use alloy_consensus::{SignableTransaction, TxLegacy};
+    use alloy_primitives::Signature;
+    use reth_db::{tables, transaction::DbTxMut};
+
+    #[test]
+    fn recovery_prunes_transaction_zero_at_empty_genesis() -> eyre::Result<()> {
+        use crate::{
+            test_utils::create_test_provider_factory, StaticFileProviderFactory,
+            TransactionsProvider,
+        };
+
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw()?;
+        provider.tx_ref().put::<tables::BlockBodyIndices>(0, Default::default())?;
+        provider.commit()?;
+
+        let static_files = factory.static_file_provider();
+        let segment = StaticFileSegment::Transactions;
+        let tx = TxLegacy::default().into_signed(Signature::test_signature()).into();
+        {
+            let mut writer = static_files.latest_writer(segment)?;
+            writer.increment_block(0)?;
+            writer.increment_block(1)?;
+            writer.append_transaction(0, &tx)?;
+            writer.commit()?;
+        }
+        assert!(static_files.transaction_by_id(0)?.is_some());
+
+        assert_eq!(static_files.check_consistency(&factory.provider()?)?, None);
+        assert_eq!(static_files.get_highest_static_file_block(segment), Some(0));
+        assert!(static_files.transaction_by_id(0)?.is_none());
+
+        let mut writer = static_files.latest_writer(segment)?;
+        writer.increment_block(1)?;
+        writer.append_transaction(0, &tx)?;
+        writer.commit()?;
+        Ok(())
+    }
 
     #[test]
     fn stale_cache_fill_does_not_survive_index_reinitialization() -> eyre::Result<()> {
@@ -3158,7 +3230,7 @@ mod tests {
                 .with_blocks_per_file_for_segment(StaticFileSegment::Receipts, 2)
                 .build()?;
 
-        let hash_0 = B256::from([0x10; 32]);
+        let hash_0 = B256::repeat_byte(0x10);
         let header_0 = Header { number: 0, ..Default::default() };
         {
             let mut writer = static_files.latest_writer(StaticFileSegment::Headers)?;
@@ -3196,7 +3268,7 @@ mod tests {
 
         // Publish a newer snapshot of the same header jar, then simulate unrelated segment
         // pruning invalidating the whole cache while the old load remains in flight.
-        let hash_1 = B256::from([0x11; 32]);
+        let hash_1 = B256::repeat_byte(0x11);
         let header_1 = Header { number: 1, ..Default::default() };
         {
             let mut writer = static_files.latest_writer(StaticFileSegment::Headers)?;
@@ -3221,7 +3293,7 @@ mod tests {
         let (static_dir, _) = create_test_static_files_dir();
         let static_files: StaticFileProvider<EthPrimitives> =
             StaticFileProviderBuilder::read_write(&static_dir).with_blocks_per_file(10).build()?;
-        let hash = B256::from([0x10; 32]);
+        let hash = B256::repeat_byte(0x10);
         {
             let mut writer = static_files.latest_writer(StaticFileSegment::Headers)?;
             writer.append_header(&Header::default(), &hash)?;

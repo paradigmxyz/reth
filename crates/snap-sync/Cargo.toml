@@ -19,21 +19,27 @@ reth-eth-wire-types.workspace = true
 reth-network-p2p.workspace = true
 reth-network-peers.workspace = true
 reth-primitives-traits = { workspace = true, features = ["eip7928"] }
-reth-storage-api = { workspace = true, features = ["db-api"] }
+reth-prune-types.workspace = true
+reth-storage-api = { workspace = true, features = ["db-api", "std"] }
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-tasks.workspace = true
 reth-trie-common.workspace = true
 
+# evm
+evm2.workspace = true
+
 # alloy
 alloy-eip7928.workspace = true
-alloy-eips.workspace = true
+alloy-eips = { workspace = true, features = ["serde"] }
 alloy-primitives.workspace = true
 
-# revm
-revm.workspace = true
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
 
 # misc
+futures.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
@@ -43,11 +49,11 @@ tracing.workspace = true
 [dev-dependencies]
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
-futures.workspace = true
+metrics-util = { workspace = true, features = ["debugging"] }
 reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true
-reth-evm-ethereum.workspace = true
+reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-stages.workspace = true
 reth-stages-api.workspace = true

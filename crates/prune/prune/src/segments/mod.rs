@@ -15,7 +15,7 @@ use reth_stages_types::StageId;
 use reth_static_file_types::StaticFileSegment;
 pub use set::SegmentSet;
 use std::{fmt::Debug, ops::RangeInclusive};
-use tracing::error;
+use tracing::{debug, error};
 pub use user::{
     AccountHistory, Bodies, Receipts as UserReceipts, ReceiptsByLogs, SenderRecovery,
     StorageHistory, TransactionLookup,
@@ -170,12 +170,17 @@ impl PruneInput {
     ) -> ProviderResult<Option<RangeInclusive<TxNumber>>> {
         let from_tx_number = self.previous_checkpoint
             // Checkpoint exists, prune from the next transaction after the highest pruned one
-            .and_then(|checkpoint| match checkpoint.tx_number {
-                Some(tx_number) => Some(tx_number + 1),
-                _ => {
+            .and_then(|checkpoint| match (checkpoint.tx_number, checkpoint.block_number) {
+                (Some(tx_number), _) => Some(tx_number + 1),
+                // Pruned through a block without pruning any transactions, e.g. a snap sync pivot.
+                (None, Some(_)) => {
+                    debug!(target: "pruner", ?checkpoint, "Prune checkpoint has no transaction number, starting from transaction 0");
+                    None
+                }
+                (None, None) => {
                     error!(target: "pruner", ?checkpoint, "Expected transaction number in prune checkpoint, found None");
                     None
-                },
+                }
             })
             // No checkpoint exists, prune from genesis
             .unwrap_or_default();

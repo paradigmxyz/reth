@@ -1,13 +1,16 @@
 use eyre::Result;
 use reth_cli_util::cancellation::CancellationToken;
 use std::{
+    collections::VecDeque,
     io::{self, Read, Write},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, Condvar, Mutex,
+        Arc, Mutex,
     },
+    thread::{self, Thread},
     time::{Duration, Instant},
 };
+use tokio::sync::Notify;
 use tracing::info;
 
 const BYTE_UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
@@ -132,8 +135,8 @@ pub(crate) struct SharedProgress {
     pub(crate) active_extractions: AtomicU64,
     /// Number of archives currently verifying extracted outputs.
     pub(crate) active_verifications: AtomicU64,
-    /// Signals the background progress task to exit.
-    pub(crate) done: AtomicBool,
+    /// Wakes the background progress task to print the final summary and exit.
+    pub(crate) done: Notify,
     /// Cancellation token shared by the whole command.
     cancel_token: CancellationToken,
 }
@@ -164,7 +167,7 @@ impl SharedProgress {
             active_download_requests: AtomicU64::new(0),
             active_extractions: AtomicU64::new(0),
             active_verifications: AtomicU64::new(0),
-            done: AtomicBool::new(false),
+            done: Notify::new(),
             cancel_token,
         })
     }
@@ -360,21 +363,40 @@ fn format_eta(eta: Option<Duration>) -> String {
 
 /// Global request limit for the blocking downloader.
 ///
-/// This uses `Mutex + Condvar` because the segmented path runs blocking reqwest
-/// clients on OS threads.
+/// The segmented path runs blocking reqwest clients on OS threads, so waiters park their
+/// thread. Slots are granted in arrival order: otherwise a worker that releases a slot takes
+/// it straight back before a woken waiter runs, and the waiter's piece can starve while it
+/// holds back an archive's contiguous downloaded prefix. A released slot is handed directly
+/// to the oldest waiter and only that thread is woken, because thousands of workers can wait
+/// here at high concurrency.
 pub(crate) struct DownloadRequestLimiter {
     /// Maximum number of in-flight HTTP requests.
     limit: usize,
-    /// Current number of acquired request slots.
-    active: Mutex<usize>,
-    /// Wakes blocked threads when a slot is released.
-    notify: Condvar,
+    /// Acquired slots and the waiters queued for one.
+    state: Mutex<RequestLimiterState>,
+}
+
+/// Slot accounting and the FIFO wait queue for [`DownloadRequestLimiter`].
+#[derive(Default)]
+struct RequestLimiterState {
+    /// Acquired request slots, including slots handed to waiters that have not woken yet.
+    active: usize,
+    /// Callers waiting for a slot, oldest first.
+    waiters: VecDeque<Arc<RequestWaiter>>,
+}
+
+/// A caller blocked in [`DownloadRequestLimiter::acquire`].
+struct RequestWaiter {
+    /// Set, while holding the limiter lock, when a released slot is handed to this waiter.
+    granted: AtomicBool,
+    /// Thread to unpark once the slot is handed over.
+    thread: Thread,
 }
 
 impl DownloadRequestLimiter {
     /// Creates the shared request limiter.
     pub(crate) fn new(limit: usize) -> Arc<Self> {
-        Arc::new(Self { limit: limit.max(1), active: Mutex::new(0), notify: Condvar::new() })
+        Arc::new(Self { limit: limit.max(1), state: Mutex::default() })
     }
 
     /// Returns the configured request limit.
@@ -387,25 +409,56 @@ impl DownloadRequestLimiter {
         progress: Option<&'a Arc<SharedProgress>>,
         cancel_token: &CancellationToken,
     ) -> Result<DownloadRequestPermit<'a>> {
-        let mut active = self.active.lock().unwrap();
+        if cancel_token.is_cancelled() {
+            return Err(eyre::eyre!("Download cancelled"));
+        }
+
+        let mut state = self.state.lock().unwrap();
+        if state.waiters.is_empty() && state.active < self.limit {
+            state.active += 1;
+            drop(state);
+            return Ok(DownloadRequestPermit::new(self, progress));
+        }
+
+        let waiter =
+            Arc::new(RequestWaiter { granted: AtomicBool::new(false), thread: thread::current() });
+        state.waiters.push_back(Arc::clone(&waiter));
+        drop(state);
+
         loop {
-            if cancel_token.is_cancelled() {
-                return Err(eyre::eyre!("Download cancelled"));
+            if waiter.granted.load(Ordering::Acquire) {
+                return Ok(DownloadRequestPermit::new(self, progress));
             }
 
-            if *active < self.limit {
-                *active += 1;
-                if let Some(progress) = progress {
-                    progress.request_started();
+            if cancel_token.is_cancelled() {
+                let mut state = self.state.lock().unwrap();
+                if waiter.granted.load(Ordering::Acquire) {
+                    // A slot was handed over before the lock was taken, so pass it on.
+                    drop(state);
+                    self.release();
+                } else {
+                    state.waiters.retain(|queued| !Arc::ptr_eq(queued, &waiter));
                 }
-                return Ok(DownloadRequestPermit { limiter: self, progress });
+                return Err(eyre::eyre!("Download cancelled"));
             }
 
             // Wake periodically so cancellation can interrupt waiters even if
             // no request finishes.
-            let (next_active, _) =
-                self.notify.wait_timeout(active, Duration::from_millis(100)).unwrap();
-            active = next_active;
+            thread::park_timeout(Duration::from_millis(100));
+        }
+    }
+
+    /// Hands a released slot to the oldest waiter, or frees it if nobody is waiting.
+    fn release(&self) {
+        let mut state = self.state.lock().unwrap();
+        if let Some(waiter) = state.waiters.pop_front() {
+            // The slot moves to the waiter, so `active` stays the same. The flag is set under the
+            // lock so a waiter that is cancelling sees either the grant or its queue entry.
+            waiter.granted.store(true, Ordering::Release);
+            drop(state);
+            waiter.thread.unpark();
+        } else {
+            state.active = state.active.saturating_sub(1);
         }
     }
 }
@@ -421,13 +474,20 @@ pub(crate) struct DownloadRequestPermit<'a> {
     progress: Option<&'a Arc<SharedProgress>>,
 }
 
+impl<'a> DownloadRequestPermit<'a> {
+    /// Wraps a slot already counted in `limiter` and marks the request as started.
+    fn new(limiter: &'a DownloadRequestLimiter, progress: Option<&'a Arc<SharedProgress>>) -> Self {
+        if let Some(progress) = progress {
+            progress.request_started();
+        }
+        Self { limiter, progress }
+    }
+}
+
 impl Drop for DownloadRequestPermit<'_> {
     /// Releases the request slot and updates shared progress counters.
     fn drop(&mut self) {
-        let mut active = self.limiter.active.lock().unwrap();
-        *active = active.saturating_sub(1);
-        drop(active);
-        self.limiter.notify.notify_one();
+        self.limiter.release();
 
         if let Some(progress) = self.progress {
             progress.request_finished();
@@ -559,9 +619,11 @@ impl ArchiveExtractionProgressHandle {
 }
 
 /// Tracks one active archive verification attempt.
+///
+/// Bytes are recorded through a shared reference because output files are hashed in parallel.
 pub(crate) struct ArchiveVerificationProgress<'a> {
     progress: Option<&'a Arc<SharedProgress>>,
-    verified: u64,
+    verified: AtomicU64,
     completed: bool,
 }
 
@@ -571,12 +633,12 @@ impl<'a> ArchiveVerificationProgress<'a> {
         if let Some(progress) = progress {
             progress.verification_started();
         }
-        Self { progress, verified: 0, completed: false }
+        Self { progress, verified: AtomicU64::new(0), completed: false }
     }
 
     /// Adds plain-output bytes hashed by this verification attempt.
-    pub(crate) fn record_verified(&mut self, bytes: u64) {
-        self.verified += bytes;
+    pub(crate) fn record_verified(&self, bytes: u64) {
+        self.verified.fetch_add(bytes, Ordering::Relaxed);
         if let Some(progress) = self.progress {
             progress.add_active_verified_output_bytes(bytes);
         }
@@ -587,11 +649,11 @@ impl<'a> ArchiveVerificationProgress<'a> {
         if self.completed {
             return;
         }
+        let verified = std::mem::take(self.verified.get_mut());
         if let Some(progress) = self.progress {
-            progress.sub_active_verified_output_bytes(self.verified);
+            progress.sub_active_verified_output_bytes(verified);
             progress.record_archive_output_complete(total_bytes);
         }
-        self.verified = 0;
         self.completed = true;
     }
 }
@@ -599,7 +661,7 @@ impl<'a> ArchiveVerificationProgress<'a> {
 impl Drop for ArchiveVerificationProgress<'_> {
     fn drop(&mut self) {
         if let Some(progress) = self.progress {
-            progress.sub_active_verified_output_bytes(self.verified);
+            progress.sub_active_verified_output_bytes(*self.verified.get_mut());
             progress.verification_finished();
         }
     }
@@ -697,10 +759,9 @@ pub(crate) fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::ta
         let mut interval = tokio::time::interval(Duration::from_secs(3));
         interval.tick().await;
         loop {
-            interval.tick().await;
-
-            if progress.done.load(Ordering::Relaxed) {
-                break;
+            tokio::select! {
+                _ = interval.tick() => {}
+                _ = progress.done.notified() => break,
             }
 
             let download_total = progress.total_download_bytes;
@@ -840,5 +901,96 @@ mod tests {
             progress.verification_phase.lock().unwrap().as_ref().unwrap().baseline_bytes,
             40
         );
+    }
+
+    #[tokio::test]
+    async fn progress_display_exits_when_done() {
+        let progress = SharedProgress::new(10, 20, 1, CancellationToken::new());
+        let handle = spawn_progress_display(Arc::clone(&progress));
+
+        progress.done.notify_one();
+
+        // The task must exit right away instead of on its next 3s progress tick.
+        tokio::time::timeout(Duration::from_secs(1), handle).await.unwrap().unwrap();
+    }
+
+    #[test]
+    fn request_limiter_serves_waiters_before_a_releasing_caller() {
+        let limiter = DownloadRequestLimiter::new(1);
+        let token = CancellationToken::new();
+        let order = Mutex::new(Vec::new());
+
+        std::thread::scope(|scope| {
+            let held = limiter.acquire(None, &token).unwrap();
+            scope.spawn(|| {
+                let _permit = limiter.acquire(None, &token).unwrap();
+                order.lock().unwrap().push("waiter");
+            });
+            while limiter.state.lock().unwrap().waiters.is_empty() {
+                std::thread::yield_now();
+            }
+
+            // Re-acquiring right after a release must not jump ahead of the queued waiter.
+            drop(held);
+            let _permit = limiter.acquire(None, &token).unwrap();
+            order.lock().unwrap().push("releaser");
+        });
+
+        assert_eq!(*order.lock().unwrap(), ["waiter", "releaser"]);
+    }
+
+    #[test]
+    fn request_limiter_cancelled_waiter_leaves_the_queue() {
+        let limiter = DownloadRequestLimiter::new(1);
+        let token = CancellationToken::new();
+        let cancelled = CancellationToken::new();
+
+        std::thread::scope(|scope| {
+            let held = limiter.acquire(None, &token).unwrap();
+            let waiter = scope.spawn(|| limiter.acquire(None, &cancelled).map(drop));
+            while limiter.state.lock().unwrap().waiters.is_empty() {
+                std::thread::yield_now();
+            }
+
+            cancelled.cancel();
+            let error = waiter.join().unwrap().unwrap_err();
+            assert_eq!(error.to_string(), "Download cancelled");
+            assert!(limiter.state.lock().unwrap().waiters.is_empty());
+
+            // The cancelled waiter must not hold back the slot or later callers.
+            drop(held);
+            drop(limiter.acquire(None, &token).unwrap());
+        });
+
+        let state = limiter.state.lock().unwrap();
+        assert_eq!(state.active, 0);
+        assert!(state.waiters.is_empty());
+    }
+
+    #[test]
+    fn request_limiter_never_exceeds_its_limit() {
+        let limiter = DownloadRequestLimiter::new(3);
+        let token = CancellationToken::new();
+        let in_flight = AtomicU64::new(0);
+        let max_in_flight = AtomicU64::new(0);
+
+        std::thread::scope(|scope| {
+            for _ in 0..32 {
+                scope.spawn(|| {
+                    for _ in 0..50 {
+                        let _permit = limiter.acquire(None, &token).unwrap();
+                        let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                        max_in_flight.fetch_max(now, Ordering::SeqCst);
+                        std::thread::yield_now();
+                        in_flight.fetch_sub(1, Ordering::SeqCst);
+                    }
+                });
+            }
+        });
+
+        assert!(max_in_flight.load(Ordering::SeqCst) <= 3);
+        let state = limiter.state.lock().unwrap();
+        assert_eq!(state.active, 0);
+        assert!(state.waiters.is_empty());
     }
 }

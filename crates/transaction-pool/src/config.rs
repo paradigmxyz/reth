@@ -448,7 +448,7 @@ mod tests {
 
     #[test]
     fn test_contains_local_address() {
-        let address = Address::new([1; 20]);
+        let address = Address::repeat_byte(1);
         let mut local_addresses = AddressSet::default();
         local_addresses.insert(address);
 
@@ -458,12 +458,12 @@ mod tests {
         assert!(config.contains_local_address(&address));
 
         // Should not contain another random address
-        assert!(!config.contains_local_address(&Address::new([2; 20])));
+        assert!(!config.contains_local_address(&Address::repeat_byte(2)));
     }
 
     #[test]
     fn test_is_local_with_no_exemptions() {
-        let address = Address::new([1; 20]);
+        let address = Address::repeat_byte(1);
         let config = LocalTransactionConfig {
             no_exemptions: true,
             local_addresses: AddressSet::default(),
@@ -476,7 +476,7 @@ mod tests {
 
     #[test]
     fn test_is_local_without_no_exemptions() {
-        let address = Address::new([1; 20]);
+        let address = Address::repeat_byte(1);
         let mut local_addresses = AddressSet::default();
         local_addresses.insert(address);
 
@@ -484,13 +484,13 @@ mod tests {
             LocalTransactionConfig { no_exemptions: false, local_addresses, ..Default::default() };
 
         // Should return true as the transaction origin is local
-        assert!(config.is_local(TransactionOrigin::Local, &Address::new([2; 20])));
+        assert!(config.is_local(TransactionOrigin::Local, &Address::repeat_byte(2)));
         assert!(config.is_local(TransactionOrigin::Local, &address));
 
         // Should return true as the address is in the local_addresses set
         assert!(config.is_local(TransactionOrigin::External, &address));
         // Should return false as the address is not in the local_addresses set
-        assert!(!config.is_local(TransactionOrigin::External, &Address::new([2; 20])));
+        assert!(!config.is_local(TransactionOrigin::External, &Address::repeat_byte(2)));
     }
 
     #[test]

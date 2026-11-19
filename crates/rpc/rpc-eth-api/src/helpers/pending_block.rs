@@ -4,22 +4,21 @@
 use super::SpawnBlocking;
 use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
 use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eips::eip7840::BlobParams;
-use alloy_primitives::{B256, U256};
-use alloy_rpc_types_eth::{BlockNumberOrTag, BlockOverrides};
+use alloy_eips::{eip7840::BlobParams, BlockId};
+use alloy_primitives::B256;
+use alloy_rpc_types_eth::BlockOverrides;
 use futures::Future;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
-    block::TxResult,
+    database::StateProviderDatabase,
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput},
-    ConfigureEvm, Evm, EvmEnvFor, NextBlockEnvAttributes,
+    ConfigureEvm, EvmEnv, EvmEnvFor, NextBlockEnvAttributes,
 };
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, HeaderTy, NodePrimitives, SealedHeader,
 };
-use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
     block::BlockAndReceipts, builder::config::PendingBlockKind, EthApiError, PendingBlock,
@@ -29,12 +28,12 @@ use reth_storage_api::{
     noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderTx, StateProvider,
     StateProviderBox, StateProviderFactory,
 };
+use reth_tasks::cancel::is_cancelled;
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
     PoolTransaction, TransactionPool,
 };
-use reth_trie_common::ComputedTrieData;
-use revm::context_interface::{Block, Cfg as _};
+use reth_trie_common::SortedTrieData;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -95,7 +94,7 @@ pub trait LoadPendingBlock:
             .provider()
             .latest_header()
             .map_err(Self::Error::from_eth_err)?
-            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+            .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
 
         let evm_env = self
             .evm_config()
@@ -205,7 +204,7 @@ pub trait LoadPendingBlock:
             // Is the pending block cached?
             if let Some(pending_block) = lock.as_ref() {
                 // Is the cached block not expired and latest is its parent?
-                if evm_env.block_env.number() == U256::from(pending_block.block().number()) &&
+                if evm_env.block_env().number.to::<u64>() == pending_block.block().number() &&
                     parent.hash() == pending_block.block().parent_hash() &&
                     now <= pending_block.expires_at
                 {
@@ -287,23 +286,23 @@ pub trait LoadPendingBlock:
             .history_by_block_hash(parent.hash())
             .map_err(Self::Error::from_eth_err)?;
         let state = StateProviderDatabase::new(state_provider.into_evm_state_provider());
-        let mut db = State::builder().with_database(state).with_bundle_update().build();
 
         let mut builder = self
             .evm_config()
-            .builder_for_next_block(&mut db, parent, self.next_env_attributes(parent)?)
+            .builder_for_next_block(state, parent, self.next_env_attributes(parent)?)
             .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?;
 
         builder.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
 
-        let block_gas_limit: u64 = builder.evm().block().gas_limit();
-        let is_amsterdam = self
+        let block_gas_limit = builder.evm_env().block_env().gas_limit.to::<u64>();
+        let is_amsterdam = builder.evm_env().uses_separate_block_gas();
+        let basefee = builder.evm_env().block_base_fee();
+        let blob_gasprice = self
             .provider()
             .chain_spec()
-            .is_amsterdam_active_at_timestamp(builder.evm().block().timestamp().saturating_to());
-        let basefee = builder.evm().block().basefee();
-        let blob_gasprice = builder.evm().block().blob_gasprice().map(|p| p as u64);
+            .is_cancun_active_at_timestamp(builder.evm_env().block_env().timestamp.to())
+            .then(|| builder.evm_env().block_blob_base_fee());
 
         let blob_params = self
             .provider()
@@ -314,7 +313,7 @@ pub trait LoadPendingBlock:
         let mut block_regular_gas_used = 0;
         let mut block_state_gas_used = 0;
         let mut sum_blob_gas_used = 0;
-        let tx_gas_limit_cap = builder.evm().cfg_env().tx_gas_limit_cap();
+        let tx_gas_limit_cap = builder.evm_env().regular_gas_limit_cap();
 
         // Only include transactions if not configured as Empty
         if !self.pending_block_kind().is_empty() {
@@ -328,6 +327,12 @@ pub trait LoadPendingBlock:
                 .without_updates();
 
             while let Some(pool_tx) = best_txs.next() {
+                // nobody waits for the block once the request is dropped, and the cache lock was
+                // released with it
+                if is_cancelled() {
+                    return Err(Self::Error::from_eth_err(EthApiError::InternalEthError))
+                }
+
                 // ensure we still have capacity for this transaction
                 let exceeds_gas_limit = if is_amsterdam {
                     let regular_available_gas =
@@ -399,48 +404,44 @@ pub trait LoadPendingBlock:
                     continue
                 }
 
-                let mut tx_regular_gas_used = 0;
-                let gas_output =
-                    match builder.execute_transaction_with_result_closure(tx, |result| {
-                        tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
-                    }) {
-                        Ok(gas_output) => gas_output,
-                        Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
-                            error,
-                            ..
-                        })) => {
-                            if error.is_nonce_too_low() {
-                                // if the nonce is too low, we can skip this transaction
-                            } else {
-                                // if the transaction is invalid, we can skip it and all of its
-                                // descendants
-                                best_txs.mark_invalid(
-                                    &pool_tx,
-                                    InvalidPoolTransactionError::Consensus(
-                                        InvalidTransactionError::TxTypeNotSupported,
-                                    ),
-                                );
-                            }
-                            continue
-                        }
-                        Err(BlockExecutionError::Validation(
-                            BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                                transaction_gas_limit,
-                                block_available_gas,
-                            },
-                        )) => {
+                let gas_output = match builder.execute_transaction(tx) {
+                    Ok(gas_output) => gas_output,
+                    Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                        error,
+                        ..
+                    })) => {
+                        if error.is_nonce_too_low() {
+                            // if the nonce is too low, we can skip this transaction
+                        } else {
+                            // if the transaction is invalid, we can skip it and all of its
+                            // descendants
                             best_txs.mark_invalid(
                                 &pool_tx,
-                                InvalidPoolTransactionError::ExceedsGasLimit(
-                                    transaction_gas_limit,
-                                    block_available_gas,
+                                InvalidPoolTransactionError::Consensus(
+                                    InvalidTransactionError::TxTypeNotSupported,
                                 ),
                             );
-                            continue
                         }
-                        // this is an error that we should treat as fatal for this attempt
-                        Err(err) => return Err(Self::Error::from_eth_err(err)),
-                    };
+                        continue
+                    }
+                    Err(BlockExecutionError::Validation(
+                        BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                            transaction_gas_limit,
+                            block_available_gas,
+                        },
+                    )) => {
+                        best_txs.mark_invalid(
+                            &pool_tx,
+                            InvalidPoolTransactionError::ExceedsGasLimit(
+                                transaction_gas_limit,
+                                block_available_gas,
+                            ),
+                        );
+                        continue
+                    }
+                    // this is an error that we should treat as fatal for this attempt
+                    Err(err) => return Err(Self::Error::from_eth_err(err)),
+                };
 
                 // add to the total blob gas used if the transaction successfully executed
                 if let Some(tx_blob_gas) = tx_blob_gas {
@@ -455,21 +456,27 @@ pub trait LoadPendingBlock:
                 // Track receipt gas and the Amsterdam block-capacity counter separately.
                 let gas_used = gas_output.tx_gas_used();
                 cumulative_tx_gas_used += gas_used;
-                block_regular_gas_used += tx_regular_gas_used;
+                block_regular_gas_used += gas_output.regular_gas_used();
                 block_state_gas_used += gas_output.state_gas_used();
             }
         }
 
-        let BlockBuilderOutcome { execution_result, block, hashed_state, trie_updates, .. } =
-            builder.finish(NoopProvider::default(), None).map_err(Self::Error::from_eth_err)?;
+        let BlockBuilderOutcome {
+            execution_result,
+            execution_state,
+            block,
+            hashed_state,
+            trie_updates,
+            ..
+        } = builder.finish(NoopProvider::default(), None).map_err(Self::Error::from_eth_err)?;
 
         let execution_outcome =
-            BlockExecutionOutput { state: db.take_bundle(), result: execution_result };
+            BlockExecutionOutput { state: execution_state, result: execution_result };
 
         Ok(ExecutedBlock::new(
             block.into(),
             Arc::new(execution_outcome),
-            ComputedTrieData::new(
+            SortedTrieData::new(
                 Arc::new(hashed_state.into_sorted()),
                 Arc::new(trie_updates.into_sorted()),
             ),
@@ -544,7 +551,11 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
         block_overrides: Option<&BlockOverrides>,
     ) -> Self {
         let mut attributes = Self {
-            timestamp: parent.timestamp().saturating_add(12),
+            // The timestamp selects the hardfork rules, so it must be overridden before the EVM
+            // environment is derived from these attributes.
+            timestamp: block_overrides
+                .and_then(|overrides| overrides.time)
+                .unwrap_or_else(|| parent.timestamp().saturating_add(12)),
             suggested_fee_recipient: parent.beneficiary(),
             prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),

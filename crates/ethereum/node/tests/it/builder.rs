@@ -1,17 +1,87 @@
 //! Node builder setup tests.
 
-use std::sync::Arc;
-
-use reth_db::{
-    test_utils::{create_test_rw_db, TempDatabase},
-    DatabaseEnv,
+use std::{
+    str::FromStr,
+    sync::{Arc, Mutex},
 };
-use reth_node_api::NodeTypesWithDBAdapter;
-use reth_node_builder::{EngineNodeLauncher, FullNodeComponents, NodeBuilder, NodeConfig};
+
+use reth_db::test_utils::create_test_rw_db;
+use reth_node_builder::{
+    sync::{BackfillContext, BackfillSyncBuilder, PipelineBackfill},
+    FullNodeComponents, NodeBuilder, NodeConfig,
+};
+use reth_node_core::{
+    args::DatadirArgs,
+    dirs::{DataDirPath, MaybePlatformPath},
+};
 use reth_node_ethereum::node::{EthereumAddOns, EthereumNode};
-use reth_provider::providers::BlockchainProvider;
+use reth_provider::{
+    providers::ProviderNodeTypes, DBProvider, DatabaseProviderFactory, MetadataProvider,
+    MetadataWriter, PipelineUnwind, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
+};
 use reth_rpc_builder::Identity;
+use reth_stages_types::{StageCheckpoint, StageId};
 use reth_tasks::Runtime;
+use tempfile::{tempdir, TempDir};
+
+// Records the order its hooks run in, building the staged pipeline backfill.
+#[derive(Default)]
+struct RecordingBackfill {
+    // Hooks called so far.
+    calls: Arc<Mutex<Vec<&'static str>>>,
+    // Whether `recover` refuses the database.
+    fail_recovery: bool,
+    pending_unwind: bool,
+}
+
+impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for RecordingBackfill {
+    type Backfill = <PipelineBackfill as BackfillSyncBuilder<N, C>>::Backfill;
+
+    fn build(self, ctx: BackfillContext<N, C>) -> eyre::Result<Self::Backfill> {
+        self.calls.lock().unwrap().push("build");
+        assert_eq!(ctx.provider_factory().provider()?.pipeline_unwind()?, None);
+        if self.pending_unwind {
+            assert_eq!(
+                ctx.provider_factory().get_stage_checkpoint(StageId::Era)?,
+                Some(StageCheckpoint::new(0))
+            );
+        }
+        PipelineBackfill.build(ctx)
+    }
+
+    fn recover(&mut self, provider_factory: &ProviderFactory<N>) -> eyre::Result<()> {
+        // The database is open and readable by now.
+        provider_factory.provider()?.get_stage_checkpoint(StageId::Finish)?;
+        self.calls.lock().unwrap().push("recover");
+        if self.fail_recovery {
+            eyre::bail!("recovery refused the database")
+        }
+        if self.pending_unwind {
+            let provider = provider_factory.database_provider_rw()?;
+            provider.write_pipeline_unwind(Some(&PipelineUnwind {
+                target: 0,
+                stages: vec!["Era".into(), "Execution".into()],
+                bad_block: None,
+            }))?;
+            provider.save_stage_checkpoint(StageId::Era, StageCheckpoint::new(10))?;
+            provider.commit()?;
+        }
+        Ok(())
+    }
+}
+
+// A test node config with its own data directory, kept alive by the returned guard.
+fn launch_config() -> (NodeConfig<reth_chainspec::ChainSpec>, TempDir) {
+    let datadir = tempdir().expect("temp datadir");
+    let datadir_args = DatadirArgs {
+        datadir: MaybePlatformPath::<DataDirPath>::from_str(datadir.path().to_str().unwrap())
+            .expect("valid datadir"),
+        static_files_path: Some(datadir.path().join("static")),
+        rocksdb_path: Some(datadir.path().join("rocksdb")),
+        pprof_dumps_path: Some(datadir.path().join("pprof")),
+    };
+    (NodeConfig::test().with_datadir_args(datadir_args), datadir)
+}
 
 #[test]
 fn test_basic_setup() {
@@ -44,76 +114,63 @@ fn test_basic_setup() {
         .check_launch();
 }
 
-#[tokio::test]
-async fn test_eth_launcher() {
-    let runtime = Runtime::test();
-    let config = NodeConfig::test();
-    let db = create_test_rw_db();
-    let _builder =
-        NodeBuilder::new(config)
-            .with_database(db)
-            .with_launch_context(runtime.clone())
-            .with_types_and_provider::<EthereumNode, BlockchainProvider<
-                NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
-            >>()
-            .with_components(EthereumNode::components())
-            .with_add_ons(EthereumAddOns::default())
-            .apply(|builder| {
-                let _ = builder.db();
-                builder
-            })
-            .launch_with_fn(|builder| {
-                let launcher = EngineNodeLauncher::new(
-                    runtime.clone(),
-                    builder.config().datadir(),
-                    Default::default(),
-                );
-                builder.launch_with(launcher)
-            });
-}
-
-#[test]
-fn test_eth_launcher_with_tokio_runtime() {
-    // #[tokio::test] can not be used here because we need to create a custom tokio runtime
-    // and it would be dropped before the test is finished, resulting in a panic.
-    let main_rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-
-    let custom_rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-
-    main_rt.block_on(async {
-        let runtime = Runtime::test();
-        let config = NodeConfig::test();
-        let db = create_test_rw_db();
-        let _builder =
-            NodeBuilder::new(config)
-                .with_database(db)
-                .with_launch_context(runtime.clone())
-                .with_types_and_provider::<EthereumNode, BlockchainProvider<
-                    NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
-                >>()
-                .with_components(EthereumNode::components())
-                .with_add_ons(
-                    EthereumAddOns::default().with_tokio_runtime(Some(custom_rt.handle().clone())),
-                )
-                .apply(|builder| {
-                    let _ = builder.db();
-                    builder
-                })
-                .launch_with_fn(|builder| {
-                    let launcher = EngineNodeLauncher::new(
-                        runtime.clone(),
-                        builder.config().datadir(),
-                        Default::default(),
-                    );
-                    builder.launch_with(launcher)
-                });
-    });
-}
-
 #[test]
 fn test_node_setup() {
     let config = NodeConfig::test();
     let db = create_test_rw_db();
     let _builder =
         NodeBuilder::new(config).with_database(db).node(EthereumNode::default()).check_launch();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn custom_backfill_recovers_then_builds() -> eyre::Result<()> {
+    let (config, _datadir) = launch_config();
+    let backfill = RecordingBackfill::default();
+    let calls = Arc::clone(&backfill.calls);
+
+    let _node = NodeBuilder::new(config)
+        .with_database(create_test_rw_db())
+        .with_launch_context(Runtime::test())
+        .with_types::<EthereumNode>()
+        .with_components(EthereumNode::components())
+        .with_add_ons(EthereumAddOns::default())
+        .launch_with_debug_capabilities_and_backfill(backfill)
+        .await?;
+
+    assert_eq!(*calls.lock().unwrap(), ["recover", "build"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn failed_backfill_recovery_stops_the_launch() {
+    let (config, _datadir) = launch_config();
+    let backfill = RecordingBackfill { fail_recovery: true, ..Default::default() };
+    let calls = Arc::clone(&backfill.calls);
+
+    let launched = NodeBuilder::new(config)
+        .with_database(create_test_rw_db())
+        .with_launch_context(Runtime::test())
+        .with_types::<EthereumNode>()
+        .with_components(EthereumNode::components())
+        .with_add_ons(EthereumAddOns::default())
+        .launch_with_debug_capabilities_and_backfill(backfill)
+        .await;
+
+    assert!(launched.is_err());
+    assert_eq!(*calls.lock().unwrap(), ["recover"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pending_genesis_unwind_recovers_before_backfill() -> eyre::Result<()> {
+    let (config, _datadir) = launch_config();
+    let backfill = RecordingBackfill { pending_unwind: true, ..Default::default() };
+    let _node = NodeBuilder::new(config)
+        .with_database(create_test_rw_db())
+        .with_launch_context(Runtime::test())
+        .with_types::<EthereumNode>()
+        .with_components(EthereumNode::components())
+        .with_add_ons(EthereumAddOns::default())
+        .launch_with_debug_capabilities_and_backfill(backfill)
+        .await?;
+    Ok(())
 }

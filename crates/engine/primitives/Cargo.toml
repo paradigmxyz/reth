@@ -38,6 +38,7 @@ futures = { workspace = true, optional = true }
 auto_impl.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["getrandom"] }
@@ -63,6 +64,7 @@ std = [
     "tokio",
     "serde/std",
     "thiserror/std",
+    "tracing/std",
     "reth-evm?/std",
     "alloy-rlp/std",
 ]

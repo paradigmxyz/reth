@@ -1,12 +1,11 @@
-use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
 use alloy_consensus::Header;
 use alloy_eips::Encodable2718;
-use alloy_genesis::{Genesis, GenesisAccount};
+use alloy_genesis::GenesisAccount;
 use alloy_primitives::{bytes, Address, Bytes, TxKind, B256};
 use alloy_rpc_types_eth::TransactionRequest;
-use jsonrpsee_core::{client::ClientT, rpc_params};
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::{setup, transaction::TransactionTestContext};
+use reth_e2e_test_utils::{
+    test_chain_spec_builder, test_genesis, transaction::TransactionTestContext, E2ETestSetupExt,
+};
 use reth_node_ethereum::EthereumNode;
 use reth_provider::StateProviderFactory;
 use reth_rpc_api::PayloadStatusWithWitness;
@@ -27,7 +26,7 @@ async fn check_witness(version: u8) -> eyre::Result<()> {
     let contract = Address::with_last_byte(0x80);
     // Read storage without writing it, and access an ancestor block hash.
     let code = bytes!("600054506001405000");
-    let mut genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json"))?;
+    let mut genesis = test_genesis();
     genesis.alloc.insert(
         contract,
         GenesisAccount {
@@ -36,13 +35,10 @@ async fn check_witness(version: u8) -> eyre::Result<()> {
             ..Default::default()
         },
     );
-    let chain = ChainSpecBuilder::default().chain(MAINNET.chain).genesis(genesis);
-    let (chain, attributes) = if version == 5 {
-        (chain.amsterdam_activated().build(), eth_payload_attributes_amsterdam as fn(_) -> _)
-    } else {
-        (chain.prague_activated().build(), eth_payload_attributes as fn(_) -> _)
-    };
-    let (mut nodes, wallet) = setup::<EthereumNode>(2, Arc::new(chain), false, attributes).await?;
+    let chain = test_chain_spec_builder().genesis(genesis);
+    let chain =
+        if version == 5 { chain.amsterdam_activated() } else { chain.prague_activated() }.build();
+    let (mut nodes, wallet) = EthereumNode::test_setup(2, Arc::new(chain)).build().await?;
     let target = nodes.pop().unwrap();
     let mut source = nodes.pop().unwrap();
     let first = source.advance_block().await?;
@@ -79,8 +75,8 @@ async fn check_witness(version: u8) -> eyre::Result<()> {
     };
     let client = target.auth_server_handle().http_client();
     let method = format!("engine_newPayloadWithWitnessV{version}");
-    let params = rpc_params![&payload, Vec::<B256>::new(), B256::ZERO, &requests];
-    let response: PayloadStatusWithWitness = client.request(&method, params.clone()).await?;
+    let params = (&payload, Vec::<B256>::new(), B256::ZERO, &requests);
+    let response: PayloadStatusWithWitness = client.request(method.clone(), params.clone()).await?;
     assert!(response.payload_status.is_valid());
     assert_eq!(response.payload_status.latest_valid_hash, Some(block_hash));
     let witness = alloy_rlp::decode_exact::<WireWitness>(&response.witness.unwrap())?;
@@ -95,7 +91,7 @@ async fn check_witness(version: u8) -> eyre::Result<()> {
     let expected: DebugWitness = source
         .rpc_client()
         .unwrap()
-        .request("debug_executionWitnessByBlockHash", rpc_params![block_hash, "canonical"])
+        .request("debug_executionWitnessByBlockHash", (block_hash, "canonical"))
         .await?;
     assert_eq!(witness.state, expected.state);
     assert_eq!(witness.codes, expected.codes);
@@ -108,18 +104,17 @@ async fn check_witness(version: u8) -> eyre::Result<()> {
         expected.headers
     );
 
-    let repeated: PayloadStatusWithWitness = client.request(&method, params.clone()).await?;
+    let repeated: PayloadStatusWithWitness = client.request(method.clone(), params.clone()).await?;
     assert!(repeated.payload_status.is_valid());
     assert!(repeated.witness.is_none(), "known blocks are not re-executed");
     let ordinary: serde_json::Value =
-        client.request(&format!("engine_newPayloadV{version}"), params).await?;
+        client.request(format!("engine_newPayloadV{version}"), params).await?;
     assert_eq!(ordinary, serde_json::to_value(&repeated.payload_status)?);
 
     let mut invalid = payload;
     invalid["blockHash"] = serde_json::to_value(B256::ZERO)?;
-    let invalid: PayloadStatusWithWitness = client
-        .request(&method, rpc_params![invalid, Vec::<B256>::new(), B256::ZERO, requests])
-        .await?;
+    let invalid: PayloadStatusWithWitness =
+        client.request(method, (invalid, Vec::<B256>::new(), B256::ZERO, requests)).await?;
     assert!(invalid.payload_status.is_invalid());
     assert!(invalid.witness.is_none());
     Ok(())
@@ -133,7 +128,7 @@ struct WireWitness {
     keys: Vec<Bytes>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct DebugWitness {
     headers: Vec<Bytes>,
     codes: Vec<Bytes>,

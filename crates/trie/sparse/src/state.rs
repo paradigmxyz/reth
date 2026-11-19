@@ -5,7 +5,13 @@ use crate::{
 use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
 use either::Either;
+#[cfg(feature = "std")]
+use rayon::iter::IntoParallelRefMutIterator;
+#[cfg(feature = "std")]
+use rayon::iter::ParallelIterator;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
+#[cfg(feature = "std")]
+use reth_primitives_traits::ParallelBridgeBuffered;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
@@ -283,9 +289,6 @@ where
 
         #[cfg(feature = "std")]
         let results: Vec<_> = {
-            use rayon::iter::ParallelIterator;
-            use reth_primitives_traits::ParallelBridgeBuffered;
-
             let parent_span = tracing::Span::current();
             targets
                 .into_iter()
@@ -367,6 +370,17 @@ where
     /// Returns storage sparse trie root if the trie has been revealed.
     pub fn storage_root(&mut self, account: &B256, new_epoch: TrieNodeEpoch) -> Option<B256> {
         self.storage.tries.get_mut(account).and_then(|trie| trie.root(new_epoch))
+    }
+
+    /// Returns the roots of all revealed storage tries, keyed by hashed account address.
+    ///
+    /// Dirty roots are computed at `new_epoch`; blind storage tries are omitted.
+    pub fn storage_roots(&mut self, new_epoch: TrieNodeEpoch) -> B256Map<B256> {
+        self.storage
+            .tries
+            .iter_mut()
+            .filter_map(|(address, trie)| trie.root(new_epoch).map(|root| (*address, root)))
+            .collect()
     }
 
     /// Returns mutable reference to the revealed account sparse trie.
@@ -528,8 +542,6 @@ struct StorageTries<S = ArenaParallelSparseTrie> {
 impl<S: SparseTrieTrait> StorageTries<S> {
     /// Prunes storage tries by epoch, returning fully old tries to the reuse pool.
     fn prune(&mut self, prune_before: TrieNodeEpoch, parent_span: &tracing::Span) -> usize {
-        use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-
         let addresses_to_evict: Vec<B256> = self
             .tries
             .par_iter_mut()
@@ -1014,6 +1026,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn take_trie_updates() {
         reth_tracing::init_test_tracing();
 
@@ -1053,7 +1066,7 @@ mod tests {
         let address_1 = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
         let address_path_1 = Nibbles::unpack(address_1);
         let account_1 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
-        let mut trie_account_1 = account_1.into_trie_account(storage_root);
+        let mut trie_account_1 = account_1.clone().into_trie_account(storage_root);
         let address_2 = b256!("0x1100000000000000000000000000000000000000000000000000000000000000");
         let address_path_2 = Nibbles::unpack(address_2);
         let account_2 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
@@ -1061,7 +1074,7 @@ mod tests {
 
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(ProofRetainer::from_iter([address_path_1, address_path_2]));
-        hash_builder.add_leaf(address_path_1, &alloy_rlp::encode(trie_account_1));
+        hash_builder.add_leaf(address_path_1, &alloy_rlp::encode(trie_account_1.clone()));
         hash_builder.add_leaf(address_path_2, &alloy_rlp::encode(trie_account_2));
 
         let root = hash_builder.root();
