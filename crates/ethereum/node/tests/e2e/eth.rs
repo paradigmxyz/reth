@@ -1,6 +1,7 @@
 use crate::utils::{advance_with_random_transactions, EngineSszRequestExt, EngineSszResponseExt};
-use alloy_eips::eip7685::RequestsOrHash;
+use alloy_eips::{eip7685::RequestsOrHash, BlockNumberOrTag};
 use alloy_primitives::{Bytes, B256};
+use alloy_provider::Provider;
 use alloy_rpc_types_engine::{
     ssz_engine_types::{
         BlobsV1Request, BlobsV1Response, BlobsV2Response, BlobsV3Response, BlobsV4Request,
@@ -9,14 +10,17 @@ use alloy_rpc_types_engine::{
         ForkchoiceUpdateCancun, ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse, Optional,
         PayloadAttributesCancun, PayloadStatus as SszPayloadStatus, PayloadStatusKind,
     },
-    ClientVersionV1, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
+    ClientVersionV1, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    PayloadStatusEnum,
 };
-use reth_chainspec::{EthChainSpec, EthereumHardfork};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
-    eth_payload_attributes, test_chain_spec, transaction::TransactionTestContext, E2ETestSetupExt,
+    eth_payload_attributes, node::NodeTestContext, test_chain_spec,
+    transaction::TransactionTestContext, E2ETestSetupExt, NodeHelperType,
 };
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
+    args::RpcServerArgs,
     node_config::NodeConfig,
     version::{version_metadata, CLIENT_CODE},
 };
@@ -113,6 +117,203 @@ async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
     node.stop().await?;
 
     Ok(())
+}
+
+#[tokio::test]
+async fn can_update_forkchoice_without_finalized_block() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+    let node = launch_without_finality(chain_spec.clone()).await?;
+    let attributes = |timestamp| eth_payload_attributes(&chain_spec, timestamp);
+    let engine = node.auth_server_handle().http_client();
+    let rpc = node.rpc_provider();
+    let canonical = node.inner.provider.canonical_in_memory_state();
+    assert!(canonical.get_finalized_num_hash().is_none());
+
+    let mut parent = node.block_hash(0);
+    for timestamp in 1..=3 {
+        let hash = submit_cancun_block(&node, parent, attributes(timestamp)).await?;
+
+        // Advance the head, then build on it, without ever supplying a finalized hash.
+        for attrs in [None, Some(attributes(timestamp + 1))] {
+            let build_requested = attrs.is_some();
+            let response = engine
+                .request::<_, ForkchoiceUpdated>(
+                    "engine_forkchoiceUpdatedV3",
+                    (
+                        ForkchoiceState {
+                            head_block_hash: hash,
+                            safe_block_hash: parent,
+                            finalized_block_hash: B256::ZERO,
+                        },
+                        attrs,
+                    ),
+                )
+                .await?;
+            assert_eq!(response.payload_status.status, PayloadStatusEnum::Valid);
+            assert_eq!(response.payload_status.latest_valid_hash, Some(hash));
+            assert_eq!(response.payload_id.is_some(), build_requested);
+            assert_eq!(
+                rpc.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap().header.hash,
+                hash
+            );
+            assert_eq!(canonical.get_safe_num_hash().unwrap().hash, parent);
+            assert!(canonical.get_finalized_num_hash().is_none());
+        }
+        parent = hash;
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn rewinds_to_canonical_ancestor_above_finality() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+    let node = launch_without_finality(chain_spec.clone()).await?;
+    let engine = node.auth_server_handle().http_client();
+    let rpc = node.rpc_provider();
+    let canonical = node.inner.provider.canonical_in_memory_state();
+
+    let mut hashes = vec![node.block_hash(0)];
+    for timestamp in 1..=8 {
+        let attributes = eth_payload_attributes(&chain_spec, timestamp);
+        let hash = submit_cancun_block(&node, hashes[timestamp as usize - 1], attributes).await?;
+        let advanced = node
+            .engine
+            .forkchoice_updated(ForkchoiceState { head_block_hash: hash, ..Default::default() })
+            .await?;
+        assert_eq!(advanced.payload_status.status, PayloadStatusEnum::Valid);
+        hashes.push(hash);
+    }
+    let (checkpoint, safe, ancestor, tip) = (hashes[3], hashes[4], hashes[5], hashes[8]);
+
+    assert!(canonical.get_finalized_num_hash().is_none());
+    let cases = [
+        (B256::ZERO, None),
+        (checkpoint, None),
+        (checkpoint, Some(eth_payload_attributes(&chain_spec, 9))),
+    ];
+    for (index, (finalized, attrs)) in cases.into_iter().enumerate() {
+        let advanced = engine
+            .request::<_, ForkchoiceUpdated>(
+                "engine_forkchoiceUpdatedV3",
+                (
+                    ForkchoiceState {
+                        head_block_hash: tip,
+                        safe_block_hash: checkpoint,
+                        finalized_block_hash: finalized,
+                    },
+                    None::<PayloadAttributes>,
+                ),
+            )
+            .await?;
+        assert_eq!(advanced.payload_status.status, PayloadStatusEnum::Valid);
+        assert_eq!(
+            rpc.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap().header.hash,
+            tip
+        );
+
+        let build_requested = attrs.is_some();
+        let rewound = engine
+            .request::<_, ForkchoiceUpdated>(
+                "engine_forkchoiceUpdatedV3",
+                (
+                    ForkchoiceState {
+                        head_block_hash: ancestor,
+                        safe_block_hash: safe,
+                        finalized_block_hash: finalized,
+                    },
+                    attrs,
+                ),
+            )
+            .await?;
+        assert_eq!(rewound.payload_status.status, PayloadStatusEnum::Valid);
+        assert_eq!(rewound.payload_status.latest_valid_hash, Some(ancestor));
+        assert_eq!(rewound.payload_id.is_some(), build_requested);
+        assert_eq!(
+            rpc.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap().header.hash,
+            ancestor
+        );
+        for number in 6..=8 {
+            assert!(rpc.get_block_by_number(BlockNumberOrTag::Number(number)).await?.is_none());
+        }
+        assert_eq!(canonical.get_safe_num_hash().unwrap().hash, safe);
+        node.wait_for_pool_head(ancestor).await?;
+        assert_eq!(
+            canonical.get_finalized_num_hash().map(|block| block.hash),
+            (!finalized.is_zero()).then_some(finalized),
+        );
+
+        // The payload service processes the revert notification before handling this build.
+        let timestamp = 10 + index as u64;
+        let build = engine
+            .request::<_, ForkchoiceUpdated>(
+                "engine_forkchoiceUpdatedV3",
+                (
+                    ForkchoiceState {
+                        head_block_hash: ancestor,
+                        safe_block_hash: ancestor,
+                        finalized_block_hash: B256::ZERO,
+                    },
+                    Some(eth_payload_attributes(&chain_spec, timestamp)),
+                ),
+            )
+            .await?;
+        assert_eq!(build.payload_status.status, PayloadStatusEnum::Valid);
+        assert!(build.payload_id.is_some());
+    }
+
+    Ok(())
+}
+
+async fn launch_without_finality(
+    chain_spec: Arc<ChainSpec>,
+) -> eyre::Result<NodeHelperType<EthereumNode>> {
+    // The shared setup helper finalizes genesis, so launch without that initial FCU.
+    let config = NodeConfig::test().with_chain(chain_spec.clone()).with_unused_ports().with_rpc(
+        RpcServerArgs::default()
+            .with_unused_ports()
+            .with_http()
+            .with_http_api(RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Testing])),
+    );
+    let NodeHandle { node, .. } = NodeBuilder::new(config)
+        .testing_node(Runtime::test())
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+    NodeTestContext::new(node, move |timestamp| eth_payload_attributes(&chain_spec, timestamp))
+        .await
+}
+
+async fn submit_cancun_block(
+    node: &NodeHelperType<EthereumNode>,
+    parent: B256,
+    attributes: PayloadAttributes,
+) -> eyre::Result<B256> {
+    let TestingBuildBlockResponseV1::V5(envelope) = node
+        .testing_build_block_v1(TestingBuildBlockRequestV1 {
+            parent_block_hash: parent,
+            payload_attributes: attributes,
+            transactions: vec![],
+            extra_data: None,
+        })
+        .await?
+    else {
+        panic!("expected a V5 envelope")
+    };
+    let payload = envelope.execution_payload;
+    let hash = payload.payload_inner.payload_inner.block_hash;
+    let status = node
+        .auth_server_handle()
+        .http_client()
+        .request::<_, PayloadStatus>(
+            "engine_newPayloadV3",
+            (payload, Vec::<B256>::new(), B256::ZERO),
+        )
+        .await?;
+    assert_eq!(status.status, PayloadStatusEnum::Valid);
+    Ok(hash)
 }
 
 #[tokio::test]

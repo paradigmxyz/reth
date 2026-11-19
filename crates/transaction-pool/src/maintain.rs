@@ -325,17 +325,24 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
 
         // handle the new block or reorg
         let Some(event) = event else { continue };
-        match event {
-            CanonStateNotification::Reorg { old, new } => {
+        match &event {
+            CanonStateNotification::Reorg { old, .. } |
+            CanonStateNotification::Revert { old, .. } => {
+                let Some(new_tip) = event.tip_checked() else {
+                    debug!(target: "txpool", "canonical reorg notification has no tip");
+                    maintained_state = MaintainedPoolState::Drifted;
+                    continue
+                };
+                let new = event.committed();
                 let (old_blocks, old_state) = old.inner();
                 let (new_blocks, new_state) = new.inner();
-                let new_tip = new_blocks.tip();
-                let new_first = new_blocks.first();
-                let old_first = old_blocks.first();
+                let fork_hash = old_blocks.first().parent_hash();
+                let new_parent_hash =
+                    if new.is_empty() { fork_hash } else { new_blocks.first().parent_hash() };
 
                 // check if the reorg is not canonical with the pool's block
-                if !(old_first.parent_hash() == pool_info.last_seen_block_hash ||
-                    new_first.parent_hash() == pool_info.last_seen_block_hash)
+                if !(fork_hash == pool_info.last_seen_block_hash ||
+                    new_parent_hash == pool_info.last_seen_block_hash)
                 {
                     // the new block points to a higher block than the oldest block in the old chain
                     maintained_state = MaintainedPoolState::Drifted;
@@ -868,11 +875,11 @@ mod tests {
     use crate::{
         blobstore::InMemoryBlobStore,
         error::{InvalidPoolTransactionError, PoolErrorKind},
-        test_utils::TransactionBuilder,
+        test_utils::{OkValidator, TransactionBuilder},
         validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
     };
-    use alloy_consensus::Header;
+    use alloy_consensus::{BlockBody, Header};
     use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip2718::Decodable2718};
     use alloy_primitives::{address, hex, B256, U256};
     use reth_ethereum_primitives::{Block, PooledTransactionVariant};
@@ -1007,6 +1014,67 @@ mod tests {
         let hash = *transaction.hash();
         let added = txpool.add_transaction(TransactionOrigin::External, transaction).await.unwrap();
         assert_eq!(added.hash, hash);
+    }
+
+    #[tokio::test]
+    async fn rewind_reinserts_transactions_with_tip_from_notification() {
+        let provider = MockEthProvider::default().with_genesis_block();
+        let pool = Pool::new(
+            OkValidator::<EthPooledTransaction>::default(),
+            CoinbaseTipOrdering::default(),
+            InMemoryBlobStore::default(),
+            Default::default(),
+        );
+
+        let tip = RecoveredBlock::<Block>::new_sealed(
+            SealedBlock::from_sealed_parts(
+                SealedHeader::new(
+                    Header {
+                        number: 1,
+                        gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
+                        ..Default::default()
+                    },
+                    B256::random(),
+                ),
+                Default::default(),
+            ),
+            Vec::new(),
+        );
+        let tx = TransactionBuilder::default()
+            .gas_limit(21_000)
+            .max_fee_per_gas(1_000_000_000)
+            .to(Address::ZERO)
+            .into_eip1559();
+        let hash = *tx.tx_hash();
+        let (tx, signer) = tx.try_into_recovered().unwrap().into_parts();
+        let reverted = RecoveredBlock::<Block>::new_sealed(
+            SealedBlock::from_sealed_parts(
+                SealedHeader::new(
+                    Header { number: 2, parent_hash: tip.hash(), ..Default::default() },
+                    B256::random(),
+                ),
+                BlockBody { transactions: vec![tx], ..Default::default() },
+            ),
+            vec![signer],
+        );
+
+        // The provider only has genesis. The notification is the source of the rewind tip.
+        let tip_hash = tip.hash();
+        let notification: CanonStateNotification = CanonStateNotification::Revert {
+            tip: Arc::new(tip),
+            old: Arc::new(Chain::new(vec![reverted], Default::default(), Default::default())),
+        };
+        let maintain = maintain_transaction_pool(
+            provider,
+            pool.clone(),
+            futures::stream::iter([notification]),
+            Runtime::test(),
+            MaintainPoolConfig::default(),
+        );
+        time::timeout(Duration::from_secs(10), maintain).await.unwrap();
+
+        assert_eq!(pool.block_info().last_seen_block_hash, tip_hash);
+        assert!(pool.contains(&hash));
     }
 
     #[test]

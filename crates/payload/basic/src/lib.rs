@@ -212,10 +212,12 @@ where
     }
 
     fn on_new_state<N: NodePrimitives>(&mut self, new_state: CanonStateNotification<N>) {
-        if !self.config.pre_cache_state {
+        let Some(tip) = new_state.tip_checked().filter(|_| self.config.pre_cache_state) else {
+            // A pure revert has no committed state to pre-cache.
             self.pre_cached = None;
+            self.pre_cached_parent_block_info = None;
             return
-        }
+        };
 
         let mut cached = CachedReads::default();
 
@@ -232,7 +234,6 @@ where
             }
         }
 
-        let tip = committed.tip();
         let block = tip.hash();
         let parent_block_info =
             PayloadParentBlockInfo { transaction_count: tip.transaction_count() };

@@ -176,9 +176,12 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
     txpool.add_transaction(TransactionOrigin::External, pooled_tx1).await.unwrap();
     txpool.add_transaction(TransactionOrigin::External, pooled_tx2).await.unwrap();
 
-    // inject tx1, make the node advance and eventually generate `CanonStateNotification::Commit`
-    // event to propagate to the pool. Wait for the node's own pool to drop tx1, so the block of the
-    // reorg below can't include it.
+    // Build the replacement block with tx2 before mining tx1 on the original chain.
+    node.rpc.inject_tx(envelop2.encoded_2718().into()).await?;
+    let replacement = node.build_payload_on(genesis_hash).await?;
+    node.inner.pool.remove_transactions(vec![tx_hash2]);
+
+    // Mine tx1 on the original chain and wait for the node's pool to process the commit.
     let _ = node.rpc.inject_tx(envelop1.encoded_2718().into()).await.unwrap();
     node.advance_block_synced().await?;
 
@@ -189,10 +192,8 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
     })
     .await?;
 
-    // inject tx2 and mine it in a block on genesis, make the node reorg and eventually generate
-    // `CanonStateNotification::Reorg` event to propagate to the pool
-    let _ = node.rpc.inject_tx(envelop2.encoded_2718().into()).await.unwrap();
-    node.advance_block_on(genesis_hash).await?;
+    // Import the replacement block to emit a single reorg notification.
+    node.import_payload(replacement).await?;
 
     // wait for pool to process `CanonStateNotification::Reorg` event properly, and finally tx1
     // will be added back to the pool and tx2 will be removed.

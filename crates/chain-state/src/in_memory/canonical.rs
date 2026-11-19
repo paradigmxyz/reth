@@ -432,6 +432,25 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.inner.chain_info_tracker.set_canonical_head(header);
     }
 
+    /// Publishes a rewound head and records the start of the suffix that persistence must remove.
+    pub fn set_canonical_head_after_rewind(
+        &self,
+        header: SealedHeader<N::BlockHeader>,
+        first_reverted: BlockNumHash,
+    ) {
+        self.inner.chain_info_tracker.set_canonical_head_after_rewind(header, first_reverted);
+    }
+
+    /// Returns the first reverted block while its suffix may still be on disk.
+    pub fn first_block_in_pending_rewind(&self) -> Option<BlockNumHash> {
+        self.inner.chain_info_tracker.first_block_in_pending_rewind()
+    }
+
+    /// Clears the rewind marker when the persisted tip is on the current canonical chain.
+    pub fn clear_pending_rewind(&self) {
+        self.inner.chain_info_tracker.clear_pending_rewind();
+    }
+
     /// Safe head setter.
     pub fn set_safe(&self, header: SealedHeader<N::BlockHeader>) {
         self.inner.chain_info_tracker.set_safe(header);

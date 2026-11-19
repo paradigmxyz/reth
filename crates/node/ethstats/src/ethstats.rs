@@ -329,8 +329,8 @@ where
         let conn = self.conn.read().await;
         let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
 
-        let block_number = if let Some(head) = head {
-            head.tip().header().number()
+        let block_number = if let Some(tip) = head.as_ref().and_then(|head| head.tip_checked()) {
+            tip.header().number()
         } else {
             self.provider
                 .best_block_number()

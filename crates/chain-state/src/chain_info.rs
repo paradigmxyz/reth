@@ -36,7 +36,7 @@ where
                 last_forkchoice_update: RwLock::new(None),
 
                 canonical_head_number: AtomicU64::new(head.number()),
-                canonical_head: RwLock::new(head),
+                canonical_head: RwLock::new(CanonicalHead { header: head, first_reverted: None }),
                 safe_block,
                 finalized_block,
                 persisted_block,
@@ -47,7 +47,7 @@ where
     /// Returns the [`ChainInfo`] for the canonical head.
     pub fn chain_info(&self) -> ChainInfo {
         let inner = self.inner.canonical_head.read();
-        ChainInfo { best_hash: inner.hash(), best_number: inner.number() }
+        ChainInfo { best_hash: inner.header.hash(), best_number: inner.header.number() }
     }
 
     /// Update the timestamp when we received a forkchoice update.
@@ -62,7 +62,7 @@ where
 
     /// Returns the canonical head of the chain.
     pub fn get_canonical_head(&self) -> SealedHeader<N::BlockHeader> {
-        self.inner.canonical_head.read().clone()
+        self.inner.canonical_head.read().header.clone()
     }
 
     /// Returns the safe header of the chain.
@@ -77,7 +77,7 @@ where
 
     /// Returns the `BlockNumHash` of the canonical head.
     pub fn get_canonical_num_hash(&self) -> BlockNumHash {
-        self.inner.canonical_head.read().num_hash()
+        self.inner.canonical_head.read().header.num_hash()
     }
 
     /// Returns the block number of the canonical head.
@@ -103,10 +103,36 @@ where
     /// Sets the canonical head of the chain.
     pub fn set_canonical_head(&self, header: SealedHeader<N::BlockHeader>) {
         let number = header.number();
-        *self.inner.canonical_head.write() = header;
-
-        // also update the atomic number.
+        self.inner.canonical_head.write().header = header;
         self.inner.canonical_head_number.store(number, Ordering::Relaxed);
+    }
+
+    /// Sets the rewound head and records the start of the reverted suffix.
+    pub fn set_canonical_head_after_rewind(
+        &self,
+        header: SealedHeader<N::BlockHeader>,
+        first_reverted: BlockNumHash,
+    ) {
+        let number = header.number();
+        let mut head = self.inner.canonical_head.write();
+        head.header = header;
+        // An earlier rewind can still be waiting for persistence to unwind its suffix.
+        if head.first_reverted.is_none_or(|first| first_reverted.number < first.number) {
+            head.first_reverted = Some(first_reverted);
+        }
+        self.inner.canonical_head_number.store(number, Ordering::Relaxed);
+    }
+
+    /// Returns the first reverted block while its suffix may still be on disk.
+    pub fn first_block_in_pending_rewind(&self) -> Option<BlockNumHash> {
+        self.inner.canonical_head.read().first_reverted
+    }
+
+    /// Clears the rewind marker after the engine verifies that disk is on the canonical chain.
+    pub(crate) fn clear_pending_rewind(&self) {
+        if self.first_block_in_pending_rewind().is_some() {
+            self.inner.canonical_head.write().first_reverted = None;
+        }
     }
 
     /// Sets the safe header of the chain.
@@ -174,13 +200,19 @@ struct ChainInfoInner<N: NodePrimitives = reth_ethereum_primitives::EthPrimitive
     /// Tracks the number of the `canonical_head`.
     canonical_head_number: AtomicU64,
     /// The canonical head of the chain.
-    canonical_head: RwLock<SealedHeader<N::BlockHeader>>,
+    canonical_head: RwLock<CanonicalHead<N::BlockHeader>>,
     /// The block that the beacon node considers safe.
     safe_block: watch::Sender<Option<SealedHeader<N::BlockHeader>>>,
     /// The block that the beacon node considers finalized.
     finalized_block: watch::Sender<Option<SealedHeader<N::BlockHeader>>>,
     /// The last block that was persisted to disk.
     persisted_block: watch::Sender<Option<BlockNumHash>>,
+}
+
+#[derive(Debug)]
+struct CanonicalHead<H> {
+    header: SealedHeader<H>,
+    first_reverted: Option<BlockNumHash>,
 }
 
 /// The headers a [`ChainInfoTracker`] starts from: the canonical head and, if known, the safe and
