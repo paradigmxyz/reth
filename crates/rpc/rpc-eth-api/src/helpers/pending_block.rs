@@ -560,7 +560,11 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
             prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),
             parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| B256::ZERO),
-            withdrawals: parent.withdrawals_root().map(|_| Default::default()),
+            withdrawals: parent.withdrawals_root().map(|_| {
+                block_overrides
+                    .and_then(|overrides| overrides.withdrawals.clone())
+                    .unwrap_or_default()
+            }),
             extra_data: parent.extra_data().clone(),
             slot_number: parent.slot_number().map(|slot| slot.saturating_add(1)),
         };
