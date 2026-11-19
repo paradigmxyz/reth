@@ -575,6 +575,14 @@ where
                     .iter()
                     .any(|frame| frame.mode == alloy_eips::eip8141::FrameMode::DependencyVerify)
             {
+                if !self
+                    .transaction_validation_gas_rules
+                    .load()
+                    .version
+                    .feature(evm2::EvmFeatures::EIP8288)
+                {
+                    return Err(Eip8141PoolTransactionError::DependencyFramesDisabled.into());
+                }
                 let dependencies = frame
                     .dependencies()
                     .map_err(reth_eip8288::ProofError::from)
@@ -1813,12 +1821,13 @@ mod tests {
         eip2930::{AccessList, AccessListItem},
         eip7702::Authorization,
         eip8141::{Frame, FrameLimits, FrameMode, TransactionFees},
+        eip8288::{Dependency, LEANSPHINCS_SCHEME, LEANSPHINCS_VERIFICATION_GAS},
     };
     use alloy_primitives::{hex, Address, Bytes, Sealable, Signature, B256, U256};
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::SignedTransaction;
+    use reth_primitives_traits::{SealedHeader, SignedTransaction};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_storage_api::AccountReader;
 
@@ -3053,5 +3062,84 @@ mod tests {
             validator.validate_stateless(TransactionOrigin::External, &transaction(gas_limit + 1)),
             Err(InvalidPoolTransactionError::ExceedsGasLimit(60_000_001, 60_000_000))
         ));
+    }
+
+    #[test]
+    fn dependency_frames_require_activation_before_evidence() {
+        for activation in [None, Some(1), Some(0)] {
+            let mut spec = ChainSpecBuilder::mainnet().bogota_activated().build();
+            spec.genesis.timestamp = 0;
+            if let Some(timestamp) = activation {
+                spec.genesis.config.extra_fields.insert("eip8288Time".into(), timestamp.into());
+            }
+            let evm_config = EthEvmConfig::new(Arc::new(spec.clone()));
+            let provider = MockEthProvider::default().with_chain_spec(spec).with_genesis_block();
+            let validator = EthTransactionValidatorBuilder::new(provider, evm_config)
+                .build(InMemoryBlobStore::default());
+            let sender = Address::repeat_byte(0x41);
+            let frame = TxEip8141 {
+                chain_id: validator.chain_id(),
+                sender,
+                frames: vec![Frame {
+                    mode: FrameMode::DependencyVerify,
+                    limits: FrameLimits { execution: LEANSPHINCS_VERIFICATION_GAS, state: 0 },
+                    data: Bytes::copy_from_slice(
+                        &Dependency {
+                            scheme: LEANSPHINCS_SCHEME,
+                            data_hash: B256::ZERO,
+                            verification_key_hash: B256::repeat_byte(1),
+                        }
+                        .encode(),
+                    ),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            let encoded_length = frame.eip2718_encoded_length();
+            let transaction = EthPooledTransaction::new(
+                alloy_consensus::transaction::Recovered::new_unchecked(
+                    reth_ethereum_primitives::TransactionSigned::Eip8141(frame.seal_slow()),
+                    sender,
+                ),
+                encoded_length,
+            );
+            for timestamp in [0, 1, 0] {
+                validator.on_new_head_block(&SealedHeader::seal_slow(Header {
+                    timestamp,
+                    gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
+                    ..Default::default()
+                }));
+                for origin in [
+                    TransactionOrigin::External,
+                    TransactionOrigin::Local,
+                    TransactionOrigin::Private,
+                ] {
+                    let error = validator.validate_stateless(origin, &transaction).unwrap_err();
+                    if activation.is_some_and(|activation| timestamp >= activation) {
+                        assert!(
+                            matches!(
+                                error,
+                                InvalidPoolTransactionError::Eip8141(
+                                    Eip8141PoolTransactionError::DependencyEvidence(
+                                        reth_eip8288::ProofError::MissingEvidence
+                                    )
+                                )
+                            ),
+                            "{error:?}"
+                        );
+                    } else {
+                        assert!(
+                            matches!(
+                                error,
+                                InvalidPoolTransactionError::Eip8141(
+                                    Eip8141PoolTransactionError::DependencyFramesDisabled
+                                )
+                            ),
+                            "{error:?}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }

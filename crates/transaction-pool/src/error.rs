@@ -260,6 +260,9 @@ pub enum Eip8141PoolTransactionError {
     /// Dependency evidence is missing, invalid, or does not cover the transaction.
     #[error(transparent)]
     DependencyEvidence(#[from] reth_eip8288::ProofError),
+    /// Dependency frames require the experimental EIP-8288 activation.
+    #[error("EIP-8288 dependency frames are disabled")]
+    DependencyFramesDisabled,
 }
 
 /// Represents errors that can happen when validating transactions for the pool
@@ -458,6 +461,7 @@ impl InvalidPoolTransactionError {
             Self::Eip8141(eip8141_err) => match eip8141_err {
                 Eip8141PoolTransactionError::InvalidTransaction(_) => true,
                 Eip8141PoolTransactionError::DependencyEvidence(_) |
+                Eip8141PoolTransactionError::DependencyFramesDisabled |
                 Eip8141PoolTransactionError::PublicMempoolValidationUnavailable |
                 Eip8141PoolTransactionError::PublicMempoolPolicy(_) => false,
             },
