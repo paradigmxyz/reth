@@ -39,6 +39,7 @@ metrics = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
 # reth
 reth-db-common.workspace = true
 reth-chainspec.workspace = true
@@ -58,6 +59,7 @@ trie-debug = [
     "dep:rand",
 ]
 test-utils = [
+    "reth-concurrency/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
     "reth-trie/test-utils",

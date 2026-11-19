@@ -40,6 +40,7 @@ itertools.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
 # reth
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
