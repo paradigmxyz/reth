@@ -1522,6 +1522,22 @@ fn test_tree_state_on_new_head_deep_fork() {
     }
 }
 
+#[test]
+fn test_tree_state_on_new_head_genesis() {
+    let test_harness = TestHarness::new(MAINNET.clone());
+    let genesis = TestBlockBuilder::eth().get_executed_block_with_number(0, B256::ZERO);
+    let genesis_hash = genesis.recovered_block().hash();
+
+    // A canonical ancestor that was loaded from disk is tracked like an executed block.
+    test_harness
+        .tree
+        .canonical_in_memory_state
+        .update_chain(NewCanonicalChain::Commit { new: vec![genesis] });
+
+    // The genesis block has no parent to walk back to, so there is no new chain for it.
+    assert!(test_harness.tree.on_new_head(genesis_hash).unwrap().is_none());
+}
+
 #[tokio::test]
 async fn test_get_canonical_blocks_to_persist() {
     let chain_spec = MAINNET.clone();

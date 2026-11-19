@@ -63,9 +63,11 @@ where
         let new_head_number = new_head_block.recovered_block().number();
         let mut current_canonical_number = self.state.tree_state.current_canonical_head.number;
 
+        // The genesis block has no parent to walk back to. It is only tracked after it was loaded
+        // from disk as a canonical ancestor, and never is a new head.
+        let Some(mut current_number) = new_head_number.checked_sub(1) else { return Ok(None) };
         let mut current_hash = new_head_block.recovered_block().parent_hash();
         let mut new_chain = vec![new_head_block];
-        let mut current_number = new_head_number - 1;
 
         // Walk back the new chain until we reach a block we know about
         //
