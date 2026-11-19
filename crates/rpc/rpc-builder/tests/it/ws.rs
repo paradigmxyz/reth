@@ -153,6 +153,7 @@ async fn test_eth_subscribe_invalid_params_rejected() {
     for (kind, params) in [
         ("logs", serde_json::json!(true)),
         ("transactionReceipts", serde_json::json!(true)),
+        ("transactionReceipts", serde_json::json!({"fromBlock": "latest"})),
         ("newPendingTransactions", serde_json::json!({})),
     ] {
         let response =

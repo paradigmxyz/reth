@@ -93,8 +93,8 @@ where
         self.inner.eth_api.log_stream(filter)
     }
 
-    /// Forwards notifications to an already accepted sink. Returns an error if the parameters
-    /// are invalid for the subscription kind or a notification cannot be serialized.
+    /// Forwards notifications to an already accepted sink. Invalid parameters and per-subscriber
+    /// serialization failures return an error. Shared feeds log failures and skip those items.
     pub async fn handle_accepted(
         &self,
         accepted_sink: SubscriptionSink,
@@ -326,6 +326,12 @@ impl Subscription {
                 Ok(Self::TransactionReceipts(filter))
             }
             (SubscriptionKind::TransactionReceipts, Params::None) => {
+                Ok(Self::TransactionReceipts(Default::default()))
+            }
+            // Alloy decodes `{}` as the default log filter.
+            (SubscriptionKind::TransactionReceipts, Params::Logs(filter))
+                if *filter == Filter::default() =>
+            {
                 Ok(Self::TransactionReceipts(Default::default()))
             }
             _ => Err(invalid_params_rpc_err(format!("Invalid params for {kind}"))),
@@ -747,11 +753,13 @@ mod tests {
         let module = pubsub.clone().into_rpc().remove_context();
 
         let (heads_id, mut heads) = subscribe(&module, r#"["newHeads"]"#).await;
-        // Both ways of asking for every receipt share a feed.
+        // Unfiltered receipt subscriptions share a feed.
         let mut receipts = Vec::new();
-        for params in
-            [r#"["transactionReceipts"]"#, r#"["transactionReceipts", {"transactionHashes": []}]"#]
-        {
+        for params in [
+            r#"["transactionReceipts"]"#,
+            r#"["transactionReceipts", {}]"#,
+            r#"["transactionReceipts", {"transactionHashes": []}]"#,
+        ] {
             receipts.push(subscribe(&module, params).await);
         }
         let (hashes_id, mut hashes) = subscribe(&module, r#"["newPendingTransactions"]"#).await;
@@ -759,7 +767,7 @@ mod tests {
         let feeds = &pubsub.inner.feeds;
         wait_for_producers(&[
             (&feeds.new_heads, 1),
-            (&feeds.transaction_receipts, 2),
+            (&feeds.transaction_receipts, receipts.len()),
             (&feeds.pending_transaction_hashes, 1),
             (&feeds.full_pending_transactions, 1),
         ])
