@@ -150,29 +150,34 @@ async fn test_eth_subscribe_invalid_params_rejected() {
     let handle = launch_ws_eth().await;
     let mut client = WebSocketTestClient::new(handle.ws_local_addr().unwrap()).await.unwrap();
 
-    for (kind, params) in [
-        ("logs", serde_json::json!(true)),
-        ("transactionReceipts", serde_json::json!(true)),
-        ("transactionReceipts", serde_json::json!({"fromBlock": "latest"})),
-        ("transactionReceipts", serde_json::json!({"topics": []})),
-        ("transactionReceipts", serde_json::json!({"address": []})),
-        ("transactionReceipts", serde_json::json!({"transactionHashes": [], "topics": []})),
-        ("transactionReceipts", serde_json::json!({"transactionHashes": ["0x01"]})),
-        ("newPendingTransactions", serde_json::json!({})),
+    for (kind, params, detail) in [
+        ("logs", serde_json::json!(true), None),
+        ("transactionReceipts", serde_json::json!(true), None),
+        ("transactionReceipts", serde_json::json!({"fromBlock": "latest"}), None),
+        ("transactionReceipts", serde_json::json!({"topics": []}), None),
+        ("transactionReceipts", serde_json::json!({"address": []}), None),
+        ("transactionReceipts", serde_json::json!({"transactionHashes": [], "topics": []}), None),
+        (
+            "transactionReceipts",
+            serde_json::json!({"transactionHashes": ["0x01"]}),
+            Some("invalid string length"),
+        ),
+        ("newPendingTransactions", serde_json::json!({}), None),
     ] {
         let response =
             ws_call(&mut client, "eth_subscribe", serde_json::json!([kind, params])).await;
-        assert_eq!(
-            response,
-            serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "error": {
-                    "code": jsonrpsee::types::error::INVALID_PARAMS_CODE,
-                    "message": format!("Invalid params for {kind}"),
-                },
-            })
-        );
+        let mut expected = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": {
+                "code": jsonrpsee::types::error::INVALID_PARAMS_CODE,
+                "message": format!("Invalid params for {kind}"),
+            },
+        });
+        if let Some(detail) = detail {
+            expected["error"]["data"] = detail.into();
+        }
+        assert_eq!(response, expected);
     }
 
     let response =

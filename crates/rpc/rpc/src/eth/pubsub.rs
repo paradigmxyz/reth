@@ -815,6 +815,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn receipt_subscription_delivers_only_selected_hash() {
+        let provider = test_provider();
+        let module = test_pubsub(provider.clone(), testing_pool()).into_rpc().remove_context();
+        let chain = chain_with_logs(1);
+        let hash = chain.transaction_hashes().nth(1).unwrap();
+        let params = serde_json::json!(["transactionReceipts", { "transactionHashes": [hash] }]);
+        let (_, mut notifications) = subscribe(&module, &params.to_string()).await;
+
+        // The subscription task may start listening after the acknowledgement.
+        let msg = tokio::time::timeout(TIMEOUT, async {
+            loop {
+                commit(&provider, chain.clone());
+                tokio::select! {
+                    msg = notifications.recv() => break msg.unwrap(),
+                    _ = tokio::task::yield_now() => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        let notification: Value = serde_json::from_str(&msg).unwrap();
+        let receipts = notification["params"]["result"].as_array().unwrap();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0]["transactionHash"], serde_json::json!(hash));
+    }
+
+    #[tokio::test]
     async fn shared_feed_runs_only_while_subscribed() {
         let provider = test_provider();
         let pubsub = test_pubsub(provider.clone(), testing_pool());

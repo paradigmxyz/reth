@@ -469,9 +469,14 @@ impl<'de: 'a, 'a> Deserialize<'de> for Id<'a> {
 const MAX_INVALID_PARAMS_DATA: usize = 1024;
 
 fn invalid_params(e: impl ToString) -> ErrorObjectOwned {
+    invalid_params_with_data(INVALID_PARAMS_MSG, e)
+}
+
+/// Creates an invalid-params error with the parser's diagnostic truncated to fit the data limit.
+pub fn invalid_params_with_data(message: &'static str, e: impl ToString) -> ErrorObjectOwned {
     let mut data = e.to_string();
     data.truncate(data.floor_char_boundary(MAX_INVALID_PARAMS_DATA));
-    ErrorObject::owned(ErrorCode::InvalidParams.code(), INVALID_PARAMS_MSG, Some(data))
+    ErrorObject::owned(ErrorCode::InvalidParams.code(), message, Some(data))
 }
 
 #[cfg(test)]
