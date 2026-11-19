@@ -4,7 +4,6 @@ use crate::{
 };
 use alloy_primitives::map::foldhash::fast::FixedState;
 use clap::Parser;
-use itertools::Itertools;
 use reth_chainspec::{EthereumHardforks, OP_MAINNET_BEDROCK_BLOCK, OVM_HEADER_1_HASH};
 use reth_db::{static_file::iter_static_files, DatabaseEnv};
 use reth_db_api::{
@@ -154,7 +153,6 @@ fn checksum_static_file<N: NodePrimitives>(
 
     let start_block = start_block.unwrap_or(0);
     let end_block = end_block.unwrap_or(u64::MAX);
-    let is_change_based = segment.is_change_based();
 
     info!(
         "Computing checksum for {} static files, start_block={}, end_block={}, limit={:?}",
@@ -164,9 +162,8 @@ fn checksum_static_file<N: NodePrimitives>(
         if limit == usize::MAX { None } else { Some(limit) }
     );
 
-    let mut reached_limit = limit == 0;
-    for (block_range, header) in ranges.iter().sorted_by_key(|(range, _)| range.start()) {
-        if reached_limit {
+    for (block_range, header) in ranges {
+        if checksummer.total == limit {
             break;
         }
         let first = block_range.start().max(start_block);
@@ -175,20 +172,14 @@ fn checksum_static_file<N: NodePrimitives>(
             continue;
         }
 
-        let fixed_block_range = static_file_provider.find_fixed_range(segment, block_range.start());
-        let jar_provider = static_file_provider
-            .get_segment_provider_for_range(segment, || Some(fixed_block_range), None)?
-            .ok_or_else(|| {
-                eyre::eyre!(
-                    "Failed to get segment provider for segment {} at range {}",
-                    segment,
-                    block_range
-                )
-            })?;
-
+        let jar_provider = static_file_provider.get_segment_provider_for_block(
+            segment,
+            block_range.start(),
+            None,
+        )?;
         let mut cursor = jar_provider.cursor()?;
 
-        if is_change_based {
+        if segment.is_change_based() {
             let offsets = jar_provider.read_changeset_offsets()?.ok_or_else(|| {
                 eyre::eyre!(
                     "Missing changeset offsets sidecar for segment {} at range {}",
@@ -204,7 +195,7 @@ fn checksum_static_file<N: NodePrimitives>(
                 offsets: &offsets,
             };
 
-            reached_limit = checksum_change_based_segment(&mut checksummer, input, &mut cursor)?;
+            checksum_change_based_segment(&mut checksummer, input, &mut cursor)?;
         } else {
             let count = if segment.is_headers() {
                 block_range.len()
@@ -235,7 +226,6 @@ fn checksum_static_file<N: NodePrimitives>(
                     eyre::eyre!("Missing row {index} in {segment} static file {block_range}")
                 })?;
                 if checksummer.write_row(&row) {
-                    reached_limit = true;
                     break;
                 }
             }
@@ -243,7 +233,7 @@ fn checksum_static_file<N: NodePrimitives>(
 
         // Explicitly drop provider before removing from cache to avoid deadlock
         drop(jar_provider);
-        static_file_provider.remove_cached_provider(segment, fixed_block_range.end());
+        static_file_provider.remove_cached_provider(segment, header.expected_block_end());
     }
 
     let (checksum, total) = checksummer.finish();
@@ -487,11 +477,10 @@ fn checksum_change_based_segment<H: Hasher>(
     checksummer: &mut Checksummer<H>,
     input: ChangeBasedChecksumInput<'_>,
     cursor: &mut reth_db::static_file::StaticFileCursor<'_>,
-) -> eyre::Result<bool> {
+) -> eyre::Result<()> {
     let ChangeBasedChecksumInput { segment, block_range_start, start_block, end_block, offsets } =
         input;
     let is_storage = segment.is_storage_change_sets();
-    let mut reached_limit = false;
 
     for (offset_index, offset) in offsets.iter().enumerate() {
         let block_number = block_range_start + offset_index as u64;
@@ -527,17 +516,12 @@ fn checksum_change_based_segment<H: Hasher>(
             };
 
             if done {
-                reached_limit = true;
-                break;
+                return Ok(())
             }
-        }
-
-        if reached_limit {
-            break;
         }
     }
 
-    if !reached_limit && cursor.next_row()?.is_some() {
+    if cursor.next_row()?.is_some() {
         return Err(eyre::eyre!(
             "Changeset offsets do not cover all rows for {} at range starting {}",
             segment,
@@ -545,7 +529,7 @@ fn checksum_change_based_segment<H: Hasher>(
         ));
     }
 
-    Ok(reached_limit)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -710,77 +694,61 @@ mod tests {
 
     #[test]
     fn checksum_imported_ovm_receipts() {
-        for (first, pruned) in [
-            (0, false),
-            (OP_MAINNET_BEDROCK_BLOCK + 1, false),
-            (OP_MAINNET_BEDROCK_BLOCK - 1, true),
-        ] {
-            let dir = tempfile::tempdir().unwrap();
-            let files = test_files(&dir, 2);
-            let db = create_test_rw_db();
-            let tx = db.tx_mut().unwrap();
-            tx.put::<tables::HeaderNumbers>(OVM_HEADER_1_HASH, 1).unwrap();
-            let segment = StaticFileSegment::Receipts;
-            let mut writer = files.get_writer(first, segment).unwrap();
-            for tx_num in 0..2 {
-                let block = first + tx_num;
-                tx.put::<tables::BlockBodyIndices>(
-                    block,
-                    StoredBlockBodyIndices { first_tx_num: tx_num, tx_count: 1 },
-                )
-                .unwrap();
-                writer.increment_block(block).unwrap();
-                if !pruned || tx_num != 0 {
-                    writer.append_receipt(tx_num, &Default::default()).unwrap();
-                }
-            }
-            writer.commit().unwrap();
-            drop(writer);
-            tx.commit().unwrap();
-            assert_eq!(
-                checksum_static_file(&files, &db, segment, None, None, None).unwrap().1,
-                if pruned { 1 } else { 2 }
-            );
-            let partial = || {
-                checksum_static_file(&files, &db, segment, Some(first + 1), Some(first + 1), None)
-            };
-            let legacy_error = format!(
-                "Cannot determine per-block receipt rows in legacy OVM static file {first}..={}",
-                first + 1
-            );
-            if first >= OP_MAINNET_BEDROCK_BLOCK {
-                assert_eq!(partial().unwrap().1, 1);
-                continue
-            }
-            assert_eq!(partial().unwrap_err().to_string(), legacy_error);
-            if pruned {
-                for (block, tx_number) in
-                    [(first, Some(0)), (first, None), (first - 1, None), (first - 1, Some(0))]
-                {
-                    let tx = db.tx_mut().unwrap();
-                    tx.put::<tables::PruneCheckpoints>(
-                        PruneSegment::Receipts,
-                        PruneCheckpoint { tx_number, ..PruneCheckpoint::pruned_through(block) },
-                    )
-                    .unwrap();
-                    tx.commit().unwrap();
-                    assert_eq!(partial().unwrap().1, 1);
-                }
-                assert_eq!(
-                    checksum_static_file(&files, &db, segment, Some(first), Some(first), None)
-                        .unwrap()
-                        .1,
-                    0
-                );
-                // The lagging checkpoint alone cannot establish which block owns the first receipt.
-                let tx = db.tx_mut().unwrap();
-                tx.clear::<tables::BlockBodyIndices>().unwrap();
-                tx.commit().unwrap();
-                assert!(matches!(
-                    partial().unwrap_err().downcast_ref::<ProviderError>(),
-                    Some(ProviderError::BlockBodyIndicesNotFound(OP_MAINNET_BEDROCK_BLOCK))
-                ));
+        let dir = tempfile::tempdir().unwrap();
+        let files = test_files(&dir, 2);
+        let db = create_test_rw_db();
+        let segment = StaticFileSegment::Receipts;
+        let bedrock = OP_MAINNET_BEDROCK_BLOCK;
+        let legacy = bedrock - 1;
+        let mut writer = files.get_writer(bedrock - 3, segment).unwrap();
+        let tx = db.tx_mut().unwrap();
+        tx.put::<tables::HeaderNumbers>(OVM_HEADER_1_HASH, 1).unwrap();
+        for (tx_num, block) in (0..).zip(bedrock - 3..=bedrock + 2) {
+            tx.put::<tables::BlockBodyIndices>(
+                block,
+                StoredBlockBodyIndices { first_tx_num: tx_num, tx_count: 1 },
+            )
+            .unwrap();
+            writer.increment_block(block).unwrap();
+            if block != legacy {
+                writer.append_receipt(tx_num, &Default::default()).unwrap();
             }
         }
+        writer.commit().unwrap();
+        drop(writer);
+        tx.commit().unwrap();
+
+        let query = |start, end| checksum_static_file(&files, &db, segment, start, end, None);
+        let block = |n| query(Some(n), Some(n));
+        assert_eq!(query(None, None).unwrap().1, 5);
+        assert_eq!(block(bedrock + 1).unwrap().1, 1);
+        for (requested, start) in [(bedrock - 3, bedrock - 3), (bedrock, legacy)] {
+            let range = SegmentRangeInclusive::new(start, start + 1);
+            assert_eq!(
+                block(requested).unwrap_err().to_string(),
+                format!(
+                    "Cannot determine per-block receipt rows in legacy OVM static file {range}"
+                )
+            );
+        }
+        for (checkpoint, tx_number) in
+            [(legacy, Some(2)), (legacy, None), (legacy - 1, None), (legacy - 1, Some(2))]
+        {
+            db.update(|tx| {
+                tx.put::<tables::PruneCheckpoints>(
+                    PruneSegment::Receipts,
+                    PruneCheckpoint { tx_number, ..PruneCheckpoint::pruned_through(checkpoint) },
+                )
+            })
+            .unwrap()
+            .unwrap();
+            assert_eq!(block(bedrock).unwrap().1, 1);
+            assert_eq!(block(legacy).unwrap().1, 0);
+        }
+        db.update(|tx| tx.delete::<tables::BlockBodyIndices>(bedrock, None)).unwrap().unwrap();
+        assert!(matches!(
+            block(bedrock).unwrap_err().downcast_ref::<ProviderError>(),
+            Some(ProviderError::BlockBodyIndicesNotFound(OP_MAINNET_BEDROCK_BLOCK))
+        ));
     }
 }
