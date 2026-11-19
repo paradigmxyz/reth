@@ -91,7 +91,7 @@ where
     ///
     /// This will also do the necessary housekeeping of the tree state, this includes:
     ///  - removing all blocks below the backfill height
-    ///  - resetting the canonical in-memory state
+    ///  - moving the remaining canonical in-memory blocks to the non-canonical section
     ///
     /// In case backfill resulted in an unwind, this will clear the tree state above the unwind
     /// target block.
@@ -136,12 +136,20 @@ where
             // the node reset so we need to clear everything above that height so that backfill
             // height is the new canonical block.
             self.state.set_pending_sparse_trie_prune(false);
-            self.state.tree_state.reset(backfill_num_hash)
+            self.state.tree_state.reset(backfill_num_hash);
+            self.canonical_in_memory_state.clear_state();
         } else {
             self.state.tree_state.remove_until(
                 backfill_num_hash,
                 self.persistence_state.last_persisted_block.hash,
                 Some(backfill_num_hash),
+            );
+            // The in-memory state drops the blocks the tree state dropped above. The executed
+            // blocks that do not conflict with the backfill block stay in it like they stay in the
+            // tree state, but none of them is canonical.
+            self.canonical_in_memory_state.on_backfill_finished(
+                self.persistence_state.last_persisted_block.hash,
+                backfill_num_hash,
             );
         }
 
@@ -151,9 +159,6 @@ where
         // remove all buffered blocks below the backfill height
         self.state.buffer.remove_old_blocks(backfill_height);
         self.purge_timing_stats(backfill_height, None);
-        // we remove all entries because now we're synced to the backfill target and consider this
-        // the canonical chain
-        self.canonical_in_memory_state.clear_state();
 
         if let Ok(Some(new_head)) = self.provider.sealed_header(backfill_height) {
             // update the tracked chain height, after backfill sync both the canonical height and

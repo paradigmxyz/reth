@@ -383,10 +383,9 @@ where
         }
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        // Trim the canonical in-memory state first: state providers build their overlays from the
-        // canonical chain, so it must never reference blocks whose overlays the manager has
-        // already pruned. `remove_before` does not read the canonical in-memory state, so the
-        // order between the two trims is free to choose.
+        // Trim the canonical blocks of the in-memory state, then the tree state and the blocks
+        // that are not canonical. Overlays are built from the in-memory state alone and pruned
+        // on their next use, so the order between the two trims is free to choose.
         self.canonical_in_memory_state.remove_persisted_blocks_until(
             self.persistence_state.last_persisted_block,
             in_memory_persisted_block.number,
@@ -472,6 +471,14 @@ where
             None
         };
 
+        // The executed blocks that are not canonical are removed from the in-memory state like
+        // the tree state removes them: if the finalized block is ahead of the upper bound, the
+        // upper bound is used instead.
+        if let Some(finalized) = num {
+            self.canonical_in_memory_state.prune_conflicting_with_finalized(
+                if upper_bound.number < finalized.number { upper_bound } else { finalized },
+            );
+        }
         self.state.tree_state.remove_until(
             upper_bound,
             self.persistence_state.last_persisted_block.hash,

@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{
     BlockOverrides, Index,
 };
 use alloy_rpc_types_trace::{
-    filter::TraceFilter,
+    filter::{TraceFilter, TraceFilterBlockOption},
     opcode::{BlockOpcodeGas, TransactionOpcodeGas},
     parity::*,
     tracerequest::TraceCallRequest,
@@ -389,7 +389,21 @@ where
     ) -> Result<Vec<LocalizedTransactionTrace>, Eth::Error> {
         // We'll reuse the matcher across multiple blocks that are traced in parallel
         let matcher = Arc::new(filter.matcher());
-        let TraceFilter { from_block, to_block, mut after, count, .. } = filter;
+        let (from_block, to_block) = match filter
+            .block_option()
+            .map_err(|err| EthApiError::InvalidParams(err.to_string()))?
+        {
+            TraceFilterBlockOption::Range { from_block, to_block } => (from_block, to_block),
+            TraceFilterBlockOption::AtBlockHash(hash) => {
+                let number = self
+                    .provider()
+                    .block_number(hash)
+                    .map_err(Eth::Error::from_eth_err)?
+                    .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
+                (Some(number), Some(number))
+            }
+        };
+        let TraceFilter { mut after, count, .. } = filter;
 
         let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
         let start = from_block.unwrap_or(latest_block);
@@ -1210,8 +1224,10 @@ mod tests {
             },
             body: BlockBody::default(),
         };
+        let block = block.seal_slow();
+        let block_hash = block.hash();
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&block.seal_slow().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
         provider_rw.update_pipeline_stages(1, false).unwrap();
         provider_rw.commit().unwrap();
 
@@ -1235,6 +1251,31 @@ mod tests {
                 TraceFilter { from_block: Some(0), to_block: Some(to_block), ..Default::default() };
             assert_eq!(trace_order(&api.trace_filter(filter).await.unwrap()), expected);
         }
+        for (hash, expected) in [(genesis_hash, vec![]), (block_hash, vec![(1, None, true)])] {
+            let filter = TraceFilter::default().block_hash(hash);
+            assert_eq!(trace_order(&api.trace_filter(filter).await.unwrap()), expected);
+        }
+
+        let unknown_hash = B256::repeat_byte(0x22);
+        let err =
+            api.trace_filter(TraceFilter::default().block_hash(unknown_hash)).await.unwrap_err();
+        assert!(
+            matches!(err, EthApiError::HeaderNotFound(id) if id == unknown_hash.into()),
+            "{err:?}"
+        );
+
+        let err = api
+            .trace_filter(TraceFilter::default().block_hash(block_hash).from_block(1))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                EthApiError::InvalidParams(msg)
+                    if msg == "cannot specify both blockHash and fromBlock/toBlock, choose one or the other"
+            ),
+            "{err:?}"
+        );
     }
 
     fn localized_transaction_trace(
