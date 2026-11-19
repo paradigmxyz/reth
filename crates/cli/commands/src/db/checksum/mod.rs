@@ -15,8 +15,13 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
-use reth_provider::{providers::ProviderNodeTypes, DBProvider, StaticFileProviderFactory};
+use reth_primitives_traits::NodePrimitives;
+use reth_provider::{
+    providers::{ProviderNodeTypes, StaticFileProvider},
+    DBProvider, StaticFileProviderFactory,
+};
 use reth_static_file_types::{ChangesetOffset, StaticFileSegment};
+use reth_storage_api::BlockBodyIndicesProvider;
 use std::{
     hash::{BuildHasher, Hasher},
     ops::Bound,
@@ -99,7 +104,19 @@ impl Command {
                 table.view(&ChecksumViewer { tool, start_key, end_key, limit })?;
             }
             Subcommand::StaticFile { segment, start_block, end_block, limit } => {
-                checksum_static_file(tool, segment, start_block, end_block, limit)?;
+                let static_files = tool.provider_factory.static_file_provider();
+                if let Err(err) = static_files.check_consistency(&tool.provider_factory.provider()?)
+                {
+                    warn!("Error checking consistency of static files: {err}");
+                }
+                checksum_static_file(
+                    &static_files,
+                    &tool.provider_factory,
+                    segment,
+                    start_block,
+                    end_block,
+                    limit,
+                )?;
             }
             Subcommand::Rocksdb { table, limit } => {
                 rocksdb::checksum_rocksdb(tool, table, limit)?;
@@ -115,18 +132,14 @@ fn checksum_hasher() -> impl Hasher {
     FixedState::with_seed(u64::from_be_bytes(*b"RETHRETH")).build_hasher()
 }
 
-fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
-    tool: &DbTool<NodeTypesWithDBAdapter<N, DatabaseEnv>>,
+fn checksum_static_file(
+    static_file_provider: &StaticFileProvider<impl NodePrimitives>,
+    indices: &impl BlockBodyIndicesProvider,
     segment: StaticFileSegment,
     start_block: Option<u64>,
     end_block: Option<u64>,
     limit: Option<usize>,
-) -> eyre::Result<()> {
-    let static_file_provider = tool.provider_factory.static_file_provider();
-    if let Err(err) = static_file_provider.check_consistency(&tool.provider_factory.provider()?) {
-        warn!("Error checking consistency of static files: {err}");
-    }
-
+) -> eyre::Result<(u64, usize)> {
     let static_files = iter_static_files(static_file_provider.directory())?;
 
     let ranges = static_files
@@ -149,11 +162,32 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         if limit == usize::MAX { None } else { Some(limit) }
     );
 
-    let mut reached_limit = false;
-    for (block_range, _header) in ranges.iter().sorted_by_key(|(range, _)| range.start()) {
-        if block_range.end() < start_block || block_range.start() > end_block {
+    let mut reached_limit = limit == 0;
+    for (block_range, header) in ranges.iter().sorted_by_key(|(range, _)| range.start()) {
+        if reached_limit {
+            break;
+        }
+        let first = block_range.start().max(start_block);
+        let last = block_range.end().min(end_block);
+        if first > last {
             continue;
         }
+
+        let rows = if segment.is_headers() {
+            (first - block_range.start())..(last - block_range.start() + 1)
+        } else if let Some(txs) = header.tx_range() {
+            // Whole files do not need body indices. Only resolve boundaries inside a file.
+            let rows_through = |block| {
+                indices
+                    .next_tx_num_after_block(block)
+                    .map(|next| next.saturating_sub(txs.start()).min(txs.len()))
+            };
+            let start = if first == block_range.start() { 0 } else { rows_through(first - 1)? };
+            let end = if last == block_range.end() { txs.len() } else { rows_through(last)? };
+            start..end
+        } else {
+            0..0
+        };
 
         let fixed_block_range = static_file_provider.find_fixed_range(segment, block_range.start());
         let jar_provider = static_file_provider
@@ -186,7 +220,10 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
 
             reached_limit = checksum_change_based_segment(&mut checksummer, input, &mut cursor)?;
         } else {
-            while let Some(row) = cursor.next_row()? {
+            for index in rows {
+                let row = cursor.row_by_number(usize::try_from(index)?)?.ok_or_else(|| {
+                    eyre::eyre!("Missing row {index} in {segment} static file {block_range}")
+                })?;
                 if checksummer.write_row(&row) {
                     reached_limit = true;
                     break;
@@ -197,10 +234,6 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         // Explicitly drop provider before removing from cache to avoid deadlock
         drop(jar_provider);
         static_file_provider.remove_cached_provider(segment, fixed_block_range.end());
-
-        if reached_limit {
-            break;
-        }
     }
 
     let (checksum, total) = checksummer.finish();
@@ -211,7 +244,7 @@ fn checksum_static_file<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         segment, checksum, total, elapsed
     );
 
-    Ok(())
+    Ok((checksum, total))
 }
 
 pub(crate) struct ChecksumViewer<'a, N: NodeTypesWithDB> {
@@ -442,4 +475,115 @@ fn checksum_change_based_segment<H: Hasher>(
     }
 
     Ok(reached_limit)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::Address;
+    use reth_db_api::{
+        models::{CompactU256, StoredBlockBodyIndices},
+        table::Compress,
+    };
+    use reth_node_api::NodeTypes;
+    use reth_provider::{
+        test_utils::{MockEthProvider, MockNodeTypes},
+        ProviderError, StaticFileProviderBuilder, StaticFileWriter,
+    };
+
+    #[test]
+    fn checksum_headers_across_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = StaticFileProviderBuilder::read_write(dir.path())
+            .with_blocks_per_file(3)
+            .build::<<MockNodeTypes as NodeTypes>::Primitives>()
+            .unwrap();
+        let segment = StaticFileSegment::Headers;
+        let mut writer = files.get_writer(0, segment).unwrap();
+        let mut expected = checksum_hasher();
+        for number in 0..6 {
+            let header = Header { number, ..Default::default() };
+            let hash = header.hash_slow();
+            writer.append_header(&header, &hash).unwrap();
+            if (2..=3).contains(&number) {
+                expected.write(&header.compress());
+                expected.write(&CompactU256::default().compress());
+                expected.write(hash.as_slice());
+            }
+        }
+        writer.commit().unwrap();
+        drop(writer);
+
+        assert_eq!(
+            checksum_static_file(
+                &files,
+                &MockEthProvider::default(),
+                segment,
+                Some(2),
+                Some(3),
+                None
+            )
+            .unwrap(),
+            (expected.finish(), 2)
+        );
+    }
+
+    #[test]
+    fn checksum_transaction_rows_by_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = StaticFileProviderBuilder::read_write(dir.path())
+            .with_blocks_per_file(3)
+            .build::<<MockNodeTypes as NodeTypes>::Primitives>()
+            .unwrap();
+        let bodies = MockEthProvider::default();
+        let segment = StaticFileSegment::TransactionSenders;
+        let mut writer = files.get_writer(0, segment).unwrap();
+        let mut next_tx = 0;
+        for (block, tx_count) in (0..).zip([0, 1, 2, 1, 0, 1, 0, 0, 0]) {
+            let indices = StoredBlockBodyIndices { first_tx_num: next_tx, tx_count };
+            bodies.add_block_body_indices(block, indices);
+            writer.increment_block(block).unwrap();
+            for tx in indices.tx_num_range() {
+                writer.append_transaction_sender(tx, &Address::repeat_byte(tx as u8)).unwrap();
+            }
+            next_tx = indices.next_tx_num();
+        }
+        writer.commit().unwrap();
+        drop(writer);
+
+        for (start, end, limit, expected_txs) in [
+            (Some(0), Some(0), None, 0..0),
+            (Some(2), Some(2), None, 1..3),
+            (Some(2), Some(3), None, 1..4),
+            (Some(2), None, Some(3), 1..4),
+            (Some(4), Some(4), None, 4..4),
+            (Some(7), Some(7), None, 5..5),
+            (None, Some(2), None, 0..3),
+            (None, None, Some(0), 0..0),
+            (Some(3), Some(1), None, 0..0),
+        ] {
+            let mut expected = checksum_hasher();
+            for tx in expected_txs.clone() {
+                expected.write(Address::repeat_byte(tx).as_slice());
+            }
+            assert_eq!(
+                checksum_static_file(&files, &bodies, segment, start, end, limit).unwrap(),
+                (expected.finish(), expected_txs.len()),
+                "start={start:?} end={end:?} limit={limit:?}",
+            );
+        }
+
+        let no_indices = MockEthProvider::default();
+        assert_eq!(
+            checksum_static_file(&files, &no_indices, segment, None, None, None).unwrap().1,
+            5
+        );
+        let err =
+            checksum_static_file(&files, &no_indices, segment, None, Some(1), None).unwrap_err();
+        assert!(matches!(
+            err.downcast_ref::<ProviderError>(),
+            Some(ProviderError::BlockBodyIndicesNotFound(1))
+        ));
+    }
 }
