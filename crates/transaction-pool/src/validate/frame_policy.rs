@@ -572,9 +572,9 @@ mod tests {
         assert_eq!(policy.declared_execution_gas, LEANSPHINCS_VERIFICATION_GAS + 20);
         assert_eq!(policy.state_gas, 20);
         let transaction =
-            tx(vec![dependency_frame(34, false), frame(FrameMode::Verify, 3, sender())]);
+            tx(vec![dependency_frame(1, false), frame(FrameMode::Verify, 3, sender())]);
         assert_eq!(
-            FrameValidationPolicy::new(&transaction, 0),
+            FrameValidationPolicy::new(&transaction, MAX_VERIFY_GAS - LEANSPHINCS_VERIFICATION_GAS,),
             Err("verification gas budget exceeded")
         );
     }
