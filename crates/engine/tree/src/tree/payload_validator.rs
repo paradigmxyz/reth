@@ -112,7 +112,7 @@ use crate::tree::{
 };
 use alloy_consensus::{transaction::Either, Transaction as _};
 use alloy_eip7928::{
-    bal::{Bal, DecodedBal},
+    bal::{Bal, DecodedBal, RawBal},
     BlockAccessList,
 };
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
@@ -793,6 +793,12 @@ where
                 .ok()
         };
 
+        // A block without a sidecar, such as one downloaded from a peer, keeps the BAL built here.
+        let built_raw_bal = built_bal
+            .as_ref()
+            .filter(|_| decoded_bal.is_none())
+            .map(|bal| RawBal::new(alloy_rlp::encode(bal).into()));
+
         ensure_ok_post_block!(
             self.validate_post_execution(
                 &block,
@@ -913,11 +919,12 @@ where
 
         // The payload's raw bytes are already bound to this header: payload-to-block conversion
         // and downloaded-sidecar verification both check their hash against it, so pairing them
-        // with the BAL this execution produced is sound. The zip leaves the BAL unset for a
-        // downloaded block that carried only a BAL hash and no sidecar.
-        let bal = evm_bal.zip(decoded_bal).map(|(evm_bal, decoded_bal)| {
-            Arc::new(DecodedEvmBal::with_raw_bal(evm_bal, decoded_bal.as_raw_bal().clone()))
-        });
+        // with the BAL this execution produced is sound. Without a sidecar, the built BAL was
+        // checked against the header hash in `validate_post_execution`.
+        let raw_bal = decoded_bal.as_deref().map(DecodedBal::as_raw_bal).cloned().or(built_raw_bal);
+        let bal = evm_bal
+            .zip(raw_bal)
+            .map(|(evm_bal, raw_bal)| Arc::new(DecodedEvmBal::with_raw_bal(evm_bal, raw_bal)));
         let executed_block = self
             .spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output)
             .with_bal(bal);
