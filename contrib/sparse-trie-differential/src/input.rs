@@ -7,8 +7,9 @@ use crate::{
 use serde::Serialize;
 use serde_json::{json, Value};
 
-// Two maximally escaped inputs plus paths and metadata still fit the 65536-byte ABI request.
-const MAX_INPUT_BYTES: usize = 12_288;
+// Two escaped input strings leave at least 5536 bytes for native request metadata.
+const MAX_INPUT_BYTES: usize = 28_672;
+const MAX_ESCAPED_INPUT_BYTES: usize = 30_000;
 const OPERATORS: [&str; 13] = [
     "action.insert",
     "action.remove",
@@ -32,8 +33,9 @@ pub(crate) struct Site {
 }
 
 pub(crate) fn parse(text: &str) -> Result<Input, Error> {
-    if text.len() > MAX_INPUT_BYTES {
-        return Err(Error::Invalid("input exceeds 12288 bytes"));
+    if text.len() > MAX_INPUT_BYTES || serde_json::to_string(text)?.len() > MAX_ESCAPED_INPUT_BYTES
+    {
+        return Err(Error::Invalid("input exceeds native input budget"));
     }
     let input: Input = serde_json::from_str(text)?;
     input.validate().map_err(Error::Invalid)?;
@@ -43,8 +45,9 @@ pub(crate) fn parse(text: &str) -> Result<Input, Error> {
 pub(crate) fn text(input: &Input) -> Result<String, Error> {
     input.validate().map_err(Error::Invalid)?;
     let text = serde_json::to_string(input)?;
-    if text.len() > MAX_INPUT_BYTES {
-        return Err(Error::Invalid("input exceeds 12288 bytes"));
+    if text.len() > MAX_INPUT_BYTES || serde_json::to_string(&text)?.len() > MAX_ESCAPED_INPUT_BYTES
+    {
+        return Err(Error::Invalid("input exceeds native input budget"));
     }
     Ok(text)
 }
@@ -77,7 +80,7 @@ pub(crate) fn sites(input: &Input, operator: &str) -> Result<Vec<Site>, Error> {
     let mut paths = Vec::new();
     for (round, actions) in input.rounds.iter().enumerate() {
         let root = vec!["rounds".into(), round.to_string()];
-        if operator == "action.insert" && actions.len() < 8 {
+        if operator == "action.insert" && actions.len() < 32 {
             paths.push(root.clone());
         }
         for (index, action) in actions.iter().enumerate() {
@@ -85,7 +88,7 @@ pub(crate) fn sites(input: &Input, operator: &str) -> Result<Vec<Site>, Error> {
             path.push(index.to_string());
             match operator {
                 "action.remove" | "action.crossover" => paths.push(path.clone()),
-                "action.duplicate" if actions.len() < 8 => paths.push(path.clone()),
+                "action.duplicate" if actions.len() < 32 => paths.push(path.clone()),
                 "action.swap" if index + 1 < actions.len() => paths.push(path.clone()),
                 _ => {}
             }
@@ -219,13 +222,17 @@ pub(crate) fn mutate(
             *action_mut(&mut input, path)? = replacement;
         }
         "update.insert" => {
-            let mut generated = Input::generate(seed);
-            let Action::UpdateBatch { mut updates } = generated.rounds[round].remove(0) else {
-                unreachable!("generator starts each round with an update batch");
-            };
+            let generated = Input::generate(seed);
+            let change = generated.rounds[round]
+                .iter()
+                .find_map(|action| match action {
+                    Action::UpdateBatch { updates } => updates.first().cloned(),
+                    _ => None,
+                })
+                .ok_or(Error::Invalid("generated round has no update"))?;
             let target = updates_mut(&mut input, path)?;
             let at = (random % (target.len() + 1) as u64) as usize;
-            target.insert(at, updates.remove(0));
+            target.insert(at, change);
         }
         "prune.update" => {
             let Action::Prune { cutoff } = action_mut(&mut input, path)? else {
@@ -295,7 +302,7 @@ pub(crate) fn mutate(
     }
     match text(&input) {
         // Rift treats planning errors as connection failures; exhausted size budgets skip an edit.
-        Err(Error::Invalid("input exceeds 12288 bytes")) => Ok(original),
+        Err(Error::Invalid("input exceeds native input budget")) => Ok(original),
         result => result,
     }
 }
@@ -309,9 +316,16 @@ mod tests {
         parts.iter().map(|part| (*part).to_owned()).collect()
     }
 
+    fn sample(seed: u64) -> Input {
+        let mut input = Input::generate(seed);
+        input.rounds[0].push(Action::Clone);
+        input.rounds[15].push(Action::Prune { cutoff: 100 });
+        input
+    }
+
     #[test]
     fn generated_inputs_are_versioned_bounded_and_deterministic() {
-        for seed in (0..72).chain([u64::MAX - 1, u64::MAX]) {
+        for seed in (0..2048).chain([u64::MAX - 1, u64::MAX]) {
             let value = generated(seed).unwrap();
             assert_eq!(value, generated(seed).unwrap());
             let input = parse(&value).unwrap();
@@ -331,9 +345,30 @@ mod tests {
     }
 
     #[test]
+    fn largest_generated_action_shape_fits_two_input_request() {
+        let change = Change { key: [255; 32], value: [255; 32] };
+        let mut input = Input::generate(u64::MAX);
+        input.rounds[0] = vec![Action::UpdateBatch { updates: vec![change.clone(); 4] }];
+        // Four separate update batches plus three update hints and eight unrelated hints.
+        let mut round = vec![Action::Reveal { key: [255; 32] }; 11];
+        round.extend(vec![Action::UpdateBatch { updates: vec![change] }; 4]);
+        input.rounds[1..].fill(round);
+        let value = text(&input).unwrap();
+        assert_eq!(parse(&value).unwrap(), input);
+        let request = json!({"method":"mutate-input","params":{
+            "args":{},"input":value,"donor":value,"operator":"update.crossover",
+            "seed":u64::MAX,"path":["rounds","15","14","updates","0"],
+            "donor_path":["rounds","15","14","updates","0"]
+        }})
+        .to_string();
+        assert!(request.len() <= MAX_REQUEST_BYTES);
+        serde_json::from_str::<Request>(&request).unwrap();
+    }
+
+    #[test]
     fn every_operator_has_real_sites_and_deterministic_local_edits() {
-        let input = Input::generate(0);
-        let donor = Input::generate(1);
+        let input = sample(0);
+        let donor = sample(1);
         let metadata = operators();
         for entry in metadata.as_array().unwrap() {
             assert!(entry.get("selector").is_none());
@@ -363,7 +398,7 @@ mod tests {
 
     #[test]
     fn value_and_key_edits_preserve_other_fields() {
-        let input = Input::generate(0);
+        let input = sample(0);
         for operator in ["key.update", "value.update"] {
             let location = sites(&input, operator).unwrap().remove(0).path;
             let mut result =
@@ -383,8 +418,9 @@ mod tests {
 
     #[test]
     fn removals_shrink_to_empty_and_insertions_restore_sites() {
-        let mut input = Input::generate(0);
+        let mut input = sample(0);
         let batch = path(&["rounds", "0", "0", "updates", "0"]);
+        updates_mut(&mut input, &batch).unwrap().truncate(1);
         input = parse(&mutate(input, "update.remove", &batch, 0, None).unwrap()).unwrap();
         assert_eq!(updates_mut(&mut input, &batch).unwrap().len(), 0);
         input =
@@ -408,8 +444,8 @@ mod tests {
     #[test]
     fn crossover_copies_exact_donor_action_or_update() {
         for operator in ["action.crossover", "update.crossover"] {
-            let input = Input::generate(0);
-            let mut donor = Input::generate(7);
+            let input = sample(0);
+            let mut donor = sample(7);
             let target = sites(&input, operator).unwrap().remove(0).path;
             let source = sites(&donor, operator).unwrap().remove(1).path;
             let result = parse(
@@ -441,8 +477,8 @@ mod tests {
 
     #[test]
     fn prefix_crossover_preserves_destination_suffix() {
-        let mut input = Input::generate(0);
-        let mut donor = Input::generate(1);
+        let mut input = sample(0);
+        let mut donor = sample(1);
         let location = sites(&input, "key.prefix").unwrap().remove(0).path;
         *key_mut(&mut input, &location).unwrap() = [0x12; 32];
         *key_mut(&mut donor, &location).unwrap() = [0xab; 32];
@@ -471,7 +507,7 @@ mod tests {
 
     #[test]
     fn invalid_paths_donors_versions_and_bounds_are_rejected() {
-        let input = Input::generate(0);
+        let input = sample(0);
         for invalid in [
             path(&[]),
             path(&["rounds", "16", "0"]),
@@ -514,24 +550,29 @@ mod tests {
         invalid.rounds.pop();
         assert_eq!(text(&invalid).unwrap_err().to_string(), "input requires sixteen rounds");
         invalid = input.clone();
-        invalid.rounds[0] = vec![Action::Clone; 9];
-        assert_eq!(text(&invalid).unwrap_err().to_string(), "round exceeds eight actions");
+        invalid.rounds[0] = vec![Action::Clone; 33];
+        assert_eq!(text(&invalid).unwrap_err().to_string(), "round exceeds thirty-two actions");
         invalid = input.clone();
         let updates = updates_mut(&mut invalid, &target).unwrap();
         *updates = vec![updates[0].clone(); 5];
         assert_eq!(text(&invalid).unwrap_err().to_string(), "batch exceeds four updates");
         assert_eq!(
             parse(&" ".repeat(MAX_INPUT_BYTES + 1)).unwrap_err().to_string(),
-            "input exceeds 12288 bytes"
+            "input exceeds native input budget"
         );
         let mut padded = generated(0).unwrap();
-        padded.extend(std::iter::repeat_n('\t', MAX_INPUT_BYTES - padded.len()));
+        let overhead = serde_json::to_string(&padded).unwrap().len() - padded.len();
+        let limit = MAX_INPUT_BYTES.min(MAX_ESCAPED_INPUT_BYTES - overhead);
+        padded.extend(std::iter::repeat_n(' ', limit - padded.len()));
         let request =
             json!({"method":"mutate-input","params":{"args":{},"input":padded,"donor":padded,
             "operator":"action.crossover","seed":u64::MAX,"path":target,"donor_path":target}})
             .to_string();
         assert!(request.len() < MAX_REQUEST_BYTES);
-        assert_eq!(parse(&padded).unwrap(), input);
+        assert_eq!(parse(&padded).unwrap(), Input::generate(0));
+        let mut escaped = generated(0).unwrap();
+        escaped.extend(std::iter::repeat_n('\t', MAX_INPUT_BYTES - escaped.len()));
+        assert_eq!(parse(&escaped).unwrap_err().to_string(), "input exceeds native input budget");
         let mut full = input;
         for actions in &mut full.rounds {
             *actions = vec![
@@ -541,12 +582,21 @@ mod tests {
                 8
             ];
         }
-        assert_eq!(text(&full).unwrap_err().to_string(), "input exceeds 12288 bytes");
+        assert_eq!(text(&full).unwrap_err().to_string(), "input exceeds native input budget");
     }
 
     #[test]
     fn growth_at_byte_budget_is_a_safe_noop() {
-        let mut input = Input::generate(0);
+        let mut input = sample(0);
+        for actions in &mut input.rounds {
+            *actions = vec![
+                Action::UpdateBatch {
+                    updates: vec![Change { key: [255; 32], value: [255; 32] }]
+                };
+                6
+            ];
+        }
+        text(&input).unwrap();
         loop {
             let mut grew = false;
             if let Some(site) = sites(&input, "update.duplicate").unwrap().into_iter().next() {
@@ -571,7 +621,7 @@ mod tests {
 
     #[test]
     fn prune_cutoff_mutations_cover_zero_max_and_epoch_boundaries() {
-        let mut input = Input::generate(0);
+        let mut input = sample(0);
         input.rounds[0] = vec![Action::Prune { cutoff: 18 }];
         let target = sites(&input, "prune.update").unwrap().remove(0).path;
         let mut observed = Vec::new();
@@ -594,12 +644,12 @@ mod tests {
 
     #[test]
     fn generated_and_mutated_tapes_execute_with_replay() {
-        let input = Input::generate(0);
+        let input = sample(0);
         for metadata in operators().as_array().unwrap() {
             let operator = metadata["name"].as_str().unwrap();
             let target = sites(&input, operator).unwrap().remove(0).path;
             let other = metadata["donor"].as_bool().unwrap().then(|| {
-                let donor = Input::generate(1);
+                let donor = sample(1);
                 let source = sites(&donor, operator).unwrap().remove(0).path;
                 (donor, source)
             });

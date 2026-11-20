@@ -35,6 +35,7 @@ def main():
     def invoke(handle, method, params, error=None):
         replies.clear()
         payload = json.dumps({'method': method, 'params': params}).encode()
+        assert len(payload) <= 65_536, (method, len(payload))
         status = call(handle, payload, len(payload), reply, None)
         assert len(replies) == 1, (method, replies)
         text = replies[0].decode()
@@ -54,6 +55,15 @@ def main():
         assert count == 72
         inputs = [invoke(handle, 'seed-inputs', {**args, 'index': i})['input'] for i in range(count)]
         assert len(set(inputs)) == count
+        # Prune mutations need explicit sites; leave the generated corpus unchanged.
+        fixture = json.loads(inputs[0])
+        fixture['rounds'][0].append({'kind': 'clone'})
+        fixture['rounds'][-1].append({'kind': 'prune', 'cutoff': 100})
+        fixture = json.dumps(fixture)
+        donor = json.loads(inputs[1])
+        donor['rounds'][0].append({'kind': 'clone'})
+        donor['rounds'][-1].append({'kind': 'prune', 'cutoff': 100})
+        donor = json.dumps(donor)
         invoke(handle, 'seed-inputs', {**args, 'index': count}, 'seed index is out of range')
         operators = invoke(handle, 'mutation-operators', args)
         mutated = []
@@ -66,29 +76,29 @@ def main():
         for operator in operators:
             assert 'selector' not in operator, 'dynamic sites must not be bypassed'
             name = operator['name']
-            sites = invoke(handle, 'mutation-sites', {**args, 'input': inputs[0], 'operator': name})
+            sites = invoke(handle, 'mutation-sites', {**args, 'input': fixture, 'operator': name})
             assert sites and all(site['operator'] == name for site in sites), name
-            mutation = {**args, 'input': inputs[0], 'seed': 99, 'operator': name,
+            mutation = {**args, 'input': fixture, 'seed': 99, 'operator': name,
                         'path': sites[0]['path'], 'donor': None, 'donor_path': []}
             if operator['donor']:
-                donors = invoke(handle, 'mutation-sites', {**args, 'input': inputs[1], 'operator': name})
-                mutation.update(donor=inputs[1], donor_path=donors[0]['path'])
+                donors = invoke(handle, 'mutation-sites', {**args, 'input': donor, 'operator': name})
+                mutation.update(donor=donor, donor_path=donors[0]['path'])
             result = invoke(handle, 'mutate-input', mutation)
-            assert isinstance(result, str) and result != inputs[0], name
+            assert isinstance(result, str) and result != fixture, name
             assert result == invoke(handle, 'mutate-input', mutation)
-            original, changed = json.loads(inputs[0]), json.loads(result)
-            assert changed['version'] == 2 and changed['fixture_seed'] == original['fixture_seed']
+            original, changed = json.loads(fixture), json.loads(result)
+            assert changed['version'] == 3 and changed['fixture_seed'] == original['fixture_seed']
             round_index = int(sites[0]['path'][1])
             assert all(changed['rounds'][i] == original['rounds'][i]
                        for i in range(16) if i != round_index), name
             mutated.append(result)
-        invoke(handle, 'mutate-input', {**args, 'input': inputs[0], 'seed': 99,
+        invoke(handle, 'mutate-input', {**args, 'input': fixture, 'seed': 99,
                'operator': 'key.update', 'path': ['rounds', '99', '0', 'key']},
                'invalid mutation path')
         fresh = invoke(handle, 'fresh-input', {**args, 'seed': 123})
         assert fresh == invoke(handle, 'fresh-input', {**args, 'seed': 123})
         invoke(handle, 'finish', {'admitted': False, 'n': 0}, 'no execution is pending')
-        invoke(handle, 'mutation-sites', {**args, 'input': inputs[0], 'operator': 'invalid'},
+        invoke(handle, 'mutation-sites', {**args, 'input': fixture, 'operator': 'invalid'},
                'unknown mutation operator')
         # A malformed request is an ABI error, never a differential objective.
         replies.clear()

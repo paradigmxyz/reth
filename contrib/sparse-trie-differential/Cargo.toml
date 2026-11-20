@@ -13,12 +13,13 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-alloy-primitives = { version = "1.6.1", default-features = false, features = ["std", "map-foldhash"] }
+alloy-primitives = { version = "1.6.1", default-features = false, features = ["std", "map-foldhash", "serde"] }
 alloy-rlp = { version = "0.3.16", default-features = false, features = ["std", "core-net"] }
 alloy-trie = { version = "0.9.9", default-features = false, features = ["std"] }
 reth-trie = { path = "../../crates/trie/trie", features = ["test-utils"] }
 reth-trie-common = { path = "../../crates/trie/common", features = ["test-utils", "arbitrary"] }
 reth-trie-sparse = { path = "../../crates/trie/sparse", default-features = false, features = ["std", "fuzz"] }
+rand = { version = "0.9.5", default-features = false, features = ["std", "std_rng"] }
 serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
 

@@ -19,6 +19,9 @@ use std::{
     fmt::Debug,
 };
 
+#[path = "sparse_trie_differential/generator.rs"]
+mod sparse_trie_generator;
+
 /// Stable ordered dimensions for measured, instrumented workload coverage.
 pub const COVERAGE_OPERATIONS: &[&str] = &[
     "blocked_update_batches",
@@ -72,7 +75,7 @@ impl Evidence {
 }
 
 /// Version of the explicit, locally mutable workload input.
-pub const INPUT_VERSION: u8 = 2;
+pub const INPUT_VERSION: u8 = 3;
 
 /// A generated fixture plus an explicit action sequence for each mandatory round.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,6 +101,7 @@ pub enum Action {
     /// Reveal a valid model-derived proof, including for an absent key.
     Reveal {
         /// Prehashed key, not a database lookup or a proof supplied by the fuzzer.
+        #[serde(with = "word")]
         key: [u8; 32],
     },
     /// Blind nodes older than the supplied epoch.
@@ -118,36 +122,17 @@ pub enum Action {
 #[serde(deny_unknown_fields)]
 pub struct Change {
     /// Already hashed, full-width trie key.
+    #[serde(with = "word")]
     pub key: [u8; 32],
     /// Big-endian integer; zero deletes, nonzero is canonically RLP encoded by the driver.
+    #[serde(with = "word")]
     pub value: [u8; 32],
 }
 
 impl Input {
     /// Generates the explicit tape once; execution consumes it without drawing actions again.
     pub fn generate(seed: u64) -> Self {
-        let mut generator = Generator(seed ^ 0x494e_5055_5400_0002);
-        let rounds = (0..16)
-            .map(|round| {
-                let mut actions = vec![Action::UpdateBatch {
-                    updates: (0..=round % 2)
-                        .map(|_| Change {
-                            key: generator.key().0,
-                            value: generator.value().to_be_bytes(),
-                        })
-                        .collect(),
-                }];
-                actions.push(match generator.next() % 5 {
-                    0 => Action::Prune { cutoff: if round % 2 == 0 { 0 } else { 18 + round * 10 } },
-                    1 => Action::Reveal { key: generator.key().0 },
-                    2 => Action::Snapshot,
-                    3 => Action::Clone,
-                    _ => Action::TrackingReset,
-                });
-                actions
-            })
-            .collect();
-        Self { version: INPUT_VERSION, fixture_seed: seed, rounds }
+        sparse_trie_generator::generate(seed)
     }
 
     /// Checks shape bounds before executing either backend; no target work occurs on failure.
@@ -159,8 +144,8 @@ impl Input {
             return Err("input requires sixteen rounds");
         }
         for actions in &self.rounds {
-            if actions.len() > 8 {
-                return Err("round exceeds eight actions");
+            if actions.len() > 32 {
+                return Err("round exceeds thirty-two actions");
             }
             for action in actions {
                 if let Action::UpdateBatch { updates } = action &&
@@ -1290,5 +1275,24 @@ mod tests {
         .unwrap();
         assert_eq!(harness.storage(), &BTreeMap::from([(key, U256::from(128))]));
         assert_ne!(evidence.checkpoints[3].0, evidence.checkpoints[0].0);
+    }
+}
+
+// Fixed-width hex keeps a complete prewarm/update history inside the native request budget.
+mod word {
+    use alloy_primitives::B256;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(
+        value: &[u8; 32],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        B256::from(*value).serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<[u8; 32], D::Error> {
+        B256::deserialize(deserializer).map(|word| word.0)
     }
 }

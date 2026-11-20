@@ -3755,6 +3755,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
+ "rand 0.9.5",
  "reth-trie",
  "reth-trie-common",
  "reth-trie-sparse",
