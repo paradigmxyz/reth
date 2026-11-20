@@ -44,8 +44,9 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
         transaction: ValidTransaction<T>,
         /// Whether to propagate the transaction to the network.
         propagate: bool,
-        /// The authorities of EIP-7702 transaction.
-        authorities: Option<Vec<Address>>,
+        /// The authorities of EIP-7702 transaction, with the nonce of the authorization each
+        /// signed.
+        authorities: Option<Vec<Authority>>,
     },
     /// The transaction is considered invalid indefinitely: It violates constraints that prevent
     /// this transaction from ever becoming valid.
@@ -306,8 +307,9 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub timestamp: Instant,
     /// Where this transaction originated from.
     pub origin: TransactionOrigin,
-    /// The sender ids of the 7702 transaction authorities.
-    pub authority_ids: Option<Vec<SenderId>>,
+    /// The sender ids of the 7702 transaction authorities, with the nonce of the authorization
+    /// each signed.
+    pub authority_ids: Option<Vec<Authority<SenderId>>>,
 }
 
 // === impl ValidPoolTransaction ===
@@ -495,6 +497,15 @@ impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
             .field("tx", &self.transaction)
             .finish()
     }
+}
+
+/// An EIP-7702 authority and the nonce of the authorization it signed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Authority<T = Address> {
+    /// The authority's address, or its [`SenderId`] once tracked by the pool.
+    pub id: T,
+    /// The nonce of the authorization.
+    pub nonce: u64,
 }
 
 /// Validation Errors that can occur during transaction validation.
