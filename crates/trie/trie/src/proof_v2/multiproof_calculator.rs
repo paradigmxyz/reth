@@ -305,7 +305,7 @@ mod tests {
         for _ in 0..2 {
             let mut proof = calculator
                 .multiproof(MultiProofTargetsV2 {
-                    storage_targets: [(hashed_address, Vec::new())].into_iter().collect(),
+                    storage_targets: std::iter::once((hashed_address, Vec::new())).collect(),
                     ..Default::default()
                 })
                 .unwrap();
@@ -346,7 +346,7 @@ mod tests {
             );
             let mut proof = calculator
                 .multiproof(MultiProofTargetsV2 {
-                    storage_targets: [(hashed_address, Vec::new())].into_iter().collect(),
+                    storage_targets: std::iter::once((hashed_address, Vec::new())).collect(),
                     ..Default::default()
                 })
                 .unwrap();
