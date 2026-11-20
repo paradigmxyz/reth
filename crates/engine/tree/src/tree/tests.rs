@@ -1625,9 +1625,10 @@ fn threshold_persistence_uses_canonical_in_memory_chain_length() {
         blocks[7].recovered_block().num_hash();
     test_harness.tree.persistence_state.last_state_trie_persisted_block =
         blocks[5].recovered_block().num_hash();
-    test_harness.tree.canonical_in_memory_state().remove_persisted_blocks_until(
+    test_harness.tree.canonical_in_memory_state_writer.on_blocks_persisted(
         blocks[7].recovered_block().num_hash(),
-        blocks[5].recovered_block().number(),
+        blocks[5].recovered_block().num_hash(),
+        None,
     );
 
     assert_eq!(test_harness.tree.canonical_in_memory_state().canonical_chain().count(), 4);

@@ -472,7 +472,7 @@ mod tests {
             Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
-        let provider = BlockchainProvider::new(factory).unwrap();
+        let (provider, mut writer) = BlockchainProvider::new_with_writer(factory).unwrap();
 
         let eth_api = EthApiBuilder::new(
             provider.clone(),
@@ -529,7 +529,7 @@ mod tests {
             )),
             ..Default::default()
         };
-        provider.canonical_in_memory_state().set_pending_block(pending_block);
+        writer.set_pending_block(pending_block);
         let pending_next_base_fee = next_base_fee - next_base_fee / 8;
         for base_fee in [None, Some((pending_next_base_fee - 1) as u128)] {
             let response = api
