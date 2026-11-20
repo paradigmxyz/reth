@@ -62,10 +62,8 @@ pub const DEFAULT_MAX_SIMULATE_BLOCKS: u64 = 256;
 /// `debug_traceCallMany` request.
 pub const DEFAULT_MAX_CALL_MANY_CALLS: usize = 1024;
 
-/// The default timeout of an `eth_callMany`, `trace_callMany` or `debug_traceCallMany` request,
-/// matching geth's `eth_call` timeout. It starts with the request's first call, and no call
-/// starts after it expires.
-pub const DEFAULT_CALL_MANY_TIMEOUT: Duration = Duration::from_secs(5);
+/// Default time from the first admitted call in a call-many request.
+pub const DEFAULT_CALL_MANY_TIMEOUT: Duration = DEFAULT_RPC_EVM_TIMEOUT;
 
 /// The default maximum number of total storage slots for `eth_getStorageValues`.
 pub const DEFAULT_MAX_STORAGE_VALUES_SLOTS: usize = 1024;
