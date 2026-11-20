@@ -20,6 +20,7 @@ pub mod fee_history;
 pub mod gas_oracle;
 pub mod id_provider;
 pub mod logs_utils;
+pub mod logs_v2;
 pub mod pending_block;
 pub mod receipt;
 pub mod settings;
