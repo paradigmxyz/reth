@@ -273,12 +273,15 @@ pub fn apply_precompile_overrides(
     state_overrides: &StateOverride,
     evm: &mut impl RethEvm,
 ) -> Result<(), EthSimulateError> {
-    let moves: Vec<_> = state_overrides
+    let mut moves: Vec<_> = state_overrides
         .iter()
         .filter_map(|(source, account_override)| {
             account_override.move_precompile_to.map(|dest| (*source, dest))
         })
         .collect();
+    // `StateOverride` iterates in a randomly seeded order. Apply moves in ascending source order so
+    // the result is deterministic and the higher source wins at a shared destination.
+    moves.sort_unstable_by_key(|(source, _)| *source);
     if moves.is_empty() {
         return Ok(())
     }
@@ -745,6 +748,7 @@ mod tests {
     use evm2::{
         ethereum::ethereum_tx_registry,
         evm::{AccountInfo, CacheDB, EmptyDB, InMemoryDB},
+        precompiles::PrecompileId,
         BaseEvmTypes, Evm, Precompiles, SpecId,
     };
     use reth_evm::BundleState;
@@ -887,6 +891,28 @@ mod tests {
         let precompiles = evm.precompiles_as::<Precompiles>().unwrap().as_map();
         assert!(!precompiles.contains(&source));
         assert!(precompiles.contains(&dest));
+    }
+
+    #[test]
+    fn precompiles_moved_to_same_destination_resolve_to_higher_source() {
+        let dest = address!("0000000000000000000000000000000000001111");
+
+        // Every `StateOverride` gets a new random hasher seed, so repeat to cover both orders.
+        for _ in 0..64 {
+            let mut state_overrides = StateOverride::default();
+            for source in [Address::with_last_byte(2), Address::with_last_byte(4)] {
+                state_overrides.insert(
+                    source,
+                    AccountOverride { move_precompile_to: Some(dest), ..Default::default() },
+                );
+            }
+            let mut evm = test_evm();
+
+            apply_precompile_overrides(&state_overrides, &mut evm).unwrap();
+
+            let precompiles = evm.precompiles_as::<Precompiles>().unwrap().as_map();
+            assert_eq!(precompiles.get(&dest).unwrap().id(), &PrecompileId::Identity);
+        }
     }
 
     #[test]
