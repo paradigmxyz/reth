@@ -4212,10 +4212,8 @@ impl<TX: Send, N: NodeTypes> StoragePath for DatabaseProvider<TX, N> {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{
-            blocks::BlockchainTestData, create_test_provider_factory, MockNodeTypesWithDB,
-        },
-        BlockWriter, ProviderFactory,
+        test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
+        BlockWriter,
     };
     use alloy_consensus::Header;
     use alloy_eips::BlockNumHash;
@@ -4225,7 +4223,8 @@ mod tests {
     };
     use evm2::evm::AccountInfo;
     use reth_chain_state::{
-        test_utils::TestBlockBuilder, CanonicalInMemoryStateWriter, ChainInfoHeaders, ExecutedBlock,
+        test_utils::{canonical_in_memory_state_writer, TestBlockBuilder},
+        ExecutedBlock,
     };
     use reth_db_api::models::{SnapAttempt, StorageSettings};
     use reth_ethereum_primitives::Receipt;
@@ -4256,20 +4255,6 @@ mod tests {
             &[],
             None,
             SaveBlocksMode::Full,
-        )
-    }
-
-    /// Creates the writer of a canonical state over the in-memory blocks of `factory`.
-    fn canonical_state_writer_for(
-        factory: &ProviderFactory<MockNodeTypesWithDB>,
-    ) -> CanonicalInMemoryStateWriter {
-        CanonicalInMemoryStateWriter::new(
-            ChainInfoHeaders {
-                canonical_head: SealedHeader::default(),
-                safe: None,
-                finalized: None,
-            },
-            factory.in_memory_state().clone(),
         )
     }
 
@@ -5164,7 +5149,7 @@ mod tests {
         for block in &blocks {
             provider.insert_block(block.recovered_block()).unwrap();
         }
-        let mut writer = canonical_state_writer_for(&factory);
+        let mut writer = canonical_in_memory_state_writer(factory.in_memory_state().clone());
         for block in &blocks[6..] {
             writer.insert_executed(block.clone());
         }
@@ -5213,7 +5198,7 @@ mod tests {
         save_genesis(&provider_rw, &genesis).unwrap();
         provider_rw.commit().unwrap();
 
-        let mut writer = canonical_state_writer_for(&factory);
+        let mut writer = canonical_in_memory_state_writer(factory.in_memory_state().clone());
         for block in &blocks[2..] {
             writer.insert_executed(block.clone());
         }
