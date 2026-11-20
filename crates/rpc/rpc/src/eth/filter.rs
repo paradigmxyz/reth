@@ -1,6 +1,6 @@
 //! `eth_` `Filter` RPC handler implementation
 
-use alloy_consensus::{BlockHeader, TxReceipt};
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Sealable, TxHash};
 use alloy_rpc_types_eth::{
@@ -96,9 +96,10 @@ const MAX_PARALLEL_BATCH_SIZE: usize = 256;
 /// the address and the block and transaction hashes.
 const MIN_LOG_JSON_SIZE: usize = 300;
 
-/// Upper bound on the JSON size in bytes of a log without its topics and data: every quantity at
-/// its widest, and the separators between its topics and to the next log.
-const MAX_LOG_JSON_SIZE: usize = 420;
+/// Upper bound on the JSON size in bytes of a log without the hex digits of its topics and data:
+/// every quantity at its widest, the quotes, prefixes and separators of four topics, and the
+/// separator to the next log.
+const MAX_LOG_JSON_SIZE: usize = 436;
 
 /// Allowance in bytes for the JSON-RPC envelope around the logs of a response, enough for request
 /// ids of up to 90 bytes.
@@ -738,10 +739,8 @@ where
         limits: QueryLimits,
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         let mut all_logs = Vec::new();
-        // A lower bound on the JSON size of the matching logs, and an upper bound on the size of a
-        // response with them.
+        // A lower bound on the JSON size of the matching logs.
         let mut response_size = 0;
-        let mut max_encoded_size = MAX_RESPONSE_ENVELOPE_SIZE;
         let mut retry_range_end = to_block;
 
         // get current chain tip to determine processing mode
@@ -798,19 +797,35 @@ where
                 range_mode.next().await?
             {
                 let num_hash = header.num_hash();
+                let logs_before = all_logs.len();
 
-                // Checked before the block's logs are kept, so that the logs held by a query stay
-                // within the response size limit. Like the count limit, it does not apply to a
-                // single block.
+                let payload_len = append_matching_block_logs(
+                    &mut all_logs,
+                    self.eth_api.converter(),
+                    recovered_block
+                        .map(ProviderOrBlock::Block)
+                        .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
+                    filter,
+                    &header,
+                    &receipts,
+                    false,
+                )?;
+
+                // size check but only if range is multiple blocks, so we always return all
+                // logs of a single block
+                let is_multi_block_range = from_block != to_block;
                 if let Some(max_response_size) = limits.max_response_size &&
-                    from_block != to_block
+                    is_multi_block_range
                 {
-                    let (min_size, max_size) = matching_logs_json_size_bounds(filter, &receipts);
-                    response_size += min_size;
-                    max_encoded_size += max_size;
+                    // Topics and data are hex encoded.
+                    response_size +=
+                        (all_logs.len() - logs_before) * MIN_LOG_JSON_SIZE + payload_len * 2;
                     // The transport measures the encoded response, so the retry range ends before
                     // the first block whose logs may no longer fit it. A range of only
                     // `from_block` is left to the transport, like any single block.
+                    let max_encoded_size = MAX_RESPONSE_ENVELOPE_SIZE +
+                        response_size +
+                        all_logs.len() * (MAX_LOG_JSON_SIZE - MIN_LOG_JSON_SIZE);
                     if max_encoded_size > max_response_size {
                         retry_range_end =
                             retry_range_end.min(num_hash.number.saturating_sub(1).max(from_block));
@@ -832,21 +847,6 @@ where
                     }
                 }
 
-                append_matching_block_logs(
-                    &mut all_logs,
-                    self.eth_api.converter(),
-                    recovered_block
-                        .map(ProviderOrBlock::Block)
-                        .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
-                    filter,
-                    &header,
-                    &receipts,
-                    false,
-                )?;
-
-                // size check but only if range is multiple blocks, so we always return all
-                // logs of a single block
-                let is_multi_block_range = from_block != to_block;
                 if let Some(max_logs_per_response) = limits.max_logs_per_response &&
                     is_multi_block_range &&
                     all_logs.len() > max_logs_per_response
@@ -876,22 +876,6 @@ where
 
         Ok(all_logs)
     }
-}
-
-/// Returns a lower and an upper bound on the JSON size in bytes of the logs in `receipts` that
-/// match `filter`.
-fn matching_logs_json_size_bounds<R: TxReceipt<Log = alloy_primitives::Log>>(
-    filter: &Filter,
-    receipts: &[R],
-) -> (usize, usize) {
-    receipts.iter().flat_map(|receipt| receipt.logs()).filter(|log| filter.matches(log)).fold(
-        (0, 0),
-        |(min, max), log| {
-            // Topics and data are hex encoded, a topic as a quoted 0x-prefixed string.
-            let size = log.topics().len() * 68 + log.data.data.len() * 2;
-            (min + MIN_LOG_JSON_SIZE + size, max + MAX_LOG_JSON_SIZE + size)
-        },
-    )
 }
 
 /// All active filters
@@ -2010,7 +1994,7 @@ mod tests {
         assert!(result.is_none());
     }
 
-    /// Returns a provider with blocks 100 to 102, each with one log carrying `data`.
+    /// Returns a provider with blocks 100 to 102, each with one log with one topic and `data`.
     fn provider_with_one_log_per_block(data: alloy_primitives::Bytes) -> MockEthProvider {
         let provider = MockEthProvider::default();
 
@@ -2030,7 +2014,7 @@ mod tests {
 
         let mock_log = alloy_primitives::Log {
             address: alloy_primitives::Address::ZERO,
-            data: alloy_primitives::LogData::new_unchecked(vec![], data),
+            data: alloy_primitives::LogData::new_unchecked(vec![FixedBytes::ZERO], data),
         };
 
         let receipt = reth_ethereum_primitives::Receipt {
@@ -2097,7 +2081,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_response_size_retry_range_excludes_overflow_block() {
-        // Each log is at least 300 + 2 * 1_000 and at most 420 + 2 * 1_000 bytes.
+        // Each log is at least 300 + 2 * 1_032 and at most 436 + 2 * 1_032 bytes.
         let provider = provider_with_one_log_per_block(vec![0u8; 1_000].into());
         let eth_api = build_test_eth_api(provider);
         let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
@@ -2111,10 +2095,10 @@ mod tests {
         };
 
         // The limit, the end of the retry range and whether the transport accepts that range:
-        // three blocks exceed 5_000, two blocks may exceed 4_700, and the first block alone
-        // exceeds 2_000, which is left to the transport like any single block.
+        // three blocks exceed 7_000, two blocks may exceed 5_000 and 4_800, and the first block
+        // alone exceeds 2_000, which is left to the transport like any single block.
         for (max_response_size, retry_to_block, accepted) in
-            [(5_000, 101, true), (4_700, 100, true), (2_000, 100, false)]
+            [(7_000, 101, true), (5_000, 100, true), (4_800, 100, true), (2_000, 100, false)]
         {
             let limits =
                 QueryLimits { max_response_size: Some(max_response_size), ..Default::default() };
@@ -2141,65 +2125,57 @@ mod tests {
             assert_eq!(transport_accepts(logs, max_response_size), accepted);
         }
 
-        // The lower bound alone admits two blocks at 4_700, which the transport rejects.
-        let limits = QueryLimits { max_response_size: Some(4_700), ..Default::default() };
+        // The lower bound alone admits two blocks at 4_800, which the transport rejects.
+        let limits = QueryLimits { max_response_size: Some(4_800), ..Default::default() };
         let logs = eth_filter
             .inner
             .clone()
             .get_logs_in_block_range(Filter::default(), 100, 101, limits)
             .await
             .unwrap();
-        assert!(!transport_accepts(logs, 4_700));
+        assert!(!transport_accepts(logs, 4_800));
     }
 
     #[test]
-    fn test_matching_logs_json_size_bounds() {
-        let rpc_log =
-            |address_byte, topics, data_len, quantity, block_timestamp| alloy_rpc_types_eth::Log {
-                inner: alloy_primitives::Log {
-                    address: alloy_primitives::Address::repeat_byte(address_byte),
-                    data: alloy_primitives::LogData::new_unchecked(
-                        vec![FixedBytes::ZERO; topics],
-                        vec![0u8; data_len].into(),
-                    ),
-                },
-                block_hash: Some(FixedBytes::ZERO),
-                block_number: Some(quantity),
-                block_timestamp,
-                transaction_hash: Some(FixedBytes::ZERO),
-                transaction_index: Some(quantity),
-                log_index: Some(quantity),
-                removed: false,
-            };
+    fn test_log_json_size_bounds() {
+        let rpc_log = |topics, data_len, quantity, block_timestamp| alloy_rpc_types_eth::Log {
+            inner: alloy_primitives::Log {
+                address: alloy_primitives::Address::ZERO,
+                data: alloy_primitives::LogData::new_unchecked(
+                    vec![FixedBytes::ZERO; topics],
+                    vec![0u8; data_len].into(),
+                ),
+            },
+            block_hash: Some(FixedBytes::ZERO),
+            block_number: Some(quantity),
+            block_timestamp,
+            transaction_hash: Some(FixedBytes::ZERO),
+            transaction_index: Some(quantity),
+            log_index: Some(quantity),
+            removed: false,
+        };
         // The smallest and the widest encoding of a log.
-        let smallest = rpc_log(1, 0, 0, 0, None);
-        let widest = rpc_log(2, 4, 1_000, u64::MAX, Some(u64::MAX));
-        let receipt = reth_ethereum_primitives::Receipt {
-            tx_type: TxType::Legacy,
-            cumulative_gas_used: 0,
-            logs: vec![smallest.inner.clone(), widest.inner.clone()],
-            success: true,
+        let smallest = rpc_log(0, 0, 0, None);
+        let widest = rpc_log(4, 1_000, u64::MAX, Some(u64::MAX));
+        let hex_len = |log: &alloy_rpc_types_eth::Log| {
+            (size_of_val(log.topics()) + log.data().data.len()) * 2
         };
 
         for log in [&smallest, &widest] {
-            // Only the log that matches the filter counts.
-            let filter = Filter::new().address(log.address());
-            let (min, max) =
-                matching_logs_json_size_bounds(&filter, std::slice::from_ref(&receipt));
+            let (min, max) = (MIN_LOG_JSON_SIZE + hex_len(log), MAX_LOG_JSON_SIZE + hex_len(log));
             let json_size = serde_json::to_vec(log).unwrap().len();
             // The upper bound includes the separator to the next log.
             assert!(min <= json_size && json_size < max, "{min} <= {json_size} < {max}");
         }
 
         // The envelope allowance covers the widest numeric request id.
-        let filter = Filter::new().address(widest.address());
-        let (_, max) = matching_logs_json_size_bounds(&filter, &[receipt]);
+        let max = MAX_RESPONSE_ENVELOPE_SIZE + MAX_LOG_JSON_SIZE + hex_len(&widest);
         let response = MethodResponse::response(
             Id::Number(u64::MAX),
             ResponsePayload::success(vec![widest]),
             usize::MAX,
         );
-        assert!(response.into_json().len() <= MAX_RESPONSE_ENVELOPE_SIZE + max);
+        assert!(response.into_json().len() <= max);
     }
 
     #[tokio::test]
