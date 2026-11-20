@@ -48,6 +48,13 @@ pub(crate) const RPC_DEFAULT_MAX_REQUEST_SIZE_MB: u32 = 15;
 /// This is only relevant for very large trace responses.
 pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 160;
 
+/// Default trace byte limit per byte of the response limit.
+///
+/// Struct logs and `vmTrace` record about 1.5-5x their JSON size, since a 32-byte stack word
+/// serializes as short hex. Twice the response limit passes every mainnet block whose traces fit
+/// in the response, while keeping a block trace's memory bounded.
+const RPC_TRACE_BYTES_PER_RESPONSE_BYTE: u64 = 2;
+
 /// Default number of incoming connections.
 ///
 /// This restricts how many active connections (http, ws) the server accepts.
@@ -96,6 +103,7 @@ pub struct DefaultRpcServerArgs {
     rpc_evm_memory_limit: u64,
     rpc_tx_fee_cap: u128,
     rpc_max_simulate_blocks: u64,
+    rpc_max_trace_bytes: Option<usize>,
     rpc_compute_state_root_for_eth_simulate: bool,
     rpc_eth_proof_window: u64,
     rpc_proof_permits: usize,
@@ -340,6 +348,12 @@ impl DefaultRpcServerArgs {
         self
     }
 
+    /// Set the default maximum bytes a single trace may record
+    pub const fn with_rpc_max_trace_bytes(mut self, v: Option<usize>) -> Self {
+        self.rpc_max_trace_bytes = v;
+        self
+    }
+
     /// Set whether to compute state roots for `eth_simulateV1` responses by default.
     pub const fn with_rpc_compute_state_root_for_eth_simulate(mut self, v: bool) -> Self {
         self.rpc_compute_state_root_for_eth_simulate = v;
@@ -435,6 +449,7 @@ impl Default for DefaultRpcServerArgs {
             rpc_evm_memory_limit: (1 << 32) - 1,
             rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
             rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
+            rpc_max_trace_bytes: None,
             rpc_compute_state_root_for_eth_simulate: false,
             rpc_eth_proof_window: constants::DEFAULT_ETH_PROOF_WINDOW,
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
@@ -705,6 +720,14 @@ pub struct RpcServerArgs {
     )]
     pub rpc_max_simulate_blocks: u64,
 
+    /// Max bytes a traced tx may record, defaults to 2x `--rpc.max-response-size`, 0 is unlimited.
+    #[arg(
+        long = "rpc.max-trace-bytes",
+        value_name = "BYTES",
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_max_trace_bytes.map(|v| v.to_string().into()))
+    )]
+    pub rpc_max_trace_bytes: Option<usize>,
+
     /// Compute state roots for `eth_simulateV1` responses.
     #[arg(
         long = "rpc.compute-state-root-for-eth-simulate",
@@ -963,6 +986,22 @@ impl RpcServerArgs {
             .as_deref()
             .unwrap_or_else(|| &DefaultRpcServerArgs::get_global().auth_ipc_path)
     }
+
+    /// Returns the trace byte limit, `None` when `--rpc.max-trace-bytes 0` disables it.
+    ///
+    /// By default, a trace may record up to twice the configured RPC response size limit.
+    pub fn max_trace_bytes(&self) -> Option<usize> {
+        match self.rpc_max_trace_bytes {
+            Some(0) => None,
+            Some(bytes) => Some(bytes),
+            None => Some(
+                (u64::from(self.rpc_max_response_size.get()) * 1024 * 1024)
+                    .saturating_mul(RPC_TRACE_BYTES_PER_RESPONSE_BYTE)
+                    .try_into()
+                    .unwrap_or(usize::MAX),
+            ),
+        }
+    }
 }
 
 impl Default for RpcServerArgs {
@@ -1005,6 +1044,7 @@ impl Default for RpcServerArgs {
             rpc_evm_memory_limit,
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
+            rpc_max_trace_bytes,
             rpc_compute_state_root_for_eth_simulate,
             rpc_eth_proof_window,
             rpc_proof_permits,
@@ -1054,6 +1094,7 @@ impl Default for RpcServerArgs {
             rpc_evm_memory_limit,
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
+            rpc_max_trace_bytes,
             rpc_compute_state_root_for_eth_simulate,
             rpc_eth_proof_window,
             rpc_proof_permits,
@@ -1322,6 +1363,26 @@ mod tests {
     }
 
     #[test]
+    fn test_rpc_max_trace_bytes() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.max_trace_bytes(), Some(320 * 1024 * 1024));
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.max-response-size", "10"])
+                .args;
+        assert_eq!(args.max_trace_bytes(), Some(20 * 1024 * 1024));
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.max-trace-bytes", "1024"])
+                .args;
+        assert_eq!(args.max_trace_bytes(), Some(1024));
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.max-trace-bytes", "0"]).args;
+        assert_eq!(args.max_trace_bytes(), None);
+    }
+
+    #[test]
     fn test_rpc_server_args() {
         let args = RpcServerArgs {
             http: true,
@@ -1367,6 +1428,7 @@ mod tests {
             rpc_evm_memory_limit: 256,
             rpc_tx_fee_cap: 2_000_000_000_000_000_000u128,
             rpc_max_simulate_blocks: 256,
+            rpc_max_trace_bytes: Some(1 << 20),
             rpc_compute_state_root_for_eth_simulate: false,
             rpc_eth_proof_window: 100_000,
             rpc_proof_permits: 16,
@@ -1456,6 +1518,8 @@ mod tests {
             "2.0",
             "--rpc.max-simulate-blocks",
             "256",
+            "--rpc.max-trace-bytes",
+            "1048576",
             "--rpc.eth-proof-window",
             "100000",
             "--rpc.proof-permits",
