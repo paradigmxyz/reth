@@ -311,10 +311,12 @@ impl TestHarness {
             .tree_state
             .set_canonical_head(blocks.last().unwrap().recovered_block().num_hash());
 
-        canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
         self.tree.canonical_in_memory_state_writer =
             CanonicalInMemoryStateWriter::new(canonical_in_memory_state.clone());
         self.tree.canonical_in_memory_state = canonical_in_memory_state;
+        self.tree
+            .canonical_in_memory_state_writer
+            .update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
 
         self.blocks = blocks.clone();
 

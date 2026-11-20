@@ -285,7 +285,8 @@ where
     /// Keeps track of the state of the canonical chain that isn't persisted yet.
     /// This is intended to be accessed from external sources, such as rpc.
     canonical_in_memory_state: CanonicalInMemoryState<N>,
-    /// Changes the executed blocks that `canonical_in_memory_state` tracks.
+    /// Changes the executed blocks that `canonical_in_memory_state` tracks, and reports its
+    /// persisted tip.
     canonical_in_memory_state_writer: CanonicalInMemoryStateWriter<N>,
     /// Handle to the payload builder that will receive payload attributes for valid forkchoice
     /// updates
@@ -327,7 +328,6 @@ where
             .field("persistence_state", &self.persistence_state)
             .field("backfill_sync_state", &self.backfill_sync_state)
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
-            .field("canonical_in_memory_state_writer", &self.canonical_in_memory_state_writer)
             .field("payload_builder", &self.payload_builder)
             .field("config", &self.config)
             .field("metrics", &self.metrics)
