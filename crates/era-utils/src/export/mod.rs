@@ -172,6 +172,12 @@ where
     // `best_block_number()` can be stale behind static files, so reconcile against what is actually
     // available.
     let last_block = determine_export_range(provider, config)?;
+    if last_block < config.first_block_number {
+        return Err(eyre!(
+            "First block {} is beyond the last exportable block {last_block}",
+            config.first_block_number
+        ));
+    }
 
     info!(
         target: "era::history::export",

@@ -31,3 +31,20 @@ fn test_export_with_genesis_only() {
     let metadata = fs::metadata(file_path).unwrap();
     assert!(metadata.len() > 0, "Exported file should not be empty");
 }
+
+#[test]
+fn test_export_first_block_beyond_available_errors() {
+    let provider_factory = create_test_provider_factory();
+    init_genesis(&provider_factory).unwrap();
+
+    let export_dir = tempdir().unwrap();
+    // Only genesis exists, so nothing at or after block 1 can be exported.
+    let export_config = ExportConfig {
+        dir: export_dir.path().to_owned(),
+        first_block_number: 1,
+        ..Default::default()
+    };
+
+    let result = export::<Era1, _>(&provider_factory.provider_rw().unwrap().0, &export_config);
+    assert!(result.is_err(), "export of an empty range must fail, got {result:?}");
+}
