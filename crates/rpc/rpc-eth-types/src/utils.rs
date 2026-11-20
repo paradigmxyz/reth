@@ -10,7 +10,10 @@ use evm2::{interpreter::InstrStop, TxResultExt};
 use reth_evm::TransactionEnvMut;
 use reth_primitives_traits::{Recovered, SignedTransaction};
 use reth_rpc_server_types::constants::{DEFAULT_CALL_MANY_TIMEOUT, DEFAULT_MAX_CALL_MANY_CALLS};
-use std::{future::Future, time::Instant};
+use std::{
+    future::Future,
+    time::{Duration, Instant},
+};
 
 /// Calculates the gas used and next log index for a transaction at the given index
 pub fn calculate_gas_used_and_next_log_index(
@@ -107,17 +110,17 @@ pub fn checked_blob_gas_used_ratio(blob_gas_used: u64, max_blob_gas_per_block: u
 /// Bounds the work of one `eth_callMany`, `trace_callMany` or `debug_traceCallMany` request.
 ///
 /// The request may carry at most [`DEFAULT_MAX_CALL_MANY_CALLS`] calls, all of its calls share
-/// one gas budget of the RPC gas cap, and no call starts more than [`DEFAULT_CALL_MANY_TIMEOUT`]
-/// after the first one.
+/// one gas budget of the RPC gas cap, and the first call starts the configured timeout.
 #[derive(Debug)]
 pub struct CallManyBudget {
     /// The RPC gas cap the calls share, reported once they exceed it.
     gas_cap: u64,
     /// Gas left for the remaining calls, `None` if the RPC gas cap is disabled.
     remaining_gas: Option<u64>,
-    /// No call starts after this instant. Set when the first call is admitted, so waiting for a
-    /// permit or replaying the block's transactions does not count.
-    deadline: Option<Instant>,
+    /// Execution time allowed from the first call, or zero to disable the timeout.
+    timeout: Duration,
+    /// Set when the first call is admitted, after permit acquisition and block replay.
+    started_at: Option<Instant>,
     /// Whether [`Self::admit`] lowered the gas limit of the last admitted call.
     capped: bool,
 }
@@ -136,7 +139,8 @@ impl CallManyBudget {
         Ok(Self {
             gas_cap,
             remaining_gas: (gas_cap != 0).then_some(gas_cap),
-            deadline: None,
+            timeout: DEFAULT_CALL_MANY_TIMEOUT,
+            started_at: None,
             capped: false,
         })
     }
@@ -146,6 +150,12 @@ impl CallManyBudget {
     /// An empty bundle counts as one call, so requests of empty bundles are bounded too.
     pub fn for_bundles<T>(bundles: &[Bundle<T>], gas_cap: u64) -> Result<Self, EthApiError> {
         Self::new(bundles.iter().map(|bundle| bundle.transactions.len().max(1)).sum(), gas_cap)
+    }
+
+    /// Sets the duration shared by all calls from the first admission. Zero disables the timeout.
+    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
     }
 
     /// Admits the request's next call, lowering the gas limit of `tx_env` to the gas left for the
@@ -158,8 +168,10 @@ impl CallManyBudget {
         tx_env: &mut Recovered<T>,
     ) -> Result<(), EthApiError> {
         let now = Instant::now();
-        if now >= *self.deadline.get_or_insert(now + DEFAULT_CALL_MANY_TIMEOUT) {
-            return Err(EthApiError::ExecutionTimedOut(DEFAULT_CALL_MANY_TIMEOUT))
+        if !self.timeout.is_zero() &&
+            now.duration_since(*self.started_at.get_or_insert(now)) >= self.timeout
+        {
+            return Err(EthApiError::ExecutionTimedOut(self.timeout))
         }
         self.capped = false;
         if let Some(remaining) = self.remaining_gas &&
@@ -271,16 +283,22 @@ mod tests {
 
     #[test]
     fn call_many_budget_times_out() {
-        let mut budget = CallManyBudget::new(2, 0).unwrap();
-        assert_eq!(budget.deadline, None);
-        budget.admit(&mut tx_env(21_000)).unwrap();
-        assert!(budget.deadline.is_some());
+        for timeout in
+            [DEFAULT_CALL_MANY_TIMEOUT, Duration::from_millis(25), Duration::ZERO, Duration::MAX]
+        {
+            let mut budget = CallManyBudget::new(2, 0).unwrap().with_timeout(timeout);
+            assert_eq!(budget.started_at, None);
+            budget.admit(&mut tx_env(21_000)).unwrap();
+            assert_eq!(budget.started_at.is_some(), !timeout.is_zero());
 
-        budget.deadline = Some(Instant::now());
-        assert!(matches!(
-            budget.admit(&mut tx_env(21_000)),
-            Err(EthApiError::ExecutionTimedOut(timeout)) if timeout == DEFAULT_CALL_MANY_TIMEOUT
-        ));
+            budget.started_at = Some(Instant::now() - DEFAULT_CALL_MANY_TIMEOUT);
+            let result = budget.admit(&mut tx_env(21_000));
+            if timeout.is_zero() || timeout == Duration::MAX {
+                result.unwrap();
+            } else {
+                assert!(matches!(result, Err(EthApiError::ExecutionTimedOut(t)) if t == timeout));
+            }
+        }
     }
 
     #[tokio::test]

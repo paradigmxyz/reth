@@ -32,11 +32,8 @@ const MAX_NESTED_BUNDLE_DEPTH: usize = 5;
 /// Maximum body size
 const MAX_BUNDLE_BODY_SIZE: usize = 50;
 
-/// Default simulation timeout
-pub(crate) const DEFAULT_SIM_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Maximum simulation timeout
-pub(crate) const MAX_SIM_TIMEOUT: Duration = Duration::from_secs(30);
+/// Maximum simulation timeout.
+const MAX_SIM_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Maximum payout cost
 const SBUNDLE_PAYOUT_MAX_COST: u64 = 30_000;
@@ -513,12 +510,10 @@ where
     ) -> RpcResult<SimBundleResponse> {
         trace!("mev_simBundle called, request: {:?}, overrides: {:?}", request, overrides);
 
-        let override_timeout = overrides.timeout;
-
-        let timeout = override_timeout
-            .map(Duration::from_secs)
-            .map(|d| d.min(MAX_SIM_TIMEOUT))
-            .unwrap_or(DEFAULT_SIM_TIMEOUT);
+        let timeout = bundle_timeout(
+            overrides.timeout.map(Duration::from_secs),
+            self.eth_api().eth_api_settings().evm_timeout,
+        );
 
         let bundle_res =
             tokio::time::timeout(timeout, Self::sim_bundle_inner(self, request, overrides, true))
@@ -585,6 +580,13 @@ pub enum EthSimBundleError {
     NegativeProfit,
 }
 
+/// Resolves a bundle request's timeout, falling back to the configured default. Bundles
+/// always retain their execution limit, including when the default timeout is disabled.
+pub(super) fn bundle_timeout(requested: Option<Duration>, configured: Duration) -> Duration {
+    let default = if configured.is_zero() { MAX_SIM_TIMEOUT } else { configured };
+    requested.unwrap_or(default).min(MAX_SIM_TIMEOUT)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -608,6 +610,18 @@ mod tests {
         generators::{generate_key, sign_tx_with_key_pair},
     };
     use reth_transaction_pool::test_utils::testing_pool;
+
+    #[test]
+    fn bundle_timeout_preserves_request_override_and_maximum() {
+        let configured = Duration::from_secs(2);
+        let requested = Duration::from_secs(7);
+        assert_eq!(bundle_timeout(None, configured), configured);
+        assert_eq!(bundle_timeout(Some(requested), configured), requested);
+        assert_eq!(bundle_timeout(Some(Duration::ZERO), configured), Duration::ZERO);
+        assert_eq!(bundle_timeout(None, Duration::ZERO), MAX_SIM_TIMEOUT);
+        assert_eq!(bundle_timeout(None, Duration::MAX), MAX_SIM_TIMEOUT);
+        assert_eq!(bundle_timeout(Some(Duration::MAX), configured), MAX_SIM_TIMEOUT);
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn sim_bundle_uses_next_block_env_and_overrides() {

@@ -316,7 +316,8 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
             if bundles.is_empty() {
                 return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
             }
-            let mut budget = CallManyBudget::for_bundles(&bundles, self.call_gas_limit())?;
+            let mut budget = CallManyBudget::for_bundles(&bundles, self.call_gas_limit())?
+                .with_timeout(self.eth_api_settings().evm_timeout);
 
             let permit = self
                 .acquire_owned_blocking_io()

@@ -160,7 +160,8 @@ where
         calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
-        let mut budget = CallManyBudget::new(calls.len(), self.eth_api().call_gas_limit())?;
+        let mut budget = CallManyBudget::new(calls.len(), self.eth_api().call_gas_limit())?
+            .with_timeout(self.eth_api().eth_api_settings().evm_timeout);
         let at = block_id.unwrap_or_default();
         let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
 

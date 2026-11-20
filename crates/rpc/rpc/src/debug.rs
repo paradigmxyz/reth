@@ -541,7 +541,8 @@ where
         if bundles.is_empty() {
             return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into())
         }
-        let mut budget = CallManyBudget::for_bundles(&bundles, self.eth_api().call_gas_limit())?;
+        let mut budget = CallManyBudget::for_bundles(&bundles, self.eth_api().call_gas_limit())?
+            .with_timeout(self.eth_api().eth_api_settings().evm_timeout);
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
         let transaction_index = transaction_index.unwrap_or_default();

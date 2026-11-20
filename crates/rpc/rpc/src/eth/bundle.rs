@@ -1,6 +1,6 @@
 //! `Eth` bundle implementation and helpers.
 
-use crate::eth::sim_bundle::{DEFAULT_SIM_TIMEOUT, MAX_SIM_TIMEOUT};
+use crate::eth::sim_bundle::bundle_timeout;
 use alloy_consensus::{transaction::TxHashRef, EnvKzgSettings, Transaction as _};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{uint, Keccak256, U256};
@@ -53,9 +53,9 @@ where
     /// state, or it can be used to simulate a past block. The sender is responsible for signing the
     /// transactions and using the correct nonce and ensuring validity
     ///
-    /// The simulation is bounded by the request's `timeout` in milliseconds, capped at 30
-    /// seconds, or by 5 seconds if it is missing or zero. No transaction starts after it expires,
-    /// the request then fails with [`EthApiError::ExecutionTimedOut`].
+    /// The request's `timeout` in milliseconds defaults to the configured RPC EVM timeout when
+    /// omitted or zero. Bundles always have a 30-second maximum. If the timeout expires before
+    /// the next transaction starts, the request fails with [`EthApiError::ExecutionTimedOut`].
     pub async fn call_bundle(
         &self,
         bundle: EthCallBundle,
@@ -96,10 +96,10 @@ where
         }
 
         // A zero timeout selects the default instead of expiring immediately.
-        let timeout = timeout
-            .filter(|timeout| *timeout > 0)
-            .map(Duration::from_millis)
-            .map_or(DEFAULT_SIM_TIMEOUT, |timeout| timeout.min(MAX_SIM_TIMEOUT));
+        let timeout = bundle_timeout(
+            timeout.filter(|timeout| *timeout > 0).map(Duration::from_millis),
+            self.eth_api().eth_api_settings().evm_timeout,
+        );
 
         let transactions =
             self.eth_api().recover_raw_transactions::<PoolPooledTx<Eth::Pool>>(txs)?;

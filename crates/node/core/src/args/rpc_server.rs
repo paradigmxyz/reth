@@ -705,8 +705,9 @@ pub struct RpcServerArgs {
     )]
     pub rpc_tx_fee_cap: u128,
 
-    /// Wall-clock timeout shared by all blocks in an `eth_simulateV1` request.
-    /// Accepts seconds or a duration with an `s` or `ms` suffix. Zero disables the timeout.
+    /// EVM execution timeout for `eth_simulateV1` and call-many requests. Accepts seconds
+    /// or a duration with an `s` or `ms` suffix. Zero disables the timeout for these methods.
+    /// Bundle simulations use this default up to 30s, or 30s when set to zero.
     #[arg(
         long = "rpc.evmtimeout",
         alias = "rpc-evmtimeout",
