@@ -1,4 +1,7 @@
 //! Standard-compatible threads and borrowed scopes for the selected backend.
+//!
+//! In simulation, `panicking()` reads the shared OS thread's unwind flag, not a logical task's
+//! state. It can therefore report another task's panic while an unwinding destructor yields.
 
 use std::{io, num::NonZeroUsize};
 
@@ -41,6 +44,9 @@ impl Builder {
         Self(self.0.name(name))
     }
     /// Sets stack size for a non-scoped logical thread.
+    ///
+    /// Shuttle stack-allocation failures can panic during `spawn` instead of returning an I/O
+    /// error. Invalid sizes and allocation-failure handling are not simulated like native threads.
     pub fn stack_size(self, size: usize) -> Self {
         Self(self.0.stack_size(size))
     }
