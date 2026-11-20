@@ -121,7 +121,7 @@ def smoke_test(root):
                     "stage", "run", stage, *target, "--config", config, *network,
                     "--from", "0", "--to", TIP, "--batch-size", "8",
                     "--commit", "--skip-unwind",
-                    # Execution must checkpoint its static files even without --checkpoints.
+                    # Execution must checkpoint its state even without --checkpoints.
                     *([] if stage == "execution" else ["--checkpoints"]),
                 )
                 saved = json.loads(run(
@@ -153,6 +153,32 @@ def smoke_test(root):
                 print((root / "peer.log").read_text(), end="", flush=True)
 
 
+def test_legacy_execution_replay(root):
+    config = root / "prune.toml"
+    config.write_text("[prune.segments]\nreceipts = { before = 1 }\n")
+    target = [
+        "--chain", FIXTURE / "genesis.json", "--datadir", root / "legacy",
+        "--storage.v2=false", "--config", config,
+    ]
+    run("import", *target, "--fail-on-invalid-block", FIXTURE / "chain.rlp")
+    for start, end in [(TIP - 3, TIP - 2), (TIP - 2, TIP)]:
+        run(
+            "stage", "run", "execution", *target, "--from", start, "--to", end,
+            "--batch-size", "1", "--commit",
+        )
+        saved = json.loads(run(
+            "db", *target, "get", "mdbx", "StageCheckpoints", "Execution", quiet=True,
+        ))
+        assert saved["block_number"] == end, saved
+    # Older diagnostic runs could leave execution state ahead of the saved checkpoint.
+    run(
+        "db", *target, "stage-checkpoints", "set", "--stage", "execution",
+        "--block-number", TIP - 2, "--clear-stage-unit",
+    )
+    run("stage", "run", "execution", *target, "--from", TIP - 2, "--to", TIP, "--commit")
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="reth-stage-") as directory:
         smoke_test(Path(directory))
+        test_legacy_execution_replay(Path(directory))

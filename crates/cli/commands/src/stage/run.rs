@@ -103,8 +103,7 @@ pub struct Command<C: ChainSpecParser> {
     #[arg(long, short)]
     commit: bool,
 
-    /// Save stage checkpoints. Execution always saves its checkpoint when it writes static
-    /// files so that reopening the database preserves the committed execution data.
+    /// Save stage checkpoints. Execution always saves its checkpoint with the committed state.
     #[arg(long)]
     checkpoints: bool,
 
@@ -341,11 +340,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 ),
                 StageEnum::Hashing => eyre::bail!(HASHING_UNSUPPORTED),
             };
-        // Storage consistency on reopen uses the Execution checkpoint to truncate static files.
-        let save_checkpoints = self.checkpoints ||
-            (self.stage == StageEnum::Execution &&
-                (provider_rw.cached_storage_settings().is_v2() ||
-                    EitherWriter::receipts_destination(&provider_rw).is_static_file()));
+        // Both pipeline resume and static-file recovery use the checkpoint as the execution tip.
+        let save_checkpoints = self.checkpoints || self.stage == StageEnum::Execution;
         let checkpoint = provider_rw.get_stage_checkpoint(exec_stage.id())?.unwrap_or_default();
 
         let mut exec_checkpoint = checkpoint.with_block_number(self.from);
