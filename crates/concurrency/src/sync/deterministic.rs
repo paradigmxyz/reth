@@ -6,10 +6,11 @@
     reason = "Native TLS shares scheduler state across logical tasks; native locks only hand work and results across the runner boundary."
 )]
 
-use crate::sync::time::{Duration, Instant};
+use crate::sync::time::Instant;
 use shuttle::{
     scheduler::{RoundRobinScheduler, Schedule, Scheduler, Task, TaskId},
-    thread, Config, MaxSteps, Runner,
+    sync::{self, Condvar},
+    thread, Config, FailurePersistence, MaxSteps, Runner,
 };
 use std::{
     cell::RefCell,
@@ -28,11 +29,47 @@ thread_local! {
     static CLOCK: RefCell<Option<Rc<RefCell<Clock>>>> = const { RefCell::new(None) };
 }
 
+/// A private notification token, independent of the caller's public thread park token.
+#[derive(Clone, Debug)]
+pub(super) struct Waiter {
+    id: thread::ThreadId,
+    // No user callbacks touch this flag; unrelated logical-task unwinding can poison Shuttle's
+    // native mutex, so private notification operations recover its still-valid boolean.
+    state: Arc<(sync::Mutex<bool>, Condvar)>,
+}
+
+impl Waiter {
+    pub(super) fn new() -> Self {
+        Self {
+            id: thread::current().id(),
+            state: Arc::new((sync::Mutex::new(false), Condvar::new())),
+        }
+    }
+
+    pub(super) const fn id(&self) -> thread::ThreadId {
+        self.id
+    }
+
+    pub(super) fn wait(&self) {
+        let (notified, ready) = &*self.state;
+        let mut notified = notified.lock().unwrap_or_else(|error| error.into_inner());
+        while !*notified {
+            notified = ready.wait(notified).unwrap_or_else(|error| error.into_inner());
+        }
+        *notified = false;
+    }
+
+    pub(super) fn notify(&self) {
+        let (notified, ready) = &*self.state;
+        *notified.lock().unwrap_or_else(|error| error.into_inner()) = true;
+        ready.notify_one();
+    }
+}
+
 pub(crate) struct Timer(u64);
 
 impl Timer {
-    pub(crate) fn new(deadline: Instant) -> Self {
-        let current = thread::current();
+    pub(crate) fn new(deadline: Instant, waiter: Waiter) -> Self {
         let (id, driver) = with_clock(|clock| {
             assert!(
                 !clock.stopped,
@@ -40,7 +77,7 @@ impl Timer {
             );
             let id = clock.next_timer;
             clock.next_timer += 1;
-            clock.timers.push(TimerEntry { id, deadline, thread: current });
+            clock.timers.push(TimerEntry { id, deadline, waiter });
             (id, clock.driver.clone())
         });
         if let Some(driver) = driver {
@@ -58,11 +95,12 @@ impl Drop for Timer {
 
 #[derive(Default)]
 struct Clock {
-    now: Duration,
+    now: i128,
     timers: Vec<TimerEntry>,
     next_timer: u64,
     driver: Option<thread::Thread>,
     stopped: bool,
+    waking_timers: bool,
     pools: HashMap<usize, Slots>,
 }
 
@@ -70,19 +108,19 @@ struct Clock {
 // Borrows never span a scheduler operation or user callback.
 pub(super) struct Slots {
     pub(super) occupied: Vec<bool>,
-    pub(super) waiters: Vec<thread::Thread>,
+    pub(super) waiters: Vec<Waiter>,
 }
 
 struct TimerEntry {
     id: u64,
     deadline: Instant,
-    thread: thread::Thread,
+    waiter: Waiter,
 }
 
 struct DriverState {
     stopped: bool,
     pending: bool,
-    ready: Vec<thread::Thread>,
+    ready: Vec<Waiter>,
 }
 
 struct ClockScheduler {
@@ -107,7 +145,8 @@ impl Scheduler for ClockScheduler {
         assert!(!runnable.is_empty(), "simulated workload deadlocked without a pending timer");
         let tasks = &runnable;
         let mut clock = self.clock.borrow_mut();
-        if tasks.len() == 1 &&
+        if !clock.waking_timers &&
+            tasks.len() == 1 &&
             clock
                 .driver
                 .as_ref()
@@ -133,7 +172,7 @@ impl Drop for ResetClock {
     }
 }
 
-pub(crate) fn now() -> Duration {
+pub(crate) fn now() -> i128 {
     with_clock(|clock| clock.now)
 }
 
@@ -154,6 +193,9 @@ where
     let scheduler = ClockScheduler { scheduler: RoundRobinScheduler::new(1), clock };
     let mut config = Config::default();
     config.stack_size = DEFAULT_STACK_SIZE;
+    // Fixed round-robin executions can be replayed by rerunning the workload; do not clone and
+    // print Shuttle's entire retained schedule on failure. Shuttle still records every step.
+    config.failure_persistence = FailurePersistence::None;
     // Runtime workloads are not bounded-size Shuttle tests.
     config.max_steps = MaxSteps::None;
     Runner::new(scheduler, config).run(move || {
@@ -194,20 +236,24 @@ fn drive_clock() {
             let mut ready = Vec::new();
             clock.timers.retain(|timer| {
                 if timer.deadline.0 <= clock.now {
-                    ready.push(timer.thread.clone());
+                    ready.push(timer.waiter.clone());
                     false
                 } else {
                     true
                 }
             });
+            // A notification schedules before making its waiter runnable. Keep the clock frozen
+            // until every due waiter has actually been notified.
+            clock.waking_timers = !ready.is_empty();
             DriverState { stopped: clock.stopped, pending: !clock.timers.is_empty(), ready }
         });
         if state.stopped {
             return;
         }
-        for thread in state.ready {
-            thread.unpark();
+        for waiter in state.ready {
+            waiter.notify();
         }
+        with_clock(|clock| clock.waking_timers = false);
         if state.pending {
             thread::yield_now();
         } else {

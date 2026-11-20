@@ -10,7 +10,7 @@ pub use rayon::{
 
 #[cfg(feature = "fuzz")]
 mod deterministic {
-    use crate::sync::deterministic::with_pool_slots;
+    use crate::sync::deterministic::{with_pool_slots, Waiter};
     use shuttle::{sync::mpsc, thread, thread_local};
     use std::{
         any::Any,
@@ -70,12 +70,23 @@ mod deterministic {
             })
         }
 
-        /// Executes inline, waiting for a free logical worker unless already on this pool.
+        /// Executes on a logical worker, inline only when already on this pool.
+        ///
+        /// External calls use a separate task so they do not inherit the caller's thread-locals.
+        /// Logical worker-local storage is not retained between separate jobs.
         pub fn install<T: Send>(&self, f: impl FnOnce() -> T + Send) -> T {
             if self.current_thread_index().is_some() {
                 f()
             } else {
-                without_current_slot(|| self.execute(None, f))
+                without_current_slot(|| {
+                    thread::scope(|threads| {
+                        let result = threads
+                            .spawn(|| catch_unwind(AssertUnwindSafe(|| self.execute(None, f))))
+                            .join()
+                            .unwrap_or_else(|panic| resume_unwind(panic));
+                        result.unwrap_or_else(|panic| resume_unwind(panic))
+                    })
+                })
             }
         }
 
@@ -154,8 +165,9 @@ mod deterministic {
         }
 
         fn acquire(&self, index: Option<usize>) -> usize {
+            // A private notification leaves the caller's public park token untouched.
+            let waiter = Waiter::new();
             loop {
-                let current = thread::current();
                 let available = with_pool_slots(self.id, self.current_num_threads(), |slots| {
                     let available = match index {
                         Some(index) => (!slots.occupied[index]).then_some(index),
@@ -163,15 +175,15 @@ mod deterministic {
                     };
                     if let Some(index) = available {
                         slots.occupied[index] = true;
-                    } else if !slots.waiters.iter().any(|waiter| waiter.id() == current.id()) {
-                        slots.waiters.push(current);
+                    } else {
+                        slots.waiters.push(waiter.clone());
                     }
                     available
                 });
                 if let Some(index) = available {
                     return index;
                 }
-                thread::park();
+                waiter.wait();
             }
         }
 
@@ -181,7 +193,7 @@ mod deterministic {
                 mem::take(&mut slots.waiters)
             });
             for waiter in waiters {
-                waiter.unpark();
+                waiter.notify();
             }
         }
 
@@ -230,7 +242,11 @@ mod deterministic {
             self.num_threads = threads;
             self
         }
-        /// Sets the names attached to logical worker jobs.
+        /// Configures worker names for native API compatibility.
+        ///
+        /// Shuttle fixes task metadata before slots are leased: unscoped tasks use worker zero's
+        /// name, while new scoped tasks (including external installs) are unnamed. Names do not
+        /// track worker leases.
         pub fn thread_name(mut self, name: impl FnMut(usize) -> String + Send + 'static) -> Self {
             self.thread_name = Some(Box::new(name));
             self
@@ -247,9 +263,16 @@ mod deterministic {
             reason = "Only process-wide pool configuration is stored here; scheduling state is execution-local."
         )]
         pub fn build_global(self) -> Result<(), ThreadPoolBuildError> {
-            GLOBAL_POOL
-                .set(self.build()?)
-                .map_err(|_| ThreadPoolBuildError::GlobalPoolAlreadyInitialized)
+            let mut initialized = false;
+            GLOBAL_POOL.get_or_init(|| {
+                initialized = true;
+                self.build().expect("logical pool construction is infallible")
+            });
+            if initialized {
+                Ok(())
+            } else {
+                Err(ThreadPoolBuildError::GlobalPoolAlreadyInitialized)
+            }
         }
         /// Builds a pool; constructing logical workers cannot fail.
         pub fn build(mut self) -> Result<ThreadPool, ThreadPoolBuildError> {
@@ -415,6 +438,8 @@ mod deterministic {
                             running -= 1;
                             if first_panic.is_none() {
                                 first_panic = result.err();
+                            } else if let Err(panic) = result {
+                                discard_panic(panic);
                             }
                         }
                     }
@@ -432,7 +457,12 @@ mod deterministic {
             (result, panic)
         });
         match result {
-            Err(panic) => resume_unwind(panic),
+            Err(panic) => {
+                if let Some(child_panic) = child_panic {
+                    discard_panic(child_panic);
+                }
+                resume_unwind(panic)
+            }
             Ok(value) => {
                 if let Some(panic) = child_panic {
                     resume_unwind(panic);
@@ -472,13 +502,31 @@ mod deterministic {
         b: impl FnOnce() -> B + Send,
     ) -> (A, B) {
         let (sender, receiver) = mpsc::channel();
-        let b = in_place_scope(|scope| {
+        let b = scope(|scope| {
             scope.spawn(move |_| {
-                sender.send(a()).unwrap_or_else(|_| panic!("join receiver outlives producer"));
+                let result = catch_unwind(AssertUnwindSafe(a));
+                sender.send(result).unwrap_or_else(|_| panic!("join receiver outlives producer"));
             });
-            b()
+            catch_unwind(AssertUnwindSafe(b))
         });
-        (receiver.recv().expect("join producer completed before scope returned"), b)
+        let a = receiver.recv().expect("join producer completed before scope returned");
+        match (a, b) {
+            (Ok(a), Ok(b)) => (a, b),
+            (Err(a), b) => {
+                if let Err(b) = b {
+                    discard_panic(b);
+                }
+                resume_unwind(a)
+            }
+            (Ok(_), Err(b)) => resume_unwind(b),
+        }
+    }
+
+    fn discard_panic(panic: Panic) {
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(panic))) {
+            // A second payload can itself panic on drop; never unwind out of the drain.
+            mem::forget(panic);
+        }
     }
 
     #[cfg(test)]

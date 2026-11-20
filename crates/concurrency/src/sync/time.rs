@@ -1,9 +1,7 @@
 //! Monotonic and system time using native clocks or a virtual clock in simulation.
 
 #[cfg(feature = "fuzz")]
-use crate::sync::deterministic::{self, Timer};
-#[cfg(feature = "fuzz")]
-use shuttle::thread;
+use crate::sync::deterministic::{self, Timer, Waiter};
 #[cfg(feature = "fuzz")]
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
@@ -19,9 +17,12 @@ pub use reth_primitives_traits::FastInstant;
 pub use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 /// A point on the simulated monotonic clock, reset for each runtime execution.
+///
+/// Signed nanoseconds permit backdating before the execution origin and deadlines beyond one
+/// [`Duration::MAX`] of elapsed time. Arithmetic bounds do not depend on the host clock.
 #[cfg(feature = "fuzz")]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct Instant(pub(crate) Duration);
+pub struct Instant(pub(crate) i128);
 
 #[cfg(feature = "fuzz")]
 impl Instant {
@@ -36,8 +37,14 @@ impl Instant {
     }
 
     /// Returns the elapsed duration, saturating at zero.
+    ///
+    /// Panics if the difference exceeds [`Duration::MAX`].
     pub const fn duration_since(&self, earlier: Self) -> Duration {
-        self.0.saturating_sub(earlier.0)
+        let nanos = self.0.saturating_sub(earlier.0);
+        let nanos = if nanos < 0 { 0 } else { nanos };
+        assert!(nanos <= Duration::MAX.as_nanos() as i128, "duration between instants overflowed");
+        // The range check above bounds both components to Duration's representation.
+        Duration::new((nanos / 1_000_000_000) as u64, (nanos % 1_000_000_000) as u32)
     }
 
     /// Returns the elapsed duration, saturating at zero.
@@ -47,12 +54,12 @@ impl Instant {
 
     /// Adds a duration, returning `None` on overflow.
     pub fn checked_add(&self, duration: Duration) -> Option<Self> {
-        self.0.checked_add(duration).map(Self)
+        self.0.checked_add(duration.as_nanos() as i128).map(Self)
     }
 
-    /// Subtracts a duration, returning `None` on underflow.
+    /// Subtracts a duration, returning `None` if the timestamp representation overflows.
     pub fn checked_sub(&self, duration: Duration) -> Option<Self> {
-        self.0.checked_sub(duration).map(Self)
+        self.0.checked_sub(duration.as_nanos() as i128).map(Self)
     }
 }
 
@@ -60,7 +67,7 @@ impl Instant {
 impl Add<Duration> for Instant {
     type Output = Self;
     fn add(self, rhs: Duration) -> Self {
-        Self(self.0 + rhs)
+        self.checked_add(rhs).expect("overflow when adding duration to instant")
     }
 }
 
@@ -68,7 +75,7 @@ impl Add<Duration> for Instant {
 impl Sub<Duration> for Instant {
     type Output = Self;
     fn sub(self, rhs: Duration) -> Self {
-        Self(self.0 - rhs)
+        self.checked_sub(rhs).expect("overflow when subtracting duration from instant")
     }
 }
 
@@ -83,13 +90,13 @@ impl Sub for Instant {
 #[cfg(feature = "fuzz")]
 impl AddAssign<Duration> for Instant {
     fn add_assign(&mut self, rhs: Duration) {
-        self.0 += rhs;
+        *self = *self + rhs;
     }
 }
 #[cfg(feature = "fuzz")]
 impl SubAssign<Duration> for Instant {
     fn sub_assign(&mut self, rhs: Duration) {
-        self.0 -= rhs;
+        *self = *self - rhs;
     }
 }
 
@@ -103,9 +110,10 @@ pub fn sleep(duration: Duration) {
     #[cfg(feature = "fuzz")]
     {
         let deadline = Instant::now() + duration;
-        let timer = Timer::new(deadline);
+        let waiter = Waiter::new();
+        let timer = Timer::new(deadline, waiter.clone());
         while Instant::now() < deadline {
-            thread::park();
+            waiter.wait();
         }
         drop(timer);
     }
@@ -136,7 +144,7 @@ impl SystemTime {
     ///
     /// Panics outside [`crate::sync::Runtime::run`]. Each execution starts at the epoch.
     pub fn now() -> Self {
-        Self::UNIX_EPOCH + deterministic::now()
+        Self::UNIX_EPOCH + Instant::now().duration_since(Instant(0))
     }
 
     /// Returns the duration since `earlier`, or an error containing the reverse duration.

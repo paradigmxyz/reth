@@ -4,6 +4,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 #[cfg(feature = "fuzz")]
+use parking_lot as _;
+#[cfg(feature = "fuzz")]
 use rayon as _;
 #[cfg(feature = "fuzz")]
 use reth_primitives_traits as _;
