@@ -28,7 +28,7 @@ mod simulated {
         deterministic::{Timer, Waiter},
         thread,
         time::{Duration, Instant},
-        Arc, Mutex, TryLockError,
+        Arc, Mutex,
     };
     use std::{collections::VecDeque, fmt, mem};
 
@@ -377,6 +377,11 @@ mod simulated {
         direct_receivers: Vec<(thread::ThreadId, Option<T>)>,
     }
 
+    shuttle::lazy_static! {
+        // Pending selections acquire this execution-local lock before either channel lock.
+        static ref RENDEZVOUS_SELECTION: Mutex<()> = Mutex::new(());
+    }
+
     struct SendListener<'a, T> {
         sender: &'a Sender<T>,
         id: thread::ThreadId,
@@ -411,7 +416,7 @@ mod simulated {
     ///
     /// Simulation checks cancellation before offering a value; native selection is unbiased
     /// when both operations are ready. Cancellation retracts an unconsumed rendezvous value
-    /// and returns it.
+    /// and returns it. Pending rendezvous selection decisions are serialized across channels.
     /// A value already accepted by a receiver is committed even if cancellation
     /// is observed before this function resumes.
     pub fn send_or_cancel<T>(
@@ -465,6 +470,10 @@ mod simulated {
                     Some(Ok(()) | Err(TryRecvError::Disconnected))
                 );
             let mut cancelled_offer = None;
+            // Serialize two-channel decisions so reciprocal selections cannot each hold their
+            // output lock while waiting for the other's cancellation lock.
+            let selection = (ticket.is_some() && cancel.is_some())
+                .then(|| RENDEZVOUS_SELECTION.lock().unwrap_or_else(|error| error.into_inner()));
             let mut state = sender.state.lock().unwrap_or_else(|error| error.into_inner());
             if let Some(sent) = ticket {
                 let Some(mut position) = state.queue.iter().position(|(id, _)| *id == sent) else {
@@ -482,17 +491,9 @@ mod simulated {
                             cancelled = true;
                         }
                     } else {
-                        // Poll while the offer is locked so acceptance cannot race with
-                        // cancellation. Never block holding both locks.
-                        let mut cancellation = match cancel.state.try_lock() {
-                            Ok(state) => state,
-                            Err(TryLockError::Poisoned(error)) => error.into_inner(),
-                            Err(TryLockError::WouldBlock) => {
-                                drop(state);
-                                thread::yield_now();
-                                continue;
-                            }
-                        };
+                        // Keep acceptance and cancellation atomic under both channel locks.
+                        let mut cancellation =
+                            cancel.state.lock().unwrap_or_else(|error| error.into_inner());
                         cancelled =
                             cancellation.queue.pop_front().is_some() || cancellation.senders == 0;
                         let waiters = if cancelled {
@@ -532,6 +533,7 @@ mod simulated {
                     register(&mut state.send_waiters, &waiter);
                     drop(state);
                     wake(waiters);
+                    drop(selection);
                     waiter.wait();
                     drop(cancellation);
                     continue;
@@ -539,6 +541,7 @@ mod simulated {
             }
             register(&mut state.send_waiters, &waiter);
             drop(state);
+            drop(selection);
             waiter.wait();
             drop(cancellation);
         }
