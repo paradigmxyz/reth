@@ -31,6 +31,10 @@ pub trait NetworkPrimitives: Send + Sync + Unpin + Clone + Debug + 'static {
     type BlockHeader: BlockHeader + 'static;
 
     /// The block body type.
+    ///
+    /// Bounded decoding of `BlockBodies` responses reads the eth protocol's layout before decoding:
+    /// a body is `[transactions, ommers, withdrawals]`, its transactions are in EIP-2718 network
+    /// encoding, and transaction types 1 to 4 are laid out as in their EIPs.
     type BlockBody: BlockBody + 'static;
 
     /// Full block type.
@@ -56,6 +60,10 @@ pub trait NetworkPrimitives: Send + Sync + Unpin + Clone + Debug + 'static {
     type PooledTransaction: SignedTransaction + TryFrom<Self::BroadcastedTransaction> + 'static;
 
     /// The transaction type which peers return in `GetReceipts` messages.
+    ///
+    /// Bounded decoding of `Receipts` responses reads the eth protocol's layout before decoding: a
+    /// receipt is in EIP-2718 network encoding before eth/69, its logs are its fourth field, and a
+    /// log is `[address, topics, data]`.
     type Receipt: TxReceipt
         + RlpEncodableReceipt
         + RlpDecodableReceipt

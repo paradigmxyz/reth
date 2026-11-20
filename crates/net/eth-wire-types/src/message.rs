@@ -38,6 +38,23 @@ pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
 /// `max_message_size * TX_MEMORY_BUDGET_MULTIPLIER`. Remaining transactions are silently dropped.
 pub const TX_MEMORY_BUDGET_MULTIPLIER: usize = 2;
 
+/// Multiplier applied to `max_message_size` to derive the in-memory budget for decoding
+/// `BlockBodies` and `Receipts` messages.
+///
+/// Decoded block bodies and receipts take more memory than their RLP encoding, so a message whose
+/// lists would exceed `max_message_size * RESPONSE_MEMORY_BUDGET_MULTIPLIER` is rejected before
+/// decoding. Truncating is not an option, because a body or receipt list cut short fails
+/// validation anyway. Valid transactions and receipts take at most about five times their
+/// encoding, an eth/69 receipt without logs being the densest.
+///
+/// The budget covers every list a message decodes into, each at the capacity its `Vec` grows to
+/// while decoding: block bodies with their transactions, ommers and withdrawals, the access lists,
+/// blob versioned hashes and authorizations of Ethereum's typed transactions, and receipt lists
+/// with their receipts, logs and topics. Lists inside transactions of other types are not counted,
+/// and neither are byte strings such as calldata and log data, which take about their encoded
+/// size.
+pub const RESPONSE_MEMORY_BUDGET_MULTIPLIER: usize = 6;
+
 /// Error when sending/receiving a message
 #[derive(thiserror::Error, Debug)]
 pub enum MessageError {
@@ -97,18 +114,27 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
     ///
     /// This will enforce decoding according to the given [`EthVersion`] of the connection.
     pub fn decode_message(version: EthVersion, buf: &mut &[u8]) -> Result<Self, MessageError> {
-        Self::decode_message_with_tx_memory_budget(version, buf, usize::MAX)
+        Self::decode_message_with_memory_budget(version, buf, usize::MAX, usize::MAX)
     }
 
-    /// Like [`Self::decode_message`], but caps the cumulative in-memory size of decoded
-    /// transactions in `Transactions` and `PooledTransactions` messages. Once exceeded,
-    /// remaining transactions are silently dropped.
+    /// Like [`Self::decode_message`], but bounds the memory that decoded messages take.
     ///
-    /// Use [`TX_MEMORY_BUDGET_MULTIPLIER`] to derive a reasonable default.
-    pub fn decode_message_with_tx_memory_budget(
+    /// Caps the cumulative in-memory size of decoded transactions in `Transactions` and
+    /// `PooledTransactions` messages at `tx_memory_budget`. Once exceeded, remaining transactions
+    /// are silently dropped.
+    ///
+    /// Rejects `BlockBodies` and `Receipts` messages before decoding them if their lists would
+    /// take more than `response_memory_budget` bytes in memory. The check reads the eth protocol's
+    /// layouts described on [`NetworkPrimitives::BlockBody`] and [`NetworkPrimitives::Receipt`],
+    /// and a budget of `usize::MAX` skips it.
+    ///
+    /// Use [`TX_MEMORY_BUDGET_MULTIPLIER`] and [`RESPONSE_MEMORY_BUDGET_MULTIPLIER`] to derive
+    /// reasonable defaults.
+    pub fn decode_message_with_memory_budget(
         version: EthVersion,
         buf: &mut &[u8],
         tx_memory_budget: usize,
+        response_memory_budget: usize,
     ) -> Result<Self, MessageError> {
         let message_type = EthMessageID::decode(buf)?;
 
@@ -147,7 +173,11 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             EthMessageID::GetBlockHeaders => EthMessage::GetBlockHeaders(RequestPair::decode(buf)?),
             EthMessageID::BlockHeaders => EthMessage::BlockHeaders(RequestPair::decode(buf)?),
             EthMessageID::GetBlockBodies => EthMessage::GetBlockBodies(RequestPair::decode(buf)?),
-            EthMessageID::BlockBodies => EthMessage::BlockBodies(RequestPair::decode(buf)?),
+            EthMessageID::BlockBodies => {
+                EthMessage::BlockBodies(RequestPair::decode_with(buf, |buf| {
+                    BlockBodies::decode_with_memory_budget(buf, response_memory_budget)
+                })?)
+            }
             EthMessageID::GetPooledTransactions => {
                 EthMessage::GetPooledTransactions(RequestPair::decode(buf)?)
             }
@@ -181,15 +211,21 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                         // eth/70 continues to omit bloom filters and adds the
                         // `lastBlockIncomplete` flag, encoded as
                         // `[request-id, lastBlockIncomplete, [[receipt₁, receipt₂], ...]]`.
-                        EthMessage::Receipts70(RequestPair::decode(buf)?)
+                        EthMessage::Receipts70(RequestPair::decode_with(buf, |buf| {
+                            Receipts70::decode_with_memory_budget(buf, response_memory_budget)
+                        })?)
                     }
                     EthVersion::Eth69 => {
                         // with eth69, receipts no longer include the bloom
-                        EthMessage::Receipts69(RequestPair::decode(buf)?)
+                        EthMessage::Receipts69(RequestPair::decode_with(buf, |buf| {
+                            Receipts69::decode_with_memory_budget(buf, response_memory_budget)
+                        })?)
                     }
                     _ => {
                         // before eth69 we need to decode the bloom  as well
-                        EthMessage::Receipts(RequestPair::decode(buf)?)
+                        EthMessage::Receipts(RequestPair::decode_with(buf, |buf| {
+                            Receipts::decode_with_memory_budget(buf, response_memory_budget)
+                        })?)
                     }
                 }
             }
@@ -862,13 +898,110 @@ where
     }
 }
 
+/// Rejects the RLP list at the front of `buf` if decoding it into a `Vec<E>`, together with the
+/// lists nested in its entries, would take more than `memory_budget` bytes, without decoding
+/// either.
+///
+/// `nested_size` is called for every entry as in [`decoded_list_size_with`]. `buf` is not
+/// advanced. A budget of `usize::MAX` is unbounded, and the list is not read at all, so decoding
+/// stays open to layouts that `nested_size` does not know.
+pub(crate) fn ensure_list_within_memory_budget<E>(
+    mut buf: &[u8],
+    memory_budget: usize,
+    nested_size: impl FnMut(&mut &[u8]) -> alloy_rlp::Result<usize>,
+) -> alloy_rlp::Result<()> {
+    if memory_budget == usize::MAX {
+        return Ok(())
+    }
+    if decoded_list_size_with::<E>(&mut buf, nested_size)? > memory_budget {
+        return Err(alloy_rlp::Error::Custom("decoded list exceeds memory budget"))
+    }
+    Ok(())
+}
+
+/// Returns the bytes that decoding the RLP list at the front of `buf` into a `Vec<T>` takes,
+/// without decoding its items, and advances `buf` past the list.
+///
+/// RLP decoding pushes the items into the `Vec` one at a time, so the list is counted at the
+/// capacity it grows to, see [`decoded_capacity`]. Memory the items point to is not counted.
+pub(crate) fn decoded_list_size<T>(buf: &mut &[u8]) -> alloy_rlp::Result<usize> {
+    decoded_list_size_with::<T>(buf, |item| skip_rlp_item(item).map(|()| 0))
+}
+
+/// Like [`decoded_list_size`], but also counts the lists nested in the items.
+///
+/// `nested_size` returns the bytes that decoding the lists nested in the item at the front of its
+/// buffer takes, reading only RLP headers, and advances past the item.
+pub(crate) fn decoded_list_size_with<T>(
+    buf: &mut &[u8],
+    mut nested_size: impl FnMut(&mut &[u8]) -> alloy_rlp::Result<usize>,
+) -> alloy_rlp::Result<usize> {
+    let mut items = Header::decode_bytes(buf, true)?;
+    let mut len = 0;
+    let mut size = 0usize;
+    while !items.is_empty() {
+        size = size.saturating_add(nested_size(&mut items)?);
+        len += 1;
+    }
+    Ok(size.saturating_add(decoded_capacity(len).saturating_mul(core::mem::size_of::<T>())))
+}
+
+/// Advances `buf` past the EIP-2718 envelope at its front the way the network decoder reads it,
+/// and returns the envelope's type byte, `None` for a legacy envelope, and the payload of the RLP
+/// list of its fields.
+///
+/// A legacy envelope is an RLP list, and a typed envelope is its type byte followed by the RLP
+/// list of its fields, usually inside an RLP string. The network decoder does not hold a typed
+/// envelope to the length of that string, so bytes left in it are read as the next envelopes, here
+/// as well.
+pub(crate) fn decode_envelope_fields<'a>(
+    buf: &mut &'a [u8],
+) -> alloy_rlp::Result<(Option<u8>, &'a [u8])> {
+    let header = Header::decode(buf)?;
+    if header.list {
+        // `Header::decode` checked that the payload is in bounds.
+        let (fields, rest) = buf.split_at(header.payload_length);
+        *buf = rest;
+        return Ok((None, fields))
+    }
+
+    // `Header::decode` steps over a string header but not over a bare type byte, so the type byte
+    // is next either way.
+    let (&ty, rest) = buf.split_first().ok_or(alloy_rlp::Error::InputTooShort)?;
+    *buf = rest;
+    Ok((Some(ty), Header::decode_bytes(buf, true)?))
+}
+
+/// Advances `buf` past the RLP item at its front without decoding it.
+pub(crate) fn skip_rlp_item(buf: &mut &[u8]) -> alloy_rlp::Result<()> {
+    let header = Header::decode(buf)?;
+    // `Header::decode` checked that the payload is in bounds.
+    *buf = &buf[header.payload_length..];
+    Ok(())
+}
+
+/// Returns the capacity of a `Vec` that `len` items were pushed into one at a time.
+///
+/// The first push allocates room for four items, the minimum `Vec` uses for items of up to
+/// 1 KiB, and every later growth doubles the capacity.
+pub(crate) const fn decoded_capacity(len: usize) -> usize {
+    if len == 0 {
+        0
+    } else if len <= 4 {
+        4
+    } else {
+        len.next_power_of_two()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::MessageError;
+    use super::{ensure_list_within_memory_budget, MessageError};
     use crate::{
-        message::RequestPair, BlockAccessLists, EthMessage, EthMessageID, EthNetworkPrimitives,
-        EthVersion, GetBlockAccessLists, GetNodeData, NodeData, ProtocolMessage,
-        RawCapabilityMessage, Status, StatusMessage,
+        message::RequestPair, BlockAccessLists, BlockBodies, EthMessage, EthMessageID,
+        EthNetworkPrimitives, EthVersion, GetBlockAccessLists, GetNodeData, NodeData,
+        ProtocolMessage, RawCapabilityMessage, Receipts, Receipts69, Receipts70, Status,
+        StatusMessage,
     };
     use alloy_hardforks::{ForkHash, ForkId};
     use alloy_primitives::{hex, B256, U256};
@@ -1156,5 +1289,79 @@ mod tests {
             result,
             Err(MessageError::ExpectedStatusMessage(EthMessageID::GetBlockBodies))
         ));
+    }
+
+    #[test]
+    fn unbounded_memory_budget_skips_list_walk() {
+        // Not an RLP list, so only reading it could fail.
+        assert_eq!(ensure_list_within_memory_budget::<u8>(&[0x80], usize::MAX, |_| Ok(0)), Ok(()));
+        assert_eq!(
+            ensure_list_within_memory_budget::<u8>(&[0x80], usize::MAX - 1, |_| Ok(0)),
+            Err(Error::UnexpectedString)
+        );
+    }
+
+    #[test]
+    fn decode_message_rejects_responses_over_memory_budget() {
+        let messages = [
+            (
+                EthVersion::Eth68,
+                EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
+                    request_id: 1,
+                    message: BlockBodies(vec![BlockBody::default()]),
+                }),
+            ),
+            (
+                EthVersion::Eth68,
+                EthMessage::Receipts(RequestPair {
+                    request_id: 1,
+                    message: Receipts(vec![vec![]]),
+                }),
+            ),
+            (
+                EthVersion::Eth69,
+                EthMessage::Receipts69(RequestPair {
+                    request_id: 1,
+                    message: Receipts69(vec![vec![]]),
+                }),
+            ),
+            (
+                EthVersion::Eth70,
+                EthMessage::Receipts70(RequestPair {
+                    request_id: 1,
+                    message: Receipts70 { last_block_incomplete: false, receipts: vec![vec![]] },
+                }),
+            ),
+        ];
+
+        for (version, message) in messages {
+            let encoded = encode(ProtocolMessage::from(message.clone()));
+
+            let result = ProtocolMessage::<EthNetworkPrimitives>::decode_message_with_memory_budget(
+                version,
+                &mut &encoded[..],
+                usize::MAX,
+                0,
+            );
+            assert!(
+                matches!(
+                    result,
+                    Err(MessageError::RlpError(Error::Custom(
+                        "decoded list exceeds memory budget"
+                    )))
+                ),
+                "{version:?} {result:?}"
+            );
+
+            let decoded =
+                ProtocolMessage::<EthNetworkPrimitives>::decode_message_with_memory_budget(
+                    version,
+                    &mut &encoded[..],
+                    usize::MAX,
+                    usize::MAX,
+                )
+                .unwrap();
+            assert_eq!(decoded.message, message);
+        }
     }
 }
