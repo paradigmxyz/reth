@@ -8,7 +8,7 @@ use reth_tasks::{
     CancelOnDrop, Runtime,
 };
 use std::sync::Arc;
-use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore, SemaphorePermit};
 
 use crate::EthApiTypes;
 
@@ -150,6 +150,19 @@ pub trait SpawnBlocking: EthApiTypes + 'static {
         }
 
         guard.clone().acquire_many_owned(permits_to_acquire)
+    }
+
+    /// Tries to acquire a permit to run a short state read at the latest block on the calling task.
+    ///
+    /// This is called before such a read. `Some` means the read may run directly on the calling
+    /// task while the permit is held. `None` means the read must go to the blocking pool, either
+    /// because the implementation does not allow inline reads (the default) or because the limit
+    /// of concurrent inline reads is reached.
+    ///
+    /// A read holding a permit can block its worker thread, so implementations must hand out
+    /// fewer permits than the runtime has worker threads.
+    fn try_acquire_inline_io(&self) -> Option<SemaphorePermit<'_>> {
+        None
     }
 
     /// Executes the future on a new blocking task.
