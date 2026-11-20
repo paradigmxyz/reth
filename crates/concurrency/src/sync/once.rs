@@ -11,6 +11,7 @@ use std::ops::Deref;
 
 /// A one-time initialized value whose waiting callers remain scheduler-managed.
 ///
+/// Access to an already initialized cell does not touch scheduler state.
 /// Process statics must not be initialized concurrently by independent runtime executions.
 /// A failed execution can abandon its initialization lock; do not reuse a static that was
 /// being initialized when an execution failed. Construct execution-local cells inside `run`.
@@ -36,6 +37,9 @@ impl<T> OnceLock<T> {
     }
     /// Blocks the logical thread until initialization completes.
     pub fn wait(&self) -> &T {
+        if let Some(value) = self.value.get() {
+            return value;
+        }
         let mut guard = self.initializing.lock().unwrap_or_else(|error| error.into_inner());
         while self.value.get().is_none() {
             guard = self.ready.wait(guard).unwrap_or_else(|error| error.into_inner());
@@ -45,6 +49,9 @@ impl<T> OnceLock<T> {
     }
     /// Initializes the cell once, or returns `value` when already initialized.
     pub fn set(&self, value: T) -> Result<(), T> {
+        if self.value.get().is_some() {
+            return Err(value);
+        }
         let guard = self.initializing.lock().unwrap_or_else(|error| error.into_inner());
         let result = self.value.set(value);
         self.ready.notify_all();

@@ -11,7 +11,10 @@ pub use rayon::{
 #[cfg(feature = "fuzz")]
 mod deterministic {
     use crate::sync::deterministic::{with_pool_slots, Waiter};
-    use shuttle::{sync::mpsc, thread, thread_local};
+    use shuttle::{
+        sync::{mpsc, Mutex},
+        thread, thread_local,
+    };
     use std::{
         any::Any,
         cell::RefCell,
@@ -342,7 +345,7 @@ mod deterministic {
 
     enum Message<'env> {
         Job(Job<'env>),
-        Done(Result<(), Panic>),
+        Done,
     }
     struct Lease {
         pool: ThreadPool,
@@ -407,52 +410,61 @@ mod deterministic {
     fn scope_inner<'env, T>(pool: Option<ThreadPool>, f: impl FnOnce(&Scope<'env>) -> T) -> T {
         let (sender, receiver) = mpsc::channel();
         let scope = Scope { sender };
-        let (result, child_panic) = thread::scope(|threads| {
+        let first_panic = Mutex::new(None);
+        let result = thread::scope(|threads| {
             let scope = &scope;
+            let first_panic = &first_panic;
             let dispatcher = threads.spawn(move || {
                 let mut running = 1usize;
-                let mut first_panic = None;
                 while running != 0 {
                     match receiver.recv().expect("scope sender outlives dispatcher") {
                         Message::Job(job) => {
                             running += 1;
                             let pool = pool.clone();
                             threads.spawn(move || {
-                                let result = catch_unwind(AssertUnwindSafe(|| {
-                                    if let Some(pool) = pool {
-                                        pool.execute(None, || job(scope));
-                                    } else {
-                                        job(scope);
+                                let execute = || {
+                                    if let Err(panic) =
+                                        catch_unwind(AssertUnwindSafe(|| job(scope)))
+                                    {
+                                        let mut first = first_panic
+                                            .lock()
+                                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                                        if first.is_none() {
+                                            *first = Some(panic);
+                                        } else {
+                                            // Payload destructors may block; keep them on the job
+                                            // and outside the lock so dispatch can keep running.
+                                            drop(first);
+                                            discard_panic(panic);
+                                        }
                                     }
-                                }));
+                                };
+                                if let Some(pool) = pool {
+                                    pool.execute(None, execute);
+                                } else {
+                                    execute();
+                                }
                                 scope
                                     .sender
-                                    .send(Message::Done(result))
+                                    .send(Message::Done)
                                     .unwrap_or_else(|_| panic!("scope dispatcher drains all jobs"));
                             });
                         }
-                        Message::Done(result) => {
-                            running -= 1;
-                            if first_panic.is_none() {
-                                first_panic = result.err();
-                            } else if let Err(panic) = result {
-                                discard_panic(panic);
-                            }
-                        }
+                        Message::Done => running -= 1,
                     }
                 }
-                first_panic
             });
             let result = catch_unwind(AssertUnwindSafe(|| f(scope)));
             scope
                 .sender
-                .send(Message::Done(Ok(())))
+                .send(Message::Done)
                 .unwrap_or_else(|_| panic!("scope dispatcher drains root completion"));
-            let panic = without_current_slot(|| {
-                dispatcher.join().unwrap_or_else(|panic| resume_unwind(panic))
+            without_current_slot(|| {
+                dispatcher.join().unwrap_or_else(|panic| resume_unwind(panic));
             });
-            (result, panic)
+            result
         });
+        let child_panic = first_panic.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
         match result {
             Err(panic) => {
                 if let Some(child_panic) = child_panic {
@@ -499,14 +511,14 @@ mod deterministic {
         b: impl FnOnce() -> B + Send,
     ) -> (A, B) {
         let (sender, receiver) = mpsc::channel();
-        let b = scope(|scope| {
+        let a = scope(|scope| {
             scope.spawn(move |_| {
-                let result = catch_unwind(AssertUnwindSafe(a));
+                let result = catch_unwind(AssertUnwindSafe(b));
                 sender.send(result).unwrap_or_else(|_| panic!("join receiver outlives producer"));
             });
-            catch_unwind(AssertUnwindSafe(b))
+            catch_unwind(AssertUnwindSafe(a))
         });
-        let a = receiver.recv().expect("join producer completed before scope returned");
+        let b = receiver.recv().expect("join producer completed before scope returned");
         match (a, b) {
             (Ok(a), Ok(b)) => (a, b),
             (Err(a), b) => {
