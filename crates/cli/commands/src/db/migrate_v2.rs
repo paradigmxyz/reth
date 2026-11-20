@@ -19,8 +19,8 @@ use reth_node_builder::NodeTypesWithDBAdapter;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockNumReader, DBProvider, DatabaseProviderFactory,
     MetadataProvider, MetadataWriter, ProviderFactory, PruneCheckpointReader,
-    RocksDBProviderFactory, StageCheckpointWriter, StaticFileProviderFactory, StaticFileWriter,
-    StorageSettings,
+    PruneCheckpointWriter, RocksDBProviderFactory, StageCheckpointWriter,
+    StaticFileProviderFactory, StaticFileWriter, StorageSettings,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -94,6 +94,13 @@ impl Command {
         info!(target: "reth::cli", "Writing StorageSettings v2 metadata");
         {
             let provider_rw = provider_factory.database_provider_rw()?;
+            // The static files start after the effective v1 boundary, including any block
+            // that an old MDBX pruner may have left incomplete.
+            for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
+                if let Some(checkpoint) = provider_rw.get_prune_checkpoint(segment)? {
+                    provider_rw.save_prune_checkpoint(segment, checkpoint)?;
+                }
+            }
             provider_rw.write_storage_settings(StorageSettings::v2())?;
             provider_rw.commit()?;
         }

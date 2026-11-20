@@ -22,10 +22,12 @@ use crate::{
         bal::{StoredBlockAccessList, StoredBlockAccessListKey},
         blocks::{HeaderHash, StoredBlockOmmers},
         storage_sharded_key::StorageShardedKey,
-        AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
+        AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey, StorageSettings,
         StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
     table::{Decode, DupSort, Encode, Table, TableInfo},
+    transaction::{DbTx, DbTxMut},
+    DatabaseError,
 };
 use alloy_consensus::Header;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
@@ -581,6 +583,56 @@ impl Table for PackedStoragesTrie {
 
 impl DupSort for PackedStoragesTrie {
     type SubKey = PackedStoredNibblesSubKey;
+}
+
+impl PruneCheckpoints {
+    const fn history_boundary_key(
+        segment: PruneSegment,
+        settings: StorageSettings,
+    ) -> Option<&'static str> {
+        match (settings.is_v2(), segment) {
+            (false, PruneSegment::AccountHistory) => Some("account_history_prune_boundary"),
+            (false, PruneSegment::StorageHistory) => Some("storage_history_prune_boundary"),
+            _ => None,
+        }
+    }
+
+    /// Reads a checkpoint, including the block that an older MDBX pruner may have partially
+    /// removed. Those pruners saved the previous block when interrupted within a block.
+    pub fn read(
+        tx: &impl DbTx,
+        segment: PruneSegment,
+        settings: StorageSettings,
+    ) -> Result<Option<PruneCheckpoint>, DatabaseError> {
+        let Some(mut checkpoint) = tx.get::<Self>(segment)? else { return Ok(None) };
+        if let Some(key) = Self::history_boundary_key(segment, settings) &&
+            let Some(block) = checkpoint.block_number &&
+            block < BlockNumber::MAX &&
+            let Some(next) = checkpoint.prune_mode.next_pruned_block(Some(block)) &&
+            tx.get::<Metadata>(key.to_owned())?.as_deref() != Some(&block.to_be_bytes())
+        {
+            checkpoint.block_number = Some(next);
+        }
+        Ok(Some(checkpoint))
+    }
+
+    /// Writes the exact history boundary atomically with the checkpoint. Recording the block
+    /// distinguishes it from a checkpoint written by an older MDBX pruner.
+    pub fn write(
+        tx: &impl DbTxMut,
+        segment: PruneSegment,
+        checkpoint: PruneCheckpoint,
+        settings: StorageSettings,
+    ) -> Result<(), DatabaseError> {
+        if let Some(key) = Self::history_boundary_key(segment, settings) {
+            if let Some(block) = checkpoint.block_number {
+                tx.put::<Metadata>(key.to_owned(), block.to_be_bytes().to_vec())?;
+            } else {
+                tx.delete::<Metadata>(key.to_owned(), None)?;
+            }
+        }
+        tx.put::<Self>(segment, checkpoint)
+    }
 }
 
 /// Keys for the `ChainState` table.

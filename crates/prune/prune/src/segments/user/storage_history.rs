@@ -1,7 +1,6 @@
 use crate::{
-    db_ext::DbTxPruneExt,
     segments::{
-        user::history::{finalize_history_prune, HistoryPruneResult},
+        user::history::{finalize_history_prune, prune_database_history, HistoryPruneResult},
         PruneInput, Segment,
     },
     PrunerError,
@@ -64,6 +63,18 @@ where
         ret(level = "trace")
     )]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
+        if EitherWriter::storage_changesets_destination(provider).is_database() {
+            return prune_database_history::<tables::StorageChangeSets, tables::StoragesHistory, _>(
+                provider.tx_ref(),
+                BlockNumberAddress((input.to_block, Address::repeat_byte(0xff))),
+                input,
+                |(BlockNumberAddress((block, address)), entry)| {
+                    (block, StorageShardedKey::new(address, entry.key, 0))
+                },
+                |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
+            )
+        }
+
         let range = match input.get_next_block_range() {
             Some(range) => range,
             None => {
@@ -78,12 +89,7 @@ where
             return self.prune_rocksdb(provider, input, range, range_end);
         }
 
-        // Check where storage changesets are stored (MDBX path)
-        if EitherWriter::storage_changesets_destination(provider).is_static_file() {
-            self.prune_static_files(provider, input, range, range_end)
-        } else {
-            self.prune_database(provider, input, range, range_end)
-        }
+        self.prune_static_files(provider, input, range, range_end)
     }
 }
 
@@ -156,80 +162,6 @@ impl StorageHistory {
         let result = HistoryPruneResult {
             highest_deleted: highest_deleted_storages,
             last_pruned_block: last_changeset_pruned_block,
-            pruned_count: pruned_changesets,
-            done,
-        };
-        finalize_history_prune::<_, tables::StoragesHistory, (Address, B256), _>(
-            provider,
-            result,
-            range_end,
-            &limiter,
-            |(address, storage_key), block_number| {
-                StorageShardedKey::new(address, storage_key, block_number)
-            },
-            |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
-        )
-        .map_err(Into::into)
-    }
-
-    fn prune_database<Provider>(
-        &self,
-        provider: &Provider,
-        input: PruneInput,
-        range: std::ops::RangeInclusive<BlockNumber>,
-        range_end: BlockNumber,
-    ) -> Result<SegmentOutput, PrunerError>
-    where
-        Provider: DBProvider<Tx: DbTxMut>,
-    {
-        let mut limiter = if let Some(limit) = input.limiter.deleted_entries_limit() {
-            input.limiter.set_deleted_entries_limit(limit / STORAGE_HISTORY_TABLES_TO_PRUNE)
-        } else {
-            input.limiter
-        };
-
-        if limiter.is_limit_reached() {
-            return Ok(SegmentOutput::not_done(
-                limiter.interrupt_reason(),
-                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
-            ))
-        }
-
-        // Deleted storage changeset keys (account addresses and storage slots) with the highest
-        // block number deleted for that key.
-        //
-        // The size of this map is limited by `prune_delete_limit * blocks_since_last_run /
-        // STORAGE_HISTORY_TABLES_TO_PRUNE`, and with current defaults it's usually `3500 * 5
-        // / 2`, so 8750 entries. Each entry is `160 bit + 256 bit + 64 bit`, so the total
-        // size should be up to ~0.5MB + some hashmap overhead. `blocks_since_last_run` is
-        // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
-        let mut last_changeset_pruned_block = None;
-        let mut highest_deleted_storages = HashMap::default();
-        let (pruned_changesets, done) =
-            provider.tx_ref().prune_table_with_range::<tables::StorageChangeSets>(
-                BlockNumberAddress::range(range),
-                &mut limiter,
-                |_| false,
-                |(BlockNumberAddress((block_number, address)), entry)| {
-                    highest_deleted_storages.insert((address, entry.key), block_number);
-                    last_changeset_pruned_block = Some(block_number);
-                },
-            )?;
-        trace!(target: "pruner", deleted = %pruned_changesets, %done, "Pruned storage history (changesets)");
-
-        // The table walk can stop in the middle of a block, so the interrupted block has to be
-        // pruned again on the next run.
-        let last_pruned_block = last_changeset_pruned_block.map(|block_number| {
-            if done {
-                block_number
-            } else {
-                block_number.saturating_sub(1)
-            }
-        });
-
-        let result = HistoryPruneResult {
-            highest_deleted: highest_deleted_storages,
-            last_pruned_block,
             pruned_count: pruned_changesets,
             done,
         };
@@ -354,23 +286,28 @@ impl StorageHistory {
 
 #[cfg(test)]
 mod tests {
-    use super::STORAGE_HISTORY_TABLES_TO_PRUNE;
-    use crate::segments::{PruneInput, PruneLimiter, Segment, SegmentOutput, StorageHistory};
+    use super::*;
+    use crate::segments::PruneLimiter;
     use alloy_primitives::{Address, BlockNumber, B256, U256};
     use assert_matches::assert_matches;
     use reth_db_api::{
-        models::{storage_sharded_key::StorageShardedKey, StorageSettings},
+        models::{
+            sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey,
+            StorageSettings,
+        },
         tables, BlockNumberList,
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
-        DBProvider, DatabaseProviderFactory, PruneCheckpointReader, RocksDBProviderFactory,
+        providers::BlockchainProvider, DBProvider, DatabaseProviderFactory, ProviderError,
+        PruneCheckpointReader, RocksDBProviderFactory,
     };
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use reth_storage_api::StorageSettingsCache;
+    use reth_stages_types::{StageCheckpoint, StageId};
+    use reth_storage_api::{StageCheckpointWriter, StateProviderFactory, StorageSettingsCache};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
         ChangeSet,
@@ -418,12 +355,11 @@ mod tests {
         let original_shards = db.table::<tables::StoragesHistory>().unwrap();
 
         let test_prune = |to_block: BlockNumber,
-                          run: usize,
+                          last_pruned_block_number: BlockNumber,
                           expected_result: (PruneProgress, usize)| {
             let prune_mode = PruneMode::Before(to_block);
-            let deleted_entries_limit = 1000;
-            let mut limiter =
-                PruneLimiter::default().set_deleted_entries_limit(deleted_entries_limit);
+            let deleted_entries_limit = 500;
+            let limiter = PruneLimiter::default().set_deleted_entries_limit(deleted_entries_limit);
             let input = PruneInput {
                 previous_checkpoint: db
                     .factory
@@ -432,14 +368,13 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::StorageHistory)
                     .unwrap(),
                 to_block,
-                limiter: limiter.clone(),
+                limiter,
             };
             let segment = StorageHistory::new(prune_mode);
 
             let provider = db.factory.database_provider_rw().unwrap();
             provider.set_storage_settings_cache(StorageSettings::v1());
             let result = segment.prune(&provider, input).unwrap();
-            limiter.increment_deleted_entries_count_by(result.pruned);
 
             assert_matches!(
                 result,
@@ -455,54 +390,14 @@ mod tests {
                 .unwrap();
             provider.commit().expect("commit");
 
-            let changesets = changesets
-                .iter()
-                .enumerate()
-                .flat_map(|(block_number, changeset)| {
-                    changeset.iter().flat_map(move |(address, _, entries)| {
-                        entries.iter().map(move |entry| (block_number, address, entry))
-                    })
-                })
-                .collect::<Vec<_>>();
-
-            #[expect(clippy::skip_while_next)]
-            let pruned = changesets
-                .iter()
-                .enumerate()
-                .skip_while(|(i, (block_number, _, _))| {
-                    *i < deleted_entries_limit / STORAGE_HISTORY_TABLES_TO_PRUNE * run &&
-                        *block_number <= to_block as usize
-                })
-                .next()
-                .map(|(i, _)| i)
-                .unwrap_or_default();
-
-            // Skip what we've pruned so far, subtracting one to get last pruned block number
-            // further down
-            let mut pruned_changesets = changesets.iter().skip(pruned.saturating_sub(1));
-
-            let last_pruned_block_number = pruned_changesets
-                .next()
-                .map(|(block_number, _, _)| {
-                    (if result.progress.is_finished() {
-                        *block_number
-                    } else {
-                        block_number.saturating_sub(1)
-                    }) as BlockNumber
-                })
-                .unwrap_or(to_block);
-
-            let pruned_changesets = pruned_changesets.fold(
-                BTreeMap::<_, Vec<_>>::new(),
-                |mut acc, (block_number, address, entry)| {
-                    acc.entry((block_number, address)).or_default().push(entry);
-                    acc
-                },
-            );
-
             assert_eq!(
                 db.table::<tables::StorageChangeSets>().unwrap().len(),
-                pruned_changesets.values().flatten().count()
+                changesets
+                    .iter()
+                    .skip(last_pruned_block_number as usize + 1)
+                    .flatten()
+                    .flat_map(|(_, _, entries)| entries)
+                    .count()
             );
 
             let actual_shards = db.table::<tables::StoragesHistory>().unwrap();
@@ -535,15 +430,60 @@ mod tests {
 
         test_prune(
             998,
-            1,
+            499,
             (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 500),
         );
-        test_prune(998, 2, (PruneProgress::Finished, 499));
-        test_prune(1200, 3, (PruneProgress::Finished, 202));
+        test_prune(998, 998, (PruneProgress::Finished, 499));
+        test_prune(1200, 1200, (PruneProgress::Finished, 202));
     }
 
-    /// Tests that when a limiter stops mid-block (with multiple storage changes for the same
-    /// block), the checkpoint is set to `block_number - 1` to avoid dangling index entries.
+    #[test]
+    fn prune_across_mdbx_history_shards() -> Result<(), PrunerError> {
+        let address = Address::ZERO;
+        let slot = B256::ZERO;
+        let next_slot = B256::with_last_byte(1);
+        let first_end = NUM_OF_INDICES_IN_SHARD as u64;
+        let second_end = 2 * first_end;
+        let changesets = (1..=second_end + 3).map(|block| {
+            let key = if block == second_end + 3 { next_slot } else { slot };
+            storage_changes(&[key])
+        });
+        // The adjacent slot still has an old index whose changeset was already pruned.
+        let db = mdbx_db(std::iter::once(storage_changes(&[next_slot])).chain(changesets), 1);
+
+        let shard = |highest, blocks| {
+            (
+                StorageShardedKey::new(address, slot, highest),
+                BlockNumberList::new_pre_sorted(blocks),
+            )
+        };
+        let neighbor = (
+            StorageShardedKey::last(address, next_slot),
+            BlockNumberList::new_pre_sorted([0, second_end + 3]),
+        );
+        for (to_block, mut expected) in [
+            (
+                first_end - 1,
+                vec![
+                    shard(first_end, first_end..=first_end),
+                    shard(second_end, first_end + 1..=second_end),
+                    shard(u64::MAX, second_end + 1..=second_end + 2),
+                ],
+            ),
+            (second_end + 1, vec![shard(u64::MAX, second_end + 2..=second_end + 2)]),
+            (second_end + 2, vec![]),
+        ] {
+            let result = prune_mdbx_batch(&db, to_block, None);
+            assert_eq!(result.progress, PruneProgress::Finished);
+            assert_eq!(result.checkpoint.unwrap().block_number, Some(to_block));
+            expected.push(neighbor.clone());
+            assert_eq!(db.table::<tables::StoragesHistory>()?, expected);
+        }
+        Ok(())
+    }
+
+    /// An interrupted block is unavailable to readers and its remaining changesets are pruned on
+    /// the next run.
     #[test]
     #[allow(clippy::clone_on_copy)]
     fn prune_partial_progress_mid_block() {
@@ -597,11 +537,8 @@ mod tests {
 
         let prune_mode = PruneMode::Before(10);
 
-        // Set limiter to stop mid-block 5
-        // With STORAGE_HISTORY_TABLES_TO_PRUNE=2, limit=14 gives us 7 storage entries before limit
-        // Blocks 0-4 use 5 slots, leaving 2 for block 5 (which has 4), so we stop mid-block 5
-        let deleted_entries_limit = 14; // 14/2 = 7 storage entries before limit
-        let limiter = PruneLimiter::default().set_deleted_entries_limit(deleted_entries_limit);
+        // Seven changesets and two empty shards exhaust the budget halfway through block 5.
+        let limiter = PruneLimiter::default().set_deleted_entries_limit(9);
 
         let input = PruneInput { previous_checkpoint: None, to_block: 10, limiter };
         let segment = StorageHistory::new(prune_mode);
@@ -619,7 +556,7 @@ mod tests {
             .unwrap();
         provider.commit().expect("commit");
 
-        // Verify checkpoint is set to block 4 (not 5), since block 5 is incomplete
+        // Block 5 is already incomplete for readers, even though its remaining rows must be pruned.
         let checkpoint = db
             .factory
             .provider()
@@ -630,26 +567,28 @@ mod tests {
 
         assert_eq!(
             checkpoint.block_number,
-            Some(4),
-            "Checkpoint should be block 4 (block before incomplete block 5)"
+            Some(5),
+            "incomplete block 5 must be unavailable to readers"
         );
 
-        // Verify remaining changesets
         let remaining_changesets = db.table::<tables::StorageChangeSets>().unwrap();
-        assert!(
-            !remaining_changesets.is_empty(),
-            "Should have remaining changesets for blocks 5-6"
+        assert_eq!(
+            remaining_changesets,
+            [
+                ((5, addr2).into(), storage_entry(1)),
+                ((5, addr2).into(), storage_entry(2)),
+                ((6, addr1).into(), storage_entry(3)),
+            ]
         );
 
-        // Verify no dangling history indices for blocks that weren't fully pruned
         let history = db.table::<tables::StoragesHistory>().unwrap();
-        for (key, _blocks) in &history {
-            assert!(
-                key.sharded_key.highest_block_number > 4,
-                "Found stale history shard with highest_block_number {} <= checkpoint 4",
-                key.sharded_key.highest_block_number
-            );
-        }
+        let shard = |address, slot, block| {
+            (
+                StorageShardedKey::last(address, B256::with_last_byte(slot)),
+                BlockNumberList::new_pre_sorted([block]),
+            )
+        };
+        assert_eq!(history, [shard(addr1, 3, 6), shard(addr2, 1, 5), shard(addr2, 2, 5)]);
 
         // Run prune again to complete - should finish processing block 5 and 6
         let input2 = PruneInput {
@@ -899,5 +838,203 @@ mod tests {
         let (result, checkpoint) = run_prune(checkpoint, 1000);
         assert!(result.progress.is_finished());
         assert_eq!(checkpoint.block_number, Some(to_block));
+    }
+
+    /// Keeps the full shard history even when older changesets have already been pruned.
+    fn mdbx_db(
+        history: impl IntoIterator<Item = ChangeSet> + Clone,
+        first_changeset: usize,
+    ) -> TestStageDB {
+        let db = TestStageDB::default();
+        db.factory.set_storage_settings_cache(StorageSettings::v1());
+        db.insert_changesets(
+            history.clone().into_iter().skip(first_changeset),
+            Some(first_changeset as u64),
+        )
+        .unwrap();
+        db.insert_history(history, None).unwrap();
+        db
+    }
+
+    fn storage_changes(slots: &[B256]) -> ChangeSet {
+        vec![(
+            Address::ZERO,
+            Account::default(),
+            slots.iter().map(|&slot| StorageEntry::new(slot, U256::ONE)).collect(),
+        )]
+    }
+
+    fn prune_mdbx_batch(
+        db: &TestStageDB,
+        to_block: BlockNumber,
+        limit: Option<usize>,
+    ) -> SegmentOutput {
+        let rows = || {
+            db.count_entries::<tables::StorageChangeSets>().unwrap() +
+                db.count_entries::<tables::StoragesHistory>().unwrap()
+        };
+        let before = rows();
+        let provider = db.factory.database_provider_rw().unwrap();
+        let segment = StorageHistory::new(PruneMode::Full);
+        let limiter = limit.map_or_else(PruneLimiter::default, |limit| {
+            PruneLimiter::default().set_deleted_entries_limit(limit)
+        });
+        let input = PruneInput {
+            previous_checkpoint: provider
+                .get_prune_checkpoint(PruneSegment::StorageHistory)
+                .unwrap(),
+            to_block,
+            limiter,
+        };
+        let result = segment.prune(&provider, input.clone()).unwrap();
+        if let Some(checkpoint) = result.checkpoint {
+            let checkpoint = checkpoint.as_prune_checkpoint(PruneMode::Full);
+            segment.save_checkpoint(&provider, checkpoint).unwrap();
+            if result.progress.is_finished() && checkpoint.block_number == Some(to_block) {
+                let repeat = PruneInput { previous_checkpoint: Some(checkpoint), ..input };
+                assert_eq!(segment.prune(&provider, repeat).unwrap(), SegmentOutput::done());
+            }
+        }
+        provider.commit().unwrap();
+        assert_eq!(before - rows(), result.pruned);
+        assert!(limit.is_none_or(|limit| result.pruned <= limit));
+        result
+    }
+
+    fn save_mdbx_checkpoint(db: &TestStageDB, block: BlockNumber) {
+        db.commit_with_provider(|provider| {
+            let checkpoint = PruneCheckpoint { block_number: Some(block), ..Default::default() };
+            StorageHistory::new(PruneMode::Full).save_checkpoint(provider, checkpoint)
+        })
+        .unwrap();
+    }
+
+    fn assert_only_storage_change(db: &TestStageDB, slot: B256, block: BlockNumber) {
+        assert_eq!(
+            db.table::<tables::StorageChangeSets>().unwrap(),
+            [((block, Address::ZERO).into(), StorageEntry::new(slot, U256::ONE))]
+        );
+        assert_eq!(
+            db.table::<tables::StoragesHistory>().unwrap(),
+            [(
+                StorageShardedKey::last(Address::ZERO, slot),
+                BlockNumberList::new_pre_sorted([block])
+            )]
+        );
+    }
+
+    #[test]
+    fn prune_mdbx_legacy_shards_within_budget() {
+        let slot = B256::ZERO;
+        let end = 3 * NUM_OF_INDICES_IN_SHARD as u64;
+        // Legacy pruning removed the old changesets but left three expired finite shards.
+        let history = (1..=end + 2).map(|_| storage_changes(&[slot]));
+        let db = mdbx_db(std::iter::once(vec![]).chain(history), end as usize + 1);
+        save_mdbx_checkpoint(&db, end);
+
+        for limit in [2, 1] {
+            let result = prune_mdbx_batch(&db, end + 1, Some(limit));
+            assert!(!result.progress.is_finished());
+            assert_eq!(result.checkpoint.unwrap().block_number, Some(end));
+        }
+        let result = prune_mdbx_batch(&db, end + 1, Some(1));
+        assert_eq!(result.progress, PruneProgress::Finished);
+        assert_eq!(result.checkpoint.unwrap().block_number, Some(end + 1));
+        assert_only_storage_change(&db, slot, end + 2);
+    }
+
+    #[test]
+    fn prune_mdbx_resumes_at_shard_boundary() {
+        let slot = B256::ZERO;
+        let neighbor = B256::with_last_byte(1);
+        let end = NUM_OF_INDICES_IN_SHARD as u64;
+        let slots = [slot, neighbor];
+        let changes = (1..=end + 1)
+            .map(|block| storage_changes(if block == end { &slots } else { &slots[..1] }));
+        let db = mdbx_db(std::iter::once(vec![]).chain(changes), 1);
+        assert!(prune_mdbx_batch(&db, end - 1, None).progress.is_finished());
+
+        let interrupted = prune_mdbx_batch(&db, end, Some(2));
+        assert!(!interrupted.progress.is_finished());
+        assert_eq!(interrupted.checkpoint.unwrap().block_number, Some(end));
+        let resumed = prune_mdbx_batch(&db, end, None);
+        assert!(resumed.progress.is_finished());
+        assert_eq!(resumed.checkpoint.unwrap().block_number, Some(end));
+        assert_only_storage_change(&db, slot, end + 1);
+    }
+
+    #[test]
+    fn prune_mdbx_resumes_within_genesis() {
+        let slots = [B256::ZERO, B256::with_last_byte(1), B256::with_last_byte(2)];
+        let db = mdbx_db([storage_changes(&slots), storage_changes(&slots[..1])], 0);
+
+        let interrupted = prune_mdbx_batch(&db, 1, Some(2));
+        assert!(!interrupted.progress.is_finished());
+        assert_eq!(interrupted.checkpoint.unwrap().block_number, None);
+        let resumed = prune_mdbx_batch(&db, 1, None);
+        assert!(resumed.progress.is_finished());
+        assert_eq!(resumed.checkpoint.unwrap().block_number, Some(1));
+        assert!(db.table_is_empty::<tables::StorageChangeSets>().unwrap());
+        assert!(db.table_is_empty::<tables::StoragesHistory>().unwrap());
+    }
+
+    #[test]
+    fn prune_mdbx_genesis_below_legacy_checkpoint() -> Result<(), ProviderError> {
+        let future_slot = B256::with_last_byte(2);
+        let mut changes = vec![vec![]; 7];
+        changes[0] = storage_changes(&[B256::ZERO, B256::with_last_byte(1)]);
+        changes[6] = storage_changes(&[future_slot]);
+        let db = mdbx_db(changes, 0);
+        save_mdbx_checkpoint(&db, 5);
+
+        // Two genesis changesets and two shards were stranded below the old checkpoint.
+        for _ in 0..4 {
+            assert_eq!(prune_mdbx_batch(&db, 5, Some(1)).pruned, 1);
+            let checkpoint =
+                db.factory.provider()?.get_prune_checkpoint(PruneSegment::StorageHistory)?;
+            assert_eq!(checkpoint.unwrap().block_number, Some(5));
+        }
+        assert_eq!(prune_mdbx_batch(&db, 5, Some(1)), SegmentOutput::done());
+        assert_only_storage_change(&db, future_slot, 6);
+        Ok(())
+    }
+
+    #[test]
+    fn prune_mdbx_partial_block_read_boundary() {
+        let blocks = random_block_range(
+            &mut generators::rng(),
+            0..=3,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+        let slot = B256::ZERO;
+        let db = mdbx_db([vec![], vec![], storage_changes(&[slot, B256::with_last_byte(1)])], 0);
+        db.insert_blocks(blocks.iter(), StorageKind::Static).unwrap();
+        db.commit_with_provider(|provider| {
+            provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3))?;
+            provider.tx_ref().put::<tables::PlainStorageState>(
+                Address::ZERO,
+                StorageEntry::new(slot, U256::from(20)),
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        save_mdbx_checkpoint(&db, 1);
+        let chain = BlockchainProvider::new(db.factory.clone()).unwrap();
+        let storage_at = |block| chain.history_by_block_number(block)?.storage(Address::ZERO, slot);
+        assert_eq!(storage_at(1).unwrap(), Some(U256::ONE));
+        assert_eq!(chain.storage_changeset(2).unwrap().len(), 2);
+
+        // The first deletion removes the index; the second removes the changeset.
+        for _ in 0..2 {
+            let batch = prune_mdbx_batch(&db, 2, Some(1));
+            assert!(!batch.progress.is_finished());
+            assert_matches!(
+                storage_at(1),
+                Err(ProviderError::InsufficientChangesets { requested: 1, available })
+                    if available == (2..=3)
+            );
+            assert_matches!(chain.storage_changeset(2), Err(ProviderError::StateAtBlockPruned(2)));
+            assert_eq!(storage_at(2).unwrap(), Some(U256::from(20)));
+        }
     }
 }
