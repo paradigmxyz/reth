@@ -328,6 +328,12 @@ impl Subscription {
             (SubscriptionKind::TransactionReceipts, Params::None) => {
                 Ok(Self::TransactionReceipts(Default::default()))
             }
+            // Alloy decodes an empty object and wildcard log filters as the default log filter.
+            (SubscriptionKind::TransactionReceipts, Params::Logs(filter))
+                if *filter == Filter::default() =>
+            {
+                Ok(Self::TransactionReceipts(Default::default()))
+            }
             _ => Err(invalid_params_rpc_err(format!("Invalid params for {kind}"))),
         }
     }
@@ -753,6 +759,8 @@ mod tests {
             r#"["transactionReceipts"]"#,
             r#"["transactionReceipts", []]"#,
             r#"["transactionReceipts", {}]"#,
+            r#"["transactionReceipts", {"topics": []}]"#,
+            r#"["transactionReceipts", {"address": []}]"#,
             r#"["transactionReceipts", {"transactionHashes": null}]"#,
             r#"["transactionReceipts", {"transactionHashes": []}]"#,
         ] {
@@ -820,7 +828,8 @@ mod tests {
         let module = test_pubsub(provider.clone(), testing_pool()).into_rpc().remove_context();
         let chain = chain_with_logs(1);
         let hash = chain.transaction_hashes().nth(1).unwrap();
-        let params = serde_json::json!(["transactionReceipts", { "transactionHashes": [hash] }]);
+        let params =
+            serde_json::json!(["transactionReceipts", { "transactionHashes": [hash], "foo": 1 }]);
         let (_, mut notifications) = subscribe(&module, &params.to_string()).await;
 
         // The subscription task may start listening after the acknowledgement.
