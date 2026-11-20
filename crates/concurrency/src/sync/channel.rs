@@ -464,18 +464,26 @@ mod simulated {
                     cancel.map(Receiver::try_recv),
                     Some(Ok(()) | Err(TryRecvError::Disconnected))
                 );
+            let mut cancelled_offer = None;
             let mut state = sender.state.lock().unwrap_or_else(|error| error.into_inner());
             if let Some(sent) = ticket {
-                let Some(position) = state.queue.iter().position(|(id, _)| *id == sent) else {
+                let Some(mut position) = state.queue.iter().position(|(id, _)| *id == sent) else {
                     return Ok(());
                 };
                 if let Some(cancel) = cancel {
-                    // A rendezvous cannot receive its own offer as cancellation. Distinct
-                    // channels are polled while the offer is locked, so acceptance cannot race
-                    // with consuming the cancellation message. Never block holding both locks.
-                    if Arc::as_ptr(&sender.state).cast::<()>() !=
+                    // An aliased cancellation receive can claim another sender's rendezvous
+                    // offer, but never its own. Keep the removed payload until after unlocking.
+                    if Arc::as_ptr(&sender.state).cast::<()>() ==
                         Arc::as_ptr(&cancel.state).cast::<()>()
                     {
+                        if let Some(other) = state.queue.iter().position(|(id, _)| *id != sent) {
+                            cancelled_offer = state.queue.remove(other);
+                            position -= usize::from(other < position);
+                            cancelled = true;
+                        }
+                    } else {
+                        // Poll while the offer is locked so acceptance cannot race with
+                        // cancellation. Never block holding both locks.
                         let mut cancellation = match cancel.state.try_lock() {
                             Ok(state) => state,
                             Err(TryLockError::Poisoned(error)) => error.into_inner(),
@@ -500,6 +508,7 @@ mod simulated {
                     let value = state.queue.remove(position).expect("pending rendezvous value").1;
                     let waiters = mem::take(&mut state.send_waiters);
                     drop(state);
+                    drop(cancelled_offer);
                     wake(waiters);
                     return Err(SendError(value));
                 }
@@ -507,7 +516,9 @@ mod simulated {
                 if cancelled || state.receivers == 0 {
                     return Err(SendError(value.take().expect("unsent value")));
                 }
-                if state.capacity.is_none_or(|cap| state.queue.len() < cap.max(1)) {
+                // Each blocked rendezvous sender needs an offer of its own, so a selecting
+                // receiver can skip its own offer and still pair with another sender.
+                if state.capacity.is_none_or(|cap| cap == 0 || state.queue.len() < cap) {
                     let id = state.next_ticket;
                     state.next_ticket += 1;
                     state.queue.push_back((id, value.take().expect("unsent value")));
@@ -565,11 +576,11 @@ mod simulated {
 #[macro_export]
 macro_rules! select_biased {
     ($(recv($receiver:expr) -> $binding:pat => $body:expr),+ $(,)?) => {{
-        let receivers = ($($crate::sync::channel::Receiver::clone(&$receiver),)+);
+        let receivers = ($(&$receiver,)+);
         $crate::__select_recv!(@index receivers; []; []; [0 1 2 3 4 5 6 7]; $(($binding, $body)),+)
     }};
     ($(recv($receiver:expr) -> $binding:pat => $body:expr,)+ default => $default:expr $(,)?) => {{
-        let receivers = ($($crate::sync::channel::Receiver::clone(&$receiver),)+);
+        let receivers = ($(&$receiver,)+);
         $crate::__select_recv!(@index receivers; [$default]; []; [0 1 2 3 4 5 6 7]; $(($binding, $body)),+)
     }};
 }
