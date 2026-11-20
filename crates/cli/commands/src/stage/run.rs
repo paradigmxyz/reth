@@ -66,7 +66,8 @@ pub struct Command<C: ChainSpecParser> {
     #[arg(value_enum)]
     stage: StageEnum,
 
-    /// The height to start at
+    /// The height to start at. For execution, this must be at or below the current execution
+    /// tip, or exactly at the tip with --skip-unwind.
     #[arg(long)]
     from: u64,
 
@@ -336,13 +337,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             };
         // Both pipeline resume and static-file recovery use the checkpoint as the execution tip.
         let save_checkpoints = self.checkpoints || self.stage == StageEnum::Execution;
-        let checkpoint = if self.stage == StageEnum::Execution {
+        let mut checkpoint = if self.stage == StageEnum::Execution {
             provider_rw.reconcile_execution_unwind_checkpoint()?
         } else {
-            provider_rw.get_stage_checkpoint(exec_stage.id())?.unwrap_or_default()
+            provider_rw
+                .get_stage_checkpoint(exec_stage.id())?
+                .unwrap_or_default()
+                .with_block_number(self.from)
         };
 
-        let mut exec_checkpoint = checkpoint.with_block_number(self.from);
         if !self.skip_unwind {
             let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
             let mut unwind = UnwindInput {
@@ -368,11 +371,18 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 }
             }
             if self.stage == StageEnum::Execution {
-                exec_checkpoint = unwind.checkpoint.with_block_number(self.from);
+                checkpoint = unwind.checkpoint;
             }
         }
 
-        let mut input = ExecInput { target: Some(self.to), checkpoint: Some(exec_checkpoint) };
+        eyre::ensure!(
+            checkpoint.block_number == self.from,
+            "cannot start {} at block {}: stage checkpoint is at block {}",
+            self.stage,
+            self.from,
+            checkpoint.block_number
+        );
+        let mut input = ExecInput { target: Some(self.to), checkpoint: Some(checkpoint) };
 
         let start = Instant::now();
         info!(target: "reth::cli", stage = %self.stage, "Executing stage");

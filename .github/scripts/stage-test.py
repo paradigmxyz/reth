@@ -29,7 +29,7 @@ STAGES = {
 }
 
 
-def run(*args, quiet=False):
+def run(*args, quiet=False, expected_error=None):
     command = [RETH, *map(str, args)]
     print("+", " ".join(command), flush=True)
     try:
@@ -47,6 +47,10 @@ def run(*args, quiet=False):
             end="", file=sys.stderr, flush=True,
         )
         raise
+    if expected_error is not None:
+        assert result.returncode == 1, (result.returncode, result.stdout, result.stderr)
+        assert result.stderr.splitlines()[:1] == [f"Error: {expected_error}"], result.stderr
+        return result.stdout
     if not quiet or result.returncode:
         print(result.stdout, end="", flush=True)
         print(result.stderr, end="", file=sys.stderr, flush=True)
@@ -167,6 +171,7 @@ def test_legacy_execution_replay(root):
         "stage", "dump", *target, "execution", "--from", TIP - 2, "--to", TIP - 1,
         "--output-datadir", root / "execution-dump",
     )
+
     def checkpoint():
         return json.loads(run(
             "db", *target, "get", "mdbx", "StageCheckpoints", "Execution", quiet=True,
@@ -187,6 +192,17 @@ def test_legacy_execution_replay(root):
 
     run_range(TIP - 3, TIP - 2)
     expected = plain_state()
+    for start, flags in [
+        (TIP - 1, []), (TIP - 1, ["--skip-unwind"]), (TIP - 3, ["--skip-unwind"]),
+    ]:
+        run(
+            "stage", "run", "execution", *target, "--from", start, "--to", TIP, "--commit",
+            *flags, quiet=True,
+            expected_error=(
+                f"cannot start Execution at block {start}: stage checkpoint is at block {TIP - 2}"
+            ),
+        )
+    assert checkpoint() == TIP - 2 and plain_state() == expected
     run_range(TIP - 2, TIP)
     # Older diagnostic runs could leave execution state ahead of the saved checkpoint.
     run(
