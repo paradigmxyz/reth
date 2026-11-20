@@ -324,6 +324,43 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+async fn test_debug_trace_block_exceeds_max_response_size() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_rpc_modifier(|mut rpc| {
+            rpc.rpc_max_response_size = 1.into();
+            rpc
+        })
+        .build_single()
+        .await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+
+    // The struct logs of this transaction alone exceed the 1 MiB limit.
+    let pending = GasWaster::deploy_builder(&provider, U256::from(200)).send().await?;
+    node.advance_block().await?;
+    pending.successful_receipt().await?;
+
+    let err = provider
+        .debug_trace_block_by_number(BlockNumberOrTag::Latest, GethDebugTracingOptions::default())
+        .await
+        .unwrap_err();
+    let err = err.as_error_resp().unwrap();
+    assert_eq!(err.code, -32008);
+    assert_eq!(err.message, "Response is too big");
+
+    let traces = provider
+        .debug_trace_block_by_number(
+            BlockNumberOrTag::Latest,
+            GethDebugTracingOptions::call_tracer(CallConfig::default()),
+        )
+        .await?;
+    assert_eq!(traces.len(), 1);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_debug_trace_eip8037_gas() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 

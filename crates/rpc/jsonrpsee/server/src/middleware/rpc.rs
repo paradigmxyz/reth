@@ -186,7 +186,9 @@ impl RpcServiceT for RpcService {
 
                 match batch_entry {
                     Ok(BatchEntry::Call(req)) => {
-                        let rp = catch_call_panic(req.id(), || service.call(req)).await;
+                        // Entries are joined into one response, so a streamed one is buffered.
+                        let rp =
+                            catch_call_panic(req.id(), || service.call(req)).await.buffer().await;
                         // Accepting or rejecting a subscription already sent its response through
                         // the subscription sink.
                         if rp.is_subscription() {
