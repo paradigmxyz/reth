@@ -222,8 +222,11 @@ def test_legacy_execution_replay(root):
 
 
 def test_legacy_static_receipt_unwind(root):
+    config = root / "archive.toml"
+    config.write_text("[stages.execution]\nmax_blocks = 1\n")
     target = [
         "--chain", FIXTURE / "genesis.json", "--datadir", root / "archive", "--storage.v2=false",
+        "--config", config,
     ]
     run("import", *target, "--fail-on-invalid-block", FIXTURE / "chain.rlp")
     run(
@@ -244,6 +247,11 @@ def test_legacy_static_receipt_unwind(root):
         "db", *target, "list", "Metadata", "--json", "--len", "100", quiet=True,
     ))
     assert "pipeline_unwind" not in dict(metadata)
+    # Reopen with committed state at TIP and receipts through TIP - 2, as after an interruption.
+    run(
+        "db", *target, "stage-checkpoints", "set", "--stage", "execution",
+        "--block-number", TIP, "--clear-stage-unit",
+    )
     run("stage", "unwind", *target, "to-block", TIP - 2)
     run("stage", "run", "execution", *target, "--from", TIP - 3, "--to", TIP - 2, "--commit")
 
