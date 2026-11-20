@@ -618,10 +618,11 @@ mod deterministic {
                 };
             // Both branches must be driven even if the other branch panics or short-circuits.
             let left = catch_unwind(AssertUnwindSafe(|| self.0.drive_unindexed(left)));
-            let right = self.1.drive_unindexed(right);
-            match left {
-                Ok(left) => reducer.reduce(left, right),
-                Err(panic) => resume_unwind(panic),
+            let right = catch_unwind(AssertUnwindSafe(|| self.1.drive_unindexed(right)));
+            // Rayon's join propagates the left panic when both branches panic.
+            match (left, right) {
+                (Ok(left), Ok(right)) => reducer.reduce(left, right),
+                (Err(panic), _) | (_, Err(panic)) => resume_unwind(panic),
             }
         }
         fn opt_len(&self) -> Option<usize> {
