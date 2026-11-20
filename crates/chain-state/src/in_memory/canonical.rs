@@ -9,8 +9,8 @@ use crate::{
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{map::B256Map, BlockNumber, TxHash, B256};
-use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
+use reth_concurrency::sync::parking_lot::RwLock;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::RecoveredBlockAndExecutionOutput;
 use reth_metrics::{metrics::Gauge, Metrics};
@@ -571,6 +571,7 @@ mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
     use rand::Rng;
+    use reth_concurrency::sync::Runtime;
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder<EthPrimitives>,
@@ -584,7 +585,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_state_by_hash() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let mut state_by_hash = B256Map::default();
             let number = rand::rng().random::<u64>();
             let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
@@ -601,7 +602,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_state_by_number() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let mut state_by_hash = B256Map::default();
             let mut hash_by_number = BTreeMap::new();
 
@@ -623,7 +624,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_head_state() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let mut state_by_hash = B256Map::default();
             let mut hash_by_number = BTreeMap::new();
             let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
@@ -646,7 +647,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_pending_state() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let pending_number = rand::rng().random::<u64>();
             let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
             let pending_state =
@@ -666,7 +667,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_no_pending_state() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let in_memory_state: InMemoryState =
                 InMemoryState::new(B256Map::default(), BTreeMap::new(), None);
 
@@ -676,7 +677,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_chain_update() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
             let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
             let block1 = test_block_builder.get_executed_block_with_number(0, B256::random());
@@ -709,7 +710,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_set_pending_block() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
             let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
 
@@ -770,7 +771,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_executed_blocks_are_not_canonical() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
             let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
             let block1 = test_block_builder.get_executed_block_with_number(1, B256::random());
@@ -810,7 +811,7 @@ mod tests {
 
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_empty() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
             assert!(state.canonical_chain().next().is_none());
         });
@@ -818,7 +819,7 @@ mod tests {
 
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_single_block() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::random());
             let hash = block.recovered_block().hash();
             let mut blocks = B256Map::default();
@@ -837,7 +838,7 @@ mod tests {
 
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_multiple_blocks() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let mut parent_hash = B256::random();
             let mut block_builder = TestBlockBuilder::eth();
             let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
@@ -861,7 +862,7 @@ mod tests {
     // ensures the pending block is not part of the canonical chain
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_with_pending_block() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let mut parent_hash = B256::random();
             let mut block_builder = TestBlockBuilder::<EthPrimitives>::eth();
             let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
@@ -885,7 +886,7 @@ mod tests {
 
     #[test]
     fn test_canonical_in_memory_state_remove_persisted_blocks() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
             let blocks = TestBlockBuilder::eth().get_executed_blocks(1..6).collect::<Vec<_>>();
             let num_hash = |number: usize| blocks[number - 1].recovered_block().num_hash();

@@ -58,13 +58,19 @@ mod sparse_trie;
 use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};
 use crate::tree::{metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, TreeConfig};
 use alloy_primitives::B256;
-use crossbeam_channel::Receiver as CrossbeamReceiver;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie, SparseTrieWithStorageRoots};
+use reth_concurrency::sync::{
+    channel::{
+        self,
+        mpsc::{self, RecvTimeoutError},
+        Receiver,
+    },
+    thread,
+    time::FastInstant as Instant,
+};
 use reth_errors::ProviderResult;
 use reth_evm::ConfigureEvm;
-use reth_primitives_traits::{
-    AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedHeader,
-};
+use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
@@ -87,14 +93,7 @@ pub use reth_trie_parallel::{
 use reth_trie_sparse::{
     ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, TrieNodeEpoch,
 };
-use std::{
-    fmt,
-    sync::{
-        mpsc::{self, RecvTimeoutError},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{fmt, sync::Arc, time::Duration};
 use tracing::{debug, debug_span, instrument, warn, Span};
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
@@ -554,7 +553,7 @@ impl DefaultStateRootStrategy {
             config,
             pending_sparse_trie_prune_blocks,
         } = options;
-        let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
+        let (updates_tx, from_multi_proof) = channel::unbounded();
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
 
         let worker_counts = ProofWorkerCounts::new(
@@ -619,8 +618,8 @@ impl DefaultStateRootStrategy {
         multiproof_provider_factory: OverlayStateProviderFactory<F, N>,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, StateRootTaskError>>,
         hashed_state_tx: mpsc::Sender<Arc<HashedPostState>>,
-        from_multi_proof: CrossbeamReceiver<StateRootMessage>,
-        cancel_rx: CrossbeamReceiver<()>,
+        from_multi_proof: Receiver<StateRootMessage>,
+        cancel_rx: Receiver<()>,
         options: SparseTrieTaskOptions<N>,
     ) where
         N: NodePrimitives,
@@ -1246,7 +1245,7 @@ where
                 }
             }
 
-            std::thread::sleep(Duration::from_millis(1));
+            thread::sleep(Duration::from_millis(1));
         }
     }
 }
@@ -1260,6 +1259,7 @@ mod tests {
     use rand::Rng;
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_chainspec::ChainSpec;
+    use reth_concurrency::sync::{channel, thread};
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm::OnStateHook;
@@ -1368,7 +1368,7 @@ mod tests {
                         overlay_manager: overlay_manager.clone(),
                         handle: StateRootHandle::new(
                             B256::ZERO,
-                            crossbeam_channel::unbounded().0,
+                            channel::unbounded().0,
                             StateRootTaskCancelGuard::channel().0,
                             result_rx,
                             mpsc::channel().1,
@@ -1452,7 +1452,7 @@ mod tests {
             let (pending_trie_tx, pending_trie_rx) = mpsc::channel();
             let overlay_manager = OverlayManager::<EthPrimitives>::default();
             let (done_tx, done_rx) = mpsc::channel();
-            let worker = std::thread::spawn(move || {
+            let worker = thread::spawn(move || {
                 publish_sparse_trie(&pending_trie_rx, &overlay_manager, B256::ZERO, B256::ZERO);
                 assert!(overlay_manager.take_sparse_trie().is_none());
                 done_tx.send(()).unwrap();

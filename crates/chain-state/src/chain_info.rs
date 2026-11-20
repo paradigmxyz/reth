@@ -1,8 +1,8 @@
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::BlockNumber;
-use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
+use reth_concurrency::sync::parking_lot::RwLock;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use std::{
     sync::{
@@ -199,12 +199,13 @@ pub struct ChainInfoHeaders<H> {
 mod tests {
     use super::*;
     use alloy_primitives::B256;
+    use reth_concurrency::sync::Runtime;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_testing_utils::{generators, generators::random_header};
 
     #[test]
     fn test_chain_info() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             // Create a random header
             let mut rng = generators::rng();
             let header = random_header(&mut rng, 10, None);
@@ -228,7 +229,7 @@ mod tests {
 
     #[test]
     fn test_on_forkchoice_update_received() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             // Create a random block header
             let mut rng = generators::rng();
             let header = random_header(&mut rng, 10, None);
@@ -255,7 +256,7 @@ mod tests {
 
     #[test]
     fn test_set_canonical_head() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             // Create a random number generator
             let mut rng = generators::rng();
             // Generate two random headers for testing
@@ -281,7 +282,7 @@ mod tests {
 
     #[test]
     fn test_set_safe() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             // Create a random number generator
             let mut rng = generators::rng();
 
@@ -334,7 +335,7 @@ mod tests {
 
     #[test]
     fn test_set_finalized() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             // Create a random number generator
             let mut rng = generators::rng();
 
@@ -382,7 +383,7 @@ mod tests {
 
     #[test]
     fn test_get_finalized_num_hash() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             // Create a random header
             let mut rng = generators::rng();
             let finalized_header = random_header(&mut rng, 10, None);
@@ -402,7 +403,7 @@ mod tests {
 
     #[test]
     fn test_get_safe_num_hash() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             // Create a random header
             let mut rng = generators::rng();
             let safe_header = random_header(&mut rng, 10, None);
@@ -423,7 +424,7 @@ mod tests {
 
     #[test]
     fn test_set_persisted() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let mut rng = generators::rng();
             let header = random_header(&mut rng, 10, None);
             let tracker: ChainInfoTracker<EthPrimitives> =

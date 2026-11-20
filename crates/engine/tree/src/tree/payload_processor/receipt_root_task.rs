@@ -8,7 +8,7 @@
 
 use alloy_eips::Encodable2718;
 use alloy_primitives::{map::HashMap, Bloom, B256};
-use crossbeam_channel::Receiver;
+use reth_concurrency::sync::channel::Receiver;
 use reth_primitives_traits::Receipt;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
 use tokio::sync::oneshot;
@@ -60,8 +60,8 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     /// and builds the trie incrementally. When all receipts have been received
     /// (channel closed), it sends the result through the oneshot channel.
     ///
-    /// This is designed to be called inside a blocking task (e.g., via
-    /// `executor.spawn_blocking(move || handle.run(receipts_len))`).
+    /// Run this on a background worker, for example with
+    /// `runtime.spawn_blocking_named("receipt-root", move || handle.run(receipts_len))`.
     ///
     /// # Arguments
     ///
@@ -137,18 +137,18 @@ mod tests {
     use super::*;
     use alloy_consensus::{proofs::calculate_receipt_root, TxReceipt};
     use alloy_primitives::{b256, Address, Bytes, Log};
-    use crossbeam_channel::bounded;
+    use reth_concurrency::sync::{channel::bounded, thread, Runtime};
     use reth_ethereum_primitives::{Receipt, TxType};
 
     #[test]
     fn test_receipt_root_task_empty() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let (_tx, rx) = bounded::<IndexedReceipt<Receipt>>(1);
             let (result_tx, mut result_rx) = oneshot::channel();
             drop(_tx);
 
             let handle = ReceiptRootTaskHandle::new(rx, result_tx);
-            std::thread::spawn(move || handle.run(0)).join().unwrap();
+            thread::spawn(move || handle.run(0)).join().unwrap();
 
             let (root, bloom) = result_rx.try_recv().unwrap();
 
@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn test_receipt_root_task_single_receipt() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let receipts: Vec<Receipt> = vec![Receipt::default()];
 
             let (tx, rx) = bounded(1);
@@ -168,7 +168,7 @@ mod tests {
             let receipts_len = receipts.len();
 
             let handle = ReceiptRootTaskHandle::new(rx, result_tx);
-            let join_handle = std::thread::spawn(move || handle.run(receipts_len));
+            let join_handle = thread::spawn(move || handle.run(receipts_len));
 
             for (i, receipt) in receipts.clone().into_iter().enumerate() {
                 tx.send(IndexedReceipt::new(i, receipt)).unwrap();
@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn test_receipt_root_task_multiple_receipts() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let receipts: Vec<Receipt> = vec![Receipt::default(); 5];
 
             let (tx, rx) = bounded(4);
@@ -196,7 +196,7 @@ mod tests {
             let receipts_len = receipts.len();
 
             let handle = ReceiptRootTaskHandle::new(rx, result_tx);
-            let join_handle = std::thread::spawn(move || handle.run(receipts_len));
+            let join_handle = thread::spawn(move || handle.run(receipts_len));
 
             for (i, receipt) in receipts.into_iter().enumerate() {
                 tx.send(IndexedReceipt::new(i, receipt)).unwrap();
@@ -217,7 +217,7 @@ mod tests {
 
     #[test]
     fn test_receipt_root_matches_standard_calculation() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             // Create some receipts with actual data
             let receipts = vec![
                 Receipt {
@@ -258,7 +258,7 @@ mod tests {
             let receipts_len = receipts.len();
 
             let handle = ReceiptRootTaskHandle::new(rx, result_tx);
-            let join_handle = std::thread::spawn(move || handle.run(receipts_len));
+            let join_handle = thread::spawn(move || handle.run(receipts_len));
 
             for (i, receipt) in receipts.into_iter().enumerate() {
                 tx.send(IndexedReceipt::new(i, receipt)).unwrap();
@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn test_receipt_root_task_out_of_order() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let receipts: Vec<Receipt> = vec![Receipt::default(); 5];
 
             // Calculate expected values first (before we move receipts)
@@ -287,7 +287,7 @@ mod tests {
             let receipts_len = receipts.len();
 
             let handle = ReceiptRootTaskHandle::new(rx, result_tx);
-            let join_handle = std::thread::spawn(move || handle.run(receipts_len));
+            let join_handle = thread::spawn(move || handle.run(receipts_len));
 
             // Send in reverse order to test out-of-order handling
             for (i, receipt) in receipts.into_iter().enumerate().rev() {

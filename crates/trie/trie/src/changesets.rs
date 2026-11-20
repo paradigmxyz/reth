@@ -133,12 +133,13 @@ mod tests {
     use super::*;
     use crate::trie_cursor::mock::MockTrieCursorFactory;
     use alloy_primitives::map::B256Map;
+    use reth_concurrency::sync::Runtime;
     use reth_trie_common::updates::StorageTrieUpdatesSorted;
     use std::collections::BTreeMap;
 
     #[test]
     fn test_empty_updates() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             // Create an empty mock factory
             // Note: We need to include B256::default() in storage_tries because
             // compute_trie_changesets creates cursors for it upfront
@@ -160,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_account_changesets() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             // Create some initial account trie state
             let path1 = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
             let path2 = Nibbles::from_nibbles([0x4, 0x5, 0x6]);
@@ -205,7 +206,7 @@ mod tests {
 
     #[test]
     fn test_storage_changesets() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let hashed_address = B256::repeat_byte(1u8);
 
             // Create some initial storage trie state

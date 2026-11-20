@@ -1,7 +1,7 @@
 //! A lazily-resolved handle to a value computed on a background thread.
 
-use parking_lot::Mutex;
-use std::sync::{Arc, OnceLock};
+use reth_concurrency::sync::{parking_lot::Mutex, OnceLock};
+use std::sync::Arc;
 use tokio::sync::oneshot;
 
 /// Handle to a value computed on a background thread.
@@ -89,10 +89,11 @@ impl<T: Send + std::fmt::Debug + 'static> std::fmt::Debug for LazyHandle<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils;
 
     #[test]
     fn test_lazy_handle_resolves() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        test_utils::run(|| {
             let (tx, rx) = oneshot::channel();
             let handle = LazyHandle::new(rx);
             tx.send(42u64).unwrap();
@@ -104,7 +105,7 @@ mod tests {
 
     #[test]
     fn test_lazy_handle_clone_shares_value() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        test_utils::run(|| {
             let (tx, rx) = oneshot::channel();
             let handle = LazyHandle::new(rx);
             let handle2 = handle.clone();
@@ -116,7 +117,7 @@ mod tests {
 
     #[test]
     fn test_lazy_handle_try_into_inner() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        test_utils::run(|| {
             let (tx, rx) = oneshot::channel();
             let handle = LazyHandle::new(rx);
             tx.send(String::from("hello")).unwrap();
@@ -126,7 +127,7 @@ mod tests {
 
     #[test]
     fn test_lazy_handle_try_into_inner_returns_self_with_clone() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        test_utils::run(|| {
             let (tx, rx) = oneshot::channel();
             let handle = LazyHandle::new(rx);
             let _clone = handle.clone();
@@ -139,7 +140,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "LazyHandle task dropped without producing a value")]
     fn test_lazy_handle_panics_on_dropped_sender() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        test_utils::run(|| {
             let (_tx, rx) = oneshot::channel::<u64>();
             let handle = LazyHandle::new(rx);
             drop(_tx);

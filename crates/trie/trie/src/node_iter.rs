@@ -330,6 +330,7 @@ mod tests {
         BranchNodeCompact, HashBuilder, Nibbles, TrieAccount, TrieMask, EMPTY_ROOT_HASH,
     };
     use itertools::Itertools;
+    use reth_concurrency::sync::Runtime;
     use reth_primitives_traits::Account;
     use reth_trie_common::{
         prefix_set::PrefixSetMut, updates::TrieUpdates, BranchNode, HashedPostState, HashedStorage,
@@ -386,7 +387,7 @@ mod tests {
 
     #[test]
     fn inserted_leaf_before_deeper_stored_branch_is_included() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             fn slot(prefix: &[u8]) -> B256 {
                 let mut bytes = [0; 32];
                 bytes[..prefix.len()].copy_from_slice(prefix);
@@ -457,7 +458,7 @@ mod tests {
     fn test_trie_node_iter() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             fn empty_leaf_rlp_for_key(key: Nibbles) -> RlpNode {
                 RlpNode::from_rlp(&alloy_rlp::encode(LeafNode::new(
                     key,

@@ -679,6 +679,7 @@ mod tests {
         BaseEvmTypes, SpecId,
     };
     use reth_chainspec::{Chain, ChainSpecBuilder, EthereumHardfork, ForkCondition};
+    use reth_concurrency::sync::{channel, Runtime};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{BlockExecutor, BlockExecutorFactory, CommitChanges};
     use reth_primitives_traits::Recovered;
@@ -957,7 +958,7 @@ mod tests {
 
     #[test]
     fn dao_fork_drain_keeps_empty_accounts() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let [absent, empty, empty_with_balance, nonce_only, ..] =
                 dao_fork::DAO_HARDFORK_ACCOUNTS;
             let beneficiary = dao_fork::DAO_HARDFORK_BENEFICIARY;
@@ -982,7 +983,7 @@ mod tests {
                 );
                 let evm = factory.evm_with_env(Db::new(database), env);
                 let mut executor = factory.create_executor(evm, segment(0, 1, B256::ZERO).ctx);
-                let (tx, rx) = std::sync::mpsc::channel();
+                let (tx, rx) = channel::unbounded();
                 executor.set_state_hook(move |update| tx.send(update).unwrap());
                 executor.apply_pre_execution_changes().unwrap();
                 let output = executor.finish_with_block_access_list().unwrap().0;

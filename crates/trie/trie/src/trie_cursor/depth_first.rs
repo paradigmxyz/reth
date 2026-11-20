@@ -132,6 +132,7 @@ mod tests {
     use super::*;
     use crate::trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory};
     use alloy_trie::TrieMask;
+    use reth_concurrency::sync::Runtime;
     use std::{collections::BTreeMap, sync::Arc};
 
     /// A trie cursor that always returns an error on seek/next.
@@ -269,8 +270,10 @@ mod tests {
         // Within the same level, lexicographical order
         assert_eq!(paths[0], Nibbles::from_nibbles([0x1, 0x1, 0x1])); // 0x111 (deepest in 0x1
                                                                       // branch)
-        assert_eq!(paths[1], Nibbles::from_nibbles([0x1, 0x1, 0x2])); // 0x112 (sibling of 0x111)
-        assert_eq!(paths[2], Nibbles::from_nibbles([0x1, 0x1])); // 0x11 (parent of 0x111, 0x112)
+        assert_eq!(paths[1], Nibbles::from_nibbles([0x1, 0x1, 0x2])); // 0x112 (sibling of
+                                                                      // 0x111)
+        assert_eq!(paths[2], Nibbles::from_nibbles([0x1, 0x1])); // 0x11 (parent of 0x111,
+                                                                 // 0x112)
         assert_eq!(paths[3], Nibbles::from_nibbles([0x1, 0x2])); // 0x12 (sibling of 0x11)
         assert_eq!(paths[4], Nibbles::from_nibbles([0x1])); // 0x1 (parent of 0x11, 0x12)
         assert_eq!(paths[5], Nibbles::from_nibbles([0x2, 0x1])); // 0x21 (child of 0x2)
@@ -280,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_empty_trie() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let factory = MockTrieCursorFactory::new(BTreeMap::new(), Default::default());
             let cursor = factory.account_trie_cursor().unwrap();
             let mut iter = DepthFirstTrieIterator::new(cursor);
@@ -290,7 +293,7 @@ mod tests {
 
     #[test]
     fn test_single_node() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
             let node = create_test_node(&[0x4], &[0x5]);
 
@@ -309,7 +312,7 @@ mod tests {
 
     #[test]
     fn test_depth_first_order() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             // Create a simple trie structure:
             // root
             // ├── 0x1 (has children 0x2 and 0x3)
@@ -366,7 +369,7 @@ mod tests {
 
     #[test]
     fn test_complex_tree() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             // Create a more complex tree structure with multiple levels
             let nodes = vec![
                 // Root with multiple children

@@ -207,3 +207,17 @@ provider = ["storage-api", "tasks", "dep:reth-provider", "dep:reth-db", "dep:ret
 storage-api = ["dep:reth-storage-api"]
 trie = ["dep:reth-trie"]
 trie-db = ["trie", "dep:reth-trie-db"]
+
+fuzz = [
+    "reth-ethereum-cli?/fuzz",
+    "reth-evm?/fuzz",
+    "reth-evm-ethereum?/fuzz",
+    "reth-network?/fuzz",
+    "reth-node-builder?/fuzz",
+    "reth-node-ethereum?/fuzz",
+    "reth-provider?/fuzz",
+    "reth-tasks?/fuzz",
+    "reth-trie?/fuzz",
+    "reth-db?/fuzz",
+    "reth-rpc-eth-types?/fuzz",
+]

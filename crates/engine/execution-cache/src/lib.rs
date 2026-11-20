@@ -22,7 +22,7 @@ pub use txpool::*;
 
 use alloy_primitives::B256;
 use metrics::{Counter, Histogram};
-use parking_lot::Mutex;
+use reth_concurrency::sync::parking_lot::Mutex;
 use reth_metrics::Metrics;
 use reth_primitives_traits::FastInstant as Instant;
 use std::{sync::Arc, time::Duration};
@@ -191,10 +191,12 @@ struct PayloadExecutionCacheMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_concurrency::sync::{channel::mpsc, thread, Runtime};
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
     fn single_checkout_blocks_second() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let cache = PayloadExecutionCache::default();
             let hash = B256::repeat_byte(1u8);
 
@@ -212,7 +214,7 @@ mod tests {
 
     #[test]
     fn checkout_available_after_drop() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let cache = PayloadExecutionCache::default();
             let hash = B256::repeat_byte(2u8);
 
@@ -231,7 +233,7 @@ mod tests {
 
     #[test]
     fn raw_cache_handle_blocks_checkout_until_drop() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let cache = PayloadExecutionCache::default();
             let hash = B256::repeat_byte(3u8);
 
@@ -255,7 +257,7 @@ mod tests {
 
     #[test]
     fn hash_mismatch_clears_and_retags() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let cache = PayloadExecutionCache::default();
             let hash_a = B256::repeat_byte(0xAA);
             let hash_b = B256::repeat_byte(0xBB);
@@ -272,15 +274,47 @@ mod tests {
 
     #[test]
     fn empty_cache_returns_none() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let cache = PayloadExecutionCache::default();
             assert!(cache.get_cache_for(B256::ZERO).is_none());
         });
     }
 
     #[test]
+    fn cache_lock_yields_while_update_waits_for_validation() {
+        Runtime::new().run(|| {
+            let cache = PayloadExecutionCache::default();
+            let updating_cache = cache.clone();
+            let (locked_tx, locked_rx) = mpsc::channel();
+            let (validated_tx, validated_rx) = mpsc::channel();
+            let update = thread::spawn(move || {
+                updating_cache.update_with_guard(|_| {
+                    locked_tx.send(()).unwrap();
+                    validated_rx.recv().unwrap();
+                });
+            });
+            locked_rx.recv().unwrap();
+
+            let reading_cache = cache;
+            let started = Arc::new(AtomicBool::new(false));
+            let reading_started = started.clone();
+            let reader = thread::spawn(move || {
+                reading_started.store(true, Ordering::Relaxed);
+                assert!(reading_cache.get_cache_for(B256::ZERO).is_none());
+            });
+            // Native atomics do not yield between the signal and the lock attempt under fuzz.
+            while !started.load(Ordering::Relaxed) {
+                thread::yield_now();
+            }
+            validated_tx.send(()).unwrap();
+            update.join().unwrap();
+            reader.join().unwrap();
+        });
+    }
+
+    #[test]
     fn checkout_distinguishes_empty_from_in_use() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let cache = PayloadExecutionCache::default();
             let hash = B256::repeat_byte(7u8);
             assert!(matches!(cache.checkout(hash), CacheCheckout::Empty));

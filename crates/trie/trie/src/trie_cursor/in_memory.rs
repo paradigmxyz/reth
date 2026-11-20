@@ -391,7 +391,7 @@ impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
 mod tests {
     use super::*;
     use crate::trie_cursor::mock::MockTrieCursor;
-    use parking_lot::Mutex;
+    use reth_concurrency::sync::{parking_lot::Mutex, Runtime};
     use std::{collections::BTreeMap, sync::Arc};
     use tracing::debug;
 
@@ -435,7 +435,7 @@ mod tests {
 
     #[test]
     fn test_empty_db_and_memory() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let test_case = InMemoryTrieCursorTestCase {
                 db_nodes: vec![],
                 in_memory_nodes: vec![],
@@ -447,7 +447,7 @@ mod tests {
 
     #[test]
     fn test_only_db_nodes() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let db_nodes = vec![
                 (
                     Nibbles::from_nibbles([0x1]),
@@ -474,7 +474,7 @@ mod tests {
 
     #[test]
     fn test_only_in_memory_nodes() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let in_memory_nodes = vec![
                 (
                     Nibbles::from_nibbles([0x1]),
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_overwrites_db() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let db_nodes = vec![
                 (
                     Nibbles::from_nibbles([0x1]),
@@ -549,7 +549,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_deletes_db_nodes() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let db_nodes = vec![
                 (
                     Nibbles::from_nibbles([0x1]),
@@ -586,7 +586,7 @@ mod tests {
 
     #[test]
     fn test_complex_interleaving() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let db_nodes = vec![
                 (
                     Nibbles::from_nibbles([0x1]),
@@ -662,7 +662,7 @@ mod tests {
 
     #[test]
     fn test_seek_exact() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let db_nodes = vec![
                 (
                     Nibbles::from_nibbles([0x1]),
@@ -716,7 +716,7 @@ mod tests {
 
     #[test]
     fn test_seek_overlay_exact_hit_does_not_touch_db_until_next() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let db_nodes = vec![
                 (
                     Nibbles::from_nibbles([0x2]),
@@ -768,7 +768,7 @@ mod tests {
 
     #[test]
     fn test_seek_overlay_exact_hit_repositions_stale_db_on_next() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let db_nodes = vec![
                 (
                     Nibbles::from_nibbles([0x1]),
@@ -826,7 +826,7 @@ mod tests {
 
     #[test]
     fn test_multiple_consecutive_deletes() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let db_nodes: Vec<(Nibbles, BranchNodeCompact)> = (1..=10)
                 .map(|i| {
                     (
@@ -860,7 +860,7 @@ mod tests {
 
     #[test]
     fn test_empty_db_with_in_memory_deletes() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let in_memory_nodes = vec![
                 (Nibbles::from_nibbles([0x1]), None),
                 (
@@ -883,7 +883,7 @@ mod tests {
 
     #[test]
     fn test_current_key_tracking() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let db_nodes = vec![(
                 Nibbles::from_nibbles([0x2]),
                 BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None),
@@ -925,7 +925,7 @@ mod tests {
     fn test_all_storage_nodes_deleted_exact_keys() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             // This test reproduces an edge case where:
             // - cursor is available
             // - All in-memory entries are deletions (None values)
@@ -1001,6 +1001,7 @@ mod tests {
         use super::*;
         use itertools::Itertools;
         use proptest::prelude::*;
+        use tracing::debug;
 
         /// Merge `db_nodes` with `in_memory_nodes`, applying the in-memory overlay.
         /// This properly handles deletions (None values in `in_memory_nodes`).
@@ -1094,7 +1095,7 @@ mod tests {
                 op_choices in prop::collection::vec(any::<u8>(), 10..500),
             ) {
                 reth_tracing::init_test_tracing();
-                reth_concurrency::sync::Runtime::new().run(move || {
+                Runtime::new().run(move || {
                     debug!(
                         db_paths=?db_nodes.iter().map(|(k, _)| k).collect::<Vec<_>>(),
                         in_mem_nodes=?in_memory_nodes.iter().map(|(k, v)| (k, v.is_some())).collect::<Vec<_>>(),

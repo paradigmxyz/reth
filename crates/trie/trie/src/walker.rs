@@ -460,6 +460,7 @@ mod tests {
         StorageRoot,
     };
     use alloy_primitives::{map::B256Map, B256, U256};
+    use reth_concurrency::sync::Runtime;
     use reth_storage_errors::db::DatabaseErrorInfo;
     use std::collections::BTreeMap;
 
@@ -507,7 +508,7 @@ mod tests {
 
     #[test]
     fn branch_siblings_remain_skippable_by_default() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let mut walker = walker_for_matching_branch_children_test(false);
 
             assert_eq!(walker.key().copied(), Some(Nibbles::default()));
@@ -530,7 +531,7 @@ mod tests {
 
     #[test]
     fn matching_branch_path_can_make_all_children_unskippable() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let mut walker = walker_for_matching_branch_children_test(true);
 
             walker.advance().unwrap();
@@ -543,7 +544,7 @@ mod tests {
 
     #[test]
     fn changed_branch_children_remove_orphans() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             for regenerate_branch in [false, true] {
                 let mut storage = BTreeMap::from([
                     (B256::right_padding_from(&[0x3a]), U256::ONE),
@@ -673,7 +674,7 @@ mod tests {
 
     #[test]
     fn orphan_cleanup_skips_live_subtrees() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let parent = Nibbles::from_nibbles([0x3]);
             let tree_mask = TrieMask::from_nibble(0xa);
             let orphans = [

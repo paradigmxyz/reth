@@ -9,7 +9,10 @@ use crate::{
 };
 use alloc::sync::Arc;
 use core::fmt;
-use reth_primitives_traits::sync::OnceLock;
+use reth_concurrency::sync::OnceLock;
+
+#[cfg(feature = "rayon")]
+use reth_concurrency::sync::rayon;
 
 /// Container for sorted trie data: hashed state and trie updates.
 ///
@@ -265,8 +268,9 @@ mod tests {
 
     use super::*;
     use alloy_primitives::{B256, U256};
+    use reth_concurrency::sync::{thread, Runtime};
     use reth_primitives_traits::Account;
-    use std::{thread, time::Duration};
+    use std::time::Duration;
 
     fn empty_pending() -> (LazyTrieData, LazyTrieDataProducer) {
         LazyTrieData::pending(
@@ -287,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_lazy_deferred() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let lazy = LazyTrieData::deferred(SortedTrieData::default);
             assert!(lazy.hashed_state().is_empty());
             assert!(lazy.trie_updates().is_empty());
@@ -296,7 +300,7 @@ mod tests {
 
     #[test]
     fn pending_wait_blocks_until_task_publishes() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let (deferred, task) = empty_pending();
 
             let handle = thread::spawn(move || deferred.get().clone());
@@ -313,7 +317,7 @@ mod tests {
 
     #[test]
     fn concurrent_waits_share_published_result() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let (deferred, task) = empty_pending();
             let deferred2 = deferred.clone();
 
@@ -331,7 +335,7 @@ mod tests {
 
     #[test]
     fn sorts_non_empty_inputs() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let hashed_address = B256::with_last_byte(1);
             let hashed_slot = B256::with_last_byte(2);
             let hashed_state = HashedPostState::default()

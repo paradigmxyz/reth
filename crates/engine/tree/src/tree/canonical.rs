@@ -5,13 +5,12 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::NumHash;
 use alloy_primitives::B256;
 use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
+use reth_concurrency::sync::time::FastInstant as Instant;
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::ProviderResult;
 use reth_evm::{debug_unreachable, ConfigureEvm};
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
-use reth_primitives_traits::{
-    FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedHeader,
-};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
     DatabaseProviderFactory, ProviderError, PruneCheckpointReader, StageCheckpointReader,

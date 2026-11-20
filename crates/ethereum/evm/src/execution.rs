@@ -46,13 +46,14 @@ mod tests {
         bytecode::Bytecode, env::BlockEnv as EvmBlockEnv, evm::InMemoryDB, interpreter::opcode::op,
     };
     use reth_chainspec::{Chain, ChainSpec, MAINNET};
+    use reth_concurrency::sync::{channel, Runtime};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition};
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
     use reth_evm::{BlockExecutorFactory, ConfigureEvm, Executor};
     use reth_execution_types::BlockExecutionOutput;
     use reth_primitives_traits::RecoveredBlock;
     use reth_trie_common::{HashedPostState, KeccakKeyHasher};
-    use std::sync::{mpsc, Arc};
+    use std::sync::Arc;
 
     sol! {
         event DepositEvent(
@@ -200,7 +201,7 @@ mod tests {
             },
             senders,
         );
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = channel::unbounded();
         let config = crate::EthEvmConfig::new(Arc::new(chain));
         let without_hook = config.batch_executor(database.clone()).execute(&block)?;
         let output = config
@@ -218,7 +219,7 @@ mod tests {
 
     #[test]
     fn charges_london_sstore_set_gas() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let caller = address!("0000000000000000000000000000000000000001");
             let contract = address!("0000000000000000000000000000000000001000");
             let mut database = InMemoryDB::default();
@@ -271,7 +272,7 @@ mod tests {
 
     #[test]
     fn applies_withdrawals_to_block_output() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let existing = address!("0000000000000000000000000000000000000001");
             let new = address!("0000000000000000000000000000000000000002");
             let mut database = InMemoryDB::default();
@@ -308,7 +309,7 @@ mod tests {
 
     #[test]
     fn zero_withdrawals_apply_eip161_state_clearing() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let nonexistent = address!("0000000000000000000000000000000000000001");
             let empty = address!("0000000000000000000000000000000000000002");
             let contract = address!("0000000000000000000000000000000000000003");
@@ -414,7 +415,7 @@ mod tests {
 
     #[test]
     fn collects_post_execution_system_call_requests() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let mut database = InMemoryDB::default();
             database.insert_account_info(
                 &WITHDRAWAL_REQUEST_ADDRESS,
@@ -447,7 +448,7 @@ mod tests {
 
     #[test]
     fn collects_amsterdam_builder_requests() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             let mut database = InMemoryDB::default();
             for (address, byte) in [
                 (WITHDRAWAL_REQUEST_ADDRESS, 0xaa),
@@ -484,7 +485,7 @@ mod tests {
 
     #[test]
     fn system_call_failures_follow_contract_policy() {
-        reth_concurrency::sync::Runtime::new().run(|| {
+        Runtime::new().run(|| {
             for address in [
                 BEACON_ROOTS_ADDRESS,
                 HISTORY_STORAGE_ADDRESS,

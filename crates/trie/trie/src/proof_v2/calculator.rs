@@ -1864,6 +1864,8 @@ mod tests {
     use alloy_rlp::Decodable;
     use alloy_trie::proof::AddedRemovedKeys;
     use itertools::Itertools;
+    use rand::prelude::*;
+    use reth_concurrency::sync::Runtime;
     use reth_trie_common::{
         prefix_set::{PrefixSet, PrefixSetMut},
         updates::TrieUpdatesSorted,
@@ -2065,7 +2067,7 @@ mod tests {
     fn test_proof_calculator_reuse_after_error() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let slots = [
                 B256::right_padding_from(&[0x10]),
                 B256::right_padding_from(&[0x20]),
@@ -2128,7 +2130,7 @@ mod tests {
 
     #[test]
     fn test_root_node_reuse_with_overlay() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let storage = BTreeMap::from([
                 (B256::right_padding_from(&[0x10]), U256::ONE),
                 (B256::right_padding_from(&[0x20]), U256::from(2)),
@@ -2167,7 +2169,7 @@ mod tests {
 
     #[test]
     fn test_partial_storage_proof_after_root_calculation() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let slot_a = B256::right_padding_from(&[0xae, 0xd4, 0x00]);
             let slot_b = B256::right_padding_from(&[0xae, 0xd4, 0x10]);
             let harness = ProofTestHarness::new(BTreeMap::from([
@@ -2271,7 +2273,7 @@ mod tests {
                     })
             ) {
                 reth_tracing::init_test_tracing();
-                reth_concurrency::sync::Runtime::new().run(move || {
+                Runtime::new().run(move || {
                     let harness = ProofTestHarness::new(storage);
 
                     harness.assert_proof(targets).expect("Proof generation failed");
@@ -2286,7 +2288,7 @@ mod tests {
                 retain_unchanged in any::<bool>(),
                 target_indices in prop::collection::vec((0usize..100, 0usize..9), 0..10),
             ) {
-                reth_concurrency::sync::Runtime::new().run(move || {
+                Runtime::new().run(move || {
                     let before = before.into_iter()
                         .map(|(key, value)| (key, U256::from(value)))
                         .collect::<BTreeMap<_, _>>();
@@ -2338,7 +2340,7 @@ mod tests {
     fn test_exact_subtrie_targets_with_root_target() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let slot_80 = B256::right_padding_from(&[0x80]);
             let slot_82 = B256::right_padding_from(&[0x82]);
             let slot_f0 = B256::right_padding_from(&[0xf0]);
@@ -2359,7 +2361,7 @@ mod tests {
 
     #[test]
     fn test_rebases_singleton_subtrie_root_below_known_parent() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let slot = B256::right_padding_from(&[0xae, 0xd4, 0x09]);
             let slot_nibbles = Nibbles::unpack(slot);
             let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::ONE)]));
@@ -2379,7 +2381,7 @@ mod tests {
 
     #[test]
     fn test_rebases_singleton_leaf_at_max_parent_depth() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let slot = B256::repeat_byte(0xae);
             let slot_nibbles = Nibbles::unpack(slot);
             let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::ONE)]));
@@ -2399,7 +2401,7 @@ mod tests {
 
     #[test]
     fn test_root_and_root_parent_targets_retain_both_singleton_representations() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let slot = B256::right_padding_from(&[0x20]);
             let slot_nibbles = Nibbles::unpack(slot);
             let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::ONE)]));
@@ -2431,7 +2433,7 @@ mod tests {
 
     #[test]
     fn test_exhausted_cursor_resets_at_equal_target_boundary() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let first = B256::ZERO;
             let last = B256::with_last_byte(1);
             let last_nibbles = Nibbles::unpack(last);
@@ -2458,7 +2460,7 @@ mod tests {
 
     #[test]
     fn test_rebases_compressed_branch_subtrie_root() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let slot_a = B256::right_padding_from(&[0xae, 0xd4, 0x00]);
             let slot_b = B256::right_padding_from(&[0xae, 0xd4, 0x10]);
             let slot_nibbles = Nibbles::unpack(slot_a);
@@ -2486,7 +2488,7 @@ mod tests {
 
     #[test]
     fn test_known_parent_retains_child() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let slot_a = B256::right_padding_from(&[0xae, 0xd2]);
             let slot_b = B256::right_padding_from(&[0xae, 0xd4]);
             let slot_nibbles = Nibbles::unpack(slot_a);
@@ -2506,7 +2508,7 @@ mod tests {
 
     #[test]
     fn test_rebased_root_matches_direct_child_not_full_short_key() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let stored_slot = B256::right_padding_from(&[0xae, 0xd4, 0x09]);
             let same_child_target = B256::right_padding_from(&[0xae, 0xd4, 0xff]);
             let other_child_target = B256::right_padding_from(&[0xae, 0xd5]);
@@ -2526,7 +2528,7 @@ mod tests {
 
     #[test]
     fn test_known_parent_separate_child_ranges() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
             let stored_slot_b = B256::right_padding_from(&[0xeb, 0x53]);
             let stored_slot_c = B256::right_padding_from(&[0xec, 0x53]);
@@ -2552,7 +2554,7 @@ mod tests {
 
     #[test]
     fn test_known_parent_does_not_use_stale_parent_mask() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
             let stored_slot = B256::right_padding_from(&[0xeb, 0x53]);
             let stored_slot_c = B256::right_padding_from(&[0xec, 0x53]);
@@ -2594,7 +2596,7 @@ mod tests {
 
     #[test]
     fn test_empty_storage_respects_parent_context() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let harness = ProofTestHarness::new(BTreeMap::new());
             let slot = B256::ZERO;
 
@@ -2614,8 +2616,6 @@ mod tests {
 
     #[test]
     fn test_big_trie() {
-        use rand::prelude::*;
-
         reth_tracing::init_test_tracing();
 
         let mut rng = rand::rngs::SmallRng::seed_from_u64(1);
@@ -2641,7 +2641,7 @@ mod tests {
         }
         targets.sort();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             // Create test harness
             let harness = ProofTestHarness::new(storage);
 
@@ -2655,7 +2655,7 @@ mod tests {
     fn test_node_with_masked_empty_child() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let val = U256::from(42u64);
 
             // All storage keys share a common first nibble (0x6), so the branch is at path 0x6. The
@@ -2717,7 +2717,7 @@ mod tests {
     fn test_node_with_masked_empty_child_lower_bound_past_branch() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let val = U256::from(42u64);
 
             // Leaf keys under 0x6 and one beyond (0x70) to keep the cursor alive after 0x6.
@@ -2777,7 +2777,7 @@ mod tests {
     fn test_prefix_set_adds_child_nibbles() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let val = U256::from(42u64);
             let slot_60 = B256::right_padding_from(&[0x60]);
             let slot_61 = B256::right_padding_from(&[0x61]);
@@ -2834,7 +2834,7 @@ mod tests {
     fn test_prefix_set_invalidates_cached_hash() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let original_val = U256::from(42u64);
             let updated_val = U256::from(9999u64);
             let slot_60 = B256::right_padding_from(&[0x60]);
@@ -2891,7 +2891,7 @@ mod tests {
     fn test_prefix_set_root_proof_processes_sibling_after_cached_descendant() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let storage = [
                 ("1022c69e9d900e40775cd387c134899f465f291dbc3c97899ff6bfb8dc972b37", 45u64),
                 ("1111ad8083c8a3a398b2b781217b989ff4d1ed182f46cc765eda49a7b316139d", 60),
@@ -2923,7 +2923,7 @@ mod tests {
     fn test_prefix_set_root_proof_processes_trailing_dirty_sibling() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let keys = [
                 "0022001020000000000000000000000000000000000000000000000000000000",
                 "0110212112000000000000000000000000000000000000000000000000000000",
@@ -2956,7 +2956,7 @@ mod tests {
 
     #[test]
     fn test_prefix_set_preserves_cached_siblings() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let storage = (0..4096u16)
                 .map(|key| (B256::right_padding_from(&key.to_be_bytes()), U256::from(1)))
                 .collect();
@@ -2997,7 +2997,7 @@ mod tests {
 
     #[test]
     fn test_prefix_set_finishes_branch_before_returning_to_ancestor() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let storage =
                 [[0x10, 0x00, 0x00], [0x12, 0x10, 0x00], [0x12, 0x10, 0x20], [0x12, 0x11, 0x00]]
                     .into_iter()
@@ -3110,14 +3110,14 @@ mod tests {
 
     #[test]
     fn test_branch_collapse_removed_child_before_remaining() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             assert_branch_collapse(1, 0);
         });
     }
 
     #[test]
     fn test_branch_collapse_removed_child_after_remaining() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             assert_branch_collapse(4, 9);
         });
     }
@@ -3126,7 +3126,7 @@ mod tests {
     fn test_prefix_set_root_proof_preserves_clean_sibling_after_cached_branch_collapse() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let dirty = B256::right_padding_from(&[0x10, 0x00, 0x10]);
             let clean_sibling = B256::right_padding_from(&[0x10, 0x10]);
             let storage = [
@@ -3168,7 +3168,7 @@ mod tests {
     fn test_prefix_set_range_skips_covered_cached_branch() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let before = B256::right_padding_from(&[0x30]);
             let cached_a = B256::right_padding_from(&[0x80, 0x10]);
             let cached_b = B256::right_padding_from(&[0x80, 0x15]);
@@ -3200,7 +3200,7 @@ mod tests {
     fn test_cached_branch_extension_skips_diverging_target() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let val = U256::from(100u64);
 
             // Keys whose first bytes directly set the nibble paths we need.
@@ -3315,7 +3315,7 @@ mod tests {
     fn test_cached_branch_extension_skips_diverging_target_before() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
 
 
         let val = U256::from(100u64);
@@ -3431,7 +3431,7 @@ mod tests {
     fn test_skipped_parent_branch_with_unskipped_child() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let val = U256::ONE;
             let updated_val = U256::from(2u64);
 
@@ -3503,7 +3503,7 @@ mod tests {
 
     #[test]
     fn test_blinded_local_root_returns_trie_inconsistency() {
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let key = B256::right_padding_from(&[0x63, 0xaa]);
             let value = U256::ONE;
             let hash = storage_leaf_hash(&Nibbles::unpack(key).slice(2..), &value);
@@ -3535,7 +3535,7 @@ mod tests {
     fn test_cached_hash_with_deleted_leaf() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             // Use different values to ensure distinct leaf hashes.
             let val_3 = U256::from(111u64);
             let val_5 = U256::from(222u64);

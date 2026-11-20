@@ -10,6 +10,7 @@
 use crate::{database_state_frontiers, OverlayManager, OverlayStateProvider};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
+// Shared with native database unwind and engine persistence; those callers are not simulated.
 use parking_lot::RwLock;
 use reth_metrics::{
     metrics::{Counter, Gauge},
@@ -1046,109 +1047,109 @@ mod tests {
     #[test]
     fn persisted_range_retains_transient_nodes_without_executed_blocks() {
         reth_concurrency::sync::Runtime::new().run(|| {
-        let factory = create_test_provider_factory();
-        seed_headers(&factory, 2);
-        let provider = factory.provider_rw().unwrap();
-        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2)).unwrap();
-        let address = Address::with_last_byte(1);
-        let hashed_address = keccak256(address);
-        provider
-            .tx_ref()
-            .put::<tables::AccountChangeSets>(1, AccountBeforeTx { address, info: None })
-            .unwrap();
-        provider
-            .tx_ref()
-            .put::<tables::AccountChangeSets>(
-                2,
-                AccountBeforeTx { address, info: Some(test_account(1)) },
-            )
-            .unwrap();
-        // The account and its storage exist only at block 1. Enough slots to branch below the first
-        // nibble ensure the trie stores non-root nodes.
-        for slot in 0..257 {
+            let factory = create_test_provider_factory();
+            seed_headers(&factory, 2);
+            let provider = factory.provider_rw().unwrap();
+            provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2)).unwrap();
+            let address = Address::with_last_byte(1);
+            let hashed_address = keccak256(address);
             provider
                 .tx_ref()
-                .put::<tables::StorageChangeSets>(
-                    BlockNumberAddress((1, address)),
-                    test_storage(slot, 0),
-                )
+                .put::<tables::AccountChangeSets>(1, AccountBeforeTx { address, info: None })
                 .unwrap();
             provider
                 .tx_ref()
-                .put::<tables::StorageChangeSets>(
-                    BlockNumberAddress((2, address)),
-                    test_storage(slot, 1),
+                .put::<tables::AccountChangeSets>(
+                    2,
+                    AccountBeforeTx { address, info: Some(test_account(1)) },
                 )
                 .unwrap();
-        }
-        let state_trie_provider =
-            OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
-                &*provider,
-                empty_overlay(),
-                provider.cached_storage_settings().is_v2(),
-            );
-        let result = reth_trie_db::compute_range_trie_changesets(
-            &*provider,
-            &state_trie_provider,
-            &[],
-            1..=2,
-            2,
-        )
-        .unwrap();
-        let nodes = result.storage_tries_ref()[&hashed_address].storage_nodes_ref();
-        assert!(!nodes.is_empty());
-        assert!(nodes.iter().all(|(_, node)| node.is_none()));
-
-        let first = reth_trie_db::compute_range_trie_changesets(
-            &*provider,
-            &state_trie_provider,
-            &[],
-            1..=1,
-            2,
-        )
-        .unwrap();
-        let second = reth_trie_db::compute_range_trie_changesets(
-            &*provider,
-            &state_trie_provider,
-            &[],
-            2..=2,
-            2,
-        )
-        .unwrap();
-        let mut merged = second.clone();
-        merged.extend_ref_and_sort(&first);
-        assert_eq!(result, merged);
-        let forward = [(1, Arc::new(second.clone())), (2, Arc::new(first.clone()))];
-        assert_eq!(
-            reth_trie_db::compute_range_trie_changesets(
+            // The account and its storage exist only at block 1. Enough slots to branch below the first
+            // nibble ensure the trie stores non-root nodes.
+            for slot in 0..257 {
+                provider
+                    .tx_ref()
+                    .put::<tables::StorageChangeSets>(
+                        BlockNumberAddress((1, address)),
+                        test_storage(slot, 0),
+                    )
+                    .unwrap();
+                provider
+                    .tx_ref()
+                    .put::<tables::StorageChangeSets>(
+                        BlockNumberAddress((2, address)),
+                        test_storage(slot, 1),
+                    )
+                    .unwrap();
+            }
+            let state_trie_provider =
+                OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
+                    &*provider,
+                    empty_overlay(),
+                    provider.cached_storage_settings().is_v2(),
+                );
+            let result = reth_trie_db::compute_range_trie_changesets(
                 &*provider,
                 &state_trie_provider,
-                &forward,
+                &[],
                 1..=2,
-                2
+                2,
             )
-            .unwrap(),
-            result,
-        );
-        let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
-        assert_eq!(manager.compute_block_trie_updates(&*provider, 1).unwrap(), second);
-        assert_eq!(manager.compute_block_trie_updates(&*provider, 2).unwrap(), first);
+            .unwrap();
+            let nodes = result.storage_tries_ref()[&hashed_address].storage_nodes_ref();
+            assert!(!nodes.is_empty());
+            assert!(nodes.iter().all(|(_, node)| node.is_none()));
 
-        // Recompute block 1 against its own tip instead of a later tip. Its changeset is identical.
-        let at_first = OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
-            &*provider,
-            StateTrieOverlay::new(TrieInputSorted::new(
-                Arc::new(second),
-                Arc::new(HashedPostStateSorted::from_reverts(&*provider, 2..=2).unwrap()),
-                Default::default(),
-            )),
-            provider.cached_storage_settings().is_v2(),
-        );
-        let at_first =
-            reth_trie_db::compute_range_trie_changesets(&*provider, &at_first, &[], 1..=1, 1)
-                .unwrap();
-        assert_eq!(first, at_first);
-    });
+            let first = reth_trie_db::compute_range_trie_changesets(
+                &*provider,
+                &state_trie_provider,
+                &[],
+                1..=1,
+                2,
+            )
+            .unwrap();
+            let second = reth_trie_db::compute_range_trie_changesets(
+                &*provider,
+                &state_trie_provider,
+                &[],
+                2..=2,
+                2,
+            )
+            .unwrap();
+            let mut merged = second.clone();
+            merged.extend_ref_and_sort(&first);
+            assert_eq!(result, merged);
+            let forward = [(1, Arc::new(second.clone())), (2, Arc::new(first.clone()))];
+            assert_eq!(
+                reth_trie_db::compute_range_trie_changesets(
+                    &*provider,
+                    &state_trie_provider,
+                    &forward,
+                    1..=2,
+                    2
+                )
+                .unwrap(),
+                result,
+            );
+            let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+            assert_eq!(manager.compute_block_trie_updates(&*provider, 1).unwrap(), second);
+            assert_eq!(manager.compute_block_trie_updates(&*provider, 2).unwrap(), first);
+
+            // Recompute block 1 against its own tip instead of a later tip. Its changeset is identical.
+            let at_first = OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
+                &*provider,
+                StateTrieOverlay::new(TrieInputSorted::new(
+                    Arc::new(second),
+                    Arc::new(HashedPostStateSorted::from_reverts(&*provider, 2..=2).unwrap()),
+                    Default::default(),
+                )),
+                provider.cached_storage_settings().is_v2(),
+            );
+            let at_first =
+                reth_trie_db::compute_range_trie_changesets(&*provider, &at_first, &[], 1..=1, 1)
+                    .unwrap();
+            assert_eq!(first, at_first);
+        });
     }
 
     #[test]

@@ -36,9 +36,9 @@ use alloy_primitives::{
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
-use rayon::slice::ParallelSliceMut;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
+use reth_concurrency::sync::rayon::prelude::ParallelSliceMut;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::{Database, ReaderTxnTracker},

@@ -88,6 +88,66 @@ jobs:
       - run: cargo clippy --workspace --lib --examples --tests --benches --locked
         env:
           RUSTFLAGS: -D warnings
+      # Use a separate configuration so native aliases stay unrestricted in non-fuzz builds.
+      - name: Reject native primitive uses in fuzz builds
+        run: |
+          status=0
+          report=$(mktemp)
+          trap 'rm -f "$report"' EXIT
+          for profile in fuzz all-features; do
+            args=(--features fuzz)
+            if [[ "$profile" == all-features ]]; then args=(--all-features); fi
+            cargo clippy --workspace --all-targets "${args[@]}" --locked --message-format=json -- \
+              --warn clippy::disallowed_types --warn clippy::disallowed_methods \
+              --warn clippy::disallowed_macros > "$report" || status=1
+            python3 - "$report" <<'PYTHON' || status=1
+          import json
+          import sys
+
+          # Expanded thread_local! diagnostics ignore local allowances on these backend declarations.
+          tls = {
+              "crates/concurrency/src/sync/deterministic.rs": "CLOCK",
+              "crates/tasks/src/pool.rs": "WORKERS",
+              "crates/tasks/src/cancel.rs": "CURRENT",
+          }
+          failed = False
+          finished = False
+          with open(sys.argv[1]) as report:
+              for line in report:
+                  item = json.loads(line)
+                  if item["reason"] == "build-finished":
+                      finished = item["success"]
+                  if item["reason"] != "compiler-message":
+                      continue
+                  diagnostic = item["message"]
+                  lint = (diagnostic.get("code") or {}).get("code", "")
+                  spans = [span for span in diagnostic["spans"] if span["is_primary"]]
+                  exempt = False
+                  for span in spans:
+                      while span.get("expansion"):
+                          span = span["expansion"]["span"]
+                      path = span["file_name"]
+                      source = "\n".join(part["text"][part["highlight_start"] - 1:part["highlight_end"] - 1]
+                                         for part in span["text"]).strip()
+                      exempt |= (lint == "clippy::disallowed_macros"
+                                 and diagnostic["message"] == "use of a disallowed macro `std::thread_local`"
+                                 and path in tls
+                                 and source.startswith(("thread_local! {", "std::thread_local! {"))
+                                 and any(line.strip().startswith(f"static {tls[path]}:")
+                                         for line in source.splitlines()))
+                  if exempt:
+                      continue
+                  if diagnostic.get("rendered"):
+                      print(diagnostic["rendered"], end="", file=sys.stderr)
+                  failed |= lint in {"clippy::disallowed_types", "clippy::disallowed_methods",
+                                     "clippy::disallowed_macros"} or diagnostic["level"] == "error"
+          sys.exit(failed or not finished)
+          PYTHON
+          done
+          exit "$status"
+        env:
+          CLIPPY_CONF_DIR: ${{ github.workspace }}/.config/fuzz-primitives
+          RUSTUP_TOOLCHAIN: nightly-2026-10-31
 
   wasm:
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
