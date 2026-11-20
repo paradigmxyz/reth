@@ -536,12 +536,15 @@ mod tests {
             "100",
             "--rpc-max-logs-per-response",
             "200",
+            "--rpc.max-response-size",
+            "5",
         ])
         .args;
 
         let config = args.eth_config().filter_config();
         assert_eq!(config.max_blocks_per_filter, Some(100));
         assert_eq!(config.max_logs_per_response, Some(200));
+        assert_eq!(config.max_response_size, Some(5 * 1024 * 1024));
     }
 
     #[test]
