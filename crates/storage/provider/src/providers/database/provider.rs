@@ -923,7 +923,12 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // iterate over block body and remove receipts
         self.remove::<tables::Receipts<ReceiptTy<N>>>(from_tx..)?;
 
-        if EitherWriter::receipts_destination(self).is_static_file() {
+        // Recovery can unwind entire batches above the surviving receipt files.
+        if EitherWriter::receipts_destination(self).is_static_file() &&
+            self.static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::Receipts)
+                .is_some_and(|tip| tip >= last_block)
+        {
             let static_file_receipt_num =
                 self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
 

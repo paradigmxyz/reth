@@ -570,7 +570,7 @@ where
 
         reject_cancun_boundary_unwind(provider, input.checkpoint.block_number, input.unwind_to)?;
 
-        self.ensure_consistency(provider, input.checkpoint.block_number, Some(unwind_to))?;
+        self.ensure_consistency(provider, input.checkpoint.block_number, Some(input.unwind_to))?;
 
         // Unwind account and storage changesets, as well as receipts.
         //
@@ -1518,5 +1518,50 @@ mod tests {
         stage
             .ensure_consistency(&provider, 1, None)
             .expect("ensure_consistency should succeed when receipts are intentionally skipped");
+    }
+
+    #[test]
+    fn unwind_batches_above_receipt_tip() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        let mut rng = generators::rng();
+        for number in 0..=5 {
+            let mut block = generators::random_block(
+                &mut rng,
+                number,
+                generators::BlockParams {
+                    tx_count: Some((number >= 3).into()),
+                    ..Default::default()
+                },
+            )
+            .unseal();
+            block.header.timestamp = number;
+            provider.insert_block(&block.seal_slow().try_recover().unwrap()).unwrap();
+        }
+        let files = factory.static_file_provider();
+        {
+            let mut receipts = files.latest_writer(StaticFileSegment::Receipts).unwrap();
+            for number in 0..=3 {
+                receipts.increment_block(number).unwrap();
+            }
+            receipts.append_receipt(0, &Default::default()).unwrap();
+            receipts.commit().unwrap();
+        }
+        provider.commit().unwrap();
+        let target = files.check_consistency(&factory.provider().unwrap()).unwrap().unwrap();
+        assert_eq!(target.unwind_target(), Some(3));
+
+        let mut execution = stage();
+        execution.thresholds.max_blocks = Some(1);
+        let mut input =
+            UnwindInput { checkpoint: StageCheckpoint::new(5), unwind_to: 3, bad_block: None };
+        for expected in [4, 3] {
+            let provider = factory.database_provider_rw().unwrap();
+            input.checkpoint = execution.unwind(&provider, input).unwrap().checkpoint;
+            provider.commit().unwrap();
+            assert_eq!(input.checkpoint.block_number, expected);
+            assert_eq!(files.get_highest_static_file_block(StaticFileSegment::Receipts), Some(3));
+            assert_eq!(files.get_highest_static_file_tx(StaticFileSegment::Receipts), Some(0));
+        }
     }
 }

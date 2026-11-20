@@ -11,12 +11,14 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookupConfig};
+use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_exex::ExExManagerHandle;
 use reth_network::BlockDownloaderProvider;
+use reth_node_api::ReceiptTy;
 use reth_node_builder::common::metrics_hooks;
 use reth_node_core::{
     args::{NetworkArgs, StageEnum},
@@ -30,8 +32,10 @@ use reth_node_metrics::{
 };
 use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::{
-    providers::BlockchainProvider, ChainSpecProvider, DBProvider, DatabaseProviderFactory,
-    StageCheckpointReader, StageCheckpointWriter,
+    providers::{BlockchainProvider, NodeTypesForProvider},
+    BlockReader, ChainSpecProvider, DBProvider, DatabaseProvider, DatabaseProviderFactory,
+    EitherWriter, ProviderError, ProviderResult, StageCheckpointReader, StageCheckpointWriter,
+    StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_stages::{
     stages::{
@@ -39,8 +43,10 @@ use reth_stages::{
         IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
         TransactionLookupStage,
     },
-    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
+    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageCheckpoint, StageExt, UnwindInput,
+    UnwindOutput,
 };
+use reth_static_file_types::StaticFileSegment;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::watch;
 use tracing::*;
@@ -121,6 +127,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 "The stage {} requires overwriting existing static files and must commit, but `--commit` was not provided. Please pass `--commit` and try again.",
                 self.stage.to_string()
             ));
+        }
+
+        if self.stage == StageEnum::Execution && self.from == self.to {
+            return Ok(())
         }
 
         // Raise the fd limit of the process.
@@ -332,20 +342,18 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             };
         let checkpoint = provider_rw.get_stage_checkpoint(exec_stage.id())?.unwrap_or_default();
 
-        let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
-
-        let mut unwind = UnwindInput {
-            // Execution's state includes changes above `--to`.
-            checkpoint: if self.stage == StageEnum::Execution {
-                checkpoint
-            } else {
-                checkpoint.with_block_number(self.to)
-            },
-            unwind_to: self.from,
-            bad_block: None,
-        };
-
+        let mut exec_checkpoint = checkpoint.with_block_number(self.from);
         if !self.skip_unwind {
+            let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
+            let mut unwind = UnwindInput {
+                checkpoint: if self.stage == StageEnum::Execution {
+                    execution_unwind_checkpoint(&provider_rw, checkpoint)?
+                } else {
+                    checkpoint.with_block_number(self.to)
+                },
+                unwind_to: self.from,
+                bad_block: None,
+            };
             while unwind.checkpoint.block_number > self.from {
                 let UnwindOutput { checkpoint } = unwind_stage.unwind(&provider_rw, unwind)?;
                 unwind.checkpoint = checkpoint;
@@ -359,12 +367,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     provider_rw = provider_factory.database_provider_rw()?;
                 }
             }
+            if self.stage == StageEnum::Execution {
+                exec_checkpoint = unwind.checkpoint.with_block_number(self.from);
+            }
         }
 
-        let mut input = ExecInput {
-            target: Some(self.to),
-            checkpoint: Some(checkpoint.with_block_number(self.from)),
-        };
+        let mut input = ExecInput { target: Some(self.to), checkpoint: Some(exec_checkpoint) };
 
         let start = Instant::now();
         info!(target: "reth::cli", stage = %self.stage, "Executing stage");
@@ -419,5 +427,82 @@ impl<C: ChainSpecParser> Command<C> {
     /// transactions and we cannot change the view of headers without writing.
     pub fn requires_commit(&self) -> bool {
         matches!(self.stage, StageEnum::Headers | StageEnum::Bodies | StageEnum::Execution)
+    }
+}
+
+/// A committed diagnostic run can leave execution data above its last saved checkpoint.
+fn execution_unwind_checkpoint<TX: DbTx + 'static, N: NodeTypesForProvider>(
+    provider: &DatabaseProvider<TX, N>,
+    checkpoint: StageCheckpoint,
+) -> ProviderResult<StageCheckpoint> {
+    let files = provider.static_file_provider();
+    let tx = provider.tx_ref();
+    let (accounts, storage) = if provider.cached_storage_settings().is_v2() {
+        (
+            files.get_highest_static_file_block(StaticFileSegment::AccountChangeSets),
+            files.get_highest_static_file_block(StaticFileSegment::StorageChangeSets),
+        )
+    } else {
+        (
+            tx.cursor_read::<tables::AccountChangeSets>()?.last()?.map(|(block, _)| block),
+            tx.cursor_read::<tables::StorageChangeSets>()?
+                .last()?
+                .map(|(key, _)| key.block_number()),
+        )
+    };
+    let receipts = if EitherWriter::receipts_destination(provider).is_static_file() {
+        files.get_highest_static_file_block(StaticFileSegment::Receipts)
+    } else if let Some((id, _)) = tx.cursor_read::<tables::Receipts<ReceiptTy<N>>>()?.last()? {
+        Some(
+            provider
+                .block_by_transaction_id(id)?
+                .ok_or(ProviderError::BlockNumberForTransactionIndexNotFound)?,
+        )
+    } else {
+        None
+    };
+
+    if let Some(tip) = [accounts, storage, receipts].into_iter().flatten().max() &&
+        tip > checkpoint.block_number
+    {
+        // Gas progress also belongs to the saved height. Recalculate it on the next execution.
+        return Ok(StageCheckpoint::new(tip))
+    }
+    Ok(checkpoint)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, B256};
+    use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
+    use reth_primitives_traits::StorageEntry;
+    use reth_provider::{test_utils::create_test_provider_factory, StorageSettings};
+    use reth_prune::{PruneMode, PruneModes};
+
+    #[test]
+    fn unwind_includes_uncheckpointed_execution() {
+        let factory = create_test_provider_factory()
+            .with_prune_modes(PruneModes { receipts: Some(PruneMode::Full), ..Default::default() });
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        let provider = factory.database_provider_rw().unwrap();
+        let tx = provider.tx_ref();
+        let saved = StageCheckpoint::new(1);
+        assert_eq!(execution_unwind_checkpoint(&provider, saved).unwrap(), saved);
+        tx.put::<tables::AccountChangeSets>(
+            2,
+            AccountBeforeTx { address: Address::ZERO, info: None },
+        )
+        .unwrap();
+        assert_eq!(execution_unwind_checkpoint(&provider, saved).unwrap(), StageCheckpoint::new(2));
+        tx.put::<tables::StorageChangeSets>(
+            (3, Address::ZERO).into(),
+            StorageEntry { key: B256::ZERO, value: Default::default() },
+        )
+        .unwrap();
+        assert_eq!(execution_unwind_checkpoint(&provider, saved).unwrap(), StageCheckpoint::new(3));
+        tx.put::<tables::TransactionBlocks>(0, 4).unwrap();
+        tx.put::<tables::Receipts>(0, Default::default()).unwrap();
+        assert_eq!(execution_unwind_checkpoint(&provider, saved).unwrap(), StageCheckpoint::new(4));
     }
 }

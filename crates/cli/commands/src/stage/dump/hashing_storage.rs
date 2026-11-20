@@ -1,4 +1,4 @@
-use super::setup;
+use super::{setup, unwind_hashing_for_dump};
 use eyre::Result;
 use reth_db::DatabaseEnv;
 use reth_db_api::{database::Database, table::TableImporter, tables};
@@ -51,9 +51,8 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
 ) -> eyre::Result<()> {
     let provider = db_tool.provider_factory.database_provider_rw()?;
 
-    let mut exec_stage = StorageHashingStage::default();
-
-    exec_stage.unwind(
+    unwind_hashing_for_dump(
+        StorageHashingStage::default(),
         &provider,
         UnwindInput {
             unwind_to: from,

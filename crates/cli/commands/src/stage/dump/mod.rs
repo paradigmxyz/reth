@@ -3,16 +3,23 @@ use crate::common::{AccessRights, CliNodeComponents, CliNodeTypes, Environment, 
 use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
+use reth_config::config::ExecutionConfig;
+use reth_consensus::FullConsensus;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, models::ClientVersion, table::TableImporter, tables,
     transaction::DbTx,
 };
 use reth_db_common::DbTool;
+use reth_evm::ConfigureEvm;
 use reth_node_builder::NodeTypesWithDB;
 use reth_node_core::{
     args::DatadirArgs,
     dirs::{DataDirPath, PlatformPath},
+};
+use reth_stages::{
+    stages::{ExecutionStage, MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD},
+    Stage, UnwindInput,
 };
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
@@ -192,4 +199,109 @@ pub(crate) fn setup<N: NodeTypesWithDB>(
         .ok_or_else(|| eyre::eyre!("`BlockBodyIndices` table of the source database is empty"))?;
 
     Ok((output_datadir, tip_block_number))
+}
+
+/// Execution queues static-file prunes, so the source transaction must unwind in one batch.
+fn unwind_execution_for_dump<E: ConfigureEvm, P>(
+    evm_config: E,
+    consensus: Arc<dyn FullConsensus<E::Primitives>>,
+    provider: &P,
+    input: UnwindInput,
+) -> eyre::Result<()>
+where
+    ExecutionStage<E>: Stage<P>,
+{
+    let output = ExecutionStage::from_config(
+        evm_config,
+        consensus,
+        ExecutionConfig { max_blocks: None, ..Default::default() },
+        MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
+    )
+    .unwind(provider, input)?;
+    eyre::ensure!(
+        output.checkpoint.block_number == input.unwind_to,
+        "execution dump unwind stopped at block {}, expected {}",
+        output.checkpoint.block_number,
+        input.unwind_to
+    );
+    Ok(())
+}
+
+/// Finish every hashing batch inside the uncommitted source transaction before copying the state.
+fn unwind_hashing_for_dump<P>(
+    mut stage: impl Stage<P>,
+    provider: &P,
+    mut input: UnwindInput,
+) -> eyre::Result<()> {
+    while input.checkpoint.block_number > input.unwind_to {
+        let output = stage.unwind(provider, input)?;
+        eyre::ensure!(
+            (input.unwind_to..input.checkpoint.block_number)
+                .contains(&output.checkpoint.block_number),
+            "{} dump unwind returned block {} for range {}..={}",
+            stage.id(),
+            output.checkpoint.block_number,
+            input.unwind_to,
+            input.checkpoint.block_number
+        );
+        input.checkpoint = output.checkpoint;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{keccak256, Address};
+    use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
+    use reth_primitives_traits::Account;
+    use reth_provider::{
+        test_utils::create_test_provider_factory, DBProvider, DatabaseProviderFactory,
+    };
+    use reth_stages::{stages::AccountHashingStage, StageCheckpoint};
+
+    #[test]
+    fn hashing_dump_finishes_in_source_transaction() {
+        let factory = create_test_provider_factory();
+        let address = Address::repeat_byte(1);
+        let hash = keccak256(address);
+        let provider = factory.database_provider_rw().unwrap();
+        let tx = provider.tx_ref();
+        for block in 2..=3 {
+            tx.put::<tables::AccountChangeSets>(
+                block,
+                AccountBeforeTx {
+                    address,
+                    info: Some(Account { nonce: block - 1, ..Default::default() }),
+                },
+            )
+            .unwrap();
+        }
+        tx.put::<tables::HashedAccounts>(hash, Account { nonce: 3, ..Default::default() }).unwrap();
+        provider.commit().unwrap();
+
+        let provider = factory.database_provider_rw().unwrap();
+        unwind_hashing_for_dump(
+            AccountHashingStage { commit_threshold: 1, ..Default::default() },
+            &provider,
+            UnwindInput { checkpoint: StageCheckpoint::new(3), unwind_to: 1, bad_block: None },
+        )
+        .unwrap();
+        assert_eq!(
+            provider.tx_ref().get::<tables::HashedAccounts>(hash).unwrap().unwrap().nonce,
+            1
+        );
+        drop(provider);
+        assert_eq!(
+            factory
+                .provider()
+                .unwrap()
+                .tx_ref()
+                .get::<tables::HashedAccounts>(hash)
+                .unwrap()
+                .unwrap()
+                .nonce,
+            3
+        );
+    }
 }

@@ -1,4 +1,4 @@
-use super::setup;
+use super::{setup, unwind_execution_for_dump};
 use reth_consensus::{noop::NoopConsensus, FullConsensus};
 use reth_db::DatabaseEnv;
 use reth_db_api::{
@@ -142,9 +142,9 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
 ) -> eyre::Result<()> {
     let provider = db_tool.provider_factory.database_provider_rw()?;
 
-    let mut exec_stage = ExecutionStage::new_with_executor(evm_config, NoopConsensus::arc());
-
-    exec_stage.unwind(
+    unwind_execution_for_dump(
+        evm_config,
+        NoopConsensus::arc(),
         &provider,
         UnwindInput {
             unwind_to: from,
