@@ -152,6 +152,8 @@ mod deterministic {
         }
 
         /// Executes the scope callback on this pool, draining descendants before unwinding.
+        ///
+        /// When multiple jobs panic, the first recorded panic propagates after draining.
         pub fn scope<'env, T: Send>(&self, f: impl FnOnce(&Scope<'env>) -> T + Send) -> T {
             self.install(|| self.in_place_scope(f))
         }
@@ -426,17 +428,7 @@ mod deterministic {
                                     if let Err(panic) =
                                         catch_unwind(AssertUnwindSafe(|| job(scope)))
                                     {
-                                        let mut first = first_panic
-                                            .lock()
-                                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                                        if first.is_none() {
-                                            *first = Some(panic);
-                                        } else {
-                                            // Payload destructors may block; keep them on the job
-                                            // and outside the lock so dispatch can keep running.
-                                            drop(first);
-                                            discard_panic(panic);
-                                        }
+                                        record_scope_panic(first_panic, panic);
                                     }
                                 };
                                 if let Some(pool) = pool {
@@ -454,7 +446,13 @@ mod deterministic {
                     }
                 }
             });
-            let result = catch_unwind(AssertUnwindSafe(|| f(scope)));
+            let result = match catch_unwind(AssertUnwindSafe(|| f(scope))) {
+                Ok(value) => Some(value),
+                Err(panic) => {
+                    record_scope_panic(first_panic, panic);
+                    None
+                }
+            };
             scope
                 .sender
                 .send(Message::Done)
@@ -464,20 +462,23 @@ mod deterministic {
             });
             result
         });
-        let child_panic = first_panic.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
-        match result {
-            Err(panic) => {
-                if let Some(child_panic) = child_panic {
-                    discard_panic(child_panic);
-                }
-                resume_unwind(panic)
-            }
-            Ok(value) => {
-                if let Some(panic) = child_panic {
-                    resume_unwind(panic);
-                }
-                value
-            }
+        if let Some(panic) =
+            first_panic.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner())
+        {
+            resume_unwind(panic);
+        }
+        result.expect("scope callback returned when no panic was recorded")
+    }
+
+    fn record_scope_panic(first_panic: &Mutex<Option<Panic>>, panic: Panic) {
+        let mut first = first_panic.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if first.is_none() {
+            *first = Some(panic);
+        } else {
+            // Root and child panics share one winner. Drop losing payloads on the task that
+            // caught them, outside the lock, so their destructors cannot stall dispatch.
+            drop(first);
+            discard_panic(panic);
         }
     }
 
