@@ -1,6 +1,6 @@
 //! Async caching support for eth RPC
 
-use super::{EthStateCacheConfig, MultiConsumerLruCache};
+use super::{BlockResponseCache, EthStateCacheConfig, MultiConsumerLruCache};
 use crate::block::CachedTransaction;
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::{bal::DecodedBal, StorageChange};
@@ -40,6 +40,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+pub mod block_responses;
 pub mod config;
 pub mod db;
 pub mod metrics;
@@ -84,11 +85,12 @@ type BalLruCache = MultiConsumerLruCache<B256, CachedBal, BalResponseSender, FbB
 #[derive(Debug)]
 pub struct EthStateCache<N: NodePrimitives> {
     to_service: UnboundedSender<CacheAction<N::Block, N::Receipt>>,
+    block_responses: Arc<BlockResponseCache>,
 }
 
 impl<N: NodePrimitives> Clone for EthStateCache<N> {
     fn clone(&self) -> Self {
-        Self { to_service: self.to_service.clone() }
+        Self { to_service: self.to_service.clone(), block_responses: self.block_responses.clone() }
     }
 }
 
@@ -114,6 +116,8 @@ impl<N: NodePrimitives> EthStateCache<N> {
             prewarm_bals: _,
             max_concurrent_db_requests,
             max_cached_tx_hashes,
+            max_block_responses,
+            block_response_depth,
         } = config;
         let eviction_interval = {
             let _guard = action_task_spawner.handle().enter();
@@ -140,7 +144,9 @@ impl<N: NodePrimitives> EthStateCache<N> {
             pending_fetches: VecDeque::new(),
             tx_hash_index: LruMap::with_hasher(max_cached_tx_hashes, Default::default()),
         };
-        let cache = Self { to_service };
+        let block_responses =
+            Arc::new(BlockResponseCache::new(max_block_responses, block_response_depth));
+        let cache = Self { to_service, block_responses };
         (cache, service)
     }
 
@@ -163,6 +169,11 @@ impl<N: NodePrimitives> EthStateCache<N> {
         let (this, service) = Self::create(provider, executor.clone(), config);
         executor.spawn_critical_task("eth state cache", service);
         this
+    }
+
+    /// Returns the serialized block and receipt responses of recent blocks.
+    pub fn block_responses(&self) -> &BlockResponseCache {
+        &self.block_responses
     }
 
     /// Requests the  [`RecoveredBlock`] for the block hash
@@ -889,10 +900,17 @@ pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
 {
     while let Some(event) = events.next().await {
         if let Some(reverted) = event.reverted() {
-            let chain_change = ChainChange::new(reverted);
+            let chain_change = ChainChange::new(reverted.clone());
 
             let _ =
                 eth_state_cache.to_service.send(CacheAction::RemoveReorgedChain { chain_change });
+
+            // Removed after the blocks are queued for removal from the service: a response that
+            // misses from here on fetches its block behind that removal, so it cannot be cached
+            // again from a block the service still holds.
+            for block in reverted.blocks_iter() {
+                eth_state_cache.block_responses.remove_block(block.hash());
+            }
         }
 
         let chain_change = ChainChange::new(event.committed());

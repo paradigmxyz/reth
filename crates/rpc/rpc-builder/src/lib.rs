@@ -987,6 +987,10 @@ where
                         RethRpcModule::Eth => {
                             // merge all eth handlers
                             let mut module = eth_api.clone().into_rpc();
+                            reth_rpc::eth::response_cache::cache_block_responses(
+                                &mut module,
+                                eth_api.clone(),
+                            );
                             module.merge(eth_filter.clone().into_rpc()).expect("No conflicts");
                             module.merge(eth_pubsub.clone().into_rpc()).expect("No conflicts");
                             module

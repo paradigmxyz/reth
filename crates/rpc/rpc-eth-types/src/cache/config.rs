@@ -5,8 +5,10 @@ use std::time::Duration;
 
 use reth_rpc_server_types::constants::cache::{
     DEFAULT_BAL_CACHE_MAX_BYTES, DEFAULT_BAL_CACHE_MAX_LEN, DEFAULT_BLOCK_CACHE_MAX_BYTES,
-    DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_CACHE_IDLE_TIMEOUT, DEFAULT_CONCURRENT_DB_REQUESTS,
-    DEFAULT_MAX_CACHED_TX_HASHES, DEFAULT_RECEIPT_CACHE_MAX_BYTES, DEFAULT_RECEIPT_CACHE_MAX_LEN,
+    DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_BLOCK_RESPONSE_CACHE_DEPTH,
+    DEFAULT_BLOCK_RESPONSE_CACHE_MAX_LEN, DEFAULT_CACHE_IDLE_TIMEOUT,
+    DEFAULT_CONCURRENT_DB_REQUESTS, DEFAULT_MAX_CACHED_TX_HASHES, DEFAULT_RECEIPT_CACHE_MAX_BYTES,
+    DEFAULT_RECEIPT_CACHE_MAX_LEN,
 };
 
 /// Settings for the [`EthStateCache`](super::EthStateCache).
@@ -61,6 +63,15 @@ pub struct EthStateCacheConfig {
     pub max_concurrent_db_requests: usize,
     /// Maximum number of transaction hashes to cache for transaction lookups.
     pub max_cached_tx_hashes: u32,
+    /// Max number of serialized block and receipt responses of recent blocks in cache. A block
+    /// has up to three: with full transactions, with transaction hashes, and its receipts.
+    ///
+    /// Default is 18. Zero disables this cache.
+    pub max_block_responses: u32,
+    /// How far below the best block a block may be for its serialized responses to be cached.
+    ///
+    /// Default is 4.
+    pub block_response_depth: u64,
 }
 
 impl Default for EthStateCacheConfig {
@@ -77,6 +88,8 @@ impl Default for EthStateCacheConfig {
             prewarm_bals: None,
             max_concurrent_db_requests: DEFAULT_CONCURRENT_DB_REQUESTS,
             max_cached_tx_hashes: DEFAULT_MAX_CACHED_TX_HASHES,
+            max_block_responses: DEFAULT_BLOCK_RESPONSE_CACHE_MAX_LEN,
+            block_response_depth: DEFAULT_BLOCK_RESPONSE_CACHE_DEPTH,
         }
     }
 }
