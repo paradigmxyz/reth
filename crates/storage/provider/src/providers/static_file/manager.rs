@@ -2561,6 +2561,19 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
         let range = self.bound_range(range, StaticFileSegment::AccountChangeSets);
         self.walk_account_changeset_range(range).collect()
     }
+
+    fn for_each_account_changeset(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        mut f: impl FnMut(BlockNumber, AccountBeforeTx),
+    ) -> ProviderResult<()> {
+        let range = self.bound_range(range, StaticFileSegment::AccountChangeSets);
+        for entry in self.walk_account_changeset_range(range) {
+            let (block_number, changeset) = entry?;
+            f(block_number, changeset);
+        }
+        Ok(())
+    }
 }
 
 impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
@@ -2661,6 +2674,19 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
         let range = self.bound_range(range, StaticFileSegment::StorageChangeSets);
         self.walk_storage_changeset_range(range).collect()
+    }
+
+    fn for_each_storage_changeset(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        mut f: impl FnMut(BlockNumberAddress, StorageEntry),
+    ) -> ProviderResult<()> {
+        let range = self.bound_range(range, StaticFileSegment::StorageChangeSets);
+        for entry in self.walk_storage_changeset_range(range) {
+            let (block_address, storage_entry) = entry?;
+            f(block_address, storage_entry);
+        }
+        Ok(())
     }
 }
 
