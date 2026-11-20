@@ -1,4 +1,4 @@
-use super::{setup, unwind_execution_for_dump};
+use super::setup;
 use reth_consensus::{noop::NoopConsensus, FullConsensus};
 use reth_db::DatabaseEnv;
 use reth_db_api::{
@@ -83,6 +83,13 @@ fn import_tables_with_range<N: ProviderNodeTypes>(
         )
     })??;
     output_db.update(|tx| {
+        tx.import_table_with_range::<tables::BlockBodyIndices, _>(
+            &db_tool.provider_factory.db_ref().tx()?,
+            Some(from),
+            to,
+        )
+    })??;
+    output_db.update(|tx| {
         tx.import_table_with_range::<tables::BlockOmmers<HeaderTy<N>>, _>(
             &db_tool.provider_factory.db_ref().tx()?,
             Some(from),
@@ -135,9 +142,9 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
 ) -> eyre::Result<()> {
     let provider = db_tool.provider_factory.database_provider_rw()?;
 
-    unwind_execution_for_dump(
-        evm_config,
-        NoopConsensus::arc(),
+    let mut exec_stage = ExecutionStage::new_with_executor(evm_config, NoopConsensus::arc());
+
+    exec_stage.unwind(
         &provider,
         UnwindInput {
             unwind_to: from,

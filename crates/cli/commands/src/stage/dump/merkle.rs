@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::{setup, unwind_execution_for_dump, unwind_hashing_for_dump};
+use super::setup;
 use alloy_primitives::{Address, BlockNumber};
 use eyre::Result;
 use reth_config::config::EtlConfig;
@@ -9,6 +9,7 @@ use reth_db::DatabaseEnv;
 use reth_db_api::{database::Database, models::BlockNumberAddress, table::TableImporter, tables};
 use reth_db_common::DbTool;
 use reth_evm::ConfigureEvm;
+use reth_exex::ExExManagerHandle;
 use reth_node_api::HeaderTy;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
@@ -16,8 +17,11 @@ use reth_provider::{
     DatabaseProviderFactory, ProviderFactory,
 };
 use reth_stages::{
-    stages::{AccountHashingStage, MerkleStage, StorageHashingStage},
-    Stage, StageCheckpoint, UnwindInput,
+    stages::{
+        AccountHashingStage, ExecutionStage, MerkleStage, StorageHashingStage,
+        MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
+    },
+    ExecutionStageThresholds, Stage, StageCheckpoint, UnwindInput,
 };
 use reth_storage_overlay::OverlayManager;
 use tracing::info;
@@ -95,14 +99,25 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
         reth_stages::ExecInput { target: Some(to), checkpoint: Some(StageCheckpoint::new(from)) };
 
     // Unwind hashes all the way to FROM
-    unwind_hashing_for_dump(StorageHashingStage::default(), &provider, unwind)?;
-    unwind_hashing_for_dump(AccountHashingStage::default(), &provider, unwind)?;
+    StorageHashingStage::default().unwind(&provider, unwind)?;
+    AccountHashingStage::default().unwind(&provider, unwind)?;
     MerkleStage::default_unwind().unwind(&provider, unwind)?;
 
     // Bring Plainstate to TO (hashing stage execution requires it)
-    unwind_execution_for_dump(
-        evm_config,
+    let mut exec_stage = ExecutionStage::new(
+        evm_config, // Not necessary for unwinding.
         Arc::new(consensus),
+        ExecutionStageThresholds {
+            max_blocks: Some(u64::MAX),
+            max_changes: None,
+            max_cumulative_gas: None,
+            max_duration: None,
+        },
+        MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
+        ExExManagerHandle::empty(),
+    );
+
+    exec_stage.unwind(
         &provider,
         UnwindInput {
             unwind_to: to,

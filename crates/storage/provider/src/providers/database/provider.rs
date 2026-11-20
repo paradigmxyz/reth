@@ -914,63 +914,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         Ok(())
     }
 
-    /// Returns the execution checkpoint to use for unwind. On legacy storage, older diagnostic
-    /// runs could commit execution data to MDBX without saving its checkpoint. If that data is
-    /// ahead, saves its height in the current transaction and drops the stale gas progress.
-    /// Returns an error if the retained state would be missing static receipts.
-    pub fn reconcile_execution_unwind_checkpoint(
-        &self,
-        unwind_to: BlockNumber,
-    ) -> ProviderResult<StageCheckpoint> {
-        let saved = self.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default();
-        if !self.cached_storage_settings().is_v2() &&
-            let Some(tip) = self.legacy_execution_data_tip()? &&
-            tip > saved.block_number
-        {
-            // Startup recovery may have truncated static receipts to the old checkpoint.
-            // Reject an unreachable target before the pipeline records its unwind intent.
-            if EitherWriter::receipts_destination(self).is_static_file() {
-                let receipt_tip = self
-                    .static_file_provider
-                    .get_highest_static_file_block(StaticFileSegment::Receipts)
-                    .unwrap_or_default();
-                if receipt_tip < tip.min(unwind_to) {
-                    return Err(ProviderError::MissingStaticFileBlock(
-                        StaticFileSegment::Receipts,
-                        receipt_tip + 1,
-                    ))
-                }
-            }
-            let checkpoint = StageCheckpoint::new(tip);
-            self.save_stage_checkpoint(StageId::Execution, checkpoint)?;
-            return Ok(checkpoint)
-        }
-        Ok(saved)
-    }
-
-    /// Highest block with execution data committed in the same MDBX transaction as plain state.
-    /// Static files can run ahead of that transaction after an interrupted commit.
-    fn legacy_execution_data_tip(&self) -> ProviderResult<Option<BlockNumber>> {
-        let accounts = self.tx.cursor_read::<tables::AccountChangeSets>()?.last()?.map(|(n, _)| n);
-        let storage = self
-            .tx
-            .cursor_read::<tables::StorageChangeSets>()?
-            .last()?
-            .map(|(key, _)| key.block_number());
-        let receipts = if EitherWriter::receipts_destination(self).is_database() &&
-            let Some((tx, _)) =
-                self.tx.cursor_read::<tables::Receipts<ReceiptTy<N>>>()?.last()?
-        {
-            Some(
-                self.block_by_transaction_id(tx)?
-                    .ok_or(ProviderError::BlockNumberForTransactionIndexNotFound)?,
-            )
-        } else {
-            None
-        };
-        Ok([accounts, storage, receipts].into_iter().flatten().max())
-    }
-
     /// Removes receipts from all transactions starting with provided number (inclusive).
     fn remove_receipts_from(
         &self,
@@ -980,12 +923,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // iterate over block body and remove receipts
         self.remove::<tables::Receipts<ReceiptTy<N>>>(from_tx..)?;
 
-        // Recovery can unwind entire batches above the surviving receipt files.
-        if EitherWriter::receipts_destination(self).is_static_file() &&
-            self.static_file_provider
-                .get_highest_static_file_block(StaticFileSegment::Receipts)
-                .is_some_and(|tip| tip >= last_block)
-        {
+        if EitherWriter::receipts_destination(self).is_static_file() {
             let static_file_receipt_num =
                 self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
 
@@ -3150,26 +3088,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         block: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<ExecutionOutcome<Self::Receipt>> {
-        // Truncation removes everything above `block`, so reject an incomplete execution range.
-        if self.cached_storage_settings().storage_v2 {
-            for segment in
-                [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
-            {
-                if let Some(tip) = self.static_file_provider.get_highest_static_file_block(segment) &&
-                    tip > end
-                {
-                    return Err(ProviderError::other(std::io::Error::other(format!(
-                        "cannot take state through block {end}: {segment} changesets extend to block {tip}"
-                    ))))
-                }
-            }
-        } else if let Some(tip) = self.legacy_execution_data_tip()? &&
-            tip > end
-        {
-            return Err(ProviderError::other(std::io::Error::other(format!(
-                "cannot take state through block {end}: MDBX execution data extends to block {tip}"
-            ))))
-        }
         let range = block + 1..=end;
 
         if range.is_empty() {
@@ -3178,7 +3096,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let start_block_number = *range.start();
 
         // We are not removing block meta as it is used to get block changesets.
-        let block_bodies = self.block_body_indices_range(range.clone())?;
+        let block_bodies = self.block_body_indices_range(range)?;
 
         // get transaction receipts
         let from_transaction_num =
@@ -3186,7 +3104,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let to_transaction_num =
             block_bodies.last().expect("already checked if there are blocks").last_tx_num();
 
-        let storage_range = BlockNumberAddress::range(range.clone());
         let storage_changeset = if let Some(highest_block) = self
             .static_file_provider
             .get_highest_static_file_block(StaticFileSegment::StorageChangeSets) &&
@@ -3198,7 +3115,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             changeset_writer.prune_storage_changesets(block)?;
             changesets
         } else {
-            self.take::<tables::StorageChangeSets>(storage_range)?.into_iter().collect()
+            // Revert every changeset above `block`, including any above `end`.
+            self.take::<tables::StorageChangeSets>(
+                BlockNumberAddress((block + 1, Address::ZERO))..,
+            )?
+            .into_iter()
+            .collect()
         };
 
         // if there are static files for this segment, prune them.
@@ -3218,7 +3140,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         } else {
             // Have to remove from static files if they exist, otherwise remove using `take` for the
             // changeset tables
-            self.take::<tables::AccountChangeSets>(range)?
+            self.take::<tables::AccountChangeSets>(block + 1..)?
         };
 
         let (state, reverts) = if self.cached_storage_settings().use_hashed_state() {
@@ -6313,18 +6235,25 @@ mod tests {
     }
 
     #[test]
-    fn take_state_stops_at_execution_tip() {
+    fn take_state_outcome_stops_at_execution_tip() {
         let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v1());
         let provider = factory.database_provider_rw().unwrap();
+        let tx = provider.tx_ref();
         for block in 0..=3 {
-            provider
-                .tx_ref()
-                .put::<tables::BlockBodyIndices>(
-                    block,
-                    StoredBlockBodyIndices { first_tx_num: 0, tx_count: 0 },
-                )
-                .unwrap();
+            tx.put::<tables::BlockBodyIndices>(
+                block,
+                StoredBlockBodyIndices { first_tx_num: 0, tx_count: 0 },
+            )
+            .unwrap();
         }
+        // State above the execution tip must still be reverted.
+        tx.put::<tables::AccountChangeSets>(
+            3,
+            AccountBeforeTx { address: Address::ZERO, info: None },
+        )
+        .unwrap();
+        tx.put::<tables::PlainAccountState>(Address::ZERO, Account::default()).unwrap();
         let sf = factory.static_file_provider();
         let mut headers = sf.latest_writer(StaticFileSegment::Headers).unwrap();
         for number in 0..=3 {
@@ -6337,79 +6266,6 @@ mod tests {
         let outcome = provider.take_state_above(1, 2).unwrap();
         assert_eq!(outcome.first_block(), 2);
         assert_eq!(outcome.len(), 1);
-    }
-
-    #[test]
-    fn take_state_rejects_changesets_above_execution_tip() {
-        for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
-        {
-            let factory = create_test_provider_factory();
-            factory.set_storage_settings_cache(StorageSettings::v2());
-            let sf = factory.static_file_provider();
-            {
-                let mut writer = sf.latest_writer(segment).unwrap();
-                for block in 0..=3 {
-                    if segment == StaticFileSegment::AccountChangeSets {
-                        writer.append_account_changeset(vec![], block).unwrap();
-                    } else {
-                        writer.append_storage_changeset(vec![], block).unwrap();
-                    }
-                }
-                writer.commit().unwrap();
-            }
-            let provider = factory.database_provider_rw().unwrap();
-            assert_eq!(
-                provider.take_state_above(1, 2).unwrap_err().to_string(),
-                format!(
-                    "cannot take state through block 2: {segment} changesets extend to block 3"
-                )
-            );
-            provider.commit().unwrap();
-            assert_eq!(sf.get_highest_static_file_block(segment), Some(3));
-        }
-    }
-
-    #[test]
-    fn unwind_includes_uncheckpointed_execution() {
-        let factory = create_test_provider_factory()
-            .with_prune_modes(PruneModes { receipts: Some(PruneMode::Full), ..Default::default() });
-        factory.set_storage_settings_cache(StorageSettings::v1());
-        let provider = factory.database_provider_rw().unwrap();
-        let tx = provider.tx_ref();
-        let saved = StageCheckpoint::new(1);
-        provider.save_stage_checkpoint(StageId::Execution, saved).unwrap();
-        assert_eq!(provider.reconcile_execution_unwind_checkpoint(1).unwrap(), saved);
-        tx.put::<tables::AccountChangeSets>(
-            2,
-            AccountBeforeTx { address: Address::ZERO, info: None },
-        )
-        .unwrap();
-        assert_eq!(
-            provider.reconcile_execution_unwind_checkpoint(1).unwrap(),
-            StageCheckpoint::new(2)
-        );
-        tx.put::<tables::StorageChangeSets>(
-            (3, Address::ZERO).into(),
-            StorageEntry { key: B256::ZERO, value: Default::default() },
-        )
-        .unwrap();
-        assert_eq!(
-            provider.reconcile_execution_unwind_checkpoint(1).unwrap(),
-            StageCheckpoint::new(3)
-        );
-        tx.put::<tables::TransactionBlocks>(0, 4).unwrap();
-        tx.put::<tables::Receipts>(0, Default::default()).unwrap();
-        assert_eq!(
-            provider.take_state_above(1, 3).unwrap_err().to_string(),
-            "cannot take state through block 3: MDBX execution data extends to block 4"
-        );
-        assert_eq!(
-            provider.reconcile_execution_unwind_checkpoint(1).unwrap(),
-            StageCheckpoint::new(4)
-        );
-        assert_eq!(
-            provider.get_stage_checkpoint(StageId::Execution).unwrap(),
-            Some(StageCheckpoint::new(4))
-        );
+        assert_eq!(tx.get::<tables::PlainAccountState>(Address::ZERO).unwrap(), None);
     }
 }

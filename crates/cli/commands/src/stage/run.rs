@@ -66,8 +66,7 @@ pub struct Command<C: ChainSpecParser> {
     #[arg(value_enum)]
     stage: StageEnum,
 
-    /// The height to start at. For execution, this must be at or below the current execution
-    /// tip, or exactly at the tip with --skip-unwind.
+    /// The height to start at
     #[arg(long)]
     from: u64,
 
@@ -98,7 +97,7 @@ pub struct Command<C: ChainSpecParser> {
     #[arg(long, short)]
     commit: bool,
 
-    /// Save stage checkpoints. Execution always saves its checkpoint with the committed state.
+    /// Save stage checkpoints
     #[arg(long)]
     checkpoints: bool,
 
@@ -122,10 +121,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 "The stage {} requires overwriting existing static files and must commit, but `--commit` was not provided. Please pass `--commit` and try again.",
                 self.stage.to_string()
             ));
-        }
-
-        if self.stage == StageEnum::Execution && self.from == self.to {
-            return Ok(())
         }
 
         // Raise the fd limit of the process.
@@ -335,33 +330,22 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 ),
                 StageEnum::Hashing => eyre::bail!(HASHING_UNSUPPORTED),
             };
-        // Both pipeline resume and static-file recovery use the checkpoint as the execution tip.
-        let save_checkpoints = self.checkpoints || self.stage == StageEnum::Execution;
-        let mut checkpoint = if self.stage == StageEnum::Execution {
-            provider_rw.reconcile_execution_unwind_checkpoint(self.from)?
-        } else {
-            provider_rw
-                .get_stage_checkpoint(exec_stage.id())?
-                .unwrap_or_default()
-                .with_block_number(self.from)
+        let checkpoint = provider_rw.get_stage_checkpoint(exec_stage.id())?.unwrap_or_default();
+
+        let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
+
+        let mut unwind = UnwindInput {
+            checkpoint: checkpoint.with_block_number(self.to),
+            unwind_to: self.from,
+            bad_block: None,
         };
 
         if !self.skip_unwind {
-            let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
-            let mut unwind = UnwindInput {
-                checkpoint: if self.stage == StageEnum::Execution {
-                    checkpoint
-                } else {
-                    checkpoint.with_block_number(self.to)
-                },
-                unwind_to: self.from,
-                bad_block: None,
-            };
             while unwind.checkpoint.block_number > self.from {
                 let UnwindOutput { checkpoint } = unwind_stage.unwind(&provider_rw, unwind)?;
                 unwind.checkpoint = checkpoint;
 
-                if save_checkpoints {
+                if self.checkpoints {
                     provider_rw.save_stage_checkpoint(unwind_stage.id(), checkpoint)?;
                 }
 
@@ -370,19 +354,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     provider_rw = provider_factory.database_provider_rw()?;
                 }
             }
-            if self.stage == StageEnum::Execution {
-                checkpoint = unwind.checkpoint;
-            }
         }
 
-        eyre::ensure!(
-            checkpoint.block_number == self.from,
-            "cannot start {} at block {}: stage checkpoint is at block {}",
-            self.stage,
-            self.from,
-            checkpoint.block_number
-        );
-        let mut input = ExecInput { target: Some(self.to), checkpoint: Some(checkpoint) };
+        let mut input = ExecInput {
+            target: Some(self.to),
+            checkpoint: Some(checkpoint.with_block_number(self.from)),
+        };
 
         let start = Instant::now();
         info!(target: "reth::cli", stage = %self.stage, "Executing stage");
@@ -392,7 +369,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
             input.checkpoint = Some(checkpoint);
 
-            if save_checkpoints {
+            if self.checkpoints {
                 provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
             }
             if self.commit {

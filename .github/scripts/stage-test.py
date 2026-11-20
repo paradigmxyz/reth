@@ -29,7 +29,7 @@ STAGES = {
 }
 
 
-def run(*args, quiet=False, expected_error=None):
+def run(*args, quiet=False):
     command = [RETH, *map(str, args)]
     print("+", " ".join(command), flush=True)
     try:
@@ -47,10 +47,6 @@ def run(*args, quiet=False, expected_error=None):
             end="", file=sys.stderr, flush=True,
         )
         raise
-    if expected_error is not None:
-        assert result.returncode == 1, (result.returncode, result.stdout, result.stderr)
-        assert result.stderr.splitlines()[:1] == [f"Error: {expected_error}"], result.stderr
-        return result.stdout
     if not quiet or result.returncode:
         print(result.stdout, end="", flush=True)
         print(result.stderr, end="", file=sys.stderr, flush=True)
@@ -124,9 +120,7 @@ def smoke_test(root):
                 run(
                     "stage", "run", stage, *target, "--config", config, *network,
                     "--from", "0", "--to", TIP, "--batch-size", "8",
-                    "--commit", "--skip-unwind",
-                    # Execution must checkpoint its state even without --checkpoints.
-                    *([] if stage == "execution" else ["--checkpoints"]),
+                    "--commit", "--checkpoints", "--skip-unwind",
                 )
                 saved = json.loads(run(
                     "db", *target, "get", "mdbx", "StageCheckpoints", checkpoint,
@@ -157,107 +151,6 @@ def smoke_test(root):
                 print((root / "peer.log").read_text(), end="", flush=True)
 
 
-def test_legacy_execution_replay(root):
-    config = root / "prune.toml"
-    config.write_text(
-        "[prune.segments]\nreceipts = { before = 1 }\n[stages.execution]\nmax_blocks = 1\n"
-    )
-    target = [
-        "--chain", FIXTURE / "genesis.json", "--datadir", root / "legacy",
-        "--storage.v2=false", "--config", config,
-    ]
-    run("import", *target, "--fail-on-invalid-block", FIXTURE / "chain.rlp")
-    run(
-        "stage", "dump", *target, "execution", "--from", TIP - 2, "--to", TIP - 1,
-        "--output-datadir", root / "execution-dump",
-    )
-
-    def checkpoint():
-        return json.loads(run(
-            "db", *target, "get", "mdbx", "StageCheckpoints", "Execution", quiet=True,
-        ))["block_number"]
-
-    def plain_state():
-        return [
-            json.loads(run("db", *target, "list", table, "--json", "--len", "1000", quiet=True))
-            for table in ["PlainAccountState", "PlainStorageState"]
-        ]
-
-    def run_range(start, end):
-        run(
-            "stage", "run", "execution", *target, "--from", start, "--to", end,
-            "--batch-size", "1", "--commit",
-        )
-        assert checkpoint() == end
-
-    run_range(TIP - 3, TIP - 2)
-    expected = plain_state()
-    for start, flags in [
-        (TIP - 1, []), (TIP - 1, ["--skip-unwind"]), (TIP - 3, ["--skip-unwind"]),
-    ]:
-        run(
-            "stage", "run", "execution", *target, "--from", start, "--to", TIP, "--commit",
-            *flags, quiet=True,
-            expected_error=(
-                f"cannot start Execution at block {start}: stage checkpoint is at block {TIP - 2}"
-            ),
-        )
-    assert checkpoint() == TIP - 2 and plain_state() == expected
-    run_range(TIP - 2, TIP)
-    # Older diagnostic runs could leave execution state ahead of the saved checkpoint.
-    run(
-        "db", *target, "stage-checkpoints", "set", "--stage", "execution",
-        "--block-number", TIP - 2, "--clear-stage-unit",
-    )
-    run("stage", "run", "execution", *target, "--from", TIP - 2, "--to", TIP, "--commit")
-    assert plain_state() != expected
-    # A pipeline unwind must also include old writes when the saved checkpoint is below its target.
-    run(
-        "db", *target, "stage-checkpoints", "set", "--stage", "execution",
-        "--block-number", TIP - 3, "--clear-stage-unit",
-    )
-    run("stage", "unwind", *target, "to-block", TIP - 2)
-    assert plain_state() == expected
-    assert checkpoint() == TIP - 2
-
-
-def test_legacy_static_receipt_unwind(root):
-    config = root / "archive.toml"
-    config.write_text("[stages.execution]\nmax_blocks = 1\n")
-    target = [
-        "--chain", FIXTURE / "genesis.json", "--datadir", root / "archive", "--storage.v2=false",
-        "--config", config,
-    ]
-    run("import", *target, "--fail-on-invalid-block", FIXTURE / "chain.rlp")
-    run(
-        "db", *target, "stage-checkpoints", "set", "--stage", "execution",
-        "--block-number", TIP - 2, "--clear-stage-unit",
-    )
-    for height in [TIP - 1, TIP]:
-        run(
-            "stage", "unwind", *target, "to-block", height, quiet=True,
-            expected_error=f"not able to find Receipts static file for block number {TIP - 1}",
-        )
-    saved = json.loads(run(
-        "db", *target, "get", "mdbx", "StageCheckpoints", "Execution", quiet=True,
-    ))
-    assert saved["block_number"] == TIP - 2, saved
-    # An unreachable target must not leave an unwind intent that blocks the valid retry.
-    metadata = json.loads(run(
-        "db", *target, "list", "Metadata", "--json", "--len", "100", quiet=True,
-    ))
-    assert "pipeline_unwind" not in dict(metadata)
-    # Reopen with committed state at TIP and receipts through TIP - 2, as after an interruption.
-    run(
-        "db", *target, "stage-checkpoints", "set", "--stage", "execution",
-        "--block-number", TIP, "--clear-stage-unit",
-    )
-    run("stage", "unwind", *target, "to-block", TIP - 2)
-    run("stage", "run", "execution", *target, "--from", TIP - 3, "--to", TIP - 2, "--commit")
-
-
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="reth-stage-") as directory:
         smoke_test(Path(directory))
-        test_legacy_execution_replay(Path(directory))
-        test_legacy_static_receipt_unwind(Path(directory))

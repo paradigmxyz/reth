@@ -163,25 +163,6 @@ fn stage_help() {
 }
 
 #[test]
-fn empty_execution_stage_run_leaves_datadir_untouched() {
-    let dir = tempfile::tempdir().unwrap();
-    let data = dir.path().join("data");
-    reth_ok(&[
-        "stage",
-        "run",
-        "execution",
-        "--datadir",
-        data.to_str().unwrap(),
-        "--from",
-        "1",
-        "--to",
-        "1",
-        "--commit",
-    ]);
-    assert!(!data.exists());
-}
-
-#[test]
 fn p2p_help() {
     let stdout = reth_ok(&["p2p", "--help"]);
     assert!(stdout.contains("header"), "stdout: {stdout}");

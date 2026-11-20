@@ -1,4 +1,4 @@
-use super::{setup, unwind_hashing_for_dump};
+use super::setup;
 use alloy_primitives::BlockNumber;
 use eyre::Result;
 use reth_db::DatabaseEnv;
@@ -60,8 +60,9 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
     output_db: &DatabaseEnv,
 ) -> eyre::Result<()> {
     let provider = db_tool.provider_factory.database_provider_rw()?;
-    unwind_hashing_for_dump(
-        AccountHashingStage::default(),
+    let mut exec_stage = AccountHashingStage::default();
+
+    exec_stage.unwind(
         &provider,
         UnwindInput {
             unwind_to: from,

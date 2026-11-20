@@ -404,9 +404,6 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
         // Reject unreachable targets before recording intent or committing any stage. Only
         // validate the recorded scope: recovery must not adopt unrelated stages.
-        if unwind.stages.iter().any(|id| id == StageId::Execution.as_str()) {
-            provider_rw.reconcile_execution_unwind_checkpoint(to)?;
-        }
         for stage in &mut self.stages {
             let stage_id = stage.id();
             if unwind.stages.iter().any(|id| id == stage_id.as_str()) {
