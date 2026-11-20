@@ -509,6 +509,11 @@ RPC:
 
           [default: 1]
 
+      --rpc.evmtimeout <DURATION>
+          Wall-clock timeout shared by all blocks in an `eth_simulateV1` request. Accepts seconds or a duration with an `s` or `ms` suffix. Zero disables the timeout
+
+          [default: 5]
+
       --rpc.max-simulate-blocks <BLOCKS_COUNT>
           Maximum number of blocks for `eth_simulateV1` call
 

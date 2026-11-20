@@ -765,6 +765,7 @@ mod tests {
             assert_eq!(actual.max_blocking_io_requests, expected.max_blocking_io_requests);
             assert_eq!(actual.cache_computed_bals, expected.cache_computed_bals);
             assert_eq!(actual.gas_cap, expected.gas_cap);
+            assert_eq!(actual.evm_timeout, expected.evm_timeout);
             assert_eq!(actual.max_simulate_blocks, expected.max_simulate_blocks);
             assert_eq!(
                 actual.compute_state_root_for_eth_simulate,
@@ -794,6 +795,7 @@ mod tests {
             max_blocking_io_requests: 7,
             cache_computed_bals: true,
             gas_cap: 123_456,
+            evm_timeout: Duration::from_millis(250),
             max_simulate_blocks: 7,
             compute_state_root_for_eth_simulate: true,
             eth_proof_window: 42,
@@ -817,6 +819,7 @@ mod tests {
         .max_batch_size(expected.max_batch_size)
         .max_blocking_io_requests(expected.max_blocking_io_requests)
         .gas_cap(expected.gas_cap.into())
+        .evm_timeout(expected.evm_timeout)
         .max_simulate_blocks(expected.max_simulate_blocks)
         .compute_state_root_for_eth_simulate(expected.compute_state_root_for_eth_simulate)
         .eth_proof_window(expected.eth_proof_window)
@@ -1658,6 +1661,40 @@ mod tests {
             let block =
                 EthBlocks::rpc_block(&api, BlockId::number(1), full).await.unwrap().unwrap();
             assert_eq!(block.header.size, Some(U256::from(block_size)));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn simulate_v1_timeout_waiting_for_worker() {
+        let timeout = Duration::from_secs(2);
+        for configured in [timeout, Duration::ZERO] {
+            let provider = MockEthProvider::default();
+            let api = EthApiBuilder::new(
+                provider.clone(),
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(provider.chain_spec()),
+            )
+            .max_blocking_io_requests(1)
+            .evm_timeout(configured)
+            .build();
+            let permit = api.acquire_owned_blocking_io().await.unwrap();
+            let payload = SimulatePayload {
+                block_state_calls: vec![SimBlock::default()],
+                ..Default::default()
+            };
+            let request = EthCall::simulate_v1(&api, payload, None);
+            tokio::pin!(request);
+            assert!(futures::poll!(&mut request).is_pending());
+            tokio::time::advance(timeout).await;
+            if configured.is_zero() {
+                assert!(futures::poll!(&mut request).is_pending());
+            } else {
+                assert!(
+                    matches!(request.await, Err(EthApiError::ExecutionTimedOut(t)) if t == timeout)
+                );
+            }
+            drop(permit);
         }
     }
 

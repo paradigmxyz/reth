@@ -18,7 +18,7 @@ use reth_rpc_eth_types::{
 };
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKING_IO_REQUEST, DEFAULT_MAX_SIMULATE_BLOCKS,
-    DEFAULT_PROOF_PERMITS,
+    DEFAULT_PROOF_PERMITS, DEFAULT_RPC_EVM_TIMEOUT,
 };
 use reth_tasks::{pool::BlockingTaskPool, Runtime};
 use std::{sync::Arc, time::Duration};
@@ -32,6 +32,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     components: N,
     rpc_converter: Rpc,
     gas_cap: GasCap,
+    evm_timeout: Duration,
     max_simulate_blocks: u64,
     compute_state_root_for_eth_simulate: bool,
     eth_proof_window: u64,
@@ -88,6 +89,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             components,
             rpc_converter,
             gas_cap,
+            evm_timeout,
             max_simulate_blocks,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
@@ -113,6 +115,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             components,
             rpc_converter: f(rpc_converter),
             gas_cap,
+            evm_timeout,
             max_simulate_blocks,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
@@ -151,6 +154,7 @@ where
             eth_cache: None,
             gas_oracle: None,
             gas_cap: GasCap::default(),
+            evm_timeout: DEFAULT_RPC_EVM_TIMEOUT,
             max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
             compute_state_root_for_eth_simulate: false,
             eth_proof_window: DEFAULT_ETH_PROOF_WINDOW,
@@ -192,6 +196,7 @@ where
             components,
             rpc_converter: _,
             gas_cap,
+            evm_timeout,
             max_simulate_blocks,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
@@ -217,6 +222,7 @@ where
             components,
             rpc_converter,
             gas_cap,
+            evm_timeout,
             max_simulate_blocks,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
@@ -249,6 +255,7 @@ where
             components,
             rpc_converter,
             gas_cap,
+            evm_timeout,
             max_simulate_blocks,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
@@ -274,6 +281,7 @@ where
             components,
             rpc_converter,
             gas_cap,
+            evm_timeout,
             max_simulate_blocks,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
@@ -329,6 +337,12 @@ where
     /// Sets the gas cap.
     pub const fn gas_cap(mut self, gas_cap: GasCap) -> Self {
         self.gas_cap = gas_cap;
+        self
+    }
+
+    /// Sets the wall-clock timeout for RPC EVM execution. Zero disables the timeout.
+    pub const fn evm_timeout(mut self, timeout: Duration) -> Self {
+        self.evm_timeout = timeout;
         self
     }
 
@@ -533,6 +547,7 @@ where
             eth_cache,
             gas_oracle,
             gas_cap,
+            evm_timeout,
             max_simulate_blocks,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
@@ -584,6 +599,7 @@ where
             cache_computed_bals: eth_state_cache_config.cache_computed_bals ||
                 eth_state_cache_config.prewarm_bals.is_some(),
             gas_cap: gas_cap.into(),
+            evm_timeout,
             max_simulate_blocks,
             compute_state_root_for_eth_simulate,
             eth_proof_window,

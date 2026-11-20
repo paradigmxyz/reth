@@ -52,6 +52,9 @@ pub const DEFAULT_IPC_ENDPOINT: &str = "/tmp/reth.ipc";
 /// The `engine_api` IPC endpoint
 pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = "/tmp/reth_engine_api.ipc";
 
+/// Default wall-clock timeout for RPC EVM execution.
+pub const DEFAULT_RPC_EVM_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// The default limit for blocks count in `eth_simulateV1`.
 pub const DEFAULT_MAX_SIMULATE_BLOCKS: u64 = 256;
 
