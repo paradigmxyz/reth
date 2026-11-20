@@ -155,7 +155,9 @@ def smoke_test(root):
 
 def test_legacy_execution_replay(root):
     config = root / "prune.toml"
-    config.write_text("[prune.segments]\nreceipts = { before = 1 }\n")
+    config.write_text(
+        "[prune.segments]\nreceipts = { before = 1 }\n[stages.execution]\nmax_blocks = 1\n"
+    )
     target = [
         "--chain", FIXTURE / "genesis.json", "--datadir", root / "legacy",
         "--storage.v2=false", "--config", config,
@@ -165,21 +167,42 @@ def test_legacy_execution_replay(root):
         "stage", "dump", *target, "execution", "--from", TIP - 2, "--to", TIP - 1,
         "--output-datadir", root / "execution-dump",
     )
-    for start, end in [(TIP - 3, TIP - 2), (TIP - 2, TIP)]:
+    def checkpoint():
+        return json.loads(run(
+            "db", *target, "get", "mdbx", "StageCheckpoints", "Execution", quiet=True,
+        ))["block_number"]
+
+    def plain_state():
+        return [
+            json.loads(run("db", *target, "list", table, "--json", "--len", "1000", quiet=True))
+            for table in ["PlainAccountState", "PlainStorageState"]
+        ]
+
+    def run_range(start, end):
         run(
             "stage", "run", "execution", *target, "--from", start, "--to", end,
             "--batch-size", "1", "--commit",
         )
-        saved = json.loads(run(
-            "db", *target, "get", "mdbx", "StageCheckpoints", "Execution", quiet=True,
-        ))
-        assert saved["block_number"] == end, saved
+        assert checkpoint() == end
+
+    run_range(TIP - 3, TIP - 2)
+    expected = plain_state()
+    run_range(TIP - 2, TIP)
     # Older diagnostic runs could leave execution state ahead of the saved checkpoint.
     run(
         "db", *target, "stage-checkpoints", "set", "--stage", "execution",
         "--block-number", TIP - 2, "--clear-stage-unit",
     )
     run("stage", "run", "execution", *target, "--from", TIP - 2, "--to", TIP, "--commit")
+    assert plain_state() != expected
+    # A pipeline unwind must also include old writes when the saved checkpoint is below its target.
+    run(
+        "db", *target, "stage-checkpoints", "set", "--stage", "execution",
+        "--block-number", TIP - 3, "--clear-stage-unit",
+    )
+    run("stage", "unwind", *target, "to-block", TIP - 2)
+    assert plain_state() == expected
+    assert checkpoint() == TIP - 2
 
 
 if __name__ == "__main__":

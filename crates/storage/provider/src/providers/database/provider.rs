@@ -914,6 +914,45 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         Ok(())
     }
 
+    /// Returns the execution checkpoint to use for unwind. On legacy storage, older diagnostic
+    /// runs could commit execution data to MDBX without saving its checkpoint. If that data is
+    /// ahead, saves its height in the current transaction and drops the stale gas progress.
+    pub fn reconcile_execution_unwind_checkpoint(&self) -> ProviderResult<StageCheckpoint> {
+        let saved = self.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default();
+        if !self.cached_storage_settings().is_v2() &&
+            let Some(tip) = self.legacy_execution_data_tip()? &&
+            tip > saved.block_number
+        {
+            let checkpoint = StageCheckpoint::new(tip);
+            self.save_stage_checkpoint(StageId::Execution, checkpoint)?;
+            return Ok(checkpoint)
+        }
+        Ok(saved)
+    }
+
+    /// Highest block with execution data committed in the same MDBX transaction as plain state.
+    /// Static files can run ahead of that transaction after an interrupted commit.
+    fn legacy_execution_data_tip(&self) -> ProviderResult<Option<BlockNumber>> {
+        let accounts = self.tx.cursor_read::<tables::AccountChangeSets>()?.last()?.map(|(n, _)| n);
+        let storage = self
+            .tx
+            .cursor_read::<tables::StorageChangeSets>()?
+            .last()?
+            .map(|(key, _)| key.block_number());
+        let receipts = if EitherWriter::receipts_destination(self).is_database() &&
+            let Some((tx, _)) =
+                self.tx.cursor_read::<tables::Receipts<ReceiptTy<N>>>()?.last()?
+        {
+            Some(
+                self.block_by_transaction_id(tx)?
+                    .ok_or(ProviderError::BlockNumberForTransactionIndexNotFound)?,
+            )
+        } else {
+            None
+        };
+        Ok([accounts, storage, receipts].into_iter().flatten().max())
+    }
+
     /// Removes receipts from all transactions starting with provided number (inclusive).
     fn remove_receipts_from(
         &self,
@@ -3106,6 +3145,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     ))))
                 }
             }
+        } else if let Some(tip) = self.legacy_execution_data_tip()? &&
+            tip > end
+        {
+            return Err(ProviderError::other(std::io::Error::other(format!(
+                "cannot take state through block {end}: MDBX execution data extends to block {tip}"
+            ))))
         }
         let range = block + 1..=end;
 
@@ -6304,5 +6349,49 @@ mod tests {
             provider.commit().unwrap();
             assert_eq!(sf.get_highest_static_file_block(segment), Some(3));
         }
+    }
+
+    #[test]
+    fn unwind_includes_uncheckpointed_execution() {
+        let factory = create_test_provider_factory()
+            .with_prune_modes(PruneModes { receipts: Some(PruneMode::Full), ..Default::default() });
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        let provider = factory.database_provider_rw().unwrap();
+        let tx = provider.tx_ref();
+        let saved = StageCheckpoint::new(1);
+        provider.save_stage_checkpoint(StageId::Execution, saved).unwrap();
+        assert_eq!(provider.reconcile_execution_unwind_checkpoint().unwrap(), saved);
+        tx.put::<tables::AccountChangeSets>(
+            2,
+            AccountBeforeTx { address: Address::ZERO, info: None },
+        )
+        .unwrap();
+        assert_eq!(
+            provider.reconcile_execution_unwind_checkpoint().unwrap(),
+            StageCheckpoint::new(2)
+        );
+        tx.put::<tables::StorageChangeSets>(
+            (3, Address::ZERO).into(),
+            StorageEntry { key: B256::ZERO, value: Default::default() },
+        )
+        .unwrap();
+        assert_eq!(
+            provider.reconcile_execution_unwind_checkpoint().unwrap(),
+            StageCheckpoint::new(3)
+        );
+        tx.put::<tables::TransactionBlocks>(0, 4).unwrap();
+        tx.put::<tables::Receipts>(0, Default::default()).unwrap();
+        assert_eq!(
+            provider.take_state_above(1, 3).unwrap_err().to_string(),
+            "cannot take state through block 3: MDBX execution data extends to block 4"
+        );
+        assert_eq!(
+            provider.reconcile_execution_unwind_checkpoint().unwrap(),
+            StageCheckpoint::new(4)
+        );
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Execution).unwrap(),
+            Some(StageCheckpoint::new(4))
+        );
     }
 }
