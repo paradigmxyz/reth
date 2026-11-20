@@ -218,11 +218,14 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         .with_minimum_pruning_distance(config.prune.minimum_pruning_distance)
         .with_bal_store(bal_store);
 
-        // Check for consistency between database and static files.
-        if !access.skips_consistency_check() &&
-            let Some(unwind_target) =
-                factory.static_file_provider().check_consistency(&factory.provider()?)?
-        {
+        // Check for consistency between database and static files. The check's read transaction
+        // is dropped before the unwind below, whose commits wait for older readers.
+        let unwind_target = if access.skips_consistency_check() {
+            None
+        } else {
+            factory.static_file_provider().check_consistency(&factory.provider()?)?
+        };
+        if let Some(unwind_target) = unwind_target {
             if factory.db_ref().is_read_only()? {
                 warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
                 return Ok(factory)
