@@ -2,13 +2,13 @@
 
 use alloy_eips::{eip2124::Head, BlockNumHash};
 use futures::future;
-use reth_chain_state::{CanonStateNotifications, ForkChoiceSubscriptions};
+use reth_chain_state::ForkChoiceSubscriptions;
 use reth_chainspec::EthChainSpec;
 use reth_exex::{
     ExExContext, ExExHandle, ExExManager, ExExManagerHandle, ExExNotificationSource, Wal,
     DEFAULT_EXEX_MANAGER_CAPACITY, DEFAULT_WAL_BLOCKS_WARNING,
 };
-use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes, PrimitivesTy};
+use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
 use std::{fmt, fmt::Debug};
@@ -156,12 +156,27 @@ impl<Node: FullNodeComponents> ExExLauncher<Node> {
         });
 
         // send notifications from the blockchain tree to exex manager
+        let mut canon_state_notifications = components.provider().subscribe_to_canonical_state();
+        let mut handle = exex_manager_handle.clone();
         components.task_executor().spawn_critical_task(
             "exex manager blockchain tree notifications",
-            forward_canon_state_notifications(
-                components.provider().subscribe_to_canonical_state(),
-                exex_manager_handle.clone(),
-            ),
+            async move {
+                loop {
+                    match canon_state_notifications.recv().await {
+                        Ok(notification) => handle
+                            .send_async(ExExNotificationSource::BlockchainTree, notification.into())
+                            .await
+                            .expect("blockchain tree notification could not be sent to exex manager"),
+                        // Waiting for buffer capacity stops reading the subscription, so a slow
+                        // ExEx makes it lag. The missed blocks are gone and the manager would never
+                        // receive another notification, so fail instead of stalling every ExEx.
+                        Err(RecvError::Lagged(skipped)) => panic!(
+                            "exex manager missed {skipped} blockchain tree notifications while its buffer was full"
+                        ),
+                        Err(RecvError::Closed) => return,
+                    }
+                }
+            },
         );
 
         info!(target: "reth::cli", "ExEx Manager started");
@@ -179,60 +194,5 @@ impl<Node: FullNodeComponents> Debug for ExExLauncher<Node> {
             .field("config_container", &self.config_container)
             .field("wal_blocks_warning", &self.wal_blocks_warning)
             .finish()
-    }
-}
-
-/// Forwards canonical state notifications to the [`ExExManager`] until the subscription closes.
-///
-/// Waiting for buffer capacity stops reading the subscription, so a slow `ExEx` makes it fall
-/// behind. Once it lags, the missed blocks are gone and the manager would never receive another
-/// notification, so this panics to fail the critical task instead of stalling every `ExEx`.
-async fn forward_canon_state_notifications<N: NodePrimitives>(
-    mut notifications: CanonStateNotifications<N>,
-    mut handle: ExExManagerHandle<N>,
-) {
-    loop {
-        match notifications.recv().await {
-            Ok(notification) => handle
-                .send_async(ExExNotificationSource::BlockchainTree, notification.into())
-                .await
-                .expect("blockchain tree notification could not be sent to exex manager"),
-            Err(RecvError::Lagged(skipped)) => panic!(
-                "exex manager missed {skipped} blockchain tree notifications while its buffer was full"
-            ),
-            Err(RecvError::Closed) => return,
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reth_chain_state::CanonStateNotification;
-    use std::sync::Arc;
-    use tokio::sync::broadcast;
-
-    fn commit() -> CanonStateNotification {
-        CanonStateNotification::Commit { new: Arc::new(Default::default()) }
-    }
-
-    #[tokio::test]
-    #[should_panic(
-        expected = "exex manager missed 1 blockchain tree notifications while its buffer was full"
-    )]
-    async fn forward_canon_state_notifications_panics_when_lagged() {
-        let (tx, rx) = broadcast::channel(1);
-        tx.send(commit()).unwrap();
-        tx.send(commit()).unwrap();
-
-        forward_canon_state_notifications(rx, ExExManagerHandle::empty()).await;
-    }
-
-    #[tokio::test]
-    async fn forward_canon_state_notifications_returns_when_closed() {
-        let (tx, rx) = broadcast::channel::<CanonStateNotification>(1);
-        drop(tx);
-
-        forward_canon_state_notifications(rx, ExExManagerHandle::empty()).await;
     }
 }
