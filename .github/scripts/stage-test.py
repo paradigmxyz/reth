@@ -169,7 +169,17 @@ def test_startup_heal(root):
     assert saved["block_number"] == TIP - 2, saved
 
 
+def test_execution_dump(root):
+    target = ["--chain", FIXTURE / "genesis.json", "--datadir", root / "dump"]
+    run("import", *target, "--fail-on-invalid-block", FIXTURE / "chain.rlp")
+    run(
+        "stage", "dump", *target, "execution", "--from", TIP - 2, "--to", TIP - 1,
+        "--output-datadir", root / "execution-dump",
+    )
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="reth-stage-") as directory:
         smoke_test(Path(directory))
         test_startup_heal(Path(directory))
+        test_execution_dump(Path(directory))
