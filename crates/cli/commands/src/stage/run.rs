@@ -123,10 +123,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             ));
         }
 
-        // Raise the fd limit of the process.
-        // Does not do anything on windows.
-        let _ = fdlimit::raise_fd_limit();
-
         let runtime = ctx.task_executor.clone();
         let Environment { provider_factory, config, data_dir } =
             self.env.init::<N>(AccessRights::RW, ctx.task_executor.clone())?;
