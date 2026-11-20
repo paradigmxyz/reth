@@ -161,6 +161,10 @@ def test_legacy_execution_replay(root):
         "--storage.v2=false", "--config", config,
     ]
     run("import", *target, "--fail-on-invalid-block", FIXTURE / "chain.rlp")
+    run(
+        "stage", "dump", *target, "execution", "--from", TIP - 2, "--to", TIP - 1,
+        "--output-datadir", root / "execution-dump",
+    )
     for start, end in [(TIP - 3, TIP - 2), (TIP - 2, TIP)]:
         run(
             "stage", "run", "execution", *target, "--from", start, "--to", end,

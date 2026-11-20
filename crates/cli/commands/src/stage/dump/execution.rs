@@ -83,13 +83,6 @@ fn import_tables_with_range<N: ProviderNodeTypes>(
         )
     })??;
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::BlockBodyIndices, _>(
-            &db_tool.provider_factory.db_ref().tx()?,
-            Some(from),
-            to,
-        )
-    })??;
-    output_db.update(|tx| {
         tx.import_table_with_range::<tables::BlockOmmers<HeaderTy<N>>, _>(
             &db_tool.provider_factory.db_ref().tx()?,
             Some(from),
