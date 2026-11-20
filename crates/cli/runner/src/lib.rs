@@ -251,7 +251,8 @@ pub struct CliRunnerConfig {
     /// Timeout for graceful shutdown of tasks.
     ///
     /// After the command completes, this is the maximum time to wait for spawned tasks
-    /// to finish before forcefully terminating them.
+    /// to finish before forcefully terminating them. Tasks spawned with
+    /// [`TaskExecutor::spawn_critical_with_untimed_graceful_shutdown_signal`] are awaited past it.
     pub graceful_shutdown_timeout: Duration,
     /// Whether the runner stops a command when the process receives `SIGINT` or `SIGTERM`.
     ///
