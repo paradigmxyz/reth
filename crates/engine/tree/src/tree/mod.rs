@@ -10,7 +10,9 @@ use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus, PayloadStatusEnum};
 use error::InsertBlockFatalError;
 use payload_build::PayloadBuildTracker;
-use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
+use reth_chain_state::{
+    CanonicalInMemoryState, CanonicalInMemoryStateWriter, ExecutedBlock, ExecutionTimingStats,
+};
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::{
     BeaconEngineMessage, ConsensusEngineEvent, ExecutionPayload, ForkchoiceStateTracker,
@@ -283,6 +285,8 @@ where
     /// Keeps track of the state of the canonical chain that isn't persisted yet.
     /// This is intended to be accessed from external sources, such as rpc.
     canonical_in_memory_state: CanonicalInMemoryState<N>,
+    /// Changes the executed blocks that `canonical_in_memory_state` tracks.
+    canonical_in_memory_state_writer: CanonicalInMemoryStateWriter<N>,
     /// Handle to the payload builder that will receive payload attributes for valid forkchoice
     /// updates
     payload_builder: PayloadBuilderHandle<T>,
@@ -323,6 +327,7 @@ where
             .field("persistence_state", &self.persistence_state)
             .field("backfill_sync_state", &self.backfill_sync_state)
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
+            .field("canonical_in_memory_state_writer", &self.canonical_in_memory_state_writer)
             .field("payload_builder", &self.payload_builder)
             .field("config", &self.config)
             .field("metrics", &self.metrics)
@@ -387,6 +392,9 @@ where
             persistence_state,
             backfill_sync_state: BackfillSyncState::Idle,
             state,
+            canonical_in_memory_state_writer: CanonicalInMemoryStateWriter::new(
+                canonical_in_memory_state.clone(),
+            ),
             canonical_in_memory_state,
             payload_builder,
             config,
@@ -703,9 +711,9 @@ where
 
                         if is_pending {
                             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
-                            self.canonical_in_memory_state.set_pending_block(block.clone());
+                            self.canonical_in_memory_state_writer.set_pending_block(block.clone());
                         } else {
-                            self.canonical_in_memory_state.insert_executed(block.clone());
+                            self.canonical_in_memory_state_writer.insert_executed(block.clone());
                         }
                         self.state
                             .tree_state

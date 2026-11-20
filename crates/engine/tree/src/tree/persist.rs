@@ -396,7 +396,7 @@ where
         // Trims the canonical chain to the state/trie frontier and prunes the blocks that are not
         // canonical and conflict with the finalized block. If the finalized block number could not
         // be fetched, the canonical chain is still trimmed and the error is returned afterwards.
-        self.canonical_in_memory_state.on_blocks_persisted(
+        self.canonical_in_memory_state_writer.on_blocks_persisted(
             self.persistence_state.last_persisted_block,
             in_memory_persisted_block,
             finalized.as_ref().copied().unwrap_or_default(),

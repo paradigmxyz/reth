@@ -182,7 +182,7 @@ where
     /// Handles chain unwind scenarios by collecting blocks to remove and performing an unwind back
     /// to the canonical header
     fn handle_canonical_chain_unwind(
-        &self,
+        &mut self,
         current_head_number: u64,
         canonical_header: &SealedHeader<N::BlockHeader>,
     ) -> ProviderResult<()> {
@@ -235,7 +235,7 @@ where
 
     /// Applies the canonical ancestor block via a reorg operation.
     fn apply_canonical_ancestor_via_reorg(
-        &self,
+        &mut self,
         canonical_header: &SealedHeader<N::BlockHeader>,
         old_blocks: Vec<ExecutedBlock<N>>,
     ) -> ProviderResult<()> {
@@ -245,7 +245,7 @@ where
         // Load the canonical ancestor's block
         let executed_block = self.canonical_block_by_hash(new_head_hash)?;
         // Perform the reorg to properly handle the unwind
-        self.canonical_in_memory_state
+        self.canonical_in_memory_state_writer
             .update_chain(NewCanonicalChain::Reorg { new: vec![executed_block], old: old_blocks });
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
@@ -265,7 +265,7 @@ where
 
     /// Handles chain advance or same height scenarios.
     fn handle_chain_advance_or_same_height(
-        &self,
+        &mut self,
         canonical_header: &SealedHeader<N::BlockHeader>,
     ) -> ProviderResult<()> {
         // Load the block into memory if it's not already present
@@ -278,7 +278,11 @@ where
     }
 
     /// Ensures a block is loaded into memory if not already present.
-    fn ensure_block_in_memory(&self, block_number: u64, block_hash: B256) -> ProviderResult<()> {
+    fn ensure_block_in_memory(
+        &mut self,
+        block_number: u64,
+        block_hash: B256,
+    ) -> ProviderResult<()> {
         // Check if block is already in memory
         if self.canonical_in_memory_state.state_by_number(block_number).is_some() {
             return Ok(());
@@ -286,7 +290,7 @@ where
 
         // Load the block from storage
         let executed_block = self.canonical_block_by_hash(block_hash)?;
-        self.canonical_in_memory_state
+        self.canonical_in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: vec![executed_block] });
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
@@ -432,7 +436,7 @@ where
 
         // update the tracked in-memory state with the new chain, which also tracks the blocks of a
         // reorg that are missing from it.
-        self.canonical_in_memory_state.update_chain(chain_update);
+        self.canonical_in_memory_state_writer.update_chain(chain_update);
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
         self.canonical_in_memory_state.set_canonical_head(tip.clone());
         self.payload_validator.on_canonical_head_changed(tip.hash(), &self.state);

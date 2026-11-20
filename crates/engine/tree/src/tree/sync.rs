@@ -133,12 +133,12 @@ where
             // height is the new canonical block.
             self.state.set_pending_sparse_trie_prune(false);
             self.state.tree_state.set_canonical_head(backfill_num_hash);
-            self.canonical_in_memory_state.clear_state();
+            self.canonical_in_memory_state_writer.clear_state();
         } else {
             // The in-memory state drops the blocks up to the backfill height and the blocks that
             // conflict with the backfill block. The other executed blocks stay in it, but none of
             // them is canonical.
-            self.canonical_in_memory_state.on_backfill_finished(
+            self.canonical_in_memory_state_writer.on_backfill_finished(
                 self.persistence_state.last_persisted_block.hash,
                 backfill_num_hash,
             );
