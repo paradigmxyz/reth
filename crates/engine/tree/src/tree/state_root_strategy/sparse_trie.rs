@@ -2128,36 +2128,36 @@ mod tests {
     #[test]
     fn storage_job_panics_are_resumed_on_the_task() {
         reth_concurrency::sync::Runtime::new().run(|| {
-        let runtime = Runtime::test();
-        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
-        let address = B256::repeat_byte(0x11);
-        let StorageTrieState::Idle(work) = task.storage_trie_state_mut(address) else {
-            unreachable!()
-        };
-        work.queue_proofs(&mut vec![ProofTrieNodeV2 {
-            path: Nibbles::default(),
-            node: TrieNodeV2::Branch(BranchNodeV2 {
-                state_mask: TrieMask::from(1),
-                ..Default::default()
-            }),
-            masks: None,
-        }]);
-        let work = check_out_storage(&mut task, address);
-        task.spawn_storage_jobs(vec![StorageTrieJob { address, work }]);
+            let runtime = Runtime::test();
+            let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
+            let address = B256::repeat_byte(0x11);
+            let StorageTrieState::Idle(work) = task.storage_trie_state_mut(address) else {
+                unreachable!()
+            };
+            work.queue_proofs(&mut vec![ProofTrieNodeV2 {
+                path: Nibbles::default(),
+                node: TrieNodeV2::Branch(BranchNodeV2 {
+                    state_mask: TrieMask::from(1),
+                    ..Default::default()
+                }),
+                masks: None,
+            }]);
+            let work = check_out_storage(&mut task, address);
+            task.spawn_storage_jobs(vec![StorageTrieJob { address, work }]);
 
-        let message = receive_storage_job(&task);
-        assert!(
-            matches!(&message, StorageJobMessage::Panicked { address: returned, .. } if *returned == address)
-        );
-        let panic = panic::catch_unwind(AssertUnwindSafe(|| task.on_storage_job_message(message)));
-        assert!(panic.is_err());
-        assert_eq!(task.storage_in_flight, 0);
-        assert!(!task.storage.contains_key(&address));
+            let message = receive_storage_job(&task);
+            assert!(
+                matches!(&message, StorageJobMessage::Panicked { address: returned, .. } if *returned == address)
+            );
+            let panic = panic::catch_unwind(AssertUnwindSafe(|| task.on_storage_job_message(message)));
+            assert!(panic.is_err());
+            assert_eq!(task.storage_in_flight, 0);
+            assert!(!task.storage.contains_key(&address));
 
-        drop(updates_tx);
-        drop(task);
-        drain_sparse_trie_tasks(&runtime);
-    });
+            drop(updates_tx);
+            drop(task);
+            drain_sparse_trie_tasks(&runtime);
+        });
     }
 
     #[test]
