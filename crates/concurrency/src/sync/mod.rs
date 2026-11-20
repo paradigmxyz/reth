@@ -14,7 +14,10 @@ pub use std::{sync::*, thread_local};
 #[cfg(feature = "fuzz")]
 pub use shuttle::thread_local;
 #[cfg(feature = "fuzz")]
-pub use shuttle_sync::sync::*;
+pub use shuttle_sync::sync::{
+    atomic, Arc, Barrier, BarrierWaitResult, LockResult, Once, OnceState, PoisonError, RwLock,
+    RwLockReadGuard, RwLockWriteGuard, TryLockError, TryLockResult, Weak,
+};
 
 #[cfg(feature = "std")]
 pub mod channel;
@@ -32,6 +35,19 @@ pub mod time;
 
 #[cfg(feature = "fuzz")]
 mod deterministic;
+
+#[cfg(feature = "fuzz")]
+mod condvar;
+#[cfg(feature = "fuzz")]
+pub use condvar::{Condvar, WaitTimeoutResult};
+
+#[cfg(feature = "fuzz")]
+mod mutex;
+#[cfg(feature = "fuzz")]
+pub use mutex::{Mutex, MutexGuard};
+
+#[cfg(feature = "fuzz")]
+pub use channel::mpsc;
 
 #[cfg(feature = "fuzz")]
 mod once;
@@ -69,6 +85,10 @@ pub mod rayon {
 }
 
 /// Native non-poisoning locks, or their Shuttle equivalents under `fuzz`.
+///
+/// Shuttle's `RwLock` currently queues readers behind pending writers even when an
+/// upgradable reader prevents that writer from acquiring the lock. Native `parking_lot`
+/// admits readers in that situation, so simulations of this pattern are unsupported.
 #[cfg(feature = "std")]
 pub mod parking_lot {
     #[cfg(not(feature = "fuzz"))]

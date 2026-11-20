@@ -1,5 +1,7 @@
 //! Selected-channel ownership and disconnection regressions.
 
+#![cfg(feature = "std")]
+
 use reth_concurrency::sync::{channel, thread, Runtime};
 
 #[test]

@@ -12,9 +12,7 @@ mod deterministic {
     use std::{
         cmp::Ordering,
         collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet, LinkedList, VecDeque},
-        iter::{
-            self, once_with, Chain, Enumerate, Filter, FilterMap, OnceWith, Skip, Sum, Take, Zip,
-        },
+        iter::{self, once_with, Enumerate, Filter, FilterMap, OnceWith, Skip, Sum, Take, Zip},
         ops::{Range, RangeInclusive},
     };
 
@@ -69,6 +67,30 @@ mod deterministic {
     into_parallel!([T] VecDeque<T>);
     into_parallel!([T] LinkedList<T>);
     into_parallel!([T] BinaryHeap<T>);
+
+    /// A serial concatenation that retains exact lengths when both inputs have them.
+    #[derive(Debug, Clone)]
+    pub struct Chain<TLeft, TRight>(iter::Chain<TLeft, TRight>);
+
+    impl<TLeft: Iterator, TRight: Iterator<Item = TLeft::Item>> Iterator for Chain<TLeft, TRight> {
+        type Item = TLeft::Item;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            self.0.next()
+        }
+
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            self.0.size_hint()
+        }
+    }
+
+    impl<TLeft: ExactSizeIterator, TRight: ExactSizeIterator<Item = TLeft::Item>> ExactSizeIterator
+        for Chain<TLeft, TRight>
+    {
+        fn len(&self) -> usize {
+            self.0.size_hint().1.expect("indexed chain length fits usize")
+        }
+    }
 
     /// A lazy map adapter retaining the source compute iterator's indexed guarantees.
     pub type Map<TIterator, TMap> = Serial<iter::Map<<TIterator as ParallelIterator>::Inner, TMap>>;
@@ -270,7 +292,7 @@ mod deterministic {
             self,
             other: T,
         ) -> Serial<Chain<Self::Inner, <T::Iter as ParallelIterator>::Inner>> {
-            Serial(self.into_serial().chain(other.into_par_iter().into_serial()))
+            Serial(Chain(self.into_serial().chain(other.into_par_iter().into_serial())))
         }
     }
     impl<TIterator: Iterator + Send> ParallelIterator for Serial<TIterator>
