@@ -1,7 +1,9 @@
 //! The ECIES Stream implementation which wraps over [`AsyncRead`] and [`AsyncWrite`].
 
 use crate::{
-    codec::ECIESCodec, error::ECIESErrorImpl, ECIESError, EgressECIESValue, IngressECIESValue,
+    codec::{ECIESCodec, INITIAL_BUFFER_CAPACITY, MAX_RETAINED_BUFFER_CAPACITY},
+    error::ECIESErrorImpl,
+    ECIESError, EgressECIESValue, IngressECIESValue,
 };
 use alloy_primitives::{
     bytes::{Bytes, BytesMut},
@@ -31,8 +33,8 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 ///
 /// `RLPx` callers queue batches of messages (e.g. transaction broadcasts) and drive one flush per
 /// batch; the 8KiB default splits such a batch into one write syscall per few messages. A larger
-/// boundary batches them into fewer, larger writes. Once grown, the write buffer's capacity is
-/// retained for the connection's lifetime, so this also bounds the resident write buffer per
+/// boundary batches them into fewer, larger writes. A flush keeps the grown write buffer up to
+/// 256KiB, so this boundary plus one gossip frame also bounds the resident write buffer per
 /// connection.
 pub const DEFAULT_BACKPRESSURE_BOUNDARY: usize = 64 * 1024;
 
@@ -145,6 +147,8 @@ impl<Io> ECIESStream<Io> {
     ///
     /// A larger boundary batches more frames into a single write syscall when many messages are
     /// sent back to back, at the cost of buffering more encrypted data in memory per connection.
+    /// A flush releases a write buffer that grew past 256KiB, so with a boundary near or above
+    /// that size every large batch reallocates the buffer.
     pub fn set_backpressure_boundary(&mut self, boundary: usize) {
         self.stream.set_backpressure_boundary(boundary);
     }
@@ -183,7 +187,16 @@ where
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().stream.poll_flush(cx)
+        let mut stream = self.project().stream;
+        ready!(stream.as_mut().poll_flush(cx))?;
+
+        // A drained buffer keeps its whole allocation, and `try_reclaim` checks without
+        // allocating whether that allocation is larger than the retain limit.
+        let buf = stream.write_buffer_mut();
+        if buf.is_empty() && buf.try_reclaim(MAX_RETAINED_BUFFER_CAPACITY + 1) {
+            *buf = BytesMut::with_capacity(INITIAL_BUFFER_CAPACITY);
+        }
+        Poll::Ready(Ok(()))
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -290,5 +303,53 @@ mod tests {
             ECIESErrorImpl::FrameTooLarge { size: MAX_FRAME_SIZE + 1, max_size: MAX_FRAME_SIZE }
                 .to_string()
         );
+    }
+
+    /// Returns a connected client and server stream over TCP.
+    async fn connected_pair() -> (ECIESStream<TcpStream>, ECIESStream<TcpStream>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_key = SecretKey::new(&mut rand::rng());
+
+        let handle = tokio::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            ECIESStream::incoming(incoming, server_key).await.unwrap()
+        });
+
+        let server_id = pk2id(&server_key.public_key());
+        let outgoing = TcpStream::connect(addr).await.unwrap();
+        let client = ECIESStream::connect(outgoing, SecretKey::new(&mut rand::rng()), server_id)
+            .await
+            .unwrap();
+        (client, handle.await.unwrap())
+    }
+
+    #[tokio::test]
+    async fn releases_buffers_after_large_frame() {
+        let (mut client, mut server) = connected_pair().await;
+        let large = Bytes::from(vec![1; 2 << 20]);
+        let small = Bytes::from_static(&[2; 200]);
+        let messages = [small.clone(), large, small.clone(), small.clone(), small];
+
+        let expected = messages.clone();
+        let reader = tokio::spawn(async move {
+            for message in expected {
+                assert_eq!(server.next().await.unwrap().unwrap(), message);
+            }
+            server
+        });
+        for message in messages {
+            client.feed(message).await.unwrap();
+        }
+        client.flush().await.unwrap();
+        let mut server = reader.await.unwrap();
+
+        // Neither buffer can reclaim more than the retain limit without allocating.
+        let write_buffer = client.stream.write_buffer_mut();
+        assert!(write_buffer.is_empty());
+        assert!(!write_buffer.try_reclaim(MAX_RETAINED_BUFFER_CAPACITY + 1));
+        let read_buffer = server.stream.read_buffer_mut();
+        assert!(read_buffer.is_empty());
+        assert!(!read_buffer.try_reclaim(MAX_RETAINED_BUFFER_CAPACITY + 1));
     }
 }
