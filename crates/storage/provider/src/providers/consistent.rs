@@ -1393,7 +1393,7 @@ mod tests {
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{
-        test_utils::TestBlockBuilder, CanonicalInMemoryStateWriter, ChainInfoHeaders,
+        test_utils::{canonical_in_memory_state_writer, TestBlockBuilder},
         ExecutedBlock, InMemoryState, NewCanonicalChain,
     };
     use reth_db_api::{
@@ -1425,18 +1425,6 @@ mod tests {
     };
 
     const TEST_BLOCKS_COUNT: usize = 5;
-
-    /// Creates the writer of a canonical state without blocks.
-    fn empty_canonical_state_writer() -> CanonicalInMemoryStateWriter {
-        CanonicalInMemoryStateWriter::new(
-            ChainInfoHeaders {
-                canonical_head: SealedHeader::default(),
-                safe: None,
-                finalized: None,
-            },
-            InMemoryState::default(),
-        )
-    }
 
     fn random_blocks(
         rng: &mut impl Rng,
@@ -2104,7 +2092,7 @@ mod tests {
         provider_rw.save_prune_checkpoint(PruneSegment::AccountHistory, partial_genesis)?;
         provider_rw.commit()?;
 
-        let mut writer = empty_canonical_state_writer();
+        let mut writer = canonical_in_memory_state_writer(InMemoryState::default());
         writer.update_chain(NewCanonicalChain::Commit {
             new: vec![TestBlockBuilder::eth().get_executed_block_with_number(1, B256::ZERO)],
         });
@@ -2166,7 +2154,9 @@ mod tests {
             .is_empty());
         let provider = ConsistentProvider::new(
             factory,
-            empty_canonical_state_writer().canonical_in_memory_state().clone(),
+            canonical_in_memory_state_writer(InMemoryState::default())
+                .canonical_in_memory_state()
+                .clone(),
         )?;
         assert_eq!(provider.account_changesets_range(u64::MAX..=u64::MAX)?, [(u64::MAX, account)]);
         assert_eq!(
@@ -2211,7 +2201,9 @@ mod tests {
 
         let provider = ConsistentProvider::new(
             factory.clone(),
-            empty_canonical_state_writer().canonical_in_memory_state().clone(),
+            canonical_in_memory_state_writer(InMemoryState::default())
+                .canonical_in_memory_state()
+                .clone(),
         )?;
         assert_eq!(
             provider.account_changesets_range(first..)?,

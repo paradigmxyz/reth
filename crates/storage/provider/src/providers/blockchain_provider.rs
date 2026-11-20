@@ -86,6 +86,10 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
 impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// Creates a provider like [`Self::new_with_writer`], without the writer of its canonical
     /// in-memory state.
+    ///
+    /// Nothing can change the chain info of the returned provider or send its notifications: its
+    /// canonical head and its safe, finalized and persisted blocks stay the ones read from the
+    /// database. Its in-memory blocks are those of `storage`, and change with them.
     pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
         Self::new_with_writer(storage).map(|(provider, _)| provider)
     }
@@ -1827,8 +1831,13 @@ mod tests {
             Some(canonical.hash())
         );
 
-        // Once the fork is dropped, its hash is unknown again.
-        writer.clear_state();
+        // Once the canonical block at its height is persisted and finalized, the fork is dropped
+        // and its hash is unknown again.
+        writer.on_blocks_persisted(
+            canonical.num_hash(),
+            canonical.num_hash(),
+            Some(canonical.num_hash()),
+        );
         assert_eq!(provider.block(fork_hash.into())?, None);
         assert_eq!(provider.get_bals_by_hashes(&[fork_hash])?, vec![None]);
 

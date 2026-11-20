@@ -24,7 +24,7 @@ use alloy_rpc_types_trace::geth::{
     CallConfig, ChainBlockTraceResult, GethDebugTracingOptions, GethTrace,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use reth_chain_state::{ExecutedBlock, InMemoryState};
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{
     sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
     EthChainSpec, EthereumHardfork, SEPOLIA,
@@ -851,7 +851,8 @@ async fn test_eth_config() -> eyre::Result<()> {
 #[tokio::test]
 async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
     // eth_config reads the canonical header, and a node starts with the head stored in its
-    // database: store a head on each side of the fork without syncing the testnet.
+    // database: store a head on each side of the fork without syncing the testnet. The head is
+    // block 1, since only its timestamp decides which fork is active.
     for timestamp in [SEPOLIA_AMSTERDAM_TIMESTAMP - 1, SEPOLIA_AMSTERDAM_TIMESTAMP] {
         let node_config = NodeConfig::test()
             .with_chain(SEPOLIA.clone())
@@ -868,7 +869,7 @@ async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
                     RocksDBProvider::builder(datadir.path().join("rocksdb"))
                         .with_default_tables()
                         .build()?,
-                    OverlayManager::new(InMemoryState::default()),
+                    OverlayManager::default(),
                     Runtime::test(),
                 )?;
             init_genesis_with_settings(&provider_factory, node_config.storage_settings())?;
@@ -885,7 +886,8 @@ async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
             }
             .seal_slow()
             .try_recover()?;
-            // Persists the head on top of the genesis block, like the engine persists a block.
+            // Persists the head on top of the genesis block: the database tip and the state/trie
+            // frontier move from block 0 to block 1.
             let provider_rw = provider_factory.provider_rw()?;
             provider_rw.save_blocks(&SaveBlocksInput::new(
                 vec![ExecutedBlock { recovered_block: Arc::new(head), ..Default::default() }],

@@ -1401,8 +1401,11 @@ mod tests {
         // Finish frontier, but its execution state must remain in the overlay until trie
         // persistence.
         let new_anchor = blocks[0].recovered_block().hash();
-        let persisted = blocks[0].recovered_block().num_hash();
-        writer.on_blocks_persisted(persisted, persisted, None);
+        writer.on_blocks_persisted(
+            blocks[1].recovered_block().num_hash(),
+            blocks[0].recovered_block().num_hash(),
+            None,
+        );
 
         manager.precompute_execution_overlay(tip_hash, new_anchor);
 
