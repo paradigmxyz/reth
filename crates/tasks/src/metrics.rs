@@ -74,6 +74,8 @@ pub(crate) struct WorkerThreadMetrics {
     queue_wait_duration_seconds: Histogram,
     /// Time spent executing a task on a named worker.
     task_duration_seconds: Histogram,
+    /// Number of tasks that panicked while executing on this worker.
+    task_panics_total: Counter,
 }
 
 impl WorkerThreadMetrics {
@@ -90,6 +92,11 @@ impl WorkerThreadMetrics {
     /// Record how long a task executed on this worker.
     pub(crate) fn record_task_duration(&self, duration: Duration) {
         self.task_duration_seconds.record(duration.as_secs_f64());
+    }
+
+    /// Record that a task panicked while executing on this worker.
+    pub(crate) fn inc_task_panics(&self) {
+        self.task_panics_total.increment(1);
     }
 }
 
