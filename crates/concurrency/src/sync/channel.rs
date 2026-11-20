@@ -25,7 +25,7 @@ pub fn send_or_cancel<T>(
 #[cfg(feature = "fuzz")]
 mod simulated {
     use crate::sync::{
-        deterministic::{Timer, Waiter},
+        deterministic::{rendezvous_selection, Timer, Waiter},
         thread,
         time::{Duration, Instant},
         Arc, Mutex,
@@ -377,11 +377,6 @@ mod simulated {
         direct_receivers: Vec<(thread::ThreadId, Option<T>)>,
     }
 
-    shuttle::lazy_static! {
-        // Pending selections acquire this execution-local lock before either channel lock.
-        static ref RENDEZVOUS_SELECTION: Mutex<()> = Mutex::new(());
-    }
-
     struct SendListener<'a, T> {
         sender: &'a Sender<T>,
         id: thread::ThreadId,
@@ -472,8 +467,10 @@ mod simulated {
             let mut cancelled_offer = None;
             // Serialize two-channel decisions so reciprocal selections cannot each hold their
             // output lock while waiting for the other's cancellation lock.
-            let selection = (ticket.is_some() && cancel.is_some())
-                .then(|| RENDEZVOUS_SELECTION.lock().unwrap_or_else(|error| error.into_inner()));
+            let selection_lock = (ticket.is_some() && cancel.is_some()).then(rendezvous_selection);
+            let selection = selection_lock
+                .as_ref()
+                .map(|lock| lock.lock().unwrap_or_else(|error| error.into_inner()));
             let mut state = sender.state.lock().unwrap_or_else(|error| error.into_inner());
             if let Some(sent) = ticket {
                 let Some(mut position) = state.queue.iter().position(|(id, _)| *id == sent) else {
