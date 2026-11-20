@@ -1,0 +1,59 @@
+--- a/mdbx.c
++++ b/mdbx.c
+@@ -16803,9 +16803,22 @@
+   DEBUG("turn-%s: top page was %" PRIaPGNO " in cursor %p, ki %zi of %zi", forward ? "next" : "prev", mp->pgno,
+         __Wpedantic_format_voidptr(mc), ki, nkeys);
+   if (forward) {
+-    if (likely(++ki < nkeys))
++    if (likely(++ki < nkeys)) {
+       mc->ki[mc->top] = (indx_t)ki;
+-    else {
++      /* Prefetch the node of the following step, since nodes are placed
++       * within a page in insertion order rather than in key order. */
++      if (ki + 1 < nkeys) {
++        if (!is_dupfix_leaf(mp))
++          __prefetch(page_node(mp, ki + 1));
++      }
++      else if (mc->top > 0) {
++        /* Last node of the page, so prefetch the right sibling page. */
++        const page_t *const parent = mc->pg[mc->top - 1];
++        const size_t pki = mc->ki[mc->top - 1] + (size_t)1;
++        if (pki < page_numkeys(parent))
++          __prefetch(pgno2page(mc->txn->env, node_pgno(page_node(parent, pki))));
++      }
++    } else {
+       DEBUG("%s", "=====> move to next sibling page");
+       int err = cursor_sibling_right(mc);
+       if (unlikely(err != MDBX_SUCCESS))
+@@ -27845,27 +27858,10 @@
+      * alignment is guaranteed. Use faster cmp_int_align4(). */
+     cmp = cmp_int_align4;
+ 
+-  node_t *node;
+-  do {
+-    i = (low + high) >> 1;
+-    node = page_node(mp, i);
+-    nodekey.iov_len = node_ks(node);
+-    nodekey.iov_base = node_key(node);
+-    cASSERT(mc, ptr_disp(mp, mc->txn->env->ps) >= ptr_disp(nodekey.iov_base, nodekey.iov_len));
+-    int cr = cmp(key, &nodekey);
+-    if (is_leaf(mp))
+-      DEBUG("found leaf index %zu [%s], rc = %i", i, DKEY_DEBUG(&nodekey), cr);
+-    else
+-      DEBUG("found branch index %zu [%s -> %" PRIaPGNO "], rc = %i", i, DKEY_DEBUG(&nodekey), node_pgno(node), cr);
+-    if (cr > 0)
+-      low = ++i;
+-    else if (cr < 0)
+-      high = i - 1;
+-    else {
+-      ret.exact = true;
+-      break;
+-    }
+-  } while (likely(low <= high));
++  /* Inline the default lexical comparator into the search loop. */
++  i = (MDBX_UNALIGNED_OK >= 8 && cmp == cmp_lexical)
++          ? node_search_nodes(mc, mp, key, low, high, cmp_lexical_inline, &ret.exact)
++          : node_search_nodes(mc, mp, key, low, high, cmp, &ret.exact);
+ 
+   /* store the key index */
+   mc->ki[mc->top] = (indx_t)i;

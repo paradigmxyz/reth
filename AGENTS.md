@@ -54,7 +54,8 @@ for performance claims; omit templates and validation boilerplate.
 - **Logging and metrics**: Follow the component's existing `tracing` targets and metrics conventions.
 - **Filesystem**: Use `reth_fs_util` for filesystem operations and its error context.
 - **Async work**: Keep blocking work off executor threads; follow the component's task model.
-- **Vendored code**: Do not edit `crates/storage/libmdbx-rs/mdbx-sys/libmdbx/`.
+- **Vendored code**: Do not edit `crates/storage/libmdbx-rs/mdbx-sys/libmdbx/`; change libmdbx
+  with a patch in `crates/storage/libmdbx-rs/mdbx-sys/patches/`, which `build.rs` applies.
 - **Type order**: Keep the file's primary type before supporting types and private helpers.
 - **Documentation**: Update relevant docs when behavior or public APIs change. Regenerate CLI
   reference pages with `make update-book-cli` after changing commands or flags; do not edit
