@@ -27,6 +27,13 @@ impl Runtime {
     /// propagate to the caller. Simulation rejects a workload that returns with
     /// pending timers, or whose unfinished tasks later attempt a timed operation;
     /// finish or join spawned work before `work` returns.
+    ///
+    /// Simulation has no step limit and Shuttle retains every scheduling step. Run workloads
+    /// in a worker process with external time and memory limits. Virtual time advances only
+    /// when no workload task is runnable; yielding while polling for a timer can run forever.
+    /// After a failed execution, Shuttle may abandon suspended task stacks without running
+    /// destructors, retaining resources owned by those stacks. Restart the worker instead of
+    /// repeatedly catching execution failures and continuing in the same process.
     pub fn run<F, T>(&self, work: F) -> T
     where
         F: FnOnce() -> T + Send + 'static,
