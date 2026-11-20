@@ -102,6 +102,8 @@ struct Clock {
     stopped: bool,
     waking_timers: bool,
     pools: HashMap<usize, Slots>,
+    // Construct before user tasks: Shuttle's lazy-static Once can spuriously poison on unwind.
+    rendezvous_selection: Rc<super::Mutex<()>>,
 }
 
 // Slot metadata is shared by every logical task in this execution, not by retained pool handles.
@@ -270,4 +272,9 @@ pub(super) fn with_pool_slots<T>(id: usize, threads: usize, f: impl FnOnce(&mut 
             .entry(id)
             .or_insert_with(|| Slots { occupied: vec![false; threads], waiters: Vec::new() }))
     })
+}
+
+/// Clones the execution's arbiter before locking so no clock borrow spans a scheduling point.
+pub(super) fn rendezvous_selection() -> Rc<super::Mutex<()>> {
+    with_clock(|clock| clock.rendezvous_selection.clone())
 }
