@@ -27,6 +27,7 @@ reth-nippy-jar.workspace = true
 serde_json.workspace = true
 insta.workspace = true
 tempfile.workspace = true
+criterion.workspace = true
 
 [features]
 default = ["std"]
@@ -42,3 +43,8 @@ std = [
     "tracing?/std",
 ]
 clap = ["dep:clap"]
+
+[[bench]]
+name = "changeset_offsets"
+required-features = ["std"]
+harness = false

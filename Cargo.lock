@@ -10646,6 +10646,7 @@ version = "2.11.0"
 dependencies = [
  "alloy-primitives",
  "clap",
+ "codspeed-criterion-compat",
  "derive_more",
  "fixed-map",
  "insta",
