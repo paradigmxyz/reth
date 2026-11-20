@@ -36,9 +36,9 @@ use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory, DbTxProvider,
-    HashedPostStateProvider, HistoryInfo, HistoryReader, NodePrimitivesProvider,
-    StageCheckpointReader, StateProofProvider, StorageChangeSetReader, StorageRootProvider,
-    StorageSettingsCache,
+    DurableBlockReader, HashedPostStateProvider, HistoryInfo, HistoryReader,
+    NodePrimitivesProvider, StageCheckpointReader, StateProofProvider, StorageChangeSetReader,
+    StorageRootProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -1036,6 +1036,11 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> AccountReader for MockEthProvide
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         Ok(self.accounts.lock().get(address).cloned().map(|a| a.account))
     }
+}
+
+impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> DurableBlockReader
+    for MockEthProvider<T, ChainSpec>
+{
 }
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync> StageCheckpointReader

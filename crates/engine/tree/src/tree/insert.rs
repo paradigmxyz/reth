@@ -501,12 +501,17 @@ where
 
         let is_pending = self.state.tree_state.canonical_block_hash() ==
             executed.recovered_block().parent_hash();
-        self.state.tree_state.insert_executed(executed.clone());
 
         if is_pending {
             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
             self.canonical_in_memory_state.set_pending_block(executed.clone());
+        } else {
+            self.canonical_in_memory_state.insert_executed(executed.clone());
         }
+        self.state
+            .tree_state
+            .overlay_manager
+            .precompute_child_execution_overlays(executed.recovered_block().hash());
 
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 

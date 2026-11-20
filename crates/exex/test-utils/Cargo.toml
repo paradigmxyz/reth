@@ -29,6 +29,7 @@ reth-node-ethereum.workspace = true
 reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-storage-overlay.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 

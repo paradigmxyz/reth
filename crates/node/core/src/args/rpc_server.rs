@@ -1,5 +1,11 @@
 //! clap [`Args`] for RPC related arguments.
 
+// The clap `Args` derive builds every flag in one `augment_args` function, which needs about
+// 540 KB of stack in unoptimized builds. It runs once at startup on the main thread, and
+// splitting the struct would change field paths used by downstream nodes. Item-level lint
+// attributes on the struct do not reach the generated impl.
+#![allow(clippy::large_unopt_stack_frames)]
+
 use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},
     GasPriceOracleArgs, RpcStateCacheArgs,
@@ -976,7 +982,9 @@ impl RpcServerArgs {
     ///
     /// If no explicit or instance-adjusted path is set, returns the global default.
     pub fn auth_ipc_path(&self) -> &str {
-        self.auth_ipc_path.as_deref().unwrap_or(&DefaultRpcServerArgs::get_global().auth_ipc_path)
+        self.auth_ipc_path
+            .as_deref()
+            .unwrap_or_else(|| &DefaultRpcServerArgs::get_global().auth_ipc_path)
     }
 
     /// Returns the trace byte limit, `None` when `--rpc.max-trace-bytes 0` disables it.

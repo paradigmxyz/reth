@@ -281,6 +281,55 @@ async fn test_simulate_v1_execution_gas_cap_amsterdam() -> eyre::Result<()> {
     Ok(())
 }
 
+/// The EIP-8037 total transaction gas cap of `2^32 - 1` applies in neither simulate mode.
+#[tokio::test]
+async fn test_simulate_v1_total_gas_cap_amsterdam() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Amsterdam)
+        .with_rpc_modifier(|mut rpc| {
+            rpc.rpc_gas_cap = u64::MAX;
+            rpc
+        })
+        .build_single()
+        .await?;
+    let provider = node.rpc_provider();
+
+    let contract = Address::with_last_byte(0x42);
+    let sim_block = SimBlock::default()
+        .with_block_overrides(BlockOverrides {
+            gas_limit: Some(1 << 33),
+            base_fee: Some(U256::ZERO),
+            ..Default::default()
+        })
+        .with_state_overrides(StateOverride::from_iter([(
+            contract,
+            // Return the remaining gas using GAS.
+            AccountOverride::default().with_code(bytes!("0x5a5f5260205ff3")),
+        )]))
+        .call(
+            TransactionRequest::default()
+                .to(contract)
+                .gas_limit(1 << 32)
+                .max_fee_per_gas(0)
+                .max_priority_fee_per_gas(0),
+        );
+
+    for validation in [false, true] {
+        let mut payload = SimulatePayload::default().extend(sim_block.clone());
+        payload.validation = validation;
+
+        let result: Vec<SimulatedBlock> =
+            provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+        assert!(result[0].calls[0].status, "validation: {validation}");
+        let gas = U256::from_be_slice(&result[0].calls[0].return_data);
+        assert_eq!(gas > U256::from(MAX_TX_GAS_LIMIT_OSAKA), !validation);
+    }
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_simulate_v1_blockhash_reads_prior_simulated_block() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();

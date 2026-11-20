@@ -943,7 +943,7 @@ Dev testnet:
       --dev.block-time <BLOCK_TIME>
           Interval between blocks.
 
-          Parses strings using [`humantime::parse_duration`]
+          Accepts a duration such as `12s`, `450ms` or `1m 30s`, e.g.
           --dev.block-time 12s
 
       --dev.finality-depth <FINALITY_DEPTH>
@@ -960,7 +960,7 @@ Dev testnet:
           local miner, giving the payload job time for multiple rebuild attempts with
           new transactions from the pool.
 
-          Parses strings using [`humantime::parse_duration`]
+          Accepts a duration such as `12s`, `450ms` or `1m 30s`, e.g.
           --dev.payload-wait-time 450ms
 
       --dev.mnemonic <MNEMONIC>
