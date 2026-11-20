@@ -1,4 +1,4 @@
-use super::{BlockState, ExecutedBlock, NewCanonicalChain};
+use super::{canonical::InMemoryStateBlockCounts, BlockState, ExecutedBlock, NewCanonicalChain};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
@@ -80,6 +80,14 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
     /// Returns the state of the pending block, if there is one.
     pub(super) fn pending_state(&self) -> Option<&Arc<BlockState<N>>> {
         self.pending_hash.and_then(|hash| self.get(&hash))
+    }
+
+    /// Returns the number of tracked blocks per section.
+    pub(super) fn counts(&self) -> InMemoryStateBlockCounts {
+        InMemoryStateBlockCounts {
+            canonical: self.canonical.blocks.len(),
+            non_canonical: self.non_canonical.blocks.len(),
+        }
     }
 
     /// Returns the number of canonical blocks and the lowest and highest of their numbers.
@@ -256,6 +264,23 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
         finalized: BlockNumHash,
     ) -> Vec<Arc<BlockState<N>>> {
         let removed = self.non_canonical.remove_conflicting_with(finalized);
+        self.finish_removal(&removed);
+        removed
+    }
+
+    /// Removes the non-canonical blocks whose chain builds on a block above `persisted_number`,
+    /// the height of the persisted tip, and returns their states.
+    ///
+    /// The block such a chain builds on is neither tracked nor persisted, which happens when
+    /// blocks are removed from disk. The removed blocks can only be executed again once that
+    /// block is.
+    ///
+    /// Clears the pending block if it was removed.
+    pub(super) fn prune_built_above(
+        &mut self,
+        persisted_number: BlockNumber,
+    ) -> Vec<Arc<BlockState<N>>> {
+        let removed = self.non_canonical.remove_built_above(persisted_number);
         self.finish_removal(&removed);
         removed
     }
@@ -590,6 +615,21 @@ impl<N: NodePrimitives> InMemoryNonCanonicalBlocks<N> {
             next += 1;
         }
         removed
+    }
+
+    /// Removes the blocks whose chain builds on a block above `persisted_number`, and returns
+    /// their states.
+    fn remove_built_above(&mut self, persisted_number: BlockNumber) -> Vec<Arc<BlockState<N>>> {
+        // A chain that builds on a block above the persisted height starts two blocks above it
+        // at the lowest.
+        let hashes = self
+            .numbers
+            .range(persisted_number.saturating_add(2)..)
+            .flat_map(|(_, hashes)| hashes)
+            .filter(|hash| self.blocks[*hash].anchor().number > persisted_number)
+            .copied()
+            .collect::<Vec<_>>();
+        hashes.iter().map(|hash| self.remove(hash)).collect()
     }
 }
 

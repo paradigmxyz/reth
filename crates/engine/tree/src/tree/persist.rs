@@ -341,16 +341,16 @@ where
             target = ?target,
             "Returning save input"
         );
-        while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
+        while let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash) {
             if block.recovered_block().number() <= prev_partial_state_trie {
                 break;
             }
 
-            if block.recovered_block().number() <= new_db_tip {
-                blocks.push(block.clone());
-            }
-
             current_hash = block.recovered_block().parent_hash();
+
+            if block.recovered_block().number() <= new_db_tip {
+                blocks.push(block);
+            }
         }
 
         // Reverse the order so that the oldest block comes first
@@ -365,11 +365,9 @@ where
         ))
     }
 
-    /// This clears the blocks from the in-memory tree state that have been persisted to the
-    /// database.
-    ///
-    /// This also updates the canonical in-memory state to reflect the newest persisted block
-    /// height.
+    /// This removes the blocks that have been persisted to the database from the in-memory state,
+    /// together with the blocks that conflict with the finalized block, and updates it to reflect
+    /// the newest persisted block height.
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
     pub(super) fn on_new_persisted_block(&mut self) -> ProviderResult<()> {
@@ -382,15 +380,29 @@ where
             return Ok(())
         }
 
-        let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        // Trim the canonical blocks of the in-memory state, then the tree state and the blocks
-        // that are not canonical. Overlays are built from the in-memory state alone and pruned
-        // on their next use, so the order between the two trims is free to choose.
-        self.canonical_in_memory_state.remove_persisted_blocks_until(
+        // First fetch the finalized block number.
+        let finalized = self
+            .state
+            .forkchoice_state_tracker
+            .last_valid_finalized()
+            .map(|hash| {
+                self.provider
+                    .block_number(hash)
+                    .map(|number| number.map(|number| BlockNumHash { number, hash }))
+            })
+            .transpose()
+            .map(Option::flatten);
+        debug!(target: "engine::tree", upper_bound=?in_memory_persisted_block, ?finalized, "Removing blocks from the in-memory state");
+        // Trims the canonical chain to the state/trie frontier and prunes the blocks that are not
+        // canonical and conflict with the finalized block. If the finalized block number could not
+        // be fetched, the canonical chain is still trimmed and the error is returned afterwards.
+        self.canonical_in_memory_state.on_blocks_persisted(
             self.persistence_state.last_persisted_block,
-            in_memory_persisted_block.number,
+            in_memory_persisted_block,
+            finalized.as_ref().copied().unwrap_or_default(),
         );
-        self.remove_before(in_memory_persisted_block, finalized)?;
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
+        finalized?;
         // Persistence changes the overlay anchor. Prepare the remaining canonical range before
         // the next payload needs to read execution state against the new durable frontier.
         self.state.tree_state.overlay_manager.precompute_execution_overlay(
@@ -450,42 +462,6 @@ where
         debug!(target: "engine::tree", remove_above=persisted.number, "on-disk reorg detected");
 
         Ok(Some(persisted.number))
-    }
-
-    /// Remove all blocks up to __and including__ the given block number.
-    ///
-    /// If a finalized hash is provided, the only non-canonical blocks which will be removed are
-    /// those which have a fork point at or below the finalized hash.
-    ///
-    /// Canonical blocks below the upper bound will still be removed.
-    pub(crate) fn remove_before(
-        &mut self,
-        upper_bound: BlockNumHash,
-        finalized_hash: Option<B256>,
-    ) -> ProviderResult<()> {
-        // first fetch the finalized block number and then call the remove_before method on
-        // tree_state
-        let num = if let Some(hash) = finalized_hash {
-            self.provider.block_number(hash)?.map(|number| BlockNumHash { number, hash })
-        } else {
-            None
-        };
-
-        // The executed blocks that are not canonical are removed from the in-memory state like
-        // the tree state removes them: if the finalized block is ahead of the upper bound, the
-        // upper bound is used instead.
-        if let Some(finalized) = num {
-            self.canonical_in_memory_state.prune_conflicting_with_finalized(
-                if upper_bound.number < finalized.number { upper_bound } else { finalized },
-            );
-        }
-        self.state.tree_state.remove_until(
-            upper_bound,
-            self.persistence_state.last_persisted_block.hash,
-            num,
-        );
-        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
-        Ok(())
     }
 }
 

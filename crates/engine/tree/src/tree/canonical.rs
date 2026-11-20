@@ -54,7 +54,7 @@ where
         new_head: B256,
     ) -> ProviderResult<Option<NewCanonicalChain<N>>> {
         // get the executed new head block
-        let Some(new_head_block) = self.state.tree_state.blocks_by_hash.get(&new_head) else {
+        let Some(new_head_block) = self.state.tree_state.executed_block_by_hash(new_head) else {
             debug!(target: "engine::tree", new_head=?new_head, "New head block not found in inmemory tree state");
             self.metrics.engine.executed_new_block_cache_miss.increment(1);
             return Ok(None)
@@ -63,17 +63,18 @@ where
         let new_head_number = new_head_block.recovered_block().number();
         let mut current_canonical_number = self.state.tree_state.current_canonical_head.number;
 
-        let mut new_chain = vec![new_head_block.clone()];
+        // The genesis block has no parent to walk back to. It is only tracked after it was loaded
+        // from disk as a canonical ancestor, and never is a new head.
+        let Some(mut current_number) = new_head_number.checked_sub(1) else { return Ok(None) };
         let mut current_hash = new_head_block.recovered_block().parent_hash();
-        let mut current_number = new_head_number - 1;
+        let mut new_chain = vec![new_head_block];
 
         // Walk back the new chain until we reach a block we know about
         //
         // This is only done for in-memory blocks, because we should not have persisted any blocks
         // that are _above_ the current canonical head.
         while current_number > current_canonical_number {
-            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash).cloned()
-            {
+            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash) {
                 current_hash = block.recovered_block().parent_hash();
                 current_number -= 1;
                 new_chain.push(block);
@@ -117,8 +118,7 @@ where
             old_hash = block.recovered_block().parent_hash();
             old_chain.push(block);
 
-            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash).cloned()
-            {
+            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash) {
                 current_hash = block.recovered_block().parent_hash();
                 new_chain.push(block);
             } else {
@@ -247,6 +247,7 @@ where
         // Perform the reorg to properly handle the unwind
         self.canonical_in_memory_state
             .update_chain(NewCanonicalChain::Reorg { new: vec![executed_block], old: old_blocks });
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // CRITICAL: Update the canonical head after the reorg
         // This ensures get_canonical_head() returns the correct block
@@ -287,6 +288,7 @@ where
         let executed_block = self.canonical_block_by_hash(block_hash)?;
         self.canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed_block] });
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         debug!(
             target: "engine::tree",
@@ -348,7 +350,7 @@ where
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
         if let Some(block) = self.state.tree_state.executed_block_by_hash(hash) {
-            return Ok(block.clone())
+            return Ok(block)
         }
 
         let (block, senders) = self
@@ -419,7 +421,6 @@ where
         let tip = chain_update.tip().clone_sealed_header();
         let notification = chain_update.to_chain_notification();
 
-        // reinsert any missing reorged blocks
         if let NewCanonicalChain::Reorg { new, old } = &chain_update {
             let new_first = new.first().map(|first| first.recovered_block().num_hash());
             let old_first = old.first().map(|first| first.recovered_block().num_hash());
@@ -427,12 +428,12 @@ where
 
             self.state.set_pending_sparse_trie_prune(false);
             self.update_reorg_metrics(old.len(), old_first);
-            self.reinsert_reorged_blocks(new.clone());
-            self.reinsert_reorged_blocks(old.clone());
         }
 
-        // update the tracked in-memory state with the new chain
+        // update the tracked in-memory state with the new chain, which also tracks the blocks of a
+        // reorg that are missing from it.
         self.canonical_in_memory_state.update_chain(chain_update);
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
         self.canonical_in_memory_state.set_canonical_head(tip.clone());
         self.payload_validator.on_canonical_head_changed(tip.hash(), &self.state);
 
@@ -471,21 +472,5 @@ where
             debug_unreachable!("Reorged chain doesn't have any blocks");
         }
         self.metrics.tree.latest_reorg_depth.set(old_chain_length as f64);
-    }
-
-    /// This reinserts any blocks in the new chain that do not already exist in the tree
-    fn reinsert_reorged_blocks(&mut self, new_chain: Vec<ExecutedBlock<N>>) {
-        for block in new_chain {
-            if self
-                .state
-                .tree_state
-                .executed_block_by_hash(block.recovered_block().hash())
-                .is_none()
-            {
-                trace!(target: "engine::tree", num=?block.recovered_block().number(), hash=?block.recovered_block().hash(), "Reinserting block into tree state");
-                self.state.tree_state.insert_executed(block);
-            }
-        }
-        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
     }
 }
