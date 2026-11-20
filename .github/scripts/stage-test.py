@@ -120,7 +120,9 @@ def smoke_test(root):
                 run(
                     "stage", "run", stage, *target, "--config", config, *network,
                     "--from", "0", "--to", TIP, "--batch-size", "8",
-                    "--commit", "--checkpoints", "--skip-unwind",
+                    "--commit", "--skip-unwind",
+                    # Execution must checkpoint its static files even without --checkpoints.
+                    *([] if stage == "execution" else ["--checkpoints"]),
                 )
                 saved = json.loads(run(
                     "db", *target, "get", "mdbx", "StageCheckpoints", checkpoint,

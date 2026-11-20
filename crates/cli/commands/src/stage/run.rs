@@ -103,7 +103,8 @@ pub struct Command<C: ChainSpecParser> {
     #[arg(long, short)]
     commit: bool,
 
-    /// Save stage checkpoints
+    /// Save stage checkpoints. Execution always saves its checkpoint when it writes static
+    /// files so that reopening the database preserves the committed execution data.
     #[arg(long)]
     checkpoints: bool,
 
@@ -340,6 +341,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 ),
                 StageEnum::Hashing => eyre::bail!(HASHING_UNSUPPORTED),
             };
+        // Storage consistency on reopen uses the Execution checkpoint to truncate static files.
+        let save_checkpoints = self.checkpoints ||
+            (self.stage == StageEnum::Execution &&
+                (provider_rw.cached_storage_settings().is_v2() ||
+                    EitherWriter::receipts_destination(&provider_rw).is_static_file()));
         let checkpoint = provider_rw.get_stage_checkpoint(exec_stage.id())?.unwrap_or_default();
 
         let mut exec_checkpoint = checkpoint.with_block_number(self.from);
@@ -358,7 +364,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 let UnwindOutput { checkpoint } = unwind_stage.unwind(&provider_rw, unwind)?;
                 unwind.checkpoint = checkpoint;
 
-                if self.checkpoints {
+                if save_checkpoints {
                     provider_rw.save_stage_checkpoint(unwind_stage.id(), checkpoint)?;
                 }
 
@@ -382,7 +388,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
             input.checkpoint = Some(checkpoint);
 
-            if self.checkpoints {
+            if save_checkpoints {
                 provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
             }
             if self.commit {

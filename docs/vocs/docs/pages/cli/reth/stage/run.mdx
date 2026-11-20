@@ -160,7 +160,7 @@ Storage:
           NOTE: This flag is currently required for the headers, bodies, and execution stages because they use static files and must commit to properly unwind and run.
 
       --checkpoints
-          Save stage checkpoints
+          Save stage checkpoints. Execution always saves its checkpoint when it writes static files so that reopening the database preserves the committed execution data
 
   <STAGE>
           The name of the stage to run
