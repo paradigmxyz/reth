@@ -221,7 +221,35 @@ def test_legacy_execution_replay(root):
     assert checkpoint() == TIP - 2
 
 
+def test_legacy_static_receipt_unwind(root):
+    target = [
+        "--chain", FIXTURE / "genesis.json", "--datadir", root / "archive", "--storage.v2=false",
+    ]
+    run("import", *target, "--fail-on-invalid-block", FIXTURE / "chain.rlp")
+    run(
+        "db", *target, "stage-checkpoints", "set", "--stage", "execution",
+        "--block-number", TIP - 2, "--clear-stage-unit",
+    )
+    for height in [TIP - 1, TIP]:
+        run(
+            "stage", "unwind", *target, "to-block", height, quiet=True,
+            expected_error=f"not able to find Receipts static file for block number {TIP - 1}",
+        )
+    saved = json.loads(run(
+        "db", *target, "get", "mdbx", "StageCheckpoints", "Execution", quiet=True,
+    ))
+    assert saved["block_number"] == TIP - 2, saved
+    # An unreachable target must not leave an unwind intent that blocks the valid retry.
+    metadata = json.loads(run(
+        "db", *target, "list", "Metadata", "--json", "--len", "100", quiet=True,
+    ))
+    assert "pipeline_unwind" not in dict(metadata)
+    run("stage", "unwind", *target, "to-block", TIP - 2)
+    run("stage", "run", "execution", *target, "--from", TIP - 3, "--to", TIP - 2, "--commit")
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="reth-stage-") as directory:
         smoke_test(Path(directory))
         test_legacy_execution_replay(Path(directory))
+        test_legacy_static_receipt_unwind(Path(directory))

@@ -338,7 +338,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         // Both pipeline resume and static-file recovery use the checkpoint as the execution tip.
         let save_checkpoints = self.checkpoints || self.stage == StageEnum::Execution;
         let mut checkpoint = if self.stage == StageEnum::Execution {
-            provider_rw.reconcile_execution_unwind_checkpoint()?
+            provider_rw.reconcile_execution_unwind_checkpoint(self.from)?
         } else {
             provider_rw
                 .get_stage_checkpoint(exec_stage.id())?
