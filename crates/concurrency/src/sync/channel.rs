@@ -5,11 +5,11 @@ pub use crossbeam_channel::*;
 #[cfg(feature = "fuzz")]
 pub use simulated::*;
 
-/// Sends a value unless `cancel` receives a message or disconnects first.
+/// Selects between sending a value and receiving a cancellation message or disconnection.
 ///
-/// Returns the unsent value on cancellation or receiver disconnection. A
-/// completed send wins a race with cancellation; rendezvous sends complete only
-/// once their value is consumed.
+/// Returns the unsent value when cancellation is selected or the output disconnects.
+/// Selection is unbiased: if both operations are ready, either may win, even when
+/// cancellation was already signalled. A rendezvous send completes only when consumed.
 #[cfg(not(feature = "fuzz"))]
 pub fn send_or_cancel<T>(
     sender: &Sender<T>,
@@ -25,10 +25,10 @@ pub fn send_or_cancel<T>(
 #[cfg(feature = "fuzz")]
 mod simulated {
     use crate::sync::{
-        deterministic::Timer,
+        deterministic::{Timer, Waiter},
         thread,
         time::{Duration, Instant},
-        Arc, Mutex,
+        Arc, Mutex, TryLockError,
     };
     use std::{collections::VecDeque, fmt, mem};
 
@@ -54,13 +54,24 @@ mod simulated {
         /// `recv_timeout`, not a receive-selection registration. Selection-only
         /// waiters therefore cause `Full`; use blocking `send` with selection.
         pub fn try_send(&self, value: T) -> Result<(), TrySendError<T>> {
-            let mut state = self.state.lock().expect("channel state is not poisoned");
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
             if state.receivers == 0 {
                 return Err(TrySendError::Disconnected(value));
             }
-            if state.capacity.is_some_and(|cap| {
-                state.queue.len() >= cap.max(1) || (cap == 0 && state.direct_receivers.is_empty())
-            }) {
+            if state.capacity == Some(0) {
+                let Some((_, slot)) =
+                    state.direct_receivers.iter_mut().find(|(_, slot)| slot.is_none())
+                else {
+                    return Err(TrySendError::Full(value));
+                };
+                // Claim a particular receiver; the value can no longer time out or be stolen.
+                *slot = Some(value);
+                let waiters = mem::take(&mut state.recv_waiters);
+                drop(state);
+                wake(waiters);
+                return Ok(());
+            }
+            if state.capacity.is_some_and(|cap| state.queue.len() >= cap) {
                 return Err(TrySendError::Full(value));
             }
             let id = state.next_ticket;
@@ -74,7 +85,7 @@ mod simulated {
 
         /// Returns the number of queued messages (zero for a rendezvous channel).
         pub fn len(&self) -> usize {
-            let state = self.state.lock().expect("channel state is not poisoned");
+            let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
             if state.capacity == Some(0) {
                 0
             } else {
@@ -87,7 +98,7 @@ mod simulated {
         }
         /// Returns the configured bound, or `None` for an unbounded channel.
         pub fn capacity(&self) -> Option<usize> {
-            self.state.lock().expect("channel state is not poisoned").capacity
+            self.state.lock().unwrap_or_else(|error| error.into_inner()).capacity
         }
     }
 
@@ -99,7 +110,7 @@ mod simulated {
 
     impl<T> Clone for Sender<T> {
         fn clone(&self) -> Self {
-            self.state.lock().expect("channel state is not poisoned").senders += 1;
+            self.state.lock().unwrap_or_else(|error| error.into_inner()).senders += 1;
             Self { state: self.state.clone() }
         }
     }
@@ -122,51 +133,68 @@ mod simulated {
 
     impl<T> Receiver<T> {
         fn with_permanent_sender(self) -> Self {
-            self.state.lock().expect("channel state is not poisoned").senders = 1;
+            self.state.lock().unwrap_or_else(|error| error.into_inner()).senders = 1;
             self
         }
 
         /// Receives a value, blocking until one arrives or all senders disconnect.
         pub fn recv(&self) -> Result<T, RecvError> {
-            loop {
-                let listener = self.listen_receive();
-                match self.try_recv() {
-                    Ok(value) => return Ok(value),
-                    Err(TryRecvError::Disconnected) => return Err(RecvError),
-                    Err(TryRecvError::Empty) => thread::park(),
-                }
-                drop(listener);
-            }
+            self.recv_deadline(None).map_err(|_| RecvError)
         }
 
         /// Receives a value, waiting at most `timeout` from the current virtual time.
         ///
         /// Available values are returned before checking disconnection or the deadline.
+        /// An unrepresentable deadline waits without a time limit, like the native backend.
         /// Returns [`RecvTimeoutError::Disconnected`] when the queue is empty and all senders
         /// are gone, or [`RecvTimeoutError::Timeout`] when an empty connected channel reaches
         /// the deadline.
         pub fn recv_timeout(&self, timeout: Duration) -> Result<T, RecvTimeoutError> {
-            let deadline = Instant::now() + timeout;
-            let timer = Timer::new(deadline);
-            let result = loop {
-                let listener = self.listen_receive();
-                match self.try_recv() {
-                    Ok(value) => break Ok(value),
-                    Err(TryRecvError::Disconnected) => break Err(RecvTimeoutError::Disconnected),
-                    Err(TryRecvError::Empty) if Instant::now() >= deadline => {
-                        break Err(RecvTimeoutError::Timeout);
-                    }
-                    Err(TryRecvError::Empty) => thread::park(),
+            self.recv_deadline(Instant::now().checked_add(timeout))
+        }
+
+        fn recv_deadline(&self, deadline: Option<Instant>) -> Result<T, RecvTimeoutError> {
+            let listener = self.listen();
+            let timer = deadline.map(|deadline| Timer::new(deadline, listener.waiter.clone()));
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            state.direct_receivers.push((listener.id, None));
+            loop {
+                let slot = state
+                    .direct_receivers
+                    .iter_mut()
+                    .find(|(id, _)| *id == listener.id)
+                    .expect("active receive registration");
+                let result = if let Some(value) = slot.1.take() {
+                    Some(Ok(value))
+                } else if let Some((_, value)) = state.queue.pop_front() {
+                    Some(Ok(value))
+                } else if state.senders == 0 {
+                    Some(Err(RecvTimeoutError::Disconnected))
+                } else if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                    Some(Err(RecvTimeoutError::Timeout))
+                } else {
+                    None
+                };
+                if let Some(result) = result {
+                    // Removing readiness under the same lock as the timeout decision prevents
+                    // a successful try_send from targeting a receiver that already timed out.
+                    state.direct_receivers.retain(|(id, _)| *id != listener.id);
+                    let waiters = mem::take(&mut state.send_waiters);
+                    drop(state);
+                    wake(waiters);
+                    drop(timer);
+                    return result;
                 }
-                drop(listener);
-            };
-            drop(timer);
-            result
+                register(&mut state.recv_waiters, &listener.waiter);
+                drop(state);
+                listener.wait();
+                state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            }
         }
 
         /// Tries to receive without blocking.
         pub fn try_recv(&self) -> Result<T, TryRecvError> {
-            let mut state = self.state.lock().expect("channel state is not poisoned");
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
             if let Some((_, value)) = state.queue.pop_front() {
                 let waiters = mem::take(&mut state.send_waiters);
                 drop(state);
@@ -189,7 +217,7 @@ mod simulated {
         }
         /// Returns the number of queued messages (zero for a rendezvous channel).
         pub fn len(&self) -> usize {
-            let state = self.state.lock().expect("channel state is not poisoned");
+            let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
             if state.capacity == Some(0) {
                 0
             } else {
@@ -202,17 +230,7 @@ mod simulated {
         }
         /// Returns the configured bound, or `None` for an unbounded channel.
         pub fn capacity(&self) -> Option<usize> {
-            self.state.lock().expect("channel state is not poisoned").capacity
-        }
-
-        fn listen_receive(&self) -> Listener<'_, T> {
-            let listener = self.listen();
-            self.state
-                .lock()
-                .expect("channel state is not poisoned")
-                .direct_receivers
-                .push(listener.id);
-            listener
+            self.state.lock().unwrap_or_else(|error| error.into_inner()).capacity
         }
 
         /// Creates a receiver-typed result slot for selection macro expansion.
@@ -224,9 +242,19 @@ mod simulated {
         /// Registers the current task for receive readiness; used by selection macros.
         #[doc(hidden)]
         pub fn listen(&self) -> Listener<'_, T> {
-            let mut state = self.state.lock().expect("channel state is not poisoned");
-            register(&mut state.recv_waiters);
-            Listener { receiver: self, id: thread::current().id() }
+            self.listen_waiter(Waiter::new())
+        }
+
+        /// Shares a selection's private notification token across receive branches.
+        #[doc(hidden)]
+        pub fn listen_with<U>(&self, listener: &Listener<'_, U>) -> Listener<'_, T> {
+            self.listen_waiter(listener.waiter.clone())
+        }
+
+        fn listen_waiter(&self, waiter: Waiter) -> Listener<'_, T> {
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            register(&mut state.recv_waiters, &waiter);
+            Listener { receiver: self, id: waiter.id(), waiter }
         }
     }
 
@@ -238,7 +266,7 @@ mod simulated {
 
     impl<T> Clone for Receiver<T> {
         fn clone(&self) -> Self {
-            self.state.lock().expect("channel state is not poisoned").receivers += 1;
+            self.state.lock().unwrap_or_else(|error| error.into_inner()).receivers += 1;
             Self { state: self.state.clone() }
         }
     }
@@ -284,12 +312,26 @@ mod simulated {
     pub struct Listener<'a, T> {
         receiver: &'a Receiver<T>,
         id: thread::ThreadId,
+        waiter: Waiter,
+    }
+    impl<T> Listener<'_, T> {
+        /// Blocks on this selection's private notification token.
+        #[doc(hidden)]
+        pub fn wait(&self) {
+            self.waiter.wait();
+        }
     }
     impl<T> Drop for Listener<'_, T> {
         fn drop(&mut self) {
             let mut state = self.receiver.state.lock().unwrap_or_else(|error| error.into_inner());
             state.recv_waiters.retain(|thread| thread.id() != self.id);
-            state.direct_receivers.retain(|id| *id != self.id);
+            let abandoned = state
+                .direct_receivers
+                .iter()
+                .position(|(id, _)| *id == self.id)
+                .map(|position| state.direct_receivers.remove(position));
+            drop(state);
+            drop(abandoned);
         }
     }
 
@@ -321,15 +363,18 @@ mod simulated {
         }
     }
 
+    // Payload callbacks never run while this private state is locked. Shuttle can mark
+    // it poisoned when an unrelated logical task unwinds on the same OS thread; all
+    // internal accesses recover the intact state instead of propagating that poison.
     struct State<T> {
         queue: VecDeque<(u64, T)>,
         capacity: Option<usize>,
         next_ticket: u64,
         senders: usize,
         receivers: usize,
-        send_waiters: Vec<thread::Thread>,
-        recv_waiters: Vec<thread::Thread>,
-        direct_receivers: Vec<thread::ThreadId>,
+        send_waiters: Vec<Waiter>,
+        recv_waiters: Vec<Waiter>,
+        direct_receivers: Vec<(thread::ThreadId, Option<T>)>,
     }
 
     struct SendListener<'a, T> {
@@ -364,7 +409,9 @@ mod simulated {
 
     /// Sends a value unless `cancel` receives a message or disconnects first.
     ///
-    /// Cancellation retracts an unconsumed rendezvous value and returns it.
+    /// Simulation checks cancellation before offering a value; native selection is unbiased
+    /// when both operations are ready. Cancellation retracts an unconsumed rendezvous value
+    /// and returns it.
     /// A value already accepted by a receiver is committed even if cancellation
     /// is observed before this function resumes.
     pub fn send_or_cancel<T>(
@@ -389,15 +436,14 @@ mod simulated {
         (Sender { state: state.clone() }, Receiver { state })
     }
 
-    fn wake(waiters: Vec<thread::Thread>) {
+    fn wake(waiters: Vec<Waiter>) {
         for waiter in waiters {
-            waiter.unpark();
+            waiter.notify();
         }
     }
-    fn register(waiters: &mut Vec<thread::Thread>) {
-        let current = thread::current();
+    fn register(waiters: &mut Vec<Waiter>, current: &Waiter) {
         if !waiters.iter().any(|waiter| waiter.id() == current.id()) {
-            waiters.push(current);
+            waiters.push(current.clone());
         }
     }
 
@@ -406,20 +452,50 @@ mod simulated {
         value: T,
         cancel: Option<&Receiver<()>>,
     ) -> Result<(), SendError<T>> {
-        let _registration = SendListener { sender, id: thread::current().id() };
+        let waiter = Waiter::new();
+        let _registration = SendListener { sender, id: waiter.id() };
         let mut value = Some(value);
         let mut ticket = None;
         loop {
-            let cancellation = cancel.map(Receiver::listen);
-            let cancelled = matches!(
-                cancel.map(Receiver::try_recv),
-                Some(Ok(()) | Err(TryRecvError::Disconnected))
-            );
-            let mut state = sender.state.lock().expect("channel state is not poisoned");
+            let cancellation = cancel.map(|cancel| cancel.listen_waiter(waiter.clone()));
+            // Before offering a value there is no send commitment to protect.
+            let mut cancelled = ticket.is_none() &&
+                matches!(
+                    cancel.map(Receiver::try_recv),
+                    Some(Ok(()) | Err(TryRecvError::Disconnected))
+                );
+            let mut state = sender.state.lock().unwrap_or_else(|error| error.into_inner());
             if let Some(sent) = ticket {
                 let Some(position) = state.queue.iter().position(|(id, _)| *id == sent) else {
                     return Ok(());
                 };
+                if let Some(cancel) = cancel {
+                    // A rendezvous cannot receive its own offer as cancellation. Distinct
+                    // channels are polled while the offer is locked, so acceptance cannot race
+                    // with consuming the cancellation message. Never block holding both locks.
+                    if Arc::as_ptr(&sender.state).cast::<()>() !=
+                        Arc::as_ptr(&cancel.state).cast::<()>()
+                    {
+                        let mut cancellation = match cancel.state.try_lock() {
+                            Ok(state) => state,
+                            Err(TryLockError::Poisoned(error)) => error.into_inner(),
+                            Err(TryLockError::WouldBlock) => {
+                                drop(state);
+                                thread::yield_now();
+                                continue;
+                            }
+                        };
+                        cancelled =
+                            cancellation.queue.pop_front().is_some() || cancellation.senders == 0;
+                        let waiters = if cancelled {
+                            mem::take(&mut cancellation.send_waiters)
+                        } else {
+                            Vec::new()
+                        };
+                        drop(cancellation);
+                        wake(waiters);
+                    }
+                }
                 if cancelled || state.receivers == 0 {
                     let value = state.queue.remove(position).expect("pending rendezvous value").1;
                     let waiters = mem::take(&mut state.send_waiters);
@@ -442,17 +518,17 @@ mod simulated {
                         return Ok(());
                     }
                     ticket = Some(id);
-                    register(&mut state.send_waiters);
+                    register(&mut state.send_waiters, &waiter);
                     drop(state);
                     wake(waiters);
-                    thread::park();
+                    waiter.wait();
                     drop(cancellation);
                     continue;
                 }
             }
-            register(&mut state.send_waiters);
+            register(&mut state.send_waiters, &waiter);
             drop(state);
-            thread::park();
+            waiter.wait();
             drop(cancellation);
         }
     }
@@ -519,8 +595,9 @@ macro_rules! __select_recv {
     };
     (@run $receivers:ident; [$($default:expr)?]; $(($index:tt, $binding:pat, $body:expr))*) => {{
         let mut results = ($($receivers.$index.selection_slot(),)*);
+        let listener = $receivers.0.listen();
         let selected = loop {
-            let listeners = ($($receivers.$index.listen(),)*);
+            let listeners = ($($receivers.$index.listen_with(&listener),)*);
             $(match $receivers.$index.try_recv() {
                 Err($crate::sync::channel::TryRecvError::Empty) => {}
                 result => {
@@ -529,9 +606,9 @@ macro_rules! __select_recv {
                     break Some($index);
                 }
             })*
-            $crate::__select_recv!(@wait listeners; [$($default)?]);
+            $crate::__select_recv!(@wait listener, listeners; [$($default)?]);
         };
-        drop($receivers);
+        drop(listener);
         match selected {
             $(Some($index) => {
                 let $binding = results.$index.take().expect("selected receive has a result");
@@ -541,8 +618,8 @@ macro_rules! __select_recv {
             Some(_) => unreachable!("only declared receive branches can be selected"),
         }
     }};
-    (@wait $listeners:ident; []) => { $crate::sync::thread::park(); drop($listeners); };
-    (@wait $listeners:ident; [$default:expr]) => { drop($listeners); break None; };
+    (@wait $listener:ident, $listeners:ident; []) => { $listener.wait(); drop($listeners); };
+    (@wait $listener:ident, $listeners:ident; [$default:expr]) => { drop($listeners); break None; };
     (@default []) => { unreachable!("blocking selection always selects a receive") };
     (@default [$default:expr]) => { $default };
 }

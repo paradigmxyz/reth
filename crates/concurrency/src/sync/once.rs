@@ -10,6 +10,10 @@ use shuttle_sync::sync;
 use std::ops::Deref;
 
 /// A one-time initialized value whose waiting callers remain scheduler-managed.
+///
+/// Process statics must not be initialized concurrently by independent runtime executions.
+/// A failed execution can abandon its initialization lock; do not reuse a static that was
+/// being initialized when an execution failed. Construct execution-local cells inside `run`.
 #[derive(Debug)]
 pub struct OnceLock<T> {
     value: std::sync::OnceLock<T>,
@@ -55,6 +59,12 @@ impl<T> OnceLock<T> {
             return value;
         }
         let guard = self.initializing.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(value) = self.value.get() {
+            // A losing closure may reenter this cell from a captured destructor.
+            drop(guard);
+            drop(initialize);
+            return value;
+        }
         let value = self.value.get_or_init(initialize);
         self.ready.notify_all();
         drop(guard);
@@ -95,6 +105,8 @@ impl<T> From<T> for OnceLock<T> {
 /// executions for process statics. Only the waiting state in Shuttle's [`sync::Once`] resets.
 /// Values containing simulated synchronization primitives must not be reused across executions.
 /// Independent runtime executions must not concurrently initialize the same process static.
+/// A failed execution can abandon the native initializer on a leaked task stack; do not reuse
+/// a static that was being initialized when an execution failed.
 #[derive(Debug)]
 pub struct LazyLock<T, F = fn() -> T> {
     value: std::sync::LazyLock<T, F>,
