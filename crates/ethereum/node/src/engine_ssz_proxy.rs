@@ -526,8 +526,12 @@ where
             if request.versioned_hashes.len() > MAX_BLOBS_REQUEST {
                 return problem_response(STATUS_PAYLOAD_TOO_LARGE, "request-too-large", None)
             }
-            return blob_response::<BlobsV4Response, _>(
+            return blob_response(
                 self.get_blobs_v4_metered(request.versioned_hashes, request.indices_bitarray),
+                |blobs| {
+                    BlobsV4Response::encode_with_indices(&blobs, request.indices_bitarray)
+                        .map(ssz_bytes_response)
+                },
             )
         }
         let request = match BlobsV1Request::from_ssz_bytes(&body) {
@@ -539,9 +543,15 @@ where
         }
         let hashes = request.versioned_hashes;
         match version {
-            1 => blob_response::<BlobsV1Response, _>(self.get_blobs_v1_metered(hashes).map(Some)),
-            2 => blob_response::<BlobsV2Response, _>(self.get_blobs_v2_metered(hashes)),
-            3 => blob_response::<BlobsV3Response, _>(self.get_blobs_v3_metered(hashes)),
+            1 => blob_response(self.get_blobs_v1_metered(hashes).map(Some), |blobs| {
+                BlobsV1Response::try_from(blobs).map(ssz_response)
+            }),
+            2 => blob_response(self.get_blobs_v2_metered(hashes), |blobs| {
+                BlobsV2Response::try_from(blobs).map(ssz_response)
+            }),
+            3 => blob_response(self.get_blobs_v3_metered(hashes), |blobs| {
+                BlobsV3Response::try_from(blobs).map(ssz_response)
+            }),
             _ => problem_response(STATUS_NOT_FOUND, "method-not-found", None),
         }
     }
@@ -992,14 +1002,13 @@ async fn read_ssz_body(request: HttpRequest, max_bytes: usize) -> Result<Bytes, 
     }
 }
 
-fn blob_response<Ssz, Legacy>(response: Result<Option<Legacy>, EngineApiError>) -> HttpResponse
-where
-    Ssz: TryFrom<Legacy> + ssz::Encode,
-    Ssz::Error: std::fmt::Display,
-{
+fn blob_response<T, E: std::fmt::Display>(
+    response: Result<Option<T>, EngineApiError>,
+    encode: impl FnOnce(T) -> Result<HttpResponse, E>,
+) -> HttpResponse {
     match response {
-        Ok(Some(response)) => match Ssz::try_from(response) {
-            Ok(response) => ssz_response(response),
+        Ok(Some(response)) => match encode(response) {
+            Ok(response) => response,
             Err(err) => {
                 problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", Some(err.to_string()))
             }
@@ -1189,10 +1198,14 @@ where
 }
 
 fn ssz_response<T: ssz::Encode>(value: T) -> HttpResponse {
+    ssz_bytes_response(value.as_ssz_bytes())
+}
+
+fn ssz_bytes_response(bytes: Vec<u8>) -> HttpResponse {
     HttpResponse::builder()
         .status(STATUS_OK)
         .header(CONTENT_TYPE, OCTET_STREAM)
-        .body(HttpBody::from(value.as_ssz_bytes()))
+        .body(HttpBody::from(bytes))
         .expect("valid response")
 }
 
