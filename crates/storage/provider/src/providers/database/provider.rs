@@ -4225,7 +4225,7 @@ mod tests {
     };
     use evm2::evm::AccountInfo;
     use reth_chain_state::{
-        test_utils::TestBlockBuilder, CanonicalInMemoryState, ChainInfoHeaders, ExecutedBlock,
+        test_utils::TestBlockBuilder, CanonicalInMemoryStateWriter, ChainInfoHeaders, ExecutedBlock,
     };
     use reth_db_api::models::{SnapAttempt, StorageSettings};
     use reth_ethereum_primitives::Receipt;
@@ -4259,11 +4259,11 @@ mod tests {
         )
     }
 
-    /// Creates the canonical state that updates the in-memory blocks of `factory`.
-    fn canonical_state_for(
+    /// Creates the writer of a canonical state over the in-memory blocks of `factory`.
+    fn canonical_state_writer_for(
         factory: &ProviderFactory<MockNodeTypesWithDB>,
-    ) -> CanonicalInMemoryState {
-        CanonicalInMemoryState::with_head(
+    ) -> CanonicalInMemoryStateWriter {
+        CanonicalInMemoryStateWriter::new(
             ChainInfoHeaders {
                 canonical_head: SealedHeader::default(),
                 safe: None,
@@ -5164,9 +5164,9 @@ mod tests {
         for block in &blocks {
             provider.insert_block(block.recovered_block()).unwrap();
         }
-        let canonical_state = canonical_state_for(&factory);
+        let mut writer = canonical_state_writer_for(&factory);
         for block in &blocks[6..] {
-            canonical_state.insert_executed(block.clone());
+            writer.insert_executed(block.clone());
         }
         provider
             .save_stage_checkpoint(
@@ -5213,9 +5213,9 @@ mod tests {
         save_genesis(&provider_rw, &genesis).unwrap();
         provider_rw.commit().unwrap();
 
-        let canonical_state = canonical_state_for(&factory);
+        let mut writer = canonical_state_writer_for(&factory);
         for block in &blocks[2..] {
-            canonical_state.insert_executed(block.clone());
+            writer.insert_executed(block.clone());
         }
 
         let provider_rw = factory.provider_rw().unwrap();
