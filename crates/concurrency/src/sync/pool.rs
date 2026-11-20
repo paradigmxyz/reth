@@ -263,16 +263,13 @@ mod deterministic {
             reason = "Only process-wide pool configuration is stored here; scheduling state is execution-local."
         )]
         pub fn build_global(self) -> Result<(), ThreadPoolBuildError> {
-            let mut initialized = false;
-            GLOBAL_POOL.get_or_init(|| {
-                initialized = true;
-                self.build().expect("logical pool construction is infallible")
-            });
-            if initialized {
-                Ok(())
-            } else {
-                Err(ThreadPoolBuildError::GlobalPoolAlreadyInitialized)
+            if GLOBAL_POOL.get().is_some() {
+                return Err(ThreadPoolBuildError::GlobalPoolAlreadyInitialized);
             }
+            // Naming callbacks may yield, so run them outside the native initialization lock.
+            // Another task may initialize the global pool while these callbacks are running.
+            let pool = self.build()?;
+            GLOBAL_POOL.set(pool).map_err(|_| ThreadPoolBuildError::GlobalPoolAlreadyInitialized)
         }
         /// Builds a pool; constructing logical workers cannot fail.
         pub fn build(mut self) -> Result<ThreadPool, ThreadPoolBuildError> {
