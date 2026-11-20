@@ -242,7 +242,9 @@ mod deterministic {
         pub fn new() -> Self {
             Self::default()
         }
-        /// Sets the logical worker count; zero selects the deterministic default of one.
+        /// Sets the logical worker count, capped at Rayon's maximum.
+        ///
+        /// Zero selects the deterministic default of one.
         pub const fn num_threads(mut self, threads: usize) -> Self {
             self.num_threads = threads;
             self
@@ -278,7 +280,7 @@ mod deterministic {
         }
         /// Builds a pool; constructing logical workers cannot fail.
         pub fn build(mut self) -> Result<ThreadPool, ThreadPoolBuildError> {
-            let names = (0..self.num_threads.max(1))
+            let names = (0..self.num_threads.max(1).min(rayon::max_num_threads()))
                 .map(|index| self.thread_name.as_mut().map(|name| name(index)))
                 .collect();
             Ok(ThreadPool {
