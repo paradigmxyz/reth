@@ -165,9 +165,11 @@ fn checksum_static_file<N: NodePrimitives>(
         if checksummer.total == limit || block_range.start() > end_block {
             break;
         }
-        let first = block_range.start().max(start_block);
-        let last = block_range.end().min(end_block);
-        if first > last {
+        let selected = SegmentRangeInclusive::new(
+            block_range.start().max(start_block),
+            block_range.end().min(end_block),
+        );
+        if selected.is_empty() {
             continue;
         }
 
@@ -211,12 +213,12 @@ fn checksum_static_file<N: NodePrimitives>(
                 count == u64::try_from(jar_provider.rows())?,
                 "Row count mismatch in {segment} static file {block_range}"
             );
-            let rows = if first == block_range.start() && last == block_range.end() {
+            let rows = if selected == *block_range {
                 0..count
             } else if segment.is_headers() {
-                (first - block_range.start())..(last - block_range.start() + 1)
+                (selected.start() - block_range.start())..(selected.end() - block_range.start() + 1)
             } else if let Some(txs) = header.tx_range() {
-                partial_transaction_rows(&db.tx()?, segment, *block_range, txs, first, last)?
+                partial_transaction_rows(&db.tx()?, segment, *block_range, txs, selected)?
             } else {
                 0..0
             };
@@ -252,8 +254,7 @@ fn partial_transaction_rows(
     segment: StaticFileSegment,
     blocks: SegmentRangeInclusive,
     txs: SegmentRangeInclusive,
-    first: u64,
-    last: u64,
+    selected: SegmentRangeInclusive,
 ) -> eyre::Result<Range<u64>> {
     let body = |block| {
         tx.get::<tables::BlockBodyIndices>(block)?
@@ -276,9 +277,11 @@ fn partial_transaction_rows(
         );
     }
     let offset = |n: u64| n.saturating_sub(txs.start()).min(txs.len());
-    let from = if first == start { 0 } else { offset(body(first)?.first_tx_num) };
-    let to = if last == blocks.end() { txs.len() } else { offset(next_tx(last)?) };
-    eyre::ensure!(from <= to, "Decreasing transaction offsets for blocks {first}..={last}");
+    let from =
+        if selected.start() == start { 0 } else { offset(body(selected.start())?.first_tx_num) };
+    let to =
+        if selected.end() == blocks.end() { txs.len() } else { offset(next_tx(selected.end())?) };
+    eyre::ensure!(from <= to, "Decreasing transaction offsets for blocks {selected}");
     Ok(from..to)
 }
 
