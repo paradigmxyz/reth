@@ -243,7 +243,7 @@ impl TestHarness {
             header.num_hash(),
             overlay_manager.clone(),
         );
-        let canonical_in_memory_state = CanonicalInMemoryState::with_head(
+        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
             ChainInfoHeaders { canonical_head: header, safe: None, finalized: None },
             overlay_manager.in_memory_state().clone(),
         );
@@ -269,7 +269,7 @@ impl TestHarness {
             engine_validator,
             from_tree_tx,
             engine_api_tree_state,
-            canonical_in_memory_state,
+            canonical_in_memory_state_writer,
             persistence_handle,
             PersistenceState {
                 last_persisted_block: BlockNumHash::default(),
@@ -297,7 +297,7 @@ impl TestHarness {
     }
 
     fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
-        let canonical_in_memory_state = CanonicalInMemoryState::with_head(
+        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
             ChainInfoHeaders {
                 canonical_head: blocks.last().unwrap().recovered_block().clone_sealed_header(),
                 safe: None,
@@ -311,8 +311,7 @@ impl TestHarness {
             .tree_state
             .set_canonical_head(blocks.last().unwrap().recovered_block().num_hash());
 
-        self.tree.canonical_in_memory_state_writer =
-            CanonicalInMemoryStateWriter::new(canonical_in_memory_state);
+        self.tree.canonical_in_memory_state_writer = canonical_in_memory_state_writer;
         self.tree
             .canonical_in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: blocks.clone() });

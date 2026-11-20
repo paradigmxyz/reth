@@ -111,7 +111,7 @@ mod tests {
     /// writer of that state. Its canonical head is the default header.
     fn tree_state() -> (TreeState, CanonicalInMemoryState, CanonicalInMemoryStateWriter) {
         let overlay_manager = OverlayManager::default();
-        let canonical_in_memory_state = CanonicalInMemoryState::with_head(
+        let writer = CanonicalInMemoryStateWriter::new(
             ChainInfoHeaders {
                 canonical_head: SealedHeader::default(),
                 safe: None,
@@ -121,8 +121,8 @@ mod tests {
         );
         (
             TreeState::new(BlockNumHash::default(), overlay_manager),
-            canonical_in_memory_state.clone(),
-            CanonicalInMemoryStateWriter::new(canonical_in_memory_state),
+            writer.canonical_in_memory_state().clone(),
+            writer,
         )
     }
 

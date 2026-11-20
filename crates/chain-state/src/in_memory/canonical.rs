@@ -624,27 +624,40 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 }
 
-/// Changes a [`CanonicalInMemoryState`]: the blocks it tracks, its chain info, and the
-/// notifications it sends.
+/// Creates a [`CanonicalInMemoryState`] and changes it: the blocks it tracks, its chain info, and
+/// the notifications it sends.
 ///
-/// What is written through a writer is read through the state it was created for and through
-/// every clone of that state.
+/// A writer is created together with its state. [`Self::canonical_in_memory_state`] returns that
+/// state, which can be cloned and is what everything but the owner of the writer reads. What is
+/// written through the writer is read through the state and every clone of it.
 ///
 /// A writer cannot be cloned and its methods take `&mut self`, so only its owner changes the
-/// state through it. The methods of [`CanonicalInMemoryState`] that change it are still public,
-/// and a second writer can be created for the same state.
+/// state through it. The constructors of [`CanonicalInMemoryState`] and its methods that change
+/// it are still public.
 #[derive(Debug)]
 pub struct CanonicalInMemoryStateWriter<N: NodePrimitives = EthPrimitives> {
     canonical_in_memory_state: CanonicalInMemoryState<N>,
 }
 
 impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
-    /// Creates a writer of the blocks of `canonical_in_memory_state`.
-    pub const fn new(canonical_in_memory_state: CanonicalInMemoryState<N>) -> Self {
-        Self { canonical_in_memory_state }
+    /// Creates a canonical state over the blocks of `in_memory_state`, with the canonical head
+    /// and the safe and finalized blocks of `chain_info_headers`, and returns its writer.
+    ///
+    /// The blocks are shared with every other handle of `in_memory_state`. The chain info and the
+    /// notifications belong to the created state and its clones.
+    pub fn new(
+        chain_info_headers: ChainInfoHeaders<N::BlockHeader>,
+        in_memory_state: InMemoryState<N>,
+    ) -> Self {
+        Self {
+            canonical_in_memory_state: CanonicalInMemoryState::with_head(
+                chain_info_headers,
+                in_memory_state,
+            ),
+        }
     }
 
-    /// Returns the state whose blocks this changes.
+    /// Returns the state this changes.
     pub const fn canonical_in_memory_state(&self) -> &CanonicalInMemoryState<N> {
         &self.canonical_in_memory_state
     }
@@ -1268,8 +1281,15 @@ mod tests {
 
     #[test]
     fn test_writer_changes_blocks_of_canonical_state() {
-        let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
-        let mut writer = CanonicalInMemoryStateWriter::new(state.clone());
+        let mut writer = CanonicalInMemoryStateWriter::new(
+            ChainInfoHeaders {
+                canonical_head: SealedHeader::default(),
+                safe: None,
+                finalized: None,
+            },
+            InMemoryState::default(),
+        );
+        let state: CanonicalInMemoryState = writer.canonical_in_memory_state().clone();
         let mut block_builder = TestBlockBuilder::eth();
         let blocks = block_builder.get_executed_blocks(1..4).collect::<Vec<_>>();
         let hash = |number: usize| blocks[number - 1].recovered_block().hash();
@@ -1313,5 +1333,16 @@ mod tests {
             in_memory_state.block_counts(),
             InMemoryStateBlockCounts { canonical: 0, non_canonical: 0 }
         );
+
+        // The chain info set through the writer is read through the state as well.
+        let header = blocks[2].recovered_block().clone_sealed_header();
+        writer.on_forkchoice_update_received();
+        writer.set_canonical_head(header.clone());
+        writer.set_safe(header.clone());
+        writer.set_finalized(header.clone());
+        assert!(state.last_received_update_timestamp().is_some());
+        assert_eq!(state.get_canonical_head(), header);
+        assert_eq!(state.get_safe_num_hash(), Some(header.num_hash()));
+        assert_eq!(state.get_finalized_num_hash(), Some(header.num_hash()));
     }
 }
