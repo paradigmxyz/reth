@@ -248,8 +248,9 @@ enum FileHashMessage {
     Finish,
     /// Drops the current file because not all of its bytes were seen.
     Discard,
-    /// Drops any hash for this path, because an entry that is not hashed replaced it.
-    Forget(PathBuf),
+    /// Drops every recorded hash, because an entry replaces a file that an earlier entry may
+    /// have written.
+    ForgetAll,
 }
 
 impl FileHasher {
@@ -272,23 +273,25 @@ impl FileHasher {
                             hashes.insert(path, hasher.count(), hasher.finalize());
                         }
                     }
-                    FileHashMessage::Discard => {
-                        if let Some((path, _)) = current.take() {
-                            hashes.remove(&path);
-                        }
-                    }
-                    FileHashMessage::Forget(path) => hashes.remove(&path),
+                    FileHashMessage::Discard => current = None,
+                    FileHashMessage::ForgetAll => hashes.clear(),
                 }
             }
             hashes
         });
-        Self { range: 0..0, seen: 0, batch: Vec::new(), sender, thread }
+        Self {
+            range: 0..0,
+            seen: 0,
+            batch: Vec::with_capacity(FILE_HASH_BATCH_SIZE),
+            sender,
+            thread,
+        }
     }
 
     /// Starts hashing `entry` if it is a regular file, and returns whether it did.
     ///
-    /// Other entries, such as links and sparse files, drop any hash for their path so their
-    /// outputs are verified by reading them back.
+    /// Other entries, such as links and sparse files, get no hash, so their outputs are
+    /// verified by reading them back.
     fn start_entry<R: Read>(
         &mut self,
         entry: &tar::Entry<'_, R>,
@@ -298,9 +301,14 @@ impl FileHasher {
         let Some(path) = entry_destination_path(entry, target_dir, static_files_dir)? else {
             return Ok(false)
         };
+        // This entry replaces a file already at the destination. An earlier entry may have
+        // written it under another spelling of the path, such as a different case on a
+        // case-insensitive filesystem, so which recorded hash it had is unknown and none is kept.
+        if std::fs::symlink_metadata(&path).is_ok_and(|metadata| !metadata.is_dir()) {
+            self.send(FileHashMessage::ForgetAll)?;
+        }
         let entry_type = entry.header().entry_type();
         if !entry_type.is_file() && !entry_type.is_contiguous() {
-            self.send(FileHashMessage::Forget(path))?;
             return Ok(false)
         }
         let start = entry.raw_file_position();
@@ -318,11 +326,17 @@ impl FileHasher {
         if start >= end {
             return Ok(())
         }
-        self.batch
-            .extend_from_slice(&bytes[(start - position) as usize..(end - position) as usize]);
         self.seen += end - start;
-        if self.batch.len() >= FILE_HASH_BATCH_SIZE {
-            self.send_batch()?;
+        let mut bytes = &bytes[(start - position) as usize..(end - position) as usize];
+        // Batches are filled exactly, so a batch never outgrows its allocation.
+        while !bytes.is_empty() {
+            let (head, tail) =
+                bytes.split_at(bytes.len().min(FILE_HASH_BATCH_SIZE - self.batch.len()));
+            self.batch.extend_from_slice(head);
+            bytes = tail;
+            if self.batch.len() == FILE_HASH_BATCH_SIZE {
+                self.send_batch()?;
+            }
         }
         Ok(())
     }
@@ -1007,6 +1021,64 @@ mod tests {
         assert!(verifier
             .verify_with_progress(&[checksum("static_files/headers", &data)], None, Some(&hashes))
             .unwrap());
+
+        // An entry that replaces a file written by an earlier entry drops the recorded hashes,
+        // whether it is hashed or not; tar writes unknown entry types as regular files. On a
+        // case-insensitive filesystem `db/DATA` replaces `db/data` as well.
+        for (path, entry_type) in
+            [("db/data", tar::EntryType::Fifo), ("db/DATA", tar::EntryType::Regular)]
+        {
+            let mut archive = tar::Builder::new(Vec::new());
+            header.set_entry_type(tar::EntryType::Regular);
+            archive.append_data(&mut header, "db/data", data.as_slice()).unwrap();
+            header.set_entry_type(entry_type);
+            archive.append_data(&mut header, path, corrupt.as_slice()).unwrap();
+            let tar = zstd::encode_all(archive.into_inner().unwrap().as_slice(), 0).unwrap();
+            let target = tempfile::tempdir().unwrap();
+            let hashes = extract_archive_hashed(
+                tar.as_slice(),
+                CompressionFormat::Zstd,
+                target.path(),
+                None,
+                None,
+            )
+            .unwrap();
+            let replaced = fs::read(target.path().join("db/data")).unwrap() == corrupt;
+            assert!(replaced || entry_type == tar::EntryType::Regular);
+            let verifier = super::super::verify::OutputVerifier::new(target.path(), None);
+            assert_eq!(
+                verifier
+                    .verify_with_progress(&[checksum("db/data", &data)], None, Some(&hashes))
+                    .unwrap(),
+                !replaced,
+                "`{path}` replaced the hashed file: {replaced}"
+            );
+        }
+
+        // An output the archive made unreadable is an error, as it is for a read-back, unless
+        // the user can read it regardless.
+        #[cfg(unix)]
+        {
+            let mut archive = tar::Builder::new(Vec::new());
+            header.set_entry_type(tar::EntryType::Regular);
+            header.set_mode(0o200);
+            archive.append_data(&mut header, "db/data", data.as_slice()).unwrap();
+            let tar = zstd::encode_all(archive.into_inner().unwrap().as_slice(), 0).unwrap();
+            let target = tempfile::tempdir().unwrap();
+            let hashes = extract_archive_hashed(
+                tar.as_slice(),
+                CompressionFormat::Zstd,
+                target.path(),
+                None,
+                None,
+            )
+            .unwrap();
+            let readable = fs::open(target.path().join("db/data")).is_ok();
+            let verifier = super::super::verify::OutputVerifier::new(target.path(), None);
+            let verified =
+                verifier.verify_with_progress(&[checksum("db/data", &data)], None, Some(&hashes));
+            assert_eq!(verified.is_ok(), readable);
+        }
     }
 
     #[test]

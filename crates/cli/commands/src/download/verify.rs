@@ -28,9 +28,9 @@ impl ExtractedHashes {
         self.0.insert(path, (size, hash));
     }
 
-    /// Drops any hash recorded for `path`.
-    pub(crate) fn remove(&mut self, path: &Path) {
-        self.0.remove(path);
+    /// Drops every recorded hash.
+    pub(crate) fn clear(&mut self) {
+        self.0.clear();
     }
 }
 
@@ -60,7 +60,7 @@ impl<'a> OutputVerifier<'a> {
     ///
     /// Sizes are checked before any file is hashed, then files are hashed in parallel. A file
     /// with a hash in `extracted` of its declared size is checked against that hash instead of
-    /// being read back.
+    /// being read back, but must still open for reading.
     pub(crate) fn verify_with_progress(
         &self,
         output_files: &[OutputFileChecksum],
@@ -93,6 +93,8 @@ impl<'a> OutputVerifier<'a> {
                 if let Some(&(size, hash)) = extracted.and_then(|hashes| hashes.0.get(&path)) &&
                     size == expected.size
                 {
+                    // The archive sets the file mode, which can leave the output unreadable.
+                    fs::open(&path)?;
                     if let Some(progress) = progress {
                         progress.record_verified(size);
                     }
