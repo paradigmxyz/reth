@@ -576,11 +576,11 @@ mod simulated {
 #[macro_export]
 macro_rules! select_biased {
     ($(recv($receiver:expr) -> $binding:pat => $body:expr),+ $(,)?) => {{
-        let receivers = ($(&$receiver,)+);
+        let receivers: ($($crate::__select_recv!(@receiver_type $receiver),)+) = ($(&$receiver,)+);
         $crate::__select_recv!(@index receivers; []; []; [0 1 2 3 4 5 6 7]; $(($binding, $body)),+)
     }};
     ($(recv($receiver:expr) -> $binding:pat => $body:expr,)+ default => $default:expr $(,)?) => {{
-        let receivers = ($(&$receiver,)+);
+        let receivers: ($($crate::__select_recv!(@receiver_type $receiver),)+) = ($(&$receiver,)+);
         $crate::__select_recv!(@index receivers; [$default]; []; [0 1 2 3 4 5 6 7]; $(($binding, $body)),+)
     }};
 }
@@ -598,6 +598,7 @@ macro_rules! select { ($($tokens:tt)*) => { $crate::select_biased! { $($tokens)*
 #[cfg(feature = "fuzz")]
 #[macro_export]
 macro_rules! __select_recv {
+    (@receiver_type $receiver:expr) => { &$crate::sync::channel::Receiver<_> };
     (@index $receivers:ident; [$($default:expr)?]; [$($done:tt)*]; [$index:tt $($indices:tt)*]; ($binding:pat, $body:expr), $($rest:tt)*) => {
         $crate::__select_recv!(@index $receivers; [$($default)?]; [$($done)* ($index, $binding, $body)]; [$($indices)*]; $($rest)*)
     };
