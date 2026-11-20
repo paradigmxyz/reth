@@ -605,16 +605,14 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
             let tx = self.tool.provider_factory.db_ref().tx()?;
             let mut cursor = tx.cursor_dup_read::<T>()?;
 
-            // Seek to the starting key. If there is actually a key at the starting key then
-            // seek to the subkey within it.
-            if let Some((decoded_key, _)) = cursor.seek(key.clone())? &&
-                decoded_key == key
-            {
-                cursor.seek_by_key_subkey(key.clone(), start_subkey.clone())?;
-            }
-
-            // Get the current position to start iteration
-            let mut current = cursor.current()?;
+            // A duplicate seek stays within one key. On a miss, resume at the next distinct key.
+            let mut current = match cursor.seek_by_key_subkey(key.clone(), start_subkey)? {
+                Some(value) => Some((key, value)),
+                None => match cursor.seek(key.clone())? {
+                    Some((found, _)) if found == key => cursor.next_no_dup()?,
+                    row => row,
+                },
+            };
 
             while let Some((decoded_key, decoded_value)) = current {
                 // Extract the subkey using the ValueWithSubKey trait

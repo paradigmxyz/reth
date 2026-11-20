@@ -18,11 +18,13 @@ fn db_get_mdbx(datadir: &str, table: &str, key: &str, args: &[&str]) -> String {
 }
 
 #[test]
-fn db_get_mdbx_exact_subkey() {
+fn db_get_mdbx_subkey_points_and_ranges() {
     let dir = tempfile::tempdir().unwrap();
     let datadir = dir.path().to_str().unwrap();
 
     let address = Address::with_last_byte(0xaa);
+    let next_address = Address::with_last_byte(0xcc);
+    let next_entry = StorageEntry::new(B256::ZERO, U256::ONE);
     let stored = B256::with_last_byte(3);
     // Include a leading zero in the stored integer to distinguish raw output from re-encoding.
     let raw = [stored.as_slice(), &[0, 0x21]].concat();
@@ -33,7 +35,8 @@ fn db_get_mdbx_exact_subkey() {
                 address,
                 StorageEntry::new(B256::with_last_byte(1), U256::from(11)),
             )?;
-            tx.put::<RawDupSort<PlainStorageState>>(address.into(), RawValue::from_vec(raw))
+            tx.put::<RawDupSort<PlainStorageState>>(address.into(), RawValue::from_vec(raw))?;
+            tx.put::<PlainStorageState>(next_address, next_entry)
         })
         .unwrap()
         .unwrap();
@@ -56,6 +59,19 @@ fn db_get_mdbx_exact_subkey() {
         serde_json::from_str::<Value>(&range).unwrap(),
         json!({ "key": address, "val": entry })
     );
+
+    let upper = Address::with_last_byte(0xdd).to_string();
+    let range_from = |start: Address| {
+        db_get_mdbx(datadir, "PlainStorageState", &start.to_string(), &[&end, &upper])
+    };
+    // Both an exhausted address and a missing address start at the next account's first slot.
+    for start in [address, Address::with_last_byte(0xbb)] {
+        assert_eq!(
+            serde_json::from_str::<Value>(&range_from(start)).unwrap(),
+            json!({ "key": next_address, "val": next_entry })
+        );
+    }
+    assert_eq!(range_from(next_address), "");
 }
 
 #[test]
