@@ -262,9 +262,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-eip7928"
-version = "0.4.11"
+version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a12e1dc70236cfb8e79b96dd8544aed47c39e2f45dc6b51c3703e969e052faa"
+checksum = "c5bda4a02ce2a7f47ff72c57a2eb673b01cecc3186f3f7b7234c4fd33354d9fc"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -3723,7 +3723,7 @@ dependencies = [
 [[package]]
 name = "evm2"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=35aa32800b147b00e616d4e1869a3835aa86701f#35aa32800b147b00e616d4e1869a3835aa86701f"
+source = "git+https://github.com/DaniPopes/evm2?rev=7512c142372cea11ade763043c2e79c86421af41#7512c142372cea11ade763043c2e79c86421af41"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -3764,7 +3764,7 @@ dependencies = [
 [[package]]
 name = "evm2-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=35aa32800b147b00e616d4e1869a3835aa86701f#35aa32800b147b00e616d4e1869a3835aa86701f"
+source = "git+https://github.com/DaniPopes/evm2?rev=7512c142372cea11ade763043c2e79c86421af41#7512c142372cea11ade763043c2e79c86421af41"
 dependencies = [
  "alloy-consensus",
  "alloy-eip2930",
@@ -3787,7 +3787,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=35aa32800b147b00e616d4e1869a3835aa86701f#35aa32800b147b00e616d4e1869a3835aa86701f"
+source = "git+https://github.com/DaniPopes/evm2?rev=7512c142372cea11ade763043c2e79c86421af41#7512c142372cea11ade763043c2e79c86421af41"
 dependencies = [
  "evm2",
  "evm2-jit-backend",
@@ -3802,7 +3802,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-backend"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=35aa32800b147b00e616d4e1869a3835aa86701f#35aa32800b147b00e616d4e1869a3835aa86701f"
+source = "git+https://github.com/DaniPopes/evm2?rev=7512c142372cea11ade763043c2e79c86421af41#7512c142372cea11ade763043c2e79c86421af41"
 dependencies = [
  "eyre",
  "ruint",
@@ -3811,12 +3811,12 @@ dependencies = [
 [[package]]
 name = "evm2-jit-build"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=35aa32800b147b00e616d4e1869a3835aa86701f#35aa32800b147b00e616d4e1869a3835aa86701f"
+source = "git+https://github.com/DaniPopes/evm2?rev=7512c142372cea11ade763043c2e79c86421af41#7512c142372cea11ade763043c2e79c86421af41"
 
 [[package]]
 name = "evm2-jit-builtins"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=35aa32800b147b00e616d4e1869a3835aa86701f#35aa32800b147b00e616d4e1869a3835aa86701f"
+source = "git+https://github.com/DaniPopes/evm2?rev=7512c142372cea11ade763043c2e79c86421af41#7512c142372cea11ade763043c2e79c86421af41"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3829,7 +3829,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-codegen"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=35aa32800b147b00e616d4e1869a3835aa86701f#35aa32800b147b00e616d4e1869a3835aa86701f"
+source = "git+https://github.com/DaniPopes/evm2?rev=7512c142372cea11ade763043c2e79c86421af41#7512c142372cea11ade763043c2e79c86421af41"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.13.2",
@@ -3852,7 +3852,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-context"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=35aa32800b147b00e616d4e1869a3835aa86701f#35aa32800b147b00e616d4e1869a3835aa86701f"
+source = "git+https://github.com/DaniPopes/evm2?rev=7512c142372cea11ade763043c2e79c86421af41#7512c142372cea11ade763043c2e79c86421af41"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3862,7 +3862,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-llvm"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=35aa32800b147b00e616d4e1869a3835aa86701f#35aa32800b147b00e616d4e1869a3835aa86701f"
+source = "git+https://github.com/DaniPopes/evm2?rev=7512c142372cea11ade763043c2e79c86421af41#7512c142372cea11ade763043c2e79c86421af41"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -3875,7 +3875,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-runtime"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=35aa32800b147b00e616d4e1869a3835aa86701f#35aa32800b147b00e616d4e1869a3835aa86701f"
+source = "git+https://github.com/DaniPopes/evm2?rev=7512c142372cea11ade763043c2e79c86421af41#7512c142372cea11ade763043c2e79c86421af41"
 dependencies = [
  "alloy-primitives",
  "crossbeam-channel",
@@ -3901,7 +3901,7 @@ dependencies = [
 [[package]]
 name = "evm2-macros"
 version = "0.1.0"
-source = "git+https://github.com/DaniPopes/evm2?rev=35aa32800b147b00e616d4e1869a3835aa86701f#35aa32800b147b00e616d4e1869a3835aa86701f"
+source = "git+https://github.com/DaniPopes/evm2?rev=7512c142372cea11ade763043c2e79c86421af41#7512c142372cea11ade763043c2e79c86421af41"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -444,9 +444,9 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f", default-features = false }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f", default-features = false }
-evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f", default-features = false }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "7512c142372cea11ade763043c2e79c86421af41", default-features = false }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "7512c142372cea11ade763043c2e79c86421af41", default-features = false }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "7512c142372cea11ade763043c2e79c86421af41", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -455,7 +455,7 @@ alloy-sol-types = { version = "1.6.1", default-features = false }
 
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-eip7928 = { version = "0.4.10", default-features = false, features = ["rlp"] }
+alloy-eip7928 = { version = "0.4.12", default-features = false, features = ["rlp"] }
 alloy-rlp = { version = "0.3.16", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.9", default-features = false }
 
@@ -684,9 +684,9 @@ ipnet = "2.11"
 # evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
 # rejects a patch from the same source.
 [patch."https://github.com/alloy-rs/evm2"]
-evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f" }
-evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f" }
-evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f" }
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "7512c142372cea11ade763043c2e79c86421af41" }
+evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "7512c142372cea11ade763043c2e79c86421af41" }
+evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "7512c142372cea11ade763043c2e79c86421af41" }
 
 [patch.crates-io]
 # reth-core
