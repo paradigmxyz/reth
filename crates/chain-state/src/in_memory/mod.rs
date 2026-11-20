@@ -6,7 +6,7 @@ pub use block_state::BlockState;
 mod blocks;
 
 mod canonical;
-pub use canonical::{CanonicalInMemoryState, InMemoryState};
+pub use canonical::{CanonicalInMemoryState, InMemoryState, InMemoryStateBlockCounts};
 
 mod executed_block;
 pub use executed_block::ExecutedBlock;

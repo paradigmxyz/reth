@@ -501,7 +501,6 @@ where
 
         let is_pending = self.state.tree_state.canonical_block_hash() ==
             executed.recovered_block().parent_hash();
-        self.state.tree_state.insert_executed(executed.clone());
 
         if is_pending {
             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
