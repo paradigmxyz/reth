@@ -171,7 +171,7 @@ impl<Node: FullNodeComponents> ExExLauncher<Node> {
                         // ExEx makes it lag. The missed blocks are gone and the manager would never
                         // receive another notification, so fail instead of stalling every ExEx.
                         Err(RecvError::Lagged(skipped)) => panic!(
-                            "exex manager missed {skipped} blockchain tree notifications while its buffer was full"
+                            "exex manager forwarder lagged and missed {skipped} blockchain tree notifications"
                         ),
                         Err(RecvError::Closed) => return,
                     }
