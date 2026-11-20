@@ -347,7 +347,7 @@ impl Discv5 {
             "discovered peer"
         );
 
-        Some(DiscoveredPeer { node_record, fork_id })
+        Some(DiscoveredPeer { node_record, fork_id, enr_seq: enr.seq() })
     }
 
     /// Tries to recover an unreachable [`Enr`](discv5::Enr) received via
@@ -464,6 +464,8 @@ pub struct DiscoveredPeer {
     pub node_record: NodeRecord,
     /// [`ForkId`] extracted from ENR w.r.t. configured
     pub fork_id: Option<ForkId>,
+    /// Sequence number of the ENR that supplied this update.
+    pub enr_seq: u64,
 }
 
 /// Builds the local ENR with the supplied key.
@@ -510,6 +512,11 @@ pub fn build_local_enr(
             builder.tcp4(tcp_socket.port());
         } else if v6.is_some() {
             builder.tcp6(tcp_socket.port());
+        }
+        // An IPv4 RLPx listener cannot accept IPv6, even when discovery is dual stack.
+        // Explicit zero disables the ENR's generic `tcp` fallback for that family.
+        if v6.is_some() && tcp_socket.is_ipv4() {
+            builder.tcp6(0);
         }
 
         // Prefer v6 when both are configured
@@ -1152,5 +1159,39 @@ mod test {
             discv5.get_fork_id(&enr_without_network_stack_id),
             Err(Error::NetworkStackIdNotConfigured)
         ));
+    }
+
+    #[test]
+    fn build_enr_advertises_rlpx_address_family() {
+        let sk = SecretKey::new(&mut rng());
+        let listen = ListenConfig::DualStack {
+            ipv4: Ipv4Addr::LOCALHOST,
+            ipv4_port: 30301,
+            ipv6: Ipv6Addr::LOCALHOST,
+            ipv6_port: 30302,
+        };
+        for tcp in [
+            SocketAddr::from((Ipv4Addr::LOCALHOST, 30303)),
+            SocketAddr::from((Ipv6Addr::UNSPECIFIED, 30303)),
+        ] {
+            let config = Config::builder(tcp)
+                .discv5_config(discv5::ConfigBuilder::new(listen.clone()).build())
+                .build();
+            let (enr, _, _, _) = build_local_enr(&sk, &config);
+            assert_eq!(enr.tcp4(), Some(30303));
+            assert_eq!(enr.tcp6(), tcp.is_ipv4().then_some(0));
+            let EnrCombinedKeyWrapper(enr) = enr.try_into().unwrap();
+            let discovery = discv5_noop();
+            for socket in [
+                SocketAddr::from((Ipv4Addr::LOCALHOST, 30301)),
+                SocketAddr::from((Ipv6Addr::LOCALHOST, 30302)),
+            ] {
+                let record = discovery.try_into_reachable(&enr, socket).unwrap();
+                assert_eq!(
+                    record.tcp_port,
+                    if tcp.is_ipv4() && socket.is_ipv6() { 0 } else { 30303 }
+                );
+            }
+        }
     }
 }
