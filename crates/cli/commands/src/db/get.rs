@@ -646,13 +646,11 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
                 .tool
                 .get_dup::<RawDupSort<T>>(key.into(), RawKey::from_vec(subkey.to_vec()))?
                 .filter(|value| value.raw_value().starts_with(subkey));
-            let content = match value {
-                Some(value) if self.raw => Some(hex::encode_prefixed(value.raw_value())),
-                Some(value) => Some(serde_json::to_string_pretty(&value.value()?)?),
-                None => None,
-            };
-
-            print_content(content, "subkey");
+            match value {
+                Some(value) if self.raw => println!("{:#}", hex::display(value.raw_value())),
+                Some(value) => println!("{}", serde_json::to_string_pretty(&value.value()?)?),
+                None => print_content(None, "subkey"),
+            }
         }
         Ok(())
     }

@@ -1,6 +1,7 @@
 use super::*;
 use alloy_primitives::{Address, B256, U256};
 use reth_db::{
+    init_db,
     mdbx::DatabaseArguments,
     open_db,
     tables::{PackedStoragesTrie, PlainStorageState},
@@ -20,13 +21,12 @@ fn db_get_mdbx(datadir: &str, table: &str, key: &str, args: &[&str]) -> String {
 fn db_get_mdbx_exact_subkey() {
     let dir = tempfile::tempdir().unwrap();
     let datadir = dir.path().to_str().unwrap();
-    reth_ok(&["init", "--chain", "dev", "--datadir", datadir, "--storage.v2=false"]);
 
     let address = Address::with_last_byte(0xaa);
     let stored = B256::with_last_byte(3);
     // Include a leading zero in the stored integer to distinguish raw output from re-encoding.
     let raw = [stored.as_slice(), &[0, 0x21]].concat();
-    open_db(dir.path().join("db"), DatabaseArguments::test())
+    init_db(dir.path().join("db"), DatabaseArguments::test())
         .unwrap()
         .update(|tx| {
             tx.put::<PlainStorageState>(
