@@ -644,6 +644,11 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
         Self { canonical_in_memory_state }
     }
 
+    /// Returns the state whose blocks this changes.
+    pub const fn canonical_in_memory_state(&self) -> &CanonicalInMemoryState<N> {
+        &self.canonical_in_memory_state
+    }
+
     /// See [`CanonicalInMemoryState::clear_state`].
     pub fn clear_state(&mut self) {
         self.canonical_in_memory_state.clear_state();

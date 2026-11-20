@@ -158,7 +158,7 @@ where
             self.persistence_state.finish(new_head.num_hash(), new_head.num_hash());
 
             // update the tracked canonical head
-            self.canonical_in_memory_state.set_canonical_head(new_head);
+            self.canonical_in_memory_state().set_canonical_head(new_head);
 
             // If the pipeline reached the head of the syncing FCU, apply its safe and finalized
             // blocks now that the head is canonical. An unwind must wait for a new FCU because the
@@ -329,7 +329,7 @@ where
     /// for access lists of blocks past the fork. Access list downloads are best-effort anyway, so
     /// those blocks simply take the regular execution path.
     pub(super) fn should_download_access_lists(&self) -> bool {
-        self.canonical_in_memory_state.get_canonical_head().block_access_list_hash().is_some()
+        self.canonical_in_memory_state().get_canonical_head().block_access_list_hash().is_some()
     }
 
     /// Returns true if the distance from the local tip to the block is greater than the configured

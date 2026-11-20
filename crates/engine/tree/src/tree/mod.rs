@@ -282,11 +282,11 @@ where
     persistence_state: PersistenceState,
     /// Flag indicating the state of the node's backfill synchronization process.
     backfill_sync_state: BackfillSyncState,
-    /// Keeps track of the state of the canonical chain that isn't persisted yet.
-    /// This is intended to be accessed from external sources, such as rpc.
-    canonical_in_memory_state: CanonicalInMemoryState<N>,
-    /// Changes the executed blocks that `canonical_in_memory_state` tracks, and reports its
-    /// persisted tip.
+    /// Changes the executed blocks of the state of the canonical chain that isn't persisted yet,
+    /// and reports its persisted tip.
+    ///
+    /// The engine reads that state through [`Self::canonical_in_memory_state`]. Its clones are
+    /// intended to be accessed from external sources, such as rpc.
     canonical_in_memory_state_writer: CanonicalInMemoryStateWriter<N>,
     /// Handle to the payload builder that will receive payload attributes for valid forkchoice
     /// updates
@@ -327,7 +327,7 @@ where
             .field("persistence", &self.persistence)
             .field("persistence_state", &self.persistence_state)
             .field("backfill_sync_state", &self.backfill_sync_state)
-            .field("canonical_in_memory_state", &self.canonical_in_memory_state)
+            .field("canonical_in_memory_state_writer", &self.canonical_in_memory_state_writer)
             .field("payload_builder", &self.payload_builder)
             .field("config", &self.config)
             .field("metrics", &self.metrics)
@@ -393,9 +393,8 @@ where
             backfill_sync_state: BackfillSyncState::Idle,
             state,
             canonical_in_memory_state_writer: CanonicalInMemoryStateWriter::new(
-                canonical_in_memory_state.clone(),
+                canonical_in_memory_state,
             ),
-            canonical_in_memory_state,
             payload_builder,
             config,
             metrics: Default::default(),
@@ -990,6 +989,12 @@ where
         let _ = self.outgoing.send(event).inspect_err(
             |err| error!(target: "engine::tree", "Failed to send internal event: {err:?}"),
         );
+    }
+
+    /// Returns the state of the canonical chain that isn't persisted yet, whose executed blocks
+    /// the engine changes through its writer.
+    const fn canonical_in_memory_state(&self) -> &CanonicalInMemoryState<N> {
+        self.canonical_in_memory_state_writer.canonical_in_memory_state()
     }
 }
 

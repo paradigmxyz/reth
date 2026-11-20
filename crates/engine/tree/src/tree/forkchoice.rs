@@ -87,7 +87,7 @@ where
 
     /// Records metrics for forkchoice updated calls
     fn record_forkchoice_metrics(&self) {
-        self.canonical_in_memory_state.on_forkchoice_update_received();
+        self.canonical_in_memory_state().on_forkchoice_update_received();
     }
 
     /// Pre-validates the forkchoice state and returns early if validation fails.
@@ -222,7 +222,7 @@ where
             // The stored finalized block is used because a forkchoice update MAY carry a zero
             // finalized hash without clearing previously established finality.
             if !always_trigger_payload_job &&
-                self.canonical_in_memory_state
+                self.canonical_in_memory_state()
                     .get_finalized_num_hash()
                     .is_some_and(|finalized| canonical_header.number() < finalized.number)
             {
@@ -333,7 +333,7 @@ where
         &self,
         hash: B256,
     ) -> Result<Option<SealedHeader<N::BlockHeader>>, ProviderError> {
-        if let Some(header) = self.canonical_in_memory_state.header_by_hash(hash) {
+        if let Some(header) = self.canonical_in_memory_state().header_by_hash(hash) {
             return Ok(Some(header))
         }
 
@@ -341,11 +341,11 @@ where
         // Reorged-out headers remain on disk until persistence catches up, so reject old tips above
         // the in-memory head and use in-memory hashes to reject old blocks at shared heights.
         let number = header.number();
-        if number > self.canonical_in_memory_state.get_canonical_block_number() {
+        if number > self.canonical_in_memory_state().get_canonical_block_number() {
             return Ok(None)
         }
         let canonical_hash =
-            if let Some(hash) = self.canonical_in_memory_state.hash_by_number(number) {
+            if let Some(hash) = self.canonical_in_memory_state().hash_by_number(number) {
                 Some(hash)
             } else {
                 self.provider.block_hash(number)?
@@ -419,12 +419,12 @@ where
             }
             Ok(Some(finalized)) => {
                 if Some(finalized.num_hash()) !=
-                    self.canonical_in_memory_state.get_finalized_num_hash()
+                    self.canonical_in_memory_state().get_finalized_num_hash()
                 {
                     // we're also persisting the finalized block on disk so we can reload it on
                     // restart this is required by optimism which queries the finalized block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
                     let _ = self.persistence.save_finalized_block_number(finalized.number());
-                    self.canonical_in_memory_state.set_finalized(finalized.clone());
+                    self.canonical_in_memory_state().set_finalized(finalized.clone());
                     // Update finalized block height metric
                     self.metrics.tree.finalized_block_height.set(finalized.number() as f64);
                 }
@@ -450,11 +450,11 @@ where
                 return Err(OnForkChoiceUpdated::invalid_state())
             }
             Ok(Some(safe)) => {
-                if Some(safe.num_hash()) != self.canonical_in_memory_state.get_safe_num_hash() {
+                if Some(safe.num_hash()) != self.canonical_in_memory_state().get_safe_num_hash() {
                     // we're also persisting the safe block on disk so we can reload it on
                     // restart this is required by optimism which queries the safe block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
                     let _ = self.persistence.save_safe_block_number(safe.number());
-                    self.canonical_in_memory_state.set_safe(safe.clone());
+                    self.canonical_in_memory_state().set_safe(safe.clone());
                     // Update safe block height metric
                     self.metrics.tree.safe_block_height.set(safe.number() as f64);
                 }
