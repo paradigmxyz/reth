@@ -624,15 +624,15 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 }
 
-/// Changes the blocks that a [`CanonicalInMemoryState`] tracks.
+/// Changes a [`CanonicalInMemoryState`]: the blocks it tracks, its chain info, and the
+/// notifications it sends.
 ///
-/// Blocks written through a writer are read through the state it was created for and through
-/// every clone of that state. [`Self::on_blocks_persisted`] also reports the persisted tip of that
-/// state.
+/// What is written through a writer is read through the state it was created for and through
+/// every clone of that state.
 ///
-/// A writer cannot be cloned and its methods take `&mut self`, so only its owner changes blocks
-/// through it. The methods of [`CanonicalInMemoryState`] that change blocks are still public, and
-/// a second writer can be created for the same state.
+/// A writer cannot be cloned and its methods take `&mut self`, so only its owner changes the
+/// state through it. The methods of [`CanonicalInMemoryState`] that change it are still public,
+/// and a second writer can be created for the same state.
 #[derive(Debug)]
 pub struct CanonicalInMemoryStateWriter<N: NodePrimitives = EthPrimitives> {
     canonical_in_memory_state: CanonicalInMemoryState<N>,
@@ -690,6 +690,31 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
             state_trie_persisted_block,
             finalized,
         );
+    }
+
+    /// See [`CanonicalInMemoryState::on_forkchoice_update_received`].
+    pub fn on_forkchoice_update_received(&mut self) {
+        self.canonical_in_memory_state.on_forkchoice_update_received();
+    }
+
+    /// See [`CanonicalInMemoryState::set_canonical_head`].
+    pub fn set_canonical_head(&mut self, header: SealedHeader<N::BlockHeader>) {
+        self.canonical_in_memory_state.set_canonical_head(header);
+    }
+
+    /// See [`CanonicalInMemoryState::set_safe`].
+    pub fn set_safe(&mut self, header: SealedHeader<N::BlockHeader>) {
+        self.canonical_in_memory_state.set_safe(header);
+    }
+
+    /// See [`CanonicalInMemoryState::set_finalized`].
+    pub fn set_finalized(&mut self, header: SealedHeader<N::BlockHeader>) {
+        self.canonical_in_memory_state.set_finalized(header);
+    }
+
+    /// See [`CanonicalInMemoryState::notify_canon_state`].
+    pub fn notify_canon_state(&mut self, event: CanonStateNotification<N>) {
+        self.canonical_in_memory_state.notify_canon_state(event);
     }
 }
 

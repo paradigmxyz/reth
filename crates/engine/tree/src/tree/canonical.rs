@@ -251,7 +251,7 @@ where
 
         // CRITICAL: Update the canonical head after the reorg
         // This ensures get_canonical_head() returns the correct block
-        self.canonical_in_memory_state().set_canonical_head(canonical_header.clone());
+        self.canonical_in_memory_state_writer.set_canonical_head(canonical_header.clone());
 
         debug!(
             target: "engine::tree",
@@ -272,7 +272,7 @@ where
         self.ensure_block_in_memory(canonical_header.number(), canonical_header.hash())?;
 
         // Update the canonical head header
-        self.canonical_in_memory_state().set_canonical_head(canonical_header.clone());
+        self.canonical_in_memory_state_writer.set_canonical_head(canonical_header.clone());
 
         Ok(())
     }
@@ -438,14 +438,14 @@ where
         // reorg that are missing from it.
         self.canonical_in_memory_state_writer.update_chain(chain_update);
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
-        self.canonical_in_memory_state().set_canonical_head(tip.clone());
+        self.canonical_in_memory_state_writer.set_canonical_head(tip.clone());
         self.payload_validator.on_canonical_head_changed(tip.hash(), &self.state);
 
         // Update metrics based on new tip
         self.metrics.tree.canonical_chain_height.set(tip.number() as f64);
 
         // sends an event to all active listeners about the new canonical chain
-        self.canonical_in_memory_state().notify_canon_state(notification);
+        self.canonical_in_memory_state_writer.notify_canon_state(notification);
 
         // emit event
         self.emit_event(ConsensusEngineEvent::CanonicalChainCommitted(

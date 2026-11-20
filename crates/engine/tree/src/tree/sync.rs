@@ -158,7 +158,7 @@ where
             self.persistence_state.finish(new_head.num_hash(), new_head.num_hash());
 
             // update the tracked canonical head
-            self.canonical_in_memory_state().set_canonical_head(new_head);
+            self.canonical_in_memory_state_writer.set_canonical_head(new_head);
 
             // If the pipeline reached the head of the syncing FCU, apply its safe and finalized
             // blocks now that the head is canonical. An unwind must wait for a new FCU because the

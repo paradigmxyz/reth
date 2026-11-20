@@ -1879,7 +1879,7 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
     let current_head = blocks[3].recovered_block().clone(); // Block 4 (0-indexed as blocks[3])
     let current_head_sealed = current_head.clone_sealed_header();
     test_harness.tree.state.tree_state.set_canonical_head(current_head.num_hash());
-    test_harness.tree.canonical_in_memory_state().set_canonical_head(current_head_sealed);
+    test_harness.tree.canonical_in_memory_state_writer.set_canonical_head(current_head_sealed);
 
     // Verify the current head is set correctly
     assert_eq!(test_harness.tree.state.tree_state.canonical_block_number(), current_head.number());
@@ -1949,7 +1949,10 @@ async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
     let current_head = blocks[3].recovered_block();
     let finalized = blocks[2].recovered_block();
     let ancestor = blocks[1].recovered_block();
-    test_harness.tree.canonical_in_memory_state().set_finalized(finalized.clone_sealed_header());
+    test_harness
+        .tree
+        .canonical_in_memory_state_writer
+        .set_finalized(finalized.clone_sealed_header());
 
     // An FCU to an ancestor below the latest known finalized block would reorg out the
     // finalized block and is rejected, with or without payload attributes.
@@ -2031,7 +2034,10 @@ async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build()
     let current_head = blocks[3].recovered_block();
     let finalized = blocks[0].recovered_block();
     let ancestor = blocks[2].recovered_block();
-    test_harness.tree.canonical_in_memory_state().set_finalized(finalized.clone_sealed_header());
+    test_harness
+        .tree
+        .canonical_in_memory_state_writer
+        .set_finalized(finalized.clone_sealed_header());
 
     let payload_attributes = EthPayloadAttributes {
         timestamp: ancestor.timestamp() + 1,
@@ -2925,15 +2931,15 @@ mod forkchoice_updated_tests {
     #[test]
     fn test_update_reorg_metrics() {
         let chain_spec = MAINNET.clone();
-        let test_harness = TestHarness::new(chain_spec);
+        let mut test_harness = TestHarness::new(chain_spec);
 
         let seal_header = |number: u64| {
             SealedHeader::seal_slow(alloy_consensus::Header { number, ..Default::default() })
         };
 
         // Set finalized=30, safe=50 to test all three commitment levels
-        test_harness.tree.canonical_in_memory_state().set_finalized(seal_header(30));
-        test_harness.tree.canonical_in_memory_state().set_safe(seal_header(50));
+        test_harness.tree.canonical_in_memory_state_writer.set_finalized(seal_header(30));
+        test_harness.tree.canonical_in_memory_state_writer.set_safe(seal_header(50));
 
         // Reorg at block 20 (below finalized=30) -> finalized reorg
         test_harness.tree.update_reorg_metrics(5, Some(NumHash::new(20, B256::random())));

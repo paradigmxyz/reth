@@ -86,8 +86,8 @@ where
     }
 
     /// Records metrics for forkchoice updated calls
-    fn record_forkchoice_metrics(&self) {
-        self.canonical_in_memory_state().on_forkchoice_update_received();
+    fn record_forkchoice_metrics(&mut self) {
+        self.canonical_in_memory_state_writer.on_forkchoice_update_received();
     }
 
     /// Pre-validates the forkchoice state and returns early if validation fails.
@@ -404,7 +404,7 @@ where
 
     /// Updates the tracked finalized block if we have it.
     fn update_finalized_block(
-        &self,
+        &mut self,
         finalized_block_hash: B256,
     ) -> Result<(), OnForkChoiceUpdated> {
         if finalized_block_hash.is_zero() {
@@ -424,7 +424,7 @@ where
                     // we're also persisting the finalized block on disk so we can reload it on
                     // restart this is required by optimism which queries the finalized block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
                     let _ = self.persistence.save_finalized_block_number(finalized.number());
-                    self.canonical_in_memory_state().set_finalized(finalized.clone());
+                    self.canonical_in_memory_state_writer.set_finalized(finalized.clone());
                     // Update finalized block height metric
                     self.metrics.tree.finalized_block_height.set(finalized.number() as f64);
                 }
@@ -438,7 +438,7 @@ where
     }
 
     /// Updates the tracked safe block if we have it
-    fn update_safe_block(&self, safe_block_hash: B256) -> Result<(), OnForkChoiceUpdated> {
+    fn update_safe_block(&mut self, safe_block_hash: B256) -> Result<(), OnForkChoiceUpdated> {
         if safe_block_hash.is_zero() {
             return Ok(())
         }
@@ -454,7 +454,7 @@ where
                     // we're also persisting the safe block on disk so we can reload it on
                     // restart this is required by optimism which queries the safe block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
                     let _ = self.persistence.save_safe_block_number(safe.number());
-                    self.canonical_in_memory_state().set_safe(safe.clone());
+                    self.canonical_in_memory_state_writer.set_safe(safe.clone());
                     // Update safe block height metric
                     self.metrics.tree.safe_block_height.set(safe.number() as f64);
                 }
@@ -478,7 +478,7 @@ where
     ///
     /// [`CanonicalInMemoryState`]: reth_chain_state::CanonicalInMemoryState
     pub(super) fn ensure_consistent_forkchoice_state(
-        &self,
+        &mut self,
         state: ForkchoiceState,
     ) -> Result<(), OnForkChoiceUpdated> {
         // Ensure that the finalized block, if not zero, is known and in the canonical chain

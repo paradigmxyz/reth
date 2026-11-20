@@ -282,8 +282,8 @@ where
     persistence_state: PersistenceState,
     /// Flag indicating the state of the node's backfill synchronization process.
     backfill_sync_state: BackfillSyncState,
-    /// Changes the executed blocks of the state of the canonical chain that isn't persisted yet,
-    /// and reports its persisted tip.
+    /// Changes the state of the canonical chain that isn't persisted yet: its executed blocks,
+    /// its chain info, and the notifications it sends.
     ///
     /// The engine reads that state through [`Self::canonical_in_memory_state`]. Its clones are
     /// intended to be accessed from external sources, such as rpc.
@@ -991,8 +991,8 @@ where
         );
     }
 
-    /// Returns the state of the canonical chain that isn't persisted yet, whose executed blocks
-    /// the engine changes through its writer.
+    /// Returns the state of the canonical chain that isn't persisted yet, which the engine
+    /// changes through its writer.
     const fn canonical_in_memory_state(&self) -> &CanonicalInMemoryState<N> {
         self.canonical_in_memory_state_writer.canonical_in_memory_state()
     }
