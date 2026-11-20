@@ -47,43 +47,61 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
         self,
         buf: &mut Vec<u8>,
     ) -> Result<(RlpNode, Option<Vec<RlpNode>>), StateProofError> {
+        let start = buf.len();
+        let (node, freed_buf) = self.append_rlp(buf)?;
+        Ok((node.unwrap_or_else(|| RlpNode::from_rlp(&buf[start..])), freed_buf))
+    }
+
+    /// Appends this child's RLP encoding to `buf`, leaving the bytes before it unchanged, so that
+    /// the caller can hash several children together.
+    ///
+    /// Returns the child's [`RlpNode`] instead, appending nothing, when it is already encoded.
+    /// Also potentially returns an `RlpNode` buffer which can be re-used for other
+    /// [`ProofTrieBranchChild`]s.
+    pub(crate) fn append_rlp(
+        self,
+        buf: &mut Vec<u8>,
+    ) -> Result<(Option<RlpNode>, Option<Vec<RlpNode>>), StateProofError> {
+        let start = buf.len();
         match self {
             Self::Leaf { short_key, value } => {
                 // RLP encode the value itself
                 value.encode(buf)?;
-                let value_enc_len = buf.len();
+                let value_end = buf.len();
 
                 // Determine the required buffer size for the encoded leaf
-                let leaf_enc_len = LeafNodeRef::new(&short_key, buf).length();
+                let leaf_enc_len = LeafNodeRef::new(&short_key, &buf[start..]).length();
 
                 // We want to re-use buf for the encoding of the leaf node as well. To do this we
                 // will keep appending to it, leaving the already encoded value in-place. First we
                 // must ensure the buffer is big enough, then we'll split.
-                buf.resize(value_enc_len + leaf_enc_len, 0);
+                buf.resize(value_end + leaf_enc_len, 0);
 
-                // SAFETY we have just resized the above to be greater than `value_enc_len`, so it
+                // SAFETY we have just resized the above to be greater than `value_end`, so it
                 // must be in-bounds.
-                let (value_buf, mut leaf_buf) =
-                    unsafe { buf.split_at_mut_unchecked(value_enc_len) };
+                let (value_buf, mut leaf_buf) = unsafe { buf.split_at_mut_unchecked(value_end) };
 
-                // Encode the leaf into the right side of the split buffer, and return the RlpNode.
-                LeafNodeRef::new(&short_key, value_buf).encode(&mut leaf_buf);
-                Ok((RlpNode::from_rlp(&buf[value_enc_len..]), None))
+                // Encode the leaf into the right side of the split buffer, then move it over the
+                // value so that the leaf's encoding starts at `start`.
+                LeafNodeRef::new(&short_key, &value_buf[start..]).encode(&mut leaf_buf);
+                buf.copy_within(value_end.., start);
+                buf.truncate(start + leaf_enc_len);
+                Ok((None, None))
             }
             Self::Branch { node: branch_node, .. } => {
                 branch_node.encode(buf);
-                Ok((RlpNode::from_rlp(buf), Some(branch_node.stack)))
+                Ok((None, Some(branch_node.stack)))
             }
             Self::RlpNode { node, short_key, hash_mask_bit, .. } => {
                 if short_key.is_empty() {
-                    return Ok((node, None))
+                    return Ok((Some(node), None))
                 }
 
                 // Only branch hashes sourced from a cached hash mask can have an external short
                 // key. Other committed nodes already encode their key internally.
                 debug_assert!(hash_mask_bit);
                 ExtensionNodeRef::new(&short_key, node.as_slice()).encode(buf);
-                Ok((RlpNode::from_rlp(buf), None))
+                Ok((None, None))
             }
         }
     }

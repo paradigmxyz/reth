@@ -6,13 +6,16 @@
 //! - Dedicated rayon thread pools for different workloads (with `rayon` feature)
 //! - [`BlockingTaskGuard`] for rate-limiting expensive operations (with `rayon` feature)
 
-#[cfg(feature = "rayon")]
-use crate::pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, WorkerPool};
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
     worker_map::WorkerMap,
     PanickedTaskError, TaskEvent, TaskManager,
+};
+#[cfg(feature = "rayon")]
+use crate::{
+    pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, WorkerPool},
+    ParkedThreadPool,
 };
 use futures_util::{
     future::{select, BoxFuture},
@@ -313,10 +316,10 @@ struct RuntimeInner {
     blocking_guard: BlockingTaskGuard,
     /// Proof storage worker pool (trie storage proof computation).
     #[cfg(feature = "rayon")]
-    proof_storage_worker_pool: WorkerPool,
+    proof_storage_worker_pool: ParkedThreadPool,
     /// Proof account worker pool (trie account proof computation).
     #[cfg(feature = "rayon")]
-    proof_account_worker_pool: WorkerPool,
+    proof_account_worker_pool: ParkedThreadPool,
     /// Proof storage worker thread count the operator configured explicitly, if any.
     #[cfg(feature = "rayon")]
     proof_storage_worker_threads_override: Option<usize>,
@@ -413,13 +416,13 @@ impl Runtime {
 
     /// Get the proof storage worker pool.
     #[cfg(feature = "rayon")]
-    pub fn proof_storage_worker_pool(&self) -> &WorkerPool {
+    pub fn proof_storage_worker_pool(&self) -> &ParkedThreadPool {
         &self.0.proof_storage_worker_pool
     }
 
     /// Get the proof account worker pool.
     #[cfg(feature = "rayon")]
-    pub fn proof_account_worker_pool(&self) -> &WorkerPool {
+    pub fn proof_account_worker_pool(&self) -> &ParkedThreadPool {
         &self.0.proof_account_worker_pool
     }
 
@@ -1040,14 +1043,14 @@ impl RuntimeBuilder {
                 .proof_storage_worker_threads_override()
                 .unwrap_or(default_proof_worker_threads);
             let proof_storage_worker_pool =
-                WorkerPool::new(proof_storage_worker_threads, "proof-strg");
+                ParkedThreadPool::new(proof_storage_worker_threads, "proof-strg");
 
             let proof_account_worker_threads = config
                 .rayon
                 .proof_account_worker_threads_override()
                 .unwrap_or(default_proof_worker_threads);
             let proof_account_worker_pool =
-                WorkerPool::new(proof_account_worker_threads, "proof-acct");
+                ParkedThreadPool::new(proof_account_worker_threads, "proof-acct");
 
             let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
             let prewarming_pool = Arc::new(WorkerPool::new(prewarming_threads, "prewarm"));

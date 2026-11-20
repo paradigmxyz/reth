@@ -936,7 +936,7 @@ where
             let storage_done_tx = self.storage_done_tx.clone();
             let parent_span = parent_span.clone();
             rayon::spawn(move || {
-                let _enter = debug_span!(
+                let _enter = trace_span!(
                     target: "engine::tree::payload_processor::sparse_trie",
                     parent: &parent_span,
                     "storage_jobs",
