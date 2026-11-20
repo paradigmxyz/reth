@@ -223,7 +223,8 @@ impl<B> EngineNodeLauncher<B> {
 
         let event_sender = EventSender::default();
 
-        let beacon_engine_handle = ConsensusEngineHandle::new(consensus_engine_tx.clone());
+        let beacon_engine_handle = ConsensusEngineHandle::new(consensus_engine_tx.clone())
+            .with_witness_requests(Default::default());
 
         // The JWT secret is only used by the auth server, so don't read or create it when the auth
         // server is disabled.

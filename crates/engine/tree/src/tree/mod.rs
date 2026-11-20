@@ -60,6 +60,7 @@ mod sync;
 mod tests;
 mod txpool_prewarm;
 pub mod types;
+mod witness;
 
 use crate::persistence::PersistenceResult;
 pub use block_buffer::BlockBuffer;

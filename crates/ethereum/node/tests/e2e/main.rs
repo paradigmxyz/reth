@@ -20,5 +20,6 @@ mod selfdestruct;
 mod simulate;
 mod snap;
 mod utils;
+mod witness;
 
 const fn main() {}

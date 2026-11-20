@@ -20,7 +20,7 @@ reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-execution-cache.workspace = true
 reth-errors.workspace = true
 reth-execution-types.workspace = true
-reth-evm = { workspace = true, features = ["metrics"] }
+reth-evm = { workspace = true, features = ["metrics", "witness"] }
 reth-network-p2p.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
@@ -44,6 +44,7 @@ alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-debug.workspace = true
 
 # common
 futures.workspace = true
