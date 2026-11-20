@@ -18,7 +18,7 @@ use reth_primitives_traits::{SealedBlock, SealedHeader};
 use std::{ops::RangeInclusive, sync::Arc};
 
 /// A headers+bodies client that stores the headers and bodies in memory, with an artificial soft
-/// bodies response limit that is set to 20 by default.
+/// bodies response limit that is set to 20 by default and an unlimited soft headers response limit.
 ///
 /// This full block client can be [Clone]d and shared between multiple tasks.
 #[derive(Clone, Debug)]
@@ -28,6 +28,8 @@ pub struct TestFullBlockClient {
     access_lists: Arc<Mutex<B256Map<Bytes>>>,
     // soft response limit, max number of bodies to respond with
     soft_limit: usize,
+    // soft response limit, max number of headers to respond with
+    headers_soft_limit: usize,
 }
 
 impl Default for TestFullBlockClient {
@@ -37,6 +39,7 @@ impl Default for TestFullBlockClient {
             bodies: Arc::new(Mutex::new(B256Map::default())),
             access_lists: Arc::new(Mutex::new(B256Map::default())),
             soft_limit: 20,
+            headers_soft_limit: usize::MAX,
         }
     }
 }
@@ -57,6 +60,11 @@ impl TestFullBlockClient {
     /// Set the soft response limit.
     pub const fn set_soft_limit(&mut self, limit: usize) {
         self.soft_limit = limit;
+    }
+
+    /// Set the soft headers response limit.
+    pub const fn set_headers_soft_limit(&mut self, limit: usize) {
+        self.headers_soft_limit = limit;
     }
 
     /// Get the block with the highest block number.
@@ -130,6 +138,7 @@ impl HeadersClient for TestFullBlockClient {
                     )
                 })
             })
+            .take(self.headers_soft_limit)
             .collect::<Vec<_>>();
 
         // Returns a future containing the retrieved headers with a random peer ID.
