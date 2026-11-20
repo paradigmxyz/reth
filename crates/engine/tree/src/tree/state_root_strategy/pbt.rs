@@ -2,6 +2,7 @@
 
 use super::*;
 use alloy_eip7928::bal::DecodedBal;
+use futures::FutureExt as _;
 use reth_evm::EvmEnv as _;
 use reth_provider::{BalProvider, HeaderProvider, RawBal};
 use reth_trie_pbt::{
@@ -28,7 +29,7 @@ pub use reth_trie_pbt::replay::ReplayError;
 pub struct PbtStateRootStrategy<H = Blake3Hasher> {
     store: Arc<SnapshotStore<H>>,
     activation_timestamp: u64,
-    default: DefaultStateRootStrategy,
+    default: Arc<DefaultStateRootStrategy>,
     parallel: bool,
     shadow_replay: Option<(NonZeroUsize, NonZeroUsize)>,
 }
@@ -39,7 +40,7 @@ impl<H: TreeHasher> PbtStateRootStrategy<H> {
         Self {
             store,
             activation_timestamp,
-            default: DefaultStateRootStrategy::default(),
+            default: Arc::default(),
             parallel: false,
             shadow_replay: None,
         }
@@ -81,6 +82,26 @@ impl<H: TreeHasher> PbtStateRootStrategy<H> {
             "PBT parent restore timings"
         );
         Ok(state)
+    }
+
+    /// Authenticates a pre-activation checkpoint against its accepted MPT commitment.
+    /// The shadow worker warms the auxiliary-root cache before activation. A cache hit
+    /// can then use a disk parent without restoring and hashing the complete state again.
+    /// Cold or evicted entries still receive full authentication before being cached.
+    pub fn authenticated_mpt_parent(
+        &self,
+        hash: B256,
+        expected_mpt_root: B256,
+    ) -> ProviderResult<ExecutionParent<H>> {
+        let root = self.store.checkpoint_root(hash).map_err(ProviderError::other)?;
+        let (parent, mpt_root) =
+            self.store.execution_parent_with_shadow(hash, root).map_err(ProviderError::other)?;
+        if mpt_root != expected_mpt_root {
+            return Err(ProviderError::other(std::io::Error::other(
+                "PBT checkpoint does not match parent MPT commitment",
+            )))
+        }
+        Ok(parent)
     }
 
     /// Enables background shadow maintenance when the node runs the canonical checkpoint worker.
@@ -199,7 +220,7 @@ impl<H: TreeHasher> PbtStateRootStrategy<H> {
             self.store.execution_parent(hash, Some(root)).map_err(ProviderError::other)
         } else if active {
             // The activation parent still commits to the MPT and needs dual-state authentication.
-            self.restore_parent(hash, root, parent_timestamp).map(ExecutionParent::Eager)
+            self.authenticated_mpt_parent(hash, root)
         } else {
             self.store.execution_parent(hash, None).map_err(ProviderError::other)
         }
@@ -300,7 +321,7 @@ where
             // The MPT alone determines validity before the fork. Without a staged shadow
             // checkpoint, ordinary validation continues until a migration anchor is available.
             return <DefaultStateRootStrategy as StateRootStrategy<N, P, Evm>>::prepare(
-                &self.default,
+                self.default.as_ref(),
                 ctx,
             )
         }
@@ -339,7 +360,7 @@ where
         };
         if let Some(root) = mpt_parent {
             let prepared = <DefaultStateRootStrategy as StateRootStrategy<N, P, Evm>>::prepare(
-                &self.default,
+                self.default.as_ref(),
                 if active { ctx.with_parent_state_root(root) } else { ctx },
             )?;
             job.mpt = Some(prepared.job);
@@ -361,7 +382,7 @@ where
             .database_provider_ro()
             .and_then(|provider| provider.mpt_retired_at());
         if ctx.timestamp() < self.activation_timestamp && matches!(&retired, Ok(None)) {
-            return <DefaultStateRootStrategy as StateRootStrategy<N, P, Evm>>::prepare_payload_builder(&self.default, ctx);
+            return <DefaultStateRootStrategy as StateRootStrategy<N, P, Evm>>::prepare_payload_builder(self.default.as_ref(), ctx);
         }
         // Retain preparation failures in the output backend so a missing checkpoint
         // cannot select an MPT root when the payload is completed.
@@ -379,27 +400,36 @@ where
                         ctx.overlay_manager,
                     )?;
                 }
-                self.execution_parent(
-                    ctx.parent_hash(),
-                    ctx.parent_state_root(),
-                    ctx.parent_header().timestamp(),
-                    timestamp >= self.activation_timestamp,
-                )
+                if retired.is_none() && ctx.parent_header().timestamp() >= self.activation_timestamp
+                {
+                    let (parent, shadow) = self
+                        .store
+                        .execution_parent_with_shadow(ctx.parent_hash(), ctx.parent_state_root())
+                        .map_err(ProviderError::other)?;
+                    Ok((parent, Some(shadow)))
+                } else {
+                    let parent = self.execution_parent(
+                        ctx.parent_hash(),
+                        ctx.parent_state_root(),
+                        ctx.parent_header().timestamp(),
+                        timestamp >= self.activation_timestamp,
+                    )?;
+                    Ok((parent, retired.is_none().then(|| ctx.parent_state_root())))
+                }
             })
             .map_err(Arc::new);
         let store = self.store.clone();
+        let parent_header = SealedHeader::new(ctx.parent_header().clone(), ctx.parent_hash());
+        let executor = ctx.executor.clone();
+        let config = ctx.config.clone();
+        let default = self.default.clone();
         let factory = ctx.state_provider_factory;
         let preparation_elapsed = preparation_started.elapsed();
         Ok(Some(PayloadStateRootHandle::from_output("pbt", move |bundle| {
             let started = Instant::now();
-            let parent = parent
+            let (parent, mpt_parent) = parent
                 .as_ref()
                 .map_err(|error| StateRootTaskError::Other(Box::new(error.clone())))?;
-            let update_started = Instant::now();
-            let state = parent
-                .apply_bundle(bundle, parallel)
-                .map_err(|err| StateRootTaskError::Other(err.into()))?;
-            let update_elapsed = update_started.elapsed();
             let provider = factory.database_provider_ro()?;
             let retired = provider.mpt_retired_at()?;
             if retired.is_some_and(|number| parent_number < number) {
@@ -409,14 +439,84 @@ where
                 ))
             }
             let hashed_state = provider.hashed_post_state(bundle)?;
+            drop(provider);
             let mpt_started = Instant::now();
-            let trie_updates = if retired.is_none() {
-                provider.state_root_with_updates(hashed_state.clone())?.1
+            // Each rebuild gets its own task. Auxiliary tries must not be published under
+            // the payload's PBT header root in the shared MPT sparse-trie cache.
+            let mut mpt = if retired.is_none() && config.use_state_root_task() {
+                let (mut handle, pending_trie) = default.spawn_state_root_with_parent_root(
+                    &executor,
+                    factory.clone(),
+                    StateRootTaskOptions {
+                        parent_header: parent_header.clone(),
+                        preserved_sparse_trie: None,
+                        transaction_count: None,
+                        gas_used: None,
+                        config: &config,
+                        pending_sparse_trie_prune_blocks: None,
+                    },
+                    *mpt_parent,
+                );
+                drop(pending_trie);
+                let updates = handle.take_hashed_update_stream();
+                updates.on_hashed_state_update(hashed_state.clone());
+                updates.finish();
+                Some(handle)
             } else {
-                TrieUpdates::default()
+                None
+            };
+            let update_started = Instant::now();
+            let state = parent
+                .apply_bundle(bundle, parallel)
+                .map_err(|err| StateRootTaskError::Other(err.into()))?;
+            let update_elapsed = update_started.elapsed();
+            // Retirement may have committed while PBT hashing was in progress.
+            let retired = factory.database_provider_ro()?.mpt_retired_at()?;
+            if retired.is_some_and(|number| parent_number < number) {
+                return Err(StateRootTaskError::Other(
+                    std::io::Error::other("cannot unwind past MPT retirement; re-anchor or resync")
+                        .into(),
+                ))
+            }
+            let mpt_wait_started = Instant::now();
+            let trie_updates = if retired.is_some() {
+                Arc::new(TrieUpdates::default())
+            } else {
+                let (mpt_root, updates) = if let Some(handle) = &mut mpt {
+                    let rx = handle.take_state_root_rx();
+                    let outcome = loop {
+                        if executor.on_shutdown_signal().clone().now_or_never().is_some() {
+                            return Err(StateRootTaskError::Canceled)
+                        }
+                        match rx.recv_timeout(Duration::from_millis(100)) {
+                            Ok(result) => break result?,
+                            Err(RecvTimeoutError::Timeout) => continue,
+                            Err(RecvTimeoutError::Disconnected) => {
+                                return Err(StateRootTaskError::Other(
+                                    "sparse trie task dropped".into(),
+                                ))
+                            }
+                        }
+                    };
+                    (outcome.state_root, outcome.trie_updates)
+                } else {
+                    let (root, updates) = factory
+                        .database_provider_ro()?
+                        .state_root_with_updates(hashed_state.clone())?;
+                    (root, Arc::new(updates))
+                };
+                store
+                    .cache_shadow_mpt_root(state.root(), mpt_root)
+                    .map_err(|err| StateRootTaskError::Other(err.into()))?;
+                updates
             };
             let mpt_ms =
                 if retired.is_none() { mpt_started.elapsed().as_secs_f64() * 1000.0 } else { 0.0 };
+            let mpt_wait_ms = if retired.is_none() {
+                mpt_wait_started.elapsed().as_secs_f64() * 1000.0
+            } else {
+                0.0
+            };
             let checkpoint_started = Instant::now();
             store
                 .cache_execution_candidate(&state)
@@ -437,6 +537,7 @@ where
                 pbt_root = ?state.root(),
                 pbt_update_ms = update_elapsed.as_secs_f64() * 1000.0,
                 mpt_ms,
+                mpt_wait_ms,
                 checkpoint_ms = 0.0,
                 candidate_cache_ms = checkpoint_elapsed.as_secs_f64() * 1000.0,
                 prepare_ms = preparation_elapsed.as_secs_f64() * 1000.0,
@@ -446,7 +547,7 @@ where
             );
             Ok(StateRootComputeOutcome {
                 state_root: state.root(),
-                trie_updates: Arc::new(trie_updates),
+                trie_updates,
                 hashed_state: Arc::new(hashed_state),
             })
         })))

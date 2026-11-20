@@ -402,7 +402,10 @@ where
                             let _entered = span.enter();
                             for block in committed.blocks_iter().take_while(|block| block.timestamp() < activation) {
                                 let hash = block.hash();
-                                if let Err(error) = strategy.ensure_shadow_checkpoint(hash, block.header(), &provider, &overlay) {
+                                if let Err(error) = strategy
+                                    .ensure_shadow_checkpoint(hash, block.header(), &provider, &overlay)
+                                    .and_then(|()| strategy.authenticated_mpt_parent(hash, block.state_root()).map(|_| ()))
+                                {
                                     tracing::warn!(target: "pbt::persistence", %hash, %error, "PBT shadow checkpoint deferred");
                                     break
                                 }
@@ -1193,6 +1196,34 @@ mod tests {
             mined.block().block_access_list_hash().unwrap(),
         )?;
         assert_eq!(replayed.root(), state.root());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn payload_auxiliary_mpt_matches_full_state_on_rebuilds() -> eyre::Result<()> {
+        let (mut node, store, _directory) = setup_for(0, EthereumHardfork::Amsterdam).await?;
+        node.set_finality(Finality::Keep);
+        let mut sender = Wallet::new(1).account(0);
+        let transfer = sender.transfer(Address::repeat_byte(0x78), U256::from(7)).await;
+        node.mine([transfer]).await?.ensure_success()?;
+        let transfer = sender.transfer(Address::repeat_byte(0x79), U256::from(11)).await;
+        node.rpc.inject_tx(transfer).await?;
+        for _ in 0..2 {
+            let payload = node.new_payload().await?;
+            let parent = store.load_block(payload.block().parent_hash)?;
+            let raw = payload.block_access_list().expect("Amsterdam payload carries a BAL");
+            let bal = DecodedBal::from_raw_bal(RawBal::new(raw.clone()))?;
+            let state = reth_trie_pbt::replay::replay(
+                &parent,
+                bal.as_bal().as_slice(),
+                payload.block().block_access_list_hash().unwrap(),
+            )?;
+            assert_eq!(payload.block().state_root, state.root());
+            assert_eq!(store.shadow_mpt_root(&state)?, mpt_root(&state));
+            assert!(!store.contains_block(payload.block().hash())?);
+        }
+        let next = node.advance_block().await?;
+        assert_eq!(store.verify_block(next.block().hash())?, next.block().state_root);
         Ok(())
     }
 
@@ -2019,6 +2050,54 @@ mod tests {
             configure_chain(configured.clone()).unwrap().genesis_hash(),
             configured.genesis_hash()
         );
+    }
+
+    #[test]
+    fn activation_reuses_worker_authentication_without_restoring_full_state() -> eyre::Result<()> {
+        use reth_trie_pbt::execution::ExecutionParent;
+
+        let directory = tempfile::tempdir()?;
+        let mut store = SnapshotStore::<Blake3Hasher>::open_with_limits(
+            directory.path(),
+            DecodeLimits::native(),
+            DecodeLimits::native(),
+        )?;
+        store.set_cache_budget(0)?;
+        let store = Arc::new(store);
+        let mut state = StateTree::new();
+        state.set_account(Address::ZERO, AccountData { nonce: 1, ..Default::default() })?;
+        let expected = mpt_root(&state);
+        let hash = B256::repeat_byte(0x71);
+        store.save_block_with_number(hash, 1, &state)?;
+        let strategy = PbtStateRootStrategy::new(store.clone(), 2);
+        // A cold worker authenticates the complete checkpoint once.
+        assert!(matches!(
+            strategy.authenticated_mpt_parent(hash, expected)?,
+            ExecutionParent::Eager(_)
+        ));
+        // Activation can now use a pinned disk parent even with the full-state cache disabled.
+        assert!(matches!(
+            strategy.authenticated_mpt_parent(hash, expected)?,
+            ExecutionParent::Disk(_)
+        ));
+        assert!(strategy.authenticated_mpt_parent(hash, B256::ZERO).is_err());
+        assert!(strategy.authenticated_mpt_parent(B256::ZERO, expected).is_err());
+        drop(strategy);
+        drop(store);
+        // Restarting does not turn an unauthenticated persisted root into a cache hit.
+        let mut store = SnapshotStore::<Blake3Hasher>::open_with_limits(
+            directory.path(),
+            DecodeLimits::native(),
+            DecodeLimits::native(),
+        )?;
+        store.set_cache_budget(0)?;
+        let strategy = PbtStateRootStrategy::new(Arc::new(store), 2);
+        assert!(strategy.authenticated_mpt_parent(hash, B256::ZERO).is_err());
+        assert!(matches!(
+            strategy.authenticated_mpt_parent(hash, expected)?,
+            ExecutionParent::Disk(_)
+        ));
+        Ok(())
     }
 
     #[test]
