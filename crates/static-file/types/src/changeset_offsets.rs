@@ -187,6 +187,9 @@ impl ChangesetOffsetReader {
     /// Record size in bytes.
     const RECORD_SIZE: usize = 16;
 
+    /// Limit the temporary read buffer to 64 KiB.
+    const RECORDS_PER_READ: usize = 64 * 1024 / Self::RECORD_SIZE;
+
     /// Opens the changeset offset file for reading with an explicit length.
     ///
     /// The `len` parameter (from header metadata) bounds the reader - any records
@@ -207,10 +210,7 @@ impl ChangesetOffsetReader {
         let mut buf = [0u8; Self::RECORD_SIZE];
         self.file.read_exact_at(&mut buf, byte_pos)?;
 
-        let offset = u64::from_le_bytes(buf[..8].try_into().unwrap());
-        let num_changes = u64::from_le_bytes(buf[8..].try_into().unwrap());
-
-        Ok(Some(ChangesetOffset::new(offset, num_changes)))
+        Ok(Some(Self::decode_record(&buf)))
     }
 
     /// Reads a range of changeset offsets.
@@ -221,17 +221,15 @@ impl ChangesetOffsetReader {
         }
 
         let count = (end - start) as usize;
-        let byte_pos = start * Self::RECORD_SIZE as u64;
-
         let mut result = Vec::with_capacity(count);
-        let mut buf = [0u8; Self::RECORD_SIZE];
+        let mut buf = vec![[0; Self::RECORD_SIZE]; count.min(Self::RECORDS_PER_READ)];
 
-        for i in 0..count {
-            let pos = byte_pos + (i as u64) * Self::RECORD_SIZE as u64;
-            self.file.read_exact_at(&mut buf, pos)?;
-            let offset = u64::from_le_bytes(buf[..8].try_into().unwrap());
-            let num_changes = u64::from_le_bytes(buf[8..].try_into().unwrap());
-            result.push(ChangesetOffset::new(offset, num_changes));
+        while result.len() < count {
+            let batch_len = (count - result.len()).min(buf.len());
+            let records = &mut buf[..batch_len];
+            let pos = (start + result.len() as u64) * Self::RECORD_SIZE as u64;
+            self.file.read_exact_at(records.as_flattened_mut(), pos)?;
+            result.extend(records.iter().map(Self::decode_record));
         }
 
         Ok(result)
@@ -245,6 +243,11 @@ impl ChangesetOffsetReader {
     /// Returns true if there are no records.
     pub const fn is_empty(&self) -> bool {
         self.len == 0
+    }
+
+    const fn decode_record(record: &[u8; Self::RECORD_SIZE]) -> ChangesetOffset {
+        let (fields, _) = record.as_chunks::<8>();
+        ChangesetOffset::new(u64::from_le_bytes(fields[0]), u64::from_le_bytes(fields[1]))
     }
 }
 
@@ -452,5 +455,30 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn range_reads_across_batches() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.csoff");
+        let batch = ChangesetOffsetReader::RECORDS_PER_READ;
+        let offsets = (0..batch as u64 + 5)
+            .map(|i| ChangesetOffset::new(1_000_000 + i * 257, 257))
+            .collect::<Vec<_>>();
+        let mut writer = ChangesetOffsetWriter::new(&path, 0).unwrap();
+        writer.append_many(&offsets).unwrap();
+        writer.sync().unwrap();
+
+        let committed = offsets.len() - 1;
+        let reader = ChangesetOffsetReader::new(&path, committed as u64).unwrap();
+        for len in [0, 1, batch - 1, batch, batch + 1] {
+            assert_eq!(reader.get_range(2, (2 + len) as u64).unwrap(), offsets[2..2 + len]);
+        }
+        assert_eq!(reader.get_range(2, u64::MAX).unwrap(), offsets[2..committed]);
+
+        // Truncate within the final committed record after opening the reader.
+        let bytes = committed * ChangesetOffsetReader::RECORD_SIZE - 1;
+        File::options().write(true).open(path).unwrap().set_len(bytes as u64).unwrap();
+        assert_eq!(reader.get_range(2, u64::MAX).unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
     }
 }
