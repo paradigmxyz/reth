@@ -342,10 +342,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         });
     }
 
-    /// Applies the persistence of blocks, in one update.
+    /// Applies the persistence of blocks.
     ///
-    /// Reports `last_persisted_block` as the persisted tip and removes the canonical blocks up to
-    /// and including `state_trie_persisted_block` like [`Self::remove_persisted_blocks_until`].
+    /// Reports `last_persisted_block` as the persisted tip, and then removes blocks in one update:
+    /// the canonical blocks up to and including `state_trie_persisted_block` like
+    /// [`Self::remove_persisted_blocks_until`].
     /// It also removes the executed blocks that are not canonical and whose chain builds on a
     /// block above `last_persisted_block`: that block was removed from disk and is not tracked, so
     /// they are not connected to the persisted chain anymore.
@@ -620,6 +621,113 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             }
         }
         None
+    }
+}
+
+/// Creates a [`CanonicalInMemoryState`] and changes it: the blocks it tracks, its chain info, and
+/// the notifications it sends.
+///
+/// A writer is created together with its state. [`Self::canonical_in_memory_state`] returns that
+/// state, which can be cloned and is what everything but the owner of the writer reads. What is
+/// written through the writer is read through the state and every clone of it.
+///
+/// A writer cannot be cloned and its methods take `&mut self`, so only its owner changes the
+/// state through it. The constructors of [`CanonicalInMemoryState`] and its methods that change
+/// it are still public.
+#[derive(Debug)]
+pub struct CanonicalInMemoryStateWriter<N: NodePrimitives = EthPrimitives> {
+    canonical_in_memory_state: CanonicalInMemoryState<N>,
+}
+
+impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
+    /// Creates a canonical state over the blocks of `in_memory_state`, with the canonical head
+    /// and the safe and finalized blocks of `chain_info_headers`, and returns its writer.
+    ///
+    /// The blocks are shared with every other handle of `in_memory_state`. The chain info and the
+    /// notifications belong to the created state and its clones.
+    pub fn new(
+        chain_info_headers: ChainInfoHeaders<N::BlockHeader>,
+        in_memory_state: InMemoryState<N>,
+    ) -> Self {
+        Self {
+            canonical_in_memory_state: CanonicalInMemoryState::with_head(
+                chain_info_headers,
+                in_memory_state,
+            ),
+        }
+    }
+
+    /// Returns the state this changes.
+    pub const fn canonical_in_memory_state(&self) -> &CanonicalInMemoryState<N> {
+        &self.canonical_in_memory_state
+    }
+
+    /// See [`CanonicalInMemoryState::clear_state`].
+    pub fn clear_state(&mut self) {
+        self.canonical_in_memory_state.clear_state();
+    }
+
+    /// See [`CanonicalInMemoryState::insert_executed`].
+    pub fn insert_executed(&mut self, block: ExecutedBlock<N>) {
+        self.canonical_in_memory_state.insert_executed(block);
+    }
+
+    /// See [`CanonicalInMemoryState::set_pending_block`].
+    pub fn set_pending_block(&mut self, pending: ExecutedBlock<N>) {
+        self.canonical_in_memory_state.set_pending_block(pending);
+    }
+
+    /// See [`CanonicalInMemoryState::update_chain`].
+    pub fn update_chain(&mut self, new_chain: NewCanonicalChain<N>) {
+        self.canonical_in_memory_state.update_chain(new_chain);
+    }
+
+    /// See [`CanonicalInMemoryState::on_backfill_finished`].
+    pub fn on_backfill_finished(
+        &mut self,
+        last_persisted_hash: B256,
+        backfill_block: BlockNumHash,
+    ) {
+        self.canonical_in_memory_state.on_backfill_finished(last_persisted_hash, backfill_block);
+    }
+
+    /// See [`CanonicalInMemoryState::on_blocks_persisted`].
+    pub fn on_blocks_persisted(
+        &mut self,
+        last_persisted_block: BlockNumHash,
+        state_trie_persisted_block: BlockNumHash,
+        finalized: Option<BlockNumHash>,
+    ) {
+        self.canonical_in_memory_state.on_blocks_persisted(
+            last_persisted_block,
+            state_trie_persisted_block,
+            finalized,
+        );
+    }
+
+    /// See [`CanonicalInMemoryState::on_forkchoice_update_received`].
+    pub fn on_forkchoice_update_received(&mut self) {
+        self.canonical_in_memory_state.on_forkchoice_update_received();
+    }
+
+    /// See [`CanonicalInMemoryState::set_canonical_head`].
+    pub fn set_canonical_head(&mut self, header: SealedHeader<N::BlockHeader>) {
+        self.canonical_in_memory_state.set_canonical_head(header);
+    }
+
+    /// See [`CanonicalInMemoryState::set_safe`].
+    pub fn set_safe(&mut self, header: SealedHeader<N::BlockHeader>) {
+        self.canonical_in_memory_state.set_safe(header);
+    }
+
+    /// See [`CanonicalInMemoryState::set_finalized`].
+    pub fn set_finalized(&mut self, header: SealedHeader<N::BlockHeader>) {
+        self.canonical_in_memory_state.set_finalized(header);
+    }
+
+    /// See [`CanonicalInMemoryState::notify_canon_state`].
+    pub fn notify_canon_state(&mut self, event: CanonStateNotification<N>) {
+        self.canonical_in_memory_state.notify_canon_state(event);
     }
 }
 
@@ -1169,5 +1277,72 @@ mod tests {
             assert!(in_memory_state.contains(&block.recovered_block().hash()));
         }
         assert!(!in_memory_state.contains(&B256::random()));
+    }
+
+    #[test]
+    fn test_writer_changes_blocks_of_canonical_state() {
+        let mut writer = CanonicalInMemoryStateWriter::new(
+            ChainInfoHeaders {
+                canonical_head: SealedHeader::default(),
+                safe: None,
+                finalized: None,
+            },
+            InMemoryState::default(),
+        );
+        let state: CanonicalInMemoryState = writer.canonical_in_memory_state().clone();
+        let mut block_builder = TestBlockBuilder::eth();
+        let blocks = block_builder.get_executed_blocks(1..4).collect::<Vec<_>>();
+        let hash = |number: usize| blocks[number - 1].recovered_block().hash();
+        let num_hash = |number: usize| blocks[number - 1].recovered_block().num_hash();
+        let fork = block_builder.get_executed_block_with_number(2, hash(1));
+        let fork_hash = fork.recovered_block().hash();
+        let in_memory_state = &state.inner.in_memory_state;
+
+        // Blocks written through the writer are read through the state it was created for.
+        writer.insert_executed(blocks[0].clone());
+        writer.set_pending_block(blocks[1].clone());
+        assert_eq!(state.pending_block_num_hash(), Some(num_hash(2)));
+        writer.update_chain(NewCanonicalChain::Commit { new: blocks[..2].to_vec() });
+        writer.insert_executed(blocks[2].clone());
+        writer.insert_executed(fork);
+        assert_eq!(state.canonical_chain().count(), 2);
+        assert_eq!(
+            in_memory_state.block_counts(),
+            InMemoryStateBlockCounts { canonical: 2, non_canonical: 2 }
+        );
+
+        // Persisting the blocks 1 and 2 removes them, and finalizing block 2 removes the fork at
+        // its height.
+        writer.on_blocks_persisted(num_hash(2), num_hash(2), Some(num_hash(2)));
+        assert_eq!(state.get_persisted_num_hash(), Some(num_hash(2)));
+        for removed in [hash(1), hash(2), fork_hash] {
+            assert!(!in_memory_state.contains(&removed));
+        }
+
+        // After a backfill run that ends at block 2, block 3 is no longer canonical.
+        writer.update_chain(NewCanonicalChain::Commit { new: vec![blocks[2].clone()] });
+        assert_eq!(state.canonical_chain().count(), 1);
+        writer.on_backfill_finished(hash(2), num_hash(2));
+        assert_eq!(
+            in_memory_state.block_counts(),
+            InMemoryStateBlockCounts { canonical: 0, non_canonical: 1 }
+        );
+
+        writer.clear_state();
+        assert_eq!(
+            in_memory_state.block_counts(),
+            InMemoryStateBlockCounts { canonical: 0, non_canonical: 0 }
+        );
+
+        // The chain info set through the writer is read through the state as well.
+        let header = blocks[2].recovered_block().clone_sealed_header();
+        writer.on_forkchoice_update_received();
+        writer.set_canonical_head(header.clone());
+        writer.set_safe(header.clone());
+        writer.set_finalized(header.clone());
+        assert!(state.last_received_update_timestamp().is_some());
+        assert_eq!(state.get_canonical_head(), header);
+        assert_eq!(state.get_safe_num_hash(), Some(header.num_hash()));
+        assert_eq!(state.get_finalized_num_hash(), Some(header.num_hash()));
     }
 }

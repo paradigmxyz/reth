@@ -133,12 +133,12 @@ where
             // height is the new canonical block.
             self.state.set_pending_sparse_trie_prune(false);
             self.state.tree_state.set_canonical_head(backfill_num_hash);
-            self.canonical_in_memory_state.clear_state();
+            self.canonical_in_memory_state_writer.clear_state();
         } else {
             // The in-memory state drops the blocks up to the backfill height and the blocks that
             // conflict with the backfill block. The other executed blocks stay in it, but none of
             // them is canonical.
-            self.canonical_in_memory_state.on_backfill_finished(
+            self.canonical_in_memory_state_writer.on_backfill_finished(
                 self.persistence_state.last_persisted_block.hash,
                 backfill_num_hash,
             );
@@ -158,7 +158,7 @@ where
             self.persistence_state.finish(new_head.num_hash(), new_head.num_hash());
 
             // update the tracked canonical head
-            self.canonical_in_memory_state.set_canonical_head(new_head);
+            self.canonical_in_memory_state_writer.set_canonical_head(new_head);
 
             // If the pipeline reached the head of the syncing FCU, apply its safe and finalized
             // blocks now that the head is canonical. An unwind must wait for a new FCU because the
@@ -329,7 +329,7 @@ where
     /// for access lists of blocks past the fork. Access list downloads are best-effort anyway, so
     /// those blocks simply take the regular execution path.
     pub(super) fn should_download_access_lists(&self) -> bool {
-        self.canonical_in_memory_state.get_canonical_head().block_access_list_hash().is_some()
+        self.canonical_in_memory_state().get_canonical_head().block_access_list_hash().is_some()
     }
 
     /// Returns true if the distance from the local tip to the block is greater than the configured

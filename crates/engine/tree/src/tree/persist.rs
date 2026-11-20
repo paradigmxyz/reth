@@ -47,7 +47,7 @@ where
     /// How many canonical blocks are retained in memory. A large count means persistence is
     /// falling behind execution.
     fn persistence_gap(&self) -> u64 {
-        self.canonical_in_memory_state.canonical_chain().count() as u64
+        self.canonical_in_memory_state().canonical_chain().count() as u64
     }
 
     /// How many blocks beyond the configured in-memory buffer are awaiting persistence.
@@ -195,7 +195,7 @@ where
         // the finalized block if set.
         let min_threshold = last_block_number.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS);
         let eviction_threshold =
-            if let Some(finalized) = self.canonical_in_memory_state.get_finalized_num_hash() {
+            if let Some(finalized) = self.canonical_in_memory_state().get_finalized_num_hash() {
                 // Use the minimum of finalized block and retention threshold to be conservative
                 finalized.number.min(min_threshold)
             } else {
@@ -205,7 +205,7 @@ where
         debug!(
             target: "engine::tree",
             last_persisted = last_block_number,
-            finalized_number = ?self.canonical_in_memory_state.get_finalized_num_hash().map(|f| f.number),
+            finalized_number = ?self.canonical_in_memory_state().get_finalized_num_hash().map(|f| f.number),
             eviction_threshold,
             "Evicting changesets below threshold"
         );
@@ -296,7 +296,8 @@ where
 
                 let persistence_threshold =
                     usize::try_from(self.config.persistence_threshold()).unwrap_or(usize::MAX);
-                if self.canonical_in_memory_state.canonical_chain().count() <= persistence_threshold
+                if self.canonical_in_memory_state().canonical_chain().count() <=
+                    persistence_threshold
                 {
                     return None
                 }
@@ -396,7 +397,7 @@ where
         // Trims the canonical chain to the state/trie frontier and prunes the blocks that are not
         // canonical and conflict with the finalized block. If the finalized block number could not
         // be fetched, the canonical chain is still trimmed and the error is returned afterwards.
-        self.canonical_in_memory_state.on_blocks_persisted(
+        self.canonical_in_memory_state_writer.on_blocks_persisted(
             self.persistence_state.last_persisted_block,
             in_memory_persisted_block,
             finalized.as_ref().copied().unwrap_or_default(),

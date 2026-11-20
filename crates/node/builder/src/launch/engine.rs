@@ -156,13 +156,19 @@ impl<B> EngineNodeLauncher<B> {
                     PruneConfigKind::from_config(&this.prune_config(), this.chain_spec().as_ref()).as_str();
                 info!(target: "reth::cli", ?settings, ?pruning_mode, "Loaded storage settings");
             })
-            .with_metrics_task()
+            .with_metrics_task();
+
+        // Create the blockchain provider with the writer of its canonical in-memory state. The
+        // provider and its clones read that state, and the engine changes it through the writer.
+        let (blockchain_db, canonical_in_memory_state_writer) =
+            BlockchainProvider::new_with_writer(ctx.provider_factory().clone())?;
+
+        let ctx = ctx
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
-            .with_blockchain_db::<T, _>(move |provider_factory| {
-                Ok(BlockchainProvider::new(provider_factory)?)
-            })?
-            .with_components(components_builder, on_component_initialized).await?;
+            .with_blockchain_db::<T, _>(move |_| Ok(blockchain_db))?
+            .with_components(components_builder, on_component_initialized)
+            .await?;
 
         // spawn exexs if any
         let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;
@@ -286,6 +292,7 @@ impl<B> EngineNodeLauncher<B> {
             pipeline_task_spawner: ctx.task_executor().clone(),
             provider: ctx.provider_factory().clone(),
             blockchain_db: ctx.blockchain_db().clone(),
+            canonical_in_memory_state_writer,
             pruner,
             payload_builder: ctx.components().payload_builder_handle().clone(),
             payload_validator: engine_validator,

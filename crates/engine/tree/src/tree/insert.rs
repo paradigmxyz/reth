@@ -464,7 +464,10 @@ where
         // as this indicates there's already a canonical block at that height.
         let is_fork = block_id.block.number <= self.state.tree_state.current_canonical_head.number;
 
-        let ctx = TreeCtx::new(&mut self.state, &self.canonical_in_memory_state);
+        let ctx = TreeCtx::new(
+            &mut self.state,
+            self.canonical_in_memory_state_writer.canonical_in_memory_state(),
+        );
 
         let start = Instant::now();
 
@@ -504,9 +507,9 @@ where
 
         if is_pending {
             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
-            self.canonical_in_memory_state.set_pending_block(executed.clone());
+            self.canonical_in_memory_state_writer.set_pending_block(executed.clone());
         } else {
-            self.canonical_in_memory_state.insert_executed(executed.clone());
+            self.canonical_in_memory_state_writer.insert_executed(executed.clone());
         }
         self.state
             .tree_state

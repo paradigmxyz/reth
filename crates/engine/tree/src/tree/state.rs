@@ -11,9 +11,9 @@ use reth_storage_overlay::OverlayManager;
 /// Keeps track of the state of the tree.
 ///
 /// The executed blocks are tracked, canonical or not, by the [`InMemoryState`] of the
-/// [`OverlayManager`]. This type only reads them: they have to be written through a
-/// [`CanonicalInMemoryState`](reth_chain_state::CanonicalInMemoryState) that shares that
-/// [`InMemoryState`].
+/// [`OverlayManager`]. This type only reads them: the engine writes them through its
+/// [`CanonicalInMemoryStateWriter`](reth_chain_state::CanonicalInMemoryStateWriter), whose state
+/// has to share that [`InMemoryState`].
 ///
 /// ## Invariants
 ///
@@ -102,15 +102,16 @@ impl<N: NodePrimitives> TreeState<N> {
 mod tests {
     use super::*;
     use reth_chain_state::{
-        test_utils::TestBlockBuilder, CanonicalInMemoryState, ChainInfoHeaders, NewCanonicalChain,
+        test_utils::TestBlockBuilder, CanonicalInMemoryState, CanonicalInMemoryStateWriter,
+        ChainInfoHeaders, NewCanonicalChain,
     };
     use reth_primitives_traits::AlloyBlockHeader;
 
-    /// Creates a tree state without blocks and the canonical state that writes the blocks it
-    /// reads. Its canonical head is the default header.
-    fn tree_state() -> (TreeState, CanonicalInMemoryState) {
+    /// Creates a tree state without blocks, the canonical state that shares its blocks and the
+    /// writer of that state. Its canonical head is the default header.
+    fn tree_state() -> (TreeState, CanonicalInMemoryState, CanonicalInMemoryStateWriter) {
         let overlay_manager = OverlayManager::default();
-        let canonical_in_memory_state = CanonicalInMemoryState::with_head(
+        let writer = CanonicalInMemoryStateWriter::new(
             ChainInfoHeaders {
                 canonical_head: SealedHeader::default(),
                 safe: None,
@@ -118,7 +119,11 @@ mod tests {
             },
             overlay_manager.in_memory_state().clone(),
         );
-        (TreeState::new(BlockNumHash::default(), overlay_manager), canonical_in_memory_state)
+        (
+            TreeState::new(BlockNumHash::default(), overlay_manager),
+            writer.canonical_in_memory_state().clone(),
+            writer,
+        )
     }
 
     fn hash(block: &ExecutedBlock) -> B256 {
@@ -133,12 +138,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_tree_state_insert_executed() {
-        let (tree_state, canonical_in_memory_state) = tree_state();
+        let (tree_state, _, mut writer) = tree_state();
         let blocks = TestBlockBuilder::eth().get_executed_blocks(1..4).collect::<Vec<_>>();
         let persisted_hash = blocks[0].recovered_block().parent_hash();
 
-        canonical_in_memory_state.insert_executed(blocks[0].clone());
-        canonical_in_memory_state.insert_executed(blocks[1].clone());
+        writer.insert_executed(blocks[0].clone());
+        writer.insert_executed(blocks[1].clone());
 
         // Block 2 is linked to block 1, and nothing else is tracked.
         assert_eq!(
@@ -147,7 +152,7 @@ mod tests {
         );
         assert_eq!(tree_state.block_count(), 2);
 
-        canonical_in_memory_state.insert_executed(blocks[2].clone());
+        writer.insert_executed(blocks[2].clone());
 
         // Block 3 is linked to block 2, and nothing else is tracked.
         assert_eq!(
@@ -173,15 +178,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_tree_state_insert_executed_with_reorg() {
-        let (tree_state, canonical_in_memory_state) = tree_state();
+        let (tree_state, canonical_in_memory_state, mut writer) = tree_state();
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks = test_block_builder.get_executed_blocks(1..6).collect::<Vec<_>>();
         let persisted_hash = blocks[0].recovered_block().parent_hash();
 
         for block in &blocks {
-            canonical_in_memory_state.insert_executed(block.clone());
+            writer.insert_executed(block.clone());
         }
-        canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        writer.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
         assert_eq!(
             tree_state.in_memory_state().block_counts(),
             InMemoryStateBlockCounts { canonical: 5, non_canonical: 0 }
@@ -193,9 +198,9 @@ mod tests {
         let fork_block_5 =
             test_block_builder.get_executed_block_with_number(5, hash(&fork_block_4));
 
-        canonical_in_memory_state.insert_executed(fork_block_3.clone());
-        canonical_in_memory_state.insert_executed(fork_block_4.clone());
-        canonical_in_memory_state.insert_executed(fork_block_5.clone());
+        writer.insert_executed(fork_block_3.clone());
+        writer.insert_executed(fork_block_4.clone());
+        writer.insert_executed(fork_block_5.clone());
 
         assert_eq!(
             tree_state.in_memory_state().block_counts(),
@@ -211,7 +216,7 @@ mod tests {
         );
 
         // Verify that we can insert the same block again without issues.
-        canonical_in_memory_state.insert_executed(fork_block_4.clone());
+        writer.insert_executed(fork_block_4.clone());
         assert_eq!(tree_state.block_count(), 8);
 
         // The fork blocks are linked to each other.
@@ -236,7 +241,7 @@ mod tests {
         }
 
         // Reorging to the fork moves the replaced canonical blocks to the non-canonical section.
-        canonical_in_memory_state.update_chain(NewCanonicalChain::Reorg {
+        writer.update_chain(NewCanonicalChain::Reorg {
             new: vec![fork_block_3.clone(), fork_block_4, fork_block_5],
             old: blocks[2..].to_vec(),
         });
@@ -276,16 +281,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_tree_state_remove_canonical_until() {
-        let (tree_state, canonical_in_memory_state) = tree_state();
+        let (tree_state, canonical_in_memory_state, mut writer) = tree_state();
         let blocks = TestBlockBuilder::eth().get_executed_blocks(1..6).collect::<Vec<_>>();
 
         for block in &blocks {
-            canonical_in_memory_state.insert_executed(block.clone());
+            writer.insert_executed(block.clone());
         }
-        canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        writer.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
 
         // Inclusive bound, so we should remove anything up to and including 2.
-        canonical_in_memory_state.on_blocks_persisted(
+        writer.on_blocks_persisted(
             BlockNumHash::new(2, hash(&blocks[1])),
             BlockNumHash::new(2, hash(&blocks[1])),
             Some(blocks[1].recovered_block().num_hash()),
@@ -296,16 +301,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_tree_state_remove_canonical_until_finalized() {
-        let (tree_state, canonical_in_memory_state) = tree_state();
+        let (tree_state, canonical_in_memory_state, mut writer) = tree_state();
         let blocks = TestBlockBuilder::eth().get_executed_blocks(1..6).collect::<Vec<_>>();
 
         for block in &blocks {
-            canonical_in_memory_state.insert_executed(block.clone());
+            writer.insert_executed(block.clone());
         }
-        canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        writer.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
 
         // We should still remove everything up to and including 2.
-        canonical_in_memory_state.on_blocks_persisted(
+        writer.on_blocks_persisted(
             BlockNumHash::new(2, hash(&blocks[1])),
             BlockNumHash::new(2, hash(&blocks[1])),
             None,
@@ -316,16 +321,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_tree_state_remove_canonical_until_lower_finalized() {
-        let (tree_state, canonical_in_memory_state) = tree_state();
+        let (tree_state, canonical_in_memory_state, mut writer) = tree_state();
         let blocks = TestBlockBuilder::eth().get_executed_blocks(1..6).collect::<Vec<_>>();
 
         for block in &blocks {
-            canonical_in_memory_state.insert_executed(block.clone());
+            writer.insert_executed(block.clone());
         }
-        canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        writer.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
 
         // We have no forks so we should still remove anything up to and including 2.
-        canonical_in_memory_state.on_blocks_persisted(
+        writer.on_blocks_persisted(
             BlockNumHash::new(2, hash(&blocks[1])),
             BlockNumHash::new(2, hash(&blocks[1])),
             Some(blocks[0].recovered_block().num_hash()),
@@ -336,13 +341,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_tree_state_remove_canonical_until_prunes_finalized_sidechains() {
-        let (tree_state, canonical_in_memory_state) = tree_state();
+        let (tree_state, canonical_in_memory_state, mut writer) = tree_state();
         let mut builder = TestBlockBuilder::eth();
         let blocks = builder.get_executed_blocks(1..6).collect::<Vec<_>>();
         for block in &blocks {
-            canonical_in_memory_state.insert_executed(block.clone());
+            writer.insert_executed(block.clone());
         }
-        canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        writer.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
 
         // A fork off block 1 can never become canonical once block 2 is finalized, a fork off
         // block 3 still can.
@@ -350,14 +355,14 @@ mod tests {
         let dead_fork_child = builder.get_executed_block_with_number(3, hash(&dead_fork));
         let live_fork = builder.get_executed_block_with_number(4, hash(&blocks[2]));
         for block in [&dead_fork, &dead_fork_child, &live_fork] {
-            canonical_in_memory_state.insert_executed(block.clone());
+            writer.insert_executed(block.clone());
         }
         assert_eq!(
             tree_state.in_memory_state().block_counts(),
             InMemoryStateBlockCounts { canonical: 5, non_canonical: 3 }
         );
 
-        canonical_in_memory_state.on_blocks_persisted(
+        writer.on_blocks_persisted(
             BlockNumHash::new(2, hash(&blocks[1])),
             BlockNumHash::new(2, hash(&blocks[1])),
             Some(blocks[1].recovered_block().num_hash()),

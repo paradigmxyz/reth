@@ -10,7 +10,9 @@ use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus, PayloadStatusEnum};
 use error::InsertBlockFatalError;
 use payload_build::PayloadBuildTracker;
-use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
+use reth_chain_state::{
+    CanonicalInMemoryState, CanonicalInMemoryStateWriter, ExecutedBlock, ExecutionTimingStats,
+};
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::{
     BeaconEngineMessage, ConsensusEngineEvent, ExecutionPayload, ForkchoiceStateTracker,
@@ -280,9 +282,12 @@ where
     persistence_state: PersistenceState,
     /// Flag indicating the state of the node's backfill synchronization process.
     backfill_sync_state: BackfillSyncState,
-    /// Keeps track of the state of the canonical chain that isn't persisted yet.
-    /// This is intended to be accessed from external sources, such as rpc.
-    canonical_in_memory_state: CanonicalInMemoryState<N>,
+    /// Changes the state of the canonical chain that isn't persisted yet: its executed blocks,
+    /// its chain info, and the notifications it sends.
+    ///
+    /// The engine reads that state through [`Self::canonical_in_memory_state`]. Its clones are
+    /// intended to be accessed from external sources, such as rpc.
+    canonical_in_memory_state_writer: CanonicalInMemoryStateWriter<N>,
     /// Handle to the payload builder that will receive payload attributes for valid forkchoice
     /// updates
     payload_builder: PayloadBuilderHandle<T>,
@@ -322,7 +327,7 @@ where
             .field("persistence", &self.persistence)
             .field("persistence_state", &self.persistence_state)
             .field("backfill_sync_state", &self.backfill_sync_state)
-            .field("canonical_in_memory_state", &self.canonical_in_memory_state)
+            .field("canonical_in_memory_state_writer", &self.canonical_in_memory_state_writer)
             .field("payload_builder", &self.payload_builder)
             .field("config", &self.config)
             .field("metrics", &self.metrics)
@@ -364,7 +369,7 @@ where
         payload_validator: V,
         outgoing: UnboundedSender<EngineApiEvent<N>>,
         state: EngineApiTreeState<N>,
-        canonical_in_memory_state: CanonicalInMemoryState<N>,
+        canonical_in_memory_state_writer: CanonicalInMemoryStateWriter<N>,
         persistence: PersistenceHandle<N>,
         persistence_state: PersistenceState,
         payload_builder: PayloadBuilderHandle<T>,
@@ -387,7 +392,7 @@ where
             persistence_state,
             backfill_sync_state: BackfillSyncState::Idle,
             state,
-            canonical_in_memory_state,
+            canonical_in_memory_state_writer,
             payload_builder,
             config,
             metrics: Default::default(),
@@ -413,7 +418,7 @@ where
         payload_validator: V,
         persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,
-        canonical_in_memory_state: CanonicalInMemoryState<N>,
+        canonical_in_memory_state_writer: CanonicalInMemoryStateWriter<N>,
         overlay_manager: OverlayManager<N>,
         config: TreeConfig,
         kind: EngineApiKind,
@@ -445,7 +450,7 @@ where
             payload_validator,
             tx,
             state,
-            canonical_in_memory_state,
+            canonical_in_memory_state_writer,
             persistence,
             persistence_state,
             payload_builder,
@@ -703,9 +708,9 @@ where
 
                         if is_pending {
                             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
-                            self.canonical_in_memory_state.set_pending_block(block.clone());
+                            self.canonical_in_memory_state_writer.set_pending_block(block.clone());
                         } else {
-                            self.canonical_in_memory_state.insert_executed(block.clone());
+                            self.canonical_in_memory_state_writer.insert_executed(block.clone());
                         }
                         self.state
                             .tree_state
@@ -982,6 +987,12 @@ where
         let _ = self.outgoing.send(event).inspect_err(
             |err| error!(target: "engine::tree", "Failed to send internal event: {err:?}"),
         );
+    }
+
+    /// Returns the state of the canonical chain that isn't persisted yet, which the engine
+    /// changes through its writer.
+    const fn canonical_in_memory_state(&self) -> &CanonicalInMemoryState<N> {
+        self.canonical_in_memory_state_writer.canonical_in_memory_state()
     }
 }
 

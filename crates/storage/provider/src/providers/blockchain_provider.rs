@@ -16,8 +16,9 @@ use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
-    BlockState, CanonicalInMemoryState, ChainInfoHeaders, ExecutedBlock, ForkChoiceNotifications,
-    ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
+    BlockState, CanonicalInMemoryState, CanonicalInMemoryStateWriter, ChainInfoHeaders,
+    ExecutedBlock, ForkChoiceNotifications, ForkChoiceSubscriptions, PersistedBlockNotifications,
+    PersistedBlockSubscriptions,
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
@@ -84,12 +85,24 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockchainProvider<N> {
+    /// Creates a provider like [`Self::new_with_writer`], without the writer of its canonical
+    /// in-memory state.
+    pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
+        Self::new_with_writer(storage).map(|(provider, _)| provider)
+    }
+
     /// Creates a provider over `storage` and the in-memory state of `storage`, fetching the
-    /// latest, safe and finalized headers from the database to initialize the provider.
+    /// latest, safe and finalized headers from the database to initialize the provider, and
+    /// returns it with the writer of its canonical in-memory state.
+    ///
+    /// The provider and its clones read that state, and the writer is for the engine that changes
+    /// it.
     ///
     /// The in-memory blocks are shared with every other handle of that in-memory state. The chain
     /// info and the canonical state notifications belong to the returned provider and its clones.
-    pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
+    pub fn new_with_writer(
+        storage: ProviderFactory<N>,
+    ) -> ProviderResult<(Self, CanonicalInMemoryStateWriter<N::Primitives>)> {
         let provider = storage.provider()?;
         let best = provider.chain_info()?;
         let latest = provider
@@ -110,7 +123,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             .map(|num| provider.sealed_header(num))
             .transpose()?
             .flatten();
-        let canonical_in_memory_state = CanonicalInMemoryState::with_head(
+        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
             ChainInfoHeaders {
                 canonical_head: SealedHeader::new(latest, best.best_hash),
                 safe: safe_header,
@@ -118,9 +131,14 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             },
             storage.in_memory_state().clone(),
         );
+        let canonical_in_memory_state =
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone();
         let bal_store = storage.bal_store().clone();
 
-        Ok(Self { database: storage, canonical_in_memory_state, bal_store })
+        Ok((
+            Self { database: storage, canonical_in_memory_state, bal_store },
+            canonical_in_memory_state_writer,
+        ))
     }
 
     /// Gets a clone of `canonical_in_memory_state`.
