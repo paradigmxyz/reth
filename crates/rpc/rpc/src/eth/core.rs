@@ -583,7 +583,10 @@ mod tests {
         BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
         StorageSettings, TransactionsProvider,
     };
-    use reth_tasks::cancel::{is_cancelled, CancelOnDrop};
+    use reth_tasks::{
+        cancel::{is_cancelled, CancelOnDrop},
+        pool::BlockingTaskGuard,
+    };
     use reth_testing_utils::generators::{self, random_block, random_receipt, BlockParams};
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction, TestPool};
     use std::time::{Duration, Instant};
@@ -1258,6 +1261,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn explicit_precompile_code_overrides_reach_call_helpers() {
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().prague_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header { number: 1, gas_limit: 30_000_000, ..Default::default() },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api(provider);
+        let trace_api =
+            crate::TraceApi::new(api.clone(), BlockingTaskGuard::new(1), EthConfig::default());
+        let identity = Address::with_last_byte(4);
+        let request = TransactionRequest::default().with_to(identity).with_gas_limit(100_000);
+        for (code, expected) in [
+            (Bytes::new(), Bytes::new()),
+            (
+                Bytes::from_static(&[0x60, 42, 0x60, 0, 0x53, 0x60, 1, 0x60, 0, 0xf3]),
+                Bytes::from_static(&[42]),
+            ),
+        ] {
+            let overrides = StateOverride::from_iter([(
+                identity,
+                AccountOverride { code: Some(code), ..Default::default() },
+            )]);
+            let output = EthCall::call(
+                &api,
+                request.clone(),
+                Some(BlockId::latest()),
+                EvmOverrides::state(Some(overrides.clone())),
+            )
+            .await
+            .unwrap();
+            assert_eq!(output, expected);
+            let traces = trace_api
+                .trace_call(TraceCallRequest {
+                    call: request.clone(),
+                    trace_types: std::iter::once(TraceType::Trace).collect(),
+                    block_id: Some(BlockId::latest()),
+                    state_overrides: Some(overrides.clone()),
+                    block_overrides: None,
+                })
+                .await
+                .unwrap();
+            assert_eq!(traces.output, expected);
+            let bundles = vec![
+                Bundle {
+                    transactions: vec![request.clone(), request.clone()],
+                    block_override: None,
+                },
+                Bundle { transactions: vec![request.clone()], block_override: None },
+            ];
+            let outputs = EthCall::call_many(&api, bundles, None, Some(overrides)).await.unwrap();
+            assert_eq!(outputs.iter().map(Vec::len).collect::<Vec<_>>(), [2, 1]);
+            for output in outputs.into_iter().flatten() {
+                assert_eq!(output.error, None);
+                assert_eq!(output.value, Some(expected.clone()));
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn call_allowance_respects_rpc_gas_cap() {
         use reth_tasks::pool::BlockingTaskGuard;
 
@@ -1658,6 +1724,75 @@ mod tests {
             let block =
                 EthBlocks::rpc_block(&api, BlockId::number(1), full).await.unwrap().unwrap();
             assert_eq!(block.header.size, Some(U256::from(block_size)));
+        }
+    }
+
+    #[tokio::test]
+    async fn simulate_precompile_code_shadow_is_block_scoped() {
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().london_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header { number: 1, gas_limit: 30_000_000, ..Default::default() },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api(provider);
+        let identity = Address::with_last_byte(4);
+        let ordinary = Address::repeat_byte(0xbb);
+        let input = Bytes::from_static(b"input");
+        let replacement = alloy_primitives::bytes!("602a60005360016000f3");
+        for code in [Bytes::new(), replacement.clone()] {
+            for renew in [false, true] {
+                let overrides = StateOverride::from_iter([
+                    (identity, AccountOverride { code: Some(code.clone()), ..Default::default() }),
+                    (
+                        ordinary,
+                        AccountOverride { code: Some(replacement.clone()), ..Default::default() },
+                    ),
+                ]);
+                let calls = [identity, identity, ordinary].map(|target| {
+                    TransactionRequest::default()
+                        .with_to(target)
+                        .with_input(input.clone())
+                        .with_gas_limit(100_000)
+                });
+                let blocks = EthCall::simulate_v1(
+                    &api,
+                    SimulatePayload {
+                        block_state_calls: vec![
+                            SimBlock {
+                                state_overrides: Some(overrides.clone()),
+                                calls: calls.to_vec(),
+                                ..Default::default()
+                            },
+                            SimBlock {
+                                state_overrides: renew.then_some(overrides),
+                                calls: calls.to_vec(),
+                                ..Default::default()
+                            },
+                        ],
+                        ..Default::default()
+                    },
+                    Some(BlockId::latest()),
+                )
+                .await
+                .unwrap();
+                assert_eq!(blocks.len(), 2);
+                let overridden =
+                    if code.is_empty() { Bytes::new() } else { Bytes::from_static(&[42]) };
+                for (index, block) in blocks.iter().enumerate() {
+                    assert_eq!(block.calls.len(), 3);
+                    for call in &block.calls {
+                        assert!(call.status, "{call:?}");
+                    }
+                    let expected = if index == 0 || renew { &overridden } else { &input };
+                    assert_eq!(&block.calls[0].return_data, expected);
+                    assert_eq!(&block.calls[1].return_data, expected);
+                    assert_eq!(block.calls[2].return_data, Bytes::from_static(&[42]));
+                }
+            }
         }
     }
 

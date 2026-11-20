@@ -102,19 +102,25 @@ where
             EvmOverrides::new(trace_request.state_overrides, trace_request.block_overrides);
         let this = self.clone();
         self.eth_api()
-            .spawn_with_call_at(trace_request.call, at, overrides, move |db, evm_env, tx_env| {
-                let (inspector, res) = this.eth_api().inspect(
-                    &mut *db,
-                    evm_env,
-                    &tx_env,
-                    TracingInspector::new(config),
-                )?;
-                let trace_res = inspector
-                    .into_parity_builder()
-                    .into_trace_results_with_state(&res, &trace_request.trace_types, &mut *db)
-                    .map_err(Eth::Error::from_eth_err)?;
-                Ok(trace_res)
-            })
+            .spawn_with_call_at(
+                trace_request.call,
+                at,
+                overrides,
+                move |db, evm_env, tx_env, code_overrides| {
+                    let (inspector, res) = this.eth_api().inspect_with_code_overrides(
+                        &mut *db,
+                        evm_env,
+                        &tx_env,
+                        TracingInspector::new(config),
+                        code_overrides,
+                    )?;
+                    let trace_res = inspector
+                        .into_parity_builder()
+                        .into_trace_results_with_state(&res, &trace_request.trace_types, &mut *db)
+                        .map_err(Eth::Error::from_eth_err)?;
+                    Ok(trace_res)
+                },
+            )
             .boxed()
             .await
     }
@@ -174,7 +180,7 @@ where
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
                     }
-                    let (evm_env, mut tx_env) = eth_api.prepare_call_env(
+                    let (evm_env, mut tx_env, _) = eth_api.prepare_call_env(
                         evm_env.clone(),
                         call,
                         &mut db,
