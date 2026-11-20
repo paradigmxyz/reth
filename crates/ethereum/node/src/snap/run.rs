@@ -17,10 +17,10 @@ use reth_stages::{
     ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult, StageId,
 };
 use reth_tasks::Runtime;
-use reth_tracing::tracing::{debug, info, warn};
 use std::{pin::pin, time::Duration};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
+use tracing::{debug, info, warn};
 
 // Minimum time between header refreshes while forkchoice moves.
 //

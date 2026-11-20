@@ -415,14 +415,15 @@ mod tests {
     use alloy_eips::NumHash;
     use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, B256, U256};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_db::{models::ShardedKey, tables, BlockNumberList};
     use reth_db_common::init::init_genesis;
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::{
         providers::{BlockchainProvider, ProviderFactoryBuilder, ReadOnlyConfig},
         test_utils::{create_test_provider_factory, MockNodeTypes},
         AccountReader, BalConfig, BalStore, BalStoreHandle, ChainSpecProvider, HeaderProvider,
-        InMemoryBalStore, ProviderError, ProviderResult, RawBal, StateProviderFactory,
-        StorageSettingsCache,
+        InMemoryBalStore, ProviderError, ProviderResult, RawBal, RocksDBBalStore,
+        RocksDBProviderFactory, StateProviderFactory, StorageSettingsCache,
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
@@ -564,8 +565,6 @@ mod tests {
 
     #[test]
     fn test_save_blocks_flushes_bal_store() {
-        use reth_provider::{RocksDBBalStore, RocksDBProviderFactory};
-
         reth_tracing::init_test_tracing();
         let provider = create_test_provider_factory();
         let bal_store = BalStoreHandle::new(RocksDBBalStore::new(provider.rocksdb_provider()));
@@ -642,9 +641,6 @@ mod tests {
     /// first, then runs the pruner against committed state in a separate provider.
     #[test]
     fn test_save_blocks_then_prune_preserves_new_history() {
-        use reth_db::{models::ShardedKey, tables, BlockNumberList};
-        use reth_provider::RocksDBProviderFactory;
-
         reth_tracing::init_test_tracing();
 
         let provider_factory = create_test_provider_factory();

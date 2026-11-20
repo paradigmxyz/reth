@@ -13,7 +13,6 @@ use reth_metrics::{metrics::Counter, Metrics};
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::SealedHeader;
 use reth_provider::HeaderProvider;
-use reth_tracing::tracing::{debug, warn};
 use std::{
     collections::VecDeque,
     fmt::Debug,
@@ -31,6 +30,7 @@ use tokio::sync::{
     watch,
 };
 use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
+use tracing::{debug, warn};
 
 /// Default max size of the internal state notifications buffer.
 ///

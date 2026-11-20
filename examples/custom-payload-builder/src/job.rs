@@ -11,7 +11,7 @@ use std::{
     task::{Context, Poll},
 };
 
-/// A [PayloadJob] that builds empty blocks.
+/// A [`PayloadJob`] that builds empty blocks.
 pub struct EmptyBlockPayloadJob<Builder>
 where
     Builder: PayloadBuilder,
@@ -22,7 +22,7 @@ where
     pub(crate) _executor: Runtime,
     /// The type responsible for building payloads.
     ///
-    /// See [PayloadBuilder]
+    /// See [`PayloadBuilder`]
     pub(crate) builder: Builder,
 }
 
@@ -59,7 +59,7 @@ where
     }
 }
 
-/// A [PayloadJob] is a future that's being polled by the `PayloadBuilderService`
+/// A [`PayloadJob`] is a future that's being polled by the `PayloadBuilderService`
 impl<Builder> Future for EmptyBlockPayloadJob<Builder>
 where
     Builder: PayloadBuilder + Unpin + 'static,

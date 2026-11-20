@@ -4,14 +4,18 @@
 use std::{
     net::SocketAddr,
     pin::Pin,
+    sync::Arc,
     task::{ready, Context, Poll},
+    time::Duration,
 };
 
-use alloy_primitives::bytes::BytesMut;
+use alloy_consensus::TxLegacy;
+use alloy_primitives::{bytes::BytesMut, Signature};
 use futures::{Stream, StreamExt};
 use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
 };
+use reth_ethereum_primitives::TransactionSigned;
 use reth_network::{
     protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler},
     test_utils::Testnet,
@@ -336,4 +340,32 @@ async fn test_proto_multiplex() {
 
     let response = rx.await.unwrap();
     assert_eq!(response, "hello from peer1!");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_proto_multiplex_closes_session_on_rejected_eth_message() {
+    reth_tracing::init_test_tracing();
+
+    let mut net = Testnet::create(2).await;
+    for peer in net.peers_mut() {
+        let (tx, _) = mpsc::unbounded_channel();
+        peer.add_rlpx_sub_protocol(PingPongProtoHandler { state: ProtocolState { events: tx } });
+    }
+    let net = net.spawn();
+    net.connect_peers().await;
+    let [peer0, peer1] = net.peers_array();
+    let mut events = peer0.event_stream();
+
+    // The mux accepts the broadcast, but the p2p stream rejects payloads above 16 MiB.
+    let tx = TxLegacy { input: vec![0; 17 * 1024 * 1024].into(), ..Default::default() };
+    let tx = TransactionSigned::new_unhashed(tx.into(), Signature::test_signature());
+    peer0.network().send_transactions(*peer1.peer_id(), vec![Arc::new(tx)]);
+
+    let (peer_id, reason) =
+        tokio::time::timeout(Duration::from_secs(10), events.next_session_closed())
+            .await
+            .expect("session stayed open after the wire rejected a message")
+            .expect("network event stream ended before the session closed");
+    assert_eq!(peer_id, *peer1.peer_id());
+    assert_eq!(reason, None);
 }

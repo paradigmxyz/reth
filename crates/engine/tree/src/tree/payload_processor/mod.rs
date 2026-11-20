@@ -1,13 +1,12 @@
 //! Entrypoint for payload processing.
 
-use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     payload_processor::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
         reuse::{cfg_reuses_prewarm_results, PrewarmResults},
     },
-    CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, ExecutionCache,
-    ExecutionEnv, PayloadExecutionCache, SavedCache, TreeConfig,
+    CacheCheckout, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
+    ExecutionCache, ExecutionEnv, PayloadExecutionCache, SavedCache, TreeConfig,
 };
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::B256;
@@ -15,25 +14,24 @@ use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
-    block::ExecutableTxParts,
-    execute::{ExecutableTxFor, WithTxEnv},
-    ConfigureEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple, HaltReasonFor, SpecFor,
-    TxEnvFor,
+    precompile_cache::PrecompileCacheMap, ConfigureEvm, ConvertTx, EvmEnv, EvmTypesFor,
+    ExecutableTxFor, ExecutableTxIterator, ExecutableTxParts, ExecutableTxTuple, SpecFor, TxEnvFor,
+    WithTxEnv,
 };
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory, HistoryReader,
     PruneCheckpointReader, StageCheckpointReader, StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_revm::db::BundleState;
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::Runtime;
+use reth_trie_common::bundle_state::BundleState;
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
-        evm_state_to_hashed_post_state, PayloadStateRootHandle, StateAccessHint,
-        StateRootComputeOutcome, StateRootHandle, StateRootHintStream, StateRootMessage,
-        StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
+        PayloadStateRootHandle, StateAccessHint, StateRootComputeOutcome, StateRootHandle,
+        StateRootHintStream, StateRootMessage, StateRootTaskCancelGuard, StateRootUpdateHook,
+        StateRootUpdateStream,
     },
 };
 use std::{
@@ -62,7 +60,7 @@ type IteratorPayloadHandle<Evm, I> = PayloadHandle<
     IteratorTx<Evm, I>,
     <I as ExecutableTxTuple>::Error,
     <<Evm as ConfigureEvm>::Primitives as NodePrimitives>::Receipt,
-    HaltReasonFor<Evm>,
+    EvmTypesFor<Evm>,
 >;
 
 type IteratorPrewarmTxReceiver<Evm, I> =
@@ -421,7 +419,7 @@ where
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
-    ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt, HaltReasonFor<Evm>>
+    ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt, EvmTypesFor<Evm>>
     where
         P: DatabaseProviderFactory + Clone + 'static,
         P::Provider: BlockNumReader
@@ -445,7 +443,8 @@ where
         } else {
             PrewarmMode::Skipped
         };
-        let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
+        let saved_cache =
+            self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash)).flatten();
 
         // Reused results replace whole transaction executions, which is only equivalent for
         // configurations that opt in, without block access lists and EIP-8037 multidimensional
@@ -453,7 +452,7 @@ where
         let prewarm_results = (self.reuse_prewarm_results &&
             matches!(mode, PrewarmMode::Transactions { .. }) &&
             env.decoded_bal.is_none() &&
-            cfg_reuses_prewarm_results(&env.evm_env.cfg_env) &&
+            cfg_reuses_prewarm_results(env.evm_env.version()) &&
             self.evm_config.reuses_prewarm_results())
         .then(|| Arc::new(PrewarmResults::new(env.transaction_count)));
 
@@ -495,23 +494,32 @@ where
         }
     }
 
-    /// Returns the cache for the given parent hash.
+    /// Returns the cache for the given parent hash, creating one if none is stored yet.
     ///
-    /// If the given hash is different then what is recently cached, then this will create a new
-    /// instance.
+    /// Returns `None` while the stored cache is still held by another task, such as a prewarm
+    /// task queued behind earlier blocks. A new cache is not created then: saving it would free
+    /// the stored cache on the prewarm thread, which slows saves enough that a prewarm backlog
+    /// keeps growing while payloads arrive back to back.
     #[instrument(level = "debug", target = "engine::caching", skip(self))]
-    pub fn cache_for(&self, parent_hash: B256) -> SavedCache {
-        if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
-            debug!("reusing execution cache");
-            cache
-        } else {
-            debug!("creating new execution cache on cache miss");
-            let start = Instant::now();
-            let cache = ExecutionCache::new(self.cross_block_cache_size);
-            if let Some(metrics) = &self.cache_metrics {
-                metrics.record_cache_creation(start.elapsed());
+    pub fn cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
+        match self.execution_cache.checkout(parent_hash) {
+            CacheCheckout::Available(cache) => {
+                debug!("reusing execution cache");
+                Some(cache)
             }
-            SavedCache::new(parent_hash, cache)
+            CacheCheckout::InUse { cached_hash } => {
+                warn!(%cached_hash, "Execution cache still in use, executing without it");
+                None
+            }
+            CacheCheckout::Empty => {
+                debug!("creating new execution cache");
+                let start = Instant::now();
+                let cache = ExecutionCache::new(self.cross_block_cache_size);
+                if let Some(metrics) = &self.cache_metrics {
+                    metrics.record_cache_creation(start.elapsed());
+                }
+                Some(SavedCache::new(parent_hash, cache))
+            }
         }
     }
 
@@ -604,10 +612,10 @@ where
 /// Handle to all the spawned tasks.
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
-/// caching task without cloning the expensive `BundleState`, and over `H` (halt reason) of the
+/// caching task without cloning the expensive `BundleState`, and over `H` (EVM type family) of the
 /// prewarm results that execution may reuse.
-#[derive(Debug)]
-pub struct PayloadHandle<Tx, Err, R, H> {
+#[derive_where::derive_where(Debug; Tx, Err, R)]
+pub struct PayloadHandle<Tx, Err, R, H: evm2::EvmTypes> {
     prewarm_handle: CacheTaskHandle<R, H>,
     /// Stream of block transactions and their indices in the block.
     transactions: IndexedTxReceiver<Tx, Err>,
@@ -615,7 +623,7 @@ pub struct PayloadHandle<Tx, Err, R, H> {
     _span: Span,
 }
 
-impl<Tx, Err, R: Send + Sync + 'static, H> PayloadHandle<Tx, Err, R, H> {
+impl<Tx, Err, R: Send + Sync + 'static, H: evm2::EvmTypes> PayloadHandle<Tx, Err, R, H> {
     /// Returns a clone of the caches used by prewarming
     pub fn caches(&self) -> Option<ExecutionCache> {
         self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.cache().clone())
@@ -674,10 +682,10 @@ impl<Tx, Err, R: Send + Sync + 'static, H> PayloadHandle<Tx, Err, R, H> {
 /// Access to the spawned [`PrewarmCacheTask`].
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
-/// prewarm task without cloning the expensive `BundleState`, and over `H` (halt reason) of the
+/// prewarm task without cloning the expensive `BundleState`, and over `H` (EVM type family) of the
 /// prewarm results that execution may reuse.
-#[derive(Debug)]
-pub struct CacheTaskHandle<R, H> {
+#[derive_where::derive_where(Debug; R)]
+pub struct CacheTaskHandle<R, H: evm2::EvmTypes> {
     /// The shared cache the task operates with.
     saved_cache: Option<SavedCache>,
     /// Channel to the spawned prewarm task if any
@@ -691,7 +699,7 @@ pub struct CacheTaskHandle<R, H> {
     cache_metrics: Option<CachedStateMetrics>,
 }
 
-impl<R: Send + Sync + 'static, H> CacheTaskHandle<R, H> {
+impl<R: Send + Sync + 'static, H: evm2::EvmTypes> CacheTaskHandle<R, H> {
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
@@ -710,19 +718,17 @@ impl<R: Send + Sync + 'static, H> CacheTaskHandle<R, H> {
         &mut self,
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
     ) -> Option<mpsc::Sender<()>> {
-        if let Some(tx) = self.to_prewarm_task.take() {
+        self.to_prewarm_task.take().map(|tx| {
             let (valid_block_tx, valid_block_rx) = mpsc::channel();
             let event = PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx };
             let _ = tx.send(event);
 
-            Some(valid_block_tx)
-        } else {
-            None
-        }
+            valid_block_tx
+        })
     }
 }
 
-impl<R, H> Drop for CacheTaskHandle<R, H> {
+impl<R, H: evm2::EvmTypes> Drop for CacheTaskHandle<R, H> {
     fn drop(&mut self) {
         // Ensure we always terminate on drop - send None without needing Send + Sync bounds
         if let Some(tx) = self.to_prewarm_task.take() {
@@ -738,12 +744,13 @@ impl<R, H> Drop for CacheTaskHandle<R, H> {
 mod tests {
     use super::*;
     use crate::tree::{
-        payload_processor::PayloadProcessor, precompile_cache::PrecompileCacheMap, ExecutionCache,
-        PayloadExecutionCache, SavedCache, TreeConfig,
+        payload_processor::PayloadProcessor, ExecutionCache, PayloadExecutionCache, SavedCache,
+        TreeConfig,
     };
     use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
     use alloy_primitives::{Address, B256, U256};
+    use evm2::evm::AccountInfo;
     use proptest::{
         prelude::any,
         test_runner::{Config, TestRunner},
@@ -751,8 +758,7 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
-    use reth_revm::db::BundleState;
-    use revm::state::AccountInfo;
+    use reth_trie_common::bundle_state::BundleState;
     use std::{
         collections::HashSet,
         process::Command,
@@ -768,19 +774,16 @@ mod tests {
     >;
 
     fn converted_tx() -> TestTx {
-        TestTx {
-            tx_env: Default::default(),
-            tx: Arc::new(reth_primitives_traits::Recovered::new_unchecked(
-                reth_ethereum_primitives::TransactionSigned::Legacy(
-                    alloy_consensus::Signed::new_unchecked(
-                        alloy_consensus::TxLegacy::default(),
-                        alloy_primitives::Signature::test_signature(),
-                        B256::ZERO,
-                    ),
+        TestTx::new(reth_primitives_traits::Recovered::new_unchecked(
+            reth_ethereum_primitives::TransactionSigned::Legacy(
+                alloy_consensus::Signed::new_unchecked(
+                    alloy_consensus::TxLegacy::default(),
+                    alloy_primitives::Signature::test_signature(),
+                    B256::ZERO,
                 ),
-                Address::ZERO,
-            )),
-        }
+            ),
+            Address::ZERO,
+        ))
     }
 
     fn test_processor() -> PayloadProcessor<EthEvmConfig> {
@@ -901,7 +904,7 @@ mod tests {
                 false,
             );
             let handle = super::PayloadHandle {
-                prewarm_handle: super::CacheTaskHandle::<(), ()> {
+                prewarm_handle: super::CacheTaskHandle::<(), evm2::BaseEvmTypes> {
                     saved_cache: None,
                     to_prewarm_task: None,
                     executed_tx_index: Default::default(),
@@ -1035,6 +1038,31 @@ mod tests {
         let cached = payload_processor.execution_cache.get_cache_for(block_hash);
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().executed_block_hash(), block_hash);
+    }
+
+    #[test]
+    fn cache_for_executes_without_cache_while_stored_cache_is_in_use() {
+        let payload_processor = PayloadProcessor::new(
+            reth_tasks::Runtime::test(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default(),
+            PrecompileCacheMap::default(),
+        );
+        let hash = B256::repeat_byte(1u8);
+        let next = B256::repeat_byte(2u8);
+        assert!(payload_processor.cache_for(hash).is_some(), "empty slot creates a cache");
+
+        payload_processor
+            .execution_cache
+            .update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
+        let held = payload_processor.cache_for(hash).expect("stored cache is available");
+        assert!(payload_processor.cache_for(next).is_none(), "held cache is not replaced");
+
+        drop(held);
+        assert_eq!(
+            payload_processor.cache_for(next).map(|cache| cache.executed_block_hash()),
+            Some(next)
+        );
     }
 
     #[test]

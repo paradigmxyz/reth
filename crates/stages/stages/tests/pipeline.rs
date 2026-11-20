@@ -15,14 +15,13 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
 use reth_primitives_traits::{
-    crypto::secp256k1::public_key_to_address,
     proofs::{calculate_receipt_root, calculate_transaction_root},
     RecoveredBlock, SealedBlock,
 };
@@ -34,7 +33,6 @@ use reth_provider::{
     StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
-use reth_revm::database::StateProviderDatabase;
 use reth_stages::{sets::DefaultStages, stages::StorageHashingStage};
 use reth_stages_api::{
     ExecInput, ExecOutput, Pipeline, PipelineEvent, Stage, StageError, StageId, StageSet,
@@ -44,6 +42,7 @@ use reth_static_file::StaticFileProducer;
 use reth_storage_api::{
     ChangeSetReader, StateProvider, StorageChangeSetReader, StorageSettings, StorageSettingsCache,
 };
+use reth_storage_overlay::OverlayManager;
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
@@ -239,7 +238,8 @@ async fn run_pipeline_forward_and_unwind(
     // Generate a keypair for signing transactions
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
-    let signer_address = public_key_to_address(key_pair.public_key());
+    let signer_address =
+        Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
 
     // Recipient address for ETH transfers
     let recipient_address = Address::repeat_byte(0x11);
@@ -776,6 +776,7 @@ async fn reopen_provider_factory(
         chain_spec,
         StaticFileProvider::read_write(datadir.join("static_files"))?,
         rocksdb,
+        OverlayManager::default(),
         reth_tasks::Runtime::test(),
     )
     .map_err(Into::into)

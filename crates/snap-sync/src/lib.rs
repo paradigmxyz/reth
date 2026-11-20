@@ -14,6 +14,7 @@ mod catch_up;
 mod common;
 mod error;
 mod generation;
+mod metrics;
 mod pivot;
 mod reorg;
 mod repair;

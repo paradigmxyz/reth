@@ -1,12 +1,13 @@
 use crate::PayloadProvider;
 use alloy_eips::BlockNumberOrTag;
 use alloy_json_rpc::{Response, ResponsePayload};
+use futures::future::BoxFuture;
 use reqwest::Client;
 use reth_node_api::ExecutionPayload;
-use reth_tracing::tracing::{debug, warn};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::mpsc, time::interval};
+use tracing::{debug, warn};
 
 /// Block provider that fetches new blocks from Etherscan API.
 #[derive(derive_more::Debug)]
@@ -54,27 +55,14 @@ where
         &self,
         block_number_or_tag: BlockNumberOrTag,
     ) -> eyre::Result<ExecutionData> {
-        let tag = match block_number_or_tag {
-            BlockNumberOrTag::Number(num) => format!("{num:#x}"),
-            tag => tag.to_string(),
-        };
-
-        let mut req = self.http_client.get(&self.base_url).query(&[
-            ("module", "proxy"),
-            ("action", "eth_getBlockByNumber"),
-            ("tag", &tag),
-            ("boolean", "true"),
-            ("apikey", &self.api_key),
-        ]);
-
-        if !self.base_url.contains("chainid=") {
-            // only append chainid if not part of the base url already
-            req = req.query(&[("chainid", &self.chain_id.to_string())]);
-        }
-
-        let resp = req.send().await?.text().await?;
-
-        debug!(target: "etherscan", %tag, response_bytes = resp.len(), "fetched block from etherscan");
+        let resp = fetch_block(
+            &self.http_client,
+            &self.base_url,
+            &self.api_key,
+            self.chain_id,
+            block_number_or_tag,
+        )
+        .await?;
 
         let resp: Response<RpcBlock> = serde_json::from_str(&resp).inspect_err(|err| {
             warn!(target: "etherscan", "Failed to parse block response from etherscan: {}", err);
@@ -143,4 +131,41 @@ where
     async fn get_payload(&self, block_number: u64) -> eyre::Result<Self::ExecutionData> {
         self.load_payload(BlockNumberOrTag::Number(block_number)).await
     }
+}
+
+/// Requests a block from Etherscan and returns the raw response body.
+///
+/// Boxed so the `reqwest` future is compiled here, not in each crate that polls it.
+fn fetch_block<'a>(
+    http_client: &'a Client,
+    base_url: &'a str,
+    api_key: &'a str,
+    chain_id: u64,
+    block_number_or_tag: BlockNumberOrTag,
+) -> BoxFuture<'a, eyre::Result<String>> {
+    Box::pin(async move {
+        let tag = match block_number_or_tag {
+            BlockNumberOrTag::Number(num) => format!("{num:#x}"),
+            tag => tag.to_string(),
+        };
+
+        let mut req = http_client.get(base_url).query(&[
+            ("module", "proxy"),
+            ("action", "eth_getBlockByNumber"),
+            ("tag", &tag),
+            ("boolean", "true"),
+            ("apikey", api_key),
+        ]);
+
+        if !base_url.contains("chainid=") {
+            // only append chainid if not part of the base url already
+            req = req.query(&[("chainid", &chain_id.to_string())]);
+        }
+
+        let resp = req.send().await?.text().await?;
+
+        debug!(target: "etherscan", %tag, response_bytes = resp.len(), "fetched block from etherscan");
+
+        Ok(resp)
+    })
 }

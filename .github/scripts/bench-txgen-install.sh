@@ -13,8 +13,9 @@ if ! command -v llvm-config &>/dev/null; then
   .github/scripts/install_llvm.sh ubuntu
 fi
 
-# txgen is private. Prefer the deploy key secret; fall back to token auth for
-# local/manual runs. Use the git CLI so cargo honors the auth configuration.
+# txgen is public, so no auth is required. If a deploy key or token is set
+# (e.g. for a private TXGEN_REPO fork), use it; the deploy key takes precedence.
+# Use the git CLI so cargo honors any auth configuration.
 if [ -n "${TXGEN_DEPLOY_KEY:-}" ]; then
   set +x
   mkdir -p "$HOME/.ssh"

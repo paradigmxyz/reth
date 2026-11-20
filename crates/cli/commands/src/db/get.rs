@@ -554,30 +554,13 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
             let end_key = table_key::<T>(end_key_str)?;
 
             // Use walk_range to iterate over the range
-            self.tool.provider_factory.db_ref().view(|tx| {
-                let mut cursor = tx.cursor_read::<T>()?;
-                let walker = cursor.walk_range(key..end_key)?;
-
-                for result in walker {
-                    let (k, v) = result?;
-                    let json_val = if self.raw {
-                        let raw_key = RawKey::from(k);
-                        serde_json::json!({
-                            "key": hex::encode_prefixed(raw_key.raw_key()),
-                            "val": hex::encode_prefixed(v.compress().as_ref()),
-                        })
-                    } else {
-                        serde_json::json!({
-                            "key": &k,
-                            "val": &v,
-                        })
-                    };
-
-                    println!("{}", serde_json::to_string_pretty(&json_val)?);
-                }
-
-                Ok::<_, eyre::Report>(())
-            })??;
+            let tx = self.tool.provider_factory.db_ref().tx()?;
+            let mut cursor = tx.cursor_read::<T>()?;
+            for result in cursor.walk_range(key..end_key)? {
+                let (k, v) = result?;
+                print_json(&row_json::<T>(k, v, self.raw))?;
+            }
+            tx.commit()?;
         } else {
             // Single key lookup
             let content = if self.raw {
@@ -588,14 +571,7 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
                 self.tool.get::<T>(key)?.as_ref().map(serde_json::to_string_pretty).transpose()?
             };
 
-            match content {
-                Some(content) => {
-                    println!("{content}");
-                }
-                None => {
-                    error!(target: "reth::cli", "No content for the given table key.");
-                }
-            };
+            print_content(content, "key");
         }
 
         Ok(())
@@ -618,53 +594,36 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
             let end_subkey_parsed =
                 self.end_subkey.as_deref().map(table_subkey::<T>).transpose()?;
 
-            self.tool.provider_factory.db_ref().view(|tx| {
-                let mut cursor = tx.cursor_dup_read::<T>()?;
+            let tx = self.tool.provider_factory.db_ref().tx()?;
+            let mut cursor = tx.cursor_dup_read::<T>()?;
 
-                // Seek to the starting key. If there is actually a key at the starting key then
-                // seek to the subkey within it.
-                if let Some((decoded_key, _)) = cursor.seek(key.clone())? &&
-                    decoded_key == key
-                {
-                    cursor.seek_by_key_subkey(key.clone(), start_subkey.clone())?;
+            // Seek to the starting key. If there is actually a key at the starting key then
+            // seek to the subkey within it.
+            if let Some((decoded_key, _)) = cursor.seek(key.clone())? &&
+                decoded_key == key
+            {
+                cursor.seek_by_key_subkey(key.clone(), start_subkey.clone())?;
+            }
+
+            // Get the current position to start iteration
+            let mut current = cursor.current()?;
+
+            while let Some((decoded_key, decoded_value)) = current {
+                // Extract the subkey using the ValueWithSubKey trait
+                let decoded_subkey = decoded_value.get_subkey();
+
+                // Check if we've reached the end (exclusive)
+                if (&decoded_key, Some(&decoded_subkey)) >= (&end_key, end_subkey_parsed.as_ref()) {
+                    break;
                 }
 
-                // Get the current position to start iteration
-                let mut current = cursor.current()?;
+                // Output the entry with both key and subkey
+                print_json(&row_json::<T>(decoded_key, decoded_value, self.raw))?;
 
-                while let Some((decoded_key, decoded_value)) = current {
-                    // Extract the subkey using the ValueWithSubKey trait
-                    let decoded_subkey = decoded_value.get_subkey();
-
-                    // Check if we've reached the end (exclusive)
-                    if (&decoded_key, Some(&decoded_subkey)) >=
-                        (&end_key, end_subkey_parsed.as_ref())
-                    {
-                        break;
-                    }
-
-                    // Output the entry with both key and subkey
-                    let json_val = if self.raw {
-                        let raw_key = RawKey::from(decoded_key.clone());
-                        serde_json::json!({
-                            "key": hex::encode_prefixed(raw_key.raw_key()),
-                            "val": hex::encode_prefixed(decoded_value.compress().as_ref()),
-                        })
-                    } else {
-                        serde_json::json!({
-                            "key": &decoded_key,
-                            "val": &decoded_value,
-                        })
-                    };
-
-                    println!("{}", serde_json::to_string_pretty(&json_val)?);
-
-                    // Move to next entry
-                    current = cursor.next()?;
-                }
-
-                Ok::<_, eyre::Report>(())
-            })??;
+                // Move to next entry
+                current = cursor.next()?;
+            }
+            tx.commit()?;
         } else {
             // Single key/subkey lookup
             let Some(subkey) = self.subkey.as_deref() else {
@@ -684,16 +643,38 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
                     .transpose()?
             };
 
-            match content {
-                Some(content) => {
-                    println!("{content}");
-                }
-                None => {
-                    error!(target: "reth::cli", "No content for the given table subkey.");
-                }
-            };
+            print_content(content, "subkey");
         }
         Ok(())
+    }
+}
+
+/// Builds the JSON object printed for a key-value pair in a range query.
+fn row_json<T: Table>(key: T::Key, value: T::Value, raw: bool) -> serde_json::Value {
+    if raw {
+        row_object(
+            hex::encode_prefixed(RawKey::from(key).raw_key()).into(),
+            hex::encode_prefixed(value.compress().as_ref()).into(),
+        )
+    } else {
+        row_object(serde_json::to_value(&key).unwrap(), serde_json::to_value(&value).unwrap())
+    }
+}
+
+fn row_object(key: serde_json::Value, value: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({ "key": key, "val": value })
+}
+
+fn print_json(value: &serde_json::Value) -> eyre::Result<()> {
+    println!("{}", serde_json::to_string_pretty(value)?);
+    Ok(())
+}
+
+/// Prints the looked up content, or logs that nothing exists for the given `key` or `subkey`.
+fn print_content(content: Option<String>, missing: &str) {
+    match content {
+        Some(content) => println!("{content}"),
+        None => error!(target: "reth::cli", "No content for the given table {missing}."),
     }
 }
 

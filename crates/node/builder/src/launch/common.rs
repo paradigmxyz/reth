@@ -96,6 +96,7 @@ use tokio::sync::{
 };
 
 use futures::{future::Either, stream, Stream, StreamExt};
+use reth_engine_primitives::ConsensusEngineEvent;
 use reth_node_ethstats::EthStatsService;
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node::NodeEvent};
 
@@ -551,18 +552,22 @@ where
             .map(|distance| {
                 RocksDBBalStore::with_buffer_retention_distance(rocksdb_provider.clone(), distance)
             })
-            .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()));
+            .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()))
+            .with_bodies_prune_mode(
+                prune_config.segments.bodies_history,
+                prune_config.minimum_pruning_distance,
+            );
         let bal_store = BalStoreHandle::new(bal_store);
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
             static_file_provider,
             rocksdb_provider,
+            overlay_manager,
             self.task_executor().clone(),
         )?
         .with_prune_modes(prune_config.segments)
         .with_minimum_pruning_distance(prune_config.minimum_pruning_distance)
-        .with_overlay_manager(overlay_manager)
         .with_bal_store(bal_store);
 
         recover(&factory)?;
@@ -1315,7 +1320,6 @@ where
         let task_executor = self.task_executor().clone();
         task_executor.spawn_task(async move {
             while let Some(event) = engine_events.next().await {
-                use reth_engine_primitives::ConsensusEngineEvent;
                 match event {
                     ConsensusEngineEvent::ForkBlockAdded(executed, duration) |
                     ConsensusEngineEvent::CanonicalBlockAdded(executed, duration) => {

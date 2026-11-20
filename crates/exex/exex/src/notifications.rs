@@ -8,7 +8,6 @@ use reth_exex_types::ExExHead;
 use reth_node_api::NodePrimitives;
 use reth_provider::{BlockNumReader, BlockReader, Chain, StateProviderFactory};
 use reth_stages_api::ExecutionStageThresholds;
-use reth_tracing::tracing::debug;
 use std::{
     collections::VecDeque,
     fmt::Debug,
@@ -17,6 +16,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc::Receiver;
+use tracing::debug;
 
 /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks. If the
 /// stream is configured with a head via [`ExExNotifications::set_with_head`] or

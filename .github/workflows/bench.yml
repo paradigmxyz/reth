@@ -1376,7 +1376,7 @@ jobs:
           toolchain: stable
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         continue-on-error: true
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.13.4"
 
@@ -1402,6 +1402,7 @@ jobs:
             }
 
       - name: Install dependencies
+        id: install-deps
         env:
           DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
         run: |
@@ -1453,6 +1454,7 @@ jobs:
 
       # Verify all required tools are available
       - name: Check dependencies
+        id: check-deps
         run: |
           export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -2289,6 +2291,8 @@ jobs:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const steps_status = [
+              ['installing dependencies', '${{ steps.install-deps.outcome }}'],
+              ['checking dependencies', '${{ steps.check-deps.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
               ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['running benchmarks', '${{ steps.run-benchmarks.outcome }}'],
@@ -2322,6 +2326,8 @@ jobs:
         with:
           script: |
             const steps_status = [
+              ['installing dependencies', '${{ steps.install-deps.outcome }}'],
+              ['checking dependencies', '${{ steps.check-deps.outcome }}'],
               ['building binaries', '${{ steps.build.outcome }}'],
               ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
               ['running benchmarks', '${{ steps.run-benchmarks.outcome }}'],

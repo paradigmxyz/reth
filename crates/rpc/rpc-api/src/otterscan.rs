@@ -11,8 +11,7 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 ///
 /// Reth implements a subset of the API. In particular, address history search is unimplemented
 /// even though `getApiLevel` returns 8. Historical queries require the relevant state and history.
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "ots"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "ots"))]
+#[rpc(server, namespace = "ots")]
 pub trait Otterscan<T: RpcObject, H: RpcObject> {
     /// Get the block header by block number, required by otterscan.
     /// Otterscan currently requires this endpoint, used as:

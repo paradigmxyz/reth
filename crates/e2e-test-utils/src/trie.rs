@@ -1,5 +1,6 @@
 //! Helpers for verifying the persisted state and trie representation of test nodes.
 
+use crate::TmpDB;
 use alloy_consensus::BlockHeader;
 use eyre::{ensure, eyre, Result};
 use reth_provider::{
@@ -7,15 +8,15 @@ use reth_provider::{
 };
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
-    verify::{Output, Verifier},
+    verify::{default_storage_workers, Output, DEFAULT_STORAGE_LOOKAHEAD},
     StateRoot,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, DatabaseVerifier};
 
 /// Asserts that the persisted state and trie representation is internally consistent and matches
 /// the state root of the latest persisted block.
 ///
-/// This performs two checks against a single database snapshot:
+/// This performs two checks against persisted database state:
 /// - the state root recomputed from the persisted hashed state matches the state root of the latest
 ///   persisted header, and
 /// - the persisted trie nodes match a recomputation from the hashed state (the library equivalent
@@ -28,9 +29,12 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 pub fn assert_trie_consistency<F>(factory: &F) -> Result<()>
 where
     F: DatabaseProviderFactory<
-        Provider: DBProvider + StorageSettingsCache + BlockNumReader + HeaderProvider,
-    >,
+            DB = TmpDB,
+            Provider: DBProvider + StorageSettingsCache + BlockNumReader + HeaderProvider,
+        > + AsRef<F::DB>,
 {
+    // Prevent commits while opening the independent snapshots.
+    let snapshot_guard = factory.database_provider_rw()?;
     let provider = factory.database_provider_ro()?;
     let tip = provider.best_block_number()?;
     let header = provider
@@ -39,8 +43,16 @@ where
     let tx = provider.tx_ref();
 
     reth_trie_db::with_adapter!(provider, |A| {
+        let db = factory.as_ref().db().clone().with_disable_long_read_transaction_safety();
+        let verifier = DatabaseVerifier::<_, A>::new(
+            &db,
+            default_storage_workers(),
+            DEFAULT_STORAGE_LOOKAHEAD,
+        )?;
+        drop(snapshot_guard);
+
         // Recompute all account leaves from the persisted hashed state. Storage roots are taken
-        // from the persisted storage tries, which the verifier below checks against the hashed
+        // from the persisted storage tries, which the verifier checks against the hashed
         // storage tables.
         let recomputed = StateRoot::new(
             DatabaseTrieCursorFactory::<_, A>::new(tx),
@@ -57,8 +69,6 @@ where
             header.state_root()
         );
 
-        let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-        let verifier = Verifier::new(&trie_cursor_factory, DatabaseHashedCursorFactory::new(tx))?;
         let mut inconsistencies = Vec::new();
         for output in verifier {
             match output? {
