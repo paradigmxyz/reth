@@ -652,7 +652,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         db: DB,
         evm_env: EvmEnvFor<Self>,
         ctx: ExecutionCtxFor<'a, Self>,
-    ) -> Result<BundleState, Box<dyn Error + Send + Sync>>
+    ) -> Result<BundleState, BlockExecutionError>
     where
         Self: 'a,
         DB: DynDatabase + 'a,
@@ -660,9 +660,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         let factory = self.block_executor_factory();
         let evm = factory.evm_with_env(db, evm_env);
         let mut executor = factory.create_executor(evm, ctx);
-        executor
-            .apply_pre_execution_changes()
-            .map_err(|err| -> Box<dyn Error + Send + Sync> { Box::new(err) })?;
+        executor.apply_pre_execution_changes()?;
         Ok(executor.into_state())
     }
 
