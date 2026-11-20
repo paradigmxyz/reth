@@ -989,8 +989,7 @@ impl RpcServerArgs {
 
     /// Returns the trace byte limit, `None` when `--rpc.max-trace-bytes 0` disables it.
     ///
-    /// Without the flag, the limit is [`RPC_TRACE_BYTES_PER_RESPONSE_BYTE`] times the response
-    /// limit, so a trace stops recording once its response would no longer fit.
+    /// By default, a trace may record up to twice the configured RPC response size limit.
     pub fn max_trace_bytes(&self) -> Option<usize> {
         match self.rpc_max_trace_bytes {
             Some(0) => None,
