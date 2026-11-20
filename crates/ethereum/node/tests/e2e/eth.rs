@@ -1,6 +1,7 @@
 use crate::utils::{advance_with_random_transactions, EngineSszRequestExt, EngineSszResponseExt};
-use alloy_eips::eip7685::RequestsOrHash;
-use alloy_primitives::{Bytes, B256};
+use alloy_consensus::Transaction;
+use alloy_eips::{eip7594::CELLS_PER_EXT_BLOB, eip7685::RequestsOrHash, Encodable2718};
+use alloy_primitives::{Bytes, B128, B256};
 use alloy_rpc_types_engine::{
     ssz_engine_types::{
         BlobsV1Request, BlobsV1Response, BlobsV2Response, BlobsV3Response, BlobsV4Request,
@@ -366,7 +367,7 @@ async fn test_engine_ssz_proxy_blob_revisions() -> eyre::Result<()> {
         let request = if version == 4 {
             request.ssz(&BlobsV4Request {
                 versioned_hashes: vec![B256::ZERO],
-                indices_bitarray: alloy_primitives::B128::ZERO,
+                indices_bitarray: B128::ZERO,
             })
         } else {
             request.ssz(&BlobsV1Request { versioned_hashes: vec![B256::ZERO] })
@@ -425,6 +426,43 @@ async fn test_engine_ssz_proxy_blob_revisions() -> eyre::Result<()> {
         response.problem_type().await?;
     }
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_engine_ssz_proxy_v4_sparse_blob_cells() -> eyre::Result<()> {
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Osaka)
+        .with_rpc_modifier(|rpc| rpc.with_force_blob_sidecar_upcasting())
+        .build_single()
+        .await?;
+    node.advance_block().await?;
+    let tx = TransactionTestContext::tx_with_blobs(1, wallet.signer(0)).await?;
+    let hash = tx.blob_versioned_hashes().unwrap()[0];
+    node.rpc.inject_tx(tx.encoded_2718().into()).await?;
+
+    let auth = node.auth_server_handle();
+    let index = CELLS_PER_EXT_BLOB - 1;
+    let response: BlobsV4Response = reqwest::Client::new()
+        .post(format!("{}/engine/v1/blobs/v4", auth.http_url()))
+        .jwt(&auth)
+        .ssz(&BlobsV4Request {
+            versioned_hashes: vec![hash],
+            indices_bitarray: B128::from((1u128 << index).to_le_bytes()),
+        })
+        .send()
+        .await?
+        .ssz()
+        .await?;
+    let [entry] = response.entries.as_slice() else { eyre::bail!("expected one blob") };
+    assert!(entry.available);
+    assert_eq!(entry.contents.blob_cells.len(), CELLS_PER_EXT_BLOB);
+    assert_eq!(entry.contents.proofs.len(), CELLS_PER_EXT_BLOB);
+    for (i, (cell, proof)) in
+        entry.contents.blob_cells.iter().zip(&entry.contents.proofs).enumerate()
+    {
+        assert_eq!(cell.is_some(), i == index);
+        assert_eq!(proof.is_some(), i == index);
+    }
     Ok(())
 }
 
