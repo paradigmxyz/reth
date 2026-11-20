@@ -50,7 +50,7 @@ use std::{
     fmt::Debug,
     ops::{RangeBounds, RangeInclusive},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -102,6 +102,8 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     snap_storage_proof: Arc<Mutex<Option<Vec<Bytes>>>>,
     tx: TxMock,
     prune_modes: Arc<PruneModes>,
+    /// The earliest block whose history has not expired.
+    earliest_block_number: Arc<AtomicU64>,
 }
 
 /// Optional mock account entries paired with why the range ended.
@@ -147,6 +149,7 @@ where
             snap_storage_proof: self.snap_storage_proof.clone(),
             tx: self.tx.clone(),
             prune_modes: self.prune_modes.clone(),
+            earliest_block_number: self.earliest_block_number.clone(),
         }
     }
 }
@@ -177,6 +180,7 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             snap_storage_proof: Default::default(),
             tx: Default::default(),
             prune_modes: Default::default(),
+            earliest_block_number: Default::default(),
         }
     }
 }
@@ -329,6 +333,11 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
         self.state_roots.lock().push(state_root);
     }
 
+    /// Sets the earliest block whose history has not expired.
+    pub fn set_earliest_block_number(&self, number: BlockNumber) {
+        self.earliest_block_number.store(number, Ordering::Relaxed);
+    }
+
     /// Set chain spec.
     pub fn with_chain_spec<C>(self, chain_spec: C) -> MockEthProvider<T, C> {
         MockEthProvider {
@@ -354,6 +363,7 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             snap_storage_proof: self.snap_storage_proof,
             tx: self.tx,
             prune_modes: self.prune_modes,
+            earliest_block_number: self.earliest_block_number,
         }
     }
 
@@ -897,6 +907,10 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> BlockNumReader
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
         self.best_block_number()
+    }
+
+    fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
+        Ok(self.earliest_block_number.load(Ordering::Relaxed))
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<alloy_primitives::BlockNumber>> {
