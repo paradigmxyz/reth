@@ -4,9 +4,9 @@ use reth_db::{
     init_db,
     mdbx::DatabaseArguments,
     open_db,
-    tables::{PackedStoragesTrie, PlainStorageState},
+    tables::{HeaderNumbers, PackedAccountsTrie, PackedStoragesTrie, PlainStorageState},
     transaction::DbTxMut,
-    Database, RawDupSort, RawValue,
+    Database, RawDupSort, RawTable, RawValue,
 };
 use reth_primitives_traits::StorageEntry;
 use serde_json::{json, Value};
@@ -53,6 +53,11 @@ fn db_get_mdbx_subkey_points_and_ranges() {
     let entry = json!({ "key": stored, "value": "0x21" });
     assert_eq!(serde_json::from_str::<Value>(&get(&[&present])).unwrap(), entry);
     assert_eq!(get(&[&present, "--raw"]), format!("{present}0021\n"));
+    assert_eq!(get(&[&gap, &key, &present, "--raw"]), "");
+    assert_eq!(
+        serde_json::from_str::<Value>(&get(&[&present, &key, &end, "--raw"])).unwrap(),
+        json!({ "key": address, "val": format!("{present}0021") })
+    );
 
     let range = get(&[&gap, &key, &end]);
     assert_eq!(
@@ -75,7 +80,7 @@ fn db_get_mdbx_subkey_points_and_ranges() {
 }
 
 #[test]
-fn db_get_mdbx_packed_storage_trie_subkey() {
+fn db_get_mdbx_packed_trie_keys() {
     let dir = tempfile::tempdir().unwrap();
     let datadir = dir.path().to_str().unwrap();
     reth_ok(&["init", "--chain", "dev", "--datadir", datadir, "--storage.v2=true"]);
@@ -88,10 +93,21 @@ fn db_get_mdbx_packed_storage_trie_subkey() {
     open_db(dir.path().join("db"), DatabaseArguments::test())
         .unwrap()
         .update(|tx| {
+            tx.put::<PackedAccountsTrie>(
+                serde_json::from_value(entry["nibbles"].clone()).unwrap(),
+                serde_json::from_value(entry["node"].clone()).unwrap(),
+            )?;
             tx.put::<PackedStoragesTrie>(key, serde_json::from_value(entry.clone()).unwrap())
         })
         .unwrap()
         .unwrap();
+
+    let account = |args: &[&str]| db_get_mdbx(datadir, "AccountsTrie", "0xa0", args);
+    assert_eq!(serde_json::from_str::<Value>(&account(&[])).unwrap(), entry["node"]);
+    assert_eq!(
+        serde_json::from_str::<Value>(&account(&["0xb"])).unwrap(),
+        json!({ "key": "0xa0", "val": entry["node"] })
+    );
 
     let key = key.to_string();
     let get = |args: &[&str]| db_get_mdbx(datadir, "StoragesTrie", &key, args);
@@ -100,4 +116,28 @@ fn db_get_mdbx_packed_storage_trie_subkey() {
     assert_eq!(get(&["0xa", "--raw"]), "");
     let range = get(&["0xa", &key, "0xb"]);
     assert_eq!(serde_json::from_str::<Value>(&range).unwrap(), json!({ "key": key, "val": entry }));
+}
+
+#[test]
+fn db_get_mdbx_raw_table_range() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = B256::with_last_byte(1);
+    // The block number decoder accepts trailing bytes that re-encoding would drop.
+    let raw = [33u64.to_le_bytes().as_slice(), &[0xff]].concat();
+    init_db(dir.path().join("db"), DatabaseArguments::test())
+        .unwrap()
+        .update(|tx| tx.put::<RawTable<HeaderNumbers>>(key.into(), RawValue::from_vec(raw)))
+        .unwrap()
+        .unwrap();
+
+    let range = db_get_mdbx(
+        dir.path().to_str().unwrap(),
+        "HeaderNumbers",
+        &key.to_string(),
+        &[&B256::with_last_byte(2).to_string(), "--raw"],
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&range).unwrap(),
+        json!({ "key": key, "val": "0x2100000000000000ff" })
+    );
 }
