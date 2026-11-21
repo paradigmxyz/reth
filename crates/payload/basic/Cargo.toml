@@ -41,3 +41,8 @@ metrics.workspace = true
 # misc
 tracing.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+reth-ethereum-engine-primitives.workspace = true
+alloy-rpc-types-engine.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

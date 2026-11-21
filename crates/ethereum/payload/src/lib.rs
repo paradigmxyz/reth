@@ -13,8 +13,7 @@ use alloy_primitives::U256;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
 use reth_basic_payload_builder::{
-    is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
-    PayloadConfig,
+    is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
@@ -100,17 +99,6 @@ where
             args,
             |attributes| self.pool.best_transactions_with_attributes(attributes),
         )
-    }
-
-    fn on_missing_payload(
-        &self,
-        _args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
-    ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
-        if self.builder_config.await_payload_on_missing {
-            MissingPayloadBehaviour::AwaitInProgress
-        } else {
-            MissingPayloadBehaviour::RaceEmptyPayload
-        }
     }
 
     fn build_empty_payload(
@@ -265,6 +253,10 @@ where
         // check if the job was cancelled, if so we can exit early
         if cancel.is_cancelled() {
             return Ok(BuildOutcome::Cancelled)
+        }
+
+        if cancel.is_finalization_requested() {
+            break
         }
 
         // ensure we still have capacity for this transaction
