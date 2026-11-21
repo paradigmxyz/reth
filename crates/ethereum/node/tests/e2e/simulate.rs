@@ -1,4 +1,7 @@
-use alloy_eips::eip7825::MAX_TX_GAS_LIMIT_OSAKA;
+use alloy_eips::{
+    eip4895::{Withdrawal, Withdrawals, GWEI_TO_WEI},
+    eip7825::MAX_TX_GAS_LIMIT_OSAKA,
+};
 use alloy_primitives::{address, bytes, Address, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::{
@@ -6,7 +9,7 @@ use alloy_rpc_types_eth::{
     state::{AccountOverride, StateOverride, StateOverridesBuilder},
     BlockOverrides, TransactionRequest, TransactionTrait as _,
 };
-use reth_chainspec::EthereumHardfork;
+use reth_chainspec::{EthereumHardfork, ForkCondition};
 use reth_e2e_test_utils::{test_chain_spec_builder, E2ETestSetupExt};
 use reth_node_ethereum::EthereumNode;
 use std::sync::Arc;
@@ -364,6 +367,59 @@ async fn test_simulate_v1_blockhash_reads_prior_simulated_block() -> eyre::Resul
     assert_eq!(result[15].calls.len(), 1);
     assert!(result[15].calls[0].status);
     assert_eq!(result[15].calls[0].return_data.as_ref(), result[0].inner.header.hash.as_slice());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_simulate_v1_applies_withdrawals_override() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    // The first simulated block moves to Shanghai on top of the pre-Shanghai genesis.
+    let shanghai_time = 100;
+    let chain_spec = Arc::new(
+        test_chain_spec_builder()
+            .paris_activated()
+            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(shanghai_time))
+            .build(),
+    );
+    let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let provider = node.rpc_provider();
+
+    let recipient = address!("0x00000000000000000000000000000000000000aa");
+    let withdrawals = Withdrawals::new(vec![Withdrawal {
+        index: 0,
+        validator_index: 1,
+        address: recipient,
+        amount: 3,
+    }]);
+    // Returns `BALANCE(recipient)`.
+    let balance_of = Address::with_last_byte(0xc3);
+    let payload = SimulatePayload::default()
+        .extend(SimBlock::default().with_block_overrides(BlockOverrides {
+            time: Some(shanghai_time),
+            withdrawals: Some(withdrawals.clone()),
+            ..Default::default()
+        }))
+        .extend(
+            SimBlock::default()
+                .with_state_overrides(StateOverride::from_iter([(
+                    balance_of,
+                    AccountOverride::default().with_code(bytes!(
+                        "0x7300000000000000000000000000000000000000aa315f5260205ff3"
+                    )),
+                )]))
+                .call(TransactionRequest::default().to(balance_of)),
+        );
+
+    let result: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].inner.withdrawals, Some(withdrawals));
+    assert_eq!(result[1].inner.withdrawals, Some(Withdrawals::default()));
+    // Withdrawal amounts are in gwei.
+    assert_eq!(U256::from_be_slice(&result[1].calls[0].return_data), U256::from(3 * GWEI_TO_WEI));
 
     Ok(())
 }
