@@ -11,7 +11,7 @@ use std::{
     thread::JoinHandle,
 };
 use tokio::sync::oneshot;
-use tracing::trace;
+use tracing::{error, trace};
 
 /// Builds a fresh EVM provider over the block's parent state. Type-erased so the pool is not
 /// generic over the provider factory; each worker builds its own per block.
@@ -46,12 +46,13 @@ pub struct BalPrewarmPool {
     workers: Vec<crossbeam_channel::Sender<PrewarmMsg>>,
     /// Round-robin cursor for distributing warm requests across workers.
     next: AtomicUsize,
-    _handles: Vec<JoinHandle<()>>,
+    handles: Vec<JoinHandle<()>>,
 }
 
 impl BalPrewarmPool {
     /// Spawns `num_threads` long-lived blocking worker threads. Owned by the
-    /// [`PayloadProcessor`](super::PayloadProcessor); the threads exit when the pool is dropped.
+    /// [`PayloadProcessor`](super::PayloadProcessor); dropping the pool stops and joins the
+    /// threads.
     pub fn new(num_threads: usize) -> Arc<Self> {
         let mut workers = Vec::with_capacity(num_threads);
         let mut handles = Vec::with_capacity(num_threads);
@@ -66,7 +67,7 @@ impl BalPrewarmPool {
             );
         }
         trace!(target: "engine::tree::bal_prewarm_pool", num_threads, "BalPrewarmPool spawned");
-        Arc::new(Self { workers, next: AtomicUsize::new(0), _handles: handles })
+        Arc::new(Self { workers, next: AtomicUsize::new(0), handles })
     }
 
     /// Begins a block: hands every worker the provider builder and shared cache so each opens its
@@ -124,6 +125,22 @@ impl BalPrewarmPool {
     fn send_warm(&self, target: PrewarmTarget) {
         let i = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
         let _ = self.workers[i].send(PrewarmMsg::Warm(target));
+    }
+}
+
+impl Drop for BalPrewarmPool {
+    /// Disconnects every worker's queue and joins the workers. Detaching them instead, by dropping
+    /// their handles, races with their exit in glibc before 2.43 and can crash the process.
+    fn drop(&mut self) {
+        self.workers.clear();
+        let current = std::thread::current().id();
+        for handle in self.handles.drain(..) {
+            if handle.thread().id() != current &&
+                let Err(err) = handle.join()
+            {
+                error!(target: "engine::tree::bal_prewarm_pool", ?err, "BAL prewarm worker panicked");
+            }
+        }
     }
 }
 
@@ -209,5 +226,38 @@ impl Drop for SendOnDrop {
         if let Some(sender) = self.sender.take() {
             let _ = sender.send(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_provider::ProviderError;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn drop_waits_for_the_workers_to_exit() {
+        let num_threads = 4;
+        let started = Arc::new(AtomicUsize::new(0));
+        let finished = Arc::new(AtomicUsize::new(0));
+        let pool = BalPrewarmPool::new(num_threads);
+        let build: Arc<BuildProviderFn> = {
+            let (started, finished) = (started.clone(), finished.clone());
+            Arc::new(move || {
+                started.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(50));
+                finished.fetch_add(1, Ordering::SeqCst);
+                Err(ProviderError::UnsupportedProvider)
+            })
+        };
+        pool.begin_block(build, ExecutionCache::new(1_000), None);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while started.load(Ordering::SeqCst) < num_threads {
+            assert!(Instant::now() < deadline, "BAL prewarm workers did not start");
+            std::thread::yield_now();
+        }
+
+        drop(pool);
+        assert_eq!(finished.load(Ordering::SeqCst), num_threads);
     }
 }

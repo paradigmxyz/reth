@@ -2,10 +2,13 @@
 
 use crate::{
     case::{Case, Cases},
-    result::assert_tests_pass,
+    result::{assert_tests_pass, Error},
 };
-use std::path::{Path, PathBuf};
-use walkdir::{DirEntry, WalkDir};
+use std::{
+    fs::File,
+    path::{Path, PathBuf},
+};
+use walkdir::WalkDir;
 
 /// A collection of tests.
 pub trait Suite {
@@ -40,6 +43,7 @@ pub trait Suite {
 
         // Find all files with the ".json" extension in the test suite directory
         let test_cases = find_all_files_with_extension(&suite_path, ".json")
+            .expect("fixture paths should be readable")
             .into_iter()
             .map(|test_case_path| {
                 let case = Self::Case::load(&test_case_path).expect("test case should load");
@@ -56,11 +60,15 @@ pub trait Suite {
 }
 
 /// Recursively find all files with a given extension.
-fn find_all_files_with_extension(path: &Path, extension: &str) -> Vec<PathBuf> {
-    WalkDir::new(path)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|e| e.file_name().to_string_lossy().ends_with(extension))
-        .map(DirEntry::into_path)
-        .collect()
+pub fn find_all_files_with_extension(path: &Path, extension: &str) -> Result<Vec<PathBuf>, Error> {
+    let mut files = Vec::new();
+    for entry in WalkDir::new(path) {
+        let entry = entry?;
+        if !entry.file_type().is_dir() && entry.file_name().to_string_lossy().ends_with(extension) {
+            File::open(entry.path())
+                .map_err(|error| Error::Io { path: entry.path().into(), error })?;
+            files.push(entry.into_path());
+        }
+    }
+    Ok(files)
 }
