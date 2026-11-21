@@ -151,6 +151,35 @@ def smoke_test(root):
                 print((root / "peer.log").read_text(), end="", flush=True)
 
 
+def test_startup_heal(root):
+    target = ["--chain", FIXTURE / "genesis.json", "--datadir", root / "heal"]
+    run("import", *target, "--fail-on-invalid-block", FIXTURE / "chain.rlp")
+    # Startup truncates the senders static file to a checkpoint below it, so restoring the
+    # checkpoint afterwards leaves it ahead of the file, as after losing static file rows.
+    for height in [TIP - 2, TIP]:
+        run(
+            "db", *target, "stage-checkpoints", "set", "--stage", "sender-recovery",
+            "--block-number", height,
+        )
+    # Any read-write command must now unwind the pipeline to the static file on startup.
+    run("init", *target)
+    saved = json.loads(run(
+        "db", *target, "get", "mdbx", "StageCheckpoints", "Execution", quiet=True,
+    ))
+    assert saved["block_number"] == TIP - 2, saved
+
+
+def test_execution_dump(root):
+    target = ["--chain", FIXTURE / "genesis.json", "--datadir", root / "dump"]
+    run("import", *target, "--fail-on-invalid-block", FIXTURE / "chain.rlp")
+    run(
+        "stage", "dump", *target, "execution", "--from", TIP - 2, "--to", TIP - 1,
+        "--output-datadir", root / "execution-dump",
+    )
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="reth-stage-") as directory:
         smoke_test(Path(directory))
+        test_startup_heal(Path(directory))
+        test_execution_dump(Path(directory))
