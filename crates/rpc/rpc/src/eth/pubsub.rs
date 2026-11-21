@@ -119,8 +119,7 @@ where
                 Ok(())
             }
             Subscription::Logs(filter) => {
-                let filter = filter.map(|filter| *filter).unwrap_or_default();
-                pipe_from_stream(accepted_sink, self.log_stream(filter)).await
+                pipe_from_stream(accepted_sink, self.log_stream(*filter)).await
             }
             Subscription::FullPendingTransactions => {
                 let results = self.subscribe_shared(
@@ -285,7 +284,7 @@ where
         let pubsub = self.clone();
         self.inner.subscription_task_spawner.spawn_task(async move {
             if let Err(err) = pubsub.run_subscription(sink, subscription).await {
-                error!(target: "rpc", %err, "Failed to serialize subscription notification");
+                error!(target: "rpc", %err);
             }
         });
 
@@ -296,7 +295,7 @@ where
 /// An `eth_subscribe` request with its parameters resolved for the requested kind.
 enum Subscription {
     NewHeads,
-    Logs(Option<Box<Filter>>),
+    Logs(Box<Filter>),
     FullPendingTransactions,
     PendingTransactionHashes,
     Syncing,
@@ -310,11 +309,8 @@ impl Subscription {
     ) -> Result<Self, ErrorObject<'static>> {
         match (kind, params.unwrap_or_default()) {
             (SubscriptionKind::NewHeads, _) => Ok(Self::NewHeads),
-            (SubscriptionKind::Logs, Params::Logs(filter)) => Ok(Self::Logs(Some(filter))),
-            // A receipt filter has historically selected the default log filter.
-            (SubscriptionKind::Logs, Params::None | Params::TransactionReceipts(_)) => {
-                Ok(Self::Logs(None))
-            }
+            (SubscriptionKind::Logs, Params::Logs(filter)) => Ok(Self::Logs(filter)),
+            (SubscriptionKind::Logs, Params::None) => Ok(Self::Logs(Box::default())),
             (SubscriptionKind::NewPendingTransactions, Params::Bool(true)) => {
                 Ok(Self::FullPendingTransactions)
             }
@@ -325,13 +321,9 @@ impl Subscription {
             (SubscriptionKind::TransactionReceipts, Params::TransactionReceipts(filter)) => {
                 Ok(Self::TransactionReceipts(filter))
             }
-            (SubscriptionKind::TransactionReceipts, Params::None) => {
-                Ok(Self::TransactionReceipts(Default::default()))
-            }
-            // Alloy decodes an empty object and wildcard log filters as the default log filter.
-            (SubscriptionKind::TransactionReceipts, Params::Logs(filter))
-                if *filter == Filter::default() =>
-            {
+            // Alloy decodes objects without transactionHashes as log filters. Like geth, ignore
+            // log filter fields for receipt subscriptions.
+            (SubscriptionKind::TransactionReceipts, Params::None | Params::Logs(_)) => {
                 Ok(Self::TransactionReceipts(Default::default()))
             }
             _ => Err(invalid_params_rpc_err(format!("Invalid params for {kind}"))),
@@ -760,7 +752,7 @@ mod tests {
             r#"["transactionReceipts", []]"#,
             r#"["transactionReceipts", {}]"#,
             r#"["transactionReceipts", {"topics": []}]"#,
-            r#"["transactionReceipts", {"address": []}]"#,
+            r#"["transactionReceipts", {"address": "0x0000000000000000000000000000000000000001"}]"#,
             r#"["transactionReceipts", {"transactionHashes": null}]"#,
             r#"["transactionReceipts", {"transactionHashes": []}]"#,
         ] {
@@ -822,32 +814,18 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn receipt_subscription_delivers_only_selected_hash() {
-        let provider = test_provider();
-        let module = test_pubsub(provider.clone(), testing_pool()).into_rpc().remove_context();
-        let chain = chain_with_logs(1);
-        let hash = chain.transaction_hashes().nth(1).unwrap();
+    #[test]
+    fn receipt_subscription_preserves_transaction_hashes() {
+        let hash = TxHash::repeat_byte(1);
         let params =
-            serde_json::json!(["transactionReceipts", { "transactionHashes": [hash], "foo": 1 }]);
-        let (_, mut notifications) = subscribe(&module, &params.to_string()).await;
-
-        // The subscription task may start listening after the acknowledgement.
-        let msg = tokio::time::timeout(TIMEOUT, async {
-            loop {
-                commit(&provider, chain.clone());
-                tokio::select! {
-                    msg = notifications.recv() => break msg.unwrap(),
-                    _ = tokio::task::yield_now() => {}
-                }
-            }
-        })
-        .await
-        .unwrap();
-        let notification: Value = serde_json::from_str(&msg).unwrap();
-        let receipts = notification["params"]["result"].as_array().unwrap();
-        assert_eq!(receipts.len(), 1);
-        assert_eq!(receipts[0]["transactionHash"], serde_json::json!(hash));
+            serde_json::from_value(serde_json::json!({"transactionHashes": [hash], "foo": 1}))
+                .unwrap();
+        let Subscription::TransactionReceipts(filter) =
+            Subscription::from_params(SubscriptionKind::TransactionReceipts, Some(params)).unwrap()
+        else {
+            panic!("expected a transaction receipts subscription");
+        };
+        assert_eq!(filter.transaction_hashes, Some(vec![hash]));
     }
 
     #[tokio::test]

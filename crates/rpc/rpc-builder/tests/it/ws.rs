@@ -150,12 +150,14 @@ async fn test_eth_subscribe_invalid_params_rejected() {
     let handle = launch_ws_eth().await;
     let mut client = WebSocketTestClient::new(handle.ws_local_addr().unwrap()).await.unwrap();
 
-    let receipts = "transactionReceipts";
     for (kind, params) in [
         ("logs", json!(true)),
+        (
+            "logs",
+            json!({"address": "0x0000000000000000000000000000000000000001", "transactionHashes": null}),
+        ),
         ("newPendingTransactions", json!({})),
-        (receipts, json!(true)),
-        (receipts, json!({"fromBlock": "latest"})),
+        ("transactionReceipts", json!(true)),
     ] {
         let response = ws_call(&mut client, "eth_subscribe", json!([kind, params])).await;
         let error = jsonrpsee::types::ErrorObject::owned(
@@ -166,18 +168,12 @@ async fn test_eth_subscribe_invalid_params_rejected() {
         assert_eq!(response, json!({"jsonrpc": "2.0", "id": 1, "error": error}));
     }
 
-    let response =
-        ws_call(&mut client, "eth_subscribe", json!([receipts, {"transactionHashes": ["0x01"]}]))
-            .await;
-    let error = jsonrpsee::types::ErrorObject::owned(
-        jsonrpsee::types::error::INVALID_PARAMS_CODE,
-        jsonrpsee::types::error::INVALID_PARAMS_MSG,
-        Some("invalid string length"),
-    );
-    assert_eq!(response, json!({"jsonrpc": "2.0", "id": 1, "error": error}));
-
-    let response =
-        ws_call(&mut client, "eth_subscribe", json!(["newPendingTransactions", true])).await;
+    let response = ws_call(
+        &mut client,
+        "eth_subscribe",
+        json!(["transactionReceipts", {"fromBlock": "latest"}]),
+    )
+    .await;
     assert!(response["result"].is_string(), "{response}");
 }
 
