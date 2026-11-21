@@ -567,7 +567,7 @@ mod tests {
     use futures::stream;
     use jsonrpsee::RpcModule;
     use jsonrpsee_types::{SubscriptionId, SubscriptionPayload, SubscriptionResponse};
-    use reth_chain_state::CanonStateNotification;
+    use reth_chain_state::{CanonStateNotification, CanonicalInMemoryStateWriter};
     use reth_chainspec::ChainSpecProvider;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Receipt;
@@ -596,10 +596,10 @@ mod tests {
     /// Capacity of a test subscription's connection channel.
     const NOTIFICATION_BUFFER: usize = 16;
 
-    fn test_provider() -> TestProvider {
+    fn test_provider() -> (TestProvider, CanonicalInMemoryStateWriter) {
         let factory = create_test_provider_factory();
         init_genesis(&factory).unwrap();
-        BlockchainProvider::new(factory).unwrap()
+        BlockchainProvider::new_with_writer(factory).unwrap()
     }
 
     fn test_pubsub(provider: TestProvider, pool: TestPool) -> EthPubSub<impl EthSubscriptions> {
@@ -643,10 +643,8 @@ mod tests {
         )
     }
 
-    fn commit(provider: &TestProvider, chain: Chain) {
-        provider
-            .canonical_in_memory_state()
-            .notify_canon_state(CanonStateNotification::Commit { new: Arc::new(chain) });
+    fn commit(writer: &mut CanonicalInMemoryStateWriter, chain: Chain) {
+        writer.notify_canon_state(CanonStateNotification::Commit { new: Arc::new(chain) });
     }
 
     /// Subscribes with `params` and returns the subscription id and its notifications.
@@ -715,7 +713,7 @@ mod tests {
 
     #[tokio::test]
     async fn shared_notifications_match_serialized_notifications() {
-        let provider = test_provider();
+        let (provider, mut writer) = test_provider();
         let pool = testing_pool();
         let pubsub = test_pubsub(provider.clone(), pool.clone());
         let module = pubsub.clone().into_rpc().remove_context();
@@ -746,7 +744,7 @@ mod tests {
         let mut expected_hashes = pubsub.pending_transaction_hashes_stream().boxed();
         let mut expected_full = pubsub.full_pending_transaction_stream().boxed();
 
-        commit(&provider, chain_with_logs(1));
+        commit(&mut writer, chain_with_logs(1));
 
         let header = expected_heads.next().await.unwrap();
         assert_eq!(
@@ -786,13 +784,13 @@ mod tests {
 
     #[tokio::test]
     async fn shared_feed_runs_only_while_subscribed() {
-        let provider = test_provider();
+        let (provider, mut writer) = test_provider();
         let pubsub = test_pubsub(provider.clone(), testing_pool());
         let module = pubsub.clone().into_rpc().remove_context();
         let feed = &pubsub.inner.feeds.new_heads;
 
         // Nothing runs before the first subscriber, even when blocks arrive.
-        commit(&provider, chain_with_logs(1));
+        commit(&mut writer, chain_with_logs(1));
         tokio::task::yield_now().await;
         assert!(feed.sender.lock().is_none());
 
@@ -801,7 +799,7 @@ mod tests {
         let (second_id, mut second) = subscribe(&module, r#"["newHeads"]"#).await;
         wait_for_producers(&[(feed, 2)]).await;
         let producer = feed.sender.lock().clone().unwrap();
-        commit(&provider, chain_with_logs(2));
+        commit(&mut writer, chain_with_logs(2));
         let notification = next_notification(&mut first).await;
         assert_eq!(
             next_notification(&mut second).await,
@@ -814,7 +812,7 @@ mod tests {
         // It keeps running while one subscriber is left.
         unsubscribe(&module, &first_id).await;
         wait_for_producers(&[(feed, 1)]).await;
-        commit(&provider, chain_with_logs(3));
+        commit(&mut writer, chain_with_logs(3));
         next_notification(&mut second).await;
         assert!(producer.upgrade().is_some());
 
@@ -826,7 +824,7 @@ mod tests {
         // The next subscriber starts a new one.
         let (_, mut third) = subscribe(&module, r#"["newHeads"]"#).await;
         wait_for_producers(&[(feed, 1)]).await;
-        commit(&provider, chain_with_logs(4));
+        commit(&mut writer, chain_with_logs(4));
         next_notification(&mut third).await;
     }
 
@@ -834,7 +832,7 @@ mod tests {
     async fn lagging_subscriber_skips_oldest_notifications() {
         const BLOCKS: u64 = PER_BLOCK_FEED_CAPACITY as u64 + 64;
 
-        let provider = test_provider();
+        let (provider, mut writer) = test_provider();
         let pubsub = test_pubsub(provider.clone(), testing_pool());
         let module = pubsub.clone().into_rpc().remove_context();
         let (_, mut heads) = subscribe(&module, r#"["newHeads"]"#).await;
@@ -843,7 +841,7 @@ mod tests {
         // The test doesn't read yet, so the subscriber blocks on its full connection channel
         // while the producer keeps broadcasting.
         for number in 1..=BLOCKS {
-            commit(&provider, chain_with_logs(number));
+            commit(&mut writer, chain_with_logs(number));
             tokio::task::yield_now().await;
         }
 
@@ -861,7 +859,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_producer_misses_nothing_published_before_it_runs() {
-        let provider = test_provider();
+        let (provider, mut writer) = test_provider();
         let pubsub = test_pubsub(provider.clone(), testing_pool());
         let mut results = pubsub.subscribe_shared(
             |feeds| &feeds.new_heads,
@@ -869,13 +867,13 @@ mod tests {
         );
 
         // Published before the spawned producer task first runs.
-        commit(&provider, chain_with_logs(1));
+        commit(&mut writer, chain_with_logs(1));
         tokio::time::timeout(TIMEOUT, results.recv()).await.unwrap().unwrap();
     }
 
     #[tokio::test]
     async fn unsubscribing_while_a_send_waits_stops_the_feed() {
-        let provider = test_provider();
+        let (provider, mut writer) = test_provider();
         let pubsub = test_pubsub(provider.clone(), testing_pool());
         let module = pubsub.clone().into_rpc().remove_context();
         let feed = &pubsub.inner.feeds.new_heads;
@@ -885,7 +883,7 @@ mod tests {
 
         // The test doesn't read, so the subscription task ends up waiting for room to send.
         for number in 0..=NOTIFICATION_BUFFER as u64 {
-            commit(&provider, chain_with_logs(number));
+            commit(&mut writer, chain_with_logs(number));
             tokio::task::yield_now().await;
         }
         unsubscribe(&module, &id).await;

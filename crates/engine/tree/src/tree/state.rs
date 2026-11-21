@@ -102,8 +102,8 @@ impl<N: NodePrimitives> TreeState<N> {
 mod tests {
     use super::*;
     use reth_chain_state::{
-        test_utils::TestBlockBuilder, CanonicalInMemoryState, CanonicalInMemoryStateWriter,
-        ChainInfoHeaders, NewCanonicalChain,
+        test_utils::{canonical_in_memory_state_writer, TestBlockBuilder},
+        CanonicalInMemoryState, CanonicalInMemoryStateWriter, NewCanonicalChain,
     };
     use reth_primitives_traits::AlloyBlockHeader;
 
@@ -111,14 +111,7 @@ mod tests {
     /// writer of that state. Its canonical head is the default header.
     fn tree_state() -> (TreeState, CanonicalInMemoryState, CanonicalInMemoryStateWriter) {
         let overlay_manager = OverlayManager::default();
-        let writer = CanonicalInMemoryStateWriter::new(
-            ChainInfoHeaders {
-                canonical_head: SealedHeader::default(),
-                safe: None,
-                finalized: None,
-            },
-            overlay_manager.in_memory_state().clone(),
-        );
+        let writer = canonical_in_memory_state_writer(overlay_manager.in_memory_state().clone());
         (
             TreeState::new(BlockNumHash::default(), overlay_manager),
             writer.canonical_in_memory_state().clone(),
