@@ -12,6 +12,7 @@ use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
 use std::{fmt, fmt::Debug};
+use tokio::sync::broadcast::error::RecvError;
 use tracing::Instrument;
 
 use crate::{common::WithConfigs, exex::BoxedLaunchExEx};
@@ -160,11 +161,20 @@ impl<Node: FullNodeComponents> ExExLauncher<Node> {
         components.task_executor().spawn_critical_task(
             "exex manager blockchain tree notifications",
             async move {
-                while let Ok(notification) = canon_state_notifications.recv().await {
-                    handle
-                        .send_async(ExExNotificationSource::BlockchainTree, notification.into())
-                        .await
-                        .expect("blockchain tree notification could not be sent to exex manager");
+                loop {
+                    match canon_state_notifications.recv().await {
+                        Ok(notification) => handle
+                            .send_async(ExExNotificationSource::BlockchainTree, notification.into())
+                            .await
+                            .expect("blockchain tree notification could not be sent to exex manager"),
+                        // Waiting for buffer capacity stops reading the subscription, so a slow
+                        // ExEx makes it lag. The missed blocks are gone and the manager would never
+                        // receive another notification, so fail instead of stalling every ExEx.
+                        Err(RecvError::Lagged(skipped)) => panic!(
+                            "exex manager forwarder lagged and missed {skipped} blockchain tree notifications"
+                        ),
+                        Err(RecvError::Closed) => return,
+                    }
                 }
             },
         );
