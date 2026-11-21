@@ -85,7 +85,7 @@ pub use reth_trie_parallel::{
     },
 };
 use reth_trie_sparse::{
-    ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, TrieNodeEpoch,
+    PersistentArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, TrieNodeEpoch,
 };
 use std::{
     fmt,
@@ -668,7 +668,7 @@ impl DefaultStateRootStrategy {
                     "Creating new sparse trie - no preserved trie available"
                 );
                 let default_trie =
-                    RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+                    RevealableSparseTrie::blind_from(PersistentArenaParallelSparseTrie::default());
                 SparseStateTrie::default()
                     .with_accounts_trie(default_trie.clone())
                     .with_default_storage_trie(default_trie)

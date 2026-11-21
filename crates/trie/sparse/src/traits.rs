@@ -247,6 +247,26 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         updates: &mut B256Map<LeafUpdate>,
         proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
     ) -> SparseTrieResult<()>;
+
+    /// Returns an independently writable snapshot of the current trie.
+    ///
+    /// Use this before applying different changes to two tries that start from the same state.
+    /// This does not hash the trie: a dirty root stays dirty, and a cached root retains its hash
+    /// and modification epoch. Subsequent changes to either trie do not affect the other.
+    ///
+    /// Both tries start with the same accumulated updates. Taking updates from one does not drain
+    /// the other. When persisting updates from a shared history with [`Self::take_updates`], apply
+    /// those common updates only once.
+    ///
+    /// The default calls [`Clone::clone`], so the method is available only when `Self: Clone`.
+    /// Implementations can prepare the source for efficient forking through the mutable receiver
+    /// without changing its logical state. Snapshot cost depends on the implementation.
+    fn snapshot(&mut self) -> Self
+    where
+        Self: Clone,
+    {
+        self.clone()
+    }
 }
 
 /// Tracks modifications to the sparse trie structure.

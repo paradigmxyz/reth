@@ -1,5 +1,5 @@
 use crate::{
-    traits::SparseTrie as SparseTrieTrait, ArenaParallelSparseTrie, RevealableSparseTrie,
+    traits::SparseTrie as SparseTrieTrait, PersistentArenaParallelSparseTrie, RevealableSparseTrie,
     TrieNodeEpoch,
 };
 use alloc::vec::Vec;
@@ -33,8 +33,8 @@ pub struct DeferredDrops {
 #[derive(Debug)]
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<
-    A = ArenaParallelSparseTrie, // Account trie implementation
-    S = ArenaParallelSparseTrie, // Storage trie implementation
+    A = PersistentArenaParallelSparseTrie, // Account trie implementation
+    S = PersistentArenaParallelSparseTrie, // Storage trie implementation
 > {
     /// Sparse account trie.
     state: RevealableSparseTrie<A>,
@@ -529,7 +529,7 @@ where
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
 /// of [`SparseStateTrie`] to help enforce allocation re-use.
 #[derive(Debug, Default)]
-struct StorageTries<S = ArenaParallelSparseTrie> {
+struct StorageTries<S = PersistentArenaParallelSparseTrie> {
     /// Sparse storage tries.
     tries: B256Map<RevealableSparseTrie<S>>,
     /// Cleared storage tries, kept for re-use.
@@ -607,7 +607,7 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ArenaParallelSparseTrie, LeafLookup, LeafUpdate};
+    use crate::{LeafLookup, LeafUpdate, PersistentArenaParallelSparseTrie};
     use alloy_primitives::{
         b256,
         map::{HashMap, HashSet},
@@ -644,7 +644,7 @@ mod tests {
 
     #[test]
     fn reveal_account_path_twice() {
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<PersistentArenaParallelSparseTrie>::default();
 
         // Full 64-nibble paths
         let full_path_0 = leaf_key([0x0], 64);
@@ -702,7 +702,7 @@ mod tests {
 
     #[test]
     fn reveal_storage_path_twice() {
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<PersistentArenaParallelSparseTrie>::default();
 
         // Full 64-nibble path
         let full_path_0 = leaf_key([0x0], 64);
@@ -775,7 +775,7 @@ mod tests {
 
     #[test]
     fn prune_uses_epochs_for_account_and_storage_tries() {
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<PersistentArenaParallelSparseTrie>::default();
 
         let account = B256::ZERO;
         let old_account =
@@ -900,7 +900,7 @@ mod tests {
 
     #[test]
     fn reveal_v2_proof_nodes() {
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<PersistentArenaParallelSparseTrie>::default();
 
         // Full 64-nibble path
         let full_path_0 = leaf_key([0x0], 64);
@@ -958,7 +958,7 @@ mod tests {
 
     #[test]
     fn reveal_storage_v2_proof_nodes() {
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<PersistentArenaParallelSparseTrie>::default();
 
         // Full 64-nibble path
         let full_path_0 = leaf_key([0x0], 64);
@@ -1018,7 +1018,7 @@ mod tests {
 
     #[test]
     fn root_on_blind_trie_returns_blind_error() {
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<PersistentArenaParallelSparseTrie>::default();
 
         let err = sparse.root(epoch(0)).unwrap_err();
 
@@ -1079,7 +1079,8 @@ mod tests {
 
         let root = hash_builder.root();
         let proof_nodes = hash_builder.take_proof_nodes();
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default().with_updates(true);
+        let mut sparse =
+            SparseStateTrie::<PersistentArenaParallelSparseTrie>::default().with_updates(true);
         sparse
             .reveal_decoded_multiproof(
                 MultiProof {

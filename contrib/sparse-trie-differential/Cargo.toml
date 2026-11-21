@@ -1,0 +1,45 @@
+[package]
+name = "sparse-trie-differential-workload"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# An independent build graph avoids resolving unrelated node and VM dependencies.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+alloy-primitives = { version = "1.6.1", default-features = false, features = ["std", "map-foldhash", "serde"] }
+alloy-rlp = { version = "0.3.16", default-features = false, features = ["std", "core-net"] }
+alloy-trie = { version = "0.9.9", default-features = false, features = ["std"] }
+reth-trie = { path = "../../crates/trie/trie", features = ["test-utils"] }
+reth-trie-common = { path = "../../crates/trie/common", features = ["test-utils", "arbitrary"] }
+reth-trie-sparse = { path = "../../crates/trie/sparse", default-features = false, features = ["std", "fuzz"] }
+rand = { version = "0.9.5", default-features = false, features = ["std", "std_rng"] }
+serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+
+# Match the public checkout's pinned core types without fetching unrelated workspaces.
+[patch.crates-io]
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
+
+[profile.fuzz]
+inherits = "release"
+debug = "full"
+strip = "none"
+debug-assertions = true
+overflow-checks = true
+panic = "unwind"
+# Preserve the distinct sparse-trie coverage bucket functions.
+lto = false
+
+# Keep all inherited evm2 users on the public workspace's single pinned revision.
+[patch."https://github.com/alloy-rs/evm2"]
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "e681662b6d9ec59edafd112f7c8d64f49f1e6dd1" }

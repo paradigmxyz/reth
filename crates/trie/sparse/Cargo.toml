@@ -39,11 +39,13 @@ reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-tracing.workspace = true
 
 arbitrary.workspace = true
+alloy-primitives = { workspace = true, features = ["serde"] }
 alloy-rlp.workspace = true
 pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 rand.workspace = true
+serde = { workspace = true, features = ["derive"] }
 
 [features]
 fuzz = []
