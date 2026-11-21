@@ -563,11 +563,20 @@ where
                 tx.as_mut().set_gas_price(0);
             }
         } else {
+            // A `gasPrice` can only reach this branch in an EIP-4844 or EIP-7702 request, where it
+            // sets both fee caps unless the request sets either one.
+            let fee = if tx.as_ref().max_fee_per_gas().is_none() &&
+                tx.as_ref().max_priority_fee_per_gas().is_none()
+            {
+                tx.as_ref().gas_price().unwrap_or_default()
+            } else {
+                0
+            };
             if tx.as_ref().max_fee_per_gas().is_none() {
-                tx.as_mut().set_max_fee_per_gas(0);
+                tx.as_mut().set_max_fee_per_gas(fee);
             }
             if tx.as_ref().max_priority_fee_per_gas().is_none() {
-                tx.as_mut().set_max_priority_fee_per_gas(0);
+                tx.as_mut().set_max_priority_fee_per_gas(fee);
             }
         }
     }
