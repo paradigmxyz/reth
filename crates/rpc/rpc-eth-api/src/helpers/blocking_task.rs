@@ -1,5 +1,5 @@
-//! Spawns a blocking task. CPU heavy tasks are executed with the `rayon` library. IO heavy tasks
-//! are executed on the `tokio` runtime.
+//! Spawns a blocking task. CPU heavy tasks and blocking IO closures are executed with the `rayon`
+//! library; blocking IO futures are executed on the `tokio` runtime.
 
 use futures::Future;
 use reth_rpc_eth_types::EthApiError;
@@ -152,34 +152,46 @@ pub trait SpawnBlocking: EthApiTypes + 'static {
         guard.clone().acquire_many_owned(permits_to_acquire)
     }
 
-    /// Executes the future on a new blocking task.
+    /// Executes `f` on the runtime's RPC pool.
     ///
-    /// Note: This is expected for futures that are dominated by blocking IO operations, for tracing
-    /// or CPU bound operations in general use [`spawn_tracing`](Self::spawn_tracing).
+    /// Note: This is expected for closures that are dominated by blocking IO operations, for
+    /// tracing or CPU bound operations in general use [`spawn_tracing`](Self::spawn_tracing),
+    /// which has its own pool and guard.
     ///
-    /// The task keeps running when the returned future is dropped, long running work in `f`
-    /// should check [`is_cancelled`](reth_tasks::cancel::is_cancelled) to stop early.
+    /// `f` is skipped if the returned future was dropped before it started. Once started it
+    /// keeps running when the future is dropped, so long running work in `f` should check
+    /// [`is_cancelled`](reth_tasks::cancel::is_cancelled) to stop early. On node shutdown the
+    /// returned future resolves with [`EthApiError::InternalEthError`] and cancels `f` the same
+    /// way.
     fn spawn_blocking_io<F, R>(&self, f: F) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
         F: FnOnce(Self) -> Result<R, Self::Error> + Send + 'static,
         R: Send + 'static,
     {
-        let (tx, rx) = oneshot::channel();
         let this = self.clone();
         let cancel = CancelOnDrop::default();
         let request = cancel.clone();
-        self.io_task_spawner().spawn_blocking_task_fn(move || {
-            if tx.is_closed() {
-                return
-            }
-            let res = cancel.scope(|| f(this));
-            let _ = tx.send(res);
-        });
+        // The RPC pool, not the tracing pool: long CPU-bound `debug_trace*` work would otherwise
+        // queue ahead of short calls.
+        let spawner = self.io_task_spawner();
+        let task = spawner
+            .rpc_pool()
+            .spawn(move || (!cancel.is_cancelled()).then(|| cancel.scope(|| f(this))));
+        // Rayon does not observe shutdown, so the returned future does, and dropping `request`
+        // then flags cancellation for a closure still running.
+        let shutdown = spawner.on_shutdown_signal().clone();
 
         async move {
-            // cancels the blocking task once the request is dropped
+            // Cancels the blocking task once the request is dropped, or on shutdown below.
             let _request = request;
-            rx.await.map_err(|_| EthApiError::InternalEthError)?
+            tokio::select! {
+                res = task => match res {
+                    Ok(Some(res)) => res,
+                    // `f` panicked: it is only skipped once this future has been dropped.
+                    _ => Err(EthApiError::InternalEthError.into()),
+                },
+                _ = shutdown => Err(EthApiError::InternalEthError.into()),
+            }
         }
     }
 
