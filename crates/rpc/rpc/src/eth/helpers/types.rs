@@ -73,6 +73,40 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_transaction_gas_price_sets_typed_fee_caps() {
+        let mut db = EmptyDB::default();
+        let rpc_converter = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
+
+        let request = TransactionRequest {
+            to: Some(Address::repeat_byte(0xaa).into()),
+            gas_price: Some(7),
+            ..Default::default()
+        };
+
+        for (request, tx_type) in [
+            (
+                TransactionRequest { authorization_list: Some(vec![]), ..request.clone() },
+                TxType::Eip7702,
+            ),
+            (
+                TransactionRequest {
+                    max_fee_per_blob_gas: Some(1),
+                    blob_versioned_hashes: Some(vec![B256::repeat_byte(1)]),
+                    ..request
+                },
+                TxType::Eip4844,
+            ),
+        ] {
+            let result =
+                resolve_transaction(request, 21000, 0, 1, false, &mut db, &rpc_converter).unwrap();
+
+            assert_eq!(result.tx_type(), tx_type);
+            assert_eq!(result.max_fee_per_gas(), 7);
+            assert_eq!(result.max_priority_fee_per_gas(), Some(7));
+        }
+    }
+
+    #[test]
     fn test_resolve_transaction_wraps_max_nonce_when_nonce_check_disabled() {
         let mut db = EmptyDB::default();
         let rpc_converter = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
