@@ -20,7 +20,7 @@ mod tests {
     use reth_chainspec::MAINNET;
     use reth_evm_ethereum::EthEvmEnv;
     use reth_rpc_convert::RpcConvert;
-    use reth_rpc_eth_types::simulate::resolve_transaction;
+    use reth_rpc_eth_types::{simulate::resolve_transaction, EthApiError};
 
     #[test]
     fn test_resolve_transaction_empty_request() {
@@ -70,6 +70,29 @@ mod tests {
         assert_eq!(tx.max_fee_per_gas(), 200);
         assert_eq!(tx.max_priority_fee_per_gas(), Some(10));
         assert_eq!(tx.gas_price(), None);
+    }
+
+    #[test]
+    fn test_resolve_transaction_conflicting_fee_fields() {
+        let mut db = EmptyDB::default();
+        let rpc_converter = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
+
+        for tx in [
+            TransactionRequest {
+                gas_price: Some(1),
+                max_fee_per_gas: Some(2),
+                ..Default::default()
+            },
+            TransactionRequest {
+                gas_price: Some(1),
+                max_priority_fee_per_gas: Some(2),
+                ..Default::default()
+            },
+        ] {
+            let err =
+                resolve_transaction(tx, 21000, 0, 1, false, &mut db, &rpc_converter).unwrap_err();
+            assert!(matches!(err, EthApiError::ConflictingFeeFieldsInRequest), "{err:?}");
+        }
     }
 
     #[test]
