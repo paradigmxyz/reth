@@ -1,0 +1,89 @@
+---
+description: Whether transparent huge pages help a Reth node, and what they do not cover.
+---
+
+# Transparent huge pages
+
+Transparent huge pages (THP) let the kernel back memory with 2 MiB pages instead
+of 4 KiB ones. One entry in the translation lookaside buffer (TLB) then covers
+512× as much memory, which reduces TLB misses and shortens page-table walks for
+workloads that touch memory spread across a large footprint.
+
+Linux exposes three modes:
+
+```bash
+cat /sys/kernel/mm/transparent_hugepage/enabled
+# always [madvise] never
+```
+
+-   `always` — every eligible mapping gets huge pages.
+-   `madvise` — only mappings that ask, via `madvise(MADV_HUGEPAGE)`. This is the
+    default on most distributions.
+-   `never` — disabled.
+
+To enable it for everything, as root:
+
+```bash
+echo always > /sys/kernel/mm/transparent_hugepage/enabled
+```
+
+The setting is system-wide, applies to every process on the machine, and does not
+survive a reboot — use your init system or a kernel command-line parameter
+(`transparent_hugepage=always`) to make it persistent.
+
+## What it does not cover
+
+**Huge pages do not apply to the database.** This is the most common wrong
+expectation, so it is worth being explicit: enabling THP does not give MDBX's
+memory map huge pages, for two independent reasons.
+
+1.  libmdbx calls `madvise(MADV_NOHUGEPAGE)` on its mapping when it creates and
+    when it remaps it. That advice overrides a system setting of `always`.
+2.  The mapping is a shared, file-backed `mmap`, and [the kernel's own
+    documentation](https://docs.kernel.org/admin-guide/mm/transhuge.html) states
+    that "THP only works for anonymous memory mappings and tmpfs/shmem". A
+    regular file mapping is not eligible in the first place.
+
+So any benefit comes from Reth's **heap** — allocator arenas, EVM execution
+state, RPC buffers — and not from database reads. If your node is dominated by
+cold database access, expect nothing from this setting.
+
+## Measured effect
+
+On an `eth_call` benchmark (200k light 1-SLOAD calls at 64 connections plus 2k
+10k-SLOAD calls at 8, average of 3 runs, control and change on the same host and
+boot), enabling `always` on top of an otherwise identical build:
+
+| instance | processor | change |
+| -------- | --------- | ------ |
+| c8g.2xlarge | Graviton4 | −3.9% |
+| c8a.2xlarge | AMD EPYC | −1.3% |
+| c8i.2xlarge | Intel | −0.7% |
+
+Small, and not uniform. On a Graviton5 box, varying the companion `defrag`
+setting measured 0.7% *slower*, i.e. within noise. Treat single-digit figures
+from any one machine with suspicion: an unchanged build re-measured after a
+stop/start differed by about 4% in this harness purely from landing on a
+different host.
+
+The benchmark used a synthetic dev genesis whose working set fits comfortably in
+the TLB, which is the case where huge pages have least to offer. A node with a
+large live heap may see more.
+
+## Costs
+
+-   **Internal fragmentation.** A 2 MiB page allocated to hold less wastes the
+    remainder.
+-   **Allocation stalls.** `/sys/kernel/mm/transparent_hugepage/defrag` decides
+    whether a huge-page allocation may compact or reclaim memory to find a
+    contiguous 2 MiB region. With `always` it can block; `madvise` or `defer`
+    avoids that at the cost of silently falling back to 4 KiB pages.
+-   **It affects every process on the machine**, not just Reth.
+
+## Recommendation
+
+Worth trying if you are already tuning a latency-sensitive RPC node, and worth
+measuring on your own hardware and workload rather than taken on faith. It is not
+a fix for database-bound nodes, and it is not a substitute for
+[profile-guided optimization](/installation/source#optimizations), which measured
+substantially larger on the same workload.
