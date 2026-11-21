@@ -515,6 +515,10 @@ where
     T: RpcConvert<Primitives: NodePrimitives<SignedTx = Tx>>,
     F: FnMut(&Address) -> Result<Option<evm2::evm::AccountInfo>, EthApiError>,
 {
+    if tx.as_ref().has_conflicting_fee_fields() {
+        return Err(EthApiError::ConflictingFeeFieldsInRequest)
+    }
+
     // If we're missing any fields we try to fill nonce, gas and
     // gas price.
     let tx_type = tx.as_ref().output_tx_type();
