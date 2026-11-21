@@ -37,7 +37,7 @@ use reth_engine_primitives::{ConsensusEngineEvent, ConsensusEngineHandle};
 use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_payload_primitives::PayloadTypes;
-use reth_primitives_traits::{NodePrimitives, TxTy};
+use reth_primitives_traits::NodePrimitives;
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
     OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
@@ -48,7 +48,8 @@ use reth_rpc_eth_api::{
     helpers::{pending_block::PendingEnvBuilder, Call, EthApiSpec, EthTransactions, TraceExt},
     node::RpcNodeCoreAdapter,
     EthApiServer, EthApiTypes, FullEthApiServer, FullEthApiTypes, RpcBlock, RpcConvert,
-    RpcConverter, RpcHeader, RpcNodeCore, RpcReceipt, RpcTransaction, RpcTxReq,
+    RpcConverter, RpcFilledTransaction, RpcHeader, RpcNodeCore, RpcReceipt, RpcTransaction,
+    RpcTxReq,
 };
 use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{
@@ -674,7 +675,7 @@ where
             RpcBlock<EthApi::NetworkTypes>,
             RpcReceipt<EthApi::NetworkTypes>,
             RpcHeader<EthApi::NetworkTypes>,
-            TxTy<N>,
+            RpcFilledTransaction,
         > + EthApiTypes,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
 {

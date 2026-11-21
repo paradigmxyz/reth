@@ -128,13 +128,13 @@ mod tests {
 
     use super::*;
     use crate::eth::helpers::{signer::DevSigner, types::EthRpcConverter};
-    use alloy_consensus::{BlobTransactionSidecar, Block, Header, Transaction};
+    use alloy_consensus::{BlobTransactionSidecar, Block, Header, Transaction, TxEnvelope};
     use alloy_eips::{
-        eip2718::Encodable2718,
+        eip2718::{Decodable2718, Encodable2718},
         eip4844::{Blob, Bytes48},
     };
     use alloy_primitives::{bytes, map::AddressMap, Address, Bytes, Signature, U256};
-    use alloy_rpc_types_eth::request::TransactionRequest;
+    use alloy_rpc_types_eth::{request::TransactionRequest, TransactionInput};
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::SenderRecoveryCache;
@@ -335,6 +335,32 @@ mod tests {
             };
             assert_eq!(actual.into_sidecar(), sidecar);
         }
+    }
+
+    #[tokio::test]
+    async fn sign_transaction_returns_raw_and_transaction() {
+        let eth_api = mock_eth_api(Default::default());
+        let signer = DevSigner::random_signers(1).pop().unwrap();
+        let from = signer.accounts()[0];
+        eth_api.signers().write().push(signer);
+
+        let request = TransactionRequest {
+            chain_id: Some(1),
+            from: Some(from),
+            to: Some(Address::random().into()),
+            gas: Some(21_000),
+            gas_price: Some(1_000),
+            value: Some(U256::from(1_000)),
+            input: TransactionInput::default(),
+            nonce: Some(0),
+            ..Default::default()
+        };
+
+        let signed = eth_api.sign_transaction(request).await.unwrap();
+        let decoded = TxEnvelope::decode_2718(&mut signed.raw.as_ref()).unwrap();
+
+        assert_eq!(signed.tx.as_ref(), &decoded);
+        assert_eq!(signed.tx.inner.signer(), from);
     }
 
     #[tokio::test]
