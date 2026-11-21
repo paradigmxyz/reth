@@ -10,7 +10,7 @@ use reqwest::Url;
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKING_IO_REQUEST,
     DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_MAX_SIMULATE_BLOCKS,
-    DEFAULT_MAX_TRACE_FILTER_BLOCKS, DEFAULT_PROOF_PERMITS,
+    DEFAULT_MAX_TRACE_FILTER_BLOCKS, DEFAULT_PROOF_PERMITS, DEFAULT_RPC_EVM_TIMEOUT,
     RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
 };
 use serde::{Deserialize, Serialize};
@@ -88,6 +88,9 @@ pub struct EthConfig {
     ///
     /// Defaults to [`RPC_DEFAULT_GAS_CAP`]
     pub rpc_gas_cap: u64,
+    /// Wall-clock timeout for RPC EVM execution. Zero disables the timeout.
+    #[serde(default = "default_rpc_evm_timeout")]
+    pub rpc_evm_timeout: Duration,
     /// Max number of blocks for `eth_simulateV1`.
     pub rpc_max_simulate_blocks: u64,
     /// Maximum bytes a single traced transaction may record. `None` is unlimited.
@@ -118,6 +121,10 @@ pub struct EthConfig {
     pub force_blob_sidecar_upcasting: bool,
 }
 
+const fn default_rpc_evm_timeout() -> Duration {
+    DEFAULT_RPC_EVM_TIMEOUT
+}
+
 impl EthConfig {
     /// Returns the filter config for the `eth_filter` handler.
     pub fn filter_config(&self) -> EthFilterConfig {
@@ -140,6 +147,7 @@ impl Default for EthConfig {
             max_blocks_per_filter: DEFAULT_MAX_BLOCKS_PER_FILTER,
             max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
             rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
+            rpc_evm_timeout: DEFAULT_RPC_EVM_TIMEOUT,
             rpc_max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
             rpc_max_trace_bytes: None,
             compute_state_root_for_eth_simulate: false,
@@ -203,6 +211,12 @@ impl EthConfig {
     /// methods.
     pub const fn rpc_gas_cap(mut self, rpc_gas_cap: u64) -> Self {
         self.rpc_gas_cap = rpc_gas_cap;
+        self
+    }
+
+    /// Sets the wall-clock timeout for RPC EVM execution. Zero disables the timeout.
+    pub const fn rpc_evm_timeout(mut self, timeout: Duration) -> Self {
+        self.rpc_evm_timeout = timeout;
         self
     }
 

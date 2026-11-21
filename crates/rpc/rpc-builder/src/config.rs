@@ -103,6 +103,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .max_logs_per_response(self.rpc_max_logs_per_response.unwrap_or_max() as usize)
             .eth_proof_window(self.rpc_eth_proof_window)
             .rpc_gas_cap(self.rpc_gas_cap)
+            .rpc_evm_timeout(self.rpc_evm_timeout)
             .rpc_max_simulate_blocks(self.rpc_max_simulate_blocks)
             .rpc_max_trace_bytes(self.max_trace_bytes())
             .compute_state_root_for_eth_simulate(self.rpc_compute_state_root_for_eth_simulate)
@@ -368,6 +369,18 @@ mod tests {
             CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.eth-proof-window", "100"])
                 .args;
         assert_eq!(args.flashbots_config().validation_window, 100);
+    }
+
+    #[test]
+    fn rpc_evm_timeout_reaches_eth_config() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.eth_config().rpc_evm_timeout, constants::DEFAULT_RPC_EVM_TIMEOUT);
+        for (value, expected) in [("0", Duration::ZERO), ("250ms", Duration::from_millis(250))] {
+            let args =
+                CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.evmtimeout", value])
+                    .args;
+            assert_eq!(args.eth_config().rpc_evm_timeout, expected);
+        }
     }
 
     #[test]
