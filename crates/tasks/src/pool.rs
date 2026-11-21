@@ -607,245 +607,277 @@ mod tests {
 
     #[test]
     fn worker_pool_init_and_access() {
-        let pool = Arc::new(WorkerPool::new(2, "test"));
-        let state = WorkerStatefulPool::new(Arc::clone(&pool));
-        state.init(|_| vec![1u8, 2, 3]);
-        let sum = pool.install_fn(|| state.get(|v: &Vec<u8>| v.iter().sum::<u8>()));
-        assert_eq!(sum, 6);
-        drop(state);
-        pool.broadcast(2, |worker| assert!(worker.state.is_none()));
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let pool = Arc::new(WorkerPool::new(2, "test"));
+            let state = WorkerStatefulPool::new(Arc::clone(&pool));
+            state.init(|_| vec![1u8, 2, 3]);
+            let sum = pool.install_fn(|| state.get(|v: &Vec<u8>| v.iter().sum::<u8>()));
+            assert_eq!(sum, 6);
+            drop(state);
+            pool.broadcast(2, |worker| assert!(worker.state.is_none()));
+        });
     }
 
     #[test]
     fn worker_pool_reinit_reuses_resources() {
-        let pool = Arc::new(WorkerPool::new(1, "test"));
-        let state = WorkerStatefulPool::new(Arc::clone(&pool));
-        state.init(|existing: Option<&mut Vec<u8>>| {
-            assert!(existing.is_none());
-            vec![1, 2, 3]
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let pool = Arc::new(WorkerPool::new(1, "test"));
+            let state = WorkerStatefulPool::new(Arc::clone(&pool));
+            state.init(|existing: Option<&mut Vec<u8>>| {
+                assert!(existing.is_none());
+                vec![1, 2, 3]
+            });
+            state.init(|existing: Option<&mut Vec<u8>>| {
+                let v = existing.expect("should have existing state");
+                assert_eq!(v, &mut vec![1, 2, 3]);
+                v.push(4);
+                std::mem::take(v)
+            });
+            let len = pool.install_fn(|| state.get(Vec::<u8>::len));
+            assert_eq!(len, 4);
         });
-        state.init(|existing: Option<&mut Vec<u8>>| {
-            let v = existing.expect("should have existing state");
-            assert_eq!(v, &mut vec![1, 2, 3]);
-            v.push(4);
-            std::mem::take(v)
-        });
-        let len = pool.install_fn(|| state.get(Vec::<u8>::len));
-        assert_eq!(len, 4);
     }
 
     #[test]
     fn worker_pool_clear_and_reinit() {
-        let pool = Arc::new(WorkerPool::new(1, "test"));
-        let state = WorkerStatefulPool::new(Arc::clone(&pool));
-        state.init(|_| 42u64);
-        assert_eq!(pool.install_fn(|| state.get(|v: &u64| *v)), 42);
-        drop(state);
-        let state = WorkerStatefulPool::new(Arc::clone(&pool));
-        state.init(|_| String::from("hello"));
-        assert_eq!(pool.install_fn(|| state.get(String::clone)), "hello");
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let pool = Arc::new(WorkerPool::new(1, "test"));
+            let state = WorkerStatefulPool::new(Arc::clone(&pool));
+            state.init(|_| 42u64);
+            assert_eq!(pool.install_fn(|| state.get(|v: &u64| *v)), 42);
+            drop(state);
+            let state = WorkerStatefulPool::new(Arc::clone(&pool));
+            state.init(|_| String::from("hello"));
+            assert_eq!(pool.install_fn(|| state.get(String::clone)), "hello");
+        });
     }
 
     #[test]
     fn worker_pool_par_iter_with_worker() {
-        let pool = Arc::new(WorkerPool::new(2, "test"));
-        let state = WorkerStatefulPool::new(Arc::clone(&pool));
-        state.init(|_| 10u64);
-        let results = pool.install_fn(|| {
-            (0u64..4).into_par_iter().map(|i| state.get(|v: &u64| i + *v)).collect::<Vec<_>>()
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let pool = Arc::new(WorkerPool::new(2, "test"));
+            let state = WorkerStatefulPool::new(Arc::clone(&pool));
+            state.init(|_| 10u64);
+            let results = pool.install_fn(|| {
+                (0u64..4).into_par_iter().map(|i| state.get(|v: &u64| i + *v)).collect::<Vec<_>>()
+            });
+            assert_eq!(results, vec![10, 11, 12, 13]);
         });
-        assert_eq!(results, vec![10, 11, 12, 13]);
     }
 
     #[test]
     fn worker_pool_spawn_and_wait_runs_on_target_pool() {
-        let caller_pool = WorkerPool::new(1, "caller");
-        let target_pool = Arc::new(WorkerPool::new(1, "target"));
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let caller_pool = WorkerPool::new(1, "caller");
+            let target_pool = Arc::new(WorkerPool::new(1, "target"));
 
-        let thread_name = caller_pool.install_fn({
-            let target_pool = Arc::clone(&target_pool);
-            move || {
-                WorkerPool::with_worker_mut(|_| {
-                    target_pool.spawn_and_wait(|| thread::current().name().unwrap().to_owned())
-                })
-            }
+            let thread_name = caller_pool.install_fn({
+                let target_pool = Arc::clone(&target_pool);
+                move || {
+                    WorkerPool::with_worker_mut(|_| {
+                        target_pool.spawn_and_wait(|| thread::current().name().unwrap().to_owned())
+                    })
+                }
+            });
+
+            assert_eq!(thread_name, "target-00");
         });
-
-        assert_eq!(thread_name, "target-00");
     }
 
     #[test]
     fn worker_get_or_init_reuses_only_matching_run_and_type() {
-        let mut worker = Worker::new();
-        let first = stateful_pool();
-        let second = stateful_pool();
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let mut worker = Worker::new();
+            let first = stateful_pool();
+            let second = stateful_pool();
 
-        worker.get_or_init(&first.owner, || vec![1u8]).push(2);
-        assert_eq!(
-            worker.get_or_init::<Vec<u8>>(&first.owner.clone(), || panic!("must reuse")),
-            &[1, 2]
-        );
-        assert_eq!(worker.get_or_init(&second.owner, || vec![3u8]), &[3]);
-        assert_eq!(worker.get_or_init(&second.owner, || String::from("new type")), "new type");
-        assert_eq!(*worker.get_or_init(&first.owner, || 42u64), 42);
+            worker.get_or_init(&first.owner, || vec![1u8]).push(2);
+            assert_eq!(
+                worker.get_or_init::<Vec<u8>>(&first.owner.clone(), || panic!("must reuse")),
+                &[1, 2]
+            );
+            assert_eq!(worker.get_or_init(&second.owner, || vec![3u8]), &[3]);
+            assert_eq!(worker.get_or_init(&second.owner, || String::from("new type")), "new type");
+            assert_eq!(*worker.get_or_init(&first.owner, || 42u64), 42);
+        });
     }
 
     #[test]
     fn worker_init_reuses_only_matching_run_and_type() {
-        let mut worker = Worker::new();
-        let first = stateful_pool();
-        let second = stateful_pool();
-        worker.init(&first.owner, |_| 1u64);
-        worker.init(&second.owner, |existing: Option<&mut u64>| {
-            assert!(existing.is_none());
-            2
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let mut worker = Worker::new();
+            let first = stateful_pool();
+            let second = stateful_pool();
+            worker.init(&first.owner, |_| 1u64);
+            worker.init(&second.owner, |existing: Option<&mut u64>| {
+                assert!(existing.is_none());
+                2
+            });
+            worker.init(&second.owner, |existing: Option<&mut String>| {
+                assert!(existing.is_none());
+                String::from("new type")
+            });
+            assert_eq!(worker.get::<String>(&second.owner), "new type");
         });
-        worker.init(&second.owner, |existing: Option<&mut String>| {
-            assert!(existing.is_none());
-            String::from("new type")
-        });
-        assert_eq!(worker.get::<String>(&second.owner), "new type");
     }
 
     #[test]
     fn worker_pool_late_cleanup_preserves_other_runs() {
-        let pool = Arc::new(WorkerPool::new(2, "run-cleanup"));
-        let first = WorkerStatefulPool::new(Arc::clone(&pool));
-        let second = WorkerStatefulPool::new(Arc::clone(&pool));
-        first.init(|_| 1u64);
-        pool.broadcast(1, |worker| {
-            assert_eq!(*worker.get_or_init(&second.owner, || 2u64), 2);
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let pool = Arc::new(WorkerPool::new(2, "run-cleanup"));
+            let first = WorkerStatefulPool::new(Arc::clone(&pool));
+            let second = WorkerStatefulPool::new(Arc::clone(&pool));
+            first.init(|_| 1u64);
+            pool.broadcast(1, |worker| {
+                assert_eq!(*worker.get_or_init(&second.owner, || 2u64), 2);
+            });
+            drop(first);
+            let retained = AtomicUsize::new(0);
+            pool.broadcast(2, |worker| {
+                if let Some((owner, state)) = &worker.state {
+                    assert!(Weak::ptr_eq(owner, &second.owner));
+                    assert_eq!(state.downcast_ref::<u64>(), Some(&2));
+                    retained.fetch_add(1, Ordering::Relaxed);
+                }
+            });
+            assert_eq!(retained.load(Ordering::Relaxed), 1);
+            drop(second);
+            pool.broadcast(2, |worker| assert!(worker.state.is_none()));
         });
-        drop(first);
-        let retained = AtomicUsize::new(0);
-        pool.broadcast(2, |worker| {
-            if let Some((owner, state)) = &worker.state {
-                assert!(Weak::ptr_eq(owner, &second.owner));
-                assert_eq!(state.downcast_ref::<u64>(), Some(&2));
-                retained.fetch_add(1, Ordering::Relaxed);
-            }
-        });
-        assert_eq!(retained.load(Ordering::Relaxed), 1);
-        drop(second);
-        pool.broadcast(2, |worker| assert!(worker.state.is_none()));
     }
 
     #[test]
     #[should_panic(expected = "worker state run mismatch")]
     fn worker_get_rejects_another_run() {
-        let mut worker = Worker::new();
-        worker.init(&stateful_pool().owner, |_| 1u64);
-        worker.get::<u64>(&stateful_pool().owner);
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let mut worker = Worker::new();
+            worker.init(&stateful_pool().owner, |_| 1u64);
+            worker.get::<u64>(&stateful_pool().owner);
+        });
     }
 
     #[test]
     #[should_panic(expected = "worker state run mismatch")]
     fn worker_get_mut_rejects_another_run() {
-        let mut worker = Worker::new();
-        worker.init(&stateful_pool().owner, |_| 1u64);
-        worker.get_mut::<u64>(&stateful_pool().owner);
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let mut worker = Worker::new();
+            worker.init(&stateful_pool().owner, |_| 1u64);
+            worker.get_mut::<u64>(&stateful_pool().owner);
+        });
     }
 
     #[test]
     fn worker_replacement_drops_previous_state_before_initialization() {
-        let mut worker = Worker::new();
-        let previous_run = stateful_pool();
-        let next_run = stateful_pool();
-        let resource = Arc::new(());
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let mut worker = Worker::new();
+            let previous_run = stateful_pool();
+            let next_run = stateful_pool();
+            let resource = Arc::new(());
 
-        for owner in [&previous_run.owner, &next_run.owner] {
-            worker.init(&previous_run.owner, |_| Arc::clone(&resource));
-            assert_eq!(Arc::strong_count(&resource), 2);
-            assert_eq!(
-                *worker.get_or_init(owner, || {
-                    assert_eq!(Arc::strong_count(&resource), 1);
-                    42u64
-                }),
-                42,
-            );
-        }
+            for owner in [&previous_run.owner, &next_run.owner] {
+                worker.init(&previous_run.owner, |_| Arc::clone(&resource));
+                assert_eq!(Arc::strong_count(&resource), 2);
+                assert_eq!(
+                    *worker.get_or_init(owner, || {
+                        assert_eq!(Arc::strong_count(&resource), 1);
+                        42u64
+                    }),
+                    42,
+                );
+            }
+        });
     }
 
     #[test]
     fn worker_failed_replacement_leaves_state_uninitialized() {
-        let mut worker = Worker::new();
-        let previous_run = stateful_pool();
-        let next_run = stateful_pool();
-        worker.init(&previous_run.owner, |_| 1u64);
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let mut worker = Worker::new();
+            let previous_run = stateful_pool();
+            let next_run = stateful_pool();
+            worker.init(&previous_run.owner, |_| 1u64);
 
-        let panic = catch_unwind(AssertUnwindSafe(|| {
-            worker.get_or_init::<u64>(&next_run.owner, || panic!("initialization failed"));
-        }))
-        .unwrap_err();
-        assert_eq!(panic.downcast_ref::<&str>(), Some(&"initialization failed"));
-        assert!(worker.state.is_none());
-        assert_eq!(*worker.get_or_init(&next_run.owner, || 2u64), 2);
+            let panic = catch_unwind(AssertUnwindSafe(|| {
+                worker.get_or_init::<u64>(&next_run.owner, || panic!("initialization failed"));
+            }))
+            .unwrap_err();
+            assert_eq!(panic.downcast_ref::<&str>(), Some(&"initialization failed"));
+            assert!(worker.state.is_none());
+            assert_eq!(*worker.get_or_init(&next_run.owner, || 2u64), 2);
+        });
     }
 
     #[test]
     fn stateful_pool_drop_does_not_initialize_unused_pool() {
-        let pool = Arc::new(WorkerPool::new(1, "unused-state"));
-        drop(WorkerStatefulPool::new(Arc::clone(&pool)));
-        assert!(!pool.is_initialized());
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let pool = Arc::new(WorkerPool::new(1, "unused-state"));
+            drop(WorkerStatefulPool::new(Arc::clone(&pool)));
+            assert!(!pool.is_initialized());
+        });
     }
 
     #[test]
     fn stateful_pool_last_job_handle_clears_state() {
-        let pool = Arc::new(WorkerPool::new(2, "owned-state"));
-        let state = WorkerStatefulPool::new(Arc::clone(&pool));
-        let owner = Arc::downgrade(&state);
-        let resource = Arc::new(());
-        state.init(|_| Arc::clone(&resource));
-        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-        let (release_tx, release_rx) = std::sync::mpsc::channel();
-        let (done_tx, done_rx) = std::sync::mpsc::channel();
-        let job_state = Arc::clone(&state);
-        state.spawn(move || {
-            ready_tx.send(()).unwrap();
-            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-            job_state.get(|value: &Arc<()>| assert_eq!(Arc::strong_count(value), 3));
-            drop(job_state);
-            done_tx.send(()).unwrap();
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let pool = Arc::new(WorkerPool::new(2, "owned-state"));
+            let state = WorkerStatefulPool::new(Arc::clone(&pool));
+            let owner = Arc::downgrade(&state);
+            let resource = Arc::new(());
+            state.init(|_| Arc::clone(&resource));
+            let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            let job_state = Arc::clone(&state);
+            state.spawn(move || {
+                ready_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                job_state.get(|value: &Arc<()>| assert_eq!(Arc::strong_count(value), 3));
+                drop(job_state);
+                done_tx.send(()).unwrap();
+            });
+            ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            drop(state);
+            assert!(owner.upgrade().is_some());
+            assert_eq!(Arc::strong_count(&resource), 3);
+            release_tx.send(()).unwrap();
+            done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert!(owner.upgrade().is_none());
+            assert_eq!(Arc::strong_count(&resource), 1);
+            pool.broadcast(2, |worker| assert!(worker.state.is_none()));
         });
-        ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-        drop(state);
-        assert!(owner.upgrade().is_some());
-        assert_eq!(Arc::strong_count(&resource), 3);
-        release_tx.send(()).unwrap();
-        done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert!(owner.upgrade().is_none());
-        assert_eq!(Arc::strong_count(&resource), 1);
-        pool.broadcast(2, |worker| assert!(worker.state.is_none()));
     }
 
     #[test]
     fn stateful_pool_clears_after_job_panics() {
-        let pool = Arc::new(WorkerPool::new(1, "unwind-state"));
-        let state = WorkerStatefulPool::new(Arc::clone(&pool));
-        let resource = Arc::new(());
-        state.init(|_| Arc::clone(&resource));
-        let panic = catch_unwind(AssertUnwindSafe(|| {
-            pool.install_fn(move || {
-                state.get_or_init(|| Arc::new(()), |_| panic!("job failed"));
-            });
-        }))
-        .unwrap_err();
-        assert_eq!(panic.downcast_ref::<&str>(), Some(&"job failed"));
-        assert_eq!(Arc::strong_count(&resource), 1);
-        pool.broadcast(1, |worker| assert!(worker.state.is_none()));
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let pool = Arc::new(WorkerPool::new(1, "unwind-state"));
+            let state = WorkerStatefulPool::new(Arc::clone(&pool));
+            let resource = Arc::new(());
+            state.init(|_| Arc::clone(&resource));
+            let panic = catch_unwind(AssertUnwindSafe(|| {
+                pool.install_fn(move || {
+                    state.get_or_init(|| Arc::new(()), |_| panic!("job failed"));
+                });
+            }))
+            .unwrap_err();
+            assert_eq!(panic.downcast_ref::<&str>(), Some(&"job failed"));
+            assert_eq!(Arc::strong_count(&resource), 1);
+            pool.broadcast(1, |worker| assert!(worker.state.is_none()));
+        });
     }
 
     #[test]
     fn stateful_pool_clears_after_unwrapping_owner() {
-        let pool = Arc::new(WorkerPool::new(1, "unwrapped-state"));
-        let state = WorkerStatefulPool::new(Arc::clone(&pool));
-        let resource = Arc::new(());
-        state.init(|_| Arc::clone(&resource));
-        let state = Arc::try_unwrap(state).unwrap();
-        assert_eq!(Arc::strong_count(&resource), 2);
-        drop(state);
-        assert_eq!(Arc::strong_count(&resource), 1);
-        pool.broadcast(1, |worker| assert!(worker.state.is_none()));
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let pool = Arc::new(WorkerPool::new(1, "unwrapped-state"));
+            let state = WorkerStatefulPool::new(Arc::clone(&pool));
+            let resource = Arc::new(());
+            state.init(|_| Arc::clone(&resource));
+            let state = Arc::try_unwrap(state).unwrap();
+            assert_eq!(Arc::strong_count(&resource), 2);
+            drop(state);
+            assert_eq!(Arc::strong_count(&resource), 1);
+            pool.broadcast(1, |worker| assert!(worker.state.is_none()));
+        });
     }
 
     fn stateful_pool() -> Arc<WorkerStatefulPool> {

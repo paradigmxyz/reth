@@ -194,95 +194,107 @@ mod tests {
 
     #[test]
     fn single_checkout_blocks_second() {
-        let cache = PayloadExecutionCache::default();
-        let hash = B256::repeat_byte(1u8);
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let cache = PayloadExecutionCache::default();
+            let hash = B256::repeat_byte(1u8);
 
-        cache.update_with_guard(|slot| {
-            *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+            cache.update_with_guard(|slot| {
+                *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+            });
+
+            let first = cache.get_cache_for(hash);
+            assert!(first.is_some());
+
+            let second = cache.get_cache_for(hash);
+            assert!(second.is_none());
         });
-
-        let first = cache.get_cache_for(hash);
-        assert!(first.is_some());
-
-        let second = cache.get_cache_for(hash);
-        assert!(second.is_none());
     }
 
     #[test]
     fn checkout_available_after_drop() {
-        let cache = PayloadExecutionCache::default();
-        let hash = B256::repeat_byte(2u8);
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let cache = PayloadExecutionCache::default();
+            let hash = B256::repeat_byte(2u8);
 
-        cache.update_with_guard(|slot| {
-            *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+            cache.update_with_guard(|slot| {
+                *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+            });
+
+            let checked_out = cache.get_cache_for(hash);
+            assert!(checked_out.is_some());
+            drop(checked_out);
+
+            let second = cache.get_cache_for(hash);
+            assert!(second.is_some());
         });
-
-        let checked_out = cache.get_cache_for(hash);
-        assert!(checked_out.is_some());
-        drop(checked_out);
-
-        let second = cache.get_cache_for(hash);
-        assert!(second.is_some());
     }
 
     #[test]
     fn raw_cache_handle_blocks_checkout_until_drop() {
-        let cache = PayloadExecutionCache::default();
-        let hash = B256::repeat_byte(3u8);
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let cache = PayloadExecutionCache::default();
+            let hash = B256::repeat_byte(3u8);
 
-        cache.update_with_guard(|slot| {
-            *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+            cache.update_with_guard(|slot| {
+                *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+            });
+
+            let checked_out = cache.get_cache_for(hash).expect("checkout should succeed");
+            let cache_handle = checked_out.cache().clone();
+            drop(checked_out);
+
+            let blocked = cache.get_cache_for(hash);
+            assert!(blocked.is_none(), "raw ExecutionCache handle should keep slot in use");
+
+            drop(cache_handle);
+
+            let available = cache.get_cache_for(hash);
+            assert!(available.is_some(), "checkout should succeed after raw handle is dropped");
         });
-
-        let checked_out = cache.get_cache_for(hash).expect("checkout should succeed");
-        let cache_handle = checked_out.cache().clone();
-        drop(checked_out);
-
-        let blocked = cache.get_cache_for(hash);
-        assert!(blocked.is_none(), "raw ExecutionCache handle should keep slot in use");
-
-        drop(cache_handle);
-
-        let available = cache.get_cache_for(hash);
-        assert!(available.is_some(), "checkout should succeed after raw handle is dropped");
     }
 
     #[test]
     fn hash_mismatch_clears_and_retags() {
-        let cache = PayloadExecutionCache::default();
-        let hash_a = B256::repeat_byte(0xAA);
-        let hash_b = B256::repeat_byte(0xBB);
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let cache = PayloadExecutionCache::default();
+            let hash_a = B256::repeat_byte(0xAA);
+            let hash_b = B256::repeat_byte(0xBB);
 
-        cache.update_with_guard(|slot| {
-            *slot = Some(SavedCache::new(hash_a, ExecutionCache::new(1_000)))
+            cache.update_with_guard(|slot| {
+                *slot = Some(SavedCache::new(hash_a, ExecutionCache::new(1_000)))
+            });
+
+            let checked_out = cache.get_cache_for(hash_b);
+            assert!(checked_out.is_some());
+            assert_eq!(checked_out.unwrap().executed_block_hash(), hash_b);
         });
-
-        let checked_out = cache.get_cache_for(hash_b);
-        assert!(checked_out.is_some());
-        assert_eq!(checked_out.unwrap().executed_block_hash(), hash_b);
     }
 
     #[test]
     fn empty_cache_returns_none() {
-        let cache = PayloadExecutionCache::default();
-        assert!(cache.get_cache_for(B256::ZERO).is_none());
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let cache = PayloadExecutionCache::default();
+            assert!(cache.get_cache_for(B256::ZERO).is_none());
+        });
     }
 
     #[test]
     fn checkout_distinguishes_empty_from_in_use() {
-        let cache = PayloadExecutionCache::default();
-        let hash = B256::repeat_byte(7u8);
-        assert!(matches!(cache.checkout(hash), CacheCheckout::Empty));
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let cache = PayloadExecutionCache::default();
+            let hash = B256::repeat_byte(7u8);
+            assert!(matches!(cache.checkout(hash), CacheCheckout::Empty));
 
-        cache.update_with_guard(|slot| {
-            *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+            cache.update_with_guard(|slot| {
+                *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+            });
+            let held = cache.get_cache_for(hash).expect("checkout should succeed");
+
+            assert!(matches!(
+                cache.checkout(B256::repeat_byte(8u8)),
+                CacheCheckout::InUse { cached_hash } if cached_hash == hash
+            ));
+            drop(held);
         });
-        let held = cache.get_cache_for(hash).expect("checkout should succeed");
-
-        assert!(matches!(
-            cache.checkout(B256::repeat_byte(8u8)),
-            CacheCheckout::InUse { cached_hash } if cached_hash == hash
-        ));
-        drop(held);
     }
 }

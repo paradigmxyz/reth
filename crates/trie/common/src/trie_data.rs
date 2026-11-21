@@ -287,59 +287,67 @@ mod tests {
 
     #[test]
     fn test_lazy_deferred() {
-        let lazy = LazyTrieData::deferred(SortedTrieData::default);
-        assert!(lazy.hashed_state().is_empty());
-        assert!(lazy.trie_updates().is_empty());
+        reth_concurrency::sync::Runtime::new().run(move || {
+            let lazy = LazyTrieData::deferred(SortedTrieData::default);
+            assert!(lazy.hashed_state().is_empty());
+            assert!(lazy.trie_updates().is_empty());
+        });
     }
 
     #[test]
     fn pending_wait_blocks_until_task_publishes() {
-        let (deferred, task) = empty_pending();
+        reth_concurrency::sync::Runtime::new().run(move || {
+            let (deferred, task) = empty_pending();
 
-        let handle = thread::spawn(move || deferred.get().clone());
-        thread::sleep(Duration::from_millis(20));
-        assert!(!handle.is_finished());
+            let handle = thread::spawn(move || deferred.get().clone());
+            thread::sleep(Duration::from_millis(20));
+            assert!(!handle.is_finished());
 
-        let published = task.compute_and_publish();
-        let result = handle.join().unwrap();
+            let published = task.compute_and_publish();
+            let result = handle.join().unwrap();
 
-        assert!(Arc::ptr_eq(&published.hashed_state, &result.hashed_state));
-        assert!(Arc::ptr_eq(&published.trie_updates, &result.trie_updates));
+            assert!(Arc::ptr_eq(&published.hashed_state, &result.hashed_state));
+            assert!(Arc::ptr_eq(&published.trie_updates, &result.trie_updates));
+        });
     }
 
     #[test]
     fn concurrent_waits_share_published_result() {
-        let (deferred, task) = empty_pending();
-        let deferred2 = deferred.clone();
+        reth_concurrency::sync::Runtime::new().run(move || {
+            let (deferred, task) = empty_pending();
+            let deferred2 = deferred.clone();
 
-        let handle = thread::spawn(move || deferred2.get().clone());
-        let published = task.compute_and_publish();
-        let result1 = deferred.get().clone();
-        let result2 = handle.join().unwrap();
+            let handle = thread::spawn(move || deferred2.get().clone());
+            let published = task.compute_and_publish();
+            let result1 = deferred.get().clone();
+            let result2 = handle.join().unwrap();
 
-        assert!(Arc::ptr_eq(&published.hashed_state, &result1.hashed_state));
-        assert!(Arc::ptr_eq(&published.trie_updates, &result1.trie_updates));
-        assert!(Arc::ptr_eq(&result1.hashed_state, &result2.hashed_state));
-        assert!(Arc::ptr_eq(&result1.trie_updates, &result2.trie_updates));
+            assert!(Arc::ptr_eq(&published.hashed_state, &result1.hashed_state));
+            assert!(Arc::ptr_eq(&published.trie_updates, &result1.trie_updates));
+            assert!(Arc::ptr_eq(&result1.hashed_state, &result2.hashed_state));
+            assert!(Arc::ptr_eq(&result1.trie_updates, &result2.trie_updates));
+        });
     }
 
     #[test]
     fn sorts_non_empty_inputs() {
-        let hashed_address = B256::with_last_byte(1);
-        let hashed_slot = B256::with_last_byte(2);
-        let hashed_state = HashedPostState::default()
-            .with_accounts([(hashed_address, Some(Account::default()))])
-            .with_storages([(
-                hashed_address,
-                HashedStorage::from_iter([(hashed_slot, U256::ONE)]),
-            )]);
+        reth_concurrency::sync::Runtime::new().run(move || {
+            let hashed_address = B256::with_last_byte(1);
+            let hashed_slot = B256::with_last_byte(2);
+            let hashed_state = HashedPostState::default()
+                .with_accounts([(hashed_address, Some(Account::default()))])
+                .with_storages([(
+                    hashed_address,
+                    HashedStorage::from_iter([(hashed_slot, U256::ONE)]),
+                )]);
 
-        let (deferred, task) =
-            LazyTrieData::pending(Arc::new(hashed_state), Arc::new(TrieUpdates::default()));
-        let _ = task.compute_and_publish();
-        let result = deferred.get().clone();
+            let (deferred, task) =
+                LazyTrieData::pending(Arc::new(hashed_state), Arc::new(TrieUpdates::default()));
+            let _ = task.compute_and_publish();
+            let result = deferred.get().clone();
 
-        assert_eq!(result.hashed_state.total_len(), 2);
-        assert_eq!(result.trie_updates.total_len(), 0);
+            assert_eq!(result.hashed_state.total_len(), 2);
+            assert_eq!(result.trie_updates.total_len(), 0);
+        });
     }
 }

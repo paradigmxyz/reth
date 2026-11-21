@@ -542,81 +542,93 @@ mod tests {
 
     #[test]
     fn warms_pool_transactions_into_a_published_snapshot() {
-        let harness = Harness::spawn();
-        let parent_hash = B256::repeat_byte(0x01);
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let harness = Harness::spawn();
+            let parent_hash = B256::repeat_byte(0x01);
 
-        // Start before the pool tracks the head, covering the poll-and-retry path.
-        harness.start(parent_hash);
-        wait_until("the untracked head is polled", || {
-            harness.pool.not_ready.load(Ordering::Relaxed) >= 1
+            // Start before the pool tracks the head, covering the poll-and-retry path.
+            harness.start(parent_hash);
+            wait_until("the untracked head is polled", || {
+                harness.pool.not_ready.load(Ordering::Relaxed) >= 1
+            });
+            harness.pool.push(parent_hash, transfer(0xB0));
+
+            let snapshot = harness.published_for(parent_hash);
+            let (accounts, _, _) = snapshot.entry_counts();
+            assert!(accounts >= 1, "speculative execution should cache account reads");
         });
-        harness.pool.push(parent_hash, transfer(0xB0));
-
-        let snapshot = harness.published_for(parent_hash);
-        let (accounts, _, _) = snapshot.entry_counts();
-        assert!(accounts >= 1, "speculative execution should cache account reads");
     }
 
     #[test]
     fn records_results_of_pool_transactions() {
-        let harness = Harness::spawn();
-        let parent_hash = B256::repeat_byte(0x01);
-        let results = harness.start_recording(parent_hash);
-        harness.pool.push(parent_hash, transfer(0xB0));
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let harness = Harness::spawn();
+            let parent_hash = B256::repeat_byte(0x01);
+            let results = harness.start_recording(parent_hash);
+            harness.pool.push(parent_hash, transfer(0xB0));
 
-        wait_until("the result is recorded", || results.get(&B256::repeat_byte(0xB0)).is_some());
+            wait_until("the result is recorded", || {
+                results.get(&B256::repeat_byte(0xB0)).is_some()
+            });
+        });
     }
 
     #[test]
     fn overlapping_pauses_require_matching_resumes() {
-        let harness = Harness::spawn();
-        let parent_hash = B256::repeat_byte(0x01);
-        harness.start(parent_hash);
-        harness.pool.push(parent_hash, transfer(0xB0));
-        let before = harness.published_for(parent_hash).entry_counts();
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let harness = Harness::spawn();
+            let parent_hash = B256::repeat_byte(0x01);
+            harness.start(parent_hash);
+            harness.pool.push(parent_hash, transfer(0xB0));
+            let before = harness.published_for(parent_hash).entry_counts();
 
-        harness.pause();
-        harness.pause();
-        harness.pool.push(parent_hash, transfer(0xB1));
-        harness.resume();
-        thread::sleep(REFRESH_INTERVAL * 2);
-        assert_eq!(
-            harness.published_entry_counts(),
-            Some(before),
-            "one resume must not release two pauses"
-        );
+            harness.pause();
+            harness.pause();
+            harness.pool.push(parent_hash, transfer(0xB1));
+            harness.resume();
+            thread::sleep(REFRESH_INTERVAL * 2);
+            assert_eq!(
+                harness.published_entry_counts(),
+                Some(before),
+                "one resume must not release two pauses"
+            );
 
-        harness.resume();
-        harness.published(|snapshot| snapshot.entry_counts() != before);
+            harness.resume();
+            harness.published(|snapshot| snapshot.entry_counts() != before);
+        });
     }
 
     #[test]
     fn reuses_the_iterator_per_head_and_reopens_on_switch() {
-        let harness = Harness::spawn();
-        let first = B256::repeat_byte(0x01);
-        let second = B256::repeat_byte(0x02);
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let harness = Harness::spawn();
+            let first = B256::repeat_byte(0x01);
+            let second = B256::repeat_byte(0x02);
 
-        harness.start(first);
-        harness.pool.push(first, transfer(0xB0));
-        let before = harness.published_for(first).entry_counts();
-        harness.pool.push(first, transfer(0xB1));
-        harness.published(|snapshot| snapshot.entry_counts() != before);
-        assert_eq!(harness.pool.opened.load(Ordering::Relaxed), 1, "one iterator per head");
+            harness.start(first);
+            harness.pool.push(first, transfer(0xB0));
+            let before = harness.published_for(first).entry_counts();
+            harness.pool.push(first, transfer(0xB1));
+            harness.published(|snapshot| snapshot.entry_counts() != before);
+            assert_eq!(harness.pool.opened.load(Ordering::Relaxed), 1, "one iterator per head");
 
-        harness.start(second);
-        harness.pool.push(second, transfer(0xB2));
-        harness.published_for(second);
-        assert_eq!(harness.pool.opened.load(Ordering::Relaxed), 2);
+            harness.start(second);
+            harness.pool.push(second, transfer(0xB2));
+            harness.published_for(second);
+            assert_eq!(harness.pool.opened.load(Ordering::Relaxed), 2);
+        });
     }
 
     #[test]
     fn shuts_down_when_control_is_dropped() {
-        let harness = Harness::spawn();
-        let parent_hash = B256::repeat_byte(0x01);
-        harness.start(parent_hash);
-        harness.pool.push(parent_hash, transfer(0xB0));
-        harness.published_for(parent_hash);
+        reth_concurrency::sync::Runtime::new().run(|| {
+            let harness = Harness::spawn();
+            let parent_hash = B256::repeat_byte(0x01);
+            harness.start(parent_hash);
+            harness.pool.push(parent_hash, transfer(0xB0));
+            harness.published_for(parent_hash);
 
-        harness.shutdown();
+            harness.shutdown();
+        });
     }
 }
