@@ -15,6 +15,7 @@ use reth_cli_util::cancellation::CancellationToken;
 use reth_fs_util as fs;
 use std::{
     cell::RefCell,
+    collections::HashSet,
     io::{self, Read},
     mem,
     ops::Range,
@@ -129,16 +130,18 @@ pub(crate) fn extract_archive_raw<R: Read>(
     Ok(())
 }
 
-/// Extracts a compressed tar archive like [`extract_archive_raw`], hashing each regular file
-/// from the bytes written to it so verification does not have to read it back.
+/// Extracts a compressed tar archive like [`extract_archive_raw`], hashing each declared output
+/// written as a regular file from the bytes written to it so verification does not have to read
+/// it back. `outputs` holds the destination paths of the archive's declared outputs.
 pub(crate) fn extract_archive_hashed<R: Read>(
     reader: R,
     format: CompressionFormat,
     target_dir: &Path,
     static_files_dir: Option<&Path>,
+    outputs: HashSet<PathBuf>,
     progress: Option<&mut ArchiveExtractionProgress>,
 ) -> Result<ExtractedHashes> {
-    let hasher = RefCell::new(FileHasher::spawn());
+    let hasher = RefCell::new(FileHasher::spawn(outputs));
     match format {
         CompressionFormat::Lz4 => unpack_archive(
             Archive::new(FileHashTee {
@@ -236,6 +239,9 @@ struct FileHasher {
     sender: SyncSender<FileHashMessage>,
     /// Hashing thread, which returns the hashes of every completed file.
     thread: thread::JoinHandle<ExtractedHashes>,
+    /// Destination paths of the archive's declared outputs; other entries are not hashed, so
+    /// the recorded hashes are bounded by the manifest rather than the archive's entry count.
+    outputs: HashSet<PathBuf>,
 }
 
 /// Work for the [`FileHasher`] thread.
@@ -254,8 +260,8 @@ enum FileHashMessage {
 }
 
 impl FileHasher {
-    /// Starts the hashing thread.
-    fn spawn() -> Self {
+    /// Starts the hashing thread for an archive with the given declared output paths.
+    fn spawn(outputs: HashSet<PathBuf>) -> Self {
         let (sender, receiver) = sync_channel(FILE_HASH_QUEUE_LEN);
         let thread = thread::spawn(move || {
             let mut hashes = ExtractedHashes::default();
@@ -285,13 +291,15 @@ impl FileHasher {
             batch: Vec::with_capacity(FILE_HASH_BATCH_SIZE),
             sender,
             thread,
+            outputs,
         }
     }
 
-    /// Starts hashing `entry` if it is a regular file, and returns whether it did.
+    /// Starts hashing `entry` if it is a regular file at a declared output path, and returns
+    /// whether it did.
     ///
-    /// Other entries, such as links and sparse files, get no hash, so their outputs are
-    /// verified by reading them back.
+    /// Other entries, such as links, sparse files and undeclared paths, get no hash, so their
+    /// outputs are verified by reading them back.
     fn start_entry<R: Read>(
         &mut self,
         entry: &tar::Entry<'_, R>,
@@ -306,6 +314,9 @@ impl FileHasher {
         // case-insensitive filesystem, so which recorded hash it had is unknown and none is kept.
         if std::fs::symlink_metadata(&path).is_ok_and(|metadata| !metadata.is_dir()) {
             self.send(FileHashMessage::ForgetAll)?;
+        }
+        if !self.outputs.contains(&path) {
+            return Ok(false)
         }
         let entry_type = entry.header().entry_type();
         if !entry_type.is_file() && !entry_type.is_contiguous() {
@@ -963,6 +974,7 @@ mod tests {
         header.set_mode(0o644);
         header.set_cksum();
         archive.append_data(&mut header, "./db/data", data.as_slice()).unwrap();
+        archive.append_data(&mut header, "db/extra", data.as_slice()).unwrap();
         let tar = zstd::encode_all(archive.into_inner().unwrap().as_slice(), 0).unwrap();
         let target = tempfile::tempdir().unwrap();
 
@@ -971,6 +983,7 @@ mod tests {
             CompressionFormat::Zstd,
             target.path(),
             None,
+            HashSet::from([target.path().join("db/data")]),
             None,
         )
         .unwrap();
@@ -986,14 +999,18 @@ mod tests {
             "an output the archive never produced still fails"
         );
 
-        // Corrupt both files on disk: the extracted file keeps its extraction hash, while the
-        // other file is read back and sees the corruption.
+        // Corrupt the files on disk: the extracted declared file keeps its extraction hash, while
+        // the other file and the undeclared entry are read back and see the corruption.
         let mut corrupt = data.clone();
         corrupt[7] ^= 1;
         fs::write(target.path().join("db/data"), &corrupt).unwrap();
         fs::write(target.path().join("db/other"), &corrupt).unwrap();
+        fs::write(target.path().join("db/extra"), &corrupt).unwrap();
         assert!(verifier.verify_with_progress(&outputs[..1], None, Some(&hashes)).unwrap());
         assert!(!verifier.verify_with_progress(&outputs[1..], None, Some(&hashes)).unwrap());
+        assert!(!verifier
+            .verify_with_progress(&[checksum("db/extra", &data)], None, Some(&hashes))
+            .unwrap());
 
         let mut wrong = outputs[..1].to_vec();
         wrong[0].blake3 = blake3::hash(&corrupt).to_hex().to_string();
@@ -1012,6 +1029,7 @@ mod tests {
             CompressionFormat::Zstd,
             target.path(),
             Some(custom.path()),
+            HashSet::from([custom.path().join("headers")]),
             None,
         )
         .unwrap();
@@ -1040,6 +1058,7 @@ mod tests {
                 CompressionFormat::Zstd,
                 target.path(),
                 None,
+                HashSet::from([target.path().join("db/data")]),
                 None,
             )
             .unwrap();
@@ -1070,6 +1089,7 @@ mod tests {
                 CompressionFormat::Zstd,
                 target.path(),
                 None,
+                HashSet::from([target.path().join("db/data")]),
                 None,
             )
             .unwrap();

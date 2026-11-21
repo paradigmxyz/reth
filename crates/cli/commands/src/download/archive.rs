@@ -18,6 +18,7 @@ use futures::stream::{self, StreamExt};
 use reth_cli_util::cancellation::CancellationToken;
 use reth_fs_util as fs;
 use std::{
+    collections::HashSet,
     io::BufReader,
     panic::{self, AssertUnwindSafe},
     path::Path,
@@ -341,6 +342,13 @@ impl ArchiveProcessor {
         availability: &ArchiveAvailability,
         format: CompressionFormat,
     ) -> Result<ExtractedHashes> {
+        let verifier = self.output_verifier();
+        let outputs = self
+            .archive()
+            .output_files
+            .iter()
+            .map(|output| verifier.output_path(output))
+            .collect::<Result<HashSet<_>>>()?;
         let mut extraction_progress = ArchiveExtractionProgress::new(self.ctx.session().progress());
         let reader = BufReader::with_capacity(
             EXTRACTION_READ_BUFFER_SIZE,
@@ -351,6 +359,7 @@ impl ArchiveProcessor {
             format,
             self.ctx.target_dir(),
             self.ctx.static_files_dir(),
+            outputs,
             Some(&mut extraction_progress),
         );
         extraction_progress.finish();
