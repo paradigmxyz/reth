@@ -124,6 +124,10 @@ pub enum EthApiError {
     /// Thrown when an `AccountOverride` contains conflicting `state` and `stateDiff` fields
     #[error("account {0:?} has both 'state' and 'stateDiff'")]
     BothStateAndStateDiffInOverride(Address),
+    /// Thrown when a call method gets a block override it doesn't support, such as `beaconRoot`
+    /// or `withdrawals`. Holds the override's JSON field name.
+    #[error("block override \"{0}\" is not supported for this RPC method")]
+    UnsupportedBlockOverride(&'static str),
     /// Other internal error
     #[error(transparent)]
     Internal(RethError),
@@ -333,6 +337,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::ConflictingFeeFieldsInRequest |
             EthApiError::Signing(_) |
             EthApiError::BothStateAndStateDiffInOverride(_) |
+            EthApiError::UnsupportedBlockOverride(_) |
             EthApiError::InvalidTracerConfig |
             EthApiError::TransactionConversionError(_) |
             EthApiError::InvalidRewardPercentiles |

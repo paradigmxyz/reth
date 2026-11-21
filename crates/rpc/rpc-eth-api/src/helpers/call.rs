@@ -32,7 +32,7 @@ use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::{
         apply_block_overrides, apply_state_overrides, apply_state_overrides_with_state,
-        attach_bal_before_tx,
+        attach_bal_before_tx, ensure_call_block_overrides,
     },
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError, SimulatedState},
@@ -973,6 +973,7 @@ pub trait Call:
         request.as_mut().take_nonce();
 
         if let Some(block_overrides) = overrides.block {
+            ensure_call_block_overrides(&block_overrides)?;
             apply_block_overrides(*block_overrides, db, &mut evm_env);
         }
         if let Some(state_overrides) = overrides.state {
