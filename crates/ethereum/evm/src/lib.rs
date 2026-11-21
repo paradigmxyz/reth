@@ -409,6 +409,25 @@ where
         None
     }
 
+    fn update_cfg_env_from_block_env(&self, evm_env: &mut EthEvmEnv<EvmF::Types>) {
+        let timestamp = evm_env.block.timestamp.saturating_to::<u64>();
+        let block_number = evm_env.block.number.saturating_to::<u64>();
+        let spec = spec_id_by_timestamp_and_block_number(
+            self.chain_spec().as_ref(),
+            timestamp,
+            block_number,
+        );
+        let blob_params = self.chain_spec().blob_params_at_timestamp(timestamp);
+
+        let factory = self.executor_factory.evm_factory();
+        let mut version = factory.version(spec, self.chain_spec().chain_id());
+        if let Some(blob_params) = blob_params {
+            version.max_blobs_per_tx = blob_params.max_blobs_per_tx as usize;
+        }
+        evm_env.spec = factory.spec_id(spec);
+        evm_env.version = version;
+    }
+
     fn evm_env(&self, header: &Header) -> Result<EvmEnvFor<Self>, Self::Error> {
         let spec = spec_id(self.chain_spec().as_ref(), header);
         let blob_params = self.chain_spec().as_ref().blob_params_at_timestamp(header.timestamp);
@@ -594,7 +613,7 @@ mod tests {
     use alloy_eips::eip7825::MAX_TX_GAS_LIMIT_OSAKA;
     use alloy_genesis::Genesis;
     use alloy_primitives::U256;
-    use reth_chainspec::{Chain, ChainSpec};
+    use reth_chainspec::{Chain, ChainSpec, EthereumHardfork, ForkCondition};
 
     #[test]
     fn test_evm_env_for_header_uses_chain_blob_params() {
@@ -630,6 +649,67 @@ mod tests {
         assert_eq!(cap(evm2::SpecId::PRAGUE), 0);
         assert_eq!(cap(evm2::SpecId::OSAKA), MAX_TX_GAS_LIMIT_OSAKA);
         assert_eq!(cap(evm2::SpecId::AMSTERDAM), evm2::constants::MAX_TX_TOTAL_GAS_LIMIT_AMSTERDAM);
+    }
+
+    #[test]
+    fn update_cfg_env_from_block_env_switches_forks() {
+        let chain_spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(Genesis::default())
+            .london_activated()
+            .paris_activated()
+            .shanghai_activated()
+            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(1000))
+            .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(2000))
+            .build();
+        let evm_config = EthEvmConfig::new(Arc::new(chain_spec));
+
+        let header = Header { timestamp: 0, ..Default::default() };
+        let mut evm_env = evm_config.evm_env(&header).unwrap();
+        assert_eq!(evm_env.spec, evm2::SpecId::SHANGHAI);
+
+        evm_env.block.timestamp = U256::from(1500);
+        evm_config.update_cfg_env_from_block_env(&mut evm_env);
+        assert_eq!(evm_env.spec, evm2::SpecId::CANCUN);
+
+        evm_env.block.timestamp = U256::from(2500);
+        evm_config.update_cfg_env_from_block_env(&mut evm_env);
+        assert_eq!(evm_env.spec, evm2::SpecId::PRAGUE);
+
+        // Moving back before Cancun must not leak the later fork's rules.
+        evm_env.block.timestamp = U256::from(500);
+        evm_config.update_cfg_env_from_block_env(&mut evm_env);
+        assert_eq!(evm_env.spec, evm2::SpecId::SHANGHAI);
+    }
+
+    #[test]
+    fn update_cfg_env_from_block_env_resets_osaka_gas_cap() {
+        let chain_spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(Genesis::default())
+            .london_activated()
+            .paris_activated()
+            .shanghai_activated()
+            .cancun_activated()
+            .prague_activated()
+            .with_fork(EthereumHardfork::Osaka, ForkCondition::Timestamp(1000))
+            .build();
+        let evm_config = EthEvmConfig::new(Arc::new(chain_spec));
+
+        let header = Header { timestamp: 0, ..Default::default() };
+        let mut evm_env = evm_config.evm_env(&header).unwrap();
+        let uncapped = evm_env.transaction_validation_limits().tx_gas_limit_cap;
+
+        evm_env.block.timestamp = U256::from(1500);
+        evm_config.update_cfg_env_from_block_env(&mut evm_env);
+        assert_eq!(
+            evm_env.transaction_validation_limits().tx_gas_limit_cap,
+            MAX_TX_GAS_LIMIT_OSAKA
+        );
+
+        evm_env.block.timestamp = U256::from(500);
+        evm_config.update_cfg_env_from_block_env(&mut evm_env);
+        assert_eq!(evm_env.transaction_validation_limits().tx_gas_limit_cap, uncapped);
     }
 
     #[derive(Debug, Clone)]
