@@ -161,8 +161,9 @@ fn checksum_static_file<N: NodePrimitives>(
         if limit == usize::MAX { None } else { Some(limit) }
     );
 
+    let mut reached_limit = limit == 0;
     for (block_range, header) in ranges {
-        if checksummer.total == limit || block_range.start() > end_block {
+        if reached_limit || block_range.start() > end_block {
             break;
         }
         let selected = SegmentRangeInclusive::new(
@@ -173,11 +174,16 @@ fn checksum_static_file<N: NodePrimitives>(
             continue;
         }
 
-        let jar_provider = static_file_provider.get_segment_provider_for_block(
-            segment,
-            block_range.start(),
-            None,
-        )?;
+        let fixed_block_range = static_file_provider.find_fixed_range(segment, block_range.start());
+        let jar_provider = static_file_provider
+            .get_segment_provider_for_range(segment, || Some(fixed_block_range), None)?
+            .ok_or_else(|| {
+                eyre::eyre!(
+                    "Failed to get segment provider for segment {} at range {}",
+                    segment,
+                    block_range
+                )
+            })?;
         let mut cursor = jar_provider.cursor()?;
 
         if segment.is_change_based() {
@@ -196,28 +202,24 @@ fn checksum_static_file<N: NodePrimitives>(
                 offsets: &offsets,
             };
 
-            checksum_change_based_segment(&mut checksummer, input, &mut cursor)?;
+            reached_limit = checksum_change_based_segment(&mut checksummer, input, &mut cursor)?;
         } else {
+            let tx_range = header.tx_range().filter(|range| !range.is_empty());
             let count = if segment.is_headers() {
                 block_range.len()
-            } else if let Some(txs) = header.tx_range() {
-                eyre::ensure!(
-                    !txs.is_empty(),
-                    "Invalid transaction range {txs} in {segment} static file {block_range}"
-                );
-                txs.len()
             } else {
-                0
+                tx_range.map_or(0, |txs| txs.len())
             };
+            // An interrupted write can leave the header's range out of sync with the jar rows.
             eyre::ensure!(
                 count == u64::try_from(jar_provider.rows())?,
                 "Row count mismatch in {segment} static file {block_range}"
             );
-            let rows = if selected == *block_range {
-                0..count
-            } else if segment.is_headers() {
+            let rows = if segment.is_headers() {
                 (selected.start() - block_range.start())..(selected.end() - block_range.start() + 1)
-            } else if let Some(txs) = header.tx_range() {
+            } else if selected == *block_range {
+                0..count
+            } else if let Some(txs) = tx_range {
                 partial_transaction_rows(&db.tx()?, segment, *block_range, txs, selected)?
             } else {
                 0..0
@@ -227,6 +229,7 @@ fn checksum_static_file<N: NodePrimitives>(
                     eyre::eyre!("Missing row {index} in {segment} static file {block_range}")
                 })?;
                 if checksummer.write_row(&row) {
+                    reached_limit = true;
                     break;
                 }
             }
@@ -234,7 +237,7 @@ fn checksum_static_file<N: NodePrimitives>(
 
         // Explicitly drop provider before removing from cache to avoid deadlock
         drop(jar_provider);
-        static_file_provider.remove_cached_provider(segment, header.expected_block_end());
+        static_file_provider.remove_cached_provider(segment, fixed_block_range.end());
     }
 
     let (checksum, total) = checksummer.finish();
@@ -256,31 +259,34 @@ fn partial_transaction_rows(
     txs: SegmentRangeInclusive,
     selected: SegmentRangeInclusive,
 ) -> eyre::Result<Range<u64>> {
-    let body = |block| {
-        tx.get::<tables::BlockBodyIndices>(block)?
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(block))
+    let mut cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+    let mut body = |block| {
+        match cursor.seek(block)? {
+            Some((indexed, indices)) if indexed == block => Ok(indices),
+            // Snap sync and dummy chains can omit indices before the first stored transaction.
+            Some((_, indices)) if indices.first_tx_num() == 0 => Ok(Default::default()),
+            _ => Err(ProviderError::BlockBodyIndicesNotFound(block)),
+        }
     };
-    let next_tx = |block| -> eyre::Result<u64> {
-        let indices = body(block)?;
-        indices
-            .first_tx_num
-            .checked_add(indices.tx_count)
-            .ok_or_else(|| eyre::eyre!("Transaction index overflow at block {block}"))
-    };
-    let start = blocks.start();
     if segment.is_receipts() {
-        // Imported receipts can have extra rows even when the requested blocks are indexed.
+        // Padded pre-Bedrock OVM receipt files can extend past their blocks' transaction bounds.
         eyre::ensure!(
-            (start == 0 || body(start)?.first_tx_num <= txs.start()) &&
-                txs.end() < next_tx(blocks.end())?,
+            body(blocks.start())?.first_tx_num() <= txs.start() &&
+                txs.end() < body(blocks.end())?.next_tx_num(),
             "{segment} transaction range {txs} does not fit blocks {blocks}"
         );
     }
     let offset = |n: u64| n.saturating_sub(txs.start()).min(txs.len());
-    let from =
-        if selected.start() == start { 0 } else { offset(body(selected.start())?.first_tx_num) };
-    let to =
-        if selected.end() == blocks.end() { txs.len() } else { offset(next_tx(selected.end())?) };
+    let from = if selected.start() == blocks.start() {
+        0
+    } else {
+        offset(body(selected.start())?.first_tx_num())
+    };
+    let to = if selected.end() == blocks.end() {
+        txs.len()
+    } else {
+        offset(body(selected.end())?.next_tx_num())
+    };
     eyre::ensure!(from <= to, "Decreasing transaction offsets for blocks {selected}");
     Ok(from..to)
 }
@@ -454,10 +460,11 @@ fn checksum_change_based_segment<H: Hasher>(
     checksummer: &mut Checksummer<H>,
     input: ChangeBasedChecksumInput<'_>,
     cursor: &mut reth_db::static_file::StaticFileCursor<'_>,
-) -> eyre::Result<()> {
+) -> eyre::Result<bool> {
     let ChangeBasedChecksumInput { segment, block_range_start, start_block, end_block, offsets } =
         input;
     let is_storage = segment.is_storage_change_sets();
+    let mut reached_limit = false;
 
     for (offset_index, offset) in offsets.iter().enumerate() {
         let block_number = block_range_start + offset_index as u64;
@@ -493,12 +500,17 @@ fn checksum_change_based_segment<H: Hasher>(
             };
 
             if done {
-                return Ok(())
+                reached_limit = true;
+                break;
             }
+        }
+
+        if reached_limit {
+            break;
         }
     }
 
-    if cursor.next_row()?.is_some() {
+    if !reached_limit && cursor.next_row()?.is_some() {
         return Err(eyre::eyre!(
             "Changeset offsets do not cover all rows for {} at range starting {}",
             segment,
@@ -506,7 +518,7 @@ fn checksum_change_based_segment<H: Hasher>(
         ));
     }
 
-    Ok(())
+    Ok(reached_limit)
 }
 
 #[cfg(test)]
@@ -615,11 +627,18 @@ mod tests {
             err.downcast_ref::<ProviderError>(),
             Some(ProviderError::BlockBodyIndicesNotFound(1))
         ));
+        // Block 1's own index determines its end even when the following index is missing.
         bodies.update(|tx| tx.delete::<tables::BlockBodyIndices>(2, None).unwrap()).unwrap();
         assert_eq!(
             checksum_static_file(&files, &bodies, segment, None, Some(1), None).unwrap().1,
             1
         );
+        let err =
+            checksum_static_file(&files, &bodies, segment, Some(2), Some(2), None).unwrap_err();
+        assert!(matches!(
+            err.downcast_ref::<ProviderError>(),
+            Some(ProviderError::BlockBodyIndicesNotFound(2))
+        ));
     }
 
     #[test]
@@ -659,13 +678,46 @@ mod tests {
                 format!("Receipts transaction range {start}..={end} does not fit blocks 3..=5")
             );
         }
-        for (start, end, error) in [
-            (4, 4, "Row count mismatch in Receipts static file 3..=5"),
-            (5, 4, "Invalid transaction range 5..=4 in Receipts static file 3..=5"),
-        ] {
-            writer.user_header_mut().set_tx_range(start, end);
-            writer.commit().unwrap();
-            assert_eq!(block(4).unwrap_err().to_string(), error);
-        }
+        // A stale header would cause the second row to be silently omitted.
+        writer.user_header_mut().set_tx_range(4, 4);
+        writer.commit().unwrap();
+        assert_eq!(
+            block(4).unwrap_err().to_string(),
+            "Row count mismatch in Receipts static file 3..=5"
+        );
+    }
+
+    #[test]
+    fn checksum_receipts_after_unindexed_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = test_files(&dir, 10);
+        let db = create_test_rw_db();
+        let segment = StaticFileSegment::Receipts;
+        let mut writer = files.get_writer(3, segment).unwrap();
+        writer.initialize_pruned_anchor(3).unwrap();
+        writer.increment_block(4).unwrap();
+        writer.increment_block(5).unwrap();
+        let receipt = EthereumReceipt { cumulative_gas_used: 42, ..Default::default() };
+        writer.append_receipt(0, &receipt).unwrap();
+        writer.commit().unwrap();
+        drop(writer);
+        db.update(|tx| {
+            tx.put::<tables::BlockBodyIndices>(
+                5,
+                StoredBlockBodyIndices { first_tx_num: 0, tx_count: 1 },
+            )
+        })
+        .unwrap()
+        .unwrap();
+
+        let checksum = |start, end| {
+            checksum_static_file(&files, &db, segment, Some(start), Some(end), None).unwrap()
+        };
+        assert_eq!(checksum(3, 4), (checksum_hasher().finish(), 0));
+        assert_eq!(checksum(4, 4), (checksum_hasher().finish(), 0));
+        let mut expected = checksum_hasher();
+        expected.write(&receipt.compress());
+        assert_eq!(checksum(5, 5), (expected.finish(), 1));
+        assert_eq!(checksum(4, 5), (expected.finish(), 1));
     }
 }
