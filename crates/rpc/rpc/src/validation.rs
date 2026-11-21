@@ -116,23 +116,29 @@ where
 
     /// Merges a copy returned by [`Self::cached_reads`] back into the cached state.
     ///
-    /// `gas` is the gas spent on the reads added to the copy. Reads are only merged while the
-    /// total gas spent on the cached reads for a head stays within `max_gas`, so the cache, and
-    /// every copy of it, stays bounded.
+    /// `gas` is the gas spent on the reads added to the copy. The cache only ever holds reads
+    /// that cost at most `max_gas`, so the cache, and every copy of it, stays bounded.
     async fn update_cached_reads(&self, update: CachedState, gas: u64, max_gas: u64) {
         let mut cache = self.inner.cached_state.write().await;
-        if cache.head != update.head {
-            let generation = cache.generation + 1;
-            *cache = CachedState { generation, gas: update.gas.saturating_add(gas), ..update };
-        } else if cache.generation == update.generation && cache.gas.saturating_add(gas) <= max_gas
-        {
+        if cache.head == update.head {
             // A copy of a replaced cache is never merged, because the gas spent on its reads is
-            // not part of `cache.gas`.
-            cache.reads.extend(update.reads);
-            cache.gas += gas;
+            // not part of `cache.gas`. A copy of an uncached head has generation 0 and holds only
+            // its own reads.
+            let gas = cache.gas.saturating_add(gas);
+            if (update.generation == cache.generation || update.generation == 0) && gas <= max_gas {
+                cache.reads.extend(update.reads);
+                cache.gas = gas;
+                return
+            }
         } else {
-            self.metrics.cached_reads_skipped.increment(1);
+            let gas = update.gas.saturating_add(gas);
+            if gas <= max_gas {
+                let generation = cache.generation + 1;
+                *cache = CachedState { generation, gas, ..update };
+                return
+            }
         }
+        self.metrics.cached_reads_skipped.increment(1);
     }
 
     /// Runs the validation on a blocking task.
@@ -710,7 +716,7 @@ const MAX_CACHED_READS_BLOCKS: u64 = 16;
 struct CachedState {
     /// Hash of the parent block the reads were made against.
     head: B256,
-    /// Incremented whenever the cache is replaced.
+    /// Incremented whenever the cache is replaced, starting at 1 for the first cached head.
     generation: u64,
     /// The cached reads.
     reads: CachedReads,
@@ -1344,5 +1350,40 @@ mod tests {
         let next = cached_reads_with(&api, head, Address::repeat_byte(4)).await;
         api.update_cached_reads(next, 20, 100).await;
         assert_eq!(api.cached_reads(head).await.gas, 90);
+    }
+
+    #[tokio::test]
+    async fn test_cached_reads_replacement_respects_the_gas_budget() {
+        let api = test_validation_api(MockEthProvider::default());
+        let (head, other) = (B256::repeat_byte(0x11), B256::repeat_byte(0x22));
+
+        let first = cached_reads_with(&api, head, Address::repeat_byte(1)).await;
+        api.update_cached_reads(first, 60, 100).await;
+        let copy = cached_reads_with(&api, head, Address::repeat_byte(2)).await;
+
+        let replacement = cached_reads_with(&api, other, Address::repeat_byte(3)).await;
+        api.update_cached_reads(replacement, 10, 100).await;
+
+        // The copy holds reads that cost 60 + 50 gas, so it does not replace the cache.
+        api.update_cached_reads(copy, 50, 100).await;
+        let cache = api.cached_reads(other).await;
+        assert_eq!(cache.gas, 10);
+        assert_eq!(cache.reads.accounts.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_cached_reads_of_an_uncached_head_are_merged() {
+        let api = test_validation_api(MockEthProvider::default());
+        let head = B256::repeat_byte(0x11);
+
+        // Both validations start before any reads for `head` are cached.
+        let first = cached_reads_with(&api, head, Address::repeat_byte(1)).await;
+        let second = cached_reads_with(&api, head, Address::repeat_byte(2)).await;
+        api.update_cached_reads(first, 10, 100).await;
+        api.update_cached_reads(second, 10, 100).await;
+
+        let cache = api.cached_reads(head).await;
+        assert_eq!(cache.gas, 20);
+        assert_eq!(cache.reads.accounts.len(), 2);
     }
 }
