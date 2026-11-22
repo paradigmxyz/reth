@@ -271,7 +271,7 @@ mod tests {
     use clap::Parser;
 
     /// A helper type to parse Args more easily
-    #[derive(Parser)]
+    #[derive(Debug, Parser)]
     struct CommandParser<T: Args> {
         #[command(flatten)]
         args: T,
@@ -354,14 +354,13 @@ mod tests {
 
     #[test]
     fn test_invalid_hex_extra_data() {
-        for invalid in ["0xZZZZ", "0x0x", "0x0Xab"] {
-            let Err(err) = CommandParser::<PayloadBuilderArgs>::try_parse_from([
+        for invalid in ["0xZZZZ", "0x0xab", "0x0Xab"] {
+            let err = CommandParser::<PayloadBuilderArgs>::try_parse_from([
                 "reth",
                 "--builder.extradata",
                 invalid,
-            ]) else {
-                panic!("accepted invalid hex {invalid}");
-            };
+            ])
+            .unwrap_err();
             assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
         }
     }
