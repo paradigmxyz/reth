@@ -32,11 +32,22 @@ pub struct DefaultPayloadBuilderValues {
 impl DefaultPayloadBuilderValues {
     /// Initialize the global payload builder defaults with this configuration.
     ///
-    /// Returns the supplied configuration if the defaults are already set or its extra data
-    /// is invalid. An invalid configuration does not initialize the defaults.
-    pub fn try_init(self) -> Result<(), Self> {
-        let Ok(extra_data) = parse_extra_data(&self.extra_data) else { return Err(self) };
-        PAYLOAD_BUILDER_DEFAULTS.set((self, extra_data)).map_err(|(defaults, _)| defaults)
+    /// Returns [`PayloadBuilderDefaultsError::AlreadyInitialized`] if defaults are already
+    /// installed. [`PayloadBuilderDefaultsError::InvalidExtraData`] returns the configuration
+    /// for correction without initializing the defaults.
+    pub fn try_init(self) -> Result<(), PayloadBuilderDefaultsError> {
+        if PAYLOAD_BUILDER_DEFAULTS.get().is_some() {
+            return Err(PayloadBuilderDefaultsError::AlreadyInitialized(self));
+        }
+        let extra_data = match parse_extra_data(&self.extra_data) {
+            Ok(bytes) => bytes,
+            Err(source) => {
+                return Err(PayloadBuilderDefaultsError::InvalidExtraData { defaults: self, source })
+            }
+        };
+        PAYLOAD_BUILDER_DEFAULTS
+            .set((self, extra_data))
+            .map_err(|(defaults, _)| PayloadBuilderDefaultsError::AlreadyInitialized(defaults))
     }
 
     /// Get a reference to the global payload builder defaults
@@ -46,7 +57,7 @@ impl DefaultPayloadBuilderValues {
 
     /// Set the default extra data as `0x`-prefixed hex or plain UTF-8 text.
     ///
-    /// [`Self::try_init`] checks the hex encoding and the 32-byte limit after decoding.
+    /// [`Self::try_init`] checks the hex encoding and the 32-byte limit on the payload.
     pub fn with_extra_data(mut self, v: impl Into<String>) -> Self {
         self.extra_data = v.into();
         self
@@ -88,6 +99,22 @@ impl Default for DefaultPayloadBuilderValues {
             max_payload_tasks: 3,
         }
     }
+}
+
+/// Failure to register global payload builder defaults. Both variants return the supplied values.
+#[derive(Debug, thiserror::Error)]
+pub enum PayloadBuilderDefaultsError {
+    /// Another configuration has already been installed.
+    #[error("payload builder defaults already initialized")]
+    AlreadyInitialized(DefaultPayloadBuilderValues),
+    /// The supplied configuration failed validation and was not installed.
+    #[error("{source}")]
+    InvalidExtraData {
+        /// The supplied defaults, which can be corrected and submitted again.
+        defaults: DefaultPayloadBuilderValues,
+        /// The reason the extra data was rejected.
+        source: clap::Error,
+    },
 }
 
 /// Parameters for configuring the Payload Builder
@@ -205,25 +232,26 @@ impl TypedValueParser for ExtraDataValueParser {
 }
 
 fn parse_extra_data(val: &str) -> Result<Bytes, clap::Error> {
-    let bytes = if val.starts_with("0x") {
-        alloy_primitives::hex::decode(val).map_err(|e| {
-            clap::Error::raw(
-                clap::error::ErrorKind::InvalidValue,
-                format!("Invalid hex in extradata: {e}"),
-            )
-        })?
-    } else {
-        val.as_bytes().to_vec()
-    };
-
-    if bytes.len() > MAXIMUM_EXTRA_DATA_SIZE {
+    let is_hex = val.starts_with("0x");
+    let max_len =
+        if is_hex { "0x".len() + 2 * MAXIMUM_EXTRA_DATA_SIZE } else { MAXIMUM_EXTRA_DATA_SIZE };
+    if val.len() > max_len {
         return Err(clap::Error::raw(
             clap::error::ErrorKind::InvalidValue,
             format!("Payload builder extradata size exceeds {MAXIMUM_EXTRA_DATA_SIZE}-byte limit"),
         ))
     }
 
-    Ok(bytes.into())
+    if is_hex {
+        alloy_primitives::hex::decode(val).map(Bytes::from).map_err(|e| {
+            clap::Error::raw(
+                clap::error::ErrorKind::InvalidValue,
+                format!("Invalid hex in extradata: {e}"),
+            )
+        })
+    } else {
+        Ok(Bytes::copy_from_slice(val.as_bytes()))
+    }
 }
 
 #[cfg(test)]
@@ -300,6 +328,17 @@ mod tests {
             hex.as_str(),
         ])
         .is_err());
+    }
+
+    #[test]
+    fn extra_data_size_is_checked_before_hex_decoding() {
+        let oversized = format!("0x{}zz", "ff".repeat(MAXIMUM_EXTRA_DATA_SIZE));
+        let err = parse_extra_data(&oversized).unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
+        assert_eq!(
+            err.to_string(),
+            format!("error: Payload builder extradata size exceeds {MAXIMUM_EXTRA_DATA_SIZE}-byte limit")
+        );
     }
 
     #[test]
