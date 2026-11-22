@@ -21,6 +21,7 @@ fn custom_extra_data_applies_to_cli_and_node_config() {
     for invalid in [
         "0xgg".to_string(),
         "0xabc".to_string(),
+        "0x0xab".to_string(),
         format!("0x{}", "ab".repeat(MAXIMUM_EXTRA_DATA_SIZE + 1)),
         format!("{}x", "é".repeat(MAXIMUM_EXTRA_DATA_SIZE / 2)),
     ] {

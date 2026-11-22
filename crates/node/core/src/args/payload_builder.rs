@@ -205,8 +205,8 @@ impl TypedValueParser for ExtraDataValueParser {
 }
 
 fn parse_extra_data(val: &str) -> Result<Bytes, clap::Error> {
-    let bytes = if let Some(hex) = val.strip_prefix("0x") {
-        alloy_primitives::hex::decode(hex).map_err(|e| {
+    let bytes = if val.starts_with("0x") {
+        alloy_primitives::hex::decode(val).map_err(|e| {
             clap::Error::raw(
                 clap::error::ErrorKind::InvalidValue,
                 format!("Invalid hex in extradata: {e}"),
@@ -304,12 +304,16 @@ mod tests {
 
     #[test]
     fn test_invalid_hex_extra_data() {
-        assert!(CommandParser::<PayloadBuilderArgs>::try_parse_from([
-            "reth",
-            "--builder.extradata",
-            "0xZZZZ",
-        ])
-        .is_err());
+        for invalid in ["0xZZZZ", "0x0x", "0x0Xab"] {
+            let Err(err) = CommandParser::<PayloadBuilderArgs>::try_parse_from([
+                "reth",
+                "--builder.extradata",
+                invalid,
+            ]) else {
+                panic!("accepted invalid hex {invalid}");
+            };
+            assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
+        }
     }
 
     #[test]
