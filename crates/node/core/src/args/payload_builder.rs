@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn test_invalid_hex_extra_data() {
-        for invalid in ["0xZZZZ", "0x0xab", "0x0Xab"] {
+        for invalid in ["0xZZZZ", "0x0x", "0x0xab", "0x0Xab"] {
             let err = CommandParser::<PayloadBuilderArgs>::try_parse_from([
                 "reth",
                 "--builder.extradata",
