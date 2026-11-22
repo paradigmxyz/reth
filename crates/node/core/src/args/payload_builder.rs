@@ -32,10 +32,21 @@ pub struct DefaultPayloadBuilderValues {
 impl DefaultPayloadBuilderValues {
     /// Initialize the global payload builder defaults with this configuration.
     ///
+    /// Returns the supplied configuration if defaults are already installed or the extra data
+    /// is invalid. Use [`Self::try_init_detailed`] to distinguish the two cases.
+    pub fn try_init(self) -> Result<(), Self> {
+        self.try_init_detailed().map_err(|err| match err {
+            PayloadBuilderDefaultsError::AlreadyInitialized(defaults) |
+            PayloadBuilderDefaultsError::InvalidExtraData { defaults, .. } => defaults,
+        })
+    }
+
+    /// Initialize the global payload builder defaults, returning the reason for failure.
+    ///
     /// Returns [`PayloadBuilderDefaultsError::AlreadyInitialized`] if defaults are already
     /// installed. [`PayloadBuilderDefaultsError::InvalidExtraData`] returns the configuration
     /// for correction without initializing the defaults.
-    pub fn try_init(self) -> Result<(), PayloadBuilderDefaultsError> {
+    pub fn try_init_detailed(self) -> Result<(), PayloadBuilderDefaultsError> {
         if PAYLOAD_BUILDER_DEFAULTS.get().is_some() {
             return Err(PayloadBuilderDefaultsError::AlreadyInitialized(self));
         }
@@ -108,7 +119,7 @@ pub enum PayloadBuilderDefaultsError {
     #[error("payload builder defaults already initialized")]
     AlreadyInitialized(DefaultPayloadBuilderValues),
     /// The supplied configuration failed validation and was not installed.
-    #[error("{source}")]
+    #[error("invalid extra data in payload builder defaults")]
     InvalidExtraData {
         /// The supplied defaults, which can be corrected and submitted again.
         defaults: DefaultPayloadBuilderValues,

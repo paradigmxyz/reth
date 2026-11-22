@@ -18,15 +18,19 @@ struct CommandParser {
 #[test]
 fn custom_extra_data_applies_to_cli_and_node_config() {
     // A rejected default must leave the global slot available for a valid configuration.
-    let mut defaults = DefaultPayloadBuilderValues::default().with_max_payload_tasks(7);
+    let mut defaults = DefaultPayloadBuilderValues::default()
+        .with_max_payload_tasks(7)
+        .with_extra_data("0xgg")
+        .try_init()
+        .unwrap_err();
     for invalid in [
-        "0xgg".to_string(),
         "0xabc".to_string(),
         "0x0xab".to_string(),
         format!("0x{}", "ab".repeat(MAXIMUM_EXTRA_DATA_SIZE + 1)),
         format!("{}x", "é".repeat(MAXIMUM_EXTRA_DATA_SIZE / 2)),
     ] {
-        let err = defaults.with_extra_data(invalid).try_init().unwrap_err();
+        let err = defaults.with_extra_data(invalid).try_init_detailed().unwrap_err();
+        assert_eq!(err.to_string(), "invalid extra data in payload builder defaults");
         let PayloadBuilderDefaultsError::InvalidExtraData { defaults: rejected, source } = err
         else {
             panic!("expected invalid extra data, got {err}");
@@ -41,7 +45,7 @@ fn custom_extra_data_applies_to_cli_and_node_config() {
     for replacement in ["valid", "0xgg"] {
         let err = DefaultPayloadBuilderValues::default()
             .with_extra_data(replacement)
-            .try_init()
+            .try_init_detailed()
             .unwrap_err();
         assert!(matches!(err, PayloadBuilderDefaultsError::AlreadyInitialized(_)));
     }
