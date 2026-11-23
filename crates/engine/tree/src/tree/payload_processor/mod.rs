@@ -35,6 +35,7 @@ pub use reth_trie_parallel::{
     },
 };
 use std::{
+    num::NonZeroUsize,
     ops::Not,
     sync::{
         atomic::{AtomicBool, AtomicUsize},
@@ -117,6 +118,8 @@ where
     /// Dedicated blocking pool for warming the BAL read-set, created lazily on the first BAL block
     /// (see [`Self::bal_prewarm_pool`]). Its threads exit when the processor is dropped.
     bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
+    /// Number of BAL read-set prewarm workers for this engine.
+    bal_prewarm_threads: usize,
 }
 
 impl<Evm> PayloadProcessor<Evm>
@@ -147,6 +150,9 @@ where
             disable_bal_batch_io: config.disable_bal_batch_io(),
             reuse_prewarm_results: config.prewarm_reuse(),
             bal_prewarm_pool: OnceLock::new(),
+            bal_prewarm_threads: config
+                .bal_prewarm_threads()
+                .map_or(bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS, NonZeroUsize::get),
         }
     }
 
@@ -154,9 +160,7 @@ where
     /// first use (only the BAL parallel execution path calls this).
     fn bal_prewarm_pool(&self) -> Arc<bal_prewarm_pool::BalPrewarmPool> {
         self.bal_prewarm_pool
-            .get_or_init(|| {
-                bal_prewarm_pool::BalPrewarmPool::new(bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS)
-            })
+            .get_or_init(|| bal_prewarm_pool::BalPrewarmPool::new(self.bal_prewarm_threads))
             .clone()
     }
 
