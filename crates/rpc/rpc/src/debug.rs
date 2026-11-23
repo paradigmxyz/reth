@@ -1603,7 +1603,11 @@ impl JsTraceInterrupt {
     /// Lets this interrupt stop the JS tracers of `inspector`, including those in a mux tracer.
     #[cfg_attr(
         not(feature = "js-tracer"),
-        expect(clippy::missing_const_for_fn, reason = "only JS tracers can be interrupted")
+        expect(
+            clippy::missing_const_for_fn,
+            unused_mut,
+            reason = "only JS tracers can be interrupted"
+        )
     )]
     fn attach(&self, mut inspector: DebugInspector) -> DebugInspector {
         #[cfg(feature = "js-tracer")]
