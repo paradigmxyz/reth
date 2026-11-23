@@ -115,7 +115,7 @@ pub struct SparseTrieWithStorageRoots {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_concurrency::sync::{channel::mpsc, Runtime};
+    use reth_concurrency::sync::channel::mpsc;
 
     #[reth_concurrency::test]
     fn pending_trie_exposes_block_hash_before_completion() {

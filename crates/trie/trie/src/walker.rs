@@ -460,7 +460,6 @@ mod tests {
         StorageRoot,
     };
     use alloy_primitives::{map::B256Map, B256, U256};
-
     use reth_storage_errors::db::DatabaseErrorInfo;
     use std::collections::BTreeMap;
 

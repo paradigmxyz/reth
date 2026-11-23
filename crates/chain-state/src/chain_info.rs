@@ -199,7 +199,6 @@ pub struct ChainInfoHeaders<H> {
 mod tests {
     use super::*;
     use alloy_primitives::B256;
-
     use reth_ethereum_primitives::EthPrimitives;
     use reth_testing_utils::{generators, generators::random_header};
 

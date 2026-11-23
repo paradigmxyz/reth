@@ -747,10 +747,7 @@ mod tests {
         evm::{AccountInfo, CacheDB, EmptyDB, InMemoryDB},
         BaseEvmTypes, Evm, Precompiles, SpecId,
     };
-    use reth_concurrency::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Runtime,
-    };
+    use reth_concurrency::sync::atomic::{AtomicUsize, Ordering};
     use reth_evm::BundleState;
     use reth_primitives_traits::SealedHeader;
     use reth_storage_api::HashedPostStateProvider;

@@ -5,7 +5,7 @@ use reth_concurrency::sync::{
     atomic::{AtomicUsize, Ordering},
     channel,
     channel::{Receiver, Sender},
-    thread::{Builder, JoinHandle},
+    thread::{self, Builder, JoinHandle},
 };
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
 use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
@@ -139,7 +139,7 @@ impl Drop for BalPrewarmPool {
     /// would deadlock.
     fn drop(&mut self) {
         self.workers.clear();
-        let current = std::thread::current().id();
+        let current = thread::current().id();
         for handle in self.handles.drain(..) {
             if handle.thread().id() != current &&
                 let Err(err) = handle.join()
