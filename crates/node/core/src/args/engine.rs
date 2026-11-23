@@ -11,7 +11,7 @@ use reth_cli_util::{
 };
 use reth_engine_primitives::{
     TreeConfig, DEFAULT_BACKFILL_RUN_THRESHOLD, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
-    DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_NUM_STATE_MASKING_BLOCKS,
+    DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_NUM_STATE_MASKING_BLOCKS, DEFAULT_PREWARM_MIN_TXS,
     MIN_PERSISTENCE_BACKPRESSURE_THRESHOLD,
 };
 use std::{num::NonZeroUsize, sync::OnceLock, time::Duration};
@@ -579,6 +579,11 @@ pub struct EngineArgs {
     )]
     pub prewarm_reuse: bool,
 
+    /// Minimum number of transactions a block needs for transaction prewarming. Smaller blocks
+    /// execute without prewarming; 0 prewarms every block.
+    #[arg(long = "engine.prewarm-min-txs", default_value_t = DEFAULT_PREWARM_MIN_TXS)]
+    pub prewarm_min_txs: usize,
+
     /// Add random jitter before each proof computation (trie-debug only).
     /// Each proof worker sleeps for a random duration up to this value before
     /// starting work. Useful for stress-testing timing-sensitive proof logic.
@@ -665,6 +670,7 @@ impl Default for EngineArgs {
             bal_parallel_state_root_disabled,
             disable_bal_batch_io: false,
             prewarm_reuse: false,
+            prewarm_min_txs: DEFAULT_PREWARM_MIN_TXS,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -773,7 +779,8 @@ impl EngineArgs {
             .without_bal_parallel_execution(self.bal_parallel_execution_disabled)
             .without_bal_parallel_state_root(self.bal_parallel_state_root_disabled)
             .without_bal_batch_io(self.disable_bal_batch_io)
-            .with_prewarm_reuse(self.prewarm_reuse);
+            .with_prewarm_reuse(self.prewarm_reuse)
+            .with_prewarm_min_txs(self.prewarm_min_txs);
         #[cfg(feature = "trie-debug")]
         let config = config.with_proof_jitter(self.proof_jitter);
         if let Some(cpu_cores) = self.cpu_cores {
@@ -986,6 +993,7 @@ mod tests {
             bal_parallel_state_root_disabled: true,
             disable_bal_batch_io: true,
             prewarm_reuse: true,
+            prewarm_min_txs: 0,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         };
@@ -1033,6 +1041,8 @@ mod tests {
             "--engine.disable-bal-parallel-state-root",
             "--engine.disable-bal-batch-io",
             "--engine.prewarm-reuse",
+            "--engine.prewarm-min-txs",
+            "0",
         ])
         .args;
 

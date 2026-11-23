@@ -46,6 +46,11 @@ pub const SMALL_BLOCK_GAS_THRESHOLD: u64 = 20_000_000;
 /// This will be deducted from the thread count of main reth global threadpool.
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 
+/// Default minimum number of transactions a block needs for transaction prewarming: smaller
+/// blocks skip it, since the fixed overhead of spawning prewarm workers exceeds the execution
+/// time saved.
+pub const DEFAULT_PREWARM_MIN_TXS: usize = 5;
+
 /// Default depth for sparse trie pruning.
 ///
 /// Nodes at this depth and below are converted to hash stubs to reduce memory.
@@ -227,6 +232,8 @@ pub struct TreeConfig {
     disable_bal_batch_io: bool,
     /// Whether block execution reuses transaction prewarming results.
     prewarm_reuse: bool,
+    /// Blocks with fewer transactions than this skip transaction prewarming.
+    prewarm_min_txs: usize,
     /// Whether to skip trie state-root computation during engine validation.
     ///
     /// This trusts the block header's state root. It is intended for experiments that measure
@@ -284,6 +291,7 @@ impl Default for TreeConfig {
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             prewarm_reuse: false,
+            prewarm_min_txs: DEFAULT_PREWARM_MIN_TXS,
             skip_state_root: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
@@ -374,6 +382,7 @@ impl TreeConfig {
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             prewarm_reuse: false,
+            prewarm_min_txs: DEFAULT_PREWARM_MIN_TXS,
             skip_state_root: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
@@ -837,6 +846,17 @@ impl TreeConfig {
     /// Setter for whether block execution reuses transaction prewarming results.
     pub const fn with_prewarm_reuse(mut self, prewarm_reuse: bool) -> Self {
         self.prewarm_reuse = prewarm_reuse;
+        self
+    }
+
+    /// Returns the transaction count below which blocks skip transaction prewarming.
+    pub const fn prewarm_min_txs(&self) -> usize {
+        self.prewarm_min_txs
+    }
+
+    /// Setter for the transaction count below which blocks skip transaction prewarming.
+    pub const fn with_prewarm_min_txs(mut self, prewarm_min_txs: usize) -> Self {
+        self.prewarm_min_txs = prewarm_min_txs;
         self
     }
 

@@ -1212,6 +1212,11 @@ Engine:
 
           [env: RETH_ENGINE_PREWARM_REUSE=]
 
+      --engine.prewarm-min-txs <PREWARM_MIN_TXS>
+          Minimum number of transactions a block needs for transaction prewarming. Smaller blocks execute without prewarming; 0 prewarms every block
+
+          [default: 5]
+
 ERA:
       --era.enable
           Enable import from ERA1 files

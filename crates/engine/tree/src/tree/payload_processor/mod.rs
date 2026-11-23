@@ -49,9 +49,10 @@ pub mod prewarm;
 pub mod receipt_root_task;
 pub(crate) mod reuse;
 
-/// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
-/// prewarm workers exceeds the execution time saved.
-pub const SMALL_BLOCK_TX_THRESHOLD: usize = 5;
+/// Default for [`TreeConfig::prewarm_min_txs`]: blocks with fewer transactions than this skip
+/// prewarming, since the fixed overhead of spawning prewarm workers exceeds the execution time
+/// saved.
+pub const SMALL_BLOCK_TX_THRESHOLD: usize = reth_engine_primitives::DEFAULT_PREWARM_MIN_TXS;
 
 /// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
 type IteratorTx<Evm, I> = RecoveredTx<TxEnvFor<Evm>, <I as ExecutableTxIterator<Evm>>::Recovered>;
@@ -99,6 +100,8 @@ where
     cross_block_cache_size: usize,
     /// Whether transactions should not be executed on prewarming task.
     disable_transaction_prewarming: bool,
+    /// Blocks with fewer transactions than this skip transaction prewarming.
+    prewarm_min_txs: usize,
     /// Whether state cache should be disable
     disable_state_cache: bool,
     /// Determines how to configure the evm for execution.
@@ -135,6 +138,7 @@ where
             execution_cache: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_prewarming(),
+            prewarm_min_txs: config.prewarm_min_txs(),
             evm_config,
             disable_state_cache: config.disable_state_cache(),
             precompile_cache_disabled: config.precompile_cache_disabled(),
@@ -225,7 +229,7 @@ where
     ) -> bool {
         !parallel_bal_execution &&
             !self.disable_transaction_prewarming &&
-            transaction_count >= SMALL_BLOCK_TX_THRESHOLD
+            transaction_count >= self.prewarm_min_txs
     }
 
     /// Transaction count threshold below which sequential conversion is used.
