@@ -15,12 +15,17 @@ use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use lean_vm::lean_sphincs;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::{test_genesis, wait::poll_until, wallet::Wallet, E2ETestSetupExt};
+use reth_e2e_test_utils::{
+    test_genesis,
+    wait::{poll_until, poll_until_with, PollOpts},
+    wallet::Wallet,
+    E2ETestSetupExt,
+};
 use reth_node_ethereum::EthereumNode;
 use reth_rpc_eth_api::helpers::LoadPendingBlock;
 use reth_transaction_pool::TransactionPool;
 use serde_json::json;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 const VERIFY_GAS: u64 = 10_000;
 const USER_OP_GAS: u64 = 30_000;
@@ -482,8 +487,14 @@ async fn lean_sphincs_wrapper_is_gossiped_and_mined() -> eyre::Result<()> {
     eyre::ensure!(response.get("error").is_none(), "{response}");
     let hashes: Vec<B256> = serde_json::from_value(response["result"].clone())?;
     assert_eq!(hashes.len(), 1);
+    // The unoptimized native prover has its own budget before ordinary gossip admission.
+    let aggregate = poll_until_with(
+        PollOpts { timeout: Duration::from_secs(180), ..Default::default() },
+        "dependency aggregate to be produced",
+        || async { Ok(producer.inner.pool.dependency_aggregate()) },
+    )
+    .await?;
     follower.wait_for_pooled(hashes.iter().copied()).await?;
-    let aggregate = producer.inner.pool.dependency_aggregate().unwrap();
     let payload = producer.new_payload().await?;
     assert_eq!(payload.block().body().transactions.len(), 1);
     assert!(!payload.block().recursive_stark.as_ref().unwrap().stark_proof.is_empty());
