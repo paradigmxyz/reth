@@ -792,7 +792,6 @@ where
         request: RpcTxReq<T::NetworkTypes>,
     ) -> RpcResult<FillTransaction<TxTy<T::Primitives>>> {
         trace!(target: "rpc::eth", ?request, "Serving eth_fillTransaction");
-        // Filling estimates gas when the request has no gas limit, see `estimate_gas`.
         let _permit = self.acquire_owned_blocking_io().await;
         Ok(EthTransactions::fill_transaction(self, request).await?)
     }
@@ -828,8 +827,6 @@ where
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<U256> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
-        // Held here rather than in `EstimateCall::estimate_gas_at` so implementations that
-        // override the estimate run under the same blocking IO limit as `eth_call`.
         let _permit = self.acquire_owned_blocking_io().await;
         Ok(EthCall::estimate_gas_at(
             self,
