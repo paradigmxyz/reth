@@ -65,7 +65,10 @@ pub struct RethCliVersionConsts {
     /// e.g.: `reth/v0.1.0-alpha.1-428a6dc2f/aarch64-apple-darwin`
     pub p2p_client_version: Cow<'static, str>,
 
-    /// extra data used for payload building
+    /// Default extra data used for payload building, as `0x`-prefixed hex or plain UTF-8 text.
+    ///
+    /// Empty values and values rejected by `--builder.extradata` fall back to
+    /// [`default_extra_data`].
     pub extra_data: Cow<'static, str>,
 }
 
@@ -105,6 +108,14 @@ pub fn default_client_version() -> ClientVersion {
 /// [`try_init_version_metadata`].
 pub fn version_metadata() -> &'static RethCliVersionConsts {
     VERSION_METADATA.get_or_init(unknown_version_metadata)
+}
+
+/// Returns the extra data of the metadata set with [`try_init_version_metadata`], if any.
+///
+/// Unlike [`version_metadata`], this leaves the global unset, so a binary can still set its own
+/// metadata afterwards.
+pub(crate) fn registered_extra_data() -> Option<&'static str> {
+    VERSION_METADATA.get().map(|metadata| metadata.extra_data.as_ref())
 }
 
 /// Version metadata without anything a build script stamps: the package version and `unknown`

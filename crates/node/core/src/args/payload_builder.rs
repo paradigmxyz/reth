@@ -1,4 +1,7 @@
-use crate::{cli::config::PayloadBuilderConfig, version::default_extra_data};
+use crate::{
+    cli::config::PayloadBuilderConfig,
+    version::{default_extra_data, registered_extra_data},
+};
 use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
 use alloy_primitives::{hex, Bytes};
 use clap::{
@@ -96,7 +99,8 @@ impl DefaultPayloadBuilderValues {
     fn global() -> &'static (Self, Bytes) {
         PAYLOAD_BUILDER_DEFAULTS.get_or_init(|| {
             let defaults = Self::default();
-            let extra_data = Bytes::copy_from_slice(defaults.extra_data.as_bytes());
+            let extra_data = decode_extra_data(&defaults.extra_data)
+                .expect("default extra data is accepted by the CLI parser");
             (defaults, extra_data)
         })
     }
@@ -105,7 +109,7 @@ impl DefaultPayloadBuilderValues {
 impl Default for DefaultPayloadBuilderValues {
     fn default() -> Self {
         Self {
-            extra_data: default_extra_data(),
+            extra_data: select_default_extra_data(registered_extra_data()),
             interval: "1".to_string(),
             deadline: "12".to_string(),
             max_payload_tasks: 3,
@@ -239,27 +243,30 @@ impl TypedValueParser for ExtraDataValueParser {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
 
-        let max_len = if val.starts_with("0x") {
-            "0x".len() + 2 * MAXIMUM_EXTRA_DATA_SIZE
-        } else {
-            MAXIMUM_EXTRA_DATA_SIZE
-        };
-        if val.len() > max_len {
-            return Err(clap::Error::raw(
-                clap::error::ErrorKind::InvalidValue,
-                format!(
-                    "Payload builder extradata size exceeds {MAXIMUM_EXTRA_DATA_SIZE}-byte limit"
-                ),
-            ))
-        }
-
-        decode_extra_data(val).map_err(|e| {
-            clap::Error::raw(
-                clap::error::ErrorKind::InvalidValue,
-                format!("Invalid hex in extradata: {e}"),
-            )
-        })
+        parse_extra_data(val)
     }
+}
+
+/// Parses a CLI extra data value, enforcing the 32-byte limit before decoding.
+fn parse_extra_data(val: &str) -> Result<Bytes, clap::Error> {
+    let max_len = if val.starts_with("0x") {
+        "0x".len() + 2 * MAXIMUM_EXTRA_DATA_SIZE
+    } else {
+        MAXIMUM_EXTRA_DATA_SIZE
+    };
+    if val.len() > max_len {
+        return Err(clap::Error::raw(
+            clap::error::ErrorKind::InvalidValue,
+            format!("Payload builder extradata size exceeds {MAXIMUM_EXTRA_DATA_SIZE}-byte limit"),
+        ))
+    }
+
+    decode_extra_data(val).map_err(|e| {
+        clap::Error::raw(
+            clap::error::ErrorKind::InvalidValue,
+            format!("Invalid hex in extradata: {e}"),
+        )
+    })
 }
 
 /// Decodes `0x`-prefixed hex and keeps any other value as UTF-8 bytes.
@@ -269,6 +276,17 @@ fn decode_extra_data(val: &str) -> Result<Bytes, hex::FromHexError> {
     } else {
         Ok(Bytes::copy_from_slice(val.as_bytes()))
     }
+}
+
+/// Selects the extra data from version metadata, falling back to [`default_extra_data`].
+///
+/// Metadata is not validated when set, and this value becomes the `--builder.extradata` default,
+/// so a value the parser rejects would otherwise fail every CLI invocation. Empty values are
+/// treated as unset because `RethCliVersionConsts::default` leaves the field empty.
+fn select_default_extra_data(registered: Option<&str>) -> String {
+    registered
+        .filter(|extra_data| !extra_data.is_empty() && parse_extra_data(extra_data).is_ok())
+        .map_or_else(default_extra_data, str::to_owned)
 }
 
 #[cfg(test)]
@@ -358,6 +376,17 @@ mod tests {
             err.to_string(),
             format!("error: Payload builder extradata size exceeds {MAXIMUM_EXTRA_DATA_SIZE}-byte limit")
         );
+    }
+
+    #[test]
+    fn metadata_extra_data_falls_back_when_cli_would_reject_it() {
+        let oversized = "x".repeat(MAXIMUM_EXTRA_DATA_SIZE + 1);
+        for rejected in [None, Some(""), Some("0xgg"), Some(oversized.as_str())] {
+            assert_eq!(select_default_extra_data(rejected), default_extra_data());
+        }
+        for accepted in ["client/v1/linux", "0xabcd"] {
+            assert_eq!(select_default_extra_data(Some(accepted)), accepted);
+        }
     }
 
     #[test]
