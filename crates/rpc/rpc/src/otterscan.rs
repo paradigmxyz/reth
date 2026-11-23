@@ -471,7 +471,7 @@ mod tests {
     use alloy_consensus::{
         constants::ETH_TO_WEI, proofs::calculate_transaction_root, Header, TxLegacy,
     };
-    use alloy_eips::{eip4895::Withdrawal, BlockNumberOrTag};
+    use alloy_eips::{eip4895::Withdrawal, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{bytes, Signature, TxKind};
     use alloy_rpc_types_trace::parity::TransactionTrace;
     use evm2::{
@@ -860,12 +860,12 @@ mod tests {
     #[tokio::test]
     async fn block_responses_report_missing_data_with_requested_id() {
         let provider = MockEthProvider::default();
-        let (block, _) = block_with_transaction(1, B256::ZERO, 2, 0);
+        let (block, receipt) = block_with_transaction(1, B256::ZERO, 2, 0);
         let hash = block.header.hash_slow();
         provider.add_block(hash, block);
         let api = OtterscanApi::new(
             crate::eth::EthApiBuilder::new(
-                provider,
+                provider.clone(),
                 testing_pool(),
                 NoopNetwork::default(),
                 EthEvmConfig::new(MAINNET.clone()),
@@ -874,18 +874,30 @@ mod tests {
             .build(),
         );
 
-        // The latest block exists without receipts, height two is absent, and pending is disabled.
-        for id in [BlockNumberOrTag::Latest, BlockNumberOrTag::Number(2), BlockNumberOrTag::Pending]
-        {
-            let expected: ErrorObjectOwned = EthApiError::HeaderNotFound(id.into()).into();
-            assert_eq!(api.get_block_details(id.into()).await.unwrap_err(), expected);
-            assert_eq!(api.get_block_transactions(id.into(), 0, 1).await.unwrap_err(), expected);
+        let not_found = |id| ErrorObjectOwned::from(EthApiError::HeaderNotFound(id));
+        let latest = BlockNumberOrTag::Latest;
+        assert_eq!(
+            api.get_block_details(latest.into()).await.unwrap_err(),
+            not_found(latest.into())
+        );
+        for id in [latest, BlockNumberOrTag::Number(2)] {
+            assert_eq!(
+                api.get_block_transactions(id.into(), 0, 1).await.unwrap_err(),
+                not_found(id.into())
+            );
+        }
+        for id in [hash, B256::ZERO] {
+            assert_eq!(api.get_block_details_by_hash(id).await.unwrap_err(), not_found(id.into()));
         }
 
-        for id in [hash, B256::ZERO] {
-            let expected: ErrorObjectOwned = EthApiError::HeaderNotFound(id.into()).into();
-            assert_eq!(api.get_block_details_by_hash(id).await.unwrap_err(), expected);
-        }
+        // Disabled pending must fail even when the provider can resolve the block and its receipts.
+        provider.add_receipts(1, vec![receipt]);
+        provider.set_pending_block_num_hash(Some(BlockNumHash::new(1, hash)));
+        let pending = BlockNumberOrTag::Pending;
+        assert_eq!(
+            api.get_block_details(pending.into()).await.unwrap_err(),
+            not_found(pending.into())
+        );
     }
 
     #[tokio::test]
