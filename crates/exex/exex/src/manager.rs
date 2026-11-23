@@ -142,6 +142,14 @@ impl<N: NodePrimitives> ExExHandle<N> {
         cx: &mut Context<'_>,
         (notification_id, notification): &(usize, ExExNotification<N>),
     ) -> Poll<Result<(), PollSendError<ExExNotification<N>>>> {
+        // Blocks committed again, e.g. by a round-trip reorg, are no longer reverted, so
+        // `FinishedHeight` events for them must be accepted. Reverts are recorded below.
+        if let Some(committed) = notification.committed_chain() {
+            for block in committed.blocks().values() {
+                self.reverted_blocks.remove(&block.num_hash());
+            }
+        }
+
         match notification {
             ExExNotification::ChainCommitted { new } => {
                 // Skip the chain commit notification if the finished height of the ExEx is
@@ -1303,12 +1311,12 @@ mod tests {
         // A3..A5 are reorged to B3, then B3 is reorged to C3.
         let reorgs = [
             ExExNotification::ChainReorged {
-                old: Arc::new(Chain::new(a3_to_a5, Default::default(), Default::default())),
+                old: Arc::new(Chain::new(a3_to_a5.clone(), Default::default(), Default::default())),
                 new: Arc::new(Chain::new(vec![b3.clone()], Default::default(), Default::default())),
             },
             ExExNotification::ChainReorged {
                 old: Arc::new(Chain::new(vec![b3], Default::default(), Default::default())),
-                new: Arc::new(Chain::new(vec![c3], Default::default(), Default::default())),
+                new: Arc::new(Chain::new(vec![c3.clone()], Default::default(), Default::default())),
             },
         ];
         for (id, reorg) in reorgs.into_iter().enumerate() {
@@ -1324,11 +1332,22 @@ mod tests {
 
         // C4 is not on the branch of A5, so it must be delivered.
         let commit = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![c4], Default::default(), Default::default())),
+            new: Arc::new(Chain::new(vec![c4.clone()], Default::default(), Default::default())),
         };
         assert!(exex_manager.exex_handles[0].send(&mut cx, &(2, commit.clone())).is_ready());
         let received = notifications.next().now_or_never().expect("C4 must be delivered");
         assert_eq!(received.unwrap().unwrap(), commit);
+
+        // C3..C4 are reorged back to A3..A5, so a new event for A5 is accepted.
+        let reorg = ExExNotification::ChainReorged {
+            old: Arc::new(Chain::new(vec![c3, c4], Default::default(), Default::default())),
+            new: Arc::new(Chain::new(a3_to_a5, Default::default(), Default::default())),
+        };
+        assert!(exex_manager.exex_handles[0].send(&mut cx, &(3, reorg.clone())).is_ready());
+        assert_eq!(notifications.next().await.unwrap().unwrap(), reorg);
+        event_tx.send(ExExEvent::FinishedHeight(a5)).unwrap();
+        let _ = exex_manager.as_mut().poll(&mut cx);
+        assert_eq!(exex_manager.exex_handles[0].finished_height, Some(a5));
     }
 
     #[tokio::test]
