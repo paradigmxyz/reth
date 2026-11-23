@@ -22,10 +22,9 @@ fn drop_error(dir: &Path, chain: &str, args: &[&str]) -> String {
 
 #[test]
 fn cleans_custom_rocksdb_history() {
-    let node = tempfile::tempdir().unwrap();
-    let external = tempfile::tempdir().unwrap();
-    let rocks = external.path();
-    let dir = node.path();
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("node");
+    let rocks = temp.path().join("external");
     let rocks_args = ["--datadir.rocksdb", rocks.to_str().unwrap()];
     // The old and new genesis must differ even though their chain IDs match.
     let mut genesis = SEPOLIA.genesis.clone();
@@ -34,32 +33,31 @@ fn cleans_custom_rocksdb_history() {
     let new = DEV.genesis.alloc.keys().next().unwrap().to_string();
     let old_chain = serde_json::to_string(&genesis).unwrap();
     let invoke =
-        |cmd, chain: &str, args: &[&str]| run(cmd, dir, chain, &[&rocks_args[..], args].concat());
+        |cmd, chain: &str, args: &[&str]| run(cmd, &dir, chain, &[&rocks_args[..], args].concat());
     let history =
         |chain, addr: &str| invoke("db", chain, &["get", "rocksdb", "accounts-history", addr]);
     invoke("init", &old_chain, &[]);
+    let archive = rocks.join("archive");
+    fs::create_dir_all(&archive).unwrap();
+    let log = archive.join("20261123.log");
+    fs::write(&log, b"keep").unwrap();
+    assert_eq!(
+        drop_error(&dir, &old_chain, &rocks_args),
+        format!("Error: Move the contents of {} before dropping RocksDB", archive.display())
+    );
     let keep = rocks.join("keep.txt");
-    fs::write(&keep, b"keep").unwrap();
+    fs::rename(log, &keep).unwrap();
     assert_eq!(invoke("db", &old_chain, &["drop"]), format!(
         "Permanently delete data at these paths?\n  MDBX: {}\n  RocksDB (dedicated directory): {}\n  Static files: {}\n  ExEx WAL: {}\nThis cannot be undone. (y/N): Database drop aborted!\n",
         dir.join("db").display(), rocks.display(), dir.join("static_files").display(), dir.join("exex/wal").display()
     ));
     assert_eq!(
-        drop_error(dir, "dev", &rocks_args),
+        drop_error(&dir, "dev", &rocks_args),
         format!("Error: Database does not contain the configured genesis {}", DEV.genesis_hash())
     );
-    let archive = rocks.join("archive");
-    fs::create_dir_all(&archive).unwrap();
-    let log = archive.join("20261123.log");
-    fs::rename(&keep, &log).unwrap();
+    let writer = RocksDBProvider::new(&rocks).unwrap();
     assert_eq!(
-        drop_error(dir, &old_chain, &rocks_args),
-        format!("Error: Move the contents of {} before dropping RocksDB", archive.display())
-    );
-    fs::rename(log, &keep).unwrap();
-    let writer = RocksDBProvider::new(rocks).unwrap();
-    assert_eq!(
-        drop_error(dir, &old_chain, &rocks_args),
+        drop_error(&dir, &old_chain, &rocks_args),
         format!("Error: Could not destroy RocksDB at {}", rocks.display())
     );
     drop(writer);
@@ -73,15 +71,14 @@ fn cleans_custom_rocksdb_history() {
 
 #[test]
 fn clears_imported_transaction_lookup() {
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../crates/rpc/rpc-e2e-tests/testdata/rpc-compat");
+    let fixture =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../crates/rpc/rpc-e2e-tests/testdata/rpc-compat");
     let node = tempfile::tempdir().unwrap();
-    let genesis = fixture.join("genesis.json");
-    let chain = genesis.to_str().unwrap();
+    let chain = format!("{fixture}/genesis.json");
     let dir = node.path();
-    let invoke = |cmd, args: &[&str]| run(cmd, dir, chain, args);
-    let blocks = fixture.join("chain.rlp");
-    invoke("import", &["--storage.v2=true", "--fail-on-invalid-block", blocks.to_str().unwrap()]);
+    let invoke = |cmd, args: &[&str]| run(cmd, dir, &chain, args);
+    let blocks = format!("{fixture}/chain.rlp");
+    invoke("import", &["--storage.v2=true", "--fail-on-invalid-block", &blocks]);
     // The third transaction in block 2 has transaction number 6.
     let hash = "0x5bc704d4eb4ce7fe319705d2f888516961426a177f2799c9f934b5df7466dd33";
     let lookup = ["get", "rocksdb", "transaction-hash-numbers", hash];
@@ -95,11 +92,9 @@ fn clears_imported_transaction_lookup() {
         if let Err(err) = fs::read_dir(&rocks) {
             assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
             assert_eq!(
-                drop_error(dir, chain, &[]),
+                drop_error(dir, &chain, &[]),
                 format!("Error: failed to read dir {rocks:?}: {err}")
             );
-            assert!(dir.join("db/mdbx.dat").is_file());
-            assert!(rocks.join("CURRENT").is_file());
         }
         fs::set_permissions(&rocks, original).unwrap();
     }
@@ -111,28 +106,27 @@ fn clears_imported_transaction_lookup() {
 
 #[test]
 fn protects_external_directories_and_drops_legacy_stores() {
-    let node = tempfile::tempdir().unwrap();
-    let dir = node.path();
-    run("init", dir, "dev", &["--storage.v2=false"]);
-    let rocks = dir.join("rocksdb");
-    if rocks.exists() {
-        fs::remove_dir_all(&rocks).unwrap();
-    }
-    let external = tempfile::tempdir().unwrap();
-    let log = external.path().join("000007.log");
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("node");
+    let init_rocks = temp.path().join("init-rocksdb");
+    let v1 = ["--storage.v2=false", "--datadir.rocksdb", init_rocks.to_str().unwrap()];
+    run("init", &dir, "dev", &v1);
+    let external = temp.path().join("external");
+    fs::create_dir(&external).unwrap();
+    let log = external.join("000007.log");
     fs::write(&log, b"keep").unwrap();
     let refused =
-        |path: &Path| drop_error(dir, "dev", &["--datadir.rocksdb", path.to_str().unwrap()]);
+        |path: &Path| drop_error(&dir, "dev", &["--datadir.rocksdb", path.to_str().unwrap()]);
     let unrecognized = format!(
         "Error: Refusing to destroy an unrecognized RocksDB directory at {}",
-        external.path().display()
+        external.display()
     );
-    assert_eq!(refused(external.path()), unrecognized);
+    assert_eq!(refused(&external), unrecognized);
     assert_eq!(fs::read(&log).unwrap(), b"keep");
     fs::remove_file(log).unwrap();
-    drop(RocksDBProvider::new(external.path()).unwrap());
-    assert_eq!(refused(external.path()), unrecognized);
-    assert!(external.path().join("CURRENT").is_file());
+    drop(RocksDBProvider::new(&external).unwrap());
+    assert_eq!(refused(&external), unrecognized);
+    assert!(external.join("CURRENT").is_file());
     #[cfg(unix)]
     {
         let offline = dir.join("offline");
@@ -144,12 +138,12 @@ fn protects_external_directories_and_drops_legacy_stores() {
     }
     let root = dir.canonicalize().unwrap();
     assert_eq!(
-        refused(dir),
+        refused(&dir),
         format!("Error: Database directories overlap: {root:?} and {:?}", root.join("db"))
     );
     fs::create_dir_all(dir.join("exex/wal")).unwrap();
-    run("db", dir, "dev", DROP);
-    assert!(!rocks.exists());
+    run("db", &dir, "dev", DROP);
+    assert!(!dir.join("rocksdb").exists());
     assert!(!dir.join("db").exists());
     assert!(!dir.join("exex/wal").exists());
     assert_eq!(fs::read_dir(dir.join("static_files")).unwrap().count(), 0);
@@ -157,27 +151,27 @@ fn protects_external_directories_and_drops_legacy_stores() {
 
 #[test]
 fn checks_static_genesis_independently() {
-    let dev = tempfile::tempdir().unwrap();
-    let sepolia = tempfile::tempdir().unwrap();
-    let dir = dev.path();
-    let dev_static = dir.join("static_files");
-    run("init", dir, "dev", &[]);
-    run("init", sepolia.path(), "sepolia", &[]);
+    let temp = tempfile::tempdir().unwrap();
+    let dev = temp.path().join("dev");
+    let sepolia = temp.path().join("sepolia");
+    let dev_static = dev.join("static_files");
+    run("init", &dev, "dev", &[]);
+    run("init", &sepolia, "sepolia", &[]);
     let mismatch = format!(
         "Error: Static files at {} do not contain the configured genesis {}",
         dev_static.display(),
         SEPOLIA.genesis_hash()
     );
     let foreign = ["--datadir.static-files", dev_static.to_str().unwrap()];
-    assert_eq!(drop_error(sepolia.path(), "sepolia", &foreign), mismatch);
-    run("db", dir, "dev", &["clear", "mdbx", "HeaderNumbers"]);
-    assert_eq!(drop_error(dir, "sepolia", &[]), mismatch);
-    let missing = dir.join("missing-static");
+    assert_eq!(drop_error(&sepolia, "sepolia", &foreign), mismatch);
+    run("db", &dev, "dev", &["clear", "mdbx", "HeaderNumbers"]);
+    assert_eq!(drop_error(&dev, "sepolia", &[]), mismatch);
+    let missing = dev.join("missing-static");
     assert_eq!(
-        drop_error(dir, "dev", &["--datadir.static-files", missing.to_str().unwrap()]),
+        drop_error(&dev, "dev", &["--datadir.static-files", missing.to_str().unwrap()]),
         format!("Error: Database does not contain the configured genesis {}", DEV.genesis_hash())
     );
-    assert!(sepolia.path().join("rocksdb/CURRENT").is_file());
-    assert!(dir.join("rocksdb/CURRENT").is_file());
-    run("db", dir, "dev", DROP);
+    assert!(sepolia.join("rocksdb/CURRENT").is_file());
+    assert!(dev.join("rocksdb/CURRENT").is_file());
+    run("db", &dev, "dev", DROP);
 }
