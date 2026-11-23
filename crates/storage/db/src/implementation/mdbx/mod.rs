@@ -1881,13 +1881,21 @@ mod tests {
             "dead reader slot must still be counted before the wait"
         );
 
+        let env = Arc::new(env);
         let (done_tx, done_rx) = mpsc::channel();
+        let waiter = Arc::clone(&env);
         std::thread::spawn(move || {
-            env.wait_for_pre_commit_readers();
+            waiter.wait_for_pre_commit_readers();
             let _ = done_tx.send(());
         });
         done_rx
             .recv_timeout(Duration::from_secs(10))
             .expect("wait_for_pre_commit_readers hung on a dead process's reader slot");
+        // This process's own idle slot may remain, but no slot may predate the last commit.
+        let last_txnid = env.last_txnid().unwrap();
+        assert!(
+            env.oldest_reader_txnid().is_none_or(|oldest| oldest >= last_txnid),
+            "dead reader slot must be cleared"
+        );
     }
 }
