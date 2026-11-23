@@ -9,7 +9,10 @@ use alloy_rpc_types_eth::{
     },
     Filter,
 };
-use futures::{stream::BoxStream, FutureExt, StreamExt};
+use futures::{
+    stream::{BoxStream, FusedStream},
+    FutureExt, StreamExt,
+};
 use jsonrpsee::{
     server::{PendingSubscriptionAcceptError, SharedResult, SubscriptionMessage},
     types::ErrorObject,
@@ -318,7 +321,7 @@ impl From<SubscriptionSerializeError> for ErrorObject<'static> {
 }
 
 /// Polls a lazy source once before acknowledgement, retaining any immediately available item.
-fn start_stream<S: Stream + Unpin>(stream: S) -> impl Stream<Item = S::Item> + Unpin {
+fn start_stream<S: Stream + Unpin>(stream: S) -> impl FusedStream<Item = S::Item> + Unpin {
     let mut stream = stream.peekable();
     let _ = Pin::new(&mut stream).peek().now_or_never();
     stream
@@ -522,6 +525,10 @@ impl SharedFeed {
         items: BoxStream<'_, T>,
     ) {
         let mut items = start_stream(items);
+        // An ended source must release its sender before another subscriber can join it.
+        if items.is_terminated() {
+            return
+        }
         // The startup poll only attaches the source. Serialize items in the spawned task.
         tokio::task::yield_now().await;
         loop {
@@ -638,7 +645,7 @@ mod tests {
     };
     use serde_json::Value;
     use std::{pin::pin, time::Duration};
-    use tokio::sync::mpsc;
+    use tokio::sync::{mpsc, Notify};
 
     type TestProvider = BlockchainProvider<MockNodeTypesWithDB>;
 
@@ -856,22 +863,34 @@ mod tests {
 
     #[test]
     fn receipt_subscription_delivers_only_selected_hash() {
-        let rpc = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
+        let idle = Arc::new(Notify::new());
+        let parked = Arc::clone(&idle);
+        let rpc = tokio::runtime::Builder::new_current_thread()
+            .on_thread_park(move || parked.notify_one())
             .enable_all()
             .build()
             .unwrap();
         let forward = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        let (provider, mut writer) = rpc.block_on(async { test_provider() });
-        let module = forward.block_on(async {
-            test_pubsub(provider, testing_pool()).into_rpc().remove_context()
-        });
+        let (provider, mut writer) = forward.block_on(async { test_provider() });
+        let module = forward
+            .block_on(async { test_pubsub(provider, testing_pool()).into_rpc().remove_context() });
         let chain = chain_with_logs(1);
         let hash = *chain.transaction_hashes().nth(1).unwrap();
         let params = serde_json::json!(["transactionReceipts", { "transactionHashes": [hash] }]);
         let request = rpc.spawn(async move { subscribe(&module, &params.to_string()).await });
-        let (_, mut notifications) = forward
-            .block_on(async { tokio::time::timeout(TIMEOUT, request).await.unwrap().unwrap() });
+        // With forwarding stopped, run the in-process RPC request until it has no runnable tasks.
+        rpc.block_on(async { tokio::time::timeout(TIMEOUT, idle.notified()).await.unwrap() });
+        assert!(!request.is_finished(), "acknowledged before the source could attach");
+
+        let (_, mut notifications) = forward.block_on(async {
+            tokio::task::spawn_blocking(move || {
+                rpc.block_on(async {
+                    tokio::time::timeout(TIMEOUT, request).await.unwrap().unwrap()
+                })
+            })
+            .await
+            .unwrap()
+        });
 
         // Publish once after acknowledgement, with the forwarding runtime stopped.
         commit(&mut writer, chain);
@@ -1078,5 +1097,18 @@ mod tests {
         let (id, mut notifications) =
             tokio::time::timeout(TIMEOUT, subscribe(&module, "[]")).await.unwrap();
         assert_eq!(next_notification(&mut notifications).await, serialized_notification(&id, &42));
+    }
+
+    #[tokio::test]
+    async fn shared_source_reopens_after_immediate_eof() {
+        let pubsub = test_pubsub(test_provider().0, testing_pool());
+        let mut ended = pubsub
+            .subscribe_shared(|feeds| &feeds.new_heads, |_| stream::empty::<u8>().boxed())
+            .await;
+        // Join again before any spawned producer can run.
+        let mut reopened =
+            pubsub.subscribe_shared(|feeds| &feeds.new_heads, |_| stream::iter([1]).boxed()).await;
+        assert!(matches!(ended.try_recv(), Err(broadcast::error::TryRecvError::Closed)));
+        tokio::time::timeout(TIMEOUT, reopened.recv()).await.unwrap().unwrap();
     }
 }
