@@ -292,45 +292,6 @@ where
     }
 }
 
-/// An `eth_subscribe` request with its parameters resolved for the requested kind.
-enum Subscription {
-    NewHeads,
-    Logs(Box<Filter>),
-    FullPendingTransactions,
-    PendingTransactionHashes,
-    Syncing,
-    TransactionReceipts(TransactionReceiptsParams),
-}
-
-impl Subscription {
-    fn from_params(
-        kind: SubscriptionKind,
-        params: Option<Params>,
-    ) -> Result<Self, ErrorObject<'static>> {
-        match (kind, params.unwrap_or_default()) {
-            (SubscriptionKind::NewHeads, _) => Ok(Self::NewHeads),
-            (SubscriptionKind::Logs, Params::Logs(filter)) => Ok(Self::Logs(filter)),
-            (SubscriptionKind::Logs, Params::None) => Ok(Self::Logs(Box::default())),
-            (SubscriptionKind::NewPendingTransactions, Params::Bool(true)) => {
-                Ok(Self::FullPendingTransactions)
-            }
-            (SubscriptionKind::NewPendingTransactions, Params::Bool(false) | Params::None) => {
-                Ok(Self::PendingTransactionHashes)
-            }
-            (SubscriptionKind::Syncing, _) => Ok(Self::Syncing),
-            (SubscriptionKind::TransactionReceipts, Params::TransactionReceipts(filter)) => {
-                Ok(Self::TransactionReceipts(filter))
-            }
-            // Alloy decodes objects without transactionHashes as log filters. Like geth, ignore
-            // log filter fields for receipt subscriptions.
-            (SubscriptionKind::TransactionReceipts, Params::None | Params::Logs(_)) => {
-                Ok(Self::TransactionReceipts(Default::default()))
-            }
-            _ => Err(invalid_params_rpc_err(format!("Invalid params for {kind}"))),
-        }
-    }
-}
-
 /// Helper to convert a serde error into an [`ErrorObject`]
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to serialize subscription item: {0}")]
@@ -580,6 +541,47 @@ impl SharedFeed {
         }
         *slot = None;
         true
+    }
+}
+
+/// An `eth_subscribe` request with its parameters resolved for the requested kind.
+enum Subscription {
+    NewHeads,
+    Logs(Box<Filter>),
+    FullPendingTransactions,
+    PendingTransactionHashes,
+    Syncing,
+    TransactionReceipts(TransactionReceiptsParams),
+}
+
+impl Subscription {
+    fn from_params(
+        kind: SubscriptionKind,
+        params: Option<Params>,
+    ) -> Result<Self, ErrorObject<'static>> {
+        match (kind, params.unwrap_or_default()) {
+            (SubscriptionKind::NewHeads, _) => Ok(Self::NewHeads),
+            // Alloy decodes an object with `transactionHashes` as receipt params and drops its
+            // `address` and `topics`, so it is rejected instead of being served as every log.
+            (SubscriptionKind::Logs, Params::Logs(filter)) => Ok(Self::Logs(filter)),
+            (SubscriptionKind::Logs, Params::None) => Ok(Self::Logs(Box::default())),
+            (SubscriptionKind::NewPendingTransactions, Params::Bool(true)) => {
+                Ok(Self::FullPendingTransactions)
+            }
+            (SubscriptionKind::NewPendingTransactions, Params::Bool(false) | Params::None) => {
+                Ok(Self::PendingTransactionHashes)
+            }
+            (SubscriptionKind::Syncing, _) => Ok(Self::Syncing),
+            (SubscriptionKind::TransactionReceipts, Params::TransactionReceipts(filter)) => {
+                Ok(Self::TransactionReceipts(filter))
+            }
+            // Alloy decodes objects without transactionHashes as log filters. Like geth, ignore
+            // log filter fields for receipt subscriptions.
+            (SubscriptionKind::TransactionReceipts, Params::None | Params::Logs(_)) => {
+                Ok(Self::TransactionReceipts(Default::default()))
+            }
+            _ => Err(invalid_params_rpc_err(format!("Invalid params for {kind}"))),
+        }
     }
 }
 
