@@ -640,7 +640,7 @@ impl ChangesetCacheInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::canonical_in_memory_state_writer_for, StateTrieOverlay};
+    use crate::{test_utils::overlay_manager_with_writer, StateTrieOverlay};
     use alloy_consensus::Header;
     use alloy_primitives::{
         keccak256,
@@ -927,8 +927,7 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
-        let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
-        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        let (manager, mut canonical_in_memory_state_writer) = overlay_manager_with_writer();
         for (block, updates) in [
             (&blocks[1], Arc::new(storage_updates(vec![(removed, Some(node))]))),
             (&blocks[2], Arc::clone(&finish_updates)),

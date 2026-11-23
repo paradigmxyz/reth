@@ -20,6 +20,7 @@ use jsonrpsee::{
     types::{Response, ResponsePayload},
     RpcModule,
 };
+use reth_chain_state::InMemoryState;
 use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_db::{
     init_db,
@@ -365,8 +366,9 @@ impl Engine {
             .with_default_tables()
             .build()
             .map_err(|err| Error::engine("failed to set up the engine", err))?;
+        let (in_memory_state, in_memory_state_writer) = InMemoryState::new();
         let overlay_manager = OverlayManager::with_worker_pool(
-            Default::default(),
+            in_memory_state,
             runtime.state_trie_overlay_worker_pool(),
         );
         let factory = ProviderFactory::<FixtureNode>::new(
@@ -382,7 +384,7 @@ impl Engine {
         init_genesis_with_settings(&factory, storage_settings)
             .map_err(|err| Error::engine("failed to set up the engine", err))?;
         let (provider, canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(factory.clone())
+            BlockchainProvider::new_with_writer(factory.clone(), in_memory_state_writer)
                 .map_err(|err| Error::engine("failed to set up the engine", err))?;
 
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
