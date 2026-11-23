@@ -267,8 +267,13 @@ where
         let (start_block, kind) = {
             let mut filters = self.inner.active_filters.inner.lock().await;
             let filter = filters.get_mut(&id).ok_or(EthFilterError::FilterNotFound(id))?;
+            filter.last_poll_timestamp = Instant::now();
 
-            if filter.block > best_number {
+            // Pending transactions arrive between blocks, so only block and log filters can skip a
+            // poll without a new block.
+            if filter.block > best_number &&
+                matches!(filter.kind, FilterKind::Block | FilterKind::Log(_))
+            {
                 // no new blocks since the last poll
                 return Ok(FilterChanges::Empty)
             }
@@ -278,7 +283,6 @@ where
             // block to `best_block +1`, the next from which we should start fetching changes again
             let mut block = best_number + 1;
             std::mem::swap(&mut filter.block, &mut block);
-            filter.last_poll_timestamp = Instant::now();
 
             (block, filter.kind.clone())
         };
@@ -2917,7 +2921,7 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "current_thread")]
+    #[tokio::test]
     async fn full_pending_filter_is_served_through_filter_changes() {
         let eth_api = build_test_eth_api(provider_with_head());
         let pool = eth_api.pool().clone();
@@ -2933,13 +2937,20 @@ mod tests {
             .unwrap()
             .hash;
 
-        // A filter can only be polled once without a new block, so this relies on the producer
-        // sharing the test's single thread: it has forwarded the transaction once this yields.
-        tokio::task::yield_now().await;
-
-        let FilterChanges::Transactions(txs) = eth_filter.filter_changes(id).await.unwrap() else {
-            panic!("expected transactions")
-        };
+        // The feed forwards the transaction asynchronously, so poll until it arrives.
+        let txs = tokio::time::timeout(TIMEOUT, async {
+            loop {
+                match eth_filter.filter_changes(id.clone()).await.unwrap() {
+                    FilterChanges::Transactions(txs) if !txs.is_empty() => break txs,
+                    FilterChanges::Transactions(_) => {
+                        tokio::time::sleep(Duration::from_millis(5)).await
+                    }
+                    changes => panic!("unexpected changes {changes:?}"),
+                }
+            }
+        })
+        .await
+        .expect("filter did not receive the transaction");
         assert_eq!(txs.iter().map(|tx| tx.tx_hash()).collect::<Vec<_>>(), [hash]);
     }
 
@@ -2985,5 +2996,73 @@ mod tests {
             eth_filter.new_block_filter().await.unwrap();
         }
         assert_eq!(eth_filter.active_filters().len().await, 50);
+    }
+
+    #[tokio::test]
+    async fn test_filter_changes_without_new_block() {
+        let provider = MockEthProvider::default();
+        provider.add_header(FixedBytes::random(), alloy_consensus::Header::default());
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+        let block_filter = eth_filter.new_block_filter().await.unwrap();
+        let pending_filter = eth_filter.new_pending_transaction_filter(None).await.unwrap();
+
+        // The first poll advances the filters past the head.
+        eth_filter.filter_changes(block_filter.clone()).await.unwrap();
+        eth_filter.filter_changes(pending_filter.clone()).await.unwrap();
+
+        let tx = MockTransaction::eip1559();
+        let hash = *tx.hash();
+        eth_filter.pool().add_transaction(TransactionOrigin::External, tx).await.unwrap();
+
+        // A block filter waits for the next block, a pending transaction filter does not.
+        assert_eq!(eth_filter.filter_changes(block_filter).await.unwrap(), FilterChanges::Empty);
+        // The feed forwards the transaction asynchronously, so poll until it arrives.
+        let hashes = tokio::time::timeout(TIMEOUT, async {
+            loop {
+                match eth_filter.filter_changes(pending_filter.clone()).await.unwrap() {
+                    FilterChanges::Hashes(hashes) if !hashes.is_empty() => break hashes,
+                    FilterChanges::Hashes(_) => tokio::time::sleep(Duration::from_millis(5)).await,
+                    changes => panic!("unexpected changes {changes:?}"),
+                }
+            }
+        })
+        .await
+        .expect("filter did not receive the transaction");
+        assert_eq!(hashes, [hash]);
+    }
+
+    #[tokio::test]
+    async fn test_filter_poll_without_new_block_keeps_filter_alive() {
+        let provider = MockEthProvider::default();
+        provider.add_header(FixedBytes::random(), alloy_consensus::Header::default());
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+        let ttl = eth_filter.inner.stale_filter_ttl;
+        let active_filters = eth_filter.active_filters();
+        let ids = [
+            eth_filter.new_block_filter().await.unwrap(),
+            eth_filter.new_pending_transaction_filter(None).await.unwrap(),
+        ];
+
+        for id in &ids {
+            // The first poll advances the filter past the head, so the second one sees no new
+            // block.
+            eth_filter.filter_changes(id.clone()).await.unwrap();
+            // Unless the second poll refreshes it, the filter is stale at `now + ttl / 2`.
+            active_filters.inner.lock().await.get_mut(id).unwrap().last_poll_timestamp -= ttl;
+            eth_filter.filter_changes(id.clone()).await.unwrap();
+        }
+
+        eth_filter.clear_stale_filters(Instant::now() + ttl / 2).await;
+        for id in &ids {
+            assert!(active_filters.contains(id).await, "{id:?} was evicted");
+        }
     }
 }

@@ -817,7 +817,7 @@ mod tests {
         provider.write_trie_updates(trie_updates).unwrap();
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn consumers_restore_trie_values_masked_by_deferred_blocks() {
         let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
         let factory = create_test_provider_factory();
@@ -889,7 +889,7 @@ mod tests {
         assert_eq!(cached(), 7);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn calculated_reverts_preserve_deletions_across_frontiers() {
         let factory = create_test_provider_factory();
         let blocks = TestBlockBuilder::eth().get_executed_blocks(0..4).collect::<Vec<_>>();
@@ -971,7 +971,7 @@ mod tests {
         assert!(Arc::ptr_eq(&cached, &advanced));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn calculated_historical_range_excludes_tail_reverts() {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
@@ -1020,7 +1020,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn persisted_range_retains_transient_nodes_without_executed_blocks() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 2);
@@ -1126,7 +1126,7 @@ mod tests {
         assert_eq!(first, at_first);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn cached_range_merge_keeps_oldest_revert_values() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 2);
@@ -1176,7 +1176,7 @@ mod tests {
         assert_eq!(accumulated.account_nodes_ref(), &[(path, Some(older_node))]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn aggregate_range_reverts_to_pre_range_state() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 3);
@@ -1298,7 +1298,7 @@ mod tests {
         assert_eq!(cache.inner.read().entries.len(), 2);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn aggregate_range_matches_legacy_per_block_merge_with_storage_wipe() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 3);

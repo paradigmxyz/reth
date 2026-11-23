@@ -548,31 +548,6 @@ mod tests {
         );
     }
 
-    async fn cache_empty_block(
-        cache: reth_rpc_eth_types::EthStateCache<reth_ethereum_primitives::EthPrimitives>,
-        block: reth_ethereum_primitives::Block,
-    ) {
-        // MockEthProvider does not implement recovered_block; seed the normal RPC cache.
-        let outcome = reth_execution_types::ExecutionOutcome::new(
-            Default::default(),
-            vec![vec![]],
-            block.header.number,
-            vec![],
-        );
-        let chain = reth_execution_types::Chain::new(
-            [reth_primitives_traits::RecoveredBlock::new_unhashed(block, vec![])],
-            outcome,
-            Default::default(),
-        );
-        reth_rpc_eth_types::cache::cache_new_blocks_task(
-            cache,
-            futures::stream::iter([reth_chain_state::CanonStateNotification::Commit {
-                new: std::sync::Arc::new(chain),
-            }]),
-        )
-        .await;
-    }
-
     #[tokio::test]
     async fn block_details_issuance_follows_chain_forks() {
         for (spec, number, reward) in [
@@ -598,7 +573,7 @@ mod tests {
             let header = Header { number, ..Default::default() };
             let hash = header.hash_slow();
             let block = reth_ethereum_primitives::Block { header, body: Default::default() };
-            provider.add_block(hash, block.clone());
+            provider.add_block(hash, block);
             provider.add_receipts(number, vec![]);
             let api = OtterscanApi::new(
                 crate::eth::EthApiBuilder::new(
@@ -609,7 +584,6 @@ mod tests {
                 )
                 .build(),
             );
-            cache_empty_block(api.eth.cache().clone(), block).await;
             let by_number = api
                 .get_block_details(alloy_eips::BlockNumberOrTag::Number(number).into())
                 .await
@@ -637,7 +611,7 @@ mod tests {
             },
         };
         let hash = block.header.hash_slow();
-        provider.add_block(hash, block.clone());
+        provider.add_block(hash, block);
         provider.add_receipts(126, vec![]);
         let api = OtterscanApi::new(
             crate::eth::EthApiBuilder::new(
@@ -648,7 +622,6 @@ mod tests {
             )
             .build(),
         );
-        cache_empty_block(api.eth.cache().clone(), block).await;
         let expected = calculate_issuance(5 * ETH_TO_WEI, 126, [123].into_iter());
         assert_eq!(
             api.get_block_details(alloy_eips::BlockNumberOrTag::Number(126).into())

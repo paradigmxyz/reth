@@ -1112,7 +1112,7 @@ mod tests {
         manager.overlay_for_parent(&parent_state, anchor_hash, OverlayCacheConfig::default())
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn builds_managed_overlay_for_inserted_blocks() {
         let manager = OverlayManager::default();
         let canonical_state = canonical_state_for(&manager);
@@ -1136,7 +1136,7 @@ mod tests {
         assert!(Arc::ptr_eq(&short, &cached_short));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn builds_execution_overlay_for_inserted_blocks() {
         let manager = OverlayManager::default();
         let canonical_state = canonical_state_for(&manager);
@@ -1174,7 +1174,7 @@ mod tests {
         assert_eq!(short.accounts().len(), 1);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn computing_sibling_evicts_ready_cached_overlays() {
         let manager = OverlayManager::default();
         let canonical_state = canonical_state_for(&manager);
@@ -1208,7 +1208,7 @@ mod tests {
         assert!(!manager.inner.execution_overlays.entries.contains_key(&first_key));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn promotes_ready_parent_overlays_to_the_child() {
         let manager = OverlayManager::default();
         let canonical_state = canonical_state_for(&manager);
@@ -1235,7 +1235,7 @@ mod tests {
         assert!(manager.inner.execution_overlays.entries.contains_key(&child_key));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn promotes_parent_overlays_held_by_callers() {
         let manager = OverlayManager::default();
         let canonical_state = canonical_state_for(&manager);
@@ -1275,7 +1275,7 @@ mod tests {
         assert_eq!(child_execution.accounts().len(), 3);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn does_not_cache_or_take_parent_overlays_for_unmanaged_blocks() {
         let manager = OverlayManager::default();
         let canonical_state = canonical_state_for(&manager);
@@ -1311,7 +1311,7 @@ mod tests {
     }
 
     #[cfg(feature = "rayon")]
-    #[test]
+    #[reth_concurrency::test]
     fn uncached_overlays_do_not_use_worker_pool() {
         let worker_pool = Arc::new(WorkerPool::new(1, "uncached-overlay-test"));
         let manager =
@@ -1348,7 +1348,7 @@ mod tests {
     }
 
     #[cfg(feature = "rayon")]
-    #[test]
+    #[reth_concurrency::test]
     fn precomputes_execution_overlay_for_cached_parent() {
         let manager = OverlayManager::with_worker_pool(
             InMemoryState::default(),
@@ -1384,7 +1384,7 @@ mod tests {
     }
 
     #[cfg(feature = "rayon")]
-    #[test]
+    #[reth_concurrency::test]
     fn precomputes_execution_overlay_after_anchor_advances() {
         let manager = OverlayManager::with_worker_pool(
             InMemoryState::default(),
@@ -1436,7 +1436,7 @@ mod tests {
     }
 
     #[cfg(feature = "rayon")]
-    #[test]
+    #[reth_concurrency::test]
     fn execution_overlay_precompute_does_not_wait_for_pending_entry() {
         let worker_pool = Arc::new(WorkerPool::new(1, "execution-overlay-pending-test"));
         let manager =
@@ -1464,7 +1464,7 @@ mod tests {
         assert!(completed.is_ok(), "execution overlay precompute waited for pending entry");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn required_lookup_waits_for_in_progress_overlay() {
         let manager = OverlayManager::<EthPrimitives>::default();
         let block = test_blocks().remove(0);
@@ -1499,7 +1499,7 @@ mod tests {
         assert!(state.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn prunes_cached_overlays_after_removing_blocks() {
         let manager = OverlayManager::default();
         let canonical_state = canonical_state_for(&manager);
