@@ -627,7 +627,7 @@ mod tests {
     use futures::stream;
     use jsonrpsee::{
         server::{
-            BoundedSubscriptions, ConnectionId, MethodCallback, MethodSink,
+            BoundedSubscriptions, ConnectionId, MethodCallback, MethodResponse, MethodSink,
             RandomIntegerIdProvider, SubscriptionState,
         },
         RpcModule,
@@ -1140,19 +1140,19 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn canceled_subscription_startup_cannot_send_blocked_ack() {
-        let pubsub = test_pubsub(test_provider().0, testing_pool());
+    /// Starts a request on a full connection and waits for its shared producer to attach.
+    async fn start_blocked_new_heads(
+        pubsub: &EthPubSub<impl EthSubscriptions>,
+        tx: mpsc::Sender<String>,
+    ) -> (impl Future<Output = MethodResponse>, broadcast::WeakSender<SharedResult>) {
         let module = pubsub.clone().into_rpc();
         let Some(MethodCallback::Subscription(subscribe)) = module.method("eth_subscribe") else {
             panic!("expected a subscription")
         };
-        let (tx, mut messages) = mpsc::channel(1);
-        let full = tx.try_reserve().unwrap();
         let response = subscribe(
             Id::Number(1),
             jsonrpsee_types::Params::new(Some(r#"["newHeads"]"#)),
-            MethodSink::new(tx.clone()),
+            MethodSink::new(tx),
             SubscriptionState {
                 conn_id: ConnectionId::IN_PROCESS,
                 id_provider: &RandomIntegerIdProvider,
@@ -1160,16 +1160,37 @@ mod tests {
             },
         );
 
-        // The source is attached, but the connection has no room for the acknowledgement.
         let feed = &pubsub.inner.feeds.new_heads;
         wait_for_producers(&[(feed, 1)]).await;
-        let producer = feed.sender.lock().await.clone().unwrap();
+        (response, feed.sender.lock().await.clone().unwrap())
+    }
+
+    #[tokio::test]
+    async fn canceled_subscription_startup_cannot_send_blocked_ack() {
+        let pubsub = test_pubsub(test_provider().0, testing_pool());
+        let (tx, mut messages) = mpsc::channel(1);
+        let full = tx.try_reserve().unwrap();
+        let (response, producer) = start_blocked_new_heads(&pubsub, tx.clone()).await;
+
         pubsub.inner.subscription_task_spawner.graceful_shutdown();
         wait_until_stopped(&producer).await;
         drop(full);
 
         let response = tokio::time::timeout(TIMEOUT, response).await.unwrap();
         assert_eq!(response.as_error_code(), Some(ErrorCode::InternalError.code()));
+        assert_eq!(messages.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+    }
+
+    #[tokio::test]
+    async fn dropping_request_stops_producer_while_ack_is_blocked() {
+        let pubsub = test_pubsub(test_provider().0, testing_pool());
+        let (tx, mut messages) = mpsc::channel(1);
+        let full = tx.try_reserve().unwrap();
+        let (response, producer) = start_blocked_new_heads(&pubsub, tx.clone()).await;
+
+        drop(response);
+        wait_until_stopped(&producer).await;
+        drop(full);
         assert_eq!(messages.try_recv(), Err(mpsc::error::TryRecvError::Empty));
     }
 }
