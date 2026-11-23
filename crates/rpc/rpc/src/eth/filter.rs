@@ -7,6 +7,7 @@ use alloy_rpc_types_eth::{
     error::EthRpcErrorCode, Filter, FilterBlockOption, FilterChanges, FilterId,
     PendingTransactionFilterKind,
 };
+use async_trait::async_trait;
 use futures::{
     future::TryFutureExt,
     stream::{FuturesOrdered, StreamExt},
@@ -300,7 +301,7 @@ where
         };
 
         match kind {
-            FilterKind::PendingTransaction(filter) => Ok(match filter.drain() {
+            FilterKind::PendingTransaction(filter) => Ok(match filter.drain().await {
                 FilterChanges::Empty => FilterChanges::Empty,
                 FilterChanges::Hashes(hashes) => FilterChanges::Hashes(hashes),
                 FilterChanges::Transactions(transactions) => {
@@ -986,18 +987,18 @@ struct ActiveFilter<T> {
 /// Returns all hashes that were published since the last poll.
 #[derive(Debug, Clone)]
 struct PendingTransactionsReceiver {
-    txs_receiver: Arc<parking_lot::Mutex<broadcast::Receiver<TxHash>>>,
+    txs_receiver: Arc<Mutex<broadcast::Receiver<TxHash>>>,
 }
 
 impl PendingTransactionsReceiver {
     fn new(receiver: broadcast::Receiver<TxHash>) -> Self {
-        Self { txs_receiver: Arc::new(parking_lot::Mutex::new(receiver)) }
+        Self { txs_receiver: Arc::new(Mutex::new(receiver)) }
     }
 
     /// Returns all new pending transactions received since the last poll.
-    fn drain<T>(&self) -> FilterChanges<T> {
+    async fn drain<T>(&self) -> FilterChanges<T> {
         let mut pending_txs = Vec::new();
-        drain_feed(&mut self.txs_receiver.lock(), |tx_hash| pending_txs.push(tx_hash));
+        drain_feed(&mut *self.txs_receiver.lock().await, |tx_hash| pending_txs.push(tx_hash));
         FilterChanges::Hashes(pending_txs)
     }
 }
@@ -1006,7 +1007,7 @@ impl PendingTransactionsReceiver {
 /// transactions.
 #[derive(Debug)]
 struct FullTransactionsReceiver<T: PoolTransaction, TxCompat> {
-    txs_receiver: parking_lot::Mutex<broadcast::Receiver<Arc<ValidPoolTransaction<T>>>>,
+    txs_receiver: Mutex<broadcast::Receiver<Arc<ValidPoolTransaction<T>>>>,
     converter: TxCompat,
 }
 
@@ -1016,36 +1017,43 @@ where
     TxCompat: RpcConvert<Primitives: NodePrimitives<SignedTx = T::Consensus>>,
 {
     /// Returns all new pending transactions received since the last poll.
-    fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
-        let mut pending_txs = Vec::new();
-        drain_feed(&mut self.txs_receiver.lock(), |tx| {
-            match self.converter.fill_pending(tx.to_consensus()) {
-                Ok(tx) => pending_txs.push(tx),
+    async fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
+        // The guard is dropped before the conversion, so a concurrent poll of the filter only waits
+        // for the transactions to be taken from the feed.
+        let mut txs = Vec::new();
+        drain_feed(&mut *self.txs_receiver.lock().await, |tx| txs.push(tx));
+        let pending_txs = txs
+            .into_iter()
+            .filter_map(|tx| match self.converter.fill_pending(tx.to_consensus()) {
+                Ok(tx) => Some(tx),
                 Err(err) => {
                     error!(target: "rpc",
                         %err,
                         "Failed to fill txn with block context"
                     );
+                    None
                 }
-            }
-        });
+            })
+            .collect();
         FilterChanges::Transactions(pending_txs)
     }
 }
 
 /// Helper trait for [`FullTransactionsReceiver`] to erase the `Transaction` type.
+#[async_trait]
 trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
-    fn drain(&self) -> FilterChanges<T>;
+    async fn drain(&self) -> FilterChanges<T>;
 }
 
+#[async_trait]
 impl<T, TxCompat> FullTransactionsFilter<RpcTransaction<TxCompat::Network>>
     for FullTransactionsReceiver<T, TxCompat>
 where
     T: PoolTransaction + 'static,
     TxCompat: RpcConvert<Primitives: NodePrimitives<SignedTx = T::Consensus>>,
 {
-    fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
-        Self::drain(self)
+    async fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
+        Self::drain(self).await
     }
 }
 
@@ -1095,7 +1103,7 @@ where
             (listener.map(|event| event.transaction), capacity)
         });
         Arc::new(FullTransactionsReceiver {
-            txs_receiver: parking_lot::Mutex::new(txs_receiver),
+            txs_receiver: Mutex::new(txs_receiver),
             converter: dyn_clone::clone(&self.converter),
         })
     }
@@ -1117,10 +1125,10 @@ impl<T: 'static> PendingTransactionKind<T> {
     ///
     /// A filter that is polled less often than its feed holds items loses the oldest ones, like a
     /// lagging subscription does.
-    fn drain(&self) -> FilterChanges<T> {
+    async fn drain(&self) -> FilterChanges<T> {
         match self {
-            Self::Hashes(receiver) => receiver.drain(),
-            Self::FullTransaction(receiver) => receiver.drain(),
+            Self::Hashes(receiver) => receiver.drain().await,
+            Self::FullTransaction(receiver) => receiver.drain().await,
         }
     }
 }
@@ -2742,7 +2750,7 @@ mod tests {
         tokio::time::timeout(TIMEOUT, async {
             let mut hashes = Vec::new();
             while hashes.len() < count {
-                match kind.drain() {
+                match kind.drain().await {
                     FilterChanges::Hashes(new) => hashes.extend(new),
                     changes => panic!("unexpected changes {changes:?}"),
                 }
@@ -2844,12 +2852,12 @@ mod tests {
         .await
         .expect("feed did not stop");
 
-        let FilterChanges::Hashes(drained) = receiver.drain::<()>() else {
+        let FilterChanges::Hashes(drained) = receiver.drain::<()>().await else {
             panic!("expected hashes")
         };
         assert_eq!(drained, hashes[hashes.len() - CAPACITY..]);
         assert!(
-            matches!(receiver.drain::<()>(), FilterChanges::Hashes(hashes) if hashes.is_empty())
+            matches!(receiver.drain::<()>().await, FilterChanges::Hashes(hashes) if hashes.is_empty())
         );
     }
 
@@ -2937,7 +2945,7 @@ mod tests {
             let kind = pending_kind(&eth_filter, id).await;
             let txs = tokio::time::timeout(TIMEOUT, async {
                 loop {
-                    match kind.drain() {
+                    match kind.drain().await {
                         FilterChanges::Transactions(txs) if !txs.is_empty() => break txs,
                         FilterChanges::Transactions(_) => {
                             tokio::time::sleep(Duration::from_millis(5)).await
@@ -3129,5 +3137,30 @@ mod tests {
         tokio::time::timeout(Duration::from_millis(10), eth_filter.watch_and_clear_stale_filters())
             .await
             .unwrap_err();
+    }
+
+    // Runs on one thread, so a poll that blocked the thread on the receiver would deadlock.
+    #[tokio::test(flavor = "current_thread")]
+    async fn concurrent_poll_of_a_pending_filter_yields() {
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider_with_head()),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+        let id = eth_filter.new_pending_transaction_filter(None).await.unwrap();
+        let PendingTransactionKind::Hashes(receiver) = pending_kind(&eth_filter, &id).await else {
+            panic!("expected a hash filter")
+        };
+
+        let guard = receiver.txs_receiver.lock().await;
+        let poll = tokio::spawn({
+            let eth_filter = eth_filter.clone();
+            async move { eth_filter.filter_changes(id).await }
+        });
+        tokio::task::yield_now().await;
+        assert!(!poll.is_finished());
+
+        drop(guard);
+        assert_eq!(poll.await.unwrap().unwrap(), FilterChanges::Hashes(Vec::new()));
     }
 }
