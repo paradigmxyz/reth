@@ -254,8 +254,13 @@ where
         let (start_block, kind) = {
             let mut filters = self.inner.active_filters.inner.lock().await;
             let filter = filters.get_mut(&id).ok_or(EthFilterError::FilterNotFound(id))?;
+            filter.last_poll_timestamp = Instant::now();
 
-            if filter.block > best_number {
+            // Pending transactions arrive between blocks, so only block and log filters can skip a
+            // poll without a new block.
+            if filter.block > best_number &&
+                matches!(filter.kind, FilterKind::Block | FilterKind::Log(_))
+            {
                 // no new blocks since the last poll
                 return Ok(FilterChanges::Empty)
             }
@@ -265,7 +270,6 @@ where
             // block to `best_block +1`, the next from which we should start fetching changes again
             let mut block = best_number + 1;
             std::mem::swap(&mut filter.block, &mut block);
-            filter.last_poll_timestamp = Instant::now();
 
             (block, filter.kind.clone())
         };
@@ -1495,7 +1499,10 @@ mod tests {
     use reth_rpc_eth_types::receipt::EthReceiptConverter;
     use reth_tasks::Runtime;
     use reth_testing_utils::generators;
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_transaction_pool::{
+        test_utils::{testing_pool, MockTransaction, TestPool},
+        TransactionOrigin,
+    };
     use std::{collections::VecDeque, sync::Arc};
 
     #[test]
@@ -2481,5 +2488,64 @@ mod tests {
             .await
             .unwrap();
         assert!(logs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_filter_changes_without_new_block() {
+        let provider = MockEthProvider::default();
+        provider.add_header(FixedBytes::random(), alloy_consensus::Header::default());
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+        let block_filter = eth_filter.new_block_filter().await.unwrap();
+        let pending_filter = eth_filter.new_pending_transaction_filter(None).await.unwrap();
+
+        // The first poll advances the filters past the head.
+        eth_filter.filter_changes(block_filter.clone()).await.unwrap();
+        eth_filter.filter_changes(pending_filter.clone()).await.unwrap();
+
+        let tx = MockTransaction::eip1559();
+        let hash = *tx.hash();
+        eth_filter.pool().add_transaction(TransactionOrigin::External, tx).await.unwrap();
+
+        // A block filter waits for the next block, a pending transaction filter does not.
+        assert_eq!(eth_filter.filter_changes(block_filter).await.unwrap(), FilterChanges::Empty);
+        assert_eq!(
+            eth_filter.filter_changes(pending_filter).await.unwrap(),
+            FilterChanges::Hashes(vec![hash])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_filter_poll_without_new_block_keeps_filter_alive() {
+        let provider = MockEthProvider::default();
+        provider.add_header(FixedBytes::random(), alloy_consensus::Header::default());
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+        let ttl = eth_filter.inner.stale_filter_ttl;
+        let active_filters = eth_filter.active_filters();
+        let ids = [
+            eth_filter.new_block_filter().await.unwrap(),
+            eth_filter.new_pending_transaction_filter(None).await.unwrap(),
+        ];
+
+        for id in &ids {
+            // The first poll advances the filter past the head, so the second one sees no new
+            // block.
+            eth_filter.filter_changes(id.clone()).await.unwrap();
+            // Unless the second poll refreshes it, the filter is stale at `now + ttl / 2`.
+            active_filters.inner.lock().await.get_mut(id).unwrap().last_poll_timestamp -= ttl;
+            eth_filter.filter_changes(id.clone()).await.unwrap();
+        }
+
+        eth_filter.clear_stale_filters(Instant::now() + ttl / 2).await;
+        for id in &ids {
+            assert!(active_filters.contains(id).await, "{id:?} was evicted");
+        }
     }
 }
