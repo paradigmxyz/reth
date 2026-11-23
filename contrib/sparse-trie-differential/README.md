@@ -42,15 +42,31 @@ rounds refresh their working sets independently. The initialization round and at
 least one normal round remain. Histories retain this workload's sixteen-round, four-updates-per-round budget.
 Account identities and storage writes map to flat leaves; round boundaries replace
 commits. Account metadata, nested slot keyspaces, prefix-preimage lookup files and
-background-worker timing are not modeled by this single-threaded sparse-trie API.
+background-worker timing are not modeled by this sparse-trie API.
+A trie "fork" here means an independent in-memory snapshot, not a blockchain
+fork. Persistent snapshots share unchanged nodes; writes must not leak between
+copies. A nested snapshot is a snapshot of a snapshot. Existing fixed checks
+mutate sibling copies and verify survivors after their source is cleared or
+dropped; arbitrary snapshot ancestry and drop order are not mutable tape actions.
 The mandatory check sequence runs alongside generated actions. Thirteen local mutation
 operators edit those actions, batches, keys, values and prune cutoffs; they are listed
 in the Native calling interface section below.
 
-Execution is single-threaded and in memory: no database, output files, network or
-subprocesses. Preparation and Rift's result management may use disk. The core
-disables parallel work by setting all four parallelism thresholds on both backends
-to their integer types' `MAX`; their exact field names are in the shared example.
+Execution is in memory: no database, output files, network or subprocesses.
+Preparation and Rift's result management may use disk. Every input runs on both
+backends twice: once with all four parallelism thresholds set to their integer
+types' `MAX`, and once with all four set to zero. The fields are
+`min_revealed_nodes`, `min_updates`, `min_dirty_leaves` and `min_leaves_for_prune`.
+The zero thresholds exercise
+parallel proof revelation, updates, hashing and pruning when the trie contains
+suitable subtries. Roots, retained updates and observable transcripts are compared
+across all four runs. Transcripts include proof requests, pending changes, pruning
+counts and root-cache epochs. Each execution creates a local two-thread Rayon pool after
+Rift has forked its worker process, so no live thread pool is inherited across
+`fork()`. All worker threads are scoped and joined before reading coverage.
+It does not initialize Rayon's process-global pool. The successful report records
+`execution_modes: 2` (serial and parallel) and `worker_threads: 2`; operation
+counts sum all four runs.
 
 ## Prepare on the execution machine
 
@@ -77,12 +93,16 @@ the library from the target directory's `fuzz/` subdirectory and records the pro
 in `build-info.json`. A script-generated Cargo `RUSTC_WRAPPER`
 enables `--cfg reth_sparse_trie_coverage` and appends
 `-Cpasses=sancov-module -Cllvm-args=-sanitizer-coverage-level=3
--Cllvm-args=-sanitizer-coverage-inline-8bit-counters` only when compiling
+-Cllvm-args=-sanitizer-coverage-trace-pc-guard` only when compiling
 `reth_trie_sparse`, preserving all original compiler arguments. Other crates,
 including the adapter and core driver, stay uninstrumented to avoid coverage
 self-observation. Existing compiler wrappers and external SanCov flags are
-rejected. The `reth_trie_sparse` dependency also enables its `fuzz` feature; both switches
-are required for its sparse-trie-specific coverage buckets. These classify node
+rejected. The target crate's optional `fuzz` Cargo feature disables expensive
+structural assertions and orphan-node checks. This workload must run those checks,
+so the wrapper rejects that feature and requires debug assertions on the target
+crate. The `fuzz` build profile does not enable the similarly named Cargo feature. That checker detects allocated trie nodes that are no longer
+reachable from the root. The independent `reth_sparse_trie_coverage` cfg enables the
+sparse-trie-specific coverage buckets. These classify node
 neighborhoods by depth, target nibble and neighboring branch pattern: 28672
 combinations plus two proof-state controls in each backend. LTO stays disabled
 so their distinct machine-code functions survive. Preparation checks all 28674
@@ -105,7 +125,8 @@ to a full commit SHA, let the host select execution concurrency from available c
 the intended duration. Leave stop-on-first-objective disabled to collect
 multiple differences. Preparation tests the native calling interface before
 writing the session pointer. Each client is a separate process with sequential
-native ABI calls; using multiple clients does not enable trie-internal threads.
+native ABI calls. Each call also exercises trie-internal parallelism in its bounded pool;
+multiple clients are not a substitute for this.
 
 ## Local validation
 
@@ -120,8 +141,12 @@ python3 contrib/sparse-trie-differential/smoke.py \
 ```
 
 The Python smoke loads the actual library through `ctypes`, checks the methods
-below, and verifies that execution creates neither output files nor extra threads.
-It checks callback counts, malformed-request errors, null handles and deterministic
+in the Native calling interface section, checks that execution creates no output
+files, and checks local workers exit after every execution (allowing up to one
+second for Linux procfs to remove joined threads). Loading the library starts no threads.
+It requires actual instrumented target coverage on both worker threads across the
+corpus, rather than merely checking that threads were created. It also checks
+callback counts, malformed-request errors, null handles and deterministic
 mutation, registered native edge counters, input-sensitive coverage, and exact
 semantic replay after other executions (excluding duration and native probe-count
 noise). It executes four generated inputs by default, or every initial seed with `--all-seeds`,
@@ -145,8 +170,10 @@ execution to run the full oracles; skipping correctness checks is unsupported.
 Success returns a handle without invoking the callback; failure returns null and one UTF-8 diagnostic.
 Calls accept `{"method":"METHOD","params":{...}}`, at most 65536 bytes.
 They invoke the synchronous borrowed-buffer callback exactly once: status zero
-means a JSON result; nonzero means a UTF-8 diagnostic. Planning calls (all methods
-except `execute` and `finish`) require `args: {}` in their parameters.
+means a JSON result; nonzero means a UTF-8 diagnostic. The methods below either prepare inputs or execute them. Input-planning calls
+(`seed-inputs`, `fresh-input`, `mutation-operators`, `mutation-sites` and
+`mutate-input`) require `args: {}`. `execute` runs an input; `finish` acknowledges
+its retained result.
 
 - `seed-inputs` returns the input count, or one input when given `index`.
   `fresh-input` deterministically derives an input from the host's random `seed`.
@@ -156,7 +183,7 @@ except `execute` and `finish`) require `args: {}` in their parameters.
   applies `action.insert/remove/duplicate/crossover/swap`,
   `update.insert/remove/duplicate/crossover`, `key.update`, `key.prefix`,
   `value.update`, or `prune.update` to the selected local site. Action/update
-  crossover and nibble-prefix crossover require both `donor` input text and
+  crossover and `key.prefix` (nibble-prefix crossover) require both `donor` input text and
   `donor_path` (the selected location within that donor); other operators reject donors. Indices and action types are
   validated before mutation. Operator metadata omits fixed path selectors so Rift asks for the
   current capacity-checked sites. Byte-budget exhaustion safely returns the unchanged
@@ -165,7 +192,8 @@ except `execute` and `finish`) require `args: {}` in their parameters.
   while value mutations cover deletion and RLP integer boundaries. There are no
   database, sleep, account or artificial commit-boundary operators.
 - `execute` runs all checks immediately and returns native `coverage` slot/count
-  pairs, `coverage_size`, a build/layout `coverage_id`, semantic features and a
+  pairs, `coverage_size`, a build/layout `coverage_id`, `coverage_threads` (distinct
+  threads that hit instrumented target code), semantic features and a
   verdict. Rift uses new counters or features to decide **corpus admission**:
   whether to keep the input for later mutation. The result is `pending: true`
   until Rift calls `finish` with `admitted` (that decision) and `n` (its execution
@@ -179,25 +207,28 @@ except `execute` and `finish`) require `args: {}` in their parameters.
   be recovered by catching Rust unwinds.
 
 Coverage is LLVM SanCov **native edge coverage** in `reth_trie_sparse`, not a
-proxy derived from scenario names or seeds. Its compiler constructor calls the
-exported `__sanitizer_cov_8bit_counters_init` to register each writable static
-counter span. The native ABI keeps library code and these spans mapped until
+proxy derived from scenario names or seeds. Its compiler constructor calls
+`__sanitizer_cov_trace_pc_guard_init` to assign stable slot IDs to static guards.
+The exported `__sanitizer_cov_trace_pc_guard` callback increments adapter-owned
+atomic 8-bit counters, so parallel target threads do not race on LLVM's plain
+inline counters. The native ABI keeps library code and guards mapped until
 process exit, including after worker fork. A process-local mutex serializes each
-clear/run/read transaction across handles; execution calls must remain sequential
-and target code must not run on other threads. Raw pointers are accessed only
-before and after the core; no Rust counter references survive target execution.
-Neither registration nor measurement spawns threads or writes files. The
-unmodified target crate still contains generic functions instantiated downstream;
-only machine code compiled in `reth_trie_sparse` receives native instrumentation.
+clear/run/read transaction across handles; native ABI calls remain sequential,
+while joined Rayon tasks may run instrumented target code concurrently. The
+adapter and callbacks are uninstrumented, preventing coverage self-observation.
+Only machine code compiled in `reth_trie_sparse` receives native instrumentation;
+generic functions instantiated in downstream crates are not covered by it.
 
 The adapter clears all native counters immediately before calling the example's
 `run_input(&input)` entrypoint (included as module `core`), then
-returns sorted nonzero `(slot, raw 8-bit count)` pairs. LLVM counters wrap modulo
-256; a wrapped zero is omitted. Slots concatenate spans in constructor order;
-the `coverage_id` includes the SHA-256 of the actual instrumented target
-rlib and a hash of the full span layout, independent of ASLR or observed edges.
+returns sorted nonzero `(slot, raw 8-bit count)` pairs. Atomic counters wrap modulo
+256; a wrapped zero is omitted. Slots follow guard registration order. The
+`coverage_id` includes the SHA-256 of the actual instrumented target rlib and a
+hash of the full guard layout, independent of ASLR or observed edges. Its `v2`
+namespace distinguishes this atomic guard layout from the earlier inline-counter
+builds.
 Coverage is comparable within this exact retained build, not across rebuilds.
-The target’s randomly seeded hash-table probing can vary some raw native counts for the same input;
+The target’s hash-table probing and parallel scheduling can vary raw native counts for the same input;
 the smoke test reports this variation but requires identical semantic features
 and oracle results. Native coverage is not claimed to be byte-identical on replay.
 Semantic scenarios and logarithmic operation-count buckets remain separate

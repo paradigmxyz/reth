@@ -14,7 +14,7 @@ use alloy_trie::TrieMask;
 use reth_trie_common::{Nibbles, ProofTrieNodeV2, ProofV2TargetParent, RlpNode};
 use tracing::{instrument, trace};
 
-#[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
+#[cfg(reth_sparse_trie_coverage)]
 use super::sparse_guidance::observe_proof_target;
 
 /// A subtrie within the arena-based parallel sparse trie.
@@ -299,7 +299,7 @@ impl ArenaSparseSubtrie {
             // If the path hits a blinded node, request a proof regardless of update type.
             if matches!(find_result, SeekResult::Blinded) {
                 let logical_len = self.buffers.cursor.head_logical_branch_path_len(&self.arena);
-                #[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
+                #[cfg(reth_sparse_trie_coverage)]
                 observe_proof_target(
                     &self.arena,
                     self.buffers.cursor.head().map(|entry| (entry.index, logical_len)),

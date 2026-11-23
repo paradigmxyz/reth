@@ -65,10 +65,10 @@ mod nodes;
 mod subtrie;
 mod trie;
 
-// Require a custom cfg as well as `fuzz`: ordinary `--all-features` Clippy, udeps, doctests
-// and private docs must not instantiate the 28,674-function coverage bank. Enable explicitly
-// with `RUSTFLAGS="--cfg reth_sparse_trie_coverage"` and `--features fuzz`.
-#[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
+// Require an explicit cfg: ordinary `--all-features` Clippy, udeps, doctests and private
+// docs must not instantiate the 28,674-function coverage bank. Enable explicitly with
+// `RUSTFLAGS="--cfg reth_sparse_trie_coverage"`; the `fuzz` feature is not required.
+#[cfg(reth_sparse_trie_coverage)]
 mod sparse_guidance;
 
 use branch_child_idx::BranchChildIdx;

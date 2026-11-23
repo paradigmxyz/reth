@@ -62,8 +62,10 @@ fi
 cat > "$bundle/rustc-wrapper.py" <<'PYWRAPPER'
 #!/usr/bin/env python3
 import hashlib
+import json
 import os
 import pathlib
+import subprocess
 import sys
 
 rustc, *args = sys.argv[1:]
@@ -82,12 +84,34 @@ if any('sanitizer-coverage' in arg or 'sancov' in arg for arg in codegen):
     raise SystemExit('external SanCov flags would instrument the adapter; remove them')
 crate = next(values('--crate-name'), None)
 if crate == 'reth_trie_sparse':
-    if 'feature="fuzz"' not in values('--cfg'):
-        raise SystemExit('reth_trie_sparse must enable the fuzz feature')
+    if 'feature="fuzz"' in values('--cfg'):
+        raise SystemExit('reth_trie_sparse must not enable the fuzz feature')
+    # A manually supplied built-in cfg could conceal disabled codegen assertions.
+    if any(value.strip() == 'debug_assertions' for value in values('--cfg')):
+        raise SystemExit('use -C debug-assertions=on, not --cfg debug_assertions')
     args += ['--cfg', 'reth_sparse_trie_coverage',
              '--check-cfg=cfg(reth_sparse_trie_coverage)',
              '-Cpasses=sancov-module', '-Cllvm-args=-sanitizer-coverage-level=3',
-             '-Cllvm-args=-sanitizer-coverage-inline-8bit-counters']
+             '-Cllvm-args=-sanitizer-coverage-trace-pc-guard']
+    # Ask rustc about the effective flags, including split/compact forms and overrides.
+    # --print=cfg does not compile or emit artifacts. Never infer assertions from the
+    # profile name: command-line/environment overrides can disable them.
+    probe_env = {key: value for key, value in os.environ.items() if key != 'CARGO_MAKEFLAGS'}
+    cfg = set(subprocess.check_output([rustc, *args, '--print=cfg'],
+                                      text=True, env=probe_env).splitlines())
+    if 'feature="fuzz"' in cfg:
+        raise SystemExit('reth_trie_sparse must not enable the fuzz feature')
+    if 'debug_assertions' not in cfg:
+        raise SystemExit('reth_trie_sparse requires debug assertions (-C debug-assertions=on)')
+    if 'reth_sparse_trie_coverage' not in cfg:
+        raise SystemExit('reth_trie_sparse requires reth_sparse_trie_coverage')
+    policy = {'kind': 'llvm-sancov-trace-pc-guard', 'crate': crate,
+              'adapter_instrumented': False, 'fuzz_feature': False,
+              'debug_assertions': True, 'orphan_node_checks': True,
+              'reth_sparse_trie_coverage': True,
+              'rustc_args': args, 'rustc_cfg': sorted(cfg)}
+    pathlib.Path(__file__).with_name('target-build-policy.json').write_text(
+        json.dumps(policy, indent=2) + '\n')
 elif crate == 'sparse_trie_differential_workload':
     target = next((value.split('=', 1)[1] for value in values('--extern')
                    if value.startswith('reth_trie_sparse=')), None)
@@ -100,7 +124,7 @@ PYWRAPPER
 chmod +x "$bundle/rustc-wrapper.py"
 export RUSTC_WRAPPER="$bundle/rustc-wrapper.py"
 # This is native compilation on the execution machine, not a prebuilt registry upload.
-# Bind local functions so a fuzz host's own SanCov callback cannot steal our counter spans.
+# Bind local functions so a fuzz host's own SanCov callback cannot steal our guards.
 # Resolve the active toolchain directly when rustup is available. Host Cargo dispatch shims
 # can replace RUSTC_WRAPPER, which would silently remove the target-only instrumentation.
 if command -v rustup >/dev/null 2>&1; then
@@ -121,6 +145,18 @@ cp -- "$CARGO_TARGET_DIR/fuzz/libsparse_trie_differential_workload.so" "$bundle/
 python3 - "$bundle" "$root" "$source_sha256" <<'PY'
 import hashlib, json, pathlib, shutil, subprocess, sys, tarfile
 bundle, root = map(pathlib.Path, sys.argv[1:3])
+# Only the target wrapper's successful effective-cfg check can establish these claims.
+# Fail closed if Cargo reused an unchecked cached artifact without invoking the wrapper.
+policy_path = bundle / 'target-build-policy.json'
+if not policy_path.is_file():
+    raise SystemExit('target compile policy missing; prepare with a fresh CARGO_TARGET_DIR')
+coverage = json.loads(policy_path.read_text())
+expected = {'kind': 'llvm-sancov-trace-pc-guard', 'crate': 'reth_trie_sparse',
+            'adapter_instrumented': False, 'fuzz_feature': False,
+            'debug_assertions': True, 'orphan_node_checks': True,
+            'reth_sparse_trie_coverage': True}
+if any(coverage.get(key) != value for key, value in expected.items()):
+    raise SystemExit('target build policy was not verified')
 symbols = subprocess.check_output(
     ['nm', '--defined-only', '--demangle', str(bundle / 'libworkload.so')], text=True)
 # Fail closed if either cfg-gated bank was omitted or optimized out of the actual library.
@@ -131,6 +167,7 @@ bucket_arms = {
 }
 if any(count != 28674 for count in bucket_arms.values()):
     raise SystemExit(f'missing sparse-trie coverage bucket bodies: {bucket_arms}')
+coverage['bucket_arms'] = bucket_arms
 linked = subprocess.check_output(['ldd', str(bundle / 'libworkload.so')], text=True)
 if 'not found' in linked:
     raise SystemExit('unresolved native dependency:\n' + linked)
@@ -164,10 +201,7 @@ provenance = {'source_commit': commit, 'source_status': status,
               'source_tree_sha256': sys.argv[3], 'profile': 'fuzz',
               'rustc': subprocess.check_output(['rustc', '--version'], text=True).strip(),
               'cargo': subprocess.check_output(['cargo', '--version'], text=True).strip(),
-              'coverage': {'kind': 'llvm-sancov-inline-8bit-counters',
-                           'crate': 'reth_trie_sparse', 'adapter_instrumented': False,
-                           'fuzz_feature': True, 'reth_sparse_trie_coverage': True,
-                           'bucket_arms': bucket_arms},
+              'coverage': coverage,
               'sha256': files}
 (bundle / 'build-info.json').write_text(json.dumps(provenance, indent=2) + '\n')
 session = {'version': 2, 'library': './libworkload.so', 'args': {},

@@ -18,8 +18,9 @@ alloy-rlp = { version = "0.3.16", default-features = false, features = ["std", "
 alloy-trie = { version = "0.9.9", default-features = false, features = ["std"] }
 reth-trie = { path = "../../crates/trie/trie", features = ["test-utils"] }
 reth-trie-common = { path = "../../crates/trie/common", features = ["test-utils", "arbitrary"] }
-reth-trie-sparse = { path = "../../crates/trie/sparse", default-features = false, features = ["std", "fuzz"] }
+reth-trie-sparse = { path = "../../crates/trie/sparse", default-features = false, features = ["std"] }
 rand = { version = "0.9.5", default-features = false, features = ["std", "std_rng"] }
+rayon = { version = "1.7", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
 

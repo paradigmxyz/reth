@@ -14,7 +14,7 @@ use reth_trie_common::{BranchNodeMasks, Nibbles, ProofV2TargetParent};
 use smallvec::SmallVec;
 use tracing::{instrument, trace};
 
-#[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
+#[cfg(reth_sparse_trie_coverage)]
 use super::sparse_guidance::observe_proof_target;
 
 impl PersistentArenaParallelSparseTrie {
@@ -399,7 +399,7 @@ impl PersistentArenaParallelSparseTrie {
         sibling_path.push_unchecked(sibling_nibble);
         trace!(target: TRACE_TARGET, ?sibling_path, "Collapse onto blinded sibling requires a proof");
 
-        #[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
+        #[cfg(reth_sparse_trie_coverage)]
         observe_proof_target(arena, Some((parent_entry.index, parent_depth)), &sibling_path, &[]);
         Some(ArenaRequiredProof {
             key: Self::nibbles_to_padded_b256(&sibling_path),

@@ -4,12 +4,16 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     any::Any,
+    cell::Cell,
     ffi::c_void,
     fmt,
     panic::{catch_unwind, AssertUnwindSafe},
     path::Path,
     ptr, slice,
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicU64, AtomicU8, AtomicUsize, Ordering},
+        Mutex,
+    },
     time::Instant,
 };
 
@@ -24,16 +28,10 @@ struct Workload {
     pending: Option<Value>,
 }
 
-// The loader registers writable module-lifetime allocations before workers are forked.
-// No Rust reference into them survives a call to instrumented code.
 struct CounterSpan {
-    start: *mut u8,
+    start: usize,
     len: usize,
 }
-
-// SAFETY: These pointers refer to static SanCov storage, retained until process exit by the
-// native ABI. The registry mutex serializes reset/run/read across every workload handle.
-unsafe impl Send for CounterSpan {}
 
 #[derive(Default)]
 struct CounterRegistry {
@@ -44,12 +42,19 @@ struct CounterRegistry {
 struct NativeCoverage {
     counters: Vec<u8>,
     id: String,
+    threads: usize,
 }
 
 const MAX_COVERAGE_SIZE: usize = 67_108_864;
 const MAX_COUNTER_SPANS: usize = 4096;
+static COUNTERS: [AtomicU8; MAX_COVERAGE_SIZE] = [const { AtomicU8::new(0) }; MAX_COVERAGE_SIZE];
 static NATIVE_COUNTERS: Mutex<CounterRegistry> =
     Mutex::new(CounterRegistry { spans: Vec::new(), invalid: false });
+static COVERAGE_GENERATION: AtomicU64 = AtomicU64::new(0);
+static COVERAGE_THREADS: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    static THREAD_COVERAGE_GENERATION: Cell<u64> = const { Cell::new(0) };
+}
 
 const MAX_REQUEST_BYTES: usize = 65_536;
 const SEED_COUNT: u64 = 72;
@@ -232,6 +237,7 @@ fn execution_result(
             // Native edges remain available even when the oracle exits before its report.
             return Ok(json!({
                 "coverage": coverage, "coverage_size": coverage_size, "coverage_id": native.id,
+                "coverage_threads": native.threads,
                 "semantic_features": [],
                 "verdict": {"status": "difference", "details": failure.details},
                 "objective_signatures": [failure.signature], "duration_ns": duration,
@@ -275,6 +281,7 @@ fn execution_result(
     Ok(json!({
         "coverage": coverage, "coverage_size": coverage_size,
         "coverage_id": native.id,
+        "coverage_threads": native.threads,
         "semantic_features": features,
         "verdict": {"status": "passed", "report": report},
         "objective_signatures": [], "duration_ns": duration,
@@ -415,81 +422,124 @@ unsafe fn send(reply: Reply, context: *mut c_void, bytes: &[u8]) {
     unsafe { reply(context, bytes.as_ptr(), bytes.len()) };
 }
 
-/// Registers one compiler-generated inline 8-bit counter allocation at library load.
+/// Assigns stable IDs to compiler-generated guards before target execution begins.
 ///
 /// # Safety
-/// `start..end` must be a single writable allocation that remains mapped until process exit.
-/// Only compiler constructors may call this function, before any workload execution. The host
-/// must not execute this library's instrumented code outside its sequential workload calls.
+/// Nonempty `start..end` must delimit one writable, aligned `u32` allocation. Registration
+/// must finish before any thread reads these guards, and must not run during a workload call.
+/// The guard allocation must remain readable whenever its instrumented target code runs.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn __sanitizer_cov_8bit_counters_init(start: *mut u8, end: *mut u8) {
-    // No unwind or user callbacks are possible here, including after mutex poisoning.
+unsafe extern "C" fn __sanitizer_cov_trace_pc_guard_init(start: *mut u32, end: *mut u32) {
     let mut registry = match NATIVE_COUNTERS.lock() {
         Ok(registry) => registry,
         Err(poisoned) => poisoned.into_inner(),
     };
-    registry.register(start, end);
+    // SAFETY: The compiler constructor supplies its static guard allocation.
+    unsafe { registry.register(start, end) };
+}
+
+/// Counts a target hit without acquiring the registry mutex held by measured execution.
+///
+/// # Safety
+/// A nonnull `guard` must point to a readable, aligned `u32` initialized by the guard
+/// constructor before target threads begin. Its ID must not change during target execution.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn __sanitizer_cov_trace_pc_guard(guard: *mut u32) {
+    if guard.is_null() {
+        return;
+    }
+    // SAFETY: Registration ends before execution; target threads only read guard IDs.
+    let id = unsafe { guard.read() };
+    if id != 0 &&
+        let Some(counter) = COUNTERS.get(id as usize - 1)
+    {
+        counter.fetch_add(1, Ordering::Relaxed);
+        let generation = COVERAGE_GENERATION.load(Ordering::Relaxed);
+        if generation != 0 {
+            THREAD_COVERAGE_GENERATION.with(|previous| {
+                if previous.replace(generation) != generation {
+                    COVERAGE_THREADS.fetch_add(1, Ordering::Relaxed);
+                }
+            });
+        }
+    }
 }
 
 impl CounterRegistry {
-    fn register(&mut self, start: *mut u8, end: *mut u8) {
+    /// Registers a constructor span, rejecting invalid geometry before dereferencing it.
+    ///
+    /// # Safety
+    /// Any span that passes validation must be one writable `u32` allocation with no
+    /// concurrent readers or writers. Guard IDs remain immutable after initialization.
+    unsafe fn register(&mut self, start: *mut u32, end: *mut u32) {
         if start == end {
             return;
         }
-        let Some(len) = end.addr().checked_sub(start.addr()) else {
+        let Some(bytes) = end.addr().checked_sub(start.addr()) else {
             self.invalid = true;
             return;
         };
-        if start.is_null() || len > MAX_COVERAGE_SIZE {
+        if start.is_null() || !start.is_aligned() || bytes % size_of::<u32>() != 0 {
             self.invalid = true;
             return;
         }
-        if self.spans.iter().any(|span| span.start == start && span.len == len) {
+        let len = bytes / size_of::<u32>();
+        if self.spans.iter().any(|span| span.start == start.addr() && span.len == len) {
             return;
         }
-        if self.spans.len() == MAX_COUNTER_SPANS ||
-            self.spans.iter().map(|span| span.len).sum::<usize>() > MAX_COVERAGE_SIZE - len
+        let offset = self.spans.iter().map(|span| span.len).sum::<usize>();
+        if len > MAX_COVERAGE_SIZE ||
+            self.spans.len() == MAX_COUNTER_SPANS ||
+            offset > MAX_COVERAGE_SIZE - len ||
+            self.spans.iter().any(|span| {
+                start.addr() < span.start + span.len * size_of::<u32>() && end.addr() > span.start
+            })
         {
             self.invalid = true;
             return;
         }
-        self.spans.push(CounterSpan { start, len });
+        for index in 0..len {
+            // SAFETY: The constructor guarantees one writable allocation of `len` guards.
+            unsafe { start.add(index).write((offset + index + 1) as u32) };
+        }
+        self.spans.push(CounterSpan { start: start.addr(), len });
     }
 
-    // SAFETY requirements are inherited from the constructor registration contract. Holding
-    // the registry lock excludes execution through other handles. No references alias writes
-    // performed by the target: raw pointers are used only before and after core::run.
-    unsafe fn clear(&self) {
-        for span in &self.spans {
-            // SAFETY: Each registered allocation remains writable for its recorded length.
-            unsafe { ptr::write_bytes(span.start, 0, span.len) };
+    /// Resets a measurement while the registry is locked and all target tasks are joined.
+    fn clear(&self) {
+        let len = self.spans.iter().map(|span| span.len).sum::<usize>();
+        for counter in &COUNTERS[..len] {
+            counter.store(0, Ordering::Relaxed);
+        }
+        COVERAGE_THREADS.store(0, Ordering::Relaxed);
+        if COVERAGE_GENERATION.fetch_add(1, Ordering::Relaxed) == u64::MAX {
+            COVERAGE_GENERATION.store(1, Ordering::Relaxed);
         }
     }
 
-    unsafe fn snapshot(&self) -> NativeCoverage {
+    /// Reads a completed measurement while the registry lock excludes another execution.
+    fn snapshot(&self) -> NativeCoverage {
         let mut counters = Vec::new();
         let mut layout = 0xcbf29ce484222325_u64;
         for span in &self.spans {
             for byte in span.len.to_le_bytes() {
                 layout = (layout ^ u64::from(byte)).wrapping_mul(0x100000001b3);
             }
-            for offset in 0..span.len {
-                // SAFETY: Instrumented execution has ended and the lock prevents another run.
-                counters.push(unsafe { span.start.add(offset).read_volatile() });
-            }
         }
-        // The wrapper hashes the actual instrumented rlib, so a different build cannot silently
-        // reuse a layout just because its number of counters happens to be unchanged.
+        let len = self.spans.iter().map(|span| span.len).sum::<usize>();
+        counters.extend(COUNTERS[..len].iter().map(|counter| counter.load(Ordering::Relaxed)));
         let build = option_env!("SPARSE_TRIE_NATIVE_COVERAGE_ID").unwrap_or("uninstrumented");
         let id = if counters.is_empty() {
             String::new()
         } else {
-            format!("sparse-trie-sancov-v1-{build}-{layout:016x}")
+            format!("sparse-trie-sancov-v2-{build}-{layout:016x}")
         };
-        NativeCoverage { counters, id }
+        NativeCoverage { counters, id, threads: COVERAGE_THREADS.load(Ordering::Relaxed) }
     }
 }
 
+/// Holds the registry lock across reset/run/read; `run_input` joins all target tasks before
+/// returning or unwinding. Only the target crate is instrumented, never this adapter.
 fn run_measured(
     input: &core::Input,
 ) -> Result<(Result<String, core::DifferentialFailure>, NativeCoverage), Error> {
@@ -502,12 +552,11 @@ fn run_measured(
     if registry.spans.is_empty() {
         return Err(Error::Invalid("native coverage is absent; build with prepare.sh"));
     }
-    // SAFETY: Loader registration guarantees static allocations. The mutex spans the complete
-    // reset/run/read transaction. The adapter and core driver are deliberately uninstrumented.
-    unsafe { registry.clear() };
+    // The registry lock excludes other executions. Only target tasks touch these atomics
+    // until the local pool has joined, and the adapter itself remains uninstrumented.
+    registry.clear();
     let result = core::run_input(input);
-    // SAFETY: The core has returned and no target code can concurrently update the counters.
-    let native = unsafe { registry.snapshot() };
+    let native = registry.snapshot();
     Ok((result, native))
 }
 
@@ -606,6 +655,7 @@ mod tests {
         assert_eq!(many["coverage"], json!([[1, 1], [2, 255]]));
         assert_eq!(one["coverage_id"], many["coverage_id"]);
         assert_eq!(one["coverage_size"], 3);
+        assert_eq!(one["coverage_threads"], 2);
         assert_ne!(one["semantic_features"], many["semantic_features"]);
         let empty = execution_result(
             Ok(json!({"features": [], "operations": {}}).to_string()),
@@ -642,6 +692,7 @@ mod tests {
         NativeCoverage {
             counters: counters.to_vec(),
             id: if counters.is_empty() { String::new() } else { "test-layout".to_owned() },
+            threads: 2,
         }
     }
 
@@ -657,40 +708,109 @@ mod tests {
     }
 
     #[test]
-    fn native_spans_reset_and_snapshot_without_self_observation() {
-        let mut first = [1_u8, 2, 255];
-        let mut second = [4_u8, 5];
-        let mut registry = CounterRegistry::default();
+    fn native_guards_are_atomic_and_reset_without_self_observation() {
+        let mut registry = NATIVE_COUNTERS.lock().unwrap();
+        let offset = registry.spans.iter().map(|span| span.len).sum::<usize>();
+        let span_count = registry.spans.len();
+        let mut first = [0_u32; 3];
+        let mut second = [0_u32; 2];
         let first_start = first.as_mut_ptr();
         let second_start = second.as_mut_ptr();
-        registry.register(first_start, first_start.wrapping_add(first.len()));
-        registry.register(first_start, first_start.wrapping_add(first.len()));
-        registry.register(second_start, second_start.wrapping_add(second.len()));
-        registry.register(ptr::null_mut(), ptr::null_mut());
-        assert_eq!(registry.spans.len(), 2);
-        // SAFETY: Both arrays remain live, and no target or other thread accesses them.
-        let before = unsafe { registry.snapshot() };
-        assert_eq!(before.counters, [1, 2, 255, 4, 5]);
-        // SAFETY: Both arrays are exclusively owned and remain writable.
-        unsafe { registry.clear() };
-        // SAFETY: Read and write through the original raw pointers without retagging arrays.
-        assert_eq!(unsafe { registry.snapshot() }.counters, [0, 0, 0, 0, 0]);
-        // SAFETY: This pointer still uniquely addresses the live first allocation.
-        unsafe { first_start.add(1).write(7) };
-        // SAFETY: No references to the arrays are live while snapshot reads their pointers.
-        let after = unsafe { registry.snapshot() };
-        assert_eq!(after.counters, [0, 7, 0, 0, 0]);
+        unsafe {
+            registry.register(first_start, first_start.add(first.len()));
+            registry.register(first_start, first_start.add(first.len()));
+            registry.register(second_start, second_start.add(second.len()));
+            registry.register(ptr::null_mut(), ptr::null_mut());
+        }
+        assert!(!registry.invalid);
+        assert_eq!(registry.spans.len(), span_count + 2);
+        assert_eq!(first, [offset as u32 + 1, offset as u32 + 2, offset as u32 + 3]);
+        assert_eq!(second, [offset as u32 + 4, offset as u32 + 5]);
+        registry.clear();
+        for (index, count) in [1, 2, 255].into_iter().enumerate() {
+            for _ in 0..count {
+                unsafe { __sanitizer_cov_trace_pc_guard(first.as_ptr().add(index).cast_mut()) };
+            }
+        }
+        let before = registry.snapshot();
+        assert_eq!(before.counters[offset..], [1, 2, 255, 0, 0]);
+        assert_eq!(before.threads, 1);
+        assert!(before.id.starts_with("sparse-trie-sancov-v2-"));
+        registry.clear();
+        assert_eq!(registry.snapshot().counters[offset..], [0; 5]);
+        assert_eq!(registry.snapshot().threads, 0);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    for _ in 0..1001 {
+                        unsafe { __sanitizer_cov_trace_pc_guard(first.as_ptr().cast_mut()) };
+                    }
+                    for _ in 0..257 {
+                        unsafe { __sanitizer_cov_trace_pc_guard(second.as_ptr().cast_mut()) };
+                    }
+                });
+            }
+        });
+        let after = registry.snapshot();
+        assert_eq!(after.counters[offset..], [72, 0, 0, 8, 0]);
+        assert_eq!(after.threads, 8);
         assert_eq!(before.id, after.id);
-        // SAFETY: Snapshot does not mutate either allocation.
-        assert_eq!(after.counters, unsafe { registry.snapshot() }.counters);
+        assert_eq!(after.counters, registry.snapshot().counters);
+        let mut disabled = 0;
+        let mut out_of_range = MAX_COVERAGE_SIZE as u32 + 1;
+        unsafe {
+            __sanitizer_cov_trace_pc_guard(ptr::null_mut());
+            __sanitizer_cov_trace_pc_guard(&mut disabled);
+            __sanitizer_cov_trace_pc_guard(&mut out_of_range);
+        }
+        assert_eq!(after.counters, registry.snapshot().counters);
+        assert_eq!(registry.snapshot().threads, 8);
+        registry.clear();
+        assert!(registry.snapshot().counters.iter().all(|count| *count == 0));
+        assert_eq!(registry.snapshot().threads, 0);
+        unsafe { __sanitizer_cov_trace_pc_guard(first.as_ptr().cast_mut()) };
+        assert_eq!(registry.snapshot().threads, 1);
+        COVERAGE_GENERATION.store(u64::MAX, Ordering::Relaxed);
+        registry.clear();
+        assert_eq!(COVERAGE_GENERATION.load(Ordering::Relaxed), 1);
+        assert_eq!(registry.snapshot().threads, 0);
+        registry.spans.truncate(span_count);
     }
 
     #[test]
-    fn invalid_native_span_is_rejected_without_dereferencing() {
+    fn invalid_native_guards_are_rejected_without_dereferencing() {
         let mut registry = CounterRegistry::default();
-        registry.register(ptr::null_mut(), ptr::without_provenance_mut(1));
+        unsafe { registry.register(ptr::null_mut(), ptr::without_provenance_mut(4)) };
         assert!(registry.invalid);
         assert!(registry.spans.is_empty());
+        for (start, end) in [(8, 4), (1, 5), (4, 7), (4, (MAX_COVERAGE_SIZE + 1) * 4 + 4)] {
+            let mut registry = CounterRegistry::default();
+            unsafe {
+                registry
+                    .register(ptr::without_provenance_mut(start), ptr::without_provenance_mut(end));
+            }
+            assert!(registry.invalid);
+            assert!(registry.spans.is_empty());
+        }
+        let mut registry =
+            CounterRegistry { spans: vec![CounterSpan { start: 4, len: 2 }], invalid: false };
+        unsafe {
+            registry.register(ptr::without_provenance_mut(8), ptr::without_provenance_mut(16));
+        }
+        assert!(registry.invalid);
+        assert_eq!(registry.spans.len(), 1);
+        for spans in [
+            (0..MAX_COUNTER_SPANS).map(|_| CounterSpan { start: 16, len: 0 }).collect(),
+            vec![CounterSpan { start: 16, len: MAX_COVERAGE_SIZE }],
+        ] {
+            let mut registry = CounterRegistry { spans, invalid: false };
+            let len = registry.spans.len();
+            unsafe {
+                registry.register(ptr::without_provenance_mut(4), ptr::without_provenance_mut(8));
+            }
+            assert!(registry.invalid);
+            assert_eq!(registry.spans.len(), len);
+        }
     }
 
     #[test]

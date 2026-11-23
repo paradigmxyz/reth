@@ -1,14 +1,29 @@
 #!/usr/bin/env python3
-"""Exercise the native ABI synchronously without a fuzzer or execution threads."""
+"""Exercise the native ABI synchronously without a fuzzer or load-time execution threads."""
 import ctypes
 import json
 import pathlib
 import tempfile
 import sys
+import time
+
+
+def assert_workers_joined(expected):
+    # pthread_join may return before Linux removes the exited task from procfs.
+    # Scoped Rust workers are joined synchronously; allow only bounded procfs cleanup.
+    deadline = time.monotonic() + 1
+    while True:
+        tasks = list(pathlib.Path('/proc/self/task').iterdir())
+        if len(tasks) == expected:
+            return
+        assert time.monotonic() < deadline, ('worker threads did not exit', [task.name for task in tasks])
+        time.sleep(0.001)
 
 
 def main():
+    load_threads = len(list(pathlib.Path('/proc/self/task').iterdir()))
     library = ctypes.CDLL(str(pathlib.Path(sys.argv[1]).resolve()))
+    assert len(list(pathlib.Path('/proc/self/task').iterdir())) == load_threads, 'library load spawned threads'
     pointer, size = ctypes.c_void_p, ctypes.c_size_t
     callback_type = ctypes.CFUNCTYPE(None, pointer, pointer, size)
     replies = []
@@ -107,24 +122,27 @@ def main():
         with tempfile.TemporaryDirectory() as temporary:
             # The workload must never create the artifact directory or any execution file.
             before = set(pathlib.Path(temporary).iterdir())
-            threads = len(list(pathlib.Path('/proc/self/task').iterdir()))
             cases = (inputs if '--all-seeds' in sys.argv[2:] else [inputs[0], inputs[1], inputs[-1], fresh['input']]) + mutated
             objectives = 0
             layouts = set()
             edge_maps = set()
             native_slots = set()
+            max_coverage_threads = 0
             for index, value in enumerate(cases):
                 out = str(pathlib.Path(temporary) / str(index))
                 result = invoke(handle, 'execute', {'input': value, 'seed': index, 'out': out})
+                assert_workers_joined(load_threads)
                 assert result['finalized']
                 assert result['coverage'] == sorted(result['coverage'])
                 assert all(0 <= slot < result['coverage_size'] and 1 <= count <= 255
                            for slot, count in result['coverage'])
                 assert result['semantic_features'] == sorted(set(result['semantic_features']))
-                assert result['coverage_id'].startswith('sparse-trie-sancov-v1-')
+                assert result['coverage_id'].startswith('sparse-trie-sancov-v2-')
                 assert 'uninstrumented' not in result['coverage_id']
                 assert result['coverage_size'] > 100, 'missing real native edge layout'
                 assert result['coverage'], 'no target edges were observed'
+                assert 1 <= result['coverage_threads'] <= 2, result['coverage_threads']
+                max_coverage_threads = max(max_coverage_threads, result['coverage_threads'])
                 layouts.add((result['coverage_id'], result['coverage_size']))
                 edge_maps.add(tuple(map(tuple, result['coverage'])))
                 native_slots.update(slot for slot, _ in result['coverage'])
@@ -139,15 +157,14 @@ def main():
                 status = finished['verdict']['status']
                 assert status in {'passed', 'difference'}, finished
                 assert bool(finished['objective_signatures']) == (status == 'difference'), finished
+                if status == 'passed':
+                    report = finished['verdict']['report']
+                    assert report['execution_modes'] == 2 and report['worker_threads'] == 2, report
                 objectives += bool(finished['objective_signatures'])
-                # Other inputs and planning calls must not leak counters into replay. Ignore
-                # duration only; host seed/out must not influence target execution or novelty.
                 if index == 0:
                     replay_input, replay_result = value, result
             replay = invoke(handle, 'execute', {'input': replay_input, 'seed': 999, 'out': out})
-            # Hash-table randomization can change native probe counts without changing trie
-            # operations or oracle results. Do not mistake that noise for a semantic difference.
-            nondeterministic = {'duration_ns', 'coverage'}
+            nondeterministic = {'duration_ns', 'coverage', 'coverage_threads'}
             assert {k: v for k, v in replay.items() if k not in nondeterministic} == {
                 k: v for k, v in replay_result.items() if k not in nondeterministic}
             first_counts, replay_counts = dict(replay_result['coverage']), dict(replay['coverage'])
@@ -155,14 +172,16 @@ def main():
                                          for slot in first_counts.keys() | replay_counts.keys())
             if replay['pending']:
                 invoke(handle, 'finish', {'admitted': False, 'n': len(cases)})
+            assert max_coverage_threads == 2, 'instrumented target did not reach both workers'
             assert len(layouts) == 1, 'native slot layout changed between executions'
             assert len(edge_maps) > 1, 'native counters did not respond to different inputs'
             assert set(pathlib.Path(temporary).iterdir()) == before
-            assert len(list(pathlib.Path('/proc/self/task').iterdir())) == threads, 'execution spawned threads'
+            assert_workers_joined(load_threads)
         print(f'Native ABI smoke passed ({len(cases)} executions; {count} corpus entries; '
               f'{len(mutated)} structured mutations; {objectives} differential objectives; {len(native_slots)} native slots observed / '
               f'{next(iter(layouts))[1]} registered; deterministic semantic replay '
-              f'({replay_counter_changes} native counts varied); no files or threads).')
+              f'({replay_counter_changes} native counts varied); target reached {max_coverage_threads} workers; '
+              f'no files or load-time threads).')
     finally:
         destroy(handle)
     replies.clear()

@@ -3757,6 +3757,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-trie",
  "rand 0.9.5",
+ "rayon",
  "reth-trie",
  "reth-trie-common",
  "reth-trie-sparse",

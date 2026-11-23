@@ -20,7 +20,7 @@ use reth_trie_common::{
 use smallvec::SmallVec;
 use tracing::{instrument, trace};
 
-#[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
+#[cfg(reth_sparse_trie_coverage)]
 use super::sparse_guidance::observe_proof_target;
 
 impl SparseTrie for PersistentArenaParallelSparseTrie {
@@ -577,7 +577,7 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
                     let logical_len = cursor.head_logical_branch_path_len(&self.upper_arena);
                     let parent = ProofV2TargetParent::new(logical_len);
                     trace!(target: TRACE_TARGET, ?key, ?parent, "Update hit blinded node, requesting proof");
-                    #[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
+                    #[cfg(reth_sparse_trie_coverage)]
                     observe_proof_target(
                         &self.upper_arena,
                         cursor.head().map(|entry| (entry.index, logical_len)),

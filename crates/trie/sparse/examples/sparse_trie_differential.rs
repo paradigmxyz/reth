@@ -1,7 +1,7 @@
-//! Deterministic, single-threaded, in-memory differential sparse-trie workload.
+//! Deterministic, in-memory differential sparse-trie workload in serial and parallel modes.
 //!
 //! Run with `cargo run -p reth-trie-sparse --example sparse_trie_differential -- 0 1 2`.
-//! No global pool, database, filesystem, clock, or OS randomness is used by `run`.
+//! A local two-thread Rayon pool is joined before `run` returns; no global pool or I/O is used.
 
 use alloy_primitives::{map::B256Map, B256, U256};
 use alloy_rlp::encode_fixed_size;
@@ -576,7 +576,7 @@ fn generated(seed: u64) -> BTreeMap<B256, U256> {
 
 fn exercise<T: SparseTrie + Clone>(
     input: &Input,
-    factory: fn() -> T,
+    factory: impl Fn() -> T + Copy,
 ) -> Result<Evidence, DifferentialFailure> {
     let seed = input.fixture_seed;
     let mut evidence = Evidence::default();
@@ -924,7 +924,7 @@ fn exercise<T: SparseTrie + Clone>(
 }
 
 fn root_and_fork_isolation<T: SparseTrie + Clone>(
-    factory: fn() -> T,
+    factory: impl Fn() -> T + Copy,
     harness: &TrieTestHarness,
     evidence: &mut Evidence,
 ) -> Result<(), DifferentialFailure> {
@@ -1145,68 +1145,99 @@ pub fn run(seed: u64) -> Result<String, DifferentialFailure> {
     run_input(&Input::generate(seed))
 }
 
-/// Runs the same validated tape on both backends with every fixed trait oracle enabled.
+/// Runs the validated tape on both backends with sequential and forced-parallel thresholds.
 ///
-/// Invalid shapes fail before target execution. No action generation, I/O or worker spawning
-/// occurs.
+/// Invalid shapes fail before target execution. A bounded local pool is created after worker
+/// fork and dropped after all target tasks join; the process-global Rayon pool is never used.
 pub fn run_input(input: &Input) -> Result<String, DifferentialFailure> {
     input.validate().map_err(|details| DifferentialFailure {
         signature: "sparse-trie/invalid-input".into(),
         details: details.into(),
     })?;
-    let seed = input.fixture_seed;
-    let arena = exercise(input, || {
-        ArenaParallelSparseTrie::default().with_parallelism_thresholds(ArenaParallelismThresholds {
-            min_dirty_leaves: u64::MAX,
-            min_revealed_nodes: usize::MAX,
-            min_updates: usize::MAX,
-            min_leaves_for_prune: u64::MAX,
-        })
-    })
-    .map_err(|mut failure| {
-        failure.details = format!("seed={seed}; backend=arena; {}", failure.details);
-        failure
-    })?;
-    let persistent = exercise(input, || {
-        PersistentArenaParallelSparseTrie::default().with_parallelism_thresholds(
-            PersistentArenaParallelismThresholds {
-                min_dirty_leaves: u64::MAX,
-                min_revealed_nodes: usize::MAX,
-                min_updates: usize::MAX,
-                min_leaves_for_prune: u64::MAX,
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build_scoped(
+            |thread| thread.run(),
+            |pool| {
+                pool.install(|| {
+                    let seed = input.fixture_seed;
+                    let mut baseline = None;
+                    let mut counts = BTreeMap::<_, u64>::new();
+                    let mut features = BTreeSet::new();
+                    for parallel in [false, true] {
+                        let mode = if parallel { "parallel" } else { "sequential" };
+                        let arena = exercise(input, || {
+                            ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+                                ArenaParallelismThresholds {
+                                    min_dirty_leaves: if parallel { 0 } else { u64::MAX },
+                                    min_revealed_nodes: if parallel { 0 } else { usize::MAX },
+                                    min_updates: if parallel { 0 } else { usize::MAX },
+                                    min_leaves_for_prune: if parallel { 0 } else { u64::MAX },
+                                },
+                            )
+                        })
+                        .map_err(|mut failure| {
+                            failure.details = format!("seed={seed}; backend=arena; mode={mode}; {}", failure.details);
+                            failure
+                        })?;
+                        let persistent = exercise(input, || {
+                            PersistentArenaParallelSparseTrie::default().with_parallelism_thresholds(
+                                PersistentArenaParallelismThresholds {
+                                    min_dirty_leaves: if parallel { 0 } else { u64::MAX },
+                                    min_revealed_nodes: if parallel { 0 } else { usize::MAX },
+                                    min_updates: if parallel { 0 } else { usize::MAX },
+                                    min_leaves_for_prune: if parallel { 0 } else { u64::MAX },
+                                },
+                            )
+                        })
+                        .map_err(|mut failure| {
+                            failure.details = format!("seed={seed}; backend=persistent; mode={mode}; {}", failure.details);
+                            failure
+                        })?;
+                        for (backend, evidence) in [("arena", arena), ("persistent", persistent)] {
+                            if let Some(expected) = &baseline {
+                                compare_evidence(&evidence, expected).map_err(|mut failure| {
+                                    failure.details = format!("seed={seed}; backend={backend}; mode={mode}; {}", failure.details);
+                                    failure
+                                })?;
+                            }
+                            for (&operation, &count) in &evidence.operations {
+                                *counts.entry(operation).or_default() += count;
+                            }
+                            if baseline.is_none() {
+                                features = evidence.features.clone();
+                                baseline = Some(evidence);
+                            } else {
+                                features.retain(|name| evidence.features.contains(name));
+                            }
+                        }
+                    }
+                    features.extend(["parallel_paths", "sequential_paths"]);
+                    let operations = counts
+                        .iter()
+                        .map(|(name, count)| format!("\"{name}\":{count}"))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let features = features.iter().map(|name| format!("\"{name}\"")).collect::<Vec<_>>().join(",");
+                    Ok(format!("{{\"seed\":{seed},\"operations\":{{{operations}}},\"features\":[{features}],\"backends\":2,\"execution_modes\":2,\"worker_threads\":2,\"rounds_per_backend\":16}}"))
+                })
             },
         )
-    })
-    .map_err(|mut failure| {
-        failure.details = format!("seed={seed}; backend=persistent; {}", failure.details);
-        failure
-    })?;
-    equal(&arena.checkpoints, &persistent.checkpoints, "backend-checkpoints")?;
-    equal(arena.transcript.len(), persistent.transcript.len(), "backend-transcript-length")?;
+        .expect("local differential workload pool")
+}
+
+fn compare_evidence(actual: &Evidence, expected: &Evidence) -> Result<(), DifferentialFailure> {
+    equal(&actual.checkpoints, &expected.checkpoints, "backend-checkpoints")?;
+    equal(actual.transcript.len(), expected.transcript.len(), "backend-transcript-length")?;
     for (index, (actual, expected)) in
-        arena.transcript.iter().zip(&persistent.transcript).enumerate()
+        actual.transcript.iter().zip(&expected.transcript).enumerate()
     {
         equal(actual, expected, "backend-observable-transcript").map_err(|mut failure| {
-            failure.details = format!("seed={seed}; observation={index}; {}", failure.details);
+            failure.details = format!("observation={index}; {}", failure.details);
             failure
         })?;
     }
-    let mut counts = arena.operations;
-    for (operation, count) in persistent.operations {
-        *counts.entry(operation).or_default() += count;
-    }
-    let operations = counts
-        .iter()
-        .map(|(name, count)| format!("\"{name}\":{count}"))
-        .collect::<Vec<_>>()
-        .join(",");
-    let features = arena
-        .features
-        .intersection(&persistent.features)
-        .map(|name| format!("\"{name}\""))
-        .collect::<Vec<_>>()
-        .join(",");
-    Ok(format!("{{\"seed\":{seed},\"operations\":{{{operations}}},\"features\":[{features}],\"backends\":2,\"rounds_per_backend\":16}}"))
+    Ok(())
 }
 
 fn main() {
