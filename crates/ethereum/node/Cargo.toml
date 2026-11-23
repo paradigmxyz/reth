@@ -176,6 +176,8 @@ test-utils = [
 ]
 
 fuzz = [
+    "reth-chain-state/fuzz",
+    "reth-storage-overlay/fuzz",
     "reth-engine-tree/fuzz",
     "reth-evm/fuzz",
     "reth-evm-ethereum/fuzz",
