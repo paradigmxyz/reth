@@ -1,0 +1,106 @@
+{
+  "crates/engine/execution-cache/src/cached_state.rs": {
+    "reason": "Fixed-cache, its counters, and its one-time logging stay outside the simulated backend.",
+    "source": [
+      "Self { collisions: AtomicU64::new(0), size: AtomicUsize::new(0), capacity }",
+      "account_hits: AtomicUsize,",
+      "account_misses: AtomicUsize,",
+      "code_hits: AtomicUsize,",
+      "code_misses: AtomicUsize,",
+      "collisions: AtomicU64,",
+      "let _ = self.size.fetch_add(1, Ordering::Relaxed);",
+      "let _ = self.size.fetch_sub(1, Ordering::Relaxed);",
+      "self.account_hits.fetch_add(1, Ordering::Relaxed);",
+      "self.account_hits.load(Ordering::Relaxed)",
+      "self.account_misses.fetch_add(1, Ordering::Relaxed);",
+      "self.account_misses.load(Ordering::Relaxed)",
+      "self.code_hits.fetch_add(1, Ordering::Relaxed);",
+      "self.code_hits.load(Ordering::Relaxed)",
+      "self.code_misses.fetch_add(1, Ordering::Relaxed);",
+      "self.code_misses.load(Ordering::Relaxed)",
+      "self.collisions.fetch_add(1, Ordering::Relaxed);",
+      "self.collisions.load(Ordering::Relaxed)",
+      "self.collisions.store(0, Ordering::Relaxed);",
+      "self.size.load(Ordering::Relaxed)",
+      "self.size.store(0, Ordering::Relaxed);",
+      "self.storage_hits.fetch_add(1, Ordering::Relaxed);",
+      "self.storage_hits.load(Ordering::Relaxed)",
+      "self.storage_misses.fetch_add(1, Ordering::Relaxed);",
+      "self.storage_misses.load(Ordering::Relaxed)",
+      "self.txpool_snapshot_account_hits.fetch_add(1, Ordering::Relaxed);",
+      "self.txpool_snapshot_account_hits.load(Ordering::Relaxed)",
+      "self.txpool_snapshot_account_misses.fetch_add(1, Ordering::Relaxed);",
+      "self.txpool_snapshot_account_misses.load(Ordering::Relaxed)",
+      "self.txpool_snapshot_code_hits.fetch_add(1, Ordering::Relaxed);",
+      "self.txpool_snapshot_code_hits.load(Ordering::Relaxed)",
+      "self.txpool_snapshot_code_misses.fetch_add(1, Ordering::Relaxed);",
+      "self.txpool_snapshot_code_misses.load(Ordering::Relaxed)",
+      "self.txpool_snapshot_storage_hits.fetch_add(1, Ordering::Relaxed);",
+      "self.txpool_snapshot_storage_hits.load(Ordering::Relaxed)",
+      "self.txpool_snapshot_storage_misses.fetch_add(1, Ordering::Relaxed);",
+      "self.txpool_snapshot_storage_misses.load(Ordering::Relaxed)",
+      "selfdestruct_encountered: Once,",
+      "selfdestruct_encountered: Once::new(),",
+      "size: AtomicUsize,",
+      "storage_hits: AtomicUsize,",
+      "storage_misses: AtomicUsize,",
+      "txpool_snapshot_account_hits: AtomicUsize,",
+      "txpool_snapshot_account_misses: AtomicUsize,",
+      "txpool_snapshot_code_hits: AtomicUsize,",
+      "txpool_snapshot_code_misses: AtomicUsize,",
+      "txpool_snapshot_storage_hits: AtomicUsize,",
+      "txpool_snapshot_storage_misses: AtomicUsize,",
+      "use parking_lot::Once;"
+    ]
+  },
+  "crates/engine/tree/src/tree/instrumented_state.rs": {
+    "reason": "Instrumentation observes native EVM/provider calls without coordinating workload execution.",
+    "source": [
+      "let nanos = self.nanos.load(Ordering::Relaxed);",
+      "nanos: AtomicU64,",
+      "self.nanos.fetch_add(total_nanos, Ordering::Relaxed);",
+      "self.stats.total_account_fetches.fetch_add(1, Ordering::Relaxed);",
+      "self.stats.total_code_fetched_bytes.fetch_add(",
+      "self.stats.total_code_fetches.fetch_add(1, Ordering::Relaxed);",
+      "self.stats.total_storage_fetches.fetch_add(1, Ordering::Relaxed);",
+      "self.total_account_fetches.load(Ordering::Relaxed)",
+      "self.total_code_fetched_bytes.load(Ordering::Relaxed)",
+      "self.total_code_fetches.load(Ordering::Relaxed)",
+      "self.total_storage_fetches.load(Ordering::Relaxed)",
+      "total_account_fetches: AtomicUsize,",
+      "total_code_fetched_bytes: AtomicUsize,",
+      "total_code_fetches: AtomicUsize,",
+      "total_storage_fetches: AtomicUsize,"
+    ]
+  },
+  "crates/engine/tree/src/tree/payload_build.rs": {
+    "reason": "The lifetime fence tracks native Tokio payload jobs outside synchronous simulation.",
+    "source": [
+      "(Self { active: Arc::new(AtomicUsize::new(0)), finished_tx }, finished_rx)",
+      "active: Arc<AtomicUsize>,",
+      "let previous = self.active.fetch_sub(1, Ordering::AcqRel);",
+      "self.active.fetch_add(1, Ordering::AcqRel);",
+      "self.active.load(Ordering::Acquire) != 0"
+    ]
+  },
+  "crates/tasks/src/runtime.rs": {
+    "reason": "The native counter tracks Tokio future lifetimes across OS threads outside synchronous simulation.",
+    "source": [
+      "while self.0.graceful_tasks.load(Ordering::SeqCst) > 0 {"
+    ]
+  },
+  "crates/tasks/src/task_manager.rs": {
+    "reason": "The native counter tracks Tokio future lifetimes across OS threads outside synchronous simulation.",
+    "source": [
+      "let graceful_tasks = Arc::new(AtomicUsize::new(0));",
+      "while self.graceful_tasks.load(Ordering::SeqCst) > 0 {"
+    ]
+  },
+  "crates/tasks/src/shutdown.rs": {
+    "reason": "The native counter tracks Tokio future lifetimes across OS threads outside synchronous simulation.",
+    "source": [
+      "counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);",
+      "self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);"
+    ]
+  }
+}

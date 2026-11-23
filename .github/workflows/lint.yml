@@ -88,8 +88,15 @@ jobs:
       - run: cargo clippy --workspace --lib --examples --tests --benches --locked
         env:
           RUSTFLAGS: -D warnings
+      # The primitive gate is pinned independently of the general workspace lint.
+      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+        with:
+          toolchain: nightly-2026-10-31
+          components: clippy
+      # Lint migrated workload libraries, not native dependency implementations (e.g. MDBX).
+      # Native tests and backend adapters are covered by their normal lint/test jobs.
       # Use a separate configuration so native aliases stay unrestricted in non-fuzz builds.
-      - name: Reject native primitive uses in fuzz builds
+      - name: Reject native primitives in migrated workload libraries
         run: |
           status=0
           report=$(mktemp)
@@ -97,19 +104,23 @@ jobs:
           for profile in fuzz all-features; do
             args=(--features fuzz)
             if [[ "$profile" == all-features ]]; then args=(--all-features); fi
-            cargo clippy --workspace --all-targets "${args[@]}" --locked --message-format=json -- \
+            cargo clippy --no-deps --lib \
+              -p reth-tasks -p reth-engine-tree -p reth-execution-cache \
+              -p reth-trie-common -p reth-trie -p reth-trie-sparse -p reth-trie-parallel \
+              "${args[@]}" --locked --message-format=json -- \
               --warn clippy::disallowed_types --warn clippy::disallowed_methods \
               --warn clippy::disallowed_macros > "$report" || status=1
             python3 - "$report" <<'PYTHON' || status=1
           import json
           import sys
 
-          # Expanded thread_local! diagnostics ignore local allowances on these backend declarations.
+          # Expanded thread_local! diagnostics ignore allowances on these host TLS declarations.
           tls = {
-              "crates/concurrency/src/sync/deterministic.rs": "CLOCK",
               "crates/tasks/src/pool.rs": "WORKERS",
               "crates/tasks/src/cancel.rs": "CURRENT",
           }
+          with open(".config/fuzz-primitives/native-boundaries.json") as boundaries:
+              native_boundaries = json.load(boundaries)
           failed = False
           finished = False
           with open(sys.argv[1]) as report:
@@ -124,7 +135,9 @@ jobs:
                   spans = [span for span in diagnostic["spans"] if span["is_primary"]]
                   exempt = False
                   for span in spans:
+                      macros = []
                       while span.get("expansion"):
+                          macros.append(span["expansion"]["macro_decl_name"])
                           span = span["expansion"]["span"]
                       path = span["file_name"]
                       source = "\n".join(part["text"][part["highlight_start"] - 1:part["highlight_end"] - 1]
@@ -135,7 +148,37 @@ jobs:
                                  and source.startswith(("thread_local! {", "std::thread_local! {"))
                                  and any(line.strip().startswith(f"static {tls[path]}:")
                                          for line in source.splitlines()))
-                  if exempt:
+                      # Metrics registration and Arbitrary's recursion guard are host internals,
+                      # not workload synchronization. Match both expansion and native symbol.
+                      symbol = diagnostic["message"].split("`")[1] if "`" in diagnostic["message"] else ""
+                      exempt |= (any("derive(Metrics" in macro or "derive(reth_metrics::Metrics" in macro
+                                     for macro in macros)
+                                 and symbol in {"std::sync::Once", "std::sync::OnceLock",
+                                                "std::sync::Once::new", "std::sync::Once::call_once",
+                                                "std::sync::OnceLock::new", "std::sync::OnceLock::get_or_init"})
+                      exempt |= ("#[derive(arbitrary::Arbitrary)]" in macros
+                                 and symbol in {"std::thread_local", "std::thread::LocalKey"})
+                      # Permit only the enumerated current operations, not new native uses
+                      # elsewhere in a boundary file (or new operations on the same line).
+                      boundary = native_boundaries.get(path, {})
+                      exempt |= ((symbol.startswith("core::sync::atomic::Atomic::")
+                                  or symbol in {"parking_lot::Once", "std::sync::atomic::AtomicU64",
+                                                "std::sync::atomic::AtomicUsize"})
+                                 and any(part["text"].strip() in boundary.get("source", [])
+                                         for part in span["text"]))
+                      # Ingress latency uses the timestamp supplied by the native Engine API.
+                      exempt |= (path == "crates/engine/tree/src/tree/mod.rs"
+                                 and source == "elapsed"
+                                 and any(part["text"].strip() == "let backpressure_wait = enqueued_at.elapsed();"
+                                         for part in span["text"])
+                                 and symbol == "std::time::Instant::elapsed")
+                      # Setting the OS priority is host setup, not a simulated once operation.
+                      exempt |= (path == "crates/engine/tree/src/tree/state_root_strategy/mod.rs"
+                                 and source == "reth_tasks::once!(increase_thread_priority)"
+                                 and symbol in {"std::sync::Once", "std::sync::Once::new",
+                                                "std::sync::Once::call_once"})
+                  if exempt and lint in {"clippy::disallowed_types", "clippy::disallowed_methods",
+                                         "clippy::disallowed_macros"}:
                       continue
                   if diagnostic.get("rendered"):
                       print(diagnostic["rendered"], end="", file=sys.stderr)
