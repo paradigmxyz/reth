@@ -105,8 +105,7 @@ where
 /// Each wait can be independently disabled via `wait_for_persistence` and `wait_for_caches`.
 ///
 /// Responses include timing breakdowns with server-measured execution latency.
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "reth"))]
+#[rpc(server, namespace = "reth")]
 pub trait RethEngineApi<ExecutionData> {
     /// Reth-specific newPayload that accepts either `ExecutionData` directly or an RLP-encoded
     /// block.

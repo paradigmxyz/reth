@@ -34,7 +34,7 @@ use evm2::{
     },
     interpreter::{op, InstrStop, Interpreter, Message, MessageKind, MessageResult},
     utils::WordExt,
-    EvmFeatures, EvmTypes, Inspector, TxResultWithState, Version,
+    EvmFeatures, EvmTypes, Inspector, InspectorConfig, OpcodeSet, TxResultWithState, Version,
 };
 use parking_lot::{Mutex, RwLock};
 use std::{
@@ -56,6 +56,19 @@ pub(crate) const POOL_BENEFICIARY: Address = address!("0x00000000000000000000000
 
 /// Maximum estimated number of bytes held by [`PoolResults`].
 const MAX_POOL_RESULT_BYTES: usize = 64 << 20;
+
+/// Opcodes [`BalanceTracker::step`] is called for. Must contain every opcode it matches on.
+const BALANCE_TRACKER_STEPS: OpcodeSet = {
+    let mut steps = OpcodeSet::EMPTY;
+    steps.insert(op::BALANCE);
+    steps.insert(op::SELFBALANCE);
+    steps.insert(op::SELFDESTRUCT);
+    steps.insert(op::COINBASE);
+    steps.insert(op::TIMESTAMP);
+    steps.insert(op::DIFFICULTY);
+    steps.insert(op::GASLIMIT);
+    steps
+};
 
 /// Returns whether blocks executed with `cfg_env` may reuse prewarm results, which excludes
 /// EIP-8037 multidimensional block gas.
@@ -1007,6 +1020,10 @@ impl BalanceTracker {
 }
 
 impl<T: EvmTypes> Inspector<T> for BalanceTracker {
+    fn inspector_config(&self) -> InspectorConfig {
+        InspectorConfig::new().with_steps(BALANCE_TRACKER_STEPS)
+    }
+
     fn step(&mut self, interp: &mut Interpreter<'_, '_, T>) {
         let address = match interp.opcode() {
             op::BALANCE => {
@@ -1108,7 +1125,7 @@ mod tests {
     const COUNTER: Address = Address::repeat_byte(0xc1);
     /// Stores the beneficiary balance in slot 0.
     const BENEFICIARY_BALANCE_READER: Address = Address::repeat_byte(0xc2);
-    /// Stores its own balance in slot 0.
+    /// Logs its own balance.
     const SELF_BALANCE_READER: Address = Address::repeat_byte(0xc3);
     /// Sends 5 wei to [`NOOP`].
     const FORWARDER: Address = Address::repeat_byte(0xc4);
@@ -1245,7 +1262,7 @@ mod tests {
             (SELFDESTRUCTER, bytes!("73c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0ff")),
             (COUNTER, bytes!("5f546001015f5500")),
             (BENEFICIARY_BALANCE_READER, bytes!("41315f5500")),
-            (SELF_BALANCE_READER, bytes!("475f5500")),
+            (SELF_BALANCE_READER, bytes!("475f5260205fa000")),
             (FORWARDER, bytes!("5f5f5f5f600573c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c05af100")),
             (TIMESTAMP_READER, bytes!("425f5500")),
             (GAS_LIMIT_READER, bytes!("455f5500")),

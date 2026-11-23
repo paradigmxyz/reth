@@ -20,7 +20,7 @@ reth-storage-api.workspace = true
 reth-storage-errors = { workspace = true, optional = true }
 reth-trie-common.workspace = true
 
-evm2.workspace = true
+evm2 = { workspace = true, features = ["block"] }
 
 # alloy
 alloy-primitives.workspace = true

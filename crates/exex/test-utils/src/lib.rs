@@ -55,6 +55,7 @@ use reth_provider::{
     providers::{BlockchainProvider, RocksDBProvider, StaticFileProvider},
     BlockReader, EthStorage, ProviderFactory,
 };
+use reth_storage_overlay::OverlayManager;
 use reth_tasks::Runtime;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 use tempfile::TempDir;
@@ -252,6 +253,7 @@ pub async fn test_exex_context_with_chain_spec(
         chain_spec.clone(),
         StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
         RocksDBProvider::builder(rocksdb_dir.keep()).with_default_tables().build().unwrap(),
+        OverlayManager::default(),
         reth_tasks::Runtime::test(),
     )?;
 

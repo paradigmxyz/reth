@@ -1,12 +1,12 @@
 //! OTLP exporter layers and configuration.
 
-use crate::OtlpProtocol;
+use crate::{file::FileSpanExporter, trace_file_path, OtlpProtocol};
 use eyre::ensure;
 use opentelemetry::{global, trace::TracerProvider, KeyValue, Value};
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::{
     propagation::TraceContextPropagator,
-    trace::{Sampler, SdkTracer, SdkTracerProvider},
+    trace::{Sampler, SdkTracer},
     Resource,
 };
 use opentelemetry_semantic_conventions::{attribute::SERVICE_VERSION, SCHEMA_URL};
@@ -16,6 +16,8 @@ use tracing_subscriber::registry::LookupSpan;
 use url::Url;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
+
+pub use opentelemetry_sdk::trace::SdkTracerProvider;
 
 const OTEL_EXPORTER_OTLP_TRACES_HEADERS: &str = "OTEL_EXPORTER_OTLP_TRACES_HEADERS";
 const OTEL_EXPORTER_OTLP_LOGS_HEADERS: &str = "OTEL_EXPORTER_OTLP_LOGS_HEADERS";
@@ -28,39 +30,55 @@ pub fn span_layer<S>(otlp_config: OtlpConfig) -> eyre::Result<OpenTelemetryLayer
 where
     for<'span> S: Subscriber + LookupSpan<'span>,
 {
+    let (layer, provider) = span_layer_with_provider(otlp_config)?;
+    global::set_tracer_provider(provider);
+    Ok(layer)
+}
+
+/// Creates an OTLP span layer and returns its provider for explicit flush and shutdown.
+///
+/// Unlike [`span_layer`], this does not install the provider globally. Call
+/// [`SdkTracerProvider::force_flush`] to export completed spans and
+/// [`SdkTracerProvider::shutdown`] after dropping active spans and the subscriber.
+/// File export uses the SDK batch worker and does not require a Tokio runtime.
+/// Network transports retain their usual runtime requirements.
+pub fn span_layer_with_provider<S>(
+    otlp_config: OtlpConfig,
+) -> eyre::Result<(OpenTelemetryLayer<S, SdkTracer>, SdkTracerProvider)>
+where
+    for<'span> S: Subscriber + LookupSpan<'span>,
+{
     global::set_text_map_propagator(TraceContextPropagator::new());
 
     let resource =
         build_resource(otlp_config.service_name.clone(), otlp_config.service_version.as_deref());
+    let builder = SdkTracerProvider::builder()
+        .with_resource(resource)
+        .with_sampler(build_sampler(otlp_config.sample_ratio)?);
 
-    let span_builder = SpanExporter::builder();
-
-    let span_exporter = match otlp_config.protocol {
-        OtlpProtocol::Http => {
-            span_builder.with_http().with_endpoint(otlp_config.endpoint.as_str()).build()?
-        }
-        OtlpProtocol::Grpc => {
-            span_builder.with_tonic().with_endpoint(otlp_config.endpoint.as_str()).build()?
-        }
+    let tracer_provider = if otlp_config.endpoint.scheme() == "file" {
+        builder.with_batch_exporter(FileSpanExporter::new(&otlp_config.endpoint)?).build()
+    } else {
+        let span_builder = SpanExporter::builder();
+        let span_exporter = match otlp_config.protocol {
+            OtlpProtocol::Http => {
+                span_builder.with_http().with_endpoint(otlp_config.endpoint.as_str()).build()?
+            }
+            OtlpProtocol::Grpc => {
+                span_builder.with_tonic().with_endpoint(otlp_config.endpoint.as_str()).build()?
+            }
+        };
+        builder.with_batch_exporter(span_exporter).build()
     };
 
-    let sampler = build_sampler(otlp_config.sample_ratio)?;
-
-    let tracer_provider = SdkTracerProvider::builder()
-        .with_resource(resource)
-        .with_sampler(sampler)
-        .with_batch_exporter(span_exporter)
-        .build();
-
-    global::set_tracer_provider(tracer_provider.clone());
-
     let tracer = tracer_provider.tracer(otlp_config.service_name);
-    Ok(tracing_opentelemetry::layer()
+    let layer = tracing_opentelemetry::layer()
         .with_tracer(tracer)
         .with_location(false)
         .with_tracked_inactivity(false)
         .with_target(false)
-        .with_threads(false))
+        .with_threads(false);
+    Ok((layer, tracer_provider))
 }
 
 /// Creates a tracing layer that exports logs to an OTLP endpoint.
@@ -134,7 +152,11 @@ impl OtlpConfig {
             );
         }
 
-        set_otlp_auth_header_from_endpoint(&endpoint, OTEL_EXPORTER_OTLP_TRACES_HEADERS)?;
+        if endpoint.scheme() == "file" {
+            trace_file_path(&endpoint)?;
+        } else {
+            set_otlp_auth_header_from_endpoint(&endpoint, OTEL_EXPORTER_OTLP_TRACES_HEADERS)?;
+        }
         Ok(Self {
             service_name: service_name.into(),
             service_version: None,
@@ -191,6 +213,7 @@ impl OtlpLogsConfig {
         endpoint: Url,
         protocol: OtlpProtocol,
     ) -> eyre::Result<Self> {
+        ensure!(endpoint.scheme() != "file", "OTLP logs do not support file endpoints");
         set_otlp_auth_header_from_endpoint(&endpoint, OTEL_EXPORTER_OTLP_LOGS_HEADERS)?;
         Ok(Self {
             service_name: service_name.into(),

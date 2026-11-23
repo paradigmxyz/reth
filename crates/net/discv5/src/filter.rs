@@ -92,7 +92,7 @@ mod tests {
     use super::*;
     use crate::NetworkStackId;
     use alloy_rlp::Bytes;
-    use discv5::enr::{CombinedKey, Enr};
+    use enr::{CombinedKey, Enr};
 
     #[test]
     fn must_not_include_key_filter() {

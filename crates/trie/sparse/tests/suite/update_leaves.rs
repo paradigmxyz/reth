@@ -1,4 +1,5 @@
 use super::*;
+use reth_trie_common::ProofV2TargetParent;
 
 /// Insert a new leaf via `update_leaves` and verify root.
 ///
@@ -1524,4 +1525,80 @@ pub(super) fn test_subtrie_emptied_by_deletes_with_touched<T: SparseTrie>(new_tr
 
     let actual_root = trie.root(epoch(0));
     assert_eq!(actual_root, expected_harness.original_root(), "post-delete root mismatch");
+}
+
+/// Removing a lower-subtrie leaf only requests its blinded sibling, then retries the removal.
+pub(super) fn test_subtrie_removal_onto_blinded_sibling_requests_only_sibling_proof<
+    T: SparseTrie,
+>(
+    new_trie: fn() -> T,
+) {
+    // Branch [1] has children [1, 0] and [1, 2]; [1, 2] sits at the subtrie depth and holds
+    // a leaf at [1, 2, 0] and a branch at [1, 2, 3]. That branch has one revealed leaf at
+    // nibble 4 and a blinded child at nibble 5, so removing the leaf collapses it onto the
+    // blinded child inside a lower subtrie.
+    let key = |bytes: &[u8]| B256::right_padding_from(bytes);
+    let removed_key = key(&[0x12, 0x34]);
+    let subtrie_key = key(&[0x12, 0x01]);
+    let mut storage = BTreeMap::from([
+        (key(&[0x10]), U256::from(1)),
+        (subtrie_key, U256::from(2)),
+        (removed_key, U256::from(3)),
+    ]);
+    for i in 0u8..16 {
+        storage.insert(key(&[0x12, 0x35, i << 4]), U256::from(100 + i as u64));
+    }
+    let harness = SuiteTestHarness::new(storage);
+
+    let mut trie = harness.init_trie_with_targets(&[removed_key, subtrie_key], true, new_trie);
+
+    let mut leaf_updates: B256Map<LeafUpdate> =
+        BTreeMap::from([(removed_key, LeafUpdate::Changed(Vec::new()))]).into_iter().collect();
+    let mut requested = Vec::new();
+    trie.update_leaves(&mut leaf_updates, |key, parent| requested.push((key, parent)))
+        .expect("update_leaves should succeed");
+
+    let sibling_key = key(&[0x12, 0x35]);
+    assert_eq!(requested, vec![(sibling_key, ProofV2TargetParent::new(3))]);
+    assert!(leaf_updates.contains_key(&removed_key), "removal should wait for the sibling");
+
+    harness.reveal_and_update(&mut trie, &mut leaf_updates);
+    assert!(leaf_updates.is_empty(), "removal should complete after revealing the sibling");
+    let actual_root = trie.root(epoch(0));
+    let mut actual_updates = trie.take_updates();
+    let (expected_root, mut expected_trie_updates) =
+        harness.get_root_with_updates(&BTreeMap::from([(removed_key, U256::ZERO)]));
+    harness.minimize_trie_updates(&mut expected_trie_updates);
+
+    // Minimize sparse updates inline (can't use TrieTestHarness::minimize_sparse_updates
+    // due to the crate's SparseTrieUpdates being a different type than reth-trie's copy).
+    actual_updates
+        .updated_nodes
+        .retain(|path, node| harness.storage_trie_updates().storage_nodes.get(path) != Some(node));
+    actual_updates
+        .removed_nodes
+        .retain(|path| harness.storage_trie_updates().storage_nodes.contains_key(path));
+
+    let mut expected_updated_nodes =
+        expected_trie_updates.storage_nodes.into_iter().collect::<Vec<_>>();
+    let mut actual_updated_nodes = actual_updates.updated_nodes.into_iter().collect::<Vec<_>>();
+    expected_updated_nodes.sort();
+    actual_updated_nodes.sort();
+    pretty_assertions::assert_eq!(
+        expected_updated_nodes,
+        actual_updated_nodes,
+        "updated nodes mismatch"
+    );
+
+    let mut expected_removed_nodes =
+        expected_trie_updates.removed_nodes.into_iter().collect::<Vec<_>>();
+    let mut actual_removed_nodes = actual_updates.removed_nodes.into_iter().collect::<Vec<_>>();
+    expected_removed_nodes.sort();
+    actual_removed_nodes.sort();
+    pretty_assertions::assert_eq!(
+        expected_removed_nodes,
+        actual_removed_nodes,
+        "removed nodes mismatch"
+    );
+    assert_eq!(expected_root, actual_root, "storage root mismatch");
 }

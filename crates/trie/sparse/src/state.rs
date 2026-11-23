@@ -5,7 +5,13 @@ use crate::{
 use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
 use either::Either;
+#[cfg(feature = "std")]
+use rayon::iter::IntoParallelRefMutIterator;
+#[cfg(feature = "std")]
+use rayon::iter::ParallelIterator;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
+#[cfg(feature = "std")]
+use reth_primitives_traits::ParallelBridgeBuffered;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
@@ -283,9 +289,6 @@ where
 
         #[cfg(feature = "std")]
         let results: Vec<_> = {
-            use rayon::iter::ParallelIterator;
-            use reth_primitives_traits::ParallelBridgeBuffered;
-
             let parent_span = tracing::Span::current();
             targets
                 .into_iter()
@@ -539,8 +542,6 @@ struct StorageTries<S = ArenaParallelSparseTrie> {
 impl<S: SparseTrieTrait> StorageTries<S> {
     /// Prunes storage tries by epoch, returning fully old tries to the reuse pool.
     fn prune(&mut self, prune_before: TrieNodeEpoch, parent_span: &tracing::Span) -> usize {
-        use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
-
         let addresses_to_evict: Vec<B256> = self
             .tries
             .par_iter_mut()
