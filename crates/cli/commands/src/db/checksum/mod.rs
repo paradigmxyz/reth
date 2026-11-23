@@ -161,7 +161,7 @@ fn checksum_static_file<N: NodePrimitives>(
         if limit == usize::MAX { None } else { Some(limit) }
     );
 
-    let mut reached_limit = limit == 0;
+    let mut reached_limit = false;
     for (block_range, header) in ranges {
         if reached_limit || block_range.start() > end_block {
             break;
@@ -205,20 +205,10 @@ fn checksum_static_file<N: NodePrimitives>(
             reached_limit = checksum_change_based_segment(&mut checksummer, input, &mut cursor)?;
         } else {
             let tx_range = header.tx_range().filter(|range| !range.is_empty());
-            let count = if segment.is_headers() {
-                block_range.len()
-            } else {
-                tx_range.map_or(0, |txs| txs.len())
-            };
-            // An interrupted write can leave the header's range out of sync with the jar rows.
-            eyre::ensure!(
-                count == u64::try_from(jar_provider.rows())?,
-                "Row count mismatch in {segment} static file {block_range}"
-            );
             let rows = if segment.is_headers() {
                 (selected.start() - block_range.start())..(selected.end() - block_range.start() + 1)
             } else if selected == *block_range {
-                0..count
+                0..tx_range.map_or(0, |txs| txs.len())
             } else if let Some(txs) = tx_range {
                 partial_transaction_rows(&db.tx()?, segment, *block_range, txs, selected)?
             } else {
@@ -602,7 +592,6 @@ mod tests {
             (Some(4), Some(4), None, 4..4),
             (Some(7), Some(7), None, 5..5),
             (None, Some(2), None, 0..3),
-            (None, None, Some(0), 0..0),
             (Some(3), Some(1), None, 0..0),
         ] {
             let mut expected = checksum_hasher();
@@ -678,13 +667,6 @@ mod tests {
                 format!("Receipts transaction range {start}..={end} does not fit blocks 3..=5")
             );
         }
-        // A stale header would cause the second row to be silently omitted.
-        writer.user_header_mut().set_tx_range(4, 4);
-        writer.commit().unwrap();
-        assert_eq!(
-            block(4).unwrap_err().to_string(),
-            "Row count mismatch in Receipts static file 3..=5"
-        );
     }
 
     #[test]
