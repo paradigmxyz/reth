@@ -955,7 +955,7 @@ mod tests {
         overlay.input().nodes.account_nodes_ref().iter().map(|(path, _)| *path).collect()
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_overlay_extends_bundle_state() {
         let address = Address::with_last_byte(1);
         let no_storage = Address::with_last_byte(2);
@@ -982,7 +982,7 @@ mod tests {
         assert_eq!(overlay.code_hashes[&code_hash], code);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_overlay_zeroes_unobserved_storage_for_destroyed_accounts() {
         let address = Address::with_last_byte(1);
         let mut state = BundleState::default();
@@ -1004,7 +1004,7 @@ mod tests {
         assert_eq!(overlay.storage_value(address, U256::ZERO), Some(U256::ZERO));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_overlay_storage_changes_preserve_account_fallback() {
         let address = Address::with_last_byte(1);
         let info = AccountInfo::default().with_balance(U256::from(5));
@@ -1023,7 +1023,7 @@ mod tests {
         assert_eq!(overlay.accounts[&address], Some(info));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn overlay_builder_for_state_matches_hash_lookup() {
         // The state trie frontier sits at block 1 while Finish is at block 3, so the in-memory
         // chain straddles the state-masking frontier.
@@ -1085,7 +1085,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn managed_overlay_starts_at_state_trie_frontier() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
@@ -1116,7 +1116,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn managed_overlay_skips_when_finish_is_the_anchor() {
         let (factory, blocks) = setup_frontiers(3, 3);
         let manager = OverlayManager::default();
@@ -1134,7 +1134,7 @@ mod tests {
         assert!(overlay.input().nodes.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn no_reverts_errors_when_reverts_are_required() {
         let (factory, blocks) = setup_frontiers(2, 3);
         let provider = factory.provider().unwrap();
@@ -1147,7 +1147,7 @@ mod tests {
         assert!(error.to_string().contains("reverts are disabled"));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn appended_overlay_rejects_noncanonical_anchor_when_reverts_are_required() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let provider = factory.provider().unwrap();
@@ -1168,7 +1168,7 @@ mod tests {
         ));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn state_trie_overlay_invalidates_reverts_and_fork_without_trie_changesets() {
         let (factory, blocks) = setup_frontiers(3, 3);
         let provider_rw = factory.provider_rw().unwrap();
@@ -1210,7 +1210,7 @@ mod tests {
             .contains(&Nibbles::unpack(B256::with_last_byte(34))));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_overlay_marks_historical_fallback() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let provider_rw = factory.provider_rw().unwrap();
@@ -1260,7 +1260,7 @@ mod tests {
         assert!(overlay.code_hashes.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_overlay_uses_managed_blocks_after_the_anchor() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
@@ -1293,7 +1293,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_overlay_marks_historical_fallback_for_managed_fork() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let address = Address::with_last_byte(1);
@@ -1361,7 +1361,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn managed_overlay_uses_persisted_parent_even_if_retained() {
         let (factory, blocks) = setup_frontiers(2, 3);
         let manager = OverlayManager::default();
@@ -1380,7 +1380,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn builder_appends_block_to_parent_state() {
         let manager = OverlayManager::default();
         let canonical_state = canonical_state_for(&manager);
@@ -1407,7 +1407,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn overlay_after_state_trie_frontier_requires_managed_coverage() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let provider = factory.provider().unwrap();
@@ -1422,7 +1422,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn managed_overlay_skips_manager_for_persisted_parent() {
         let parent_hash = B256::with_last_byte(1);
         let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
@@ -1432,7 +1432,7 @@ mod tests {
         assert!(state.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn managed_overlay_errors_if_parent_is_not_persisted_or_managed() {
         let parent_hash = B256::with_last_byte(1);
         let anchor_hash = B256::with_last_byte(2);
@@ -1443,7 +1443,7 @@ mod tests {
         assert!(err.to_string().contains("cannot be anchored"));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn managed_overlay_skip_requires_both_frontiers() {
         let parent_hash = B256::with_last_byte(1);
         let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);

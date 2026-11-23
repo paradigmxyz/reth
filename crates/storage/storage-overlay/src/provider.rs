@@ -1224,7 +1224,7 @@ mod tests {
         overlay.input().nodes.account_nodes_ref().iter().map(|(path, _)| *path).collect()
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn overlay_cache_is_keyed_by_both_durable_frontiers() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
@@ -1260,7 +1260,7 @@ mod tests {
         assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 2);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn overlays_are_computed_lazily() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
@@ -1288,7 +1288,7 @@ mod tests {
         assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 1);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn state_trie_overlay_cache_is_keyed_by_trie_changesets() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
@@ -1308,7 +1308,7 @@ mod tests {
         assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 2);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn supplied_state_trie_overlay_is_available_in_both_modes() {
         let (factory, _) = setup_frontiers(1, 1);
         let provider = factory.provider().unwrap();
@@ -1322,7 +1322,7 @@ mod tests {
         assert!(provider.state_trie_overlay(true).is_ok());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn lazy_overlays_survive_manager_block_removal() {
         let (factory, blocks) = setup_frontiers(1, 1);
         let manager = OverlayManager::default();
@@ -1353,7 +1353,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn skipped_state_trie_overlay_is_not_cached_or_used_for_state_roots() {
         let (factory, blocks) = setup_frontiers(3, 3);
         let manager = OverlayManager::default();
@@ -1376,7 +1376,7 @@ mod tests {
         assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_overlay_readers_use_overlay_first() {
         let (factory, _) = setup_frontiers(1, 3);
         let address = Address::with_last_byte(1);
@@ -1412,7 +1412,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     #[allow(clippy::clone_on_copy)]
     fn historical_execution_reads_use_history_indexes() {
         let (factory, blocks) = setup_frontiers(1, 3);
@@ -1479,7 +1479,7 @@ mod tests {
         assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     #[allow(clippy::clone_on_copy)]
     fn history_starts_above_lowest_changeset_file() {
         let (factory, blocks) = setup_frontiers(2, 3);
