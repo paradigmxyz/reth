@@ -12,6 +12,7 @@ description = "Concurrency primitives for native execution and fuzz simulation"
 workspace = true
 
 [dependencies]
+reth-concurrency-macros.workspace = true
 reth-primitives-traits.workspace = true
 
 # std

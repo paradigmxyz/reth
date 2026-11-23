@@ -2126,76 +2126,68 @@ mod tests {
         });
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_root_node_reuse_with_overlay() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let storage = BTreeMap::from([
-                (B256::right_padding_from(&[0x10]), U256::ONE),
-                (B256::right_padding_from(&[0x20]), U256::from(2)),
-            ]);
-            let harness = ProofTestHarness::new(storage.clone());
-            let hashed_address = harness.hashed_address();
-            let post_state = HashedPostState::from_hashed_storage(
-                hashed_address,
-                HashedStorage::from_iter(storage),
-            )
-            .into_sorted();
-            let trie_updates = TrieUpdatesSorted::default();
-            let trie_cursor = InMemoryTrieCursor::new_storage(
-                NoopStorageTrieCursor::default(),
-                &trie_updates,
-                hashed_address,
-            );
-            let hashed_cursor = HashedPostStateCursor::new_storage(
-                NoopHashedCursor::default(),
-                &post_state,
-                hashed_address,
-            );
-            let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
+        let storage = BTreeMap::from([
+            (B256::right_padding_from(&[0x10]), U256::ONE),
+            (B256::right_padding_from(&[0x20]), U256::from(2)),
+        ]);
+        let harness = ProofTestHarness::new(storage.clone());
+        let hashed_address = harness.hashed_address();
+        let post_state =
+            HashedPostState::from_hashed_storage(hashed_address, HashedStorage::from_iter(storage))
+                .into_sorted();
+        let trie_updates = TrieUpdatesSorted::default();
+        let trie_cursor = InMemoryTrieCursor::new_storage(
+            NoopStorageTrieCursor::default(),
+            &trie_updates,
+            hashed_address,
+        );
+        let hashed_cursor = HashedPostStateCursor::new_storage(
+            NoopHashedCursor::default(),
+            &post_state,
+            hashed_address,
+        );
+        let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
-            let first_root = calculator.root_node(&mut StorageValueEncoder).unwrap();
-            assert!(matches!(first_root.node, TrieNodeV2::Branch(_)));
-            assert_eq!(
-                calculator.compute_root_hash(core::slice::from_ref(&first_root)).unwrap(),
-                Some(harness.original_root())
-            );
+        let first_root = calculator.root_node(&mut StorageValueEncoder).unwrap();
+        assert!(matches!(first_root.node, TrieNodeV2::Branch(_)));
+        assert_eq!(
+            calculator.compute_root_hash(core::slice::from_ref(&first_root)).unwrap(),
+            Some(harness.original_root())
+        );
 
-            let second_root = calculator.root_node(&mut StorageValueEncoder).unwrap();
-            pretty_assertions::assert_eq!(first_root, second_root);
-        });
+        let second_root = calculator.root_node(&mut StorageValueEncoder).unwrap();
+        pretty_assertions::assert_eq!(first_root, second_root);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_partial_storage_proof_after_root_calculation() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let slot_a = B256::right_padding_from(&[0xae, 0xd4, 0x00]);
-            let slot_b = B256::right_padding_from(&[0xae, 0xd4, 0x10]);
-            let harness = ProofTestHarness::new(BTreeMap::from([
-                (slot_a, U256::ONE),
-                (slot_b, U256::from(2)),
-            ]));
-            let hashed_address = harness.hashed_address();
-            let trie_cursor =
-                harness.trie_cursor_factory().storage_trie_cursor(hashed_address).unwrap();
-            let hashed_cursor =
-                harness.hashed_cursor_factory().hashed_storage_cursor(hashed_address).unwrap();
-            let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
+        let slot_a = B256::right_padding_from(&[0xae, 0xd4, 0x00]);
+        let slot_b = B256::right_padding_from(&[0xae, 0xd4, 0x10]);
+        let harness =
+            ProofTestHarness::new(BTreeMap::from([(slot_a, U256::ONE), (slot_b, U256::from(2))]));
+        let hashed_address = harness.hashed_address();
+        let trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(hashed_address).unwrap();
+        let hashed_cursor =
+            harness.hashed_cursor_factory().hashed_storage_cursor(hashed_address).unwrap();
+        let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
-            let root_node = calculator.storage_root_node(hashed_address).unwrap();
-            assert_eq!(
-                calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap(),
-                Some(harness.original_root())
-            );
+        let root_node = calculator.storage_root_node(hashed_address).unwrap();
+        assert_eq!(
+            calculator.compute_root_hash(core::slice::from_ref(&root_node)).unwrap(),
+            Some(harness.original_root())
+        );
 
-            let target = ProofV2Target::new(slot_a).with_parent(ProofV2TargetParent::new(3));
-            let mut actual_targets = [target];
-            let actual = calculator.storage_proof(hashed_address, &mut actual_targets).unwrap();
-            let mut expected_targets = [target];
-            let (expected, root) = harness.proof_v2(&mut expected_targets);
+        let target = ProofV2Target::new(slot_a).with_parent(ProofV2TargetParent::new(3));
+        let mut actual_targets = [target];
+        let actual = calculator.storage_proof(hashed_address, &mut actual_targets).unwrap();
+        let mut expected_targets = [target];
+        let (expected, root) = harness.proof_v2(&mut expected_targets);
 
-            assert!(root.is_none());
-            pretty_assertions::assert_eq!(expected, actual);
-        });
+        assert!(root.is_none());
+        pretty_assertions::assert_eq!(expected, actual);
     }
 
     mod proptest_tests {
@@ -2357,259 +2349,227 @@ mod tests {
         });
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_rebases_singleton_subtrie_root_below_known_parent() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let slot = B256::right_padding_from(&[0xae, 0xd4, 0x09]);
-            let slot_nibbles = Nibbles::unpack(slot);
-            let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::ONE)]));
-            let mut targets = [ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(3))];
+        let slot = B256::right_padding_from(&[0xae, 0xd4, 0x09]);
+        let slot_nibbles = Nibbles::unpack(slot);
+        let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::ONE)]));
+        let mut targets = [ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(3))];
 
-            let (proof, root) = harness.proof_v2(&mut targets);
+        let (proof, root) = harness.proof_v2(&mut targets);
 
-            assert!(root.is_none());
-            assert_eq!(proof.len(), 1);
-            assert_eq!(proof[0].path, slot_nibbles.slice(0..4));
-            let TrieNodeV2::Leaf(leaf) = &proof[0].node else {
-                panic!("singleton subtrie root should remain a leaf")
-            };
-            assert_eq!(leaf.key, slot_nibbles.slice(4..));
-        });
+        assert!(root.is_none());
+        assert_eq!(proof.len(), 1);
+        assert_eq!(proof[0].path, slot_nibbles.slice(0..4));
+        let TrieNodeV2::Leaf(leaf) = &proof[0].node else {
+            panic!("singleton subtrie root should remain a leaf")
+        };
+        assert_eq!(leaf.key, slot_nibbles.slice(4..));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_rebases_singleton_leaf_at_max_parent_depth() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let slot = B256::repeat_byte(0xae);
-            let slot_nibbles = Nibbles::unpack(slot);
-            let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::ONE)]));
-            let mut targets = [ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(63))];
+        let slot = B256::repeat_byte(0xae);
+        let slot_nibbles = Nibbles::unpack(slot);
+        let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::ONE)]));
+        let mut targets = [ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(63))];
 
-            let (proof, root) = harness.proof_v2(&mut targets);
+        let (proof, root) = harness.proof_v2(&mut targets);
 
-            assert!(root.is_none());
-            assert_eq!(proof.len(), 1);
-            assert_eq!(proof[0].path, slot_nibbles);
-            let TrieNodeV2::Leaf(leaf) = &proof[0].node else {
-                panic!("singleton subtrie root should remain a leaf")
-            };
-            assert!(leaf.key.is_empty());
-        });
+        assert!(root.is_none());
+        assert_eq!(proof.len(), 1);
+        assert_eq!(proof[0].path, slot_nibbles);
+        let TrieNodeV2::Leaf(leaf) = &proof[0].node else {
+            panic!("singleton subtrie root should remain a leaf")
+        };
+        assert!(leaf.key.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_root_and_root_parent_targets_retain_both_singleton_representations() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let slot = B256::right_padding_from(&[0x20]);
-            let slot_nibbles = Nibbles::unpack(slot);
-            let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::ONE)]));
-            let mut targets = [
-                ProofV2Target::new(slot),
-                ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(0)),
-            ];
+        let slot = B256::right_padding_from(&[0x20]);
+        let slot_nibbles = Nibbles::unpack(slot);
+        let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::ONE)]));
+        let mut targets = [
+            ProofV2Target::new(slot),
+            ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(0)),
+        ];
 
-            let (proof, root) = harness.proof_v2(&mut targets);
+        let (proof, root) = harness.proof_v2(&mut targets);
 
-            assert_eq!(root, Some(harness.original_root()));
-            let root_node = proof.iter().find(|node| node.path.is_empty()).expect("root proof");
-            let TrieNodeV2::Leaf(root_leaf) = &root_node.node else {
-                panic!("root should be a leaf")
-            };
-            assert_eq!(root_leaf.key, slot_nibbles);
+        assert_eq!(root, Some(harness.original_root()));
+        let root_node = proof.iter().find(|node| node.path.is_empty()).expect("root proof");
+        let TrieNodeV2::Leaf(root_leaf) = &root_node.node else { panic!("root should be a leaf") };
+        assert_eq!(root_leaf.key, slot_nibbles);
 
-            let child_path = slot_nibbles.slice(0..1);
-            let child_node = proof
-                .iter()
-                .find(|node| node.path == child_path)
-                .expect("rebased root child proof");
-            let TrieNodeV2::Leaf(child_leaf) = &child_node.node else {
-                panic!("root child should be a leaf")
-            };
-            assert_eq!(child_leaf.key, slot_nibbles.slice(1..));
-        });
+        let child_path = slot_nibbles.slice(0..1);
+        let child_node =
+            proof.iter().find(|node| node.path == child_path).expect("rebased root child proof");
+        let TrieNodeV2::Leaf(child_leaf) = &child_node.node else {
+            panic!("root child should be a leaf")
+        };
+        assert_eq!(child_leaf.key, slot_nibbles.slice(1..));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_exhausted_cursor_resets_at_equal_target_boundary() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let first = B256::ZERO;
-            let last = B256::with_last_byte(1);
-            let last_nibbles = Nibbles::unpack(last);
-            let harness =
-                ProofTestHarness::new(BTreeMap::from([(first, U256::ONE), (last, U256::from(2))]));
-            let mut targets = [
-                ProofV2Target::new(first),
-                ProofV2Target::new(last).with_parent(ProofV2TargetParent::new(63)),
-            ];
+        let first = B256::ZERO;
+        let last = B256::with_last_byte(1);
+        let last_nibbles = Nibbles::unpack(last);
+        let harness =
+            ProofTestHarness::new(BTreeMap::from([(first, U256::ONE), (last, U256::from(2))]));
+        let mut targets = [
+            ProofV2Target::new(first),
+            ProofV2Target::new(last).with_parent(ProofV2TargetParent::new(63)),
+        ];
 
-            let (proof, root) = harness.proof_v2(&mut targets);
+        let (proof, root) = harness.proof_v2(&mut targets);
 
-            assert_eq!(root, Some(harness.original_root()));
-            let child = proof
-                .iter()
-                .find(|node| node.path == last_nibbles)
-                .expect("depth-63 target child proof");
-            let TrieNodeV2::Leaf(leaf) = &child.node else {
-                panic!("target child should be a leaf")
-            };
-            assert!(leaf.key.is_empty());
-        });
+        assert_eq!(root, Some(harness.original_root()));
+        let child = proof
+            .iter()
+            .find(|node| node.path == last_nibbles)
+            .expect("depth-63 target child proof");
+        let TrieNodeV2::Leaf(leaf) = &child.node else { panic!("target child should be a leaf") };
+        assert!(leaf.key.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_rebases_compressed_branch_subtrie_root() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let slot_a = B256::right_padding_from(&[0xae, 0xd4, 0x00]);
-            let slot_b = B256::right_padding_from(&[0xae, 0xd4, 0x10]);
-            let slot_nibbles = Nibbles::unpack(slot_a);
-            let harness = ProofTestHarness::new(BTreeMap::from([
-                (slot_a, U256::ONE),
-                (slot_b, U256::from(2)),
-            ]));
-            let mut targets = [ProofV2Target::new(slot_a).with_parent(ProofV2TargetParent::new(3))];
+        let slot_a = B256::right_padding_from(&[0xae, 0xd4, 0x00]);
+        let slot_b = B256::right_padding_from(&[0xae, 0xd4, 0x10]);
+        let slot_nibbles = Nibbles::unpack(slot_a);
+        let harness =
+            ProofTestHarness::new(BTreeMap::from([(slot_a, U256::ONE), (slot_b, U256::from(2))]));
+        let mut targets = [ProofV2Target::new(slot_a).with_parent(ProofV2TargetParent::new(3))];
 
-            let (proof, root) = harness.proof_v2(&mut targets);
+        let (proof, root) = harness.proof_v2(&mut targets);
 
-            assert!(root.is_none());
-            let branch_path = slot_nibbles.slice(0..4);
-            let branch_node = proof
-                .iter()
-                .find(|node| node.path == branch_path)
-                .expect("rebased compressed branch");
-            let TrieNodeV2::Branch(branch) = &branch_node.node else {
-                panic!("rebased node should be a branch")
-            };
-            assert!(branch.key.is_empty());
-            assert!(branch.branch_rlp_node.is_none());
-        });
+        assert!(root.is_none());
+        let branch_path = slot_nibbles.slice(0..4);
+        let branch_node =
+            proof.iter().find(|node| node.path == branch_path).expect("rebased compressed branch");
+        let TrieNodeV2::Branch(branch) = &branch_node.node else {
+            panic!("rebased node should be a branch")
+        };
+        assert!(branch.key.is_empty());
+        assert!(branch.branch_rlp_node.is_none());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_known_parent_retains_child() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let slot_a = B256::right_padding_from(&[0xae, 0xd2]);
-            let slot_b = B256::right_padding_from(&[0xae, 0xd4]);
-            let slot_nibbles = Nibbles::unpack(slot_a);
-            let harness = ProofTestHarness::new(BTreeMap::from([
-                (slot_a, U256::ONE),
-                (slot_b, U256::from(2)),
-            ]));
-            let mut targets = [ProofV2Target::new(slot_a).with_parent(ProofV2TargetParent::new(3))];
+        let slot_a = B256::right_padding_from(&[0xae, 0xd2]);
+        let slot_b = B256::right_padding_from(&[0xae, 0xd4]);
+        let slot_nibbles = Nibbles::unpack(slot_a);
+        let harness =
+            ProofTestHarness::new(BTreeMap::from([(slot_a, U256::ONE), (slot_b, U256::from(2))]));
+        let mut targets = [ProofV2Target::new(slot_a).with_parent(ProofV2TargetParent::new(3))];
 
-            let (proof, root) = harness.proof_v2(&mut targets);
+        let (proof, root) = harness.proof_v2(&mut targets);
 
-            assert!(root.is_none());
-            assert!(!proof.iter().any(|node| node.path == slot_nibbles.slice(0..3)));
-            assert!(proof.iter().any(|node| node.path == slot_nibbles.slice(0..4)));
-        });
+        assert!(root.is_none());
+        assert!(!proof.iter().any(|node| node.path == slot_nibbles.slice(0..3)));
+        assert!(proof.iter().any(|node| node.path == slot_nibbles.slice(0..4)));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_rebased_root_matches_direct_child_not_full_short_key() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let stored_slot = B256::right_padding_from(&[0xae, 0xd4, 0x09]);
-            let same_child_target = B256::right_padding_from(&[0xae, 0xd4, 0xff]);
-            let other_child_target = B256::right_padding_from(&[0xae, 0xd5]);
-            let harness = ProofTestHarness::new(BTreeMap::from([(stored_slot, U256::ONE)]));
+        let stored_slot = B256::right_padding_from(&[0xae, 0xd4, 0x09]);
+        let same_child_target = B256::right_padding_from(&[0xae, 0xd4, 0xff]);
+        let other_child_target = B256::right_padding_from(&[0xae, 0xd5]);
+        let harness = ProofTestHarness::new(BTreeMap::from([(stored_slot, U256::ONE)]));
 
-            let mut same_child =
-                [ProofV2Target::new(same_child_target).with_parent(ProofV2TargetParent::new(3))];
-            let (proof, _) = harness.proof_v2(&mut same_child);
-            assert_eq!(proof.len(), 1, "divergent leaf proves absence below the same child");
+        let mut same_child =
+            [ProofV2Target::new(same_child_target).with_parent(ProofV2TargetParent::new(3))];
+        let (proof, _) = harness.proof_v2(&mut same_child);
+        assert_eq!(proof.len(), 1, "divergent leaf proves absence below the same child");
 
-            let mut other_child =
-                [ProofV2Target::new(other_child_target).with_parent(ProofV2TargetParent::new(3))];
-            let (proof, _) = harness.proof_v2(&mut other_child);
-            assert!(proof.is_empty(), "a different direct child is unrelated to the target");
-        });
+        let mut other_child =
+            [ProofV2Target::new(other_child_target).with_parent(ProofV2TargetParent::new(3))];
+        let (proof, _) = harness.proof_v2(&mut other_child);
+        assert!(proof.is_empty(), "a different direct child is unrelated to the target");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_known_parent_separate_child_ranges() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
-            let stored_slot_b = B256::right_padding_from(&[0xeb, 0x53]);
-            let stored_slot_c = B256::right_padding_from(&[0xec, 0x53]);
-            let target_a = B256::right_padding_from(&[0xea, 0x1f]);
-            let target_c = B256::right_padding_from(&[0xec, 0x1f]);
-            let harness = ProofTestHarness::new(BTreeMap::from([
-                (stored_slot_a, U256::ONE),
-                (stored_slot_b, U256::from(2)),
-                (stored_slot_c, U256::from(3)),
-            ]));
-            let mut targets = [target_a, target_c]
-                .map(|target| ProofV2Target::new(target).with_parent(ProofV2TargetParent::new(1)));
+        let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
+        let stored_slot_b = B256::right_padding_from(&[0xeb, 0x53]);
+        let stored_slot_c = B256::right_padding_from(&[0xec, 0x53]);
+        let target_a = B256::right_padding_from(&[0xea, 0x1f]);
+        let target_c = B256::right_padding_from(&[0xec, 0x1f]);
+        let harness = ProofTestHarness::new(BTreeMap::from([
+            (stored_slot_a, U256::ONE),
+            (stored_slot_b, U256::from(2)),
+            (stored_slot_c, U256::from(3)),
+        ]));
+        let mut targets = [target_a, target_c]
+            .map(|target| ProofV2Target::new(target).with_parent(ProofV2TargetParent::new(1)));
 
-            let (proof, root) = harness.proof_v2(&mut targets);
+        let (proof, root) = harness.proof_v2(&mut targets);
 
-            assert!(root.is_none());
-            assert_eq!(
-                proof.iter().map(|node| node.path).collect::<Vec<_>>(),
-                [Nibbles::from_nibbles([0xe, 0xa]), Nibbles::from_nibbles([0xe, 0xc])]
-            );
-        });
+        assert!(root.is_none());
+        assert_eq!(
+            proof.iter().map(|node| node.path).collect::<Vec<_>>(),
+            [Nibbles::from_nibbles([0xe, 0xa]), Nibbles::from_nibbles([0xe, 0xc])]
+        );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_known_parent_does_not_use_stale_parent_mask() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
-            let stored_slot = B256::right_padding_from(&[0xeb, 0x53]);
-            let stored_slot_c = B256::right_padding_from(&[0xec, 0x53]);
-            let target = B256::right_padding_from(&[0xeb, 0x1f]);
-            let stored_slot_nibbles = Nibbles::unpack(stored_slot);
+        let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
+        let stored_slot = B256::right_padding_from(&[0xeb, 0x53]);
+        let stored_slot_c = B256::right_padding_from(&[0xec, 0x53]);
+        let target = B256::right_padding_from(&[0xeb, 0x1f]);
+        let stored_slot_nibbles = Nibbles::unpack(stored_slot);
 
-            // The known parent at `e` is supplied by the sparse trie and may be stale in the
-            // database when partial persistence masks that path. In particular, its state mask can
-            // omit the live `eb` child while hashed state already contains that child's leaf.
-            let stale_parent_mask = TrieMask::new((1 << 0xa) | (1 << 0xc));
-            let stale_parent = BranchNodeCompact::new(
-                stale_parent_mask,
-                TrieMask::new(0),
-                TrieMask::new(0),
-                Vec::new(),
-                None,
-            );
-            let storage_nodes = BTreeMap::from([(Nibbles::from_nibbles([0xe]), stale_parent)]);
+        // The known parent at `e` is supplied by the sparse trie and may be stale in the database
+        // when partial persistence masks that path. In particular, its state mask can omit the
+        // live `eb` child while hashed state already contains that child's leaf.
+        let stale_parent_mask = TrieMask::new((1 << 0xa) | (1 << 0xc));
+        let stale_parent = BranchNodeCompact::new(
+            stale_parent_mask,
+            TrieMask::new(0),
+            TrieMask::new(0),
+            Vec::new(),
+            None,
+        );
+        let storage_nodes = BTreeMap::from([(Nibbles::from_nibbles([0xe]), stale_parent)]);
 
-            let mut harness = TrieTestHarness::new(BTreeMap::from([
-                (stored_slot_a, U256::ONE),
-                (stored_slot, U256::from(2)),
-                (stored_slot_c, U256::from(3)),
-            ]));
-            harness.set_trie_nodes(storage_nodes);
+        let mut harness = TrieTestHarness::new(BTreeMap::from([
+            (stored_slot_a, U256::ONE),
+            (stored_slot, U256::from(2)),
+            (stored_slot_c, U256::from(3)),
+        ]));
+        harness.set_trie_nodes(storage_nodes);
 
-            let mut targets = [ProofV2Target::new(target).with_parent(ProofV2TargetParent::new(1))];
-            let (proof, root) = harness.proof_v2(&mut targets);
+        let mut targets = [ProofV2Target::new(target).with_parent(ProofV2TargetParent::new(1))];
+        let (proof, root) = harness.proof_v2(&mut targets);
 
-            assert!(root.is_none());
-            assert_eq!(proof.len(), 1);
-            assert_eq!(proof[0].path, stored_slot_nibbles.slice(0..2));
-            let TrieNodeV2::Leaf(leaf) = &proof[0].node else {
-                panic!("live direct child should be reconstructed as a leaf")
-            };
-            assert_eq!(leaf.key, stored_slot_nibbles.slice(2..));
-        });
+        assert!(root.is_none());
+        assert_eq!(proof.len(), 1);
+        assert_eq!(proof[0].path, stored_slot_nibbles.slice(0..2));
+        let TrieNodeV2::Leaf(leaf) = &proof[0].node else {
+            panic!("live direct child should be reconstructed as a leaf")
+        };
+        assert_eq!(leaf.key, stored_slot_nibbles.slice(2..));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_empty_storage_respects_parent_context() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let harness = ProofTestHarness::new(BTreeMap::new());
-            let slot = B256::ZERO;
+        let harness = ProofTestHarness::new(BTreeMap::new());
+        let slot = B256::ZERO;
 
-            let mut partial_target =
-                [ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(0))];
-            let (partial_proof, partial_root) = harness.proof_v2(&mut partial_target);
-            assert!(partial_proof.is_empty());
-            assert!(partial_root.is_none());
+        let mut partial_target =
+            [ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(0))];
+        let (partial_proof, partial_root) = harness.proof_v2(&mut partial_target);
+        assert!(partial_proof.is_empty());
+        assert!(partial_root.is_none());
 
-            let mut root_target = [ProofV2Target::new(slot)];
-            let (root_proof, root) = harness.proof_v2(&mut root_target);
-            assert_eq!(root_proof.len(), 1);
-            assert!(matches!(root_proof[0].node, TrieNodeV2::EmptyRoot));
-            assert_eq!(root, Some(EMPTY_ROOT_HASH));
-        });
+        let mut root_target = [ProofV2Target::new(slot)];
+        let (root_proof, root) = harness.proof_v2(&mut root_target);
+        assert_eq!(root_proof.len(), 1);
+        assert!(matches!(root_proof[0].node, TrieNodeV2::EmptyRoot));
+        assert_eq!(root, Some(EMPTY_ROOT_HASH));
     }
 
     #[test]
@@ -2954,88 +2914,77 @@ mod tests {
         });
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_preserves_cached_siblings() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let storage = (0..4096u16)
-                .map(|key| (B256::right_padding_from(&key.to_be_bytes()), U256::from(1)))
-                .collect();
-            let harness = TrieTestHarness::new(storage);
-            let changes = BTreeMap::from([
-                (B256::right_padding_from(&[0x04, 0x00]), U256::from(2)),
-                (B256::right_padding_from(&[0x04, 0xf0]), U256::from(2)),
-            ]);
-            let (expected_root, _) = harness.get_root_with_updates(&changes);
-            let mut updated_storage = harness.storage().clone();
-            updated_storage.extend(changes.clone());
-            let hashed_factory = MockHashedCursorFactory::new(
-                BTreeMap::new(),
-                std::iter::once((harness.hashed_address(), updated_storage)).collect(),
-            );
-            let prefix_set = PrefixSetMut::from(changes.keys().map(Nibbles::unpack)).freeze();
-            let trie_cursor = harness
-                .trie_cursor_factory()
-                .storage_trie_cursor(harness.hashed_address())
-                .unwrap();
-            let hashed_cursor =
-                hashed_factory.hashed_storage_cursor(harness.hashed_address()).unwrap();
-            let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
-                .with_prefix_set(prefix_set);
-            let mut targets = [ProofV2Target::new(B256::ZERO)];
-            let proof = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
+        let storage = (0..4096u16)
+            .map(|key| (B256::right_padding_from(&key.to_be_bytes()), U256::from(1)))
+            .collect();
+        let harness = TrieTestHarness::new(storage);
+        let changes = BTreeMap::from([
+            (B256::right_padding_from(&[0x04, 0x00]), U256::from(2)),
+            (B256::right_padding_from(&[0x04, 0xf0]), U256::from(2)),
+        ]);
+        let (expected_root, _) = harness.get_root_with_updates(&changes);
+        let mut updated_storage = harness.storage().clone();
+        updated_storage.extend(changes.clone());
+        let hashed_factory = MockHashedCursorFactory::new(
+            BTreeMap::new(),
+            std::iter::once((harness.hashed_address(), updated_storage)).collect(),
+        );
+        let prefix_set = PrefixSetMut::from(changes.keys().map(Nibbles::unpack)).freeze();
+        let trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
+        let hashed_cursor = hashed_factory.hashed_storage_cursor(harness.hashed_address()).unwrap();
+        let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
+            .with_prefix_set(prefix_set);
+        let mut targets = [ProofV2Target::new(B256::ZERO)];
+        let proof = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
 
-            assert_eq!(calculator.compute_root_hash(&proof).unwrap(), Some(expected_root));
+        assert_eq!(calculator.compute_root_hash(&proof).unwrap(), Some(expected_root));
 
-            // Returning from 0x040 to cached parent 0x04 must not scan all leaves up to 0x05.
-            let clean_key = B256::right_padding_from(&[0x04, 0x88]);
-            assert!(!hashed_factory
-                .visited_storage_keys(harness.hashed_address())
-                .iter()
-                .any(|visit| visit.visited_key == Some(clean_key)));
-        });
+        // Returning from 0x040 to cached parent 0x04 must not scan all leaves up to 0x05.
+        let clean_key = B256::right_padding_from(&[0x04, 0x88]);
+        assert!(!hashed_factory
+            .visited_storage_keys(harness.hashed_address())
+            .iter()
+            .any(|visit| visit.visited_key == Some(clean_key)));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_finishes_branch_before_returning_to_ancestor() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let storage =
-                [[0x10, 0x00, 0x00], [0x12, 0x10, 0x00], [0x12, 0x10, 0x20], [0x12, 0x11, 0x00]]
-                    .into_iter()
-                    .map(|key| (B256::right_padding_from(&key), U256::from(1)))
-                    .collect();
-            let harness = TrieTestHarness::new(storage);
-            let changes = BTreeMap::from([
-                (B256::right_padding_from(&[0x12, 0x00]), U256::from(1)),
-                (B256::right_padding_from(&[0x12, 0x20]), U256::from(1)),
-            ]);
-            let mut after = harness.storage().clone();
-            after.extend(changes.clone());
-            let expected_root = crate::test_utils::storage_root_prehashed(
-                after.iter().map(|(key, value)| (*key, *value)),
-            );
-            let hashed_factory = MockHashedCursorFactory::new(
-                BTreeMap::new(),
-                std::iter::once((harness.hashed_address(), after)).collect(),
-            );
-            let trie_cursor = harness
-                .trie_cursor_factory()
-                .storage_trie_cursor(harness.hashed_address())
-                .unwrap();
-            let hashed_cursor =
-                hashed_factory.hashed_storage_cursor(harness.hashed_address()).unwrap();
-            let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
-                .with_prefix_set(PrefixSetMut::from(changes.keys().map(Nibbles::unpack)).freeze());
-            let mut targets = [
-                ProofV2Target::new(B256::ZERO),
-                ProofV2Target::new(B256::right_padding_from(&[0x10]))
-                    .with_parent(ProofV2TargetParent::new(0)),
-            ];
+        let storage =
+            [[0x10, 0x00, 0x00], [0x12, 0x10, 0x00], [0x12, 0x10, 0x20], [0x12, 0x11, 0x00]]
+                .into_iter()
+                .map(|key| (B256::right_padding_from(&key), U256::from(1)))
+                .collect();
+        let harness = TrieTestHarness::new(storage);
+        let changes = BTreeMap::from([
+            (B256::right_padding_from(&[0x12, 0x00]), U256::from(1)),
+            (B256::right_padding_from(&[0x12, 0x20]), U256::from(1)),
+        ]);
+        let mut after = harness.storage().clone();
+        after.extend(changes.clone());
+        let expected_root = crate::test_utils::storage_root_prehashed(
+            after.iter().map(|(key, value)| (*key, *value)),
+        );
+        let hashed_factory = MockHashedCursorFactory::new(
+            BTreeMap::new(),
+            std::iter::once((harness.hashed_address(), after)).collect(),
+        );
+        let trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
+        let hashed_cursor = hashed_factory.hashed_storage_cursor(harness.hashed_address()).unwrap();
+        let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
+            .with_prefix_set(PrefixSetMut::from(changes.keys().map(Nibbles::unpack)).freeze());
+        let mut targets = [
+            ProofV2Target::new(B256::ZERO),
+            ProofV2Target::new(B256::right_padding_from(&[0x10]))
+                .with_parent(ProofV2TargetParent::new(0)),
+        ];
 
-            // Returning to cached ancestor 0x1 must finish dirty sibling 0x122 before encoding
-            // 0x12.
-            let proof = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
-            assert_eq!(calculator.compute_root_hash(&proof).unwrap(), Some(expected_root));
-        });
+        // Returning to cached ancestor 0x1 must finish dirty sibling 0x122 before encoding 0x12.
+        let proof = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
+        assert_eq!(calculator.compute_root_hash(&proof).unwrap(), Some(expected_root));
     }
 
     /// Helper to compute the keccak256 hash of a storage leaf node. The `short_key` is the
@@ -3108,18 +3057,14 @@ mod tests {
         pretty_assertions::assert_eq!(expected_root, root);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_branch_collapse_removed_child_before_remaining() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            assert_branch_collapse(1, 0);
-        });
+        assert_branch_collapse(1, 0);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_branch_collapse_removed_child_after_remaining() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            assert_branch_collapse(4, 9);
-        });
+        assert_branch_collapse(4, 9);
     }
 
     #[test]
@@ -3498,34 +3443,30 @@ mod tests {
         });
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_blinded_local_root_returns_trie_inconsistency() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let key = B256::right_padding_from(&[0x63, 0xaa]);
-            let value = U256::ONE;
-            let hash = storage_leaf_hash(&Nibbles::unpack(key).slice(2..), &value);
-            let mask = TrieMask::from_nibble(3);
-            let cached_branch =
-                BranchNodeCompact::new(mask, TrieMask::default(), mask, vec![hash], None);
+        let key = B256::right_padding_from(&[0x63, 0xaa]);
+        let value = U256::ONE;
+        let hash = storage_leaf_hash(&Nibbles::unpack(key).slice(2..), &value);
+        let mask = TrieMask::from_nibble(3);
+        let cached_branch =
+            BranchNodeCompact::new(mask, TrieMask::default(), mask, vec![hash], None);
 
-            let mut harness = TrieTestHarness::new(BTreeMap::from([(key, value)]));
-            harness.set_trie_nodes(BTreeMap::from([(Nibbles::from_nibbles([6]), cached_branch)]));
+        let mut harness = TrieTestHarness::new(BTreeMap::from([(key, value)]));
+        harness.set_trie_nodes(BTreeMap::from([(Nibbles::from_nibbles([6]), cached_branch)]));
 
-            let trie_cursor = harness
-                .trie_cursor_factory()
-                .storage_trie_cursor(harness.hashed_address())
-                .unwrap();
-            let hashed_cursor = harness
-                .hashed_cursor_factory()
-                .hashed_storage_cursor(harness.hashed_address())
-                .unwrap();
-            let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
+        let trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
+        let hashed_cursor = harness
+            .hashed_cursor_factory()
+            .hashed_storage_cursor(harness.hashed_address())
+            .unwrap();
+        let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
-            assert!(matches!(
-                calculator.storage_root_node(harness.hashed_address()),
-                Err(StateProofError::TrieInconsistency(_))
-            ));
-        });
+        assert!(matches!(
+            calculator.storage_root_node(harness.hashed_address()),
+            Err(StateProofError::TrieInconsistency(_))
+        ));
     }
 
     #[test]

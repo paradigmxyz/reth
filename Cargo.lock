@@ -8219,10 +8219,20 @@ dependencies = [
  "either",
  "parking_lot",
  "rayon",
+ "reth-concurrency-macros",
  "reth-primitives-traits",
  "shuttle",
  "shuttle-parking_lot",
  "shuttle-sync",
+]
+
+[[package]]
+name = "reth-concurrency-macros"
+version = "2.11.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

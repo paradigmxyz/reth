@@ -438,84 +438,69 @@ mod tests {
         HashedPostStateSorted::new(Vec::new(), storages)
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_overlay_exact_hit_does_not_touch_db_until_next() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let db_nodes = vec![(key(0x02), U256::from(2)), (key(0x03), U256::from(3))];
-            let post_state_nodes = vec![(key(0x02), U256::from(42))];
+        let db_nodes = vec![(key(0x02), U256::from(2)), (key(0x03), U256::from(3))];
+        let post_state_nodes = vec![(key(0x02), U256::from(42))];
 
-            let db_nodes_map: BTreeMap<B256, U256> = db_nodes.into_iter().collect();
-            let db_nodes_arc = Arc::new(db_nodes_map);
-            let visited_keys = Arc::new(Mutex::new(Vec::new()));
-            let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys.clone());
+        let db_nodes_map: BTreeMap<B256, U256> = db_nodes.into_iter().collect();
+        let db_nodes_arc = Arc::new(db_nodes_map);
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys.clone());
 
-            let post_state = storage_post_state(post_state_nodes);
-            let mut cursor =
-                HashedPostStateCursor::new_storage(mock_cursor, &post_state, B256::ZERO);
+        let post_state = storage_post_state(post_state_nodes);
+        let mut cursor = HashedPostStateCursor::new_storage(mock_cursor, &post_state, B256::ZERO);
 
-            let result = cursor.seek(key(0x02)).unwrap();
-            assert_eq!(result, Some((key(0x02), U256::from(42))));
-            assert!(
-                visited_keys.lock().is_empty(),
-                "exact overlay hit should not touch the DB cursor"
-            );
+        let result = cursor.seek(key(0x02)).unwrap();
+        assert_eq!(result, Some((key(0x02), U256::from(42))));
+        assert!(visited_keys.lock().is_empty(), "exact overlay hit should not touch the DB cursor");
 
-            let result = cursor.next().unwrap();
-            assert_eq!(result, Some((key(0x03), U256::from(3))));
-            assert!(!visited_keys.lock().is_empty(), "next should lazily position the DB cursor");
-        });
+        let result = cursor.next().unwrap();
+        assert_eq!(result, Some((key(0x03), U256::from(3))));
+        assert!(!visited_keys.lock().is_empty(), "next should lazily position the DB cursor");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_overlay_exact_hit_repositions_stale_db_on_next() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let db_nodes = vec![(key(0x01), U256::ONE), (key(0x03), U256::from(3))];
-            let post_state_nodes = vec![(key(0x02), U256::from(2))];
+        let db_nodes = vec![(key(0x01), U256::ONE), (key(0x03), U256::from(3))];
+        let post_state_nodes = vec![(key(0x02), U256::from(2))];
 
-            let db_nodes_map: BTreeMap<B256, U256> = db_nodes.into_iter().collect();
-            let db_nodes_arc = Arc::new(db_nodes_map);
-            let visited_keys = Arc::new(Mutex::new(Vec::new()));
-            let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys.clone());
+        let db_nodes_map: BTreeMap<B256, U256> = db_nodes.into_iter().collect();
+        let db_nodes_arc = Arc::new(db_nodes_map);
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys.clone());
 
-            let post_state = storage_post_state(post_state_nodes);
-            let mut cursor =
-                HashedPostStateCursor::new_storage(mock_cursor, &post_state, B256::ZERO);
+        let post_state = storage_post_state(post_state_nodes);
+        let mut cursor = HashedPostStateCursor::new_storage(mock_cursor, &post_state, B256::ZERO);
 
-            let result = cursor.seek(key(0x01)).unwrap();
-            assert_eq!(result, Some((key(0x01), U256::ONE)));
-            assert_eq!(visited_keys.lock().len(), 1);
+        let result = cursor.seek(key(0x01)).unwrap();
+        assert_eq!(result, Some((key(0x01), U256::ONE)));
+        assert_eq!(visited_keys.lock().len(), 1);
 
-            let result = cursor.seek(key(0x02)).unwrap();
-            assert_eq!(result, Some((key(0x02), U256::from(2))));
-            assert_eq!(visited_keys.lock().len(), 1, "exact overlay hit should not seek the DB");
+        let result = cursor.seek(key(0x02)).unwrap();
+        assert_eq!(result, Some((key(0x02), U256::from(2))));
+        assert_eq!(visited_keys.lock().len(), 1, "exact overlay hit should not seek the DB");
 
-            let result = cursor.next().unwrap();
-            assert_eq!(result, Some((key(0x03), U256::from(3))));
-        });
+        let result = cursor.next().unwrap();
+        assert_eq!(result, Some((key(0x03), U256::from(3))));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_overlay_exact_deletion_still_seeks_db() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let db_nodes = vec![(key(0x02), U256::from(2)), (key(0x03), U256::from(3))];
-            let post_state_nodes = vec![(key(0x02), U256::ZERO)];
+        let db_nodes = vec![(key(0x02), U256::from(2)), (key(0x03), U256::from(3))];
+        let post_state_nodes = vec![(key(0x02), U256::ZERO)];
 
-            let db_nodes_map: BTreeMap<B256, U256> = db_nodes.into_iter().collect();
-            let db_nodes_arc = Arc::new(db_nodes_map);
-            let visited_keys = Arc::new(Mutex::new(Vec::new()));
-            let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys.clone());
+        let db_nodes_map: BTreeMap<B256, U256> = db_nodes.into_iter().collect();
+        let db_nodes_arc = Arc::new(db_nodes_map);
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys.clone());
 
-            let post_state = storage_post_state(post_state_nodes);
-            let mut cursor =
-                HashedPostStateCursor::new_storage(mock_cursor, &post_state, B256::ZERO);
+        let post_state = storage_post_state(post_state_nodes);
+        let mut cursor = HashedPostStateCursor::new_storage(mock_cursor, &post_state, B256::ZERO);
 
-            let result = cursor.seek(key(0x02)).unwrap();
-            assert_eq!(result, Some((key(0x03), U256::from(3))));
-            assert!(
-                !visited_keys.lock().is_empty(),
-                "exact overlay deletion should consult the DB"
-            );
-        });
+        let result = cursor.seek(key(0x02)).unwrap();
+        assert_eq!(result, Some((key(0x03), U256::from(3))));
+        assert!(!visited_keys.lock().is_empty(), "exact overlay deletion should consult the DB");
     }
 
     mod proptest_tests {

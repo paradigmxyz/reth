@@ -278,139 +278,131 @@ mod tests {
         assert_eq!(paths[7], Nibbles::new()); // root (empty, parent of all)
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_empty_trie() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let factory = MockTrieCursorFactory::new(BTreeMap::new(), Default::default());
-            let cursor = factory.account_trie_cursor().unwrap();
-            let mut iter = DepthFirstTrieIterator::new(cursor);
-            assert!(iter.next().is_none());
-        });
+        let factory = MockTrieCursorFactory::new(BTreeMap::new(), Default::default());
+        let cursor = factory.account_trie_cursor().unwrap();
+        let mut iter = DepthFirstTrieIterator::new(cursor);
+        assert!(iter.next().is_none());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_single_node() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
-            let node = create_test_node(&[0x4], &[0x5]);
+        let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+        let node = create_test_node(&[0x4], &[0x5]);
 
-            let mut nodes = BTreeMap::new();
-            nodes.insert(path, node.clone());
-            let factory = MockTrieCursorFactory::new(nodes, Default::default());
-            let cursor = factory.account_trie_cursor().unwrap();
-            let mut iter = DepthFirstTrieIterator::new(cursor);
+        let mut nodes = BTreeMap::new();
+        nodes.insert(path, node.clone());
+        let factory = MockTrieCursorFactory::new(nodes, Default::default());
+        let cursor = factory.account_trie_cursor().unwrap();
+        let mut iter = DepthFirstTrieIterator::new(cursor);
 
-            let result = iter.next().unwrap().unwrap();
-            assert_eq!(result.0, path);
-            assert_eq!(result.1, node);
-            assert!(iter.next().is_none());
-        });
+        let result = iter.next().unwrap().unwrap();
+        assert_eq!(result.0, path);
+        assert_eq!(result.1, node);
+        assert!(iter.next().is_none());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_depth_first_order() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            // Create a simple trie structure:
-            // root
-            // ├── 0x1 (has children 0x2 and 0x3)
-            // │   ├── 0x12
-            // │   └── 0x13
-            // └── 0x2 (has child 0x4)
-            //     └── 0x24
+        // Create a simple trie structure:
+        // root
+        // ├── 0x1 (has children 0x2 and 0x3)
+        // │   ├── 0x12
+        // │   └── 0x13
+        // └── 0x2 (has child 0x4)
+        //     └── 0x24
 
-            let nodes = vec![
-                // Root node with children at nibbles 1 and 2
-                (Nibbles::default(), create_test_node(&[], &[0x1, 0x2])),
-                // Node at path 0x1 with children at nibbles 2 and 3
-                (Nibbles::from_nibbles([0x1]), create_test_node(&[], &[0x2, 0x3])),
-                // Leaf nodes
-                (Nibbles::from_nibbles([0x1, 0x2]), create_test_node(&[0xF], &[])),
-                (Nibbles::from_nibbles([0x1, 0x3]), create_test_node(&[0xF], &[])),
-                // Node at path 0x2 with child at nibble 4
-                (Nibbles::from_nibbles([0x2]), create_test_node(&[], &[0x4])),
-                // Leaf node
-                (Nibbles::from_nibbles([0x2, 0x4]), create_test_node(&[0xF], &[])),
-            ];
+        let nodes = vec![
+            // Root node with children at nibbles 1 and 2
+            (Nibbles::default(), create_test_node(&[], &[0x1, 0x2])),
+            // Node at path 0x1 with children at nibbles 2 and 3
+            (Nibbles::from_nibbles([0x1]), create_test_node(&[], &[0x2, 0x3])),
+            // Leaf nodes
+            (Nibbles::from_nibbles([0x1, 0x2]), create_test_node(&[0xF], &[])),
+            (Nibbles::from_nibbles([0x1, 0x3]), create_test_node(&[0xF], &[])),
+            // Node at path 0x2 with child at nibble 4
+            (Nibbles::from_nibbles([0x2]), create_test_node(&[], &[0x4])),
+            // Leaf node
+            (Nibbles::from_nibbles([0x2, 0x4]), create_test_node(&[0xF], &[])),
+        ];
 
-            let nodes_map: BTreeMap<_, _> = nodes.into_iter().collect();
-            let factory = MockTrieCursorFactory::new(nodes_map, Default::default());
-            let cursor = factory.account_trie_cursor().unwrap();
-            let iter = DepthFirstTrieIterator::new(cursor);
+        let nodes_map: BTreeMap<_, _> = nodes.into_iter().collect();
+        let factory = MockTrieCursorFactory::new(nodes_map, Default::default());
+        let cursor = factory.account_trie_cursor().unwrap();
+        let iter = DepthFirstTrieIterator::new(cursor);
 
-            // Expected post-order (depth-first with children before parents):
-            // 1. 0x12 (leaf, child of 0x1)
-            // 2. 0x13 (leaf, child of 0x1)
-            // 3. 0x1 (parent of 0x12 and 0x13)
-            // 4. 0x24 (leaf, child of 0x2)
-            // 5. 0x2 (parent of 0x24)
-            // 6. Root (parent of 0x1 and 0x2)
+        // Expected post-order (depth-first with children before parents):
+        // 1. 0x12 (leaf, child of 0x1)
+        // 2. 0x13 (leaf, child of 0x1)
+        // 3. 0x1 (parent of 0x12 and 0x13)
+        // 4. 0x24 (leaf, child of 0x2)
+        // 5. 0x2 (parent of 0x24)
+        // 6. Root (parent of 0x1 and 0x2)
 
-            let expected_order = vec![
-                Nibbles::from_nibbles([0x1, 0x2]),
-                Nibbles::from_nibbles([0x1, 0x3]),
-                Nibbles::from_nibbles([0x1]),
-                Nibbles::from_nibbles([0x2, 0x4]),
-                Nibbles::from_nibbles([0x2]),
-                Nibbles::default(),
-            ];
+        let expected_order = vec![
+            Nibbles::from_nibbles([0x1, 0x2]),
+            Nibbles::from_nibbles([0x1, 0x3]),
+            Nibbles::from_nibbles([0x1]),
+            Nibbles::from_nibbles([0x2, 0x4]),
+            Nibbles::from_nibbles([0x2]),
+            Nibbles::default(),
+        ];
 
-            let mut actual_order = Vec::new();
-            for result in iter {
-                let (path, _) = result.unwrap();
-                actual_order.push(path);
-            }
+        let mut actual_order = Vec::new();
+        for result in iter {
+            let (path, _) = result.unwrap();
+            actual_order.push(path);
+        }
 
-            assert_eq!(actual_order, expected_order);
-        });
+        assert_eq!(actual_order, expected_order);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_complex_tree() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            // Create a more complex tree structure with multiple levels
-            let nodes = vec![
-                // Root with multiple children
-                (Nibbles::default(), create_test_node(&[], &[0x0, 0x5, 0xA, 0xF])),
-                // Branch at 0x0 with children
-                (Nibbles::from_nibbles([0x0]), create_test_node(&[], &[0x1, 0x2])),
-                (Nibbles::from_nibbles([0x0, 0x1]), create_test_node(&[0x3], &[])),
-                (Nibbles::from_nibbles([0x0, 0x2]), create_test_node(&[0x4], &[])),
-                // Branch at 0x5 with no children (leaf)
-                (Nibbles::from_nibbles([0x5]), create_test_node(&[0xB], &[])),
-                // Branch at 0xA with deep nesting
-                (Nibbles::from_nibbles([0xA]), create_test_node(&[], &[0xB])),
-                (Nibbles::from_nibbles([0xA, 0xB]), create_test_node(&[], &[0xC])),
-                (Nibbles::from_nibbles([0xA, 0xB, 0xC]), create_test_node(&[0xD], &[])),
-                // Branch at 0xF (leaf)
-                (Nibbles::from_nibbles([0xF]), create_test_node(&[0xE], &[])),
-            ];
+        // Create a more complex tree structure with multiple levels
+        let nodes = vec![
+            // Root with multiple children
+            (Nibbles::default(), create_test_node(&[], &[0x0, 0x5, 0xA, 0xF])),
+            // Branch at 0x0 with children
+            (Nibbles::from_nibbles([0x0]), create_test_node(&[], &[0x1, 0x2])),
+            (Nibbles::from_nibbles([0x0, 0x1]), create_test_node(&[0x3], &[])),
+            (Nibbles::from_nibbles([0x0, 0x2]), create_test_node(&[0x4], &[])),
+            // Branch at 0x5 with no children (leaf)
+            (Nibbles::from_nibbles([0x5]), create_test_node(&[0xB], &[])),
+            // Branch at 0xA with deep nesting
+            (Nibbles::from_nibbles([0xA]), create_test_node(&[], &[0xB])),
+            (Nibbles::from_nibbles([0xA, 0xB]), create_test_node(&[], &[0xC])),
+            (Nibbles::from_nibbles([0xA, 0xB, 0xC]), create_test_node(&[0xD], &[])),
+            // Branch at 0xF (leaf)
+            (Nibbles::from_nibbles([0xF]), create_test_node(&[0xE], &[])),
+        ];
 
-            let nodes_map: BTreeMap<_, _> = nodes.into_iter().collect();
-            let factory = MockTrieCursorFactory::new(nodes_map, Default::default());
-            let cursor = factory.account_trie_cursor().unwrap();
-            let iter = DepthFirstTrieIterator::new(cursor);
+        let nodes_map: BTreeMap<_, _> = nodes.into_iter().collect();
+        let factory = MockTrieCursorFactory::new(nodes_map, Default::default());
+        let cursor = factory.account_trie_cursor().unwrap();
+        let iter = DepthFirstTrieIterator::new(cursor);
 
-            // Verify post-order traversal (children before parents)
-            let expected_order = vec![
-                Nibbles::from_nibbles([0x0, 0x1]),      // leaf child of 0x0
-                Nibbles::from_nibbles([0x0, 0x2]),      // leaf child of 0x0
-                Nibbles::from_nibbles([0x0]),           // parent of 0x01 and 0x02
-                Nibbles::from_nibbles([0x5]),           // leaf
-                Nibbles::from_nibbles([0xA, 0xB, 0xC]), // deepest leaf
-                Nibbles::from_nibbles([0xA, 0xB]),      // parent of 0xABC
-                Nibbles::from_nibbles([0xA]),           // parent of 0xAB
-                Nibbles::from_nibbles([0xF]),           // leaf
-                Nibbles::default(),                     // root (last)
-            ];
+        // Verify post-order traversal (children before parents)
+        let expected_order = vec![
+            Nibbles::from_nibbles([0x0, 0x1]),      // leaf child of 0x0
+            Nibbles::from_nibbles([0x0, 0x2]),      // leaf child of 0x0
+            Nibbles::from_nibbles([0x0]),           // parent of 0x01 and 0x02
+            Nibbles::from_nibbles([0x5]),           // leaf
+            Nibbles::from_nibbles([0xA, 0xB, 0xC]), // deepest leaf
+            Nibbles::from_nibbles([0xA, 0xB]),      // parent of 0xABC
+            Nibbles::from_nibbles([0xA]),           // parent of 0xAB
+            Nibbles::from_nibbles([0xF]),           // leaf
+            Nibbles::default(),                     // root (last)
+        ];
 
-            let mut actual_order = Vec::new();
-            for result in iter {
-                let (path, _node) = result.unwrap();
-                actual_order.push(path);
-            }
+        let mut actual_order = Vec::new();
+        for result in iter {
+            let (path, _node) = result.unwrap();
+            actual_order.push(path);
+        }
 
-            assert_eq!(actual_order, expected_order);
-        });
+        assert_eq!(actual_order, expected_order);
     }
 
     #[test]

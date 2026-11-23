@@ -11,3 +11,5 @@ use rayon as _;
 use reth_primitives_traits as _;
 
 pub mod sync;
+
+pub use reth_concurrency_macros::test;

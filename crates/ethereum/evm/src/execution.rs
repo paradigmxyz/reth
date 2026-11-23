@@ -216,145 +216,142 @@ mod tests {
         Ok(output)
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn charges_london_sstore_set_gas() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let caller = address!("0000000000000000000000000000000000000001");
-            let contract = address!("0000000000000000000000000000000000001000");
-            let mut database = InMemoryDB::default();
-            database.insert_account_info(
-                &caller,
-                AccountInfo::default().with_balance(U256::from(ETH_TO_WEI)),
-            );
-            database.insert_account_info(
-                &contract,
-                AccountInfo::default().with_nonce(1).with_code(Bytecode::new_raw(Bytes::from(
-                    vec![op::PUSH1, 10, op::PUSH1, 0, op::SSTORE, op::STOP],
-                ))),
-            );
-            let transaction = Recovered::new_unchecked(
-                TransactionSigned::Legacy(
-                    TxLegacy {
-                        gas_price: 1_000_000_000,
-                        gas_limit: 100_000,
-                        to: TxKind::Call(contract),
-                        value: U256::from(1),
-                        ..Default::default()
-                    }
-                    .into_signed(Signature::test_signature()),
-                ),
-                caller,
-            );
-
-            let output = execute_block(
-                SpecId::LONDON,
-                BlockEnv {
-                    gas_limit: U256::from(1_500_000),
-                    basefee: U256::from(1),
+        let caller = address!("0000000000000000000000000000000000000001");
+        let contract = address!("0000000000000000000000000000000000001000");
+        let mut database = InMemoryDB::default();
+        database.insert_account_info(
+            &caller,
+            AccountInfo::default().with_balance(U256::from(ETH_TO_WEI)),
+        );
+        database.insert_account_info(
+            &contract,
+            AccountInfo::default().with_nonce(1).with_code(Bytecode::new_raw(Bytes::from(vec![
+                op::PUSH1,
+                10,
+                op::PUSH1,
+                0,
+                op::SSTORE,
+                op::STOP,
+            ]))),
+        );
+        let transaction = Recovered::new_unchecked(
+            TransactionSigned::Legacy(
+                TxLegacy {
+                    gas_price: 1_000_000_000,
+                    gas_limit: 100_000,
+                    to: TxKind::Call(contract),
+                    value: U256::from(1),
                     ..Default::default()
-                },
-                database,
-                [transaction],
-                None,
-            )
-            .expect("EVM execution succeeds");
+                }
+                .into_signed(Signature::test_signature()),
+            ),
+            caller,
+        );
 
-            assert_eq!(output.result.receipts[0].cumulative_gas_used, 43_106);
-            assert!(output.result.receipts[0].success);
-            assert_eq!(output.account(&contract).unwrap().unwrap().balance, U256::from(1));
-            let sender = output.account(&caller).unwrap().unwrap();
-            assert_eq!(sender.nonce, 1);
-            assert_eq!(sender.balance, U256::from(ETH_TO_WEI) - U256::from(43_106_000_000_001u64));
-            assert_eq!(output.storage(&contract, U256::ZERO).unwrap(), U256::from(10));
-        });
+        let output = execute_block(
+            SpecId::LONDON,
+            BlockEnv {
+                gas_limit: U256::from(1_500_000),
+                basefee: U256::from(1),
+                ..Default::default()
+            },
+            database,
+            [transaction],
+            None,
+        )
+        .expect("EVM execution succeeds");
+
+        assert_eq!(output.result.receipts[0].cumulative_gas_used, 43_106);
+        assert!(output.result.receipts[0].success);
+        assert_eq!(output.account(&contract).unwrap().unwrap().balance, U256::from(1));
+        let sender = output.account(&caller).unwrap().unwrap();
+        assert_eq!(sender.nonce, 1);
+        assert_eq!(sender.balance, U256::from(ETH_TO_WEI) - U256::from(43_106_000_000_001u64));
+        assert_eq!(output.storage(&contract, U256::ZERO).unwrap(), U256::from(10));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn applies_withdrawals_to_block_output() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let existing = address!("0000000000000000000000000000000000000001");
-            let new = address!("0000000000000000000000000000000000000002");
-            let mut database = InMemoryDB::default();
-            database.insert_account_info(
-                &existing,
-                AccountInfo::default().with_balance(U256::from(100)),
-            );
-            let withdrawals = [
-                Withdrawal { index: 0, validator_index: 0, address: existing, amount: 1 },
-                Withdrawal { index: 1, validator_index: 1, address: new, amount: 2 },
-                Withdrawal { index: 2, validator_index: 2, address: new, amount: 3 },
-            ];
+        let existing = address!("0000000000000000000000000000000000000001");
+        let new = address!("0000000000000000000000000000000000000002");
+        let mut database = InMemoryDB::default();
+        database
+            .insert_account_info(&existing, AccountInfo::default().with_balance(U256::from(100)));
+        let withdrawals = [
+            Withdrawal { index: 0, validator_index: 0, address: existing, amount: 1 },
+            Withdrawal { index: 1, validator_index: 1, address: new, amount: 2 },
+            Withdrawal { index: 2, validator_index: 2, address: new, amount: 3 },
+        ];
 
-            let output = execute_block(
-                SpecId::SHANGHAI,
-                BlockEnv::default(),
-                database,
-                core::iter::empty::<Recovered<TransactionSigned>>(),
-                Some(&withdrawals),
-            )
-            .expect("EVM execution succeeds");
+        let output = execute_block(
+            SpecId::SHANGHAI,
+            BlockEnv::default(),
+            database,
+            core::iter::empty::<Recovered<TransactionSigned>>(),
+            Some(&withdrawals),
+        )
+        .expect("EVM execution succeeds");
 
-            assert!(output.result.receipts.is_empty());
-            assert_eq!(
-                output.account_state(&existing).unwrap().info.as_ref().unwrap().balance,
-                U256::from(1_000_000_100)
-            );
-            assert_eq!(
-                output.account_state(&new).unwrap().info.as_ref().unwrap().balance,
-                U256::from(5_000_000_000u64)
-            );
-        });
+        assert!(output.result.receipts.is_empty());
+        assert_eq!(
+            output.account_state(&existing).unwrap().info.as_ref().unwrap().balance,
+            U256::from(1_000_000_100)
+        );
+        assert_eq!(
+            output.account_state(&new).unwrap().info.as_ref().unwrap().balance,
+            U256::from(5_000_000_000u64)
+        );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn zero_withdrawals_apply_eip161_state_clearing() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let nonexistent = address!("0000000000000000000000000000000000000001");
-            let empty = address!("0000000000000000000000000000000000000002");
-            let contract = address!("0000000000000000000000000000000000000003");
-            let mut database = InMemoryDB::default();
-            database.insert_account_info(&empty, AccountInfo::default());
-            database.insert_account_info(&contract, AccountInfo::default().with_nonce(1));
-            let withdrawals = [
-                Withdrawal { index: 0, validator_index: 0, address: nonexistent, amount: 0 },
-                Withdrawal { index: 1, validator_index: 1, address: empty, amount: 0 },
-                Withdrawal { index: 2, validator_index: 2, address: contract, amount: 0 },
-            ];
+        let nonexistent = address!("0000000000000000000000000000000000000001");
+        let empty = address!("0000000000000000000000000000000000000002");
+        let contract = address!("0000000000000000000000000000000000000003");
+        let mut database = InMemoryDB::default();
+        database.insert_account_info(&empty, AccountInfo::default());
+        database.insert_account_info(&contract, AccountInfo::default().with_nonce(1));
+        let withdrawals = [
+            Withdrawal { index: 0, validator_index: 0, address: nonexistent, amount: 0 },
+            Withdrawal { index: 1, validator_index: 1, address: empty, amount: 0 },
+            Withdrawal { index: 2, validator_index: 2, address: contract, amount: 0 },
+        ];
 
-            let output = execute_block(
-                SpecId::SHANGHAI,
-                BlockEnv::default(),
-                database.clone(),
-                core::iter::empty::<Recovered<TransactionSigned>>(),
-                Some(&withdrawals),
-            )
-            .expect("EVM execution succeeds");
+        let output = execute_block(
+            SpecId::SHANGHAI,
+            BlockEnv::default(),
+            database.clone(),
+            core::iter::empty::<Recovered<TransactionSigned>>(),
+            Some(&withdrawals),
+        )
+        .expect("EVM execution succeeds");
 
-            assert!(output.account_state(&nonexistent).is_none());
-            assert!(output.account_state(&empty).unwrap().info.is_none());
-            assert!(output.account_state(&contract).is_none());
-            let factory = crate::EthBlockExecutorFactory::new(MAINNET.clone());
-            let env = crate::EthEvmEnv::new(SpecId::AMSTERDAM, BlockEnv::default(), 1);
-            let mut evm = factory.evm_with_env(evm2::evm::Db::new(database), env);
-            evm.state_mut().enable_bal_builder();
-            post_block_balance_state_changes(
-                &mut evm,
-                &mut BlockState::new(),
-                false,
-                &mut |_| {},
-                SpecId::AMSTERDAM,
-                None,
-                1,
-                Address::ZERO,
-                None,
-                Some(&withdrawals),
-            )
-            .unwrap();
-            let bal = evm.state_mut().take_bal_builder().unwrap();
-            for withdrawal in withdrawals {
-                assert!(bal.accounts.contains_key(&withdrawal.address));
-            }
-        });
+        assert!(output.account_state(&nonexistent).is_none());
+        assert!(output.account_state(&empty).unwrap().info.is_none());
+        assert!(output.account_state(&contract).is_none());
+        let factory = crate::EthBlockExecutorFactory::new(MAINNET.clone());
+        let env = crate::EthEvmEnv::new(SpecId::AMSTERDAM, BlockEnv::default(), 1);
+        let mut evm = factory.evm_with_env(evm2::evm::Db::new(database), env);
+        evm.state_mut().enable_bal_builder();
+        post_block_balance_state_changes(
+            &mut evm,
+            &mut BlockState::new(),
+            false,
+            &mut |_| {},
+            SpecId::AMSTERDAM,
+            None,
+            1,
+            Address::ZERO,
+            None,
+            Some(&withdrawals),
+        )
+        .unwrap();
+        let bal = evm.state_mut().take_bal_builder().unwrap();
+        for withdrawal in withdrawals {
+            assert!(bal.accounts.contains_key(&withdrawal.address));
+        }
     }
 
     #[test]
@@ -412,119 +409,112 @@ mod tests {
         assert_eq!(base_block_reward(&chain_spec, 14), Some(ETH_TO_WEI * 2));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn collects_post_execution_system_call_requests() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let mut database = InMemoryDB::default();
-            database.insert_account_info(
-                &WITHDRAWAL_REQUEST_ADDRESS,
-                AccountInfo::default().with_code(return_byte_code(0xaa)),
-            );
-            database.insert_account_info(
-                &CONSOLIDATION_REQUEST_ADDRESS,
-                AccountInfo::default().with_code(return_byte_code(0xbb)),
-            );
+        let mut database = InMemoryDB::default();
+        database.insert_account_info(
+            &WITHDRAWAL_REQUEST_ADDRESS,
+            AccountInfo::default().with_code(return_byte_code(0xaa)),
+        );
+        database.insert_account_info(
+            &CONSOLIDATION_REQUEST_ADDRESS,
+            AccountInfo::default().with_code(return_byte_code(0xbb)),
+        );
 
-            let output = execute_block(
-                SpecId::PRAGUE,
-                BlockEnv::default(),
-                database,
-                core::iter::empty::<Recovered<TransactionSigned>>(),
-                None,
-            )
-            .expect("system calls succeed");
+        let output = execute_block(
+            SpecId::PRAGUE,
+            BlockEnv::default(),
+            database,
+            core::iter::empty::<Recovered<TransactionSigned>>(),
+            None,
+        )
+        .expect("system calls succeed");
 
-            assert_eq!(
-                output.result.requests.iter().cloned().collect::<Vec<_>>(),
-                vec![
-                    Bytes::from_static(&[WITHDRAWAL_REQUEST_TYPE, 0xaa]),
-                    Bytes::from_static(&[CONSOLIDATION_REQUEST_TYPE, 0xbb]),
-                ]
-            );
-            assert!(output.result.receipts.is_empty());
-        });
+        assert_eq!(
+            output.result.requests.iter().cloned().collect::<Vec<_>>(),
+            vec![
+                Bytes::from_static(&[WITHDRAWAL_REQUEST_TYPE, 0xaa]),
+                Bytes::from_static(&[CONSOLIDATION_REQUEST_TYPE, 0xbb]),
+            ]
+        );
+        assert!(output.result.receipts.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn collects_amsterdam_builder_requests() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let mut database = InMemoryDB::default();
-            for (address, byte) in [
-                (WITHDRAWAL_REQUEST_ADDRESS, 0xaa),
-                (CONSOLIDATION_REQUEST_ADDRESS, 0xbb),
-                (BUILDER_DEPOSIT_REQUEST_ADDRESS, 0xcc),
-                (BUILDER_EXIT_REQUEST_ADDRESS, 0xdd),
+        let mut database = InMemoryDB::default();
+        for (address, byte) in [
+            (WITHDRAWAL_REQUEST_ADDRESS, 0xaa),
+            (CONSOLIDATION_REQUEST_ADDRESS, 0xbb),
+            (BUILDER_DEPOSIT_REQUEST_ADDRESS, 0xcc),
+            (BUILDER_EXIT_REQUEST_ADDRESS, 0xdd),
+        ] {
+            database.insert_account_info(
+                &address,
+                AccountInfo::default().with_code(return_byte_code(byte)),
+            );
+        }
+
+        let output = execute_block(
+            SpecId::AMSTERDAM,
+            BlockEnv::default(),
+            database,
+            core::iter::empty::<Recovered<TransactionSigned>>(),
+            None,
+        )
+        .expect("system calls succeed");
+
+        assert_eq!(
+            output.result.requests.iter().cloned().collect::<Vec<_>>(),
+            vec![
+                Bytes::from_static(&[WITHDRAWAL_REQUEST_TYPE, 0xaa]),
+                Bytes::from_static(&[CONSOLIDATION_REQUEST_TYPE, 0xbb]),
+                Bytes::from_static(&[BUILDER_DEPOSIT_REQUEST_TYPE, 0xcc]),
+                Bytes::from_static(&[BUILDER_EXIT_REQUEST_TYPE, 0xdd]),
+            ]
+        );
+    }
+
+    #[reth_concurrency::test]
+    fn system_call_failures_follow_contract_policy() {
+        for address in [
+            BEACON_ROOTS_ADDRESS,
+            HISTORY_STORAGE_ADDRESS,
+            WITHDRAWAL_REQUEST_ADDRESS,
+            CONSOLIDATION_REQUEST_ADDRESS,
+        ] {
+            for code in [
+                Bytes::from_static(&[op::PUSH0, op::PUSH0, op::REVERT]),
+                Bytes::from_static(&[op::INVALID]),
             ] {
+                let mut database = InMemoryDB::default();
+                for request_contract in [WITHDRAWAL_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS]
+                {
+                    database.insert_account_info(
+                        &request_contract,
+                        AccountInfo::default()
+                            .with_code(Bytecode::new_legacy(Bytes::from_static(&[op::STOP]))),
+                    );
+                }
                 database.insert_account_info(
                     &address,
-                    AccountInfo::default().with_code(return_byte_code(byte)),
+                    AccountInfo::default().with_code(Bytecode::new_legacy(code)),
                 );
-            }
-
-            let output = execute_block(
-                SpecId::AMSTERDAM,
-                BlockEnv::default(),
-                database,
-                core::iter::empty::<Recovered<TransactionSigned>>(),
-                None,
-            )
-            .expect("system calls succeed");
-
-            assert_eq!(
-                output.result.requests.iter().cloned().collect::<Vec<_>>(),
-                vec![
-                    Bytes::from_static(&[WITHDRAWAL_REQUEST_TYPE, 0xaa]),
-                    Bytes::from_static(&[CONSOLIDATION_REQUEST_TYPE, 0xbb]),
-                    Bytes::from_static(&[BUILDER_DEPOSIT_REQUEST_TYPE, 0xcc]),
-                    Bytes::from_static(&[BUILDER_EXIT_REQUEST_TYPE, 0xdd]),
-                ]
-            );
-        });
-    }
-
-    #[test]
-    fn system_call_failures_follow_contract_policy() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            for address in [
-                BEACON_ROOTS_ADDRESS,
-                HISTORY_STORAGE_ADDRESS,
-                WITHDRAWAL_REQUEST_ADDRESS,
-                CONSOLIDATION_REQUEST_ADDRESS,
-            ] {
-                for code in [
-                    Bytes::from_static(&[op::PUSH0, op::PUSH0, op::REVERT]),
-                    Bytes::from_static(&[op::INVALID]),
-                ] {
-                    let mut database = InMemoryDB::default();
-                    for request_contract in
-                        [WITHDRAWAL_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS]
-                    {
-                        database.insert_account_info(
-                            &request_contract,
-                            AccountInfo::default()
-                                .with_code(Bytecode::new_legacy(Bytes::from_static(&[op::STOP]))),
-                        );
-                    }
-                    database.insert_account_info(
-                        &address,
-                        AccountInfo::default().with_code(Bytecode::new_legacy(code)),
-                    );
-                    let result = execute_block(
-                        SpecId::PRAGUE,
-                        BlockEnv { number: U256::from(1), ..Default::default() },
-                        database,
-                        core::iter::empty::<Recovered<TransactionSigned>>(),
-                        None,
-                    );
-                    if matches!(address, BEACON_ROOTS_ADDRESS | HISTORY_STORAGE_ADDRESS) {
-                        result.unwrap();
-                    } else {
-                        let error = result.unwrap_err();
-                        assert!(error.as_validation().is_some(), "{error:?}");
-                    }
+                let result = execute_block(
+                    SpecId::PRAGUE,
+                    BlockEnv { number: U256::from(1), ..Default::default() },
+                    database,
+                    core::iter::empty::<Recovered<TransactionSigned>>(),
+                    None,
+                );
+                if matches!(address, BEACON_ROOTS_ADDRESS | HISTORY_STORAGE_ADDRESS) {
+                    result.unwrap();
+                } else {
+                    let error = result.unwrap_err();
+                    assert!(error.as_validation().is_some(), "{error:?}");
                 }
             }
-        });
+        }
     }
 
     #[test]

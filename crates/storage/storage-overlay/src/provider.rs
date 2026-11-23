@@ -1224,358 +1224,326 @@ mod tests {
         overlay.input().nodes.account_nodes_ref().iter().map(|(path, _)| *path).collect()
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn overlay_cache_is_keyed_by_both_durable_frontiers() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let (factory, blocks) = setup_frontiers(1, 3);
-            let manager = OverlayManager::default();
-            let canonical_state = canonical_state_for(&manager);
-            for block in &blocks[2..=3] {
-                canonical_state.insert_executed(block.clone());
-            }
-            let state_provider_factory = OverlayStateProviderFactory::new(
-                factory.clone(),
-                manager.overlay_builder(blocks[3].recovered_block().hash()),
-            );
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = OverlayManager::default();
+        let canonical_state = canonical_state_for(&manager);
+        for block in &blocks[2..=3] {
+            canonical_state.insert_executed(block.clone());
+        }
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            factory.clone(),
+            manager.overlay_builder(blocks[3].recovered_block().hash()),
+        );
 
-            let provider = state_provider_factory.database_provider_ro().unwrap();
-            let first = provider.state_trie_overlay(false).unwrap().clone();
-            assert_eq!(
-                account_keys(&first),
-                vec![B256::with_last_byte(3), B256::with_last_byte(4)]
-            );
-            drop(provider);
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+        let first = provider.state_trie_overlay(false).unwrap().clone();
+        assert_eq!(account_keys(&first), vec![B256::with_last_byte(3), B256::with_last_byte(4)]);
+        drop(provider);
 
-            let provider_rw = factory.provider_rw().unwrap();
-            provider_rw
-                .save_stage_checkpoint(
-                    StageId::Finish,
-                    StageCheckpoint::new(blocks[3].block_number()).with_finish_stage_checkpoint(
-                        FinishCheckpoint { partial_state_trie: Some(blocks[2].block_number()) },
-                    ),
-                )
-                .unwrap();
-            provider_rw.commit().unwrap();
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(blocks[3].block_number()).with_finish_stage_checkpoint(
+                    FinishCheckpoint { partial_state_trie: Some(blocks[2].block_number()) },
+                ),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
 
-            let provider = state_provider_factory.database_provider_ro().unwrap();
-            let second = provider.state_trie_overlay(false).unwrap().clone();
-            assert_eq!(account_keys(&second), vec![B256::with_last_byte(4)]);
-            assert_eq!(account_node_paths(&second), vec![Nibbles::from_nibbles([4])]);
-            assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 2);
-        });
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+        let second = provider.state_trie_overlay(false).unwrap().clone();
+        assert_eq!(account_keys(&second), vec![B256::with_last_byte(4)]);
+        assert_eq!(account_node_paths(&second), vec![Nibbles::from_nibbles([4])]);
+        assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 2);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn overlays_are_computed_lazily() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let (factory, blocks) = setup_frontiers(1, 3);
-            let manager = OverlayManager::default();
-            let canonical_state = canonical_state_for(&manager);
-            for block in &blocks[2..=3] {
-                canonical_state.insert_executed(block.clone());
-            }
-            let state_provider_factory = OverlayStateProviderFactory::new(
-                factory,
-                manager.overlay_builder(blocks[3].recovered_block().hash()),
-            );
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = OverlayManager::default();
+        let canonical_state = canonical_state_for(&manager);
+        for block in &blocks[2..=3] {
+            canonical_state.insert_executed(block.clone());
+        }
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            factory,
+            manager.overlay_builder(blocks[3].recovered_block().hash()),
+        );
 
-            let provider = state_provider_factory.database_provider_ro().unwrap();
+        let provider = state_provider_factory.database_provider_ro().unwrap();
 
-            assert!(provider.state_trie_overlay.get().is_none());
-            assert!(provider.execution_overlay.get().is_none());
-            assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
+        assert!(provider.state_trie_overlay.get().is_none());
+        assert!(provider.execution_overlay.get().is_none());
+        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
 
-            provider.basic_account(&Address::ZERO).unwrap();
-            assert!(provider.state_trie_overlay.get().is_none());
-            assert!(provider.execution_overlay.get().is_some());
-            assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
+        provider.basic_account(&Address::ZERO).unwrap();
+        assert!(provider.state_trie_overlay.get().is_none());
+        assert!(provider.execution_overlay.get().is_some());
+        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
 
-            provider.account_trie_cursor().unwrap();
-            assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 1);
-        });
+        provider.account_trie_cursor().unwrap();
+        assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 1);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn state_trie_overlay_cache_is_keyed_by_trie_changesets() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let (factory, blocks) = setup_frontiers(1, 3);
-            let manager = OverlayManager::default();
-            let canonical_state = canonical_state_for(&manager);
-            for block in &blocks[2..=3] {
-                canonical_state.insert_executed(block.clone());
-            }
-            let state_provider_factory = OverlayStateProviderFactory::new(
-                factory,
-                manager.overlay_builder(blocks[3].recovered_block().hash()),
-            );
-            let provider = state_provider_factory.database_provider_ro().unwrap();
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = OverlayManager::default();
+        let canonical_state = canonical_state_for(&manager);
+        for block in &blocks[2..=3] {
+            canonical_state.insert_executed(block.clone());
+        }
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            factory,
+            manager.overlay_builder(blocks[3].recovered_block().hash()),
+        );
+        let provider = state_provider_factory.database_provider_ro().unwrap();
 
-            provider.state_trie_overlay(false).unwrap();
-            provider.state_trie_overlay(true).unwrap();
+        provider.state_trie_overlay(false).unwrap();
+        provider.state_trie_overlay(true).unwrap();
 
-            assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 2);
-        });
+        assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 2);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn supplied_state_trie_overlay_is_available_in_both_modes() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let (factory, _) = setup_frontiers(1, 1);
-            let provider = factory.provider().unwrap();
-            let provider = OverlayStateProvider::<&_, EthPrimitives>::new_with_state_trie(
-                &provider,
-                StateTrieOverlay::new(TrieInputSorted::default()),
-                false,
-            );
+        let (factory, _) = setup_frontiers(1, 1);
+        let provider = factory.provider().unwrap();
+        let provider = OverlayStateProvider::<&_, EthPrimitives>::new_with_state_trie(
+            &provider,
+            StateTrieOverlay::new(TrieInputSorted::default()),
+            false,
+        );
 
-            assert!(provider.state_trie_overlay(false).is_ok());
-            assert!(provider.state_trie_overlay(true).is_ok());
-        });
+        assert!(provider.state_trie_overlay(false).is_ok());
+        assert!(provider.state_trie_overlay(true).is_ok());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn lazy_overlays_survive_manager_block_removal() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let (factory, blocks) = setup_frontiers(1, 1);
-            let manager = OverlayManager::default();
-            let canonical_state = canonical_state_for(&manager);
-            for block in &blocks[2..=3] {
-                canonical_state.insert_executed(block.clone());
-            }
-            let state_provider_factory = OverlayStateProviderFactory::new(
-                factory,
-                manager.overlay_builder(blocks[3].recovered_block().hash()),
-            );
-            let provider = state_provider_factory.database_provider_ro().unwrap();
+        let (factory, blocks) = setup_frontiers(1, 1);
+        let manager = OverlayManager::default();
+        let canonical_state = canonical_state_for(&manager);
+        for block in &blocks[2..=3] {
+            canonical_state.insert_executed(block.clone());
+        }
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            factory,
+            manager.overlay_builder(blocks[3].recovered_block().hash()),
+        );
+        let provider = state_provider_factory.database_provider_ro().unwrap();
 
-            canonical_state.clear_state();
-            for block in &blocks[2..=3] {
-                let hash = block.recovered_block().hash();
-                assert!(manager.in_memory_state().state_by_hash(hash).is_none());
-            }
+        canonical_state.clear_state();
+        for block in &blocks[2..=3] {
+            let hash = block.recovered_block().hash();
+            assert!(manager.in_memory_state().state_by_hash(hash).is_none());
+        }
 
-            let (execution_overlay, _) = provider.execution_overlay().unwrap();
-            assert_eq!(
-                execution_overlay.block_hashes(),
-                [blocks[2].recovered_block().num_hash(), blocks[3].recovered_block().num_hash()]
-            );
-            assert_eq!(
-                account_keys(provider.state_trie_overlay(false).unwrap()),
-                vec![B256::with_last_byte(3), B256::with_last_byte(4)]
-            );
-        });
+        let (execution_overlay, _) = provider.execution_overlay().unwrap();
+        assert_eq!(
+            execution_overlay.block_hashes(),
+            [blocks[2].recovered_block().num_hash(), blocks[3].recovered_block().num_hash()]
+        );
+        assert_eq!(
+            account_keys(provider.state_trie_overlay(false).unwrap()),
+            vec![B256::with_last_byte(3), B256::with_last_byte(4)]
+        );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn skipped_state_trie_overlay_is_not_cached_or_used_for_state_roots() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let (factory, blocks) = setup_frontiers(3, 3);
-            let manager = OverlayManager::default();
-            let canonical_state = canonical_state_for(&manager);
-            canonical_state.insert_executed(blocks[4].clone());
-            let state_provider_factory = OverlayStateProviderFactory::new(
-                factory,
-                manager
-                    .overlay_builder(blocks[4].recovered_block().hash())
-                    .with_skip_overlay_for_reused_sparse_trie(blocks[3].recovered_block().hash()),
-            );
+        let (factory, blocks) = setup_frontiers(3, 3);
+        let manager = OverlayManager::default();
+        let canonical_state = canonical_state_for(&manager);
+        canonical_state.insert_executed(blocks[4].clone());
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            factory,
+            manager
+                .overlay_builder(blocks[4].recovered_block().hash())
+                .with_skip_overlay_for_reused_sparse_trie(blocks[3].recovered_block().hash()),
+        );
 
-            let provider = state_provider_factory.database_provider_ro().unwrap();
-            assert!(provider.state_trie_overlay(false).unwrap().skipped_for_reused_sparse_trie());
-            assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
-            assert!(matches!(
-                provider.state_root(HashedPostState::default()),
-                Err(ProviderError::UnsupportedProvider)
-            ));
-            assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
-        });
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+        assert!(provider.state_trie_overlay(false).unwrap().skipped_for_reused_sparse_trie());
+        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
+        assert!(matches!(
+            provider.state_root(HashedPostState::default()),
+            Err(ProviderError::UnsupportedProvider)
+        ));
+        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_overlay_readers_use_overlay_first() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let (factory, _) = setup_frontiers(1, 3);
-            let address = Address::with_last_byte(1);
-            let account_info =
-                AccountInfo { nonce: 1, balance: U256::from(2), ..Default::default() };
-            let block_hash = B256::with_last_byte(3);
-            let storage_key = B256::with_last_byte(4);
-            let storage_value = U256::from(5);
-            let code_hash = B256::with_last_byte(6);
-            let bytecode = Bytecode::new_raw([0x60, 0x01].into());
-            let mut execution_overlay = ExecutionOverlay::default();
-            execution_overlay.accounts_mut().insert(address, Some(account_info.clone()));
-            execution_overlay.block_hashes_mut().push(BlockNumHash::new(1, block_hash));
-            execution_overlay
-                .storage_mut()
-                .entry(address)
-                .or_default()
-                .insert(U256::from_be_bytes(storage_key.0), storage_value);
-            execution_overlay.code_hashes_mut().insert(code_hash, bytecode.clone());
-            let provider = OverlayStateProvider::<_, EthPrimitives>::new_with_execution(
-                factory.provider().unwrap(),
-                Arc::new(execution_overlay),
-                false,
-            );
+        let (factory, _) = setup_frontiers(1, 3);
+        let address = Address::with_last_byte(1);
+        let account_info = AccountInfo { nonce: 1, balance: U256::from(2), ..Default::default() };
+        let block_hash = B256::with_last_byte(3);
+        let storage_key = B256::with_last_byte(4);
+        let storage_value = U256::from(5);
+        let code_hash = B256::with_last_byte(6);
+        let bytecode = Bytecode::new_raw([0x60, 0x01].into());
+        let mut execution_overlay = ExecutionOverlay::default();
+        execution_overlay.accounts_mut().insert(address, Some(account_info.clone()));
+        execution_overlay.block_hashes_mut().push(BlockNumHash::new(1, block_hash));
+        execution_overlay
+            .storage_mut()
+            .entry(address)
+            .or_default()
+            .insert(U256::from_be_bytes(storage_key.0), storage_value);
+        execution_overlay.code_hashes_mut().insert(code_hash, bytecode.clone());
+        let provider = OverlayStateProvider::<_, EthPrimitives>::new_with_execution(
+            factory.provider().unwrap(),
+            Arc::new(execution_overlay),
+            false,
+        );
 
-            assert_eq!(
-                provider.basic_account(&address).unwrap(),
-                Some(Account::from(&account_info))
-            );
-            assert!(provider.basic_account(&Address::with_last_byte(2)).unwrap().is_none());
-            assert_eq!(provider.block_hash(1).unwrap(), Some(block_hash));
-            assert_eq!(provider.canonical_hashes_range(1, 2).unwrap(), vec![block_hash]);
-            assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage_value));
-            assert_eq!(
-                provider.bytecode_by_hash(&code_hash).unwrap(),
-                Some(reth_primitives_traits::Bytecode(bytecode))
-            );
-        });
+        assert_eq!(provider.basic_account(&address).unwrap(), Some(Account::from(&account_info)));
+        assert!(provider.basic_account(&Address::with_last_byte(2)).unwrap().is_none());
+        assert_eq!(provider.block_hash(1).unwrap(), Some(block_hash));
+        assert_eq!(provider.canonical_hashes_range(1, 2).unwrap(), vec![block_hash]);
+        assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage_value));
+        assert_eq!(
+            provider.bytecode_by_hash(&code_hash).unwrap(),
+            Some(reth_primitives_traits::Bytecode(bytecode))
+        );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     #[allow(clippy::clone_on_copy)]
     fn historical_execution_reads_use_history_indexes() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let (factory, blocks) = setup_frontiers(1, 3);
-            let address = Address::with_last_byte(1);
-            let storage_key = B256::with_last_byte(2);
-            let account = Account { balance: U256::from(10), ..Default::default() };
-            let storage = U256::from(10);
-            let provider_rw = factory.provider_rw().unwrap();
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let address = Address::with_last_byte(1);
+        let storage_key = B256::with_last_byte(2);
+        let account = Account { balance: U256::from(10), ..Default::default() };
+        let storage = U256::from(10);
+        let provider_rw = factory.provider_rw().unwrap();
 
-            provider_rw
-                .tx_ref()
-                .put::<tables::AccountsHistory>(
-                    ShardedKey { key: address, highest_block_number: u64::MAX },
-                    BlockNumberList::new([2]).unwrap(),
-                )
-                .unwrap();
-            provider_rw
-                .tx_ref()
-                .put::<tables::AccountChangeSets>(
-                    2,
-                    AccountBeforeTx { address, info: Some(account.clone()) },
-                )
-                .unwrap();
-            provider_rw
-                .tx_ref()
-                .put::<tables::PlainAccountState>(
+        provider_rw
+            .tx_ref()
+            .put::<tables::AccountsHistory>(
+                ShardedKey { key: address, highest_block_number: u64::MAX },
+                BlockNumberList::new([2]).unwrap(),
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(
+                2,
+                AccountBeforeTx { address, info: Some(account.clone()) },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::PlainAccountState>(
+                address,
+                Account { balance: U256::from(20), ..Default::default() },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey {
                     address,
-                    Account { balance: U256::from(20), ..Default::default() },
-                )
-                .unwrap();
-            provider_rw
-                .tx_ref()
-                .put::<tables::StoragesHistory>(
-                    StorageShardedKey {
-                        address,
-                        sharded_key: ShardedKey {
-                            key: storage_key,
-                            highest_block_number: u64::MAX,
-                        },
-                    },
-                    BlockNumberList::new([2]).unwrap(),
-                )
-                .unwrap();
-            provider_rw
-                .tx_ref()
-                .put::<tables::StorageChangeSets>(
-                    BlockNumberAddress((2, address)),
-                    reth_primitives_traits::StorageEntry { key: storage_key, value: storage },
-                )
-                .unwrap();
-            provider_rw
-                .tx_ref()
-                .put::<tables::PlainStorageState>(
-                    address,
-                    reth_primitives_traits::StorageEntry {
-                        key: storage_key,
-                        value: U256::from(20),
-                    },
-                )
-                .unwrap();
-            provider_rw.commit().unwrap();
+                    sharded_key: ShardedKey { key: storage_key, highest_block_number: u64::MAX },
+                },
+                BlockNumberList::new([2]).unwrap(),
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((2, address)),
+                reth_primitives_traits::StorageEntry { key: storage_key, value: storage },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::PlainStorageState>(
+                address,
+                reth_primitives_traits::StorageEntry { key: storage_key, value: U256::from(20) },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
 
-            let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
-                factory,
-                OverlayManager::default().overlay_builder(blocks[1].recovered_block().hash()),
-            );
-            let provider = state_provider_factory.database_provider_ro().unwrap();
+        let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
+            factory,
+            OverlayManager::default().overlay_builder(blocks[1].recovered_block().hash()),
+        );
+        let provider = state_provider_factory.database_provider_ro().unwrap();
 
-            assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
-            assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage));
-        });
+        assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
+        assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     #[allow(clippy::clone_on_copy)]
     fn history_starts_above_lowest_changeset_file() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let (factory, blocks) = setup_frontiers(2, 3);
-            factory.set_storage_settings_cache(StorageSettings::v2());
-            let address = Address::with_last_byte(1);
-            let storage_key = B256::with_last_byte(2);
-            let account =
-                Account { bytecode_hash: Some(B256::with_last_byte(3)), ..Default::default() };
-            let storage = U256::from(10);
+        let (factory, blocks) = setup_frontiers(2, 3);
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let address = Address::with_last_byte(1);
+        let storage_key = B256::with_last_byte(2);
+        let account =
+            Account { bytecode_hash: Some(B256::with_last_byte(3)), ..Default::default() };
+        let storage = U256::from(10);
 
-            // The changeset files start at block 2 and hold nothing for it, as on a node
-            // bootstrapped without older changesets, and no history prune checkpoint exists.
-            let static_file_provider = factory.static_file_provider();
-            for segment in
-                [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
-            {
-                let mut writer = static_file_provider.get_writer(2, segment).unwrap();
-                writer.initialize_pruned_anchor(2).unwrap();
-                writer.commit().unwrap();
-            }
+        // The changeset files start at block 2 and hold nothing for it, as on a node bootstrapped
+        // without older changesets, and no history prune checkpoint exists.
+        let static_file_provider = factory.static_file_provider();
+        for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
+        {
+            let mut writer = static_file_provider.get_writer(2, segment).unwrap();
+            writer.initialize_pruned_anchor(2).unwrap();
+            writer.commit().unwrap();
+        }
 
-            // The account and slot were last written before the changeset files start, so they have
-            // no history index entry and only live in plain state.
-            let hashed_address = alloy_primitives::keccak256(address);
-            let provider_rw = factory.provider_rw().unwrap();
-            provider_rw
-                .tx_ref()
-                .put::<tables::HashedAccounts>(hashed_address, account.clone())
-                .unwrap();
-            provider_rw
-                .tx_ref()
-                .put::<tables::HashedStorages>(
-                    hashed_address,
-                    reth_primitives_traits::StorageEntry {
-                        key: alloy_primitives::keccak256(storage_key),
-                        value: storage,
-                    },
-                )
-                .unwrap();
-            provider_rw.commit().unwrap();
+        // The account and slot were last written before the changeset files start, so they have
+        // no history index entry and only live in plain state.
+        let hashed_address = alloy_primitives::keccak256(address);
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedAccounts>(hashed_address, account.clone())
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                reth_primitives_traits::StorageEntry {
+                    key: alloy_primitives::keccak256(storage_key),
+                    value: storage,
+                },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
 
-            let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
-                factory.clone(),
-                OverlayManager::default().overlay_builder(blocks[2].recovered_block().hash()),
-            );
-            let provider = state_provider_factory.database_provider_ro().unwrap();
-            assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
-            assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage));
+        let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
+            factory.clone(),
+            OverlayManager::default().overlay_builder(blocks[2].recovered_block().hash()),
+        );
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+        assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
+        assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage));
 
-            // Reverting to block 1 needs the changesets of block 2, which were never stored.
-            let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
-                factory,
-                OverlayManager::default().overlay_builder(blocks[1].recovered_block().hash()),
-            );
-            let provider = state_provider_factory.database_provider_ro().unwrap();
-            assert!(matches!(
-                provider.basic_account(&address),
-                Err(ProviderError::InsufficientChangesets { requested: 1, available })
-                    if available == (2..=3)
-            ));
-            assert!(matches!(
-                provider.state_root(HashedPostState::default()),
-                Err(ProviderError::InsufficientChangesets { requested: 1, available })
-                    if available == (2..=3)
-            ));
-        });
+        // Reverting to block 1 needs the changesets of block 2, which were never stored.
+        let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
+            factory,
+            OverlayManager::default().overlay_builder(blocks[1].recovered_block().hash()),
+        );
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+        assert!(matches!(
+            provider.basic_account(&address),
+            Err(ProviderError::InsufficientChangesets { requested: 1, available })
+                if available == (2..=3)
+        ));
+        assert!(matches!(
+            provider.state_root(HashedPostState::default()),
+            Err(ProviderError::InsufficientChangesets { requested: 1, available })
+                if available == (2..=3)
+        ));
     }
 
     #[test]

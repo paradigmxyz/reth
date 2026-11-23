@@ -90,60 +90,50 @@ impl<T: Send + std::fmt::Debug + 'static> std::fmt::Debug for LazyHandle<T> {
 mod tests {
     use super::*;
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_lazy_handle_resolves() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let (tx, rx) = oneshot::channel();
-            let handle = LazyHandle::new(rx);
-            tx.send(42u64).unwrap();
-            assert_eq!(*handle.get(), 42);
-            // subsequent calls return cached value
-            assert_eq!(*handle.get(), 42);
-        });
+        let (tx, rx) = oneshot::channel();
+        let handle = LazyHandle::new(rx);
+        tx.send(42u64).unwrap();
+        assert_eq!(*handle.get(), 42);
+        // subsequent calls return cached value
+        assert_eq!(*handle.get(), 42);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_lazy_handle_clone_shares_value() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let (tx, rx) = oneshot::channel();
-            let handle = LazyHandle::new(rx);
-            let handle2 = handle.clone();
-            tx.send(99u64).unwrap();
-            assert_eq!(*handle.get(), 99);
-            assert_eq!(*handle2.get(), 99);
-        });
+        let (tx, rx) = oneshot::channel();
+        let handle = LazyHandle::new(rx);
+        let handle2 = handle.clone();
+        tx.send(99u64).unwrap();
+        assert_eq!(*handle.get(), 99);
+        assert_eq!(*handle2.get(), 99);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_lazy_handle_try_into_inner() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let (tx, rx) = oneshot::channel();
-            let handle = LazyHandle::new(rx);
-            tx.send(String::from("hello")).unwrap();
-            assert_eq!(handle.try_into_inner().unwrap(), "hello");
-        });
+        let (tx, rx) = oneshot::channel();
+        let handle = LazyHandle::new(rx);
+        tx.send(String::from("hello")).unwrap();
+        assert_eq!(handle.try_into_inner().unwrap(), "hello");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_lazy_handle_try_into_inner_returns_self_with_clone() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let (tx, rx) = oneshot::channel();
-            let handle = LazyHandle::new(rx);
-            let _clone = handle.clone();
-            tx.send(String::from("hello")).unwrap();
-            let handle = handle.try_into_inner().unwrap_err();
-            assert_eq!(*handle.get(), "hello");
-        });
+        let (tx, rx) = oneshot::channel();
+        let handle = LazyHandle::new(rx);
+        let _clone = handle.clone();
+        tx.send(String::from("hello")).unwrap();
+        let handle = handle.try_into_inner().unwrap_err();
+        assert_eq!(*handle.get(), "hello");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     #[should_panic(expected = "LazyHandle task dropped without producing a value")]
     fn test_lazy_handle_panics_on_dropped_sender() {
-        reth_concurrency::sync::Runtime::new().run(|| {
-            let (_tx, rx) = oneshot::channel::<u64>();
-            let handle = LazyHandle::new(rx);
-            drop(_tx);
-            handle.get();
-        });
+        let (_tx, rx) = oneshot::channel::<u64>();
+        let handle = LazyHandle::new(rx);
+        drop(_tx);
+        handle.get();
     }
 }

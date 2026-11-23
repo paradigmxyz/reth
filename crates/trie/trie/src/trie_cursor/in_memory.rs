@@ -433,492 +433,371 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_empty_db_and_memory() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let test_case = InMemoryTrieCursorTestCase {
-                db_nodes: vec![],
-                in_memory_nodes: vec![],
-                expected_results: vec![],
-            };
-            execute_test(test_case);
-        });
+        let test_case = InMemoryTrieCursorTestCase {
+            db_nodes: vec![],
+            in_memory_nodes: vec![],
+            expected_results: vec![],
+        };
+        execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_only_db_nodes() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let db_nodes = vec![
-                (
-                    Nibbles::from_nibbles([0x1]),
-                    BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x2]),
-                    BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x3]),
-                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
-                ),
-            ];
+        let db_nodes = vec![
+            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+        ];
 
-            let test_case = InMemoryTrieCursorTestCase {
-                db_nodes: db_nodes.clone(),
-                in_memory_nodes: vec![],
-                expected_results: db_nodes,
-            };
-            execute_test(test_case);
-        });
+        let test_case = InMemoryTrieCursorTestCase {
+            db_nodes: db_nodes.clone(),
+            in_memory_nodes: vec![],
+            expected_results: db_nodes,
+        };
+        execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_only_in_memory_nodes() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let in_memory_nodes = vec![
-                (
-                    Nibbles::from_nibbles([0x1]),
-                    Some(BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
-                ),
-                (
-                    Nibbles::from_nibbles([0x2]),
-                    Some(BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None)),
-                ),
-                (
-                    Nibbles::from_nibbles([0x3]),
-                    Some(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
-                ),
-            ];
+        let in_memory_nodes = vec![
+            (
+                Nibbles::from_nibbles([0x1]),
+                Some(BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
+            ),
+            (
+                Nibbles::from_nibbles([0x2]),
+                Some(BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None)),
+            ),
+            (
+                Nibbles::from_nibbles([0x3]),
+                Some(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+            ),
+        ];
 
-            let expected_results: Vec<(Nibbles, BranchNodeCompact)> = in_memory_nodes
-                .iter()
-                .filter_map(|(k, v)| v.as_ref().map(|node| (*k, node.clone())))
-                .collect();
+        let expected_results: Vec<(Nibbles, BranchNodeCompact)> = in_memory_nodes
+            .iter()
+            .filter_map(|(k, v)| v.as_ref().map(|node| (*k, node.clone())))
+            .collect();
 
-            let test_case =
-                InMemoryTrieCursorTestCase { db_nodes: vec![], in_memory_nodes, expected_results };
-            execute_test(test_case);
-        });
+        let test_case =
+            InMemoryTrieCursorTestCase { db_nodes: vec![], in_memory_nodes, expected_results };
+        execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_in_memory_overwrites_db() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let db_nodes = vec![
-                (
-                    Nibbles::from_nibbles([0x1]),
-                    BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x2]),
-                    BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None),
-                ),
-            ];
+        let db_nodes = vec![
+            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None)),
+        ];
 
-            let in_memory_nodes = vec![
-                (
-                    Nibbles::from_nibbles([0x1]),
-                    Some(BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None)),
-                ),
-                (
-                    Nibbles::from_nibbles([0x3]),
-                    Some(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
-                ),
-            ];
-
-            let expected_results = vec![
-                (
-                    Nibbles::from_nibbles([0x1]),
-                    BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x2]),
-                    BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x3]),
-                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
-                ),
-            ];
-
-            let test_case =
-                InMemoryTrieCursorTestCase { db_nodes, in_memory_nodes, expected_results };
-            execute_test(test_case);
-        });
-    }
-
-    #[test]
-    fn test_in_memory_deletes_db_nodes() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let db_nodes = vec![
-                (
-                    Nibbles::from_nibbles([0x1]),
-                    BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x2]),
-                    BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x3]),
-                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
-                ),
-            ];
-
-            let in_memory_nodes = vec![(Nibbles::from_nibbles([0x2]), None)];
-
-            let expected_results = vec![
-                (
-                    Nibbles::from_nibbles([0x1]),
-                    BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x3]),
-                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
-                ),
-            ];
-
-            let test_case =
-                InMemoryTrieCursorTestCase { db_nodes, in_memory_nodes, expected_results };
-            execute_test(test_case);
-        });
-    }
-
-    #[test]
-    fn test_complex_interleaving() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let db_nodes = vec![
-                (
-                    Nibbles::from_nibbles([0x1]),
-                    BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x3]),
-                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x5]),
-                    BranchNodeCompact::new(0b0101, 0b0101, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x7]),
-                    BranchNodeCompact::new(0b0111, 0b0111, 0, vec![], None),
-                ),
-            ];
-
-            let in_memory_nodes = vec![
-                (
-                    Nibbles::from_nibbles([0x2]),
-                    Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
-                ),
-                (Nibbles::from_nibbles([0x3]), None),
-                (
-                    Nibbles::from_nibbles([0x4]),
-                    Some(BranchNodeCompact::new(0b0100, 0b0100, 0, vec![], None)),
-                ),
-                (
-                    Nibbles::from_nibbles([0x6]),
-                    Some(BranchNodeCompact::new(0b0110, 0b0110, 0, vec![], None)),
-                ),
-                (Nibbles::from_nibbles([0x7]), None),
-                (
-                    Nibbles::from_nibbles([0x8]),
-                    Some(BranchNodeCompact::new(0b1000, 0b1000, 0, vec![], None)),
-                ),
-            ];
-
-            let expected_results = vec![
-                (
-                    Nibbles::from_nibbles([0x1]),
-                    BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x2]),
-                    BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x4]),
-                    BranchNodeCompact::new(0b0100, 0b0100, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x5]),
-                    BranchNodeCompact::new(0b0101, 0b0101, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x6]),
-                    BranchNodeCompact::new(0b0110, 0b0110, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x8]),
-                    BranchNodeCompact::new(0b1000, 0b1000, 0, vec![], None),
-                ),
-            ];
-
-            let test_case =
-                InMemoryTrieCursorTestCase { db_nodes, in_memory_nodes, expected_results };
-            execute_test(test_case);
-        });
-    }
-
-    #[test]
-    fn test_seek_exact() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let db_nodes = vec![
-                (
-                    Nibbles::from_nibbles([0x1]),
-                    BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x3]),
-                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
-                ),
-            ];
-
-            let in_memory_nodes = vec![(
-                Nibbles::from_nibbles([0x2]),
-                Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
-            )];
-
-            let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
-            let db_nodes_arc = Arc::new(db_nodes_map);
-            let visited_keys = Arc::new(Mutex::new(Vec::new()));
-            let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
-
-            let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
-            let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
-
-            let result = cursor.seek_exact(Nibbles::from_nibbles([0x2])).unwrap();
-            assert_eq!(
-                result,
-                Some((
-                    Nibbles::from_nibbles([0x2]),
-                    BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)
-                ))
-            );
-            assert!(
-                visited_keys.lock().is_empty(),
-                "exact overlay hit should not touch the DB cursor"
-            );
-
-            let result = cursor.seek_exact(Nibbles::from_nibbles([0x3])).unwrap();
-            assert_eq!(
-                result,
-                Some((
-                    Nibbles::from_nibbles([0x3]),
-                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)
-                ))
-            );
-
-            let result = cursor.seek_exact(Nibbles::from_nibbles([0x4])).unwrap();
-            assert_eq!(result, None);
-        });
-    }
-
-    #[test]
-    fn test_seek_overlay_exact_hit_does_not_touch_db_until_next() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let db_nodes = vec![
-                (
-                    Nibbles::from_nibbles([0x2]),
-                    BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x3]),
-                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
-                ),
-            ];
-
-            let in_memory_nodes = vec![(
-                Nibbles::from_nibbles([0x2]),
+        let in_memory_nodes = vec![
+            (
+                Nibbles::from_nibbles([0x1]),
                 Some(BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None)),
-            )];
+            ),
+            (
+                Nibbles::from_nibbles([0x3]),
+                Some(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+            ),
+        ];
 
-            let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
-            let db_nodes_arc = Arc::new(db_nodes_map);
-            let visited_keys = Arc::new(Mutex::new(Vec::new()));
-            let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
+        let expected_results = vec![
+            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+        ];
 
-            let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
-            let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
-
-            let result = cursor.seek(Nibbles::from_nibbles([0x2])).unwrap();
-            assert_eq!(
-                result,
-                Some((
-                    Nibbles::from_nibbles([0x2]),
-                    BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None)
-                ))
-            );
-            assert!(
-                visited_keys.lock().is_empty(),
-                "exact overlay hit should not touch the DB cursor"
-            );
-
-            let result = cursor.next().unwrap();
-            assert_eq!(
-                result,
-                Some((
-                    Nibbles::from_nibbles([0x3]),
-                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)
-                ))
-            );
-            assert!(!visited_keys.lock().is_empty(), "next should lazily position the DB cursor");
-        });
+        let test_case = InMemoryTrieCursorTestCase { db_nodes, in_memory_nodes, expected_results };
+        execute_test(test_case);
     }
 
-    #[test]
-    fn test_seek_overlay_exact_hit_repositions_stale_db_on_next() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let db_nodes = vec![
-                (
-                    Nibbles::from_nibbles([0x1]),
-                    BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None),
-                ),
-                (
-                    Nibbles::from_nibbles([0x3]),
-                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None),
-                ),
-            ];
+    #[reth_concurrency::test]
+    fn test_in_memory_deletes_db_nodes() {
+        let db_nodes = vec![
+            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+        ];
 
-            let in_memory_nodes = vec![(
+        let in_memory_nodes = vec![(Nibbles::from_nibbles([0x2]), None)];
+
+        let expected_results = vec![
+            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+        ];
+
+        let test_case = InMemoryTrieCursorTestCase { db_nodes, in_memory_nodes, expected_results };
+        execute_test(test_case);
+    }
+
+    #[reth_concurrency::test]
+    fn test_complex_interleaving() {
+        let db_nodes = vec![
+            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x5]), BranchNodeCompact::new(0b0101, 0b0101, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x7]), BranchNodeCompact::new(0b0111, 0b0111, 0, vec![], None)),
+        ];
+
+        let in_memory_nodes = vec![
+            (
                 Nibbles::from_nibbles([0x2]),
                 Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
-            )];
+            ),
+            (Nibbles::from_nibbles([0x3]), None),
+            (
+                Nibbles::from_nibbles([0x4]),
+                Some(BranchNodeCompact::new(0b0100, 0b0100, 0, vec![], None)),
+            ),
+            (
+                Nibbles::from_nibbles([0x6]),
+                Some(BranchNodeCompact::new(0b0110, 0b0110, 0, vec![], None)),
+            ),
+            (Nibbles::from_nibbles([0x7]), None),
+            (
+                Nibbles::from_nibbles([0x8]),
+                Some(BranchNodeCompact::new(0b1000, 0b1000, 0, vec![], None)),
+            ),
+        ];
 
-            let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
-            let db_nodes_arc = Arc::new(db_nodes_map);
-            let visited_keys = Arc::new(Mutex::new(Vec::new()));
-            let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
+        let expected_results = vec![
+            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x4]), BranchNodeCompact::new(0b0100, 0b0100, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x5]), BranchNodeCompact::new(0b0101, 0b0101, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x6]), BranchNodeCompact::new(0b0110, 0b0110, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x8]), BranchNodeCompact::new(0b1000, 0b1000, 0, vec![], None)),
+        ];
 
-            let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
-            let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
-
-            let result = cursor.seek(Nibbles::from_nibbles([0x1])).unwrap();
-            assert_eq!(
-                result,
-                Some((
-                    Nibbles::from_nibbles([0x1]),
-                    BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)
-                ))
-            );
-            assert_eq!(visited_keys.lock().len(), 1);
-
-            let result = cursor.seek(Nibbles::from_nibbles([0x2])).unwrap();
-            assert_eq!(
-                result,
-                Some((
-                    Nibbles::from_nibbles([0x2]),
-                    BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)
-                ))
-            );
-            assert_eq!(visited_keys.lock().len(), 1, "exact overlay hit should not seek the DB");
-
-            let result = cursor.next().unwrap();
-            assert_eq!(
-                result,
-                Some((
-                    Nibbles::from_nibbles([0x3]),
-                    BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)
-                ))
-            );
-        });
+        let test_case = InMemoryTrieCursorTestCase { db_nodes, in_memory_nodes, expected_results };
+        execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
+    fn test_seek_exact() {
+        let db_nodes = vec![
+            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+        ];
+
+        let in_memory_nodes = vec![(
+            Nibbles::from_nibbles([0x2]),
+            Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
+        )];
+
+        let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
+        let db_nodes_arc = Arc::new(db_nodes_map);
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
+
+        let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
+
+        let result = cursor.seek_exact(Nibbles::from_nibbles([0x2])).unwrap();
+        assert_eq!(
+            result,
+            Some((
+                Nibbles::from_nibbles([0x2]),
+                BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)
+            ))
+        );
+        assert!(visited_keys.lock().is_empty(), "exact overlay hit should not touch the DB cursor");
+
+        let result = cursor.seek_exact(Nibbles::from_nibbles([0x3])).unwrap();
+        assert_eq!(
+            result,
+            Some((
+                Nibbles::from_nibbles([0x3]),
+                BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)
+            ))
+        );
+
+        let result = cursor.seek_exact(Nibbles::from_nibbles([0x4])).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[reth_concurrency::test]
+    fn test_seek_overlay_exact_hit_does_not_touch_db_until_next() {
+        let db_nodes = vec![
+            (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+        ];
+
+        let in_memory_nodes = vec![(
+            Nibbles::from_nibbles([0x2]),
+            Some(BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None)),
+        )];
+
+        let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
+        let db_nodes_arc = Arc::new(db_nodes_map);
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
+
+        let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
+
+        let result = cursor.seek(Nibbles::from_nibbles([0x2])).unwrap();
+        assert_eq!(
+            result,
+            Some((
+                Nibbles::from_nibbles([0x2]),
+                BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None)
+            ))
+        );
+        assert!(visited_keys.lock().is_empty(), "exact overlay hit should not touch the DB cursor");
+
+        let result = cursor.next().unwrap();
+        assert_eq!(
+            result,
+            Some((
+                Nibbles::from_nibbles([0x3]),
+                BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)
+            ))
+        );
+        assert!(!visited_keys.lock().is_empty(), "next should lazily position the DB cursor");
+    }
+
+    #[reth_concurrency::test]
+    fn test_seek_overlay_exact_hit_repositions_stale_db_on_next() {
+        let db_nodes = vec![
+            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x3]), BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+        ];
+
+        let in_memory_nodes = vec![(
+            Nibbles::from_nibbles([0x2]),
+            Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
+        )];
+
+        let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
+        let db_nodes_arc = Arc::new(db_nodes_map);
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys.clone());
+
+        let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
+
+        let result = cursor.seek(Nibbles::from_nibbles([0x1])).unwrap();
+        assert_eq!(
+            result,
+            Some((
+                Nibbles::from_nibbles([0x1]),
+                BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)
+            ))
+        );
+        assert_eq!(visited_keys.lock().len(), 1);
+
+        let result = cursor.seek(Nibbles::from_nibbles([0x2])).unwrap();
+        assert_eq!(
+            result,
+            Some((
+                Nibbles::from_nibbles([0x2]),
+                BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)
+            ))
+        );
+        assert_eq!(visited_keys.lock().len(), 1, "exact overlay hit should not seek the DB");
+
+        let result = cursor.next().unwrap();
+        assert_eq!(
+            result,
+            Some((
+                Nibbles::from_nibbles([0x3]),
+                BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)
+            ))
+        );
+    }
+
+    #[reth_concurrency::test]
     fn test_multiple_consecutive_deletes() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let db_nodes: Vec<(Nibbles, BranchNodeCompact)> = (1..=10)
-                .map(|i| {
-                    (
-                        Nibbles::from_nibbles([i]),
-                        BranchNodeCompact::new(i as u16, i as u16, 0, vec![], None),
-                    )
-                })
-                .collect();
+        let db_nodes: Vec<(Nibbles, BranchNodeCompact)> = (1..=10)
+            .map(|i| {
+                (
+                    Nibbles::from_nibbles([i]),
+                    BranchNodeCompact::new(i as u16, i as u16, 0, vec![], None),
+                )
+            })
+            .collect();
 
-            let in_memory_nodes = vec![
-                (Nibbles::from_nibbles([0x3]), None),
-                (Nibbles::from_nibbles([0x4]), None),
-                (Nibbles::from_nibbles([0x5]), None),
-                (Nibbles::from_nibbles([0x6]), None),
-            ];
+        let in_memory_nodes = vec![
+            (Nibbles::from_nibbles([0x3]), None),
+            (Nibbles::from_nibbles([0x4]), None),
+            (Nibbles::from_nibbles([0x5]), None),
+            (Nibbles::from_nibbles([0x6]), None),
+        ];
 
-            let expected_results = vec![
-                (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(1, 1, 0, vec![], None)),
-                (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(2, 2, 0, vec![], None)),
-                (Nibbles::from_nibbles([0x7]), BranchNodeCompact::new(7, 7, 0, vec![], None)),
-                (Nibbles::from_nibbles([0x8]), BranchNodeCompact::new(8, 8, 0, vec![], None)),
-                (Nibbles::from_nibbles([0x9]), BranchNodeCompact::new(9, 9, 0, vec![], None)),
-                (Nibbles::from_nibbles([0xa]), BranchNodeCompact::new(10, 10, 0, vec![], None)),
-            ];
+        let expected_results = vec![
+            (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(1, 1, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(2, 2, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x7]), BranchNodeCompact::new(7, 7, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x8]), BranchNodeCompact::new(8, 8, 0, vec![], None)),
+            (Nibbles::from_nibbles([0x9]), BranchNodeCompact::new(9, 9, 0, vec![], None)),
+            (Nibbles::from_nibbles([0xa]), BranchNodeCompact::new(10, 10, 0, vec![], None)),
+        ];
 
-            let test_case =
-                InMemoryTrieCursorTestCase { db_nodes, in_memory_nodes, expected_results };
-            execute_test(test_case);
-        });
+        let test_case = InMemoryTrieCursorTestCase { db_nodes, in_memory_nodes, expected_results };
+        execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_empty_db_with_in_memory_deletes() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let in_memory_nodes = vec![
-                (Nibbles::from_nibbles([0x1]), None),
-                (
-                    Nibbles::from_nibbles([0x2]),
-                    Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
-                ),
-                (Nibbles::from_nibbles([0x3]), None),
-            ];
-
-            let expected_results = vec![(
+        let in_memory_nodes = vec![
+            (Nibbles::from_nibbles([0x1]), None),
+            (
                 Nibbles::from_nibbles([0x2]),
-                BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None),
-            )];
+                Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
+            ),
+            (Nibbles::from_nibbles([0x3]), None),
+        ];
 
-            let test_case =
-                InMemoryTrieCursorTestCase { db_nodes: vec![], in_memory_nodes, expected_results };
-            execute_test(test_case);
-        });
+        let expected_results = vec![(
+            Nibbles::from_nibbles([0x2]),
+            BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None),
+        )];
+
+        let test_case =
+            InMemoryTrieCursorTestCase { db_nodes: vec![], in_memory_nodes, expected_results };
+        execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_current_key_tracking() {
-        reth_concurrency::sync::Runtime::new().run(move || {
-            let db_nodes = vec![(
-                Nibbles::from_nibbles([0x2]),
-                BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None),
-            )];
+        let db_nodes = vec![(
+            Nibbles::from_nibbles([0x2]),
+            BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None),
+        )];
 
-            let in_memory_nodes = vec![
-                (
-                    Nibbles::from_nibbles([0x1]),
-                    Some(BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
-                ),
-                (
-                    Nibbles::from_nibbles([0x3]),
-                    Some(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
-                ),
-            ];
+        let in_memory_nodes = vec![
+            (
+                Nibbles::from_nibbles([0x1]),
+                Some(BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
+            ),
+            (
+                Nibbles::from_nibbles([0x3]),
+                Some(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+            ),
+        ];
 
-            let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
-            let db_nodes_arc = Arc::new(db_nodes_map);
-            let visited_keys = Arc::new(Mutex::new(Vec::new()));
-            let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
+        let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
+        let db_nodes_arc = Arc::new(db_nodes_map);
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
 
-            let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
-            let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
+        let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
 
-            assert_eq!(cursor.current().unwrap(), None);
+        assert_eq!(cursor.current().unwrap(), None);
 
-            cursor.seek(Nibbles::from_nibbles([0x1])).unwrap();
-            assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x1])));
+        cursor.seek(Nibbles::from_nibbles([0x1])).unwrap();
+        assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x1])));
 
-            cursor.next().unwrap();
-            assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x2])));
+        cursor.next().unwrap();
+        assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x2])));
 
-            cursor.next().unwrap();
-            assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x3])));
-        });
+        cursor.next().unwrap();
+        assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x3])));
     }
 
     #[test]
