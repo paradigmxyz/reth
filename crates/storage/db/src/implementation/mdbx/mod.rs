@@ -1858,7 +1858,8 @@ mod tests {
             .unwrap();
         let mut stdout = BufReader::new(child.stdout.take().unwrap());
         let mut line = String::new();
-        while line.trim() != "ready" {
+        // With one test thread, libtest prints `test <name> ... ` on the same line first.
+        while !line.trim_end().ends_with("ready") {
             line.clear();
             assert_ne!(
                 stdout.read_line(&mut line).unwrap(),
