@@ -8394,6 +8394,7 @@ dependencies = [
  "roaring",
  "serde",
  "test-fuzz",
+ "tracing",
 ]
 
 [[package]]

@@ -364,6 +364,10 @@ impl Database for DatabaseEnv {
             Some(txnid as u64)
         }
     }
+
+    fn reader_check(&self) -> Result<usize, DatabaseError> {
+        self.inner.reader_check().map_err(|e| DatabaseError::Read(e.into()))
+    }
 }
 
 impl DatabaseMetrics for DatabaseEnv {
@@ -767,6 +771,7 @@ mod tests {
     use alloy_primitives::{address, Address, B256, U256};
     use reth_db_api::{
         cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
+        database::ReaderTxnTracker,
         models::{AccountBeforeTx, IntegerList, ShardedKey},
         table::{Encode, Table, TableInfo},
         tables_to_generic,
@@ -774,6 +779,11 @@ mod tests {
     use reth_libmdbx::Error;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
+    use std::{
+        io::{BufRead, BufReader},
+        process::{Command, Stdio},
+        sync::mpsc,
+    };
     use tempfile::TempDir;
 
     /// Create database for testing. Returns the `TempDir` to prevent cleanup until test ends.
@@ -1811,5 +1821,69 @@ mod tests {
         assert_eq!(sync_period(SyncMode::Durable), Duration::ZERO);
         assert_eq!(sync_period(SyncMode::SafeNoSync), NON_DURABLE_SYNC_PERIOD);
         assert_eq!(sync_period(SyncMode::UtterlyNoSync), NON_DURABLE_SYNC_PERIOD);
+    }
+
+    /// A reader slot left behind by a `SIGKILL`ed process must not block
+    /// [`ReaderTxnTracker::wait_for_pre_commit_readers`] forever.
+    #[cfg(unix)]
+    #[test]
+    fn wait_for_pre_commit_readers_clears_dead_process_reader() {
+        const CHILD_DB_PATH_ENV: &str = "RETH_TEST_STALE_READER_DB_PATH";
+
+        // Child process: hold a read transaction until killed.
+        if let Ok(path) = std::env::var(CHILD_DB_PATH_ENV) {
+            let env = DatabaseEnv::open(
+                Path::new(&path),
+                DatabaseEnvKind::RO,
+                DatabaseArguments::new(ClientVersion::default()),
+            )
+            .unwrap();
+            let _tx = env.tx().unwrap();
+            println!("ready");
+            loop {
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        }
+
+        let (dir, env) = create_test_db(DatabaseEnvKind::RW);
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "implementation::mdbx::tests::wait_for_pre_commit_readers_clears_dead_process_reader",
+                "--nocapture",
+            ])
+            .env(CHILD_DB_PATH_ENV, dir.path())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut stdout = BufReader::new(child.stdout.take().unwrap());
+        let mut line = String::new();
+        while line.trim() != "ready" {
+            line.clear();
+            assert_ne!(
+                stdout.read_line(&mut line).unwrap(),
+                0,
+                "child exited before opening a read transaction"
+            );
+        }
+
+        // `Child::kill` sends `SIGKILL`, so the child's reader slot is never released.
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        env.update(|tx| tx.put::<CanonicalHeaders>(1, B256::ZERO)).unwrap().unwrap();
+        assert!(
+            env.oldest_reader_txnid().unwrap() < env.last_txnid().unwrap(),
+            "dead reader slot must still be counted before the wait"
+        );
+
+        let (done_tx, done_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            env.wait_for_pre_commit_readers();
+            let _ = done_tx.send(());
+        });
+        done_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("wait_for_pre_commit_readers hung on a dead process's reader slot");
     }
 }

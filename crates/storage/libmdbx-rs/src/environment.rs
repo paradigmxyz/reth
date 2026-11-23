@@ -237,6 +237,16 @@ impl Environment {
 
         Ok(freelist)
     }
+
+    /// Clears reader lock table slots left behind by processes that no longer exist.
+    ///
+    /// Returns the number of cleared slots.
+    pub fn reader_check(&self) -> Result<usize> {
+        let mut dead = 0;
+        // SAFETY: `env_ptr` is valid for the lifetime of `self` and `dead` is a valid out-pointer.
+        mdbx_result(unsafe { ffi::mdbx_reader_check(self.env_ptr(), &mut dead) })?;
+        Ok(dead as usize)
+    }
 }
 
 /// Container type for Environment internals.
