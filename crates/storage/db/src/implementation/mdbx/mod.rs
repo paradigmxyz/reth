@@ -365,8 +365,8 @@ impl Database for DatabaseEnv {
         }
     }
 
-    fn reader_check(&self) -> Result<usize, DatabaseError> {
-        self.inner.reader_check().map_err(|e| DatabaseError::Read(e.into()))
+    fn reader_check(&self) -> Result<(), DatabaseError> {
+        self.inner.reader_check().map(|_| ()).map_err(|e| DatabaseError::Read(e.into()))
     }
 }
 

@@ -153,7 +153,7 @@ pub mod test_utils {
             self.db().last_txnid()
         }
 
-        fn reader_check(&self) -> Result<usize, DatabaseError> {
+        fn reader_check(&self) -> Result<(), DatabaseError> {
             self.db().reader_check()
         }
     }

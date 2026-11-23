@@ -49,9 +49,9 @@ pub trait Database: Send + Sync + Debug {
     /// Clears reader slots left behind by processes that no longer exist, so they stop counting
     /// towards [`Self::oldest_reader_txnid`].
     ///
-    /// Returns the number of cleared slots, or `0` if the backend has no such slots.
-    fn reader_check(&self) -> Result<usize, DatabaseError> {
-        Ok(0)
+    /// Does nothing by default, for backends without such slots.
+    fn reader_check(&self) -> Result<(), DatabaseError> {
+        Ok(())
     }
 
     /// Takes a function and passes a read-only transaction into it, making sure it's closed in the
@@ -107,7 +107,7 @@ impl<DB: Database> Database for Arc<DB> {
         <DB as Database>::last_txnid(self)
     }
 
-    fn reader_check(&self) -> Result<usize, DatabaseError> {
+    fn reader_check(&self) -> Result<(), DatabaseError> {
         <DB as Database>::reader_check(self)
     }
 }
@@ -136,7 +136,7 @@ impl<DB: Database> Database for &DB {
         <DB as Database>::last_txnid(self)
     }
 
-    fn reader_check(&self) -> Result<usize, DatabaseError> {
+    fn reader_check(&self) -> Result<(), DatabaseError> {
         <DB as Database>::reader_check(self)
     }
 }
