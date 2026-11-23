@@ -349,9 +349,9 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         })
     }
 
-    /// Forces a steady MDBX sync after committing a read-write transaction, because commits in
-    /// [`SyncMode::SafeNoSync`] and [`SyncMode::UtterlyNoSync`] are weak and discarded on the next
-    /// boot after power loss. Read-only transactions write nothing, so they only commit.
+    /// Syncs read-write commits to disk, since [`SyncMode::SafeNoSync`] commits are lost on a new
+    /// boot after power loss. Best effort under [`SyncMode::UtterlyNoSync`], where later commits
+    /// can overwrite the synced state.
     ///
     /// [`SyncMode::SafeNoSync`]: reth_libmdbx::SyncMode::SafeNoSync
     /// [`SyncMode::UtterlyNoSync`]: reth_libmdbx::SyncMode::UtterlyNoSync

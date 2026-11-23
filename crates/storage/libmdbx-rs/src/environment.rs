@@ -469,10 +469,9 @@ impl Info {
         }
     }
 
-    /// Returns the id of the most recent transaction whose meta page is steady, i.e. synced to
-    /// disk, or `None` if no meta page is steady.
-    ///
-    /// After an unclean shutdown on a new boot, MDBX rolls back to this transaction.
+    /// Returns the id of the latest transaction whose meta page MDBX marked steady, which a new
+    /// boot rolls back to after an unclean shutdown. Under [`SyncMode::NoMetaSync`] that meta page
+    /// may not be flushed yet.
     pub fn last_steady_txnid(&self) -> Option<u64> {
         // Mirrors `SIGN_IS_STEADY` in mdbx.c: signatures 0 and 1 mark empty and weak metas.
         const DATASIGN_WEAK: u64 = 1;

@@ -1830,7 +1830,7 @@ mod tests {
         tx.commit().expect(ERROR_COMMIT);
         assert!(info().last_steady_txnid() < Some(info().last_txnid() as u64));
 
-        // A read-only transaction writes nothing, so it doesn't sync the weak commit.
+        // Read-only transactions don't sync.
         env.tx().expect(ERROR_INIT_TX).commit_durable().expect(ERROR_COMMIT);
         assert!(info().last_steady_txnid() < Some(info().last_txnid() as u64));
 

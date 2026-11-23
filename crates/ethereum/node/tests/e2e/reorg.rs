@@ -77,9 +77,8 @@ async fn can_build_forks_and_reorg() -> eyre::Result<()> {
     Ok(())
 }
 
-/// Tests that under `--db.sync-mode safe-no-sync`, a reorg below the persisted tip syncs the MDBX
-/// unwind commit to disk. Otherwise power loss would roll MDBX back above the static files the
-/// unwind already truncated, which startup recovery cannot heal.
+/// Tests that under `--db.sync-mode safe-no-sync`, a reorg below the persisted tip syncs the unwind
+/// commit, so power loss can't roll MDBX back above the truncated static files.
 #[tokio::test]
 async fn reorg_below_persisted_tip_syncs_unwind() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
