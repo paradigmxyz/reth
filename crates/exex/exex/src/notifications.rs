@@ -552,12 +552,13 @@ where
                 return Poll::Ready(None)
             };
 
-            // 6. In case the exex is ahead of the new tip, we must skip it
-            if let Some(committed) = notification.committed_chain() {
-                // inclusive check because we should start with `exex.head + 1`
-                if this.initial_exex_head.block.number >= committed.tip().number() {
-                    continue
-                }
+            // 6. Skip commits the ExEx already has (inclusive, since we start at `exex.head + 1`),
+            // but always deliver reverts because they may unwind blocks the ExEx processed.
+            if notification.reverted_chain().is_none() &&
+                let Some(committed) = notification.committed_chain() &&
+                this.initial_exex_head.block.number >= committed.tip().number()
+            {
+                continue
             }
 
             return Poll::Ready(Some(Ok(notification)))
@@ -801,6 +802,65 @@ mod tests {
 
         let new_notification = notifications.next().await.transpose()?;
         assert_eq!(new_notification, Some(notification));
+
+        Ok(())
+    }
+
+    /// A reorg replacing the ExEx head block at the same height must be delivered, even though
+    /// its new tip is not above the ExEx head.
+    #[tokio::test]
+    async fn exex_notifications_same_head_reorg_at_head() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+
+        let provider_factory = create_test_provider_factory();
+        let genesis_hash = init_genesis(&provider_factory)?;
+        let genesis_block = provider_factory
+            .block(genesis_hash.into())?
+            .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
+
+        let provider = BlockchainProvider::new(provider_factory)?;
+
+        let node_head_block = random_block(
+            &mut rng,
+            genesis_block.number + 1,
+            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
+        )
+        .try_recover()?;
+        let node_head = node_head_block.num_hash();
+        let provider_rw = provider.database_provider_rw()?;
+        provider_rw.insert_block(&node_head_block)?;
+        provider_rw.commit()?;
+        let exex_head = ExExHead { block: node_head };
+
+        let new_block = random_block(
+            &mut rng,
+            node_head.number,
+            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
+        )
+        .try_recover()?;
+        let notification = ExExNotification::ChainReorged {
+            old: Arc::new(Chain::new(vec![node_head_block], Default::default(), BTreeMap::new())),
+            new: Arc::new(Chain::new(vec![new_block], Default::default(), BTreeMap::new())),
+        };
+
+        let (notifications_tx, notifications_rx) = mpsc::channel(1);
+
+        notifications_tx.send(notification.clone()).await?;
+        drop(notifications_tx);
+
+        let mut notifications = ExExNotificationsWithoutHead::new(
+            node_head,
+            provider,
+            EthEvmConfig::mainnet(),
+            notifications_rx,
+            wal.handle(),
+        )
+        .with_head(exex_head);
+
+        assert_eq!(notifications.next().await.transpose()?, Some(notification));
 
         Ok(())
     }
