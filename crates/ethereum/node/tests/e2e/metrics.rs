@@ -48,11 +48,12 @@ async fn assert_metrics_push(listen_addr: Option<SocketAddr>) -> eyre::Result<()
         .build_single()
         .await?;
 
+    let has_reth_info = |body: &str| body.lines().any(|line| line.starts_with("reth_info{"));
     for _ in 0..2 {
         let (parts, body) = timeout(Duration::from_secs(10), received.recv()).await?.unwrap();
         assert_eq!(parts.method, Method::PUT);
         assert_eq!(parts.uri.path(), "/metrics/job/reth");
-        assert!(std::str::from_utf8(&body)?.lines().any(|line| line.starts_with("reth_info{")));
+        assert!(has_reth_info(std::str::from_utf8(&body)?));
     }
     if let Some(addr) = listen_addr {
         let response = Client::new()
@@ -61,7 +62,7 @@ async fn assert_metrics_push(listen_addr: Option<SocketAddr>) -> eyre::Result<()
             .send()
             .await?
             .error_for_status()?;
-        assert!(response.text().await?.lines().any(|line| line.starts_with("reth_info{")));
+        assert!(has_reth_info(&response.text().await?));
     }
     drop(received);
     gateway.stop()?;
