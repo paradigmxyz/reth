@@ -131,6 +131,11 @@ impl BalPrewarmPool {
 impl Drop for BalPrewarmPool {
     /// Disconnects every worker's queue and joins the workers. Detaching them instead, by dropping
     /// their handles, races with their exit in glibc before 2.43 and can crash the process.
+    ///
+    /// A worker drains the requests queued ahead of the disconnect before it exits, so the join is
+    /// only as long as the queues are: [`end_block`](Self::end_block) empties them before the last
+    /// handle to the pool goes away. A handle for the current thread is skipped because joining it
+    /// would deadlock.
     fn drop(&mut self) {
         self.workers.clear();
         let current = std::thread::current().id();
