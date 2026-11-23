@@ -40,6 +40,11 @@ impl StorageLock {
         Self::try_acquire_file_lock(path)
     }
 
+    /// Returns whether a directory entry is the storage writer lock.
+    pub fn is_lock_file(name: &std::ffi::OsStr) -> bool {
+        name == LOCKFILE_NAME
+    }
+
     /// Acquire a file write lock.
     #[cfg(any(test, not(feature = "disable-lock")))]
     fn try_acquire_file_lock(path: &Path) -> Result<Self, StorageLockError> {

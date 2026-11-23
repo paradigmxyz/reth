@@ -865,6 +865,18 @@ impl RocksDBProvider {
         path.as_ref().join("CURRENT").exists()
     }
 
+    /// Checks an existing manifest for the transaction index common to reth database layouts.
+    pub fn has_reth_tables(path: &Path) -> ProviderResult<bool> {
+        let families = DB::list_cf(&Options::default(), path).map_err(ProviderError::other)?;
+        Ok(families.iter().any(|name| name == tables::TransactionHashNumbers::NAME))
+    }
+
+    /// Destroys the database in the dedicated directory at `path`. `RocksDB` recognizes its files
+    /// by name, including archived WALs. Returns an error if a writer holds the lock.
+    pub fn destroy(path: &Path) -> ProviderResult<()> {
+        DB::destroy(&Options::default(), path).map_err(ProviderError::other)
+    }
+
     /// Returns `true` if this provider is in read-only mode.
     pub fn is_read_only(&self) -> bool {
         matches!(self.0.as_ref(), RocksDBProviderInner::Secondary { .. })

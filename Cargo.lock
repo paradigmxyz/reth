@@ -8371,7 +8371,6 @@ dependencies = [
  "reth-db-api",
  "reth-etl",
  "reth-execution-errors",
- "reth-fs-util",
  "reth-node-types",
  "reth-primitives-traits",
  "reth-provider",

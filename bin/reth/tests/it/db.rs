@@ -141,3 +141,5 @@ fn db_get_mdbx_raw_table_range() {
         json!({ "key": key, "val": "0x2100000000000000ff" })
     );
 }
+
+mod drop;

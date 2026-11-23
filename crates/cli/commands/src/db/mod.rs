@@ -5,15 +5,13 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_db::version::{get_db_version, DatabaseVersionError, DB_VERSION};
 use reth_db_common::DbTool;
-use std::{
-    io::{self, Write},
-    sync::Arc,
-};
+use std::sync::Arc;
 mod account_storage;
 mod checksum;
 mod clear;
 mod copy;
 mod diff;
+mod drop;
 mod get;
 mod list;
 mod migrate_v2;
@@ -103,8 +101,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
         let db_path = data_dir.db();
-        let static_files_path = data_dir.static_files();
-        let exex_wal_path = data_dir.exex_wal();
 
         // ensure the provided datadir exists
         eyre::ensure!(
@@ -154,26 +150,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 });
             }
             Subcommands::Drop { force } => {
-                if !force {
-                    // Ask for confirmation
-                    print!(
-                        "Are you sure you want to drop the database at {data_dir}? This cannot be undone. (y/N): "
-                    );
-                    // Flush the buffer to ensure the message is printed immediately
-                    io::stdout().flush().unwrap();
-
-                    let mut input = String::new();
-                    io::stdin().read_line(&mut input).expect("Failed to read line");
-
-                    if !input.trim().eq_ignore_ascii_case("y") {
-                        println!("Database drop aborted!");
-                        return Ok(())
-                    }
-                }
-
-                db_exec!(self.env, tool, N, AccessRights::RW, {
-                    tool.drop(db_path, static_files_path, exex_wal_path)?;
-                });
+                tokio::task::spawn_blocking(move || {
+                    drop::execute::<N::Primitives, _>(&self.env, &data_dir, force)
+                })
+                .await??;
             }
             Subcommands::Clear(command) => {
                 db_exec!(self.env, tool, N, AccessRights::RW, {
