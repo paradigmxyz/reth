@@ -156,7 +156,9 @@ fn protects_external_directories_and_drops_legacy_stores() {
     {
         let offline = dir.join("offline");
         symlink(dir.join("unmounted"), &offline).unwrap();
-        assert_eq!(refused(&offline), format!("Error: Could not resolve {}", offline.display()));
+        for path in [&offline, &offline.join("rocksdb")] {
+            assert_eq!(refused(path), format!("Error: Could not resolve {}", offline.display()));
+        }
         assert!(dir.join("db/mdbx.dat").is_file());
     }
     let root = dir.canonicalize().unwrap();

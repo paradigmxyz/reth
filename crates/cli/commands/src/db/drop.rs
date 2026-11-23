@@ -53,7 +53,7 @@ pub(super) fn execute<P: NodePrimitives, C: ChainSpecParser<ChainSpec: EthChainS
     // symlinks. Nested stores would let recursive cleanup unlink another store's writer lock.
     let mut roots = Vec::<PathBuf>::new();
     for path in [&db, &static_files, &rocks, &wal] {
-        if path.try_exists()? || path.is_symlink() {
+        if path.try_exists()? {
             let root = path
                 .canonicalize()
                 .wrap_err_with(|| format!("Could not resolve {}", path.display()))?;
@@ -64,6 +64,16 @@ pub(super) fn execute<P: NodePrimitives, C: ChainSpecParser<ChainSpec: EthChainS
                 );
             }
             roots.push(root);
+        } else {
+            // A missing store is valid, but a dangling symlink can hide an existing one.
+            let mut prefix = PathBuf::new();
+            for component in path.components() {
+                prefix.push(component);
+                if !prefix.try_exists()? {
+                    eyre::ensure!(!prefix.is_symlink(), "Could not resolve {}", prefix.display());
+                    break
+                }
+            }
         }
     }
 
