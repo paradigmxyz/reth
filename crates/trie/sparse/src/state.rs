@@ -5,20 +5,20 @@ use crate::{
 use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
 use either::Either;
-#[cfg(feature = "std")]
-use rayon::iter::IntoParallelRefMutIterator;
-#[cfg(feature = "std")]
-use rayon::iter::ParallelIterator;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
-#[cfg(feature = "std")]
-use reth_primitives_traits::ParallelBridgeBuffered;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
 };
+use tracing::instrument;
+
+#[cfg(feature = "std")]
+use reth_concurrency::sync::rayon::{
+    self,
+    iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+};
 #[cfg(feature = "std")]
 use tracing::debug;
-use tracing::instrument;
 
 /// Holds data that should be dropped after any locks are released.
 ///
@@ -291,8 +291,7 @@ where
         let results: Vec<_> = {
             let parent_span = tracing::Span::current();
             targets
-                .into_iter()
-                .par_bridge_buffered()
+                .into_par_iter()
                 .map(|(hashed_address, target, mut nodes)| {
                     let _span = tracing::trace_span!(
                         target: "trie::sparse",
@@ -615,6 +614,7 @@ mod tests {
     };
     use arbitrary::Arbitrary;
     use rand::{rngs::StdRng, Rng, SeedableRng};
+    use reth_concurrency::sync::Runtime;
     use reth_execution_errors::{SparseStateTrieErrorKind, SparseTrieErrorKind};
     use reth_primitives_traits::Account;
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
@@ -1048,7 +1048,7 @@ mod tests {
         let account_1 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
         let account_2 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
+        Runtime::new().run(move || {
             let mut storage_hash_builder = HashBuilder::default()
                 .with_proof_retainer(ProofRetainer::from_iter([slot_path_1, slot_path_2]));
             storage_hash_builder.add_leaf(slot_path_1, &alloy_rlp::encode_fixed_size(&value_1));

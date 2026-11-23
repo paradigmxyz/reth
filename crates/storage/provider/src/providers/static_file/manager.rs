@@ -20,6 +20,7 @@ use alloy_primitives::{b256, Address, BlockHash, BlockNumber, TxHash, TxNumber, 
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, NamedChain};
+use reth_concurrency::sync::{channel::mpsc, rayon};
 use reth_db::{
     lockfile::StorageLock,
     static_file::{
@@ -60,7 +61,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
-        mpsc, Arc,
+        Arc,
     },
 };
 use tracing::{debug, info, info_span, instrument, trace, warn};

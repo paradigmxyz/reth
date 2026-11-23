@@ -18,6 +18,7 @@ use evm2::{
     evm::{AccountInfo, Database, InMemoryDB},
 };
 use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
+use reth_concurrency::sync::channel;
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
 use reth_evm::{
     execute::{BasicBlockExecutor, Executor},
@@ -27,7 +28,7 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::{BlockExecutionResult, BundleSource, StateUpdate};
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 
 fn create_database_with_beacon_root_contract() -> InMemoryDB {
     let mut db = InMemoryDB::default();
@@ -745,7 +746,7 @@ fn test_balance_increment_not_duplicated() {
     let provider = EthEvmConfig::new(chain_spec);
     let executor = provider.batch_executor(db);
 
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = channel::unbounded();
     let tx_clone = tx.clone();
 
     let _output = executor

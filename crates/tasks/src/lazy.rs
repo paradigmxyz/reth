@@ -1,7 +1,7 @@
 //! A lazily-resolved handle to a value computed on a background thread.
 
-use parking_lot::Mutex;
-use std::sync::{Arc, OnceLock};
+use reth_concurrency::sync::{parking_lot::Mutex, OnceLock};
+use std::sync::Arc;
 use tokio::sync::oneshot;
 
 /// Handle to a value computed on a background thread.

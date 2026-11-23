@@ -31,6 +31,9 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument};
 
+#[cfg(feature = "rayon")]
+use reth_concurrency::sync::rayon;
+
 /// Contains the trie and hashed-state data required to initialize an overlay state provider.
 #[derive(Debug, Clone)]
 pub struct StateTrieOverlay {

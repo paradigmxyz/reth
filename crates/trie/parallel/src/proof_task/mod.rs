@@ -28,17 +28,17 @@ pub mod metrics;
 
 use crate::error::StateRootTaskError;
 use alloy_primitives::B256;
-use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use reth_primitives_traits::FastInstant as Instant;
+use reth_concurrency::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    channel::{unbounded, Receiver, Sender},
+    time::FastInstant as Instant,
+};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult, StateProofProvider};
 use reth_tasks::{Runtime, WorkerPool};
 use reth_trie::{DecodedMultiProofV2, MultiProofTargetsV2, ProofV2Target};
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},
-    sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc,
-    },
+    sync::Arc,
     time::Duration,
 };
 use tracing::{debug, debug_span, error, instrument, trace};
@@ -103,13 +103,13 @@ impl AvailabilitySheet {
 pub struct ProofWorkerHandle {
     /// Sender shared with the workers, kept so that [`Self::results`] never disconnects while the
     /// handle is alive.
-    _result_tx: CrossbeamSender<ProofWorkerResult>,
+    _result_tx: Sender<ProofWorkerResult>,
     /// Results sent by both worker pools.
-    result_rx: CrossbeamReceiver<ProofWorkerResult>,
+    result_rx: Receiver<ProofWorkerResult>,
     /// Direct sender to storage worker pool
-    storage_work_tx: CrossbeamSender<StorageProofJob>,
+    storage_work_tx: Sender<StorageProofJob>,
     /// Direct sender to account worker pool
-    account_work_tx: CrossbeamSender<AccountProofJob>,
+    account_work_tx: Sender<AccountProofJob>,
     /// Per-worker availability flags for storage workers. Used to determine whether to chunk
     /// multiproofs.
     storage_availability: Arc<AvailabilitySheet>,
@@ -242,7 +242,7 @@ impl ProofWorkerHandle {
     ///
     /// Results arrive in completion order. The receiver never disconnects while the handle is
     /// alive.
-    pub const fn results(&self) -> &CrossbeamReceiver<ProofWorkerResult> {
+    pub const fn results(&self) -> &Receiver<ProofWorkerResult> {
         &self.result_rx
     }
 
@@ -442,9 +442,9 @@ struct ProofWorker<Factory, J> {
     /// Shared task context with database factory and prefix sets
     task_ctx: ProofTaskCtx<Factory>,
     /// Channel for receiving jobs
-    work_rx: CrossbeamReceiver<J>,
+    work_rx: Receiver<J>,
     /// Sender for job results and worker failures
-    result_tx: CrossbeamSender<ProofWorkerResult>,
+    result_tx: Sender<ProofWorkerResult>,
     /// Per-worker availability flags
     availability: Arc<AvailabilitySheet>,
     /// Set when the handle is dropped, after which nobody reads the results of queued jobs.
@@ -501,7 +501,7 @@ impl<Factory: DatabaseProviderROFactory, J> ProofWorker<Factory, J> {
                     jitter_us = jitter.as_micros(),
                     "Proof worker applying proof jitter"
                 );
-                std::thread::sleep(jitter);
+                reth_concurrency::sync::thread::sleep(jitter);
             }
 
             match catch_unwind(AssertUnwindSafe(|| process(&provider, job))) {
@@ -705,8 +705,8 @@ impl From<ProofJobError> for StateRootTaskError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossbeam_channel::RecvTimeoutError;
     use reth_chainspec::ChainSpec;
+    use reth_concurrency::sync::channel::{bounded, RecvTimeoutError};
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
     use std::sync::Arc;
 
@@ -829,7 +829,7 @@ mod tests {
             // initialization error is a message here, rather than a successful shutdown.
             assert!(matches!(
                 results.recv_timeout(Duration::from_secs(30)),
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected)
+                Err(RecvTimeoutError::Disconnected)
             ));
         }
     }
@@ -849,7 +849,7 @@ mod tests {
         let runtime = reth_tasks::Runtime::test();
 
         // Occupy both pools' blocking tasks so the workers start only after the handle is dropped.
-        let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(0);
+        let (release_tx, release_rx) = bounded::<()>(0);
         for kind in [ProofWorkerKind::Storage, ProofWorkerKind::Account] {
             let release_rx = release_rx.clone();
             runtime.spawn_blocking_named(kind.task_name(), move || {

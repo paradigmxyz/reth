@@ -187,6 +187,7 @@ mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
     use rand::Rng;
+    use reth_concurrency::sync::thread;
     use reth_ethereum_primitives::{EthPrimitives, Receipt};
 
     fn create_mock_state(
@@ -330,7 +331,7 @@ mod tests {
         const DEPTH: usize = 100_000;
 
         // A recursive drop of either chain would overflow this stack.
-        std::thread::Builder::new()
+        thread::Builder::new()
             .stack_size(64 * 1024)
             .spawn(|| {
                 let tail = block_state_chain(DEPTH, None);

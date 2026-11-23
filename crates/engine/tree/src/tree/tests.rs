@@ -11,6 +11,7 @@ use crate::{
         TreeConfig,
     },
 };
+use reth_concurrency::sync::channel::mpsc::{channel, Receiver, Sender};
 use reth_storage_overlay::OverlayManager;
 
 use alloy_eip7928::bal::DecodedBal;
@@ -29,6 +30,7 @@ use reth_chain_state::{
     NewCanonicalChain,
 };
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
+use reth_concurrency::sync::thread;
 use reth_engine_primitives::{
     BeaconForkChoiceUpdateError, ConsensusEngineHandle, EngineApiValidator, ForkchoiceStatus,
     NoopInvalidBlockHook, DEFAULT_BACKFILL_RUN_THRESHOLD,
@@ -46,16 +48,9 @@ use reth_provider::{
     InMemoryBalStore, RawBal,
 };
 use reth_stages_api::ControlFlow;
-use reth_tasks::spawn_os_thread;
+use reth_tasks::spawn_thread;
 use reth_trie_common::SortedTrieData;
-use std::{
-    str::FromStr,
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::sync::oneshot;
 use tracing::{span::Attributes, Id, Subscriber};
 use tracing_subscriber::{layer::Context, prelude::*, registry::LookupSpan, Layer};
@@ -134,7 +129,7 @@ impl<T: Send + 'static> TestChannel<T> {
         let handle = TestChannelHandle::new(release_tx);
         let test_channel = Self { release: release_rx, tx: wrapped_tx, rx: original_rx };
         // spawn the task that listens and releases stuff
-        std::thread::spawn(move || test_channel.intercept_loop());
+        thread::spawn(move || test_channel.intercept_loop());
         (original_tx, wrapped_rx, handle)
     }
 
@@ -174,9 +169,7 @@ struct TestHarness {
         BasicEngineValidator<MockEthProvider, MockEvmConfig, MockEngineValidator>,
         MockEvmConfig,
     >,
-    to_tree_tx: crossbeam_channel::Sender<
-        FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>,
-    >,
+    to_tree_tx: channel::Sender<FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>>,
     from_tree_rx: UnboundedReceiver<EngineApiEvent>,
     payload_command_rx: UnboundedReceiver<PayloadServiceCommand<EthEngineTypes>>,
     blocks: Vec<ExecutedBlock>,
@@ -478,11 +471,11 @@ impl ValidatorTestHarness {
     fn start_persistence_operation(&mut self, action: CurrentPersistenceAction) {
         match action {
             CurrentPersistenceAction::SavingBlocks { highest } => {
-                let (_tx, rx) = crossbeam_channel::bounded(1);
+                let (_tx, rx) = channel::bounded(1);
                 self.harness.tree.persistence_state.start_save(highest, rx);
             }
             CurrentPersistenceAction::RemovingBlocks { new_tip_num } => {
-                let (_tx, rx) = crossbeam_channel::bounded(1);
+                let (_tx, rx) = channel::bounded(1);
                 self.harness.tree.persistence_state.start_remove(new_tip_num, rx);
             }
         }
@@ -699,7 +692,7 @@ async fn test_tree_persist_blocks() {
         .get_executed_blocks(1..tree_config.persistence_threshold() + 2)
         .collect();
     let test_harness = TestHarness::new(chain_spec).with_blocks(blocks.clone());
-    spawn_os_thread("engine", || test_harness.tree.run());
+    spawn_thread("engine", || test_harness.tree.run());
 
     // send a message to the tree to enter the main loop.
     test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
@@ -1008,7 +1001,7 @@ fn backfill_request_is_preserved_while_persistence_is_in_flight() {
     let (mut test_harness, blocks, action) = deferred_backfill_harness();
     let state_trie_tip = blocks[2].recovered_block().num_hash();
     let database_tip = blocks[4].recovered_block().num_hash();
-    let (persistence_tx, persistence_rx) = crossbeam_channel::bounded(1);
+    let (persistence_tx, persistence_rx) = channel::bounded(1);
     test_harness.tree.persistence_state.start_save(database_tip, persistence_rx);
 
     test_harness.tree.emit_event(EngineApiEvent::BackfillAction(action.clone()));
@@ -1330,7 +1323,7 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
         .with_memory_block_buffer_target(0)
         .with_persistence_backpressure_threshold(1);
 
-    let (persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+    let (persist_tx, persist_rx) = channel::bounded(1);
     let persisted = blocks.last().unwrap().recovered_block().num_hash();
     test_harness.tree.persistence_state.start_save(persisted, persist_rx);
     assert!(test_harness.tree.should_backpressure());
@@ -1355,8 +1348,8 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
     test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
     assert_eq!(test_harness.tree.incoming.len(), 2);
 
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(10));
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(10));
         persist_tx
             .send(PersistenceResult {
                 last_block: persisted,
@@ -1403,7 +1396,7 @@ fn test_backpressure_excludes_in_memory_buffer() {
             .with_memory_block_buffer_target(5)
             .with_persistence_backpressure_threshold(10);
 
-        let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+        let (_persist_tx, persist_rx) = channel::bounded(1);
         let persisted = blocks.last().unwrap().recovered_block().num_hash();
         test_harness.tree.persistence_state.start_save(persisted, persist_rx);
 
@@ -3049,7 +3042,7 @@ mod forkchoice_updated_tests {
         let action_rx = test_harness.action_rx;
 
         // Spawn tree in background thread
-        spawn_os_thread("engine", || test_harness.tree.run());
+        spawn_thread("engine", || test_harness.tree.run());
 
         // Send terminate request
         to_tree_tx
@@ -3096,7 +3089,7 @@ mod forkchoice_updated_tests {
         let (terminate_tx, terminate_rx) = oneshot::channel();
         let to_tree_tx = test_harness.to_tree_tx.clone();
         let action_rx = test_harness.action_rx;
-        spawn_os_thread("engine", || test_harness.tree.run());
+        spawn_thread("engine", || test_harness.tree.run());
 
         to_tree_tx
             .send(FromEngine::Event(FromOrchestrator::Terminate { tx: terminate_tx }))
@@ -3781,7 +3774,8 @@ async fn test_fcu_back_to_reorged_out_head_above_shorter_branch_with_pending_dis
 }
 
 proptest::proptest! {
-    // Each case constructs a full engine harness.
+    // Each case constructs a full engine harness with native Tokio workers. Keep this mixed
+    // boundary outside the synchronous simulation, including the tracing collector below.
     #![proptest_config(proptest::test_runner::Config::with_cases(32))]
 
     #[test]
@@ -3813,7 +3807,7 @@ proptest::proptest! {
             }
             let messages = (0..requests.len()).map(|_| rx.try_recv().unwrap()).collect::<Vec<_>>();
             let expected = requests.iter().map(|&(caller, _)| callers[caller].id()).collect::<Vec<_>>();
-            std::thread::scope(|scope| {
+            thread::scope(|scope| {
                 scope.spawn(|| {
                     tracing::dispatcher::with_default(&dispatch, || {
                         let mut harness = TestHarness::new(MAINNET.clone());

@@ -6,11 +6,10 @@
 //! - Dedicated rayon thread pools for different workloads (with `rayon` feature)
 //! - [`BlockingTaskGuard`] for rate-limiting expensive operations (with `rayon` feature)
 
-#[cfg(feature = "rayon")]
-use crate::pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, WorkerPool};
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
+    wait_for_shutdown_progress,
     worker_map::WorkerMap,
     PanickedTaskError, TaskEvent, TaskManager,
 };
@@ -18,6 +17,7 @@ use futures_util::{
     future::{select, BoxFuture},
     Future, FutureExt, TryFutureExt,
 };
+use reth_concurrency::sync::time::{Duration, Instant};
 use std::{
     num::NonZeroUsize,
     pin::pin,
@@ -26,16 +26,21 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::{Duration, Instant},
+    thread::Builder,
 };
 use tokio::{runtime::Handle, sync::mpsc::UnboundedSender, task::JoinHandle};
 use tracing::{debug, error, Span};
 use tracing_futures::Instrument;
 
-use tokio::runtime::Runtime as TokioRuntime;
-
 #[cfg(feature = "rayon")]
-use std::thread::available_parallelism;
+use crate::pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, WorkerPool};
+#[cfg(feature = "rayon")]
+use reth_concurrency::sync::{
+    rayon::{ThreadPool, ThreadPoolBuildError, ThreadPoolBuilder},
+    thread::available_parallelism,
+};
+
+use tokio::runtime::Runtime as TokioRuntime;
 
 /// Default thread keep-alive duration for the tokio runtime.
 pub const DEFAULT_THREAD_KEEP_ALIVE: Duration = Duration::from_secs(15);
@@ -281,13 +286,20 @@ pub enum RuntimeBuildError {
     /// Failed to build a rayon thread pool.
     #[cfg(feature = "rayon")]
     #[error("Failed to build rayon thread pool: {0}")]
-    RayonBuild(#[from] rayon::ThreadPoolBuildError),
+    RayonBuild(#[from] ThreadPoolBuildError),
 }
 
 // ── RuntimeInner ──────────────────────────────────────────────────────
 
 struct RuntimeInner {
     /// Owned tokio runtime, taken during shutdown even while other handles remain alive.
+    #[cfg_attr(
+        feature = "fuzz",
+        allow(
+            clippy::disallowed_types,
+            reason = "Native lock owns Tokio runtime shutdown, not logical worker scheduling."
+        )
+    )]
     tokio_runtime: Mutex<Option<TokioRuntime>>,
     /// Handle to the tokio runtime.
     handle: Handle,
@@ -298,16 +310,23 @@ struct RuntimeInner {
     /// Task executor metrics.
     metrics: TaskExecutorMetrics,
     /// How many [`GracefulShutdown`] tasks are currently active.
+    #[cfg_attr(
+        feature = "fuzz",
+        allow(
+            clippy::disallowed_types,
+            reason = "Native counter tracks Tokio future lifetimes across OS threads outside synchronous simulation."
+        )
+    )]
     graceful_tasks: Arc<AtomicUsize>,
     /// General-purpose rayon CPU pool.
     #[cfg(feature = "rayon")]
-    cpu_pool: rayon::ThreadPool,
+    cpu_pool: ThreadPool,
     /// RPC blocking pool.
     #[cfg(feature = "rayon")]
     rpc_pool: BlockingTaskPool,
     /// Storage I/O pool.
     #[cfg(feature = "rayon")]
-    storage_pool: rayon::ThreadPool,
+    storage_pool: ThreadPool,
     /// Rate limiter for expensive RPC operations.
     #[cfg(feature = "rayon")]
     blocking_guard: BlockingTaskGuard,
@@ -338,10 +357,24 @@ struct RuntimeInner {
     /// Handle to the spawned [`TaskManager`] background task.
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
+    #[cfg_attr(
+        feature = "fuzz",
+        allow(
+            clippy::disallowed_types,
+            reason = "Native lock transfers ownership of a Tokio task handle, not logical worker work."
+        )
+    )]
     task_manager_handle: Mutex<Option<JoinHandle<Result<(), PanickedTaskError>>>>,
 }
 
 impl Drop for RuntimeInner {
+    #[cfg_attr(
+        feature = "fuzz",
+        allow(
+            clippy::disallowed_methods,
+            reason = "Native lock exclusively releases the owned Tokio runtime during teardown."
+        )
+    )]
     fn drop(&mut self) {
         // The last handle can belong to an async task, including one running on this runtime.
         // Without explicit shutdown, let blocking tasks finish in the background in that case.
@@ -378,6 +411,13 @@ impl Runtime {
     /// The handle resolves with `Err(PanickedTaskError)` if a critical task panicked,
     /// or `Ok(())` if shutdown was requested. If not taken, the background task still
     /// runs and logs panics at `debug!` level.
+    #[cfg_attr(
+        feature = "fuzz",
+        allow(
+            clippy::disallowed_methods,
+            reason = "Native lock transfers ownership of a Tokio task handle, not logical worker work."
+        )
+    )]
     pub fn take_task_manager_handle(&self) -> Option<JoinHandle<Result<(), PanickedTaskError>>> {
         self.0.task_manager_handle.lock().unwrap().take()
     }
@@ -389,7 +429,7 @@ impl Runtime {
 
     /// Get the general-purpose rayon CPU thread pool.
     #[cfg(feature = "rayon")]
-    pub fn cpu_pool(&self) -> &rayon::ThreadPool {
+    pub fn cpu_pool(&self) -> &ThreadPool {
         &self.0.cpu_pool
     }
 
@@ -401,7 +441,7 @@ impl Runtime {
 
     /// Get the storage I/O pool.
     #[cfg(feature = "rayon")]
-    pub fn storage_pool(&self) -> &rayon::ThreadPool {
+    pub fn storage_pool(&self) -> &ThreadPool {
         &self.0.storage_pool
     }
 
@@ -618,11 +658,12 @@ impl Runtime {
         self.spawn_blocking_named("drop", move || drop(value));
     }
 
-    /// Spawns a blocking closure on a dedicated, named OS thread.
+    /// Spawns a blocking closure on a dedicated, named selected-backend thread.
     ///
     /// Unlike [`spawn_blocking`](Self::spawn_blocking) which uses tokio's blocking thread pool,
-    /// this reuses the same OS thread for all tasks submitted under the same `name`. The thread
-    /// is created lazily on first use and its OS thread name is set to `name`.
+    /// this reuses the same worker for all tasks submitted under the same `name`. The worker
+    /// is created lazily on first use and its name is set to `name`. It is an OS thread natively
+    /// and a logical thread under `fuzz`.
     ///
     /// This is useful for tasks that benefit from running on a stable thread, e.g. for
     /// thread-local state reuse or to avoid thread creation overhead on hot paths.
@@ -637,7 +678,7 @@ impl Runtime {
         crate::LazyHandle::new(self.0.worker_map.spawn_on(name, func))
     }
 
-    /// Attempts to spawn a blocking closure on a dedicated, named OS thread.
+    /// Attempts to spawn a blocking closure on a dedicated, named selected-backend thread.
     ///
     /// Returns `None` if the named worker already has a task running or queued, allowing the caller
     /// to fall back to another executor instead of serializing behind the named worker.
@@ -653,21 +694,41 @@ impl Runtime {
         self.0.worker_map.try_spawn_on(name, func).map(crate::LazyHandle::new)
     }
 
-    /// Spawns a blocking closure on a named OS thread if it is idle, otherwise falls back to
-    /// tokio's unnamed blocking thread pool.
+    /// Spawns a blocking closure on a named selected-backend thread if idle, otherwise falls back
+    /// to tokio's unnamed blocking thread pool.
     ///
     /// Returns `true` if the closure was spawned on the named thread.
     pub fn spawn_blocking_named_or_tokio<F>(&self, name: &'static str, func: F) -> bool
     where
         F: FnOnce() + Send + 'static,
     {
+        // The caller may be native even in fuzz builds. Under fuzz, the lock only transfers
+        // ownership; logical accesses yield before locking and release it before user work.
+        #[cfg_attr(
+            feature = "fuzz",
+            allow(
+                clippy::disallowed_types,
+                reason = "Native handoff supports native callers; logical accesses explicitly yield before locking."
+            )
+        )]
         let func = Arc::new(parking_lot::Mutex::new(Some(func)));
         let named_func = func.clone();
 
         if self
             .try_spawn_blocking_named(name, move || {
+                #[cfg(not(feature = "fuzz"))]
                 if let Some(func) = named_func.lock().take() {
                     func();
+                }
+                #[cfg(feature = "fuzz")]
+                {
+                    if shuttle::current::try_get_current_task().is_some() {
+                        reth_concurrency::sync::thread::yield_now();
+                    }
+                    let func = named_func.lock().take();
+                    if let Some(func) = func {
+                        func();
+                    }
                 }
             })
             .is_some()
@@ -675,8 +736,19 @@ impl Runtime {
             return true
         }
 
+        #[cfg(not(feature = "fuzz"))]
         if let Some(func) = func.lock().take() {
             self.spawn_blocking(func);
+        }
+        #[cfg(feature = "fuzz")]
+        {
+            if shuttle::current::try_get_current_task().is_some() {
+                reth_concurrency::sync::thread::yield_now();
+            }
+            let func = func.lock().take();
+            if let Some(func) = func {
+                self.spawn_blocking(func);
+            }
         }
         false
     }
@@ -748,10 +820,18 @@ impl Runtime {
         self.spawn_critical_as(name, fut.boxed(), TaskKind::Blocking)
     }
 
-    /// This spawns a critical task onto a dedicated named OS thread.
+    /// Spawns a critical task on a dedicated named OS thread.
     /// The given future resolves as soon as the [`Shutdown`] signal is received.
     ///
-    /// If this task panics, the [`TaskManager`] is notified.
+    /// If this task panics, the [`TaskManager`] is notified. This Tokio-backed API always uses
+    /// a native OS thread, including under `fuzz`; its future is outside synchronous simulation.
+    #[cfg_attr(
+        feature = "fuzz",
+        allow(
+            clippy::disallowed_types,
+            reason = "This explicitly native API drives a Tokio future on an OS thread, outside synchronous simulation."
+        )
+    )]
     pub fn spawn_critical_os_thread<F>(
         &self,
         thread_name: &'static str,
@@ -764,6 +844,14 @@ impl Runtime {
         self.spawn_critical_os_thread_boxed(thread_name, task_name, fut.boxed())
     }
 
+    #[cfg_attr(
+        feature = "fuzz",
+        allow(
+            clippy::disallowed_types,
+            clippy::disallowed_methods,
+            reason = "This explicitly native API drives a Tokio future on an OS thread, outside synchronous simulation."
+        )
+    )]
     fn spawn_critical_os_thread_boxed(
         &self,
         thread_name: &'static str,
@@ -792,7 +880,7 @@ impl Runtime {
             let _ = select(on_shutdown, task).await;
         };
 
-        thread::Builder::new()
+        Builder::new()
             .name(thread_name.to_string())
             .spawn(move || {
                 let _guard = handle.enter();
@@ -924,6 +1012,13 @@ impl Runtime {
     /// tasks. Externally supplied runtimes are left running.
     ///
     /// Panics if called from an async context while an owned runtime remains.
+    #[cfg_attr(
+        feature = "fuzz",
+        allow(
+            clippy::disallowed_methods,
+            reason = "Native lock exclusively takes the owned Tokio runtime for OS-thread shutdown."
+        )
+    )]
     pub fn shutdown_timeout(self, timeout: Duration) {
         let runtime = self.0.tokio_runtime.lock().unwrap().take();
         if let Some(runtime) = runtime {
@@ -939,7 +1034,7 @@ impl Runtime {
                 debug!("graceful shutdown timed out");
                 return false;
             }
-            std::thread::yield_now();
+            wait_for_shutdown_progress();
         }
         debug!("gracefully shut down");
         true
@@ -1008,13 +1103,13 @@ impl RuntimeBuilder {
             let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
 
             let cpu_pool = build_pool_with_panic_handler(
-                rayon::ThreadPoolBuilder::new()
+                ThreadPoolBuilder::new()
                     .num_threads(default_threads)
                     .thread_name(|i| format!("cpu-{i:02}")),
             )?;
 
             let rpc_raw = build_pool_with_panic_handler(
-                rayon::ThreadPoolBuilder::new()
+                ThreadPoolBuilder::new()
                     .num_threads(rpc_threads)
                     .thread_name(|i| format!("rpc-{i:02}")),
             )?;
@@ -1023,7 +1118,7 @@ impl RuntimeBuilder {
             let storage_threads =
                 config.rayon.storage_threads.unwrap_or(DEFAULT_STORAGE_POOL_THREADS);
             let storage_pool = build_pool_with_panic_handler(
-                rayon::ThreadPoolBuilder::new()
+                ThreadPoolBuilder::new()
                     .num_threads(storage_threads)
                     .thread_name(|i| format!("storage-{i:02}")),
             )?;
@@ -1097,8 +1192,26 @@ impl RuntimeBuilder {
             result
         });
 
+        #[cfg_attr(
+            feature = "fuzz",
+            allow(
+                clippy::disallowed_types,
+                clippy::disallowed_methods,
+                reason = "Native lock owns Tokio runtime shutdown, not logical worker scheduling."
+            )
+        )]
+        let tokio_runtime = Mutex::new(owned_runtime);
+        #[cfg_attr(
+            feature = "fuzz",
+            allow(
+                clippy::disallowed_types,
+                clippy::disallowed_methods,
+                reason = "Native lock transfers ownership of a Tokio task handle, not logical worker work."
+            )
+        )]
+        let task_manager_handle = Mutex::new(Some(task_manager_handle));
         let inner = RuntimeInner {
-            tokio_runtime: Mutex::new(owned_runtime),
+            tokio_runtime,
             handle,
             on_shutdown,
             task_events_tx,
@@ -1131,7 +1244,7 @@ impl RuntimeBuilder {
             #[cfg(feature = "rayon")]
             state_trie_overlay_worker_pool,
             worker_map: WorkerMap::new(),
-            task_manager_handle: Mutex::new(Some(task_manager_handle)),
+            task_manager_handle,
         };
 
         Ok(Runtime(Arc::new(inner)))
@@ -1141,6 +1254,13 @@ impl RuntimeBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(feature = "fuzz"))]
+    use crate::test_utils;
+
+    #[cfg(not(feature = "fuzz"))]
+    use std::{future, sync::mpsc};
+    #[cfg(not(feature = "fuzz"))]
+    use tokio::sync::oneshot;
 
     #[test]
     fn test_runtime_config_default() {
@@ -1182,10 +1302,10 @@ mod tests {
         assert_eq!(runtime.handle().metrics().num_workers(), 5);
         assert_eq!(runtime.cpu_pool().current_num_threads(), 5);
         assert_eq!(
-            runtime
-                .handle()
-                .block_on(runtime.rpc_pool().spawn(rayon::current_num_threads))
-                .unwrap(),
+            crate::test_utils::block_on(
+                runtime.rpc_pool().spawn(reth_concurrency::sync::rayon::current_num_threads)
+            )
+            .unwrap(),
             5
         );
         assert_eq!(runtime.prewarming_pool().current_num_threads(), 5);
@@ -1284,59 +1404,79 @@ mod tests {
         let _ = runtime.handle();
     }
 
-    #[tokio::test]
-    async fn last_runtime_clone_can_drop_on_its_worker() {
-        let runtime = RuntimeBuilder::new(Runtime::test_config()).build().unwrap();
-        let task_runtime = runtime.clone();
-        let (release, wait) = tokio::sync::oneshot::channel();
-        let task = runtime.handle().spawn(async move {
-            wait.await.unwrap();
-            drop(task_runtime);
+    // Exercises native Tokio runtime ownership or OS-thread behavior.
+    #[cfg(not(feature = "fuzz"))]
+    #[test]
+    fn last_runtime_clone_can_drop_on_its_worker() {
+        test_utils::run(|| {
+            let runtime = RuntimeBuilder::new(Runtime::test_config()).build().unwrap();
+            let task_runtime = runtime.clone();
+            let (release, wait) = oneshot::channel();
+            let task = runtime.handle().spawn(async move {
+                wait.await.unwrap();
+                drop(task_runtime);
+            });
+
+            thread::spawn(move || drop(runtime)).join().unwrap();
+            release.send(()).unwrap();
+            Handle::current().block_on(task).unwrap();
         });
-
-        thread::spawn(move || drop(runtime)).join().unwrap();
-        release.send(()).unwrap();
-        task.await.unwrap();
     }
 
-    #[tokio::test]
-    async fn shutdown_with_live_runtime_clones() {
-        let runtime = RuntimeBuilder::new(Runtime::test_config()).build().unwrap();
-        let retained = runtime.clone();
-        let task_runtime = runtime.clone();
-        let (started, ready) = tokio::sync::oneshot::channel();
-        let task = runtime.handle().spawn(async move {
-            let _runtime = task_runtime;
-            started.send(()).unwrap();
-            std::future::pending::<()>().await;
+    // Exercises native Tokio runtime ownership or OS-thread behavior.
+    #[cfg(not(feature = "fuzz"))]
+    #[test]
+    fn shutdown_with_live_runtime_clones() {
+        test_utils::run(|| {
+            let runtime = RuntimeBuilder::new(Runtime::test_config()).build().unwrap();
+            let retained = runtime.clone();
+            let task_runtime = runtime.clone();
+            let (started, ready) = oneshot::channel();
+            let task = runtime.handle().spawn(async move {
+                let _runtime = task_runtime;
+                started.send(()).unwrap();
+                future::pending::<()>().await;
+            });
+            Handle::current().block_on(ready).unwrap();
+
+            thread::spawn(move || runtime.shutdown_timeout(Duration::from_secs(5))).join().unwrap();
+
+            assert!(Handle::current().block_on(task).unwrap_err().is_cancelled());
+            assert!(Handle::current()
+                .block_on(retained.handle().spawn(async {}))
+                .unwrap_err()
+                .is_cancelled());
+            retained.shutdown_timeout(Duration::from_secs(5));
         });
-        ready.await.unwrap();
-
-        thread::spawn(move || runtime.shutdown_timeout(Duration::from_secs(5))).join().unwrap();
-
-        assert!(task.await.unwrap_err().is_cancelled());
-        assert!(retained.handle().spawn(async {}).await.unwrap_err().is_cancelled());
-        retained.shutdown_timeout(Duration::from_secs(5));
     }
 
-    #[tokio::test]
-    async fn shutdown_preserves_external_runtime() {
-        let runtime = RuntimeBuilder::new(
-            Runtime::test_config().with_tokio(TokioConfig::existing_handle(Handle::current())),
-        )
-        .build()
-        .unwrap();
-        let retained = runtime.clone();
+    // Exercises native Tokio runtime ownership or OS-thread behavior.
+    #[cfg(not(feature = "fuzz"))]
+    #[test]
+    fn shutdown_preserves_external_runtime() {
+        test_utils::run(|| {
+            let runtime = RuntimeBuilder::new(
+                Runtime::test_config().with_tokio(TokioConfig::existing_handle(Handle::current())),
+            )
+            .build()
+            .unwrap();
+            let retained = runtime.clone();
 
-        runtime.shutdown_timeout(Duration::from_secs(5));
+            runtime.shutdown_timeout(Duration::from_secs(5));
 
-        assert_eq!(retained.handle().spawn(async { 42 }).await.unwrap(), 42);
+            assert_eq!(
+                Handle::current().block_on(retained.handle().spawn(async { 42 })).unwrap(),
+                42
+            );
+        });
     }
 
+    // Exercises native Tokio runtime ownership or OS-thread behavior.
+    #[cfg(not(feature = "fuzz"))]
     #[reth_concurrency::test]
     fn critical_os_thread_uses_requested_name() {
         let runtime = Runtime::test();
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = mpsc::channel();
 
         let handle = runtime.spawn_critical_os_thread(
             "critical-os-test",
@@ -1352,6 +1492,8 @@ mod tests {
         handle.join().unwrap();
     }
 
+    // Exercises native Tokio runtime ownership or OS-thread behavior.
+    #[cfg(not(feature = "fuzz"))]
     #[reth_concurrency::test]
     fn critical_os_thread_panic_is_reported() {
         let runtime = Runtime::test();

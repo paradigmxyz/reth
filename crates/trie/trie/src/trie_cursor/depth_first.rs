@@ -132,6 +132,7 @@ mod tests {
     use super::*;
     use crate::trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory};
     use alloy_trie::TrieMask;
+
     use std::{collections::BTreeMap, sync::Arc};
 
     /// A trie cursor that always returns an error on seek/next.
@@ -269,8 +270,10 @@ mod tests {
         // Within the same level, lexicographical order
         assert_eq!(paths[0], Nibbles::from_nibbles([0x1, 0x1, 0x1])); // 0x111 (deepest in 0x1
                                                                       // branch)
-        assert_eq!(paths[1], Nibbles::from_nibbles([0x1, 0x1, 0x2])); // 0x112 (sibling of 0x111)
-        assert_eq!(paths[2], Nibbles::from_nibbles([0x1, 0x1])); // 0x11 (parent of 0x111, 0x112)
+        assert_eq!(paths[1], Nibbles::from_nibbles([0x1, 0x1, 0x2])); // 0x112 (sibling of
+                                                                      // 0x111)
+        assert_eq!(paths[2], Nibbles::from_nibbles([0x1, 0x1])); // 0x11 (parent of 0x111,
+                                                                 // 0x112)
         assert_eq!(paths[3], Nibbles::from_nibbles([0x1, 0x2])); // 0x12 (sibling of 0x11)
         assert_eq!(paths[4], Nibbles::from_nibbles([0x1])); // 0x1 (parent of 0x11, 0x12)
         assert_eq!(paths[5], Nibbles::from_nibbles([0x2, 0x1])); // 0x21 (child of 0x2)

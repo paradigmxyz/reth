@@ -133,6 +133,7 @@ mod tests {
     use super::*;
     use crate::trie_cursor::mock::MockTrieCursorFactory;
     use alloy_primitives::map::B256Map;
+
     use reth_trie_common::updates::StorageTrieUpdatesSorted;
     use std::collections::BTreeMap;
 

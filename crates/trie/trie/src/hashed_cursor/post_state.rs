@@ -423,9 +423,8 @@ where
 mod tests {
     use super::*;
     use crate::hashed_cursor::mock::MockHashedCursor;
-    use parking_lot::Mutex;
+    use reth_concurrency::sync::{parking_lot::Mutex, Runtime};
     use std::{collections::BTreeMap, sync::Arc};
-    use tracing::debug;
 
     fn key(byte: u8) -> B256 {
         B256::repeat_byte(byte)
@@ -507,6 +506,7 @@ mod tests {
         use super::*;
         use itertools::Itertools;
         use proptest::prelude::*;
+        use tracing::debug;
 
         /// Merge `db_nodes` with `post_state_nodes`, applying the post state overlay.
         /// This properly handles deletions (ZERO values for U256, None for Account).
@@ -591,7 +591,7 @@ mod tests {
                 op_choices in prop::collection::vec(any::<u8>(), 10..500),
             ) {
                 reth_tracing::init_test_tracing();
-                reth_concurrency::sync::Runtime::new().run(move || {
+                Runtime::new().run(move || {
                     debug!("Starting proptest!");
 
                     // Create the expected results by merging the two sorted vectors,

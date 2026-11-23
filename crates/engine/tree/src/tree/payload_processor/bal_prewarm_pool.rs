@@ -1,15 +1,15 @@
 //! BAL read-set prewarming pool.
 
 use alloy_primitives::{Address, StorageKey};
+use reth_concurrency::sync::{
+    atomic::{AtomicUsize, Ordering},
+    channel,
+    channel::{Receiver, Sender},
+    thread::{Builder, JoinHandle},
+};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
 use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
-use std::{
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    thread::JoinHandle,
-};
+use std::sync::Arc;
 use tokio::sync::oneshot;
 use tracing::{error, trace};
 
@@ -43,7 +43,7 @@ enum PrewarmMsg {
 #[derive(Debug)]
 pub struct BalPrewarmPool {
     /// One queue per worker. `BeginBlock`/`EndBlock` are broadcast to all; `Warm`s round-robin.
-    workers: Vec<crossbeam_channel::Sender<PrewarmMsg>>,
+    workers: Vec<Sender<PrewarmMsg>>,
     /// Round-robin cursor for distributing warm requests across workers.
     next: AtomicUsize,
     handles: Vec<JoinHandle<()>>,
@@ -57,10 +57,10 @@ impl BalPrewarmPool {
         let mut workers = Vec::with_capacity(num_threads);
         let mut handles = Vec::with_capacity(num_threads);
         for i in 0..num_threads {
-            let (tx, rx) = crossbeam_channel::unbounded::<PrewarmMsg>();
+            let (tx, rx) = channel::unbounded::<PrewarmMsg>();
             workers.push(tx);
             handles.push(
-                std::thread::Builder::new()
+                Builder::new()
                     .name(format!("bal-prewarm-{i:03}"))
                     .spawn(move || prewarm_loop(rx))
                     .expect("spawn bal-prewarm thread"),
@@ -109,7 +109,8 @@ impl BalPrewarmPool {
     /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
     /// requests queued ahead of this message.
     ///
-    /// Blocks until all workers processed the end block message.
+    /// Blocks until all workers processed the end block message. Completion uses native Tokio in
+    /// all builds, so this wait does not yield to the fuzz scheduler.
     pub fn end_block(&self) {
         let (tx, rx) = oneshot::channel();
         let tx = Arc::new(SendOnDrop { sender: Some(tx) });
@@ -178,7 +179,7 @@ pub const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
 /// the workers on blocks whose read-set is concentrated in a few accounts.
 const WARM_BATCH_SIZE: usize = 8;
 
-fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
+fn prewarm_loop(rx: Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
     // `EndBlock`. `None` while idle, so no read txn is pinned across the inter-block gap.
     let mut provider: Option<CachedStateProvider<EvmStateProviderBox>> = None;

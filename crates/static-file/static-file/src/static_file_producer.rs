@@ -3,8 +3,8 @@
 use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
-use rayon::prelude::*;
 use reth_codecs::Compact;
+use reth_concurrency::sync::rayon::prelude::*;
 use reth_db_api::table::Value;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{

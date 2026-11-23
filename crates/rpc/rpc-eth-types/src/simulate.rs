@@ -747,14 +747,15 @@ mod tests {
         evm::{AccountInfo, CacheDB, EmptyDB, InMemoryDB},
         BaseEvmTypes, Evm, Precompiles, SpecId,
     };
+    use reth_concurrency::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Runtime,
+    };
     use reth_evm::BundleState;
     use reth_primitives_traits::SealedHeader;
     use reth_storage_api::HashedPostStateProvider;
     use reth_trie_common::{HashedPostState, KeccakKeyHasher};
-    use std::{
-        collections::BTreeMap,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
+    use std::collections::BTreeMap;
 
     fn test_evm() -> Evm<'static, BaseEvmTypes> {
         Evm::new(

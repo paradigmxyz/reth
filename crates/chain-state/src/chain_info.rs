@@ -1,8 +1,8 @@
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::BlockNumber;
-use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
+use reth_concurrency::sync::parking_lot::RwLock;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use std::{
     sync::{
@@ -199,6 +199,7 @@ pub struct ChainInfoHeaders<H> {
 mod tests {
     use super::*;
     use alloy_primitives::B256;
+
     use reth_ethereum_primitives::EthPrimitives;
     use reth_testing_utils::{generators, generators::random_header};
 

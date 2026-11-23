@@ -9,8 +9,8 @@ use crate::{
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{map::B256Map, BlockNumber, TxHash, B256};
-use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
+use reth_concurrency::sync::parking_lot::RwLock;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::RecoveredBlockAndExecutionOutput;
 use reth_metrics::{metrics::Gauge, Metrics};

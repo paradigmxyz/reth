@@ -152,6 +152,7 @@ impl SuiteTestHarness {
 macro_rules! sparse_trie_tests {
     ( $( $test_fn:ident ),* $(,)? ) => {
         mod arena_parallel_sparse_trie {
+            use reth_concurrency::sync::Runtime;
             use reth_trie_sparse::ArenaParallelSparseTrie;
 
             $(
@@ -163,6 +164,7 @@ macro_rules! sparse_trie_tests {
         }
 
         mod arena_parallel_sparse_trie_always_parallel {
+            use reth_concurrency::sync::Runtime;
             use reth_trie_sparse::{ArenaParallelSparseTrie, ArenaParallelismThresholds};
 
             $(

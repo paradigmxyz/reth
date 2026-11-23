@@ -1864,6 +1864,8 @@ mod tests {
     use alloy_rlp::Decodable;
     use alloy_trie::proof::AddedRemovedKeys;
     use itertools::Itertools;
+    use rand::prelude::*;
+    use reth_concurrency::sync::Runtime;
     use reth_trie_common::{
         prefix_set::{PrefixSet, PrefixSetMut},
         updates::TrieUpdatesSorted,
@@ -2256,7 +2258,7 @@ mod tests {
                     })
             ) {
                 reth_tracing::init_test_tracing();
-                reth_concurrency::sync::Runtime::new().run(move || {
+                Runtime::new().run(move || {
                     let harness = ProofTestHarness::new(storage);
 
                     harness.assert_proof(targets).expect("Proof generation failed");
@@ -2271,7 +2273,7 @@ mod tests {
                 retain_unchanged in any::<bool>(),
                 target_indices in prop::collection::vec((0usize..100, 0usize..9), 0..10),
             ) {
-                reth_concurrency::sync::Runtime::new().run(move || {
+                Runtime::new().run(move || {
                     let before = before.into_iter()
                         .map(|(key, value)| (key, U256::from(value)))
                         .collect::<BTreeMap<_, _>>();
@@ -2565,8 +2567,6 @@ mod tests {
 
     #[reth_concurrency::test]
     fn test_big_trie() {
-        use rand::prelude::*;
-
         reth_tracing::init_test_tracing();
 
         let mut rng = rand::rngs::SmallRng::seed_from_u64(1);

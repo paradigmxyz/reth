@@ -21,7 +21,9 @@ use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
-use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use reth_concurrency::sync::rayon::iter::{
+    IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
@@ -3169,8 +3171,9 @@ mod tests {
     };
     use alloy_primitives::{map::B256Map, B256, U256};
     use rand::{seq::SliceRandom, Rng, SeedableRng};
+    use reth_concurrency::sync::Runtime;
     use reth_trie::test_utils::TrieTestHarness;
-    use reth_trie_common::ProofV2Target;
+    use reth_trie_common::{ProofV2Target, RlpNode};
     use std::collections::BTreeMap;
     use tracing::{info, trace};
 
@@ -3198,12 +3201,6 @@ mod tests {
 
     #[test]
     fn pruning_pops_cursor_before_reusing_node_slot() {
-        use super::{
-            ArenaCursor, ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeState, BranchChild,
-            NextResult, NodeArena,
-        };
-        use reth_trie_common::RlpNode;
-
         let mut arena = NodeArena::new();
         let rlp = RlpNode::word_rlp(&B256::repeat_byte(1));
         let state = ArenaSparseNodeState::Cached { rlp_node: rlp.clone(), epoch: epoch(0) };
@@ -3401,48 +3398,48 @@ mod tests {
             shuffle_seed in arb::<u64>(),
         ) {
             reth_tracing::init_test_tracing();
-            reth_concurrency::sync::Runtime::new().run(move || {
+            Runtime::new().run(move || {
                 info!(target: TRACE_TARGET, ?shuffle_seed, "PROPTEST START");
 
-            // Filter out zero-valued entries from the initial dataset (zeros mean "absent").
-            let initial: BTreeMap<B256, U256> = initial.into_iter()
-                .filter(|(_, v)| !v.is_zero())
-                .collect();
+                // Filter out zero-valued entries from the initial dataset (zeros mean "absent").
+                let initial: BTreeMap<B256, U256> = initial.into_iter()
+                    .filter(|(_, v)| !v.is_zero())
+                    .collect();
 
-            let mut rng = rand::rngs::StdRng::seed_from_u64(shuffle_seed);
+                let mut rng = rand::rngs::StdRng::seed_from_u64(shuffle_seed);
 
-            let changeset1 = build_changeset(&initial, changeset1_new_keys, overlap_pct, delete_pct, &mut rng);
-            for (i, (k, v)) in changeset1.iter().enumerate() {
-                trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 1 entry");
-            }
+                let changeset1 = build_changeset(&initial, changeset1_new_keys, overlap_pct, delete_pct, &mut rng);
+                for (i, (k, v)) in changeset1.iter().enumerate() {
+                    trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 1 entry");
+                }
 
-            let mut harness = ArenaTrieTestHarness::new(initial);
+                let mut harness = ArenaTrieTestHarness::new(initial);
 
-            // Initialize the APST from the harness root node.
-            let root_node = harness.root_node();
-            let mut apst = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
-                ArenaParallelismThresholds {
-                    min_dirty_leaves: 3,
-                    min_revealed_nodes: 3,
-                    min_updates: 3,
-                    min_leaves_for_prune: 3,
-                },
-            );
-            apst.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
+                // Initialize the APST from the harness root node.
+                let root_node = harness.root_node();
+                let mut apst = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+                    ArenaParallelismThresholds {
+                        min_dirty_leaves: 3,
+                        min_revealed_nodes: 3,
+                        min_updates: 3,
+                        min_leaves_for_prune: 3,
+                    },
+                );
+                apst.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
 
-            harness.assert_changes(&mut apst, changeset1.clone());
+                harness.assert_changes(&mut apst, changeset1.clone());
 
-            // Update the harness base dataset to reflect the first changeset.
-            harness.apply_changeset(changeset1);
+                // Update the harness base dataset to reflect the first changeset.
+                harness.apply_changeset(changeset1);
 
-            // All nodes were cached at epoch 0, so this maximally prunes the trie before the
-            // second update round.
-            apst.prune(epoch(1));
+                // All nodes were cached at epoch 0, so this maximally prunes the trie before the
+                // second update round.
+                apst.prune(epoch(1));
 
-            let changeset2 = build_changeset(harness.storage(), changeset2_new_keys, overlap_pct, delete_pct, &mut rng);
-            for (i, (k, v)) in changeset2.iter().enumerate() {
-                trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 2 entry");
-            }
+                let changeset2 = build_changeset(harness.storage(), changeset2_new_keys, overlap_pct, delete_pct, &mut rng);
+                for (i, (k, v)) in changeset2.iter().enumerate() {
+                    trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 2 entry");
+                }
 
                 harness.assert_changes(&mut apst, changeset2);
             });

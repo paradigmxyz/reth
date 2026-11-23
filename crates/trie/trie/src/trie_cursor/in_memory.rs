@@ -391,7 +391,7 @@ impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
 mod tests {
     use super::*;
     use crate::trie_cursor::mock::MockTrieCursor;
-    use parking_lot::Mutex;
+    use reth_concurrency::sync::{parking_lot::Mutex, Runtime};
     use std::{collections::BTreeMap, sync::Arc};
     use tracing::debug;
 
@@ -878,6 +878,7 @@ mod tests {
         use super::*;
         use itertools::Itertools;
         use proptest::prelude::*;
+        use tracing::debug;
 
         /// Merge `db_nodes` with `in_memory_nodes`, applying the in-memory overlay.
         /// This properly handles deletions (None values in `in_memory_nodes`).
@@ -971,7 +972,7 @@ mod tests {
                 op_choices in prop::collection::vec(any::<u8>(), 10..500),
             ) {
                 reth_tracing::init_test_tracing();
-                reth_concurrency::sync::Runtime::new().run(move || {
+                Runtime::new().run(move || {
                     debug!(
                         db_paths=?db_nodes.iter().map(|(k, _)| k).collect::<Vec<_>>(),
                         in_mem_nodes=?in_memory_nodes.iter().map(|(k, v)| (k, v.is_some())).collect::<Vec<_>>(),

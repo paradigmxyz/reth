@@ -16,7 +16,7 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::Recovered;
 use alloy_primitives::{Address, B256};
-use parking_lot::RwLock;
+use reth_concurrency::sync::parking_lot::RwLock;
 use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, EvmTypesFor};
 use reth_primitives_traits::{NodePrimitives, SealedHeader, TxTy};
 use reth_provider::{

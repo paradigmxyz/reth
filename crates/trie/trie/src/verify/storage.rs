@@ -9,7 +9,7 @@ use crate::{
 };
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{B256, U256};
-use crossbeam_channel::{Receiver, Sender};
+use reth_concurrency::sync::channel::{Receiver, Sender};
 use reth_execution_errors::StateRootError;
 
 #[cfg(feature = "metrics")]

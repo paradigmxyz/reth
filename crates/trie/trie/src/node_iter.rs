@@ -330,6 +330,7 @@ mod tests {
         BranchNodeCompact, HashBuilder, Nibbles, TrieAccount, TrieMask, EMPTY_ROOT_HASH,
     };
     use itertools::Itertools;
+
     use reth_primitives_traits::Account;
     use reth_trie_common::{
         prefix_set::PrefixSetMut, updates::TrieUpdates, BranchNode, HashedPostState, HashedStorage,

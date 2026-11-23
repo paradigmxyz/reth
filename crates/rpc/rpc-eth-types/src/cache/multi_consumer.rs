@@ -220,10 +220,11 @@ struct CachedValue<V> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{
+    use reth_concurrency::sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Runtime,
     };
+    use std::sync::Arc;
 
     #[derive(Debug, PartialEq, Eq)]
     struct Weighted(usize);

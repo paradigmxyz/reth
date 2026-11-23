@@ -10,6 +10,7 @@
 use crate::{database_state_frontiers, OverlayManager, OverlayStateProvider};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
+// Shared with native database unwind and engine persistence; those callers are not simulated.
 use parking_lot::RwLock;
 use reth_metrics::{
     metrics::{Counter, Gauge},
