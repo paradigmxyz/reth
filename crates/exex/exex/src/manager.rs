@@ -3,7 +3,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{map::HashSet, BlockNumber};
+use alloy_primitives::{map::HashMap, BlockNumber};
 use futures::StreamExt;
 use itertools::Itertools;
 use metrics::Gauge;
@@ -92,14 +92,15 @@ pub struct ExExHandle<N: NodePrimitives = EthPrimitives> {
     /// If this is `None`, the `ExEx` has not emitted a `FinishedHeight` event.
     finished_height: Option<BlockNumHash>,
     /// Blocks reverted by [`ExExNotification::ChainReorged`] and
-    /// [`ExExNotification::ChainReverted`] notifications sent to the `ExEx` since the last
-    /// accepted `FinishedHeight` event.
+    /// [`ExExNotification::ChainReverted`] notifications sent to the `ExEx` since the map was
+    /// last cleared, mapped to whether they are still reverted, i.e. were not committed again.
     ///
     /// Used to ignore `FinishedHeight` events for reverted blocks that the `ExEx` emitted before
     /// it received the notifications. Events arrive in order, so once an event for a block that
-    /// was not reverted is accepted at or above [`Self::last_reverted_number`], no stale event can
-    /// follow and the set is cleared.
-    reverted_blocks: HashSet<BlockNumHash>,
+    /// was never reverted is accepted at or above [`Self::last_reverted_number`], no stale event
+    /// can follow and the map is cleared. An event for a block committed again may itself be
+    /// stale, so it does not clear the map.
+    reverted_blocks: HashMap<BlockNumHash, bool>,
     /// The number of the first block reverted by the last [`ExExNotification::ChainReorged`] or
     /// [`ExExNotification::ChainReverted`] notification sent to the `ExEx`.
     ///
@@ -134,7 +135,7 @@ impl<N: NodePrimitives> ExExHandle<N> {
                 receiver: event_rx,
                 next_notification_id: 0,
                 finished_height: None,
-                reverted_blocks: HashSet::default(),
+                reverted_blocks: HashMap::default(),
                 last_reverted_number: 0,
             },
             event_tx,
@@ -155,7 +156,9 @@ impl<N: NodePrimitives> ExExHandle<N> {
         // `FinishedHeight` events for them must be accepted. Reverts are recorded below.
         if let Some(committed) = notification.committed_chain() {
             for block in committed.blocks().values() {
-                self.reverted_blocks.remove(&block.num_hash());
+                if let Some(reverted) = self.reverted_blocks.get_mut(&block.num_hash()) {
+                    *reverted = false;
+                }
             }
         }
 
@@ -194,7 +197,8 @@ impl<N: NodePrimitives> ExExHandle<N> {
                 {
                     self.finished_height = Some(old.fork_block());
                 }
-                self.reverted_blocks.extend(old.blocks().values().map(|block| block.num_hash()));
+                self.reverted_blocks
+                    .extend(old.blocks().values().map(|block| (block.num_hash(), true)));
                 if let Some(&number) = old.blocks().keys().next() {
                     self.last_reverted_number = number;
                 }
@@ -509,14 +513,18 @@ where
                         // Ignore a stale event for a block that was reverted after the ExEx
                         // emitted it, so it does not restore the finished height of the old
                         // branch.
-                        if exex.reverted_blocks.contains(&height) {
-                            debug!(target: "exex::manager", exex_id = %exex.id, ?height, "Ignoring finished height of a reverted block");
-                        } else {
-                            exex.finished_height = Some(height);
-                            // See `ExExHandle::last_reverted_number`. A lower block could still
-                            // precede a stale event.
-                            if height.number >= exex.last_reverted_number {
-                                exex.reverted_blocks.clear();
+                        match exex.reverted_blocks.get(&height) {
+                            Some(true) => {
+                                debug!(target: "exex::manager", exex_id = %exex.id, ?height, "Ignoring finished height of a reverted block");
+                            }
+                            Some(false) => exex.finished_height = Some(height),
+                            None => {
+                                exex.finished_height = Some(height);
+                                // See `ExExHandle::last_reverted_number`. A lower block could
+                                // still precede a stale event.
+                                if height.number >= exex.last_reverted_number {
+                                    exex.reverted_blocks.clear();
+                                }
                             }
                         }
                     }
@@ -1310,6 +1318,7 @@ mod tests {
         let b4 = block(4, B256::repeat_byte(0xb4), b3.hash());
         let c4 = block(4, B256::repeat_byte(0xc4), b3.hash());
         let c5 = block(5, B256::repeat_byte(0xc5), c4.hash());
+        let c5_num_hash = c5.num_hash();
 
         let mut exex_manager = std::pin::pin!(ExExManager::new(
             provider_factory,
@@ -1368,7 +1377,8 @@ mod tests {
         let received = notifications.next().now_or_never().expect("C5 must be delivered");
         assert_eq!(received.unwrap().unwrap(), commit);
 
-        // B3..C5 are reorged back to A3..A5, so a new event for A5 is accepted.
+        // B3..C5 are reorged back to A3..A5, so an event for A5 is accepted, but because it may be
+        // stale, it does not stop a following stale event for C5 from being ignored.
         let reorg = ExExNotification::ChainReorged {
             old: Arc::new(Chain::new(vec![b3, c4, c5], Default::default(), Default::default())),
             new: Arc::new(Chain::new(a3_to_a5, Default::default(), Default::default())),
@@ -1376,6 +1386,7 @@ mod tests {
         assert!(exex_manager.exex_handles[0].send(&mut cx, &(3, reorg.clone())).is_ready());
         assert_eq!(notifications.next().await.unwrap().unwrap(), reorg);
         event_tx.send(ExExEvent::FinishedHeight(a5)).unwrap();
+        event_tx.send(ExExEvent::FinishedHeight(c5_num_hash)).unwrap();
         let _ = exex_manager.as_mut().poll(&mut cx);
         assert_eq!(exex_manager.exex_handles[0].finished_height, Some(a5));
     }
