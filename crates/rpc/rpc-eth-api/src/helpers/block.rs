@@ -171,7 +171,6 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
         block_id: BlockId,
     ) -> impl Future<Output = BlockAndReceiptsResult<Self>> + Send
     where
-        Self: LoadReceipt,
         Self::Pool:
             TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
     {

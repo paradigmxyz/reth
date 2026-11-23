@@ -25,7 +25,7 @@ use reth_primitives_traits::{BlockBody, TxTy};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_api::{
-    helpers::{EthBlocks, EthTransactions, LoadReceipt, TraceExt},
+    helpers::{EthBlocks, EthTransactions, TraceExt},
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use reth_rpc_eth_types::{block::BlockAndReceipts, utils::binary_search, EthApiError};
@@ -49,7 +49,7 @@ impl<Eth> OtterscanApi<Eth> {
 
 impl<Eth> OtterscanApi<Eth>
 where
-    Eth: TraceExt + EthBlocks + LoadReceipt,
+    Eth: TraceExt + EthBlocks,
 {
     /// Loads a matching pair, including locally built pending blocks.
     async fn block_and_receipts(
@@ -117,8 +117,7 @@ where
             TxTy<Eth::Primitives>,
         > + EthTransactions
         + TraceExt
-        + EthBlocks
-        + LoadReceipt,
+        + EthBlocks,
 {
     /// Handler for `ots_getHeaderByNumber` and `erigon_getHeaderByNumber`
     async fn get_header_by_number(
@@ -485,7 +484,7 @@ mod tests {
         TracingInspector,
     };
     use reth_chain_state::ExecutedBlock;
-    use reth_chainspec::{ChainInfo, MAINNET};
+    use reth_chainspec::{ChainInfo, MAINNET, MIN_TRANSACTION_GAS};
     use reth_ethereum_primitives::{Block, Receipt, TransactionSigned};
     use reth_evm::{ConfigureEvm, Evm};
     use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv};
@@ -733,25 +732,34 @@ mod tests {
         assert_eq!(api.trace_transaction(B256::ZERO).await.unwrap(), None);
     }
 
-    fn block_with_transaction(number: u64, parent_hash: B256, gas_price: u128) -> (Block, Receipt) {
+    fn block_with_transaction(
+        number: u64,
+        parent_hash: B256,
+        gas_price: u128,
+        zero_calldata_bytes: u8,
+    ) -> (Block, Receipt) {
+        // A transfer to an empty account costs four extra gas per zero calldata byte.
+        let gas_used = MIN_TRANSACTION_GAS + 4 * u64::from(zero_calldata_bytes);
         let tx = TransactionSigned::new_unhashed(
             TxLegacy {
                 gas_price,
-                gas_limit: 21_000,
+                gas_limit: gas_used,
                 to: Address::ZERO.into(),
+                input: vec![0; usize::from(zero_calldata_bytes)].into(),
                 ..Default::default()
             }
             .into(),
             Signature::test_signature(),
         );
         let transactions = vec![tx];
-        let receipt = Receipt { success: true, cumulative_gas_used: 21_000, ..Default::default() };
+        let receipt =
+            Receipt { success: true, cumulative_gas_used: gas_used, ..Default::default() };
         let header = Header {
             number,
             parent_hash,
             transactions_root: calculate_transaction_root(&transactions),
             receipts_root: Receipt::calculate_receipt_root_no_memo(std::slice::from_ref(&receipt)),
-            gas_used: 21_000,
+            gas_used,
             gas_limit: 30_000_000,
             timestamp: number * 12,
             ..Default::default()
@@ -768,11 +776,11 @@ mod tests {
     #[tokio::test]
     async fn block_responses_pin_latest() {
         let provider = MockEthProvider::default();
-        let (first, first_receipt) = block_with_transaction(1, B256::ZERO, 2);
+        let (first, first_receipt) = block_with_transaction(1, B256::ZERO, 2, 0);
         let first_hash = first.header.hash_slow();
         let tx_hash = *first.body.transactions[0].hash();
         let first_head = ChainInfo { best_number: 1, best_hash: first_hash };
-        let (second, second_receipt) = block_with_transaction(2, first_hash, 3);
+        let (second, second_receipt) = block_with_transaction(2, first_hash, 3, 1);
         provider.add_block(first_hash, first);
         provider.add_receipts(1, vec![first_receipt]);
         provider.add_block(second.header.hash_slow(), second);
@@ -801,6 +809,7 @@ mod tests {
         assert_eq!(receipt.receipt.block_hash, Some(first_hash));
         assert_eq!(receipt.receipt.transaction_hash, tx_hash);
         assert_eq!(receipt.receipt.effective_gas_price, 2);
+        assert_eq!(receipt.receipt.gas_used, MIN_TRANSACTION_GAS);
     }
 
     #[tokio::test]
@@ -819,7 +828,7 @@ mod tests {
             )
             .build(),
         );
-        let (mut pending, receipt) = block_with_transaction(2, parent_hash, 3);
+        let (mut pending, receipt) = block_with_transaction(2, parent_hash, 3, 0);
         // The local pending block and its ommer are unavailable through canonical hash lookups.
         pending.body.ommers.push(Header { number: 1, timestamp: 6, ..Default::default() });
         pending.header.ommers_hash = pending.body.calculate_ommers_root();
@@ -851,7 +860,7 @@ mod tests {
     #[tokio::test]
     async fn block_responses_report_missing_data_with_requested_id() {
         let provider = MockEthProvider::default();
-        let (block, _) = block_with_transaction(1, B256::ZERO, 2);
+        let (block, _) = block_with_transaction(1, B256::ZERO, 2, 0);
         let hash = block.header.hash_slow();
         provider.add_block(hash, block);
         let api = OtterscanApi::new(
@@ -882,7 +891,7 @@ mod tests {
     #[tokio::test]
     async fn block_details_match_rpc_block_with_withdrawals() {
         let provider = MockEthProvider::default();
-        let (mut block, receipt) = block_with_transaction(17_034_870, B256::ZERO, 2);
+        let (mut block, receipt) = block_with_transaction(17_034_870, B256::ZERO, 2, 0);
         block.header.timestamp = 1_681_338_455;
         block.header.base_fee_per_gas = Some(1);
         block.body.withdrawals = Some(vec![Withdrawal { amount: 42, ..Default::default() }].into());
