@@ -381,8 +381,9 @@ impl Engine {
         .map_err(|err| Error::engine("failed to set up the engine", err))?;
         init_genesis_with_settings(&factory, storage_settings)
             .map_err(|err| Error::engine("failed to set up the engine", err))?;
-        let provider = BlockchainProvider::new(factory.clone())
-            .map_err(|err| Error::engine("failed to set up the engine", err))?;
+        let (provider, canonical_in_memory_state_writer) =
+            BlockchainProvider::new_with_writer(factory.clone())
+                .map_err(|err| Error::engine("failed to set up the engine", err))?;
 
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
         let evm_config = EthEvmConfig::new(chain_spec.clone());
@@ -414,6 +415,7 @@ impl Engine {
             pipeline_task_spawner: runtime.clone(),
             provider: factory.clone(),
             blockchain_db: provider.clone(),
+            canonical_in_memory_state_writer,
             pruner: PrunerBuilder::default().build_with_provider_factory(factory),
             payload_builder: payload_builder.clone(),
             payload_validator: validator,
