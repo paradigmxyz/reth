@@ -32,7 +32,7 @@ use reth_stages_types::{PipelineTarget, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, ChainStateBlockReader, ChainStateBlockWriter, DBProvider,
-    NodePrimitivesProvider, StorageSettings, StorageSettingsCache,
+    NodePrimitivesProvider, StateBackend, StorageSettings, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::OverlayManager;
@@ -103,6 +103,8 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     /// Only set for read-only factories. Can be disabled if there is no concurrent read-write
     /// factory writing to the database (e.g as part of a running reth node).
     read_only_sync: Option<Arc<ReadOnlySyncState>>,
+    /// Backend holding current state in place of the hashed state tables.
+    state_backend: Option<Arc<dyn StateBackend>>,
 }
 
 impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, DatabaseEnv>> {
@@ -168,6 +170,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             database_provider_metrics,
             read_only_sync: None,
+            state_backend: None,
         })
     }
 
@@ -206,6 +209,20 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     /// Returns the shared overlay manager.
     pub const fn overlay_manager(&self) -> &OverlayManager<N::Primitives> {
         &self.overlay_manager
+    }
+
+    /// Sets the backend that holds current state in place of the hashed state tables for every
+    /// provider this factory creates.
+    ///
+    /// See [`StateBackend`] for its contract.
+    pub fn with_state_backend(mut self, backend: Arc<dyn StateBackend>) -> Self {
+        self.state_backend = Some(backend);
+        self
+    }
+
+    /// Returns the backend that holds current state, if one is set.
+    pub const fn state_backend(&self) -> Option<&Arc<dyn StateBackend>> {
+        self.state_backend.as_ref()
     }
 
     /// Sets the minimum pruning distance for an existing [`ProviderFactory`].
@@ -410,7 +427,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.db.path(),
             self.database_provider_metrics.clone(),
         )
-        .with_minimum_pruning_distance(self.minimum_pruning_distance))
+        .with_minimum_pruning_distance(self.minimum_pruning_distance)
+        .with_state_backend(self.state_backend.clone()))
     }
 
     /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
@@ -434,7 +452,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
                 self.database_provider_metrics.clone(),
             )
             .with_reader_txn_tracker(self.db.clone())
-            .with_minimum_pruning_distance(self.minimum_pruning_distance),
+            .with_minimum_pruning_distance(self.minimum_pruning_distance)
+            .with_state_backend(self.state_backend.clone()),
         ))
     }
 
@@ -462,7 +481,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.database_provider_metrics.clone(),
         )
         .with_reader_txn_tracker(self.db.clone())
-        .with_minimum_pruning_distance(self.minimum_pruning_distance))
+        .with_minimum_pruning_distance(self.minimum_pruning_distance)
+        .with_state_backend(self.state_backend.clone()))
     }
 
     /// State provider for latest block
@@ -993,6 +1013,7 @@ where
             minimum_pruning_distance,
             database_provider_metrics: _,
             read_only_sync,
+            state_backend,
         } = self;
         f.debug_struct("ProviderFactory")
             .field("db", &db)
@@ -1010,6 +1031,7 @@ where
                 "read_only_sync",
                 &read_only_sync.as_ref().map(|s| s.last_synced_txnid.load(Ordering::Relaxed)),
             )
+            .field("state_backend", &state_backend)
             .finish()
     }
 }
@@ -1030,6 +1052,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             minimum_pruning_distance: self.minimum_pruning_distance,
             database_provider_metrics: self.database_provider_metrics.clone(),
             read_only_sync: self.read_only_sync.clone(),
+            state_backend: self.state_backend.clone(),
         }
     }
 }

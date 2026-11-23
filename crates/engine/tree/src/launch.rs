@@ -157,8 +157,12 @@ where
         let backfill_sync = backfill(pipeline, pipeline_task_spawner)?;
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
-        let persistence_handle =
-            PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
+        let persistence_handle = PersistenceHandle::<N::Primitives>::spawn_service(
+            provider,
+            pruner,
+            sync_metrics_tx,
+            payload_validator.persistence_hook(),
+        );
 
         let (to_tree_tx, from_tree) = EngineApiTreeHandler::spawn_new(
             blockchain_db,

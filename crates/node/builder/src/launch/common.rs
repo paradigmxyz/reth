@@ -73,8 +73,8 @@ use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     BalStoreHandle, BlockHashReader, BlockNumReader, DBProvider, DatabaseProviderFactory,
     MetadataProvider, MetadataWriter, ProviderError, ProviderFactory, ProviderResult,
-    RocksDBBalStore, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
-    StaticFileProviderFactory, StorageSettingsCache,
+    RocksDBBalStore, RocksDBProviderFactory, StageCheckpointReader, StateBackend,
+    StaticFileProviderBuilder, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune::{PruneMode, PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -489,6 +489,7 @@ where
             overlay_manager,
             rocksdb_provider,
             disabled_stages,
+            None,
             |_| Ok(()),
         )
         .await
@@ -496,11 +497,15 @@ where
 
     /// Like [`Self::create_provider_factory`], but first runs `recover` to finish writes an earlier
     /// run left half-committed, before the consistency check.
+    ///
+    /// `state_backend`, if set, holds current state in place of the hashed state tables, see
+    /// [`ProviderFactory::with_state_backend`].
     pub async fn create_provider_factory_with_recovery<N, Evm>(
         &self,
         overlay_manager: OverlayManager<N::Primitives>,
         rocksdb_provider: Option<RocksDBProvider>,
         disabled_stages: &[StageId],
+        state_backend: Option<Arc<dyn StateBackend>>,
         recover: impl FnOnce(&ProviderFactory<N>) -> eyre::Result<()>,
     ) -> eyre::Result<ProviderFactory<N>>
     where
@@ -558,7 +563,7 @@ where
                 prune_config.minimum_pruning_distance,
             );
         let bal_store = BalStoreHandle::new(bal_store);
-        let factory = ProviderFactory::new(
+        let mut factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
             static_file_provider,
@@ -569,6 +574,9 @@ where
         .with_prune_modes(prune_config.segments)
         .with_minimum_pruning_distance(prune_config.minimum_pruning_distance)
         .with_bal_store(bal_store);
+        if let Some(state_backend) = state_backend {
+            factory = factory.with_state_backend(state_backend);
+        }
 
         recover(&factory)?;
 
@@ -728,6 +736,7 @@ where
             overlay_manager,
             rocksdb_provider,
             disabled_stages,
+            None,
             |_| Ok(()),
         )
         .await
@@ -735,11 +744,15 @@ where
 
     /// Like [`Self::with_provider_factory`], but first runs `recover` to finish writes an earlier
     /// run left half-committed, before the consistency check.
+    ///
+    /// `state_backend`, if set, holds current state in place of the hashed state tables, see
+    /// [`ProviderFactory::with_state_backend`].
     pub async fn with_provider_factory_and_recovery<N, Evm>(
         self,
         overlay_manager: OverlayManager<N::Primitives>,
         rocksdb_provider: Option<RocksDBProvider>,
         disabled_stages: &[StageId],
+        state_backend: Option<Arc<dyn StateBackend>>,
         recover: impl FnOnce(&ProviderFactory<N>) -> eyre::Result<()>,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
@@ -751,6 +764,7 @@ where
                 overlay_manager,
                 rocksdb_provider,
                 disabled_stages,
+                state_backend,
                 recover,
             )
             .await?;

@@ -62,6 +62,7 @@ use crossbeam_channel::Receiver as CrossbeamReceiver;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie, SparseTrieWithStorageRoots};
 use reth_errors::ProviderResult;
 use reth_evm::ConfigureEvm;
+use reth_execution_types::BlockExt;
 use reth_primitives_traits::{
     AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedHeader,
 };
@@ -439,17 +440,25 @@ pub struct StateRootJobOutcome {
     /// When set, the root was not derived from the streamed updates, so validation replaces its
     /// streaming-derived hashed post state with this one and re-runs hashed-state checks.
     pub hashed_state: Option<Arc<HashedPostState>>,
+    /// Extension data the job attaches to the validated block, carried until it is persisted.
+    pub ext: Option<BlockExt>,
 }
 
 impl StateRootJobOutcome {
     /// Creates a state-root job outcome.
     pub const fn new(state_root: B256, trie_updates: Arc<TrieUpdates>) -> Self {
-        Self { state_root, trie_updates, hashed_state: None }
+        Self { state_root, trie_updates, hashed_state: None, ext: None }
     }
 
     /// Sets the hashed post state recomputed by a fallback path.
     pub fn with_hashed_state(mut self, hashed_state: Option<Arc<HashedPostState>>) -> Self {
         self.hashed_state = hashed_state;
+        self
+    }
+
+    /// Sets the extension data attached to the validated block.
+    pub fn with_ext(mut self, ext: Option<BlockExt>) -> Self {
+        self.ext = ext;
         self
     }
 }

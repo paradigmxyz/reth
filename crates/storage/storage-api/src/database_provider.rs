@@ -1,4 +1,5 @@
-use alloc::vec::Vec;
+use crate::StateBackend;
+use alloc::{sync::Arc, vec::Vec};
 use core::ops::{Bound, RangeBounds};
 use reth_db_api::{
     common::KeyValue,
@@ -50,6 +51,13 @@ pub trait DBProvider: DbTxProvider + Sized {
 
     /// Returns a reference to prune modes.
     fn prune_modes_ref(&self) -> &PruneModes;
+
+    /// Returns the backend that holds current state in place of the hashed state tables, if any.
+    ///
+    /// See [`StateBackend`] for when it is consulted.
+    fn state_backend(&self) -> Option<&Arc<dyn StateBackend>> {
+        None
+    }
 
     /// Return full table as Vec
     fn table<T: Table>(&self) -> Result<Vec<KeyValue<T>>, DatabaseError>

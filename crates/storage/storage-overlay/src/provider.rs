@@ -537,6 +537,9 @@ where
     fn basic_account_from_db(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if self.provider().cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
+            if let Some(backend) = self.provider().state_backend() {
+                return backend.account(hashed_address)
+            }
             self.provider()
                 .tx()
                 .get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)
@@ -942,11 +945,16 @@ where
         if self.provider().cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
             let hashed_slot = alloy_primitives::keccak256(storage_key);
-            let mut cursor = self.provider().tx().cursor_dup_read::<tables::HashedStorages>()?;
-            let value = cursor
-                .seek_by_key_subkey(hashed_address, hashed_slot)?
-                .filter(|entry| entry.key == hashed_slot)
-                .map(|entry| entry.value);
+            let value = if let Some(backend) = self.provider().state_backend() {
+                backend.storage(hashed_address, hashed_slot)?
+            } else {
+                let mut cursor =
+                    self.provider().tx().cursor_dup_read::<tables::HashedStorages>()?;
+                cursor
+                    .seek_by_key_subkey(hashed_address, hashed_slot)?
+                    .filter(|entry| entry.key == hashed_slot)
+                    .map(|entry| entry.value)
+            };
             Ok(value.or_else(|| zero_if_missing.then_some(U256::ZERO)))
         } else {
             let mut cursor = self.provider().tx().cursor_dup_read::<tables::PlainStorageState>()?;
@@ -1146,7 +1154,7 @@ mod tests {
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
-        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
+        test_utils::{create_test_provider_factory, InMemoryStateBackend, MockNodeTypesWithDB},
         BlockWriter, ProviderFactory, StaticFileProviderFactory, StaticFileSegment,
         StaticFileWriter, StorageSettings,
     };
@@ -1412,6 +1420,34 @@ mod tests {
             provider.bytecode_by_hash(&code_hash).unwrap(),
             Some(reth_primitives_traits::Bytecode(bytecode))
         );
+    }
+
+    #[test]
+    fn state_backend_serves_reads_below_the_execution_overlay() {
+        let (factory, _) = setup_frontiers(1, 3);
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let address = Address::with_last_byte(1);
+        let hashed_address = alloy_primitives::keccak256(address);
+        let storage_key = B256::with_last_byte(2);
+        let account = Account { nonce: 7, ..Default::default() };
+        let mut backend = InMemoryStateBackend::default();
+        backend.accounts.insert(hashed_address, account);
+        backend
+            .storages
+            .entry(hashed_address)
+            .or_default()
+            .insert(alloy_primitives::keccak256(storage_key), U256::from(9));
+        let factory = factory.with_state_backend(Arc::new(backend));
+        let provider = OverlayStateProvider::<_, EthPrimitives>::new_with_execution(
+            factory.provider().unwrap(),
+            Arc::new(ExecutionOverlay::default()),
+            true,
+        );
+
+        assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
+        assert!(provider.basic_account(&Address::with_last_byte(3)).unwrap().is_none());
+        assert_eq!(provider.storage(address, storage_key).unwrap(), Some(U256::from(9)));
+        assert!(provider.storage(address, B256::with_last_byte(4)).unwrap().is_none());
     }
 
     #[reth_concurrency::test]

@@ -58,6 +58,9 @@ impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
         hashed_address: B256,
         hashed_slot: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
+        if let Some(backend) = self.0.state_backend() {
+            return backend.storage(hashed_address, hashed_slot)
+        }
         let mut cursor = self.tx().cursor_dup_read::<tables::HashedStorages>()?;
         Ok(cursor
             .seek_by_key_subkey(hashed_address, hashed_slot)?
@@ -73,6 +76,9 @@ impl<Provider: DBProvider + StorageSettingsCache> AccountReader
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if self.0.cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
+            if let Some(backend) = self.0.state_backend() {
+                return backend.account(hashed_address)
+            }
             self.tx()
                 .get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)
                 .map_err(Into::into)
