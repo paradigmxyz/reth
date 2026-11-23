@@ -5,7 +5,7 @@ use super::{
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, B256};
 use alloy_trie::{BranchNodeCompact, TrieMask};
-use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNodeV2, RlpNode, TrieNodeV2};
+use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, RlpNode, TrieNode};
 use smallvec::SmallVec;
 use strum::AsRefStr;
 
@@ -299,24 +299,22 @@ impl ArenaSparseNode {
 }
 
 impl ArenaSparseNode {
-    /// Converts a [`ProofTrieNodeV2`] into an [`ArenaSparseNode`], storing the RLP of a branch's
-    /// unrevealed children in `arena`'s blinded side table.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the node is an `Extension`, which should have been merged into a branch
-    /// by [`TrieNodeV2`].
-    pub(super) fn from_proof_node(arena: &mut NodeArena, proof_node: ProofTrieNodeV2) -> Self {
-        let ProofTrieNodeV2 { node, masks, .. } = proof_node;
+    /// Converts a calculator proof node into an arena node. Extensions must be paired with
+    /// their revealed branch, as checked before ingestion by `validate_extension_child`.
+    pub(super) fn from_proof_node(
+        arena: &mut NodeArena,
+        proof_node: ProofTrieNode,
+        extension_child: Option<ProofTrieNode>,
+    ) -> Self {
+        let ProofTrieNode { node, masks, .. } = proof_node;
         match node {
-            TrieNodeV2::EmptyRoot => Self::EmptyRoot { state: ArenaSparseNodeState::Revealed },
-            TrieNodeV2::Leaf(leaf) => Self::Leaf {
+            TrieNode::EmptyRoot => Self::EmptyRoot { state: ArenaSparseNodeState::Revealed },
+            TrieNode::Leaf(leaf) => Self::Leaf {
                 state: ArenaSparseNodeState::Revealed,
                 key: leaf.key,
                 value: leaf.value,
             },
-            TrieNodeV2::Branch(branch) => {
-                assert!(branch.key.is_empty(), "branches with a short key must be split first");
+            TrieNode::Branch(branch) => {
                 let children = branch.stack[..branch.state_mask.count_bits() as usize]
                     .iter()
                     .map(|rlp| arena.insert_blinded(rlp.clone()))
@@ -328,8 +326,15 @@ impl ArenaSparseNode {
                     branch_masks: masks.unwrap_or_default(),
                 })
             }
-            TrieNodeV2::Extension(_) => {
-                panic!("Extension nodes should be merged into branches by TrieNodeV2")
+            TrieNode::Extension(extension) => {
+                let Some(branch) = extension_child else {
+                    unreachable!(
+                        "calculator extensions are paired with their branch before ingestion"
+                    )
+                };
+                let branch = Self::from_proof_node(arena, branch, None);
+                let child = arena.insert(branch);
+                Self::Extension { key: extension.key, child }
             }
         }
     }

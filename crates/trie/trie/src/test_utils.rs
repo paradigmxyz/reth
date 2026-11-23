@@ -63,7 +63,7 @@ use crate::{
 use alloy_primitives::map::HashSet;
 use reth_trie_common::{
     prefix_set::PrefixSetMut, updates::StorageTrieUpdates, BranchNodeCompact,
-    HashedPostStateSorted, HashedStorage, Nibbles, ProofTrieNodeV2, ProofV2Target,
+    HashedPostStateSorted, HashedStorage, Nibbles, ProofTrieNode, ProofV2Target,
 };
 use std::{collections::BTreeMap, iter::once};
 
@@ -226,8 +226,15 @@ impl TrieTestHarness {
         self.hashed_cursor_factory.clone()
     }
 
-    /// Obtains the root node of the storage trie via [`StorageProofCalculator`].
-    pub fn root_node(&self) -> ProofTrieNodeV2 {
+    /// Obtains only the root node of the storage trie via [`StorageProofCalculator`].
+    pub fn root_node(&self) -> ProofTrieNode {
+        self.root_nodes().pop().expect("root_nodes should contain the root")
+    }
+
+    /// Obtains the root and, for an extension root, its separate child branch with masks.
+    ///
+    /// Nodes are ordered children before parents, with the root last, including for an empty trie.
+    pub fn root_nodes(&self) -> Vec<ProofTrieNode> {
         let trie_cursor = self
             .trie_cursor_factory
             .storage_trie_cursor(self.hashed_address())
@@ -239,15 +246,15 @@ impl TrieTestHarness {
 
         let mut proof_calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
         proof_calculator
-            .storage_root_node(self.hashed_address())
-            .expect("storage_root_node should succeed")
+            .storage_root_nodes(self.hashed_address())
+            .expect("storage_root_nodes should succeed")
     }
 
     /// Generates storage proofs for the given targets using [`StorageProofCalculator`].
     ///
     /// Also computes and returns the root hash (if the proof contains a root node) by reusing
     /// the calculator after the proof call.
-    pub fn proof_v2(&self, targets: &mut [ProofV2Target]) -> (Vec<ProofTrieNodeV2>, Option<B256>) {
+    pub fn proof_v2(&self, targets: &mut [ProofV2Target]) -> (Vec<ProofTrieNode>, Option<B256>) {
         let trie_cursor = self
             .trie_cursor_factory
             .storage_trie_cursor(self.hashed_address())
