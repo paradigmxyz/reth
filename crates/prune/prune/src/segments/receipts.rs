@@ -47,16 +47,26 @@ where
 
     let mut limiter = input.limiter;
 
-    let mut last_pruned_transaction = tx_range_end;
+    let mut last_pruned_transaction = None;
     let (pruned, done) = provider.tx_ref().prune_table_with_range::<tables::Receipts<
         <Provider::Primitives as NodePrimitives>::Receipt,
     >>(
         tx_range,
         &mut limiter,
         |_| false,
-        |row| last_pruned_transaction = row.0,
+        |row| last_pruned_transaction = Some(row.0),
     )?;
     trace!(target: "pruner", %pruned, %done, "Pruned receipts");
+
+    // A limit reached before the first row means nothing in the range was pruned, so keep the
+    // previous checkpoint to retry the range on the next run.
+    if last_pruned_transaction.is_none() && !done {
+        return Ok(SegmentOutput::not_done(
+            limiter.interrupt_reason(),
+            input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+        ))
+    }
+    let last_pruned_transaction = last_pruned_transaction.unwrap_or(tx_range_end);
 
     let last_pruned_block = provider
         .block_by_transaction_id(last_pruned_transaction)?
@@ -108,7 +118,7 @@ mod tests {
     use reth_testing_utils::generators::{
         self, random_block_range, random_receipt, BlockRangeParams,
     };
-    use std::ops::Sub;
+    use std::{ops::Sub, thread::sleep, time::Duration};
 
     #[test]
     fn prune_legacy() {
@@ -241,5 +251,44 @@ mod tests {
         );
         test_prune(6, (PruneProgress::Finished, 2));
         test_prune(10, (PruneProgress::Finished, 8));
+    }
+
+    #[test]
+    fn prune_legacy_time_limit_reached_keeps_checkpoint() {
+        let mut db = TestStageDB::default();
+        db.factory = db.factory.with_prune_modes(reth_prune_types::PruneModes {
+            receipts: Some(PruneMode::Full),
+            ..Default::default()
+        });
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(
+            &mut rng,
+            1..=10,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+
+        let receipts = blocks
+            .iter()
+            .flat_map(|block| &block.body().transactions)
+            .enumerate()
+            .map(|(tx_number, transaction)| {
+                (tx_number as u64, random_receipt(&mut rng, transaction, Some(0), None))
+            })
+            .collect::<Vec<_>>();
+        let receipts_len = receipts.len();
+        db.insert_receipts(receipts).expect("insert receipts");
+
+        let limiter = PruneLimiter::default().set_time_limit(Duration::ZERO);
+        sleep(Duration::from_millis(1));
+        let input = PruneInput { previous_checkpoint: None, to_block: 6, limiter };
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = super::prune(&provider, input).unwrap();
+        provider.commit().expect("commit");
+
+        assert_eq!(result, SegmentOutput::not_done(PruneInterruptReason::Timeout, None));
+        assert_eq!(db.table::<tables::Receipts>().unwrap().len(), receipts_len);
     }
 }

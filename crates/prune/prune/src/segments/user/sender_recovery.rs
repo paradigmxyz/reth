@@ -99,15 +99,25 @@ where
 
         let mut limiter = input.limiter;
 
-        let mut last_pruned_transaction = tx_range_end;
+        let mut last_pruned_transaction = None;
         let (pruned, done) =
             provider.tx_ref().prune_table_with_range::<tables::TransactionSenders>(
                 tx_range,
                 &mut limiter,
                 |_| false,
-                |row| last_pruned_transaction = row.0,
+                |row| last_pruned_transaction = Some(row.0),
             )?;
         trace!(target: "pruner", %pruned, %done, "Pruned transaction senders");
+
+        // A limit reached before the first row means nothing in the range was pruned, so keep the
+        // previous checkpoint to retry the range on the next run.
+        if last_pruned_transaction.is_none() && !done {
+            return Ok(SegmentOutput::not_done(
+                limiter.interrupt_reason(),
+                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            ))
+        }
+        let last_pruned_transaction = last_pruned_transaction.unwrap_or(tx_range_end);
 
         let last_pruned_block = provider
             .block_by_transaction_id(last_pruned_transaction)?
@@ -141,10 +151,13 @@ mod tests {
     use reth_db_api::tables;
     use reth_primitives_traits::SignerRecoverable;
     use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
-    use reth_prune_types::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
+    use reth_prune_types::{
+        PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
+        SegmentOutputCheckpoint,
+    };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-    use std::ops::Sub;
+    use std::{ops::Sub, thread::sleep, time::Duration};
 
     #[test]
     fn prune() {
@@ -280,5 +293,55 @@ mod tests {
         );
         test_prune(6, (PruneProgress::Finished, 2));
         test_prune(10, (PruneProgress::Finished, 8));
+    }
+
+    #[test]
+    fn prune_time_limit_reached_keeps_checkpoint() {
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(
+            &mut rng,
+            1..=10,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+
+        let transaction_senders = blocks
+            .iter()
+            .flat_map(|block| &block.body().transactions)
+            .enumerate()
+            .map(|(tx_number, transaction)| {
+                (tx_number as u64, transaction.recover_signer().expect("recover signer"))
+            })
+            .collect::<Vec<_>>();
+        let transaction_senders_len = transaction_senders.len();
+        db.insert_transaction_senders(transaction_senders).expect("insert transaction senders");
+
+        let previous_checkpoint = PruneCheckpoint {
+            block_number: Some(1),
+            tx_number: Some(1),
+            prune_mode: PruneMode::Before(2),
+        };
+        let limiter = PruneLimiter::default().set_time_limit(Duration::ZERO);
+        sleep(Duration::from_millis(1));
+        let input =
+            PruneInput { previous_checkpoint: Some(previous_checkpoint), to_block: 6, limiter };
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = SenderRecovery::new(PruneMode::Before(6)).prune(&provider, input).unwrap();
+        provider.commit().expect("commit");
+
+        assert_eq!(
+            result,
+            SegmentOutput::not_done(
+                PruneInterruptReason::Timeout,
+                Some(SegmentOutputCheckpoint::from_prune_checkpoint(previous_checkpoint)),
+            ),
+        );
+        assert_eq!(
+            db.table::<tables::TransactionSenders>().unwrap().len(),
+            transaction_senders_len
+        );
     }
 }

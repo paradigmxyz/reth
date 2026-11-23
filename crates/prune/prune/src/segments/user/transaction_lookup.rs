@@ -161,6 +161,16 @@ where
 
         let mut limiter = input.limiter;
 
+        // Keep the previous checkpoint if the limit is reached before any key is visited, so the
+        // range is retried on the next run. A later interruption still advances the checkpoint,
+        // because keys missing from the table are visited without being deleted.
+        if limiter.is_limit_reached() {
+            return Ok(SegmentOutput::not_done(
+                limiter.interrupt_reason(),
+                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            ))
+        }
+
         let mut last_pruned_transaction = None;
         let (pruned, done) =
             provider.tx_ref().prune_table_with_iterator::<tables::TransactionHashNumbers>(
@@ -321,7 +331,7 @@ mod tests {
     use reth_static_file_types::{StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE};
     use reth_storage_api::StorageSettingsCache;
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-    use std::ops::Sub;
+    use std::{ops::Sub, thread::sleep, time::Duration};
 
     #[test]
     fn prune_transaction_zero_after_empty_genesis() {
@@ -556,6 +566,43 @@ mod tests {
         );
         test_prune(6, (PruneProgress::Finished, 2));
         test_prune(10, (PruneProgress::Finished, 8));
+    }
+
+    #[test]
+    fn prune_time_limit_reached_keeps_checkpoint() {
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+
+        let blocks = random_block_range(
+            &mut rng,
+            1..=10,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
+
+        let tx_hash_numbers = blocks
+            .iter()
+            .flat_map(|block| &block.body().transactions)
+            .enumerate()
+            .map(|(tx_number, transaction)| (*transaction.tx_hash(), tx_number as u64))
+            .collect::<Vec<_>>();
+        let tx_hash_numbers_len = tx_hash_numbers.len();
+        db.insert_tx_hash_numbers(tx_hash_numbers).expect("insert tx hash numbers");
+
+        let limiter =
+            PruneLimiter::default().set_deleted_entries_limit(10).set_time_limit(Duration::ZERO);
+        sleep(Duration::from_millis(1));
+        let input = PruneInput { previous_checkpoint: None, to_block: 6, limiter };
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = TransactionLookup::new(PruneMode::Before(6)).prune(&provider, input).unwrap();
+        provider.commit().expect("commit");
+
+        assert_eq!(result, SegmentOutput::not_done(PruneInterruptReason::Timeout, None));
+        assert_eq!(
+            db.table::<tables::TransactionHashNumbers>().unwrap().len(),
+            tx_hash_numbers_len
+        );
     }
 
     #[test]
