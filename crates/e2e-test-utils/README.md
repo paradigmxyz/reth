@@ -69,6 +69,7 @@ RUST_LOG=info,engine::tree=debug cargo nextest run -p reth-node-ethereum --test 
 | Change node settings that have a CLI flag | `with_node_config_modifier`, `with_rpc_modifier` (default: all modules except `testing` over HTTP), `with_pruning` |
 | Change engine tree settings | `with_tree_config_modifier`, applied last, on top of the tree config derived from the node config |
 | Choose the storage layout | `with_storage_v2(bool)`, defaults to the node default |
+| Choose the MDBX sync mode | `with_node_config_modifier` setting `config.db.sync_mode`, which the harness opens the database with; defaults to durable |
 | Sync with another backfill, e.g. snap with `--snap.v2` | `with_backfill(EthereumBackfill::new)`, which picks the backfill from the final node config like the binary, so snap needs `config.network.snap_v2 = true` and `with_storage_v2(true)`; a `--snap.v2` node without `with_backfill` fails to launch; not combinable with `with_dev_mining` |
 | Let a local miner build the blocks | `with_dev_mining(block_time)`, `map_dev_payload_attributes`; `with_dev_mode` only sets `--dev` |
 | **Accounts and transactions** | |
