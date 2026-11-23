@@ -31,10 +31,7 @@ use reth_storage_api::{
     ProviderReceipt, ReceiptProvider,
 };
 use reth_tasks::Runtime;
-use reth_transaction_pool::{
-    NewSubpoolTransactionStream, PoolTransaction, SubPool, TransactionListenerKind,
-    TransactionPool, ValidPoolTransaction,
-};
+use reth_transaction_pool::{PoolTransaction, TransactionPool, ValidPoolTransaction};
 use std::{
     collections::{HashMap, VecDeque},
     fmt,
@@ -71,6 +68,12 @@ where
 
 /// The JSON-RPC error code for exceeding a limit, as defined by EIP-1474.
 const LIMIT_EXCEEDED_CODE: i32 = -32005;
+
+/// How many times per `stale_filter_ttl` expired filters are evicted.
+///
+/// Expired filters count against the active filter limit until a sweep removes them, so this
+/// bounds how long past its TTL an abandoned filter can hold a slot.
+const STALE_FILTER_SWEEPS_PER_TTL: u32 = 4;
 
 /// Threshold for deciding between cached and range mode processing
 const CACHED_MODE_BLOCK_THRESHOLD: u64 = 250;
@@ -205,13 +208,12 @@ where
         &self.inner.active_filters
     }
 
-    /// Endless future that [`Self::clear_stale_filters`] every `stale_filter_ttl` interval.
+    /// Endless future that [`Self::clear_stale_filters`] [`STALE_FILTER_SWEEPS_PER_TTL`] times per
+    /// `stale_filter_ttl`.
     /// Nonetheless, this endless future frees the thread at every await point.
     async fn watch_and_clear_stale_filters(&self) {
-        let mut interval = tokio::time::interval_at(
-            tokio::time::Instant::now() + self.inner.stale_filter_ttl,
-            self.inner.stale_filter_ttl,
-        );
+        let period = self.inner.stale_filter_ttl / STALE_FILTER_SWEEPS_PER_TTL;
+        let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
@@ -1078,13 +1080,9 @@ where
         spawner: &Runtime,
     ) -> Arc<dyn FullTransactionsFilter<RpcTransaction<TxCompat::Network>>> {
         let txs_receiver = self.feed.subscribe(spawner, || {
-            // Same listener as `new_pending_pool_transactions_listener`, which hides the capacity.
-            let listener =
-                self.pool.new_transactions_listener_for(TransactionListenerKind::PropagateOnly);
+            let listener = self.pool.new_pending_pool_transactions_listener();
             let capacity = listener.max_capacity();
-            let transactions = NewSubpoolTransactionStream::new(listener, SubPool::Pending)
-                .map(|event| event.transaction);
-            (transactions, capacity)
+            (listener.map(|event| event.transaction), capacity)
         });
         Arc::new(FullTransactionsReceiver {
             txs_receiver: parking_lot::Mutex::new(txs_receiver),
@@ -2773,7 +2771,7 @@ mod tests {
         assert_eq!(drain_hashes(&eth_filter, &first, 1).await, [hash]);
         assert_eq!(drain_hashes(&eth_filter, &second, 1).await, [hash]);
 
-        // a filter only sees the transactions that arrive after it was created
+        // A filter only sees the transactions that arrive after it was created.
         let third = eth_filter.new_pending_transaction_filter(None).await.unwrap();
         let next_hash = pool
             .add_transaction(TransactionOrigin::External, MockTransaction::eip1559())
@@ -2794,16 +2792,16 @@ mod tests {
         let first = eth_filter.new_pending_transaction_filter(None).await.unwrap();
         let second = eth_filter.new_pending_transaction_filter(None).await.unwrap();
 
-        // the feed outlives a filter that is uninstalled
+        // The feed outlives a filter that is uninstalled.
         assert!(eth_filter.uninstall_filter(first).await.unwrap());
         assert_eq!(hash_feed_sender(&eth_filter).unwrap().receiver_count(), 1);
 
-        // and stops once the last filter is evicted as stale
+        // It stops once the last filter is evicted as stale.
         eth_filter.clear_stale_filters(Instant::now() + Duration::from_secs(3600)).await;
         assert!(!eth_filter.active_filters().contains(&second).await);
         wait_for_feed_stop(&eth_filter).await;
 
-        // a later filter starts a new producer
+        // A later filter starts a new producer.
         let third = eth_filter.new_pending_transaction_filter(None).await.unwrap();
         let hash = pool
             .add_transaction(TransactionOrigin::External, MockTransaction::eip1559())
@@ -2965,18 +2963,21 @@ mod tests {
 
         for kind in [None, Some(PendingTransactionFilterKind::Full)] {
             let err = eth_filter.new_pending_transaction_filter(kind).await.unwrap_err();
-            assert_eq!(err.code(), -32005);
+            assert_eq!(err.code(), LIMIT_EXCEEDED_CODE);
             assert_eq!(err.message(), "too many active filters, max 2");
         }
-        assert_eq!(eth_filter.new_block_filter().await.unwrap_err().code(), -32005);
-        assert_eq!(eth_filter.new_filter(Filter::new()).await.unwrap_err().code(), -32005);
+        assert_eq!(eth_filter.new_block_filter().await.unwrap_err().code(), LIMIT_EXCEEDED_CODE);
+        assert_eq!(
+            eth_filter.new_filter(Filter::new()).await.unwrap_err().code(),
+            LIMIT_EXCEEDED_CODE
+        );
         assert_eq!(eth_filter.active_filters().len().await, 2);
 
-        // a rejected pending filter must not start a feed
+        // A rejected pending filter must not start a feed.
         assert!(hash_feed_sender(&eth_filter).is_none());
         assert!(eth_filter.inner.full_pending_transactions.get().is_none());
 
-        // uninstalling frees a slot for any kind
+        // Uninstalling frees a slot for any kind.
         assert!(eth_filter.uninstall_filter(block_filter).await.unwrap());
         eth_filter.new_pending_transaction_filter(None).await.unwrap();
         assert!(hash_feed_sender(&eth_filter).is_some());
@@ -3064,5 +3065,24 @@ mod tests {
         for id in &ids {
             assert!(active_filters.contains(id).await, "{id:?} was evicted");
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expired_filter_frees_its_slot_at_the_next_sweep() {
+        let eth_api = build_test_eth_api(provider_with_head());
+        let config = EthFilterConfig::default().max_active_filters(Some(1));
+        let eth_filter = EthFilter::new(eth_api, config, Runtime::test());
+        let ttl = eth_filter.inner.stale_filter_ttl;
+
+        let id = eth_filter.new_block_filter().await.unwrap();
+        eth_filter.active_filters().inner.lock().await.get_mut(&id).unwrap().last_poll_timestamp -=
+            ttl;
+        assert_eq!(eth_filter.new_block_filter().await.unwrap_err().code(), LIMIT_EXCEEDED_CODE);
+
+        tokio::time::sleep(ttl / STALE_FILTER_SWEEPS_PER_TTL).await;
+        tokio::task::yield_now().await;
+
+        assert!(!eth_filter.active_filters().contains(&id).await);
+        eth_filter.new_block_filter().await.unwrap();
     }
 }
