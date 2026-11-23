@@ -3401,7 +3401,8 @@ mod tests {
             shuffle_seed in arb::<u64>(),
         ) {
             reth_tracing::init_test_tracing();
-            info!(target: TRACE_TARGET, ?shuffle_seed, "PROPTEST START");
+            reth_concurrency::sync::Runtime::new().run(move || {
+                info!(target: TRACE_TARGET, ?shuffle_seed, "PROPTEST START");
 
             // Filter out zero-valued entries from the initial dataset (zeros mean "absent").
             let initial: BTreeMap<B256, U256> = initial.into_iter()
@@ -3443,7 +3444,8 @@ mod tests {
                 trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 2 entry");
             }
 
-            harness.assert_changes(&mut apst, changeset2);
+                harness.assert_changes(&mut apst, changeset2);
+            });
         }
     }
 }

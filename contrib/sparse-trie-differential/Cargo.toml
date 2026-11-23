@@ -42,4 +42,4 @@ lto = false
 
 # Keep all inherited evm2 users on the public workspace's single pinned revision.
 [patch."https://github.com/alloy-rs/evm2"]
-evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "e681662b6d9ec59edafd112f7c8d64f49f1e6dd1" }
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f" }

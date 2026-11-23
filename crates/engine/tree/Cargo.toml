@@ -90,6 +90,7 @@ reth-testing-utils.workspace = true
 reth-tracing.workspace = true
 reth-node-ethereum.workspace = true
 reth-e2e-test-utils.workspace = true
+reth-concurrency = { workspace = true, features = ["std"] }
 
 assert_matches.workspace = true
 eyre.workspace = true
@@ -112,6 +113,7 @@ portable = [
     "evm2/portable",
 ]
 test-utils = [
+    "reth-concurrency/test-utils",
     "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",
     "reth-consensus/test-utils",

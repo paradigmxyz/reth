@@ -325,7 +325,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     }
 
     /// Returns the in-memory state of the overlay manager of this factory, which holds the
-    /// canonical blocks that are not on disk yet.
+    /// executed blocks that are not on disk yet, canonical or not.
     pub fn in_memory_state(&self) -> &InMemoryState<N::Primitives> {
         self.overlay_manager.in_memory_state()
     }

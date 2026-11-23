@@ -446,13 +446,13 @@ fn otterscan_traces(nodes: Vec<CallTraceNode>) -> Vec<TraceEntry> {
         while selfdestructs.last().is_some_and(|entry| entry.depth > trace.depth as u32) {
             entries.push(selfdestructs.pop().expect("checked above"));
         }
-        if let Some(to) = trace.selfdestruct_refund_target {
+        if let Some(to) = trace.selfdestruct_refund_target() {
             selfdestructs.push(TraceEntry {
                 r#type: "SELFDESTRUCT".to_string(),
                 depth: trace.depth as u32 + 1,
-                from: trace.selfdestruct_address.unwrap_or(trace.address),
+                from: trace.selfdestruct_address().unwrap_or(trace.address),
                 to,
-                value: trace.selfdestruct_transferred_value,
+                value: trace.selfdestruct_transferred_value(),
                 input: Bytes::new(),
                 output: Bytes::new(),
             });
@@ -484,7 +484,10 @@ mod tests {
         evm::{AccountInfo, InMemoryDB},
         SpecId,
     };
-    use evm2_inspectors::tracing::{types::CallTrace, TracingInspector};
+    use evm2_inspectors::tracing::{
+        types::{CallTrace, SelfdestructTrace},
+        TracingInspector,
+    };
     use reth_chainspec::MAINNET;
     use reth_evm::{ConfigureEvm, Evm};
     use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv};
@@ -545,31 +548,6 @@ mod tests {
         );
     }
 
-    async fn cache_empty_block(
-        cache: reth_rpc_eth_types::EthStateCache<reth_ethereum_primitives::EthPrimitives>,
-        block: reth_ethereum_primitives::Block,
-    ) {
-        // MockEthProvider does not implement recovered_block; seed the normal RPC cache.
-        let outcome = reth_execution_types::ExecutionOutcome::new(
-            Default::default(),
-            vec![vec![]],
-            block.header.number,
-            vec![],
-        );
-        let chain = reth_execution_types::Chain::new(
-            [reth_primitives_traits::RecoveredBlock::new_unhashed(block, vec![])],
-            outcome,
-            Default::default(),
-        );
-        reth_rpc_eth_types::cache::cache_new_blocks_task(
-            cache,
-            futures::stream::iter([reth_chain_state::CanonStateNotification::Commit {
-                new: std::sync::Arc::new(chain),
-            }]),
-        )
-        .await;
-    }
-
     #[tokio::test]
     async fn block_details_issuance_follows_chain_forks() {
         for (spec, number, reward) in [
@@ -595,7 +573,7 @@ mod tests {
             let header = Header { number, ..Default::default() };
             let hash = header.hash_slow();
             let block = reth_ethereum_primitives::Block { header, body: Default::default() };
-            provider.add_block(hash, block.clone());
+            provider.add_block(hash, block);
             provider.add_receipts(number, vec![]);
             let api = OtterscanApi::new(
                 crate::eth::EthApiBuilder::new(
@@ -606,7 +584,6 @@ mod tests {
                 )
                 .build(),
             );
-            cache_empty_block(api.eth.cache().clone(), block).await;
             let by_number = api
                 .get_block_details(alloy_eips::BlockNumberOrTag::Number(number).into())
                 .await
@@ -634,7 +611,7 @@ mod tests {
             },
         };
         let hash = block.header.hash_slow();
-        provider.add_block(hash, block.clone());
+        provider.add_block(hash, block);
         provider.add_receipts(126, vec![]);
         let api = OtterscanApi::new(
             crate::eth::EthApiBuilder::new(
@@ -645,7 +622,6 @@ mod tests {
             )
             .build(),
         );
-        cache_empty_block(api.eth.cache().clone(), block).await;
         let expected = calculate_issuance(5 * ETH_TO_WEI, 126, [123].into_iter());
         assert_eq!(
             api.get_block_details(alloy_eips::BlockNumberOrTag::Number(126).into())
@@ -853,9 +829,13 @@ mod tests {
                 trace: CallTrace {
                     depth,
                     address: Address::with_last_byte(idx as u8),
-                    selfdestruct_address: (idx < 3).then_some(Address::with_last_byte(idx as u8)),
-                    selfdestruct_refund_target: (idx < 3).then_some(Address::with_last_byte(0xff)),
-                    selfdestruct_transferred_value: (idx < 3).then_some(U256::ZERO),
+                    selfdestruct: (idx < 3).then(|| {
+                        Box::new(SelfdestructTrace {
+                            address: Some(Address::with_last_byte(idx as u8)),
+                            refund_target: Some(Address::with_last_byte(0xff)),
+                            transferred_value: Some(U256::ZERO),
+                        })
+                    }),
                     ..Default::default()
                 },
                 ..Default::default()

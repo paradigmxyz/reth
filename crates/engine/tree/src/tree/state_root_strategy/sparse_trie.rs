@@ -1807,7 +1807,7 @@ mod tests {
         assert_eq!(account_rlp_buf, encoded);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn hashing_task_returns_after_finish_marker_while_hint_sender_is_alive() {
         let runtime = Runtime::test();
         let (task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
@@ -1829,7 +1829,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn checked_out_storage_trie_holds_back_its_updates_until_it_returns() {
         let runtime = Runtime::test();
         let trie = SparseStateTrie::default()
@@ -1937,7 +1937,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     #[allow(clippy::clone_on_copy)]
     fn in_flight_storage_updates_keep_latest_values_and_deletions() {
         let runtime = Runtime::test();
@@ -2050,7 +2050,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn unrelated_storage_proofs_do_not_retry_blocked_leaves() {
         let runtime = Runtime::test();
         let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
@@ -2088,7 +2088,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn canceled_task_disconnects_checked_out_storage_jobs() {
         let runtime = Runtime::test();
         let trie = SparseStateTrie::default()
@@ -2114,7 +2114,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn storage_job_panics_are_resumed_on_the_task() {
         let runtime = Runtime::test();
         let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
@@ -2147,7 +2147,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn unsupported_storage_root_errors_are_returned_to_the_task() {
         let runtime = Runtime::test();
         let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
@@ -2180,7 +2180,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn large_storage_batches_run_off_thread() {
         let runtime = Runtime::test();
         let trie = SparseStateTrie::default()
@@ -2232,7 +2232,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     #[allow(clippy::clone_on_copy)]
     fn run_waits_for_storage_tries_hashed_off_thread() {
         let runtime = Runtime::test();
@@ -2285,7 +2285,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn first_leaf_batch_starts_proofs_before_input_queue_drains() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
@@ -2367,7 +2367,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn run_returns_parent_root_without_revealing_blind_trie_when_no_state_updates() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
@@ -2420,7 +2420,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn stall_check_waits_for_in_flight_proofs_then_reports_pending_updates() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
@@ -2505,7 +2505,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn run_completes_when_hints_follow_updates_finish() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();

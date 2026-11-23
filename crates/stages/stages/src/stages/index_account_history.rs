@@ -90,12 +90,15 @@ where
             // On first sync, don't skip past a lower existing checkpoint (such as one a snapshot
             // download wrote): changesets above it are on disk, so index them and leave them to
             // the pruner. Skipping would leave blocks between the two unindexed.
-            let skip_to = match existing.and_then(|checkpoint| checkpoint.block_number) {
-                Some(block) if first_sync && block < target_prunable_block => block,
-                _ => target_prunable_block,
+            // A checkpoint with no completed block still has changesets at genesis.
+            let skip_to = match existing {
+                Some(checkpoint) if first_sync => {
+                    checkpoint.block_number.map(|block| block.min(target_prunable_block))
+                }
+                _ => Some(target_prunable_block),
             };
-            prune_target_applied = true;
-            input.checkpoint = Some(StageCheckpoint::new(skip_to));
+            prune_target_applied = skip_to.is_some();
+            input.checkpoint = skip_to.map(StageCheckpoint::new);
 
             // Save prune checkpoint only if we don't have one already.
             // Otherwise, pruner may skip the unpruned range of blocks.
@@ -491,6 +494,11 @@ mod tests {
 
     #[tokio::test]
     async fn first_sync_indexes_from_lower_prune_checkpoint() {
+        check_first_sync(Some(10), vec![20, 36]);
+        check_first_sync(None, vec![0, 20, 36]);
+    }
+
+    fn check_first_sync(block_number: Option<u64>, expected: Vec<u64>) {
         let db = TestStageDB::default();
         db.commit(|tx| {
             tx.put::<tables::BlockBodyIndices>(
@@ -505,11 +513,12 @@ mod tests {
             .unwrap();
             tx.put::<tables::AccountChangeSets>(36, acc()).unwrap();
             tx.put::<tables::AccountChangeSets>(20, acc()).unwrap();
+            tx.put::<tables::AccountChangeSets>(0, acc()).unwrap();
             // A lower checkpoint, such as one written by a snapshot download.
             tx.put::<tables::PruneCheckpoints>(
                 PruneSegment::AccountHistory,
                 PruneCheckpoint {
-                    block_number: Some(10),
+                    block_number,
                     tx_number: None,
                     prune_mode: PruneMode::Before(11),
                 },
@@ -530,7 +539,7 @@ mod tests {
 
         // Changesets above the lower checkpoint are indexed and left to the pruner.
         let table = cast(db.table::<tables::AccountsHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![20, 36])]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), expected)]));
         let checkpoint = db
             .factory
             .provider()
@@ -538,7 +547,7 @@ mod tests {
             .get_prune_checkpoint(PruneSegment::AccountHistory)
             .unwrap()
             .unwrap();
-        assert_eq!(checkpoint.block_number, Some(10));
+        assert_eq!(checkpoint.block_number, block_number);
     }
 
     #[tokio::test]

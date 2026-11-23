@@ -3,7 +3,9 @@ use super::{
     StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
 };
 use crate::{
-    changeset_walker::{StaticFileAccountChangesetWalker, StaticFileStorageChangesetWalker},
+    changeset_walker::{
+        changeset_block_range, StaticFileAccountChangesetWalker, StaticFileStorageChangesetWalker,
+    },
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, EitherWriter,
     EitherWriterDestination, HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader,
     TransactionVariant, TransactionsProvider, TransactionsProviderExt,
@@ -54,7 +56,7 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWri
 use std::{
     collections::BTreeMap,
     fmt::Debug,
-    ops::{Bound, Deref, Range, RangeBounds, RangeInclusive},
+    ops::{Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -2080,20 +2082,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         range: impl RangeBounds<BlockNumber>,
         segment: StaticFileSegment,
     ) -> RangeInclusive<BlockNumber> {
-        let highest_block = self.get_highest_static_file_block(segment).unwrap_or(0);
-
-        let start = match range.start_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => n.saturating_add(1),
-            Bound::Unbounded => 0,
-        };
-        let end = match range.end_bound() {
-            Bound::Included(&n) => n.min(highest_block),
-            Bound::Excluded(&n) => n.saturating_sub(1).min(highest_block),
-            Bound::Unbounded => highest_block,
-        };
-
-        start..=end
+        changeset_block_range(range, self.get_highest_static_file_block(segment).unwrap_or(0))
     }
 
     /// Gets the highest static file transaction.

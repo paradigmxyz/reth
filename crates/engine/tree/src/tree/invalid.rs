@@ -5,10 +5,11 @@ use crate::tree::{
     WaitForCaches,
 };
 use alloy_consensus::BlockHeader;
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{PayloadStatus, PayloadStatusEnum, PayloadValidationError};
-use reth_engine_primitives::{ConsensusEngineEvent, ExecutionPayload};
+use reth_engine_primitives::{BlockAccessListDecodeError, ConsensusEngineEvent, ExecutionPayload};
 use reth_errors::ProviderResult;
 use reth_evm::ConfigureEvm;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
@@ -93,7 +94,7 @@ where
         Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
             validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
         })
-        .with_latest_valid_hash(valid_parent_hash.unwrap_or_default()))
+        .maybe_latest_valid_hash(valid_parent_hash))
     }
 
     /// Returns true if the given hash is the last received sync target block.
@@ -197,6 +198,9 @@ where
     ///    known-bad block, which violates consensus rules
     /// 2. **Malformed payload**: Returns an appropriate error status since the payload cannot be
     ///    validated due to its own structural issues
+    ///
+    /// A payload whose block access list does not decode is still remembered as invalid, but is
+    /// answered with `latestValidHash: null`.
     pub(super) fn handle_invalid_ancestor_payload(
         &mut self,
         payload: T::ExecutionData,
@@ -204,6 +208,11 @@ where
     ) -> Result<PayloadStatus, InsertBlockFatalError> {
         let parent_hash = payload.parent_hash();
         let num_hash = payload.num_hash();
+        // The invalid header cache does not record why a block was rejected, so a resend of a
+        // payload rejected for its block access list reaches this path as well.
+        let bal_decode_error = payload
+            .block_access_list()
+            .and_then(|bal| DecodedBal::from_rlp_bytes(bal.clone()).err());
 
         // Here we might have 2 cases
         // 1. the block is well formed and indeed links to an invalid header, meaning we should
@@ -215,7 +224,20 @@ where
             Err(error) => return Ok(self.on_new_payload_error(error, num_hash, parent_hash)?),
         };
 
-        Ok(self.on_invalid_new_payload(block, invalid)?)
+        let status = self.on_invalid_new_payload(block, invalid)?;
+
+        // The Amsterdam Engine API requires `latestValidHash: null` for an undecodable BAL.
+        // <https://github.com/ethereum/execution-apis/blob/df75e230befef0de56ee8833322ed714bacb479c/src/engine/amsterdam.md?plain=1#L129>
+        if let Some(error) = bal_decode_error {
+            return Ok(PayloadStatus::new(
+                PayloadStatusEnum::Invalid {
+                    validation_error: BlockAccessListDecodeError::new(error).to_string(),
+                },
+                None,
+            ))
+        }
+
+        Ok(status)
     }
 
     /// Checks if the given `head` points to an invalid header, which requires a specific response

@@ -104,6 +104,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .eth_proof_window(self.rpc_eth_proof_window)
             .rpc_gas_cap(self.rpc_gas_cap)
             .rpc_max_simulate_blocks(self.rpc_max_simulate_blocks)
+            .rpc_max_trace_bytes(self.max_trace_bytes())
             .compute_state_root_for_eth_simulate(self.rpc_compute_state_root_for_eth_simulate)
             .state_cache(self.state_cache_config())
             .gpo_config(self.gas_price_oracle_config())
@@ -112,6 +113,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .raw_tx_forwarder(self.rpc_forwarder.clone())
             .rpc_evm_memory_limit(self.rpc_evm_memory_limit)
             .force_blob_sidecar_upcasting(self.rpc_force_blob_sidecar_upcasting)
+            .max_response_size(self.rpc_max_response_size_bytes() as usize)
     }
 
     fn flashbots_config(&self) -> ValidationApiConfig {
@@ -535,12 +537,15 @@ mod tests {
             "100",
             "--rpc-max-logs-per-response",
             "200",
+            "--rpc.max-response-size",
+            "5",
         ])
         .args;
 
         let config = args.eth_config().filter_config();
         assert_eq!(config.max_blocks_per_filter, Some(100));
         assert_eq!(config.max_logs_per_response, Some(200));
+        assert_eq!(config.max_response_size, Some(5 * 1024 * 1024));
     }
 
     #[test]

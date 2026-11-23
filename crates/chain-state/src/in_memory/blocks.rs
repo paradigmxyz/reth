@@ -1,4 +1,4 @@
-use super::{BlockState, ExecutedBlock, NewCanonicalChain};
+use super::{canonical::InMemoryStateBlockCounts, BlockState, ExecutedBlock, NewCanonicalChain};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
@@ -42,6 +42,8 @@ pub(super) struct InMemoryBlocks<N: NodePrimitives> {
     ///
     /// This is empty between operations and kept to reuse its allocation.
     relink_queue: Vec<B256>,
+    /// Number of blocks removed so far.
+    removed_count: u64,
 }
 
 impl<N: NodePrimitives> InMemoryBlocks<N> {
@@ -80,6 +82,14 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
         self.pending_hash.and_then(|hash| self.get(&hash))
     }
 
+    /// Returns the number of tracked blocks per section.
+    pub(super) fn counts(&self) -> InMemoryStateBlockCounts {
+        InMemoryStateBlockCounts {
+            canonical: self.canonical.blocks.len(),
+            non_canonical: self.non_canonical.blocks.len(),
+        }
+    }
+
     /// Returns the number of canonical blocks and the lowest and highest of their numbers.
     pub(super) fn stats(&self) -> InMemoryBlocksStats {
         let numbers = &self.canonical.numbers;
@@ -88,6 +98,11 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
             earliest: numbers.first_key_value().map(|(number, _)| *number),
             latest: numbers.last_key_value().map(|(number, _)| *number),
         }
+    }
+
+    /// Returns the number of blocks that were removed so far. It never decreases.
+    pub(super) const fn removed_count(&self) -> u64 {
+        self.removed_count
     }
 
     /// Inserts `block` into the non-canonical section unless it is already tracked.
@@ -219,25 +234,22 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
         self.relink();
     }
 
-    /// Removes the canonical blocks through `remove_until`, but none above the persisted block,
-    /// and returns their states, oldest first.
+    /// Removes the canonical blocks up to and including `remove_until` and returns their states,
+    /// oldest first.
     ///
-    /// Removes nothing if the persisted block is not one of the canonical blocks.
+    /// Removes nothing if `persisted_hash` is neither a canonical block nor the block the
+    /// canonical chain builds on. Clears the pending block if it was removed.
     pub(super) fn remove_canonical_until(
         &mut self,
-        persisted_num_hash: BlockNumHash,
+        persisted_hash: B256,
         remove_until: BlockNumber,
     ) -> Vec<Arc<BlockState<N>>> {
-        // if the persisted hash is not in the canonical in memory state, do nothing, because it
-        // means canonical blocks were not actually persisted.
-        //
-        // This can happen if the persistence task takes a long time, while a reorg is happening.
-        if self.canonical.get(&persisted_num_hash.hash).is_none() {
-            // do nothing
+        // If the persisted hash is not on the canonical chain, canonical blocks were not actually
+        // persisted. This can happen if persisting takes a long time while a reorg is happening.
+        if !self.canonical.contains_or_builds_on(&persisted_hash) {
             return Vec::new()
         }
-
-        let removed = self.canonical.remove_until(remove_until.min(persisted_num_hash.number));
+        let removed = self.canonical.remove_until(remove_until);
         self.finish_removal(&removed);
         removed
     }
@@ -256,16 +268,35 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
         removed
     }
 
+    /// Removes the non-canonical blocks whose chain builds on a block above `persisted_number`,
+    /// the height of the persisted tip, and returns their states.
+    ///
+    /// The block such a chain builds on is neither tracked nor persisted, which happens when
+    /// blocks are removed from disk. The removed blocks can only be executed again once that
+    /// block is.
+    ///
+    /// Clears the pending block if it was removed.
+    pub(super) fn prune_built_above(
+        &mut self,
+        persisted_number: BlockNumber,
+    ) -> Vec<Arc<BlockState<N>>> {
+        let removed = self.non_canonical.remove_built_above(persisted_number);
+        self.finish_removal(&removed);
+        removed
+    }
+
     /// Removes all blocks of both sections, clears the pending block and returns what was
     /// tracked.
     pub(super) fn clear(&mut self) -> Self {
-        std::mem::take(self)
+        let removed_count = self.removed_count +
+            (self.canonical.blocks.len() + self.non_canonical.blocks.len()) as u64;
+        std::mem::replace(self, Self { removed_count, ..Default::default() })
     }
 
     /// Asserts the invariants of this type.
     #[cfg(any(test, debug_assertions))]
     pub(super) fn assert_invariants(&self) {
-        let Self { canonical, non_canonical, pending_hash, relink_queue } = self;
+        let Self { canonical, non_canonical, pending_hash, relink_queue, removed_count: _ } = self;
 
         // I1 and I2.
         assert_eq!(canonical.numbers.len(), canonical.blocks.len());
@@ -386,9 +417,10 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
         self.relink_queue = queue;
     }
 
-    /// Clears the pending block if it is one of the `removed` blocks, and relinks the blocks
-    /// built on them.
+    /// Counts the `removed` blocks, clears the pending block if it is one of them, and relinks
+    /// the blocks built on them.
     fn finish_removal(&mut self, removed: &[Arc<BlockState<N>>]) {
+        self.removed_count += removed.len() as u64;
         if self.pending_hash.is_some_and(|hash| !self.contains(&hash)) {
             self.pending_hash = None;
         }
@@ -433,6 +465,18 @@ impl<N: NodePrimitives> InMemoryCanonicalBlocks<N> {
     #[cfg(test)]
     pub(super) fn len(&self) -> usize {
         self.blocks.len()
+    }
+
+    /// Returns `true` if `hash` is a canonical in-memory block or the block the chain builds on.
+    ///
+    /// This is whether [`BlockState::chain_hashes`] of the head contains `hash`, answered from
+    /// the indexes.
+    fn contains_or_builds_on(&self, hash: &B256) -> bool {
+        self.blocks.contains_key(hash) ||
+            self.numbers
+                .first_key_value()
+                .and_then(|(_, first)| self.blocks.get(first))
+                .is_some_and(|first| first.parent_hash() == *hash)
     }
 
     /// Returns the hash of the canonical block built on `parent`, if there is one.
@@ -572,6 +616,21 @@ impl<N: NodePrimitives> InMemoryNonCanonicalBlocks<N> {
         }
         removed
     }
+
+    /// Removes the blocks whose chain builds on a block above `persisted_number`, and returns
+    /// their states.
+    fn remove_built_above(&mut self, persisted_number: BlockNumber) -> Vec<Arc<BlockState<N>>> {
+        // A chain that builds on a block above the persisted height starts two blocks above it
+        // at the lowest.
+        let hashes = self
+            .numbers
+            .range(persisted_number.saturating_add(2)..)
+            .flat_map(|(_, hashes)| hashes)
+            .filter(|hash| self.blocks[*hash].anchor().number > persisted_number)
+            .copied()
+            .collect::<Vec<_>>();
+        hashes.iter().map(|hash| self.remove(hash)).collect()
+    }
 }
 
 /// The number of canonical blocks in memory and the lowest and highest of their numbers.
@@ -673,7 +732,7 @@ mod tests {
         let trimmed = inserted[..2].iter().map(Arc::downgrade).collect::<Vec<_>>();
         drop(inserted);
         let persisted = canonical[1].recovered_block().num_hash();
-        let removed = blocks.remove_canonical_until(persisted, persisted.number);
+        let removed = blocks.remove_canonical_until(persisted.hash, persisted.number);
         assert_eq!(
             removed.iter().map(|state| state.hash()).collect::<Vec<_>>(),
             vec![hash(&canonical[0]), hash(&canonical[1])]
@@ -737,7 +796,7 @@ mod tests {
         let fork = builder.get_executed_block_with_number(2, hash(&chain[0]));
         blocks.insert_executed(fork.clone());
         let persisted = chain[0].recovered_block().num_hash();
-        blocks.remove_canonical_until(persisted, persisted.number);
+        blocks.remove_canonical_until(persisted.hash, persisted.number);
         assert!(blocks.get(&hash(&fork)).unwrap().parent.is_none());
         assert_eq!(blocks.canonical().head().unwrap().chain().count(), 2);
 

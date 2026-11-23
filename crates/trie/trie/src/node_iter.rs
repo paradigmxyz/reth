@@ -384,7 +384,7 @@ mod tests {
         trie_updates.account_nodes
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn inserted_leaf_before_deeper_stored_branch_is_included() {
         fn slot(prefix: &[u8]) -> B256 {
             let mut bytes = [0; 32];
@@ -449,16 +449,16 @@ mod tests {
         assert_eq!(incremental_root, rebuilt_root);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_trie_node_iter() {
+        reth_tracing::init_test_tracing();
+
         fn empty_leaf_rlp_for_key(key: Nibbles) -> RlpNode {
             RlpNode::from_rlp(&alloy_rlp::encode(LeafNode::new(
                 key,
                 alloy_rlp::encode(TrieAccount::default()),
             )))
         }
-
-        reth_tracing::init_test_tracing();
 
         // Extension (Key = 0x0000000000000000000000000000000000000000000000000000000000000)
         // └── Branch (`branch_node_0`)

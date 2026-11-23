@@ -16,8 +16,9 @@ use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
-    BlockState, CanonicalInMemoryState, ChainInfoHeaders, ExecutedBlock, ForkChoiceNotifications,
-    ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
+    BlockState, CanonicalInMemoryState, CanonicalInMemoryStateWriter, ChainInfoHeaders,
+    ExecutedBlock, ForkChoiceNotifications, ForkChoiceSubscriptions, PersistedBlockNotifications,
+    PersistedBlockSubscriptions,
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
@@ -84,12 +85,24 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockchainProvider<N> {
+    /// Creates a provider like [`Self::new_with_writer`], without the writer of its canonical
+    /// in-memory state.
+    pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
+        Self::new_with_writer(storage).map(|(provider, _)| provider)
+    }
+
     /// Creates a provider over `storage` and the in-memory state of `storage`, fetching the
-    /// latest, safe and finalized headers from the database to initialize the provider.
+    /// latest, safe and finalized headers from the database to initialize the provider, and
+    /// returns it with the writer of its canonical in-memory state.
+    ///
+    /// The provider and its clones read that state, and the writer is for the engine that changes
+    /// it.
     ///
     /// The in-memory blocks are shared with every other handle of that in-memory state. The chain
     /// info and the canonical state notifications belong to the returned provider and its clones.
-    pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
+    pub fn new_with_writer(
+        storage: ProviderFactory<N>,
+    ) -> ProviderResult<(Self, CanonicalInMemoryStateWriter<N::Primitives>)> {
         let provider = storage.provider()?;
         let best = provider.chain_info()?;
         let latest = provider
@@ -110,7 +123,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             .map(|num| provider.sealed_header(num))
             .transpose()?
             .flatten();
-        let canonical_in_memory_state = CanonicalInMemoryState::with_head(
+        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
             ChainInfoHeaders {
                 canonical_head: SealedHeader::new(latest, best.best_hash),
                 safe: safe_header,
@@ -118,9 +131,14 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             },
             storage.in_memory_state().clone(),
         );
+        let canonical_in_memory_state =
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone();
         let bal_store = storage.bal_store().clone();
 
-        Ok(Self { database: storage, canonical_in_memory_state, bal_store })
+        Ok((
+            Self { database: storage, canonical_in_memory_state, bal_store },
+            canonical_in_memory_state_writer,
+        ))
     }
 
     /// Gets a clone of `canonical_in_memory_state`.
@@ -139,7 +157,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// Returns a state provider for the post-state of an already resolved in-memory chain.
     ///
     /// This is the post-state of `state.hash()`. Because the caller already holds the in-memory
-    /// chain, the overlay manager does not have to rebuild an identical one from its block graph.
+    /// chain, the overlay manager does not have to look it up again.
     fn state_provider_for_state(
         &self,
         state: Arc<BlockState<N::Primitives>>,
@@ -241,8 +259,8 @@ impl<N: ProviderNodeTypes> BalProvider for BlockchainProvider<N> {
         self.get_bals_by_hashes_with_limit(block_hashes, GetBlockAccessListLimit::None)
     }
 
-    /// Falls back to the blocks the engine tree holds, because the store only buffers side chain
-    /// BALs briefly and never persists them.
+    /// Falls back to the executed blocks tracked in memory, because the store only buffers side
+    /// chain BALs briefly and never persists them.
     fn get_bals_by_hashes_with_limit(
         &self,
         block_hashes: &[BlockHash],
@@ -250,11 +268,9 @@ impl<N: ProviderNodeTypes> BalProvider for BlockchainProvider<N> {
     ) -> ProviderResult<Vec<Option<Bytes>>> {
         let mut bals = self.bal_store.get_by_hashes_with_limit(block_hashes, limit)?;
         for (bal, hash) in bals.iter_mut().zip(block_hashes).filter(|(bal, _)| bal.is_none()) {
-            *bal = self
-                .database
-                .overlay_manager()
-                .executed_block_by_hash(hash)
-                .and_then(|block| block.bal().map(|bal| bal.as_raw_bal().as_raw().clone()));
+            *bal = self.database.in_memory_state().state_by_hash(*hash).and_then(|state| {
+                state.block_ref().bal().map(|bal| bal.as_raw_bal().as_raw().clone())
+            });
         }
         // Filled BALs only grow the response, so the limit can only cut it shorter.
         let mut size = 0;
@@ -1323,8 +1339,8 @@ mod tests {
         let writer = factory.provider_rw()?;
         writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 2, 1))?;
         writer.commit()?;
-        factory.overlay_manager().insert_block(blocks[2].clone());
         let provider = BlockchainProvider::new(factory)?;
+        provider.canonical_in_memory_state.insert_executed(blocks[2].clone());
 
         for number in [1, 2] {
             let state = provider.history_by_block_hash(blocks[number].recovered_block().hash())?;
@@ -1477,9 +1493,6 @@ mod tests {
         };
         if !in_memory_blocks.is_empty() {
             provider.canonical_in_memory_state.update_chain(chain);
-        }
-        for state in provider.canonical_in_memory_state.canonical_chain() {
-            provider.database.overlay_manager().insert_block(state.block());
         }
 
         // Get canonical, safe, and finalized blocks
@@ -1790,7 +1803,7 @@ mod tests {
         let fork_hash = fork.hash();
         let recovered = RecoveredBlock::new_sealed(fork.clone(), fork.senders().unwrap());
         let bal = Bytes::from_static(&[0xc2, 0xc0, 0xc0]);
-        provider.database.overlay_manager().insert_block(
+        provider.canonical_in_memory_state.insert_executed(
             ExecutedBlock { recovered_block: Arc::new(recovered.clone()), ..Default::default() }
                 .with_bal(Some(Arc::new(DecodedEvmBal::new(Arc::default(), bal.clone())))),
         );
@@ -1830,8 +1843,8 @@ mod tests {
             Some(canonical.hash())
         );
 
-        // Once the tree drops the fork, its hash is unknown again.
-        provider.database.overlay_manager().remove_blocks([fork_hash]);
+        // Once the fork is dropped, its hash is unknown again.
+        provider.canonical_in_memory_state.prune_conflicting_with_finalized(canonical.num_hash());
         assert_eq!(provider.block(fork_hash.into())?, None);
         assert_eq!(provider.get_bals_by_hashes(&[fork_hash])?, vec![None]);
 
@@ -3669,7 +3682,6 @@ mod tests {
         };
         let executed =
             ExecutedBlock::new(Arc::new(memory_block), Arc::new(execution_output), trie_data);
-        provider.database.overlay_manager().insert_block(executed.clone());
         provider
             .canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
@@ -3750,7 +3762,6 @@ mod tests {
                 Arc::new(TrieUpdates::default().into_sorted()),
             ),
         );
-        provider.database.overlay_manager().insert_block(executed.clone());
         provider
             .canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
@@ -3812,7 +3823,6 @@ mod tests {
             state: Default::default(),
         };
         let executed = ExecutedBlock::new(Arc::new(block), Arc::new(execution_output), trie_data);
-        provider.database.overlay_manager().insert_block(executed.clone());
         provider
             .canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
