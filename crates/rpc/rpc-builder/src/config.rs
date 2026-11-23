@@ -113,6 +113,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .raw_tx_forwarder(self.rpc_forwarder.clone())
             .rpc_evm_memory_limit(self.rpc_evm_memory_limit)
             .force_blob_sidecar_upcasting(self.rpc_force_blob_sidecar_upcasting)
+            .send_raw_transaction_sync_timeout(self.rpc_send_raw_transaction_sync_timeout)
             .max_response_size(self.rpc_max_response_size_bytes() as usize)
     }
 
@@ -347,6 +348,17 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn test_send_raw_transaction_sync_timeout() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--rpc.send-raw-transaction-sync-timeout",
+            "5s",
+        ])
+        .args;
+        assert_eq!(args.eth_config().send_raw_transaction_sync_timeout, Duration::from_secs(5));
     }
 
     #[test]
