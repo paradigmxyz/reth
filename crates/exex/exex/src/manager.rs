@@ -3,6 +3,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
+use alloy_primitives::map::HashSet;
 use futures::StreamExt;
 use itertools::Itertools;
 use metrics::Gauge;
@@ -90,6 +91,14 @@ pub struct ExExHandle<N: NodePrimitives = EthPrimitives> {
     ///
     /// If this is `None`, the `ExEx` has not emitted a `FinishedHeight` event.
     finished_height: Option<BlockNumHash>,
+    /// Blocks reverted by [`ExExNotification::ChainReorged`] and
+    /// [`ExExNotification::ChainReverted`] notifications sent to the `ExEx` since the last
+    /// accepted `FinishedHeight` event.
+    ///
+    /// Used to ignore `FinishedHeight` events for reverted blocks that the `ExEx` emitted before
+    /// it received the notifications. Events arrive in order, so once an event for a block that
+    /// was not reverted is accepted, no stale event can follow and the set is cleared.
+    reverted_blocks: HashSet<BlockNumHash>,
 }
 
 impl<N: NodePrimitives> ExExHandle<N> {
@@ -117,6 +126,7 @@ impl<N: NodePrimitives> ExExHandle<N> {
                 receiver: event_rx,
                 next_notification_id: 0,
                 finished_height: None,
+                reverted_blocks: HashSet::default(),
             },
             event_tx,
             notifications,
@@ -132,31 +142,42 @@ impl<N: NodePrimitives> ExExHandle<N> {
         cx: &mut Context<'_>,
         (notification_id, notification): &(usize, ExExNotification<N>),
     ) -> Poll<Result<(), PollSendError<ExExNotification<N>>>> {
-        if let Some(finished_height) = self.finished_height {
-            match notification {
-                ExExNotification::ChainCommitted { new } => {
-                    // Skip the chain commit notification if the finished height of the ExEx is
-                    // higher than or equal to the tip of the new notification.
-                    // I.e., the ExEx has already processed the notification.
-                    if finished_height.number >= new.tip().number() {
-                        debug!(
-                            target: "exex::manager",
-                            exex_id = %self.id,
-                            %notification_id,
-                            ?finished_height,
-                            new_tip = %new.tip().number(),
-                            "Skipping notification"
-                        );
+        match notification {
+            ExExNotification::ChainCommitted { new } => {
+                // Skip the chain commit notification if the finished height of the ExEx is
+                // higher than or equal to the tip of the new notification.
+                // I.e., the ExEx has already processed the notification.
+                if let Some(finished_height) = self.finished_height &&
+                    finished_height.number >= new.tip().number()
+                {
+                    debug!(
+                        target: "exex::manager",
+                        exex_id = %self.id,
+                        %notification_id,
+                        ?finished_height,
+                        new_tip = %new.tip().number(),
+                        "Skipping notification"
+                    );
 
-                        self.next_notification_id = notification_id + 1;
-                        return Poll::Ready(Ok(()))
-                    }
+                    self.next_notification_id = notification_id + 1;
+                    return Poll::Ready(Ok(()))
                 }
-                // Do not handle [ExExNotification::ChainReorged] and
-                // [ExExNotification::ChainReverted] cases and always send the
-                // notification, because the ExEx should be aware of the reorgs and reverts lower
-                // than its finished height
-                ExExNotification::ChainReorged { .. } | ExExNotification::ChainReverted { .. } => {}
+            }
+            // Always send [ExExNotification::ChainReorged] and [ExExNotification::ChainReverted],
+            // because the ExEx should be aware of the reorgs and reverts lower than its finished
+            // height.
+            ExExNotification::ChainReorged { old, .. } |
+            ExExNotification::ChainReverted { old } => {
+                // If the finished block is reverted, it no longer proves that the ExEx processed
+                // the blocks at its height, so fall back to the fork block, which is on both
+                // branches. Otherwise, commits of the new branch below the old finished height
+                // would be skipped.
+                if let Some(finished_height) = self.finished_height &&
+                    old.block_number(finished_height.hash) == Some(finished_height.number)
+                {
+                    self.finished_height = Some(old.fork_block());
+                }
+                self.reverted_blocks.extend(old.blocks().values().map(|block| block.num_hash()));
             }
         }
 
@@ -464,7 +485,17 @@ where
                 debug!(target: "exex::manager", exex_id = %exex.id, ?event, "Received event from ExEx");
                 exex.metrics.events_sent_total.increment(1);
                 match event {
-                    ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),
+                    ExExEvent::FinishedHeight(height) => {
+                        // Ignore a stale event for a block that was reverted after the ExEx
+                        // emitted it, so it does not restore the finished height of the old
+                        // branch.
+                        if exex.reverted_blocks.contains(&height) {
+                            debug!(target: "exex::manager", exex_id = %exex.id, ?height, "Ignoring finished height of a reverted block");
+                        } else {
+                            exex.finished_height = Some(height);
+                            exex.reverted_blocks.clear();
+                        }
+                    }
                 }
             }
         }
@@ -681,7 +712,7 @@ mod tests {
     use super::*;
     use crate::wal::WalResult;
     use alloy_primitives::B256;
-    use futures::{StreamExt, TryStreamExt};
+    use futures::{FutureExt, StreamExt, TryStreamExt};
     use rand::Rng;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::EthEvmConfig;
@@ -1218,6 +1249,86 @@ mod tests {
 
         // Ensure the notification ID was still incremented
         assert_eq!(exex_handle.next_notification_id, 23);
+    }
+
+    #[tokio::test]
+    async fn test_sends_commit_on_other_branch_below_finished_height() {
+        let provider_factory = create_test_provider_factory();
+        init_genesis(&provider_factory).unwrap();
+        let provider = BlockchainProvider::new(provider_factory.clone()).unwrap();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+
+        let (exex_handle, event_tx, mut notifications) = ExExHandle::new(
+            "test_exex".to_string(),
+            Default::default(),
+            provider,
+            EthEvmConfig::mainnet(),
+            wal.handle(),
+        );
+
+        let block = |number, hash, parent_hash| {
+            let mut block = RecoveredBlock::<reth_ethereum_primitives::Block>::default();
+            block.set_block_number(number);
+            block.set_hash(hash);
+            block.set_parent_hash(parent_hash);
+            block
+        };
+        let a2 = BlockNumHash::new(2, B256::repeat_byte(0xa2));
+        let a5 = BlockNumHash::new(5, B256::repeat_byte(0xa5));
+        let a3_to_a5 = vec![
+            block(3, B256::repeat_byte(0xa3), a2.hash),
+            block(4, B256::repeat_byte(0xa4), B256::repeat_byte(0xa3)),
+            block(5, a5.hash, B256::repeat_byte(0xa4)),
+        ];
+        let b3 = block(3, B256::repeat_byte(0xb3), a2.hash);
+        let c3 = block(3, B256::repeat_byte(0xc3), a2.hash);
+        let c4 = block(4, B256::repeat_byte(0xc4), c3.hash());
+
+        let mut exex_manager = std::pin::pin!(ExExManager::new(
+            provider_factory,
+            vec![exex_handle],
+            10,
+            wal,
+            empty_finalized_header_stream(),
+        ));
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+
+        // The ExEx finished A5.
+        event_tx.send(ExExEvent::FinishedHeight(a5)).unwrap();
+        let _ = exex_manager.as_mut().poll(&mut cx);
+        assert_eq!(exex_manager.exex_handles[0].finished_height, Some(a5));
+
+        // A3..A5 are reorged to B3, then B3 is reorged to C3.
+        let reorgs = [
+            ExExNotification::ChainReorged {
+                old: Arc::new(Chain::new(a3_to_a5, Default::default(), Default::default())),
+                new: Arc::new(Chain::new(vec![b3.clone()], Default::default(), Default::default())),
+            },
+            ExExNotification::ChainReorged {
+                old: Arc::new(Chain::new(vec![b3], Default::default(), Default::default())),
+                new: Arc::new(Chain::new(vec![c3], Default::default(), Default::default())),
+            },
+        ];
+        for (id, reorg) in reorgs.into_iter().enumerate() {
+            assert!(exex_manager.exex_handles[0].send(&mut cx, &(id, reorg.clone())).is_ready());
+            assert_eq!(notifications.next().await.unwrap().unwrap(), reorg);
+        }
+        assert_eq!(exex_manager.exex_handles[0].finished_height, Some(a2));
+
+        // A stale event for A5 that the ExEx emitted before it received the reorgs is ignored.
+        event_tx.send(ExExEvent::FinishedHeight(a5)).unwrap();
+        let _ = exex_manager.as_mut().poll(&mut cx);
+        assert_eq!(exex_manager.exex_handles[0].finished_height, Some(a2));
+
+        // C4 is not on the branch of A5, so it must be delivered.
+        let commit = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![c4], Default::default(), Default::default())),
+        };
+        assert!(exex_manager.exex_handles[0].send(&mut cx, &(2, commit.clone())).is_ready());
+        let received = notifications.next().now_or_never().expect("C4 must be delivered");
+        assert_eq!(received.unwrap().unwrap(), commit);
     }
 
     #[tokio::test]
