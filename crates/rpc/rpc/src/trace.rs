@@ -31,7 +31,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{error::EthApiError, utils::CallManyBudget, EthConfig};
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
-use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
@@ -123,7 +123,7 @@ where
     ) -> Result<TraceResults, Eth::Error> {
         let tx = self
             .eth_api()
-            .recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
+            .recover_raw_pooled_transaction(&tx)?
             .map(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
         let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
