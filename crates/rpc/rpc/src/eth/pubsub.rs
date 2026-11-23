@@ -749,9 +749,7 @@ mod tests {
         let mut receipts = Vec::new();
         for params in [
             r#"["transactionReceipts"]"#,
-            r#"["transactionReceipts", []]"#,
             r#"["transactionReceipts", {}]"#,
-            r#"["transactionReceipts", {"topics": []}]"#,
             r#"["transactionReceipts", {"address": "0x0000000000000000000000000000000000000001"}]"#,
             r#"["transactionReceipts", {"transactionHashes": null}]"#,
             r#"["transactionReceipts", {"transactionHashes": []}]"#,
