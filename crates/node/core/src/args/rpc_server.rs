@@ -1132,10 +1132,14 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        // This will now accept any module name, creating Other(name) for unknowns
-        Ok(val
-            .parse::<RpcModuleSelection>()
-            .expect("RpcModuleSelection parsing cannot fail with Other variant"))
+        // This accepts any module name, creating Other(name) for unknowns, but rejects the `all`
+        // and `none` keywords mixed with other modules.
+        val.parse::<RpcModuleSelection>().map_err(|_| {
+            clap::Error::raw(
+                clap::error::ErrorKind::ValueValidation,
+                format!("invalid RPC module selection '{val}': `all` and `none` cannot be combined with other modules\n"),
+            )
+        })
     }
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
@@ -1242,6 +1246,19 @@ mod tests {
         let apis = args.http_api.unwrap();
         let expected = RpcModuleSelection::Selection(Default::default());
         assert_eq!(apis, expected);
+    }
+
+    #[test]
+    fn test_rpc_server_args_parser_rejects_mixed_keywords() {
+        for flag in ["--http.api", "--ws.api"] {
+            for api in ["all,testing", "eth,all", "none,eth"] {
+                let Err(err) = CommandParser::<RpcServerArgs>::try_parse_from(["reth", flag, api])
+                else {
+                    panic!("{flag} {api} should be rejected")
+                };
+                assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation, "{flag} {api}");
+            }
+        }
     }
 
     #[test]
