@@ -246,7 +246,8 @@ impl Environment {
     pub fn reader_check(&self) -> Result<bool> {
         let mut dead = 0;
         // SAFETY: `env_ptr` is valid for the lifetime of `self` and `dead` is a valid out-pointer.
-        mdbx_result(unsafe { ffi::mdbx_reader_check(self.env_ptr(), &mut dead) })
+        let recovered = mdbx_result(unsafe { ffi::mdbx_reader_check(self.env_ptr(), &mut dead) })?;
+        Ok(recovered || dead > 0)
     }
 }
 
