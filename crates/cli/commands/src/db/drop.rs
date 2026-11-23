@@ -1,6 +1,7 @@
 //! Destructive cleanup of the configured database stores.
 
 use crate::common::EnvironmentArgs;
+use alloy_primitives::{BlockHash, BlockNumber};
 use eyre::{Result, WrapErr};
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
@@ -43,16 +44,84 @@ pub(super) fn execute<P: NodePrimitives, C: ChainSpecParser<ChainSpec: EthChainS
         }
     }
 
-    fs::create_dir_all(&static_files)?;
+    check_store_paths([&db, &static_files, &rocks, &wal])?;
+
+    // A read-write environment can initialize missing stores and write genesis. Drop must verify
+    // the stores as found on disk before deleting any of them.
     let _db_lock = StorageLock::try_acquire(&db.canonicalize()?)
         .wrap_err_with(|| format!("Could not lock {}", db.display()))?;
-    let _static_lock = StorageLock::try_acquire(&static_files.canonicalize()?)
-        .wrap_err_with(|| format!("Could not lock {}", static_files.display()))?;
+    let hash = env.chain.genesis_hash();
+    let number = env.chain.genesis().number.unwrap_or_default();
+    let static_lock = lock_static_files::<P>(
+        &static_files,
+        env.datadir.static_files_path.is_some(),
+        number,
+        hash,
+    )?;
+    if db.join("mdbx.dat").try_exists()? {
+        let store = open_db_read_only(&db, env.db.database_args())?;
+        let tx = store.tx()?;
+        eyre::ensure!(
+            tx.get::<HeaderNumbers>(hash)? == Some(number) ||
+                (static_lock.is_some() && tx.entries::<HeaderNumbers>()? == 0),
+            "Database does not contain the configured genesis {hash}"
+        );
+    }
 
-    // Check directory ownership before removing anything, including when overrides resolve through
-    // symlinks. Nested stores would let recursive cleanup unlink another store's writer lock.
+    info!(target: "reth::cli", ?db, ?rocks, ?static_files, ?wal, "Dropping database stores");
+    if rocks.try_exists()? {
+        RocksDBProvider::destroy(&rocks)?;
+    }
+    if wal.try_exists()? {
+        fs::remove_dir_all(&wal)?;
+    }
+    if static_lock.is_some() {
+        fs::remove_dir_all(&static_files)?;
+    }
+    fs::create_dir_all(&static_files)?;
+    fs::remove_dir_all(&db)?;
+    Ok(())
+}
+
+/// Returns the lock for a verified static store, or `None` for an empty or absent default store.
+fn lock_static_files<P: NodePrimitives>(
+    path: &Path,
+    require_genesis: bool,
+    number: BlockNumber,
+    hash: BlockHash,
+) -> Result<Option<StorageLock>> {
+    if path.try_exists()? {
+        let lock = StorageLock::try_acquire(&path.canonicalize()?)
+            .wrap_err_with(|| format!("Could not lock {}", path.display()))?;
+        let stored = StaticFileProviderBuilder::read_only(path)
+            .with_genesis_block_number(number)
+            .build::<P>()?
+            .block_hash(number)?;
+        if let Some(stored) = stored {
+            eyre::ensure!(
+                stored == hash,
+                "Static files at {} do not contain the configured genesis {hash}",
+                path.display()
+            );
+            return Ok(Some(lock))
+        }
+        // Release the writer lock so an otherwise empty directory is visible as empty.
+        drop(lock);
+        eyre::ensure!(
+            fs::read_dir(path)?.next().transpose()?.is_none(),
+            "Missing genesis in nonempty static files at {}",
+            path.display()
+        );
+    }
+
+    eyre::ensure!(!require_genesis, "No genesis in configured static files at {}", path.display());
+    Ok(None)
+}
+
+/// Reject overlapping stores and paths hidden by a dangling symlink.
+fn check_store_paths(paths: [&Path; 4]) -> Result<()> {
     let mut roots = Vec::<PathBuf>::new();
-    for path in [&db, &static_files, &rocks, &wal] {
+    for path in paths {
         if path.try_exists()? {
             let root = path
                 .canonicalize()
@@ -66,96 +135,51 @@ pub(super) fn execute<P: NodePrimitives, C: ChainSpecParser<ChainSpec: EthChainS
             roots.push(root);
         } else {
             // A missing store is valid, but a dangling symlink can hide an existing one.
-            let mut prefix = PathBuf::new();
-            for component in path.components() {
-                prefix.push(component);
-                if !prefix.try_exists()? {
-                    eyre::ensure!(!prefix.is_symlink(), "Could not resolve {}", prefix.display());
+            for prefix in path.ancestors() {
+                if prefix.try_exists()? {
                     break
                 }
+                eyre::ensure!(!prefix.is_symlink(), "Could not resolve {}", prefix.display());
             }
         }
     }
-
-    verify_genesis::<P, _>(env, &db, &static_files)?;
-    // Reth disables WAL archival. Native destruction would also remove unrelated numbered
-    // logs from this directory, so leave an existing archive for the operator to inspect.
-    let archive = rocks.join("archive");
-    if archive.try_exists()? {
-        eyre::ensure!(
-            fs::read_dir(&archive)?.next().transpose()?.is_none(),
-            "Move the contents of {} before dropping RocksDB",
-            archive.display()
-        );
-    }
-    let current = rocks.join("CURRENT");
-    if rocks.try_exists()? {
-        let recognized = current.try_exists()? && RocksDBProvider::has_reth_tables(&rocks)?;
-        // Native destroy can report success if it cannot list the directory.
-        for entry in fs::read_dir(&rocks)? {
-            entry.map_err(|err| fs::FsPathError::read_dir(err, &rocks))?;
-            eyre::ensure!(
-                recognized,
-                "Refusing to destroy an unrecognized RocksDB directory at {}",
-                rocks.display()
-            );
-        }
-        RocksDBProvider::destroy(&rocks)
-            .wrap_err_with(|| format!("Could not destroy RocksDB at {}", rocks.display()))?;
-        eyre::ensure!(
-            !current.try_exists()?,
-            "RocksDB cleanup left {} in place",
-            current.display()
-        );
-    }
-    info!(target: "reth::cli", ?db, ?rocks, ?static_files, ?wal, "Dropping database stores");
-    if wal.try_exists()? {
-        fs::remove_dir_all(&wal)?;
-    }
-    fs::remove_dir_all(&static_files)?;
-    fs::create_dir_all(&static_files)?;
-    fs::remove_dir_all(&db)?;
     Ok(())
 }
 
-/// Verify the chain independently in each populated store before deleting either one.
-fn verify_genesis<P: NodePrimitives, C: ChainSpecParser<ChainSpec: EthChainSpec>>(
-    env: &EnvironmentArgs<C>,
-    db: &Path,
-    static_files: &Path,
-) -> Result<()> {
-    let hash = env.chain.genesis_hash();
-    let number = env.chain.genesis().number.unwrap_or_default();
-    let static_hash = StaticFileProviderBuilder::read_only(static_files)
-        .with_genesis_block_number(number)
-        .build::<P>()?
-        .block_hash(number)?;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    if db.join("mdbx.dat").try_exists()? {
-        let store = open_db_read_only(db, env.db.database_args())?;
-        let tx = store.tx()?;
-        eyre::ensure!(
-            tx.get::<HeaderNumbers>(hash)? == Some(number) ||
-                (static_hash.is_some() && tx.entries::<HeaderNumbers>()? == 0),
-            "Database does not contain the configured genesis {hash}"
-        );
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn rejects_overlapping_store_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().canonicalize().unwrap();
+        let db = dir.join("db");
+        fs::create_dir_all(&db).unwrap();
+        let err = check_store_paths([&db, &dir.join("static_files"), &dir, &dir.join("exex/wal")])
+            .unwrap_err();
+        assert_eq!(err.to_string(), format!("Database directories overlap: {dir:?} and {db:?}"));
     }
-    // An empty static store has no chain data. A populated one must identify itself even if
-    // MDBX belongs to the requested chain or has an empty genesis index.
-    if let Some(stored) = static_hash {
-        eyre::ensure!(
-            stored == hash,
-            "Static files at {} do not contain the configured genesis {hash}",
-            static_files.display()
-        );
-    } else {
-        for entry in fs::read_dir(static_files)? {
-            eyre::ensure!(
-                StorageLock::is_lock_file(&entry?.file_name()),
-                "Missing genesis in nonempty static files at {}",
-                static_files.display()
-            );
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_dangling_store_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        let link = dir.join("volume");
+        symlink(dir.join("offline"), &link).unwrap();
+        for rocks in [&link, &link.join("rocksdb")] {
+            let err = check_store_paths([
+                &dir.join("db"),
+                &dir.join("static_files"),
+                rocks,
+                &dir.join("exex/wal"),
+            ])
+            .unwrap_err();
+            assert_eq!(err.to_string(), format!("Could not resolve {}", link.display()));
         }
     }
-    Ok(())
 }

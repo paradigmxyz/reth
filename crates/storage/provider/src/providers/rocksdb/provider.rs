@@ -5,6 +5,7 @@ use alloy_primitives::{
     map::{AddressMap, HashMap},
     Address, BlockNumber, TxNumber, B256,
 };
+use eyre::WrapErr;
 use itertools::Itertools;
 use metrics::Label;
 use parking_lot::Mutex;
@@ -19,6 +20,7 @@ use reth_db_api::{
     table::{Compress, Decode, Decompress, Encode, Table},
     tables, BlockNumberList, DatabaseError,
 };
+use reth_fs_util as fs;
 use reth_primitives_traits::{BlockBody as _, FastInstant as Instant};
 use reth_prune_types::PruneMode;
 use reth_storage_errors::{
@@ -857,24 +859,49 @@ impl RocksDBProvider {
         RocksDBBuilder::new(path)
     }
 
+    /// Destroys an existing reth database using the native `RocksDB` writer lock.
+    /// An empty directory has no database to destroy. Returns an error for unrecognized databases,
+    /// nonempty WAL archives, or an active writer.
+    pub fn destroy(path: &Path) -> eyre::Result<()> {
+        // Native destruction can report success when it cannot list the directory.
+        let mut entries = fs::read_dir(path)?;
+        if entries.next().transpose()?.is_none() {
+            return Ok(())
+        }
+        entries.try_for_each(|entry| entry.map(drop))?;
+        let options = Options::default();
+        let current = path.join("CURRENT");
+        eyre::ensure!(
+            current.try_exists()? &&
+                DB::list_cf(&options, path)?
+                    .iter()
+                    .any(|cf| cf == tables::TransactionHashNumbers::NAME),
+            "Refusing to destroy an unrecognized RocksDB directory at {}",
+            path.display()
+        );
+        // Reth disables WAL archival. Native destruction would remove numbered logs here by name.
+        let archive = path.join("archive");
+        eyre::ensure!(
+            !archive.try_exists()? || fs::read_dir(&archive)?.next().transpose()?.is_none(),
+            "Move the contents of {} before dropping RocksDB",
+            archive.display()
+        );
+        DB::destroy(&options, path)
+            .wrap_err_with(|| format!("Could not destroy RocksDB at {}", path.display()))?;
+        eyre::ensure!(
+            !current.try_exists()?,
+            "RocksDB cleanup left {} in place",
+            current.display()
+        );
+        Ok(())
+    }
+
     /// Returns `true` if a `RocksDB` database exists at the given path.
     ///
     /// Checks for the presence of the `CURRENT` file, which `RocksDB` creates
     /// when initializing a database.
     pub fn exists(path: impl AsRef<Path>) -> bool {
         path.as_ref().join("CURRENT").exists()
-    }
-
-    /// Checks an existing manifest for the transaction index common to reth database layouts.
-    pub fn has_reth_tables(path: &Path) -> ProviderResult<bool> {
-        let families = DB::list_cf(&Options::default(), path).map_err(ProviderError::other)?;
-        Ok(families.iter().any(|name| name == tables::TransactionHashNumbers::NAME))
-    }
-
-    /// Destroys the database in the dedicated directory at `path`. `RocksDB` recognizes its files
-    /// by name, including archived WALs. Returns an error if a writer holds the lock.
-    pub fn destroy(path: &Path) -> ProviderResult<()> {
-        DB::destroy(&Options::default(), path).map_err(ProviderError::other)
     }
 
     /// Returns `true` if this provider is in read-only mode.
@@ -5185,5 +5212,40 @@ mod tests {
             vec![(100, vec![100]), (200, vec![150, 200]), (u64::MAX, vec![250, 300])]
         );
         assert_eq!(storage_shard_layout(&provider, addr, slot2), vec![(u64::MAX, vec![40])]);
+    }
+
+    #[test]
+    fn destroy_checks_the_database_before_removing_files() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path();
+        let keep = path.join("keep.txt");
+        fs::write(&keep, b"keep").unwrap();
+        drop(RocksDBProvider::new(path).unwrap());
+        let err = RocksDBProvider::destroy(path).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("Refusing to destroy an unrecognized RocksDB directory at {}", path.display())
+        );
+        assert!(path.join("CURRENT").is_file());
+
+        let writer = RocksDBProvider::builder(path).with_default_tables().build().unwrap();
+        let err = RocksDBProvider::destroy(path).unwrap_err();
+        assert_eq!(err.to_string(), format!("Could not destroy RocksDB at {}", path.display()));
+        drop(writer);
+        let archive = path.join("archive");
+        fs::create_dir_all(&archive).unwrap();
+        let log = archive.join("123456.log");
+        fs::write(&log, b"log").unwrap();
+        let err = RocksDBProvider::destroy(path).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("Move the contents of {} before dropping RocksDB", archive.display())
+        );
+        assert_eq!(fs::read(&log).unwrap(), b"log");
+        fs::remove_file(log).unwrap();
+
+        RocksDBProvider::destroy(path).unwrap();
+        assert!(!path.join("CURRENT").exists());
+        assert_eq!(fs::read(keep).unwrap(), b"keep");
     }
 }
