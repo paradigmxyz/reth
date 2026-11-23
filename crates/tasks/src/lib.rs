@@ -360,6 +360,28 @@ mod tests {
     }
 
     #[test]
+    fn test_untimed_graceful_shutdown_outlives_timeout() {
+        let rt = Runtime::test();
+
+        let timeout = Duration::from_millis(100);
+        let val = Arc::new(AtomicBool::new(false));
+        let val2 = val.clone();
+        rt.spawn_critical_with_untimed_graceful_shutdown_signal("untimed", async move |shutdown| {
+            let _guard = shutdown.await;
+            tokio::time::sleep(timeout * 3).await;
+            val2.store(true, Ordering::Relaxed);
+        });
+        // A stuck timed task must not keep shutdown waiting once the untimed task has finished.
+        rt.spawn_critical_with_graceful_shutdown_signal("timed", async move |shutdown| {
+            let _guard = shutdown.await;
+            std::future::pending::<()>().await;
+        });
+
+        assert!(!rt.graceful_shutdown_with_timeout(timeout));
+        assert!(val.load(Ordering::Relaxed));
+    }
+
+    #[test]
     fn can_build_runtime() {
         let rt = Runtime::test();
         let _handle = rt.handle();
