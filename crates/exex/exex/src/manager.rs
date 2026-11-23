@@ -3,7 +3,6 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{map::HashMap, BlockNumber};
 use futures::StreamExt;
 use itertools::Itertools;
 use metrics::Gauge;
@@ -91,23 +90,6 @@ pub struct ExExHandle<N: NodePrimitives = EthPrimitives> {
     ///
     /// If this is `None`, the `ExEx` has not emitted a `FinishedHeight` event.
     finished_height: Option<BlockNumHash>,
-    /// Blocks reverted by [`ExExNotification::ChainReorged`] and
-    /// [`ExExNotification::ChainReverted`] notifications sent to the `ExEx` since the map was
-    /// last cleared, mapped to whether they are still reverted, i.e. were not committed again.
-    ///
-    /// Used to ignore `FinishedHeight` events for reverted blocks that the `ExEx` emitted before
-    /// it received the notifications. Events arrive in order, so once an event for a block that
-    /// was never reverted is accepted at or above [`Self::last_reverted_number`], no stale event
-    /// can follow and the map is cleared. An event for a block committed again may itself be
-    /// stale, so it does not clear the map.
-    reverted_blocks: HashMap<BlockNumHash, bool>,
-    /// The number of the first block reverted by the last [`ExExNotification::ChainReorged`] or
-    /// [`ExExNotification::ChainReverted`] notification sent to the `ExEx`.
-    ///
-    /// Every block at or above it that was canonical before that notification is in
-    /// [`Self::reverted_blocks`], so a `FinishedHeight` event for another block at or above it
-    /// shows that the `ExEx` processed the notification.
-    last_reverted_number: BlockNumber,
 }
 
 impl<N: NodePrimitives> ExExHandle<N> {
@@ -135,8 +117,6 @@ impl<N: NodePrimitives> ExExHandle<N> {
                 receiver: event_rx,
                 next_notification_id: 0,
                 finished_height: None,
-                reverted_blocks: HashMap::default(),
-                last_reverted_number: 0,
             },
             event_tx,
             notifications,
@@ -152,55 +132,38 @@ impl<N: NodePrimitives> ExExHandle<N> {
         cx: &mut Context<'_>,
         (notification_id, notification): &(usize, ExExNotification<N>),
     ) -> Poll<Result<(), PollSendError<ExExNotification<N>>>> {
-        // Blocks committed again, e.g. by a round-trip reorg, are no longer reverted, so
-        // `FinishedHeight` events for them must be accepted. Reverts are recorded below.
-        if let Some(committed) = notification.committed_chain() {
-            for block in committed.blocks().values() {
-                if let Some(reverted) = self.reverted_blocks.get_mut(&block.num_hash()) {
-                    *reverted = false;
-                }
-            }
-        }
+        if let Some(finished_height) = self.finished_height {
+            match notification {
+                ExExNotification::ChainCommitted { new } => {
+                    // Skip the chain commit notification if the finished height of the ExEx is
+                    // higher than or equal to the tip of the new notification.
+                    // I.e., the ExEx has already processed the notification.
+                    if finished_height.number >= new.tip().number() {
+                        debug!(
+                            target: "exex::manager",
+                            exex_id = %self.id,
+                            %notification_id,
+                            ?finished_height,
+                            new_tip = %new.tip().number(),
+                            "Skipping notification"
+                        );
 
-        match notification {
-            ExExNotification::ChainCommitted { new } => {
-                // Skip the chain commit notification if the finished height of the ExEx is
-                // higher than or equal to the tip of the new notification.
-                // I.e., the ExEx has already processed the notification.
-                if let Some(finished_height) = self.finished_height &&
-                    finished_height.number >= new.tip().number()
-                {
-                    debug!(
-                        target: "exex::manager",
-                        exex_id = %self.id,
-                        %notification_id,
-                        ?finished_height,
-                        new_tip = %new.tip().number(),
-                        "Skipping notification"
-                    );
-
-                    self.next_notification_id = notification_id + 1;
-                    return Poll::Ready(Ok(()))
+                        self.next_notification_id = notification_id + 1;
+                        return Poll::Ready(Ok(()))
+                    }
                 }
-            }
-            // Always send [ExExNotification::ChainReorged] and [ExExNotification::ChainReverted],
-            // because the ExEx should be aware of the reorgs and reverts lower than its finished
-            // height.
-            ExExNotification::ChainReorged { old, .. } |
-            ExExNotification::ChainReverted { old } => {
-                // If the finished block is reverted, it no longer proves that the ExEx processed
-                // the blocks at its height, so fall back to the fork block, which is on both
-                // branches. Otherwise, commits of the new branch below the old finished height
-                // would be skipped.
-                if let Some(finished_height) = self.finished_height &&
-                    old.block_number(finished_height.hash) == Some(finished_height.number)
-                {
-                    self.finished_height = Some(old.fork_block());
-                }
-                self.reverted_blocks
-                    .extend(old.blocks().values().map(|block| (block.num_hash(), true)));
-                if let Some(&number) = old.blocks().keys().next() {
-                    self.last_reverted_number = number;
+                // Always send [ExExNotification::ChainReorged] and
+                // [ExExNotification::ChainReverted], because the ExEx should be aware of the
+                // reorgs and reverts lower than its finished height.
+                ExExNotification::ChainReorged { old, .. } |
+                ExExNotification::ChainReverted { old } => {
+                    // If the finished block is reverted, it no longer proves that the ExEx
+                    // processed the blocks at its height, so fall back to the fork block, which
+                    // is on both branches. Otherwise, commits of the new branch below the old
+                    // finished height would be skipped.
+                    if old.block_number(finished_height.hash) == Some(finished_height.number) {
+                        self.finished_height = Some(old.fork_block());
+                    }
                 }
             }
         }
@@ -509,25 +472,7 @@ where
                 debug!(target: "exex::manager", exex_id = %exex.id, ?event, "Received event from ExEx");
                 exex.metrics.events_sent_total.increment(1);
                 match event {
-                    ExExEvent::FinishedHeight(height) => {
-                        // Ignore a stale event for a block that was reverted after the ExEx
-                        // emitted it, so it does not restore the finished height of the old
-                        // branch.
-                        match exex.reverted_blocks.get(&height) {
-                            Some(true) => {
-                                debug!(target: "exex::manager", exex_id = %exex.id, ?height, "Ignoring finished height of a reverted block");
-                            }
-                            Some(false) => exex.finished_height = Some(height),
-                            None => {
-                                exex.finished_height = Some(height);
-                                // See `ExExHandle::last_reverted_number`. A lower block could
-                                // still precede a stale event.
-                                if height.number >= exex.last_reverted_number {
-                                    exex.reverted_blocks.clear();
-                                }
-                            }
-                        }
-                    }
+                    ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),
                 }
             }
         }
@@ -1287,12 +1232,12 @@ mod tests {
     async fn test_sends_commit_on_other_branch_below_finished_height() {
         let provider_factory = create_test_provider_factory();
         init_genesis(&provider_factory).unwrap();
-        let provider = BlockchainProvider::new(provider_factory.clone()).unwrap();
+        let provider = BlockchainProvider::new(provider_factory).unwrap();
 
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
 
-        let (exex_handle, event_tx, mut notifications) = ExExHandle::new(
+        let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
             Default::default(),
             provider,
@@ -1316,79 +1261,25 @@ mod tests {
         ];
         let b3 = block(3, B256::repeat_byte(0xb3), a2.hash);
         let b4 = block(4, B256::repeat_byte(0xb4), b3.hash());
-        let c4 = block(4, B256::repeat_byte(0xc4), b3.hash());
-        let c5 = block(5, B256::repeat_byte(0xc5), c4.hash());
-        let c5_num_hash = c5.num_hash();
 
-        let mut exex_manager = std::pin::pin!(ExExManager::new(
-            provider_factory,
-            vec![exex_handle],
-            10,
-            wal,
-            empty_finalized_header_stream(),
-        ));
-        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
-
-        // The ExEx finished A5.
-        event_tx.send(ExExEvent::FinishedHeight(a5)).unwrap();
-        let _ = exex_manager.as_mut().poll(&mut cx);
-        assert_eq!(exex_manager.exex_handles[0].finished_height, Some(a5));
-
-        // A3..A5 are reorged to B3..B4, then B4 is reorged to C4.
-        let reorgs = [
-            ExExNotification::ChainReorged {
-                old: Arc::new(Chain::new(a3_to_a5.clone(), Default::default(), Default::default())),
-                new: Arc::new(Chain::new(
-                    vec![b3.clone(), b4.clone()],
-                    Default::default(),
-                    Default::default(),
-                )),
-            },
-            ExExNotification::ChainReorged {
-                old: Arc::new(Chain::new(vec![b4.clone()], Default::default(), Default::default())),
-                new: Arc::new(Chain::new(vec![c4.clone()], Default::default(), Default::default())),
-            },
-        ];
-        for (id, reorg) in reorgs.into_iter().enumerate() {
-            assert!(exex_manager.exex_handles[0].send(&mut cx, &(id, reorg.clone())).is_ready());
-            assert_eq!(notifications.next().await.unwrap().unwrap(), reorg);
-        }
-        assert_eq!(exex_manager.exex_handles[0].finished_height, Some(a2));
-
-        // Stale events that the ExEx emitted before it received the reorgs: A2 below the fork is
-        // accepted, but does not stop A5 from being ignored.
-        event_tx.send(ExExEvent::FinishedHeight(a2)).unwrap();
-        event_tx.send(ExExEvent::FinishedHeight(a5)).unwrap();
-        let _ = exex_manager.as_mut().poll(&mut cx);
-        assert_eq!(exex_manager.exex_handles[0].finished_height, Some(a2));
-
-        // The ExEx processed the first reorg, but not the second one: B3 is accepted, but does not
-        // stop a stale event for B4 from being ignored.
-        event_tx.send(ExExEvent::FinishedHeight(b3.num_hash())).unwrap();
-        event_tx.send(ExExEvent::FinishedHeight(b4.num_hash())).unwrap();
-        let _ = exex_manager.as_mut().poll(&mut cx);
-        assert_eq!(exex_manager.exex_handles[0].finished_height, Some(b3.num_hash()));
-
-        // C5 is not on the branch of A5, so it must be delivered.
-        let commit = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![c5.clone()], Default::default(), Default::default())),
-        };
-        assert!(exex_manager.exex_handles[0].send(&mut cx, &(2, commit.clone())).is_ready());
-        let received = notifications.next().now_or_never().expect("C5 must be delivered");
-        assert_eq!(received.unwrap().unwrap(), commit);
-
-        // B3..C5 are reorged back to A3..A5, so an event for A5 is accepted, but because it may be
-        // stale, it does not stop a following stale event for C5 from being ignored.
+        // The ExEx finished A5, then A3..A5 are reorged to B3.
+        exex_handle.finished_height = Some(a5);
         let reorg = ExExNotification::ChainReorged {
-            old: Arc::new(Chain::new(vec![b3, c4, c5], Default::default(), Default::default())),
-            new: Arc::new(Chain::new(a3_to_a5, Default::default(), Default::default())),
+            old: Arc::new(Chain::new(a3_to_a5, Default::default(), Default::default())),
+            new: Arc::new(Chain::new(vec![b3], Default::default(), Default::default())),
         };
-        assert!(exex_manager.exex_handles[0].send(&mut cx, &(3, reorg.clone())).is_ready());
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+        assert!(exex_handle.send(&mut cx, &(0, reorg.clone())).is_ready());
         assert_eq!(notifications.next().await.unwrap().unwrap(), reorg);
-        event_tx.send(ExExEvent::FinishedHeight(a5)).unwrap();
-        event_tx.send(ExExEvent::FinishedHeight(c5_num_hash)).unwrap();
-        let _ = exex_manager.as_mut().poll(&mut cx);
-        assert_eq!(exex_manager.exex_handles[0].finished_height, Some(a5));
+        assert_eq!(exex_handle.finished_height, Some(a2));
+
+        // B4 is not on the branch of A5, so it must be delivered.
+        let commit = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![b4], Default::default(), Default::default())),
+        };
+        assert!(exex_handle.send(&mut cx, &(1, commit.clone())).is_ready());
+        let received = notifications.next().now_or_never().expect("B4 must be delivered");
+        assert_eq!(received.unwrap().unwrap(), commit);
     }
 
     #[tokio::test]
