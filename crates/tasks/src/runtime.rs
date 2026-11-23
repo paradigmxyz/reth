@@ -933,6 +933,9 @@ impl Runtime {
 
     /// Shuts down the owned Tokio runtime for all clones and joins its worker threads.
     ///
+    /// Only the call that takes ownership of the runtime waits for its threads. Concurrent or
+    /// subsequent calls on other clones return without waiting for shutdown to finish.
+    ///
     /// Async tasks are cancelled; running blocking tasks are allowed to finish. This waits
     /// without a timeout, so callers must arrange for every blocking task to terminate, even
     /// after async tasks have been cancelled. Externally supplied runtimes are left running.
@@ -1422,6 +1425,12 @@ mod tests {
             runtime.shutdown();
             stopped.send(()).unwrap();
         });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while retained.0.tokio_runtime.lock().unwrap().is_some() {
+            assert!(Instant::now() < deadline, "shutdown did not take ownership of the runtime");
+            thread::yield_now();
+        }
+        retained.clone().shutdown();
         let early = done.recv_timeout(Duration::from_millis(50));
         release.send(()).unwrap();
         if early.is_err() {
