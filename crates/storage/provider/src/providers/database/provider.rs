@@ -276,7 +276,9 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Commits unwind writes in MDBX -> `RocksDB` -> static-file order.
     ///
     /// This keeps MDBX as the first durable step so an interrupted unwind can be recovered by
-    /// truncating static files from checkpoints on the next startup.
+    /// truncating static files from checkpoints on the next startup. The MDBX commit is synced
+    /// even in non-durable sync modes, since a rollback after power loss would leave checkpoints
+    /// above headers and changesets that the static-file commit already truncated.
     ///
     /// This waits after the MDBX commit so readers holding older MDBX-visible views cannot overlap
     /// later cross-store unwind steps.
@@ -286,7 +288,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     fn commit_unwind(self) -> ProviderResult<()> {
         let storage_v2 = self.cached_storage_settings().storage_v2;
         let reader_txn_tracker = self.reader_txn_tracker.clone();
-        self.tx.commit()?;
+        self.tx.commit_durable()?;
 
         if let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
             reader_txn_tracker.wait_for_pre_commit_readers();

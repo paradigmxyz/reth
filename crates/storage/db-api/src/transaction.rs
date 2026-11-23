@@ -36,6 +36,17 @@ pub trait DbTx: Debug + Send {
     /// Commit for read only transaction will consume and free transaction and allows
     /// freeing of memory pages
     fn commit(self) -> Result<(), DatabaseError>;
+    /// Commits the transaction and returns only once the commit is durable on disk, regardless of
+    /// the database sync mode.
+    ///
+    /// Use this when later irreversible writes to other storage depend on the commit surviving a
+    /// crash. Defaults to [`DbTx::commit`] for backends whose commits are always durable.
+    fn commit_durable(self) -> Result<(), DatabaseError>
+    where
+        Self: Sized,
+    {
+        self.commit()
+    }
     /// Aborts transaction
     fn abort(self);
     /// Iterate over read only values in table.

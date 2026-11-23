@@ -1812,4 +1812,41 @@ mod tests {
         assert_eq!(sync_period(SyncMode::SafeNoSync), NON_DURABLE_SYNC_PERIOD);
         assert_eq!(sync_period(SyncMode::UtterlyNoSync), NON_DURABLE_SYNC_PERIOD);
     }
+
+    #[test]
+    fn commit_durable_syncs_non_durable_env() {
+        let tempdir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
+        let mut env = DatabaseEnv::open(
+            tempdir.path(),
+            DatabaseEnvKind::RW,
+            DatabaseArguments::test().with_sync_mode(Some(SyncMode::SafeNoSync)),
+        )
+        .expect(ERROR_DB_CREATION);
+        env.create_tables().expect(ERROR_TABLE_CREATION);
+        let unsynced_volume = || {
+            // SAFETY: `MDBX_envinfo` is a plain C struct of integers, valid when zeroed.
+            let mut info = unsafe { std::mem::zeroed::<ffi::MDBX_envinfo>() };
+            // SAFETY: the pointer is only used within the closure, while `env` is open.
+            let rc = env.with_raw_env_ptr(|env| unsafe {
+                ffi::mdbx_env_info_ex(
+                    env,
+                    std::ptr::null(),
+                    &raw mut info,
+                    size_of::<ffi::MDBX_envinfo>(),
+                )
+            });
+            assert_eq!(rc, ffi::MDBX_SUCCESS);
+            info.mi_unsync_volume
+        };
+
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
+        tx.put::<CanonicalHeaders>(1, B256::ZERO).expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+        assert_ne!(unsynced_volume(), 0);
+
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
+        tx.put::<CanonicalHeaders>(2, B256::ZERO).expect(ERROR_PUT);
+        tx.commit_durable().expect(ERROR_COMMIT);
+        assert_eq!(unsynced_volume(), 0);
+    }
 }

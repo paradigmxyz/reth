@@ -349,6 +349,18 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         })
     }
 
+    /// Forces a steady MDBX sync after the commit, because commits in [`SyncMode::SafeNoSync`]
+    /// and [`SyncMode::UtterlyNoSync`] are weak and discarded on the next boot after power loss.
+    ///
+    /// [`SyncMode::SafeNoSync`]: reth_libmdbx::SyncMode::SafeNoSync
+    /// [`SyncMode::UtterlyNoSync`]: reth_libmdbx::SyncMode::UtterlyNoSync
+    fn commit_durable(self) -> Result<(), DatabaseError> {
+        let env = self.inner.env().clone();
+        self.commit()?;
+        env.sync(true).map_err(|e| DatabaseError::Commit(e.into()))?;
+        Ok(())
+    }
+
     fn abort(self) {
         self.execute_with_close_transaction_metric(TransactionOutcome::Abort, |this| {
             (drop(this.inner), None)
