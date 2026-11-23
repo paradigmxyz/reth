@@ -40,7 +40,9 @@ pub trait DbTx: Debug + Send {
     /// the database sync mode.
     ///
     /// Use this when later irreversible writes to other storage depend on the commit surviving a
-    /// crash. Defaults to [`DbTx::commit`] for backends whose commits are always durable.
+    /// crash. The default only calls [`DbTx::commit`], which suffices for backends whose commits
+    /// are always durable; backends with weak commits must override it. An error returned after
+    /// the commit itself succeeded means the commit may be visible but not yet durable.
     fn commit_durable(self) -> Result<(), DatabaseError>
     where
         Self: Sized,

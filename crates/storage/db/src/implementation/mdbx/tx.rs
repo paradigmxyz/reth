@@ -349,12 +349,17 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         })
     }
 
-    /// Forces a steady MDBX sync after the commit, because commits in [`SyncMode::SafeNoSync`]
-    /// and [`SyncMode::UtterlyNoSync`] are weak and discarded on the next boot after power loss.
+    /// Forces a steady MDBX sync after committing a read-write transaction, because commits in
+    /// [`SyncMode::SafeNoSync`] and [`SyncMode::UtterlyNoSync`] are weak and discarded on the next
+    /// boot after power loss. Read-only transactions write nothing, so they only commit.
     ///
     /// [`SyncMode::SafeNoSync`]: reth_libmdbx::SyncMode::SafeNoSync
     /// [`SyncMode::UtterlyNoSync`]: reth_libmdbx::SyncMode::UtterlyNoSync
+    #[instrument(name = "Tx::commit_durable", level = "debug", target = "providers::db", skip_all)]
     fn commit_durable(self) -> Result<(), DatabaseError> {
+        if K::IS_READ_ONLY {
+            return self.commit()
+        }
         let env = self.inner.env().clone();
         self.commit()?;
         env.sync(true).map_err(|e| DatabaseError::Commit(e.into()))?;
