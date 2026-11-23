@@ -940,6 +940,9 @@ impl Runtime {
     /// without a timeout, so callers must arrange for every blocking task to terminate, even
     /// after async tasks have been cancelled. Externally supplied runtimes are left running.
     ///
+    /// Do not call this from one of the runtime's blocking tasks: shutdown waits for that task
+    /// to finish.
+    ///
     /// Panics if called from an async context while an owned runtime remains.
     pub fn shutdown(self) {
         let runtime = self.0.tokio_runtime.lock().unwrap().take();
