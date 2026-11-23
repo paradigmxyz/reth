@@ -1,13 +1,16 @@
 //! Tests for building forks and reorging with the test context.
 
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::ForkchoiceState;
+use alloy_rpc_types_engine::{
+    ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ForkchoiceState,
+};
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{node::Finality, E2ETestSetupExt};
 use reth_node_ethereum::EthereumNode;
 
 /// Tests that a fork built with `advance_fork` becomes the head, that `reorg_to` switches back to
-/// the previous chain, and that both explain why they can't reorg below the finalized block.
+/// the previous chain while the engine API still serves the reorged-out blocks by hash, and that
+/// both explain why they can't reorg below the finalized block.
 #[tokio::test]
 async fn can_build_forks_and_reorg() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
@@ -38,6 +41,17 @@ async fn can_build_forks_and_reorg() -> eyre::Result<()> {
 
     node.reorg_to(a2).await?;
     assert_eq!(node.current_forkchoice_state()?.head_block_hash, a2);
+
+    let engine = node.auth_server_handle().http_client();
+    let b3_body = ExecutionPayloadBodyV1::from(b[2].block().clone().into_block());
+    let bodies = engine
+        .request::<_, ExecutionPayloadBodiesV1>("engine_getPayloadBodiesByHashV1", (vec![b3],))
+        .await?;
+    assert_eq!(bodies, vec![Some(b3_body.clone())]);
+    let bodies = engine
+        .request::<_, ExecutionPayloadBodiesV2>("engine_getPayloadBodiesByHashV2", (vec![b3],))
+        .await?;
+    assert_eq!(bodies, vec![Some(b3_body.into())]);
 
     assert_eq!(
         node.reorg_to(a1).await.unwrap_err().to_string(),

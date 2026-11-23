@@ -37,7 +37,8 @@ use std::{
 
 /// Type that interacts with a snapshot view of the blockchain (storage and in-memory) at time of
 /// instantiation, EXCEPT for pending, safe and finalized block which might change while holding
-/// this provider.
+/// this provider, and the non-canonical blocks found with [`BlockSource::Any`], which are read from
+/// the live in-memory state.
 ///
 /// CAUTION: Avoid holding this provider for too long or the inner database transaction will
 /// time-out.
@@ -406,6 +407,15 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         fetch_from_db(&self.storage_provider)
     }
 
+    /// Returns the state of a block the engine tree holds in memory by hash, canonical or not,
+    /// such as a side chain block, a reorged-out block or the pending block.
+    ///
+    /// This reads the live in-memory state rather than this provider's snapshot, which is safe
+    /// because a hash always identifies the same block.
+    fn tree_block_state(&self, hash: B256) -> Option<Arc<BlockState<N::Primitives>>> {
+        self.canonical_in_memory_state.in_memory_state().state_by_hash(hash)
+    }
+
     /// Rejects database changesets at or below the pruning boundary. A checkpoint with no
     /// completed block means some genesis changesets may already have been removed.
     fn ensure_changesets_available(
@@ -638,6 +648,12 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
             return Ok(Some(block))
         }
 
+        if source.is_any() &&
+            let Some(block_state) = self.tree_block_state(hash)
+        {
+            return Ok(Some(block_state.block_ref().recovered_block().clone_block()))
+        }
+
         if source.is_pending() {
             return Ok(self
                 .canonical_in_memory_state
@@ -668,6 +684,14 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
             )?
         {
             return Ok(Some(block))
+        }
+
+        if source.is_any() &&
+            let Some(block_state) = self.tree_block_state(hash)
+        {
+            return Ok(Some(SealedOrRecoveredBlock::recovered_arc(Arc::clone(
+                &block_state.block_ref().recovered_block,
+            ))))
         }
 
         if source.is_pending() &&
@@ -2206,6 +2230,26 @@ mod tests {
             .provider()?
             .account_changesets_range((Bound::Excluded(last), Bound::Unbounded))?
             .is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn find_block_by_hash_reads_tree_blocks_of_the_supplied_state() -> eyre::Result<()> {
+        let factory = create_test_provider_factory();
+        let mut canonical_in_memory_state_writer =
+            test_canonical_in_memory_state_writer(InMemoryState::default());
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::ZERO);
+        let recovered = Arc::clone(&block.recovered_block);
+        canonical_in_memory_state_writer.insert_executed(block);
+
+        let provider = ConsistentProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        )?;
+        assert_eq!(
+            provider.find_block_by_hash(recovered.hash(), BlockSource::Any)?,
+            Some(recovered.clone_block())
+        );
         Ok(())
     }
 }
