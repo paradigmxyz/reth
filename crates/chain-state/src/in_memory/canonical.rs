@@ -48,19 +48,35 @@ pub(crate) struct InMemoryStateMetrics {
 /// executed blocks that are not canonical.
 ///
 /// A node has one in-memory state. Clones are handles to the same blocks, pending block and
-/// metrics, and the default value is an empty state of its own.
+/// metrics. The blocks only change through the [`InMemoryStateWriter`] that [`Self::new`] returns
+/// with the state, and a state from [`Self::read_only`] never has any.
 ///
 /// # Locking behavior on state updates
 ///
 /// Updates change the blocks, the numbers and the pending block under one write lock. This
 /// prevents readers from observing partially updated state where they are out of sync with each
 /// other, or a block that is both canonical and not canonical, or neither.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct InMemoryState<N: NodePrimitives = EthPrimitives> {
     inner: Arc<InMemoryStateInner<N>>,
 }
 
 impl<N: NodePrimitives> InMemoryState<N> {
+    /// Creates an empty in-memory state and the only writer of its blocks.
+    #[must_use]
+    pub fn new() -> (Self, InMemoryStateWriter<N>) {
+        let in_memory_state = Self { inner: Arc::default() };
+        (in_memory_state.clone(), InMemoryStateWriter { in_memory_state })
+    }
+
+    /// Creates an in-memory state that has no writer and therefore never tracks a block.
+    ///
+    /// This is the in-memory state of storage that is only read from disk.
+    #[must_use]
+    pub fn read_only() -> Self {
+        Self { inner: Arc::default() }
+    }
+
     /// Returns the state of the tracked block with the given hash, canonical or not.
     pub fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
         self.inner.blocks.read().get(&hash).cloned()
@@ -110,31 +126,45 @@ impl<N: NodePrimitives> InMemoryState<N> {
     fn block_count(&self) -> usize {
         self.inner.blocks.read().canonical().len()
     }
+}
 
+/// Write access to the blocks of an [`InMemoryState`].
+///
+/// At most one writer exists per in-memory state: the one [`InMemoryState::new`] returned with
+/// it. It cannot be cloned. The blocks are changed by the [`CanonicalInMemoryStateWriter`] that
+/// is created from it.
+#[derive(Debug)]
+pub struct InMemoryStateWriter<N: NodePrimitives = EthPrimitives> {
+    in_memory_state: InMemoryState<N>,
+}
+
+impl<N: NodePrimitives> InMemoryStateWriter<N> {
     /// Applies `f` to the blocks under the write lock, bumps the removal generation if `f`
     /// removed blocks, and updates the metrics from the stats read under the same lock.
     ///
     /// Returns what `f` returns, so that the blocks it removed are dropped after the lock is
     /// released.
-    fn update<R>(&self, f: impl FnOnce(&mut InMemoryBlocks<N>) -> R) -> R {
+    #[expect(clippy::needless_pass_by_ref_mut, reason = "writing requires the unique writer")]
+    fn update<R>(&mut self, f: impl FnOnce(&mut InMemoryBlocks<N>) -> R) -> R {
+        let inner = &self.in_memory_state.inner;
         let (result, InMemoryBlocksStats { count, earliest, latest }) = {
-            let mut blocks = self.inner.blocks.write();
+            let mut blocks = inner.blocks.write();
             let removed_count = blocks.removed_count();
             let result = f(&mut blocks);
             #[cfg(debug_assertions)]
             blocks.assert_invariants();
             if blocks.removed_count() != removed_count {
-                self.inner.removal_generation.fetch_add(1, Ordering::Relaxed);
+                inner.removal_generation.fetch_add(1, Ordering::Relaxed);
             }
             (result, blocks.stats())
         };
         if let Some(earliest_block_number) = earliest {
-            self.inner.metrics.earliest_block.set(earliest_block_number as f64);
+            inner.metrics.earliest_block.set(earliest_block_number as f64);
         }
         if let Some(latest_block_number) = latest {
-            self.inner.metrics.latest_block.set(latest_block_number as f64);
+            inner.metrics.latest_block.set(latest_block_number as f64);
         }
-        self.inner.metrics.num_blocks.set(count as f64);
+        inner.metrics.num_blocks.set(count as f64);
         result
     }
 }
@@ -176,15 +206,27 @@ struct CanonicalInMemoryStateInner<N: NodePrimitives> {
 /// all canonical blocks not on disk yet and keeps track of the block range that
 /// is in memory.
 ///
-/// It is created with its [`CanonicalInMemoryStateWriter`]. This type and its clones only read:
-/// the chain info and the notifications are changed through that writer, and the blocks through
-/// it or through another writer over the same [`InMemoryState`].
+/// It is created with its [`CanonicalInMemoryStateWriter`], or without a writer by
+/// [`Self::read_only`]. This type and its clones only read: the blocks, the chain info and the
+/// notifications are changed through that writer.
 #[derive(Debug, Clone)]
 pub struct CanonicalInMemoryState<N: NodePrimitives = EthPrimitives> {
     inner: Arc<CanonicalInMemoryStateInner<N>>,
 }
 
 impl<N: NodePrimitives> CanonicalInMemoryState<N> {
+    /// Creates a canonical state over the blocks of `in_memory_state` that has no writer, with
+    /// the canonical head and the safe and finalized blocks of `chain_info_headers`.
+    ///
+    /// Nothing can change its chain info or send its notifications. Its blocks are those of
+    /// `in_memory_state`, and change with them.
+    pub fn read_only(
+        chain_info_headers: ChainInfoHeaders<N::BlockHeader>,
+        in_memory_state: InMemoryState<N>,
+    ) -> Self {
+        Self::new(chain_info_headers, in_memory_state)
+    }
+
     /// Creates a canonical state over the blocks of `in_memory_state`, with the canonical head
     /// and the safe and finalized blocks of `chain_info_headers`.
     fn new(
@@ -389,29 +431,32 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 /// written through the writer is read through the state and every clone of it.
 ///
 /// A writer cannot be cloned and its methods take `&mut self`, so only its owner changes the
-/// state through it. Nothing else changes the chain info of that state or sends its
-/// notifications. Its blocks are also changed by every other writer over the same
-/// [`InMemoryState`].
+/// state. It holds the only [`InMemoryStateWriter`] of the [`InMemoryState`] the state was
+/// created over, so nothing else changes its blocks, its chain info or sends its notifications.
 #[derive(Debug)]
 pub struct CanonicalInMemoryStateWriter<N: NodePrimitives = EthPrimitives> {
     canonical_in_memory_state: CanonicalInMemoryState<N>,
+    in_memory_state_writer: InMemoryStateWriter<N>,
 }
 
 impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
-    /// Creates a canonical state over the blocks of `in_memory_state`, with the canonical head
-    /// and the safe and finalized blocks of `chain_info_headers`, and returns its writer.
+    /// Creates a canonical state over the blocks `in_memory_state_writer` writes, with the
+    /// canonical head and the safe and finalized blocks of `chain_info_headers`, and returns its
+    /// writer.
     ///
-    /// The blocks are shared with every other handle of `in_memory_state`. The chain info and the
-    /// notifications belong to the created state and its clones.
+    /// The blocks are shared with every handle of the [`InMemoryState`] of
+    /// `in_memory_state_writer`. The chain info and the notifications belong to the created state
+    /// and its clones.
     pub fn new(
         chain_info_headers: ChainInfoHeaders<N::BlockHeader>,
-        in_memory_state: InMemoryState<N>,
+        in_memory_state_writer: InMemoryStateWriter<N>,
     ) -> Self {
         Self {
             canonical_in_memory_state: CanonicalInMemoryState::new(
                 chain_info_headers,
-                in_memory_state,
+                in_memory_state_writer.in_memory_state.clone(),
             ),
+            in_memory_state_writer,
         }
     }
 
@@ -425,7 +470,7 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
     /// The blocks are removed for every handle of the [`InMemoryState`] this state was created
     /// over. The chain info is unchanged and no notification is sent.
     pub fn clear_state(&mut self) {
-        self.inner().in_memory_state.update(InMemoryBlocks::clear);
+        self.in_memory_state_writer.update(InMemoryBlocks::clear);
     }
 
     /// Tracks an executed block that is not canonical, unless it is already tracked.
@@ -434,7 +479,7 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
     /// canonical lookups until [`Self::update_chain`] makes it canonical. Does not change the
     /// pending block.
     pub fn insert_executed(&mut self, block: ExecutedBlock<N>) {
-        self.inner().in_memory_state.update(|blocks| blocks.insert_executed(block));
+        self.in_memory_state_writer.update(|blocks| blocks.insert_executed(block));
     }
 
     /// Updates the pending block with the given block, and tracks it like
@@ -442,7 +487,7 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
     ///
     /// Note: This assumes that the parent block of the pending block is canonical.
     pub fn set_pending_block(&mut self, pending: ExecutedBlock<N>) {
-        self.inner().in_memory_state.update(|blocks| blocks.insert_pending(pending));
+        self.in_memory_state_writer.update(|blocks| blocks.insert_pending(pending));
     }
 
     /// Update the in memory state with the given chain update.
@@ -451,7 +496,7 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
     /// The blocks a reorg replaced stay tracked as executed blocks that are not canonical, and so
     /// does the pending block, which is no longer pending.
     pub fn update_chain(&mut self, new_chain: NewCanonicalChain<N>) {
-        self.inner().in_memory_state.update(|blocks| blocks.update_chain(new_chain));
+        self.in_memory_state_writer.update(|blocks| blocks.update_chain(new_chain));
     }
 
     /// Applies a backfill sync that finished at `backfill_block` without unwinding, in one
@@ -472,7 +517,7 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
         last_persisted_hash: B256,
         backfill_block: BlockNumHash,
     ) {
-        self.inner().in_memory_state.update(|blocks| {
+        self.in_memory_state_writer.update(|blocks| {
             let removed = if blocks
                 .canonical()
                 .hash_by_number(backfill_block.number)
@@ -510,9 +555,8 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
         state_trie_persisted_block: BlockNumHash,
         finalized: Option<BlockNumHash>,
     ) {
-        let inner = self.inner();
-        inner.chain_info_tracker.set_persisted(last_persisted_block);
-        inner.in_memory_state.update(|blocks| {
+        self.inner().chain_info_tracker.set_persisted(last_persisted_block);
+        self.in_memory_state_writer.update(|blocks| {
             let removed = blocks.remove_canonical_until(
                 last_persisted_block.hash,
                 state_trie_persisted_block.number.min(last_persisted_block.number),
@@ -581,7 +625,7 @@ mod tests {
         let block = TestBlockBuilder::eth().get_executed_block_with_number(number, B256::random());
         let state = Arc::new(BlockState::new(block.clone()));
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         canonical_in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: vec![block] });
         let in_memory_state =
@@ -597,7 +641,7 @@ mod tests {
         let block = TestBlockBuilder::eth().get_executed_block_with_number(number, B256::random());
         let state = Arc::new(BlockState::new(block.clone()));
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         canonical_in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: vec![block] });
         let in_memory_state =
@@ -615,7 +659,7 @@ mod tests {
             test_block_builder.get_executed_block_with_number(2, block1.recovered_block().hash());
         let hash2 = block2.recovered_block().hash();
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         canonical_in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: vec![block1, block2] });
         let in_memory_state =
@@ -633,7 +677,7 @@ mod tests {
             TestBlockBuilder::eth().get_executed_block_with_number(pending_number, B256::random());
         let pending_hash = pending_block.recovered_block().hash();
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         canonical_in_memory_state_writer.set_pending_block(pending_block);
         let in_memory_state =
             &canonical_in_memory_state_writer.canonical_in_memory_state().inner.in_memory_state;
@@ -647,7 +691,7 @@ mod tests {
 
     #[reth_concurrency::test]
     fn test_in_memory_state_impl_no_pending_state() {
-        let in_memory_state: InMemoryState = InMemoryState::default();
+        let in_memory_state: InMemoryState = InMemoryState::read_only();
 
         assert_eq!(in_memory_state.pending_state(), None);
     }
@@ -655,7 +699,7 @@ mod tests {
     #[reth_concurrency::test]
     fn test_in_memory_state_chain_update() {
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         let state = canonical_in_memory_state_writer.canonical_in_memory_state().clone();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let block1 = test_block_builder.get_executed_block_with_number(0, B256::random());
@@ -688,7 +732,7 @@ mod tests {
     #[reth_concurrency::test]
     fn test_in_memory_state_set_pending_block() {
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         let state = canonical_in_memory_state_writer.canonical_in_memory_state().clone();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
 
@@ -746,7 +790,7 @@ mod tests {
     #[reth_concurrency::test]
     fn test_in_memory_state_executed_blocks_are_not_canonical() {
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         let state = canonical_in_memory_state_writer.canonical_in_memory_state().clone();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let block1 = test_block_builder.get_executed_block_with_number(1, B256::random());
@@ -790,7 +834,7 @@ mod tests {
     #[reth_concurrency::test]
     fn test_canonical_in_memory_state_canonical_chain_empty() {
         let canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         assert!(canonical_in_memory_state_writer
             .canonical_in_memory_state()
             .canonical_chain()
@@ -803,7 +847,7 @@ mod tests {
         let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::random());
         let hash = block.recovered_block().hash();
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         canonical_in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: vec![block] });
         let state = canonical_in_memory_state_writer.canonical_in_memory_state().clone();
@@ -819,7 +863,7 @@ mod tests {
         let mut parent_hash = B256::random();
         let mut block_builder = TestBlockBuilder::eth();
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         let state = canonical_in_memory_state_writer.canonical_in_memory_state().clone();
 
         for i in 1..=3 {
@@ -844,7 +888,7 @@ mod tests {
         let mut parent_hash = B256::random();
         let mut block_builder = TestBlockBuilder::<EthPrimitives>::eth();
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         let state = canonical_in_memory_state_writer.canonical_in_memory_state().clone();
 
         for i in 1..=2 {
@@ -867,7 +911,7 @@ mod tests {
     #[reth_concurrency::test]
     fn test_on_blocks_persisted_trims_canonical_chain() {
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         let state = canonical_in_memory_state_writer.canonical_in_memory_state().clone();
         let blocks = TestBlockBuilder::eth().get_executed_blocks(1..6).collect::<Vec<_>>();
         let num_hash = |number: usize| blocks[number - 1].recovered_block().num_hash();
@@ -914,7 +958,7 @@ mod tests {
     #[test]
     fn test_in_memory_state_removal_generation() {
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         let state = canonical_in_memory_state_writer.canonical_in_memory_state().clone();
         let in_memory_state = &state.inner.in_memory_state;
         let mut block_builder = TestBlockBuilder::eth();
@@ -937,25 +981,33 @@ mod tests {
         assert_eq!(state.state_by_hash(fork_hash), None);
 
         // Nothing is removed for a block that is not on the canonical chain.
-        in_memory_state.update(|blocks| blocks.remove_canonical_until(fork_hash, 3));
+        canonical_in_memory_state_writer
+            .in_memory_state_writer
+            .update(|blocks| blocks.remove_canonical_until(fork_hash, 3));
         assert_eq!(in_memory_state.removal_generation(), generation);
         assert_eq!(state.canonical_chain().count(), 3);
 
         // Canonical blocks are removed for a canonical block.
-        in_memory_state.update(|blocks| blocks.remove_canonical_until(hash(2), 1));
+        canonical_in_memory_state_writer
+            .in_memory_state_writer
+            .update(|blocks| blocks.remove_canonical_until(hash(2), 1));
         let after_canonical_block = in_memory_state.removal_generation();
         assert!(after_canonical_block > generation);
         assert_eq!(in_memory_state.state_by_hash(hash(1)), None);
 
         // They are also removed for the block the canonical chain builds on.
-        in_memory_state.update(|blocks| blocks.remove_canonical_until(hash(1), 2));
+        canonical_in_memory_state_writer
+            .in_memory_state_writer
+            .update(|blocks| blocks.remove_canonical_until(hash(1), 2));
         let after_chain_base = in_memory_state.removal_generation();
         assert!(after_chain_base > after_canonical_block);
         assert_eq!(state.canonical_chain().map(|state| state.number()).collect::<Vec<_>>(), [3]);
 
         // Removing blocks that are not canonical counts as well.
         let finalized = blocks[2].recovered_block().num_hash();
-        in_memory_state.update(|blocks| blocks.prune_conflicting_with_finalized(finalized));
+        canonical_in_memory_state_writer
+            .in_memory_state_writer
+            .update(|blocks| blocks.prune_conflicting_with_finalized(finalized));
         let after_fork = in_memory_state.removal_generation();
         assert!(after_fork > after_chain_base);
         assert_eq!(in_memory_state.state_by_hash(fork_hash), None);
@@ -968,7 +1020,7 @@ mod tests {
     #[test]
     fn test_on_backfill_finished_is_one_update() {
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         let state = canonical_in_memory_state_writer.canonical_in_memory_state().clone();
         let in_memory_state = &state.inner.in_memory_state;
         let mut block_builder = TestBlockBuilder::eth();
@@ -996,7 +1048,7 @@ mod tests {
     #[test]
     fn test_on_backfill_finished_at_conflicting_block() {
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         let state = canonical_in_memory_state_writer.canonical_in_memory_state().clone();
         let in_memory_state = &state.inner.in_memory_state;
         let mut block_builder = TestBlockBuilder::eth();
@@ -1029,7 +1081,7 @@ mod tests {
     #[test]
     fn test_on_blocks_persisted() {
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         let state = canonical_in_memory_state_writer.canonical_in_memory_state().clone();
         let in_memory_state = &state.inner.in_memory_state;
         let mut block_builder = TestBlockBuilder::eth();
@@ -1092,7 +1144,7 @@ mod tests {
     #[test]
     fn test_on_blocks_persisted_after_disk_removal() {
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         let state = canonical_in_memory_state_writer.canonical_in_memory_state().clone();
         let in_memory_state = &state.inner.in_memory_state;
         let mut block_builder = TestBlockBuilder::eth();
@@ -1135,7 +1187,7 @@ mod tests {
     #[test]
     fn test_in_memory_state_contains_and_block_counts() {
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         let state = canonical_in_memory_state_writer.canonical_in_memory_state().clone();
         let in_memory_state = &state.inner.in_memory_state;
         let mut block_builder = TestBlockBuilder::eth();
@@ -1159,7 +1211,7 @@ mod tests {
     #[test]
     fn test_writer_changes_blocks_of_canonical_state() {
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         let state = canonical_in_memory_state_writer.canonical_in_memory_state().clone();
         let mut block_builder = TestBlockBuilder::eth();
         let blocks = block_builder.get_executed_blocks(1..4).collect::<Vec<_>>();

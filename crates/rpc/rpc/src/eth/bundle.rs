@@ -433,7 +433,11 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::RecoveredBlock;
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+        providers::BlockchainProvider,
+        test_utils::{
+            create_test_provider_factory_with_chain_spec,
+            create_test_provider_factory_with_in_memory_state_writer,
+        },
     };
     use reth_rpc_eth_api::helpers::SpawnBlocking;
     use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
@@ -470,10 +474,11 @@ mod tests {
             )]);
         let chain_spec =
             Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
-        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let (factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(chain_spec);
         init_genesis(&factory).unwrap();
         let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(factory).unwrap();
+            BlockchainProvider::new_with_writer(factory, in_memory_state_writer).unwrap();
 
         let eth_api = EthApiBuilder::new(
             provider.clone(),

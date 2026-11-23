@@ -573,13 +573,17 @@ mod tests {
     use alloy_eips::BlockNumHash;
     use eyre::OptionExt;
     use futures::StreamExt;
+    use reth_chainspec::MAINNET;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Block;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::Block as _;
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockWriter,
-        Chain, DBProvider, DatabaseProviderFactory,
+        providers::BlockchainProvider,
+        test_utils::{
+            create_test_provider_factory, create_test_provider_factory_with_in_memory_state_writer,
+        },
+        BlockWriter, Chain, DBProvider, DatabaseProviderFactory,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use std::collections::BTreeMap;
@@ -668,13 +672,14 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
 
-        let provider_factory = create_test_provider_factory();
+        let (provider_factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let genesis_hash = init_genesis(&provider_factory)?;
         let genesis_block = provider_factory
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
         let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(provider_factory.clone())?;
+            BlockchainProvider::new_with_writer(provider_factory.clone(), in_memory_state_writer)?;
 
         let exex_head =
             ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };

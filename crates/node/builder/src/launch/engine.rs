@@ -113,10 +113,11 @@ impl<B> EngineNodeLauncher<B> {
         // earlier stay no-ops, and derived metrics cache their first instance for the process.
         install_prometheus_recorder();
 
-        // Create the overlay manager that will be shared across the provider and engine, with the
-        // in-memory state of this node.
-        let overlay_manager = OverlayManager::<N::Primitives>::with_worker_pool(
-            InMemoryState::default(),
+        // Create the in-memory state of this node with the writer of its blocks, and the overlay
+        // manager that will be shared across the provider and engine.
+        let (in_memory_state, in_memory_state_writer) = InMemoryState::<N::Primitives>::new();
+        let overlay_manager = OverlayManager::with_worker_pool(
+            in_memory_state,
             ctx.task_executor.state_trie_overlay_worker_pool(),
         );
         let disabled_stages = N::disabled_stages();
@@ -161,7 +162,10 @@ impl<B> EngineNodeLauncher<B> {
         // Create the blockchain provider with the writer of its canonical in-memory state. The
         // provider and its clones read that state, and the engine changes it through the writer.
         let (blockchain_db, canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(ctx.provider_factory().clone())?;
+            BlockchainProvider::new_with_writer(
+                ctx.provider_factory().clone(),
+                in_memory_state_writer,
+            )?;
 
         let ctx = ctx
             // passing FullNodeTypes as type parameter here so that we can build

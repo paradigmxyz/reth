@@ -3494,6 +3494,7 @@ dependencies = [
  "futures",
  "jsonrpsee",
  "rayon",
+ "reth-chain-state",
  "reth-chainspec",
  "reth-consensus",
  "reth-db",
