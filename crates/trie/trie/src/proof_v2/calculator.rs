@@ -18,10 +18,13 @@ use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
-    ProofV2Target, RlpNode, TrieNodeV2,
+    keccak_batch, prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles,
+    ProofTrieNodeV2, ProofV2Target, RlpNode, TrieNodeV2,
 };
-use std::{cmp::Ordering, sync::Arc};
+use std::{
+    cmp::{Ordering, Reverse},
+    sync::Arc,
+};
 use tracing::{error, instrument, trace};
 
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
@@ -556,21 +559,60 @@ where
         );
 
         // Collect children into RlpNode Vec. Children are in lexicographic order.
+        //
+        // Every child is encoded into `rlp_encode_buf` first, so that the children whose encodings
+        // need hashing are hashed together rather than one by one.
         rlp_nodes_buf.reserve(num_children);
-        for (nibble, child) in branch
+        self.rlp_encode_buf.clear();
+        let mut encoded_ends = [0usize; 16];
+        let mut to_hash = [0usize; 16];
+        let mut num_to_hash = 0;
+        for (index, (nibble, child)) in branch
             .state_mask
             .iter()
             .zip(self.child_stack.drain(self.child_stack.len() - num_children..))
+            .enumerate()
         {
             let (hash_mask_bit, tree_mask_bit) = child.mask_bits();
             masks.set_child_bits(nibble, hash_mask_bit, tree_mask_bit);
 
-            self.rlp_encode_buf.clear();
-            let (child_rlp_node, freed_buf) = child.into_rlp(&mut self.rlp_encode_buf)?;
+            let start = self.rlp_encode_buf.len();
+            let (child_rlp_node, freed_buf) = child.append_rlp(&mut self.rlp_encode_buf)?;
             if let Some(buf) = freed_buf {
                 self.rlp_nodes_bufs.push(buf);
             }
+            encoded_ends[index] = self.rlp_encode_buf.len();
+            // Encodings shorter than a hash are inlined into the parent as they are.
+            let child_rlp_node = child_rlp_node.unwrap_or_else(|| {
+                let encoded = &self.rlp_encode_buf[start..];
+                if encoded.len() < B256::len_bytes() {
+                    return RlpNode::from_raw(encoded).expect("shorter than a hash")
+                }
+                // Placeholder until the batch below hashes it.
+                to_hash[num_to_hash] = index;
+                num_to_hash += 1;
+                RlpNode::default()
+            });
             rlp_nodes_buf.push(child_rlp_node);
+        }
+
+        // Batch messages of similar length, since every lane of a batch runs as many
+        // permutations as its longest message.
+        let encoded_len = |index: usize| {
+            encoded_ends[index] - if index == 0 { 0 } else { encoded_ends[index - 1] }
+        };
+        to_hash[..num_to_hash].sort_unstable_by_key(|&index| Reverse(encoded_len(index)));
+        for chunk in to_hash[..num_to_hash].chunks(keccak_batch::LANES) {
+            let mut inputs = [&[][..]; keccak_batch::LANES];
+            for (input, &index) in inputs.iter_mut().zip(chunk) {
+                let start = if index == 0 { 0 } else { encoded_ends[index - 1] };
+                *input = &self.rlp_encode_buf[start..encoded_ends[index]];
+            }
+            let mut hashes = [B256::ZERO; keccak_batch::LANES];
+            keccak_batch::keccak256_batch(&inputs[..chunk.len()], &mut hashes[..chunk.len()]);
+            for (&index, hash) in chunk.iter().zip(&hashes) {
+                rlp_nodes_buf[index] = RlpNode::word_rlp(hash);
+            }
         }
 
         debug_assert_eq!(

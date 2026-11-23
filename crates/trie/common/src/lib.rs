@@ -32,6 +32,8 @@ pub use input::{TrieInput, TrieInputSorted};
 /// The implementation of hash builder.
 pub mod hash_builder;
 
+pub mod keccak_batch;
+
 /// Constants related to the trie computation.
 mod constants;
 pub use constants::*;
