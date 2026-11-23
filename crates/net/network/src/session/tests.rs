@@ -14,7 +14,7 @@ use reth_eth_wire::{
     handshake::EthHandshake,
     multiplex::ProtocolConnection,
     protocol::{Protocol, ProtocolIngressLimits},
-    Capability, EthNetworkPrimitives, StatusBuilder, UnauthedEthStream,
+    Capability, EthNetworkPrimitives, StatusBuilder, UnauthedEthStream, MAX_PAYLOAD_SIZE,
 };
 use reth_eth_wire_types::message::MAX_MESSAGE_SIZE;
 use reth_ethereum_forks::EthereumHardfork;
@@ -159,6 +159,7 @@ async fn incoming_hello_with_spoofed_identity_is_rejected() {
         start_pending_incoming_session::<EthNetworkPrimitives>(
             Arc::new(EthHandshake::default()),
             MAX_MESSAGE_SIZE,
+            MAX_PAYLOAD_SIZE,
             disconnect_rx,
             SessionId(0),
             incoming,
@@ -216,6 +217,7 @@ async fn outgoing_hello_with_spoofed_identity_is_rejected() {
         start_pending_outbound_session::<EthNetworkPrimitives>(
             Arc::new(EthHandshake::default()),
             MAX_MESSAGE_SIZE,
+            MAX_PAYLOAD_SIZE,
             disconnect_rx,
             events_tx,
             SessionId(0),
@@ -257,6 +259,7 @@ async fn matching_identity_establishes_session() {
         start_pending_incoming_session::<EthNetworkPrimitives>(
             Arc::new(EthHandshake::default()),
             MAX_MESSAGE_SIZE,
+            MAX_PAYLOAD_SIZE,
             disconnect_rx,
             SessionId(0),
             incoming,
@@ -339,6 +342,7 @@ async fn extra_protocol_waits_for_status_handshake() {
             start_pending_incoming_session::<EthNetworkPrimitives>(
                 Arc::new(EthHandshake::default()),
                 MAX_MESSAGE_SIZE,
+                MAX_PAYLOAD_SIZE,
                 disconnect_rx,
                 SessionId(0),
                 incoming,
@@ -425,6 +429,7 @@ fn session_manager() -> SessionManager<EthNetworkPrimitives> {
         RlpxSubProtocols::default(),
         Arc::new(EthHandshake::default()),
         MAX_MESSAGE_SIZE,
+        MAX_PAYLOAD_SIZE,
         false,
     )
 }
@@ -510,6 +515,7 @@ async fn cancellation_interrupts_stalled_ecies() {
     let mut auth = Box::pin(authenticate::<EthNetworkPrimitives>(
         Arc::new(EthHandshake::default()),
         MAX_MESSAGE_SIZE,
+        MAX_PAYLOAD_SIZE,
         disconnect_rx,
         events,
         stream,

@@ -131,6 +131,8 @@ pub struct SessionManager<N: NetworkPrimitives> {
     handshake: Arc<dyn EthRlpxHandshake>,
     /// Maximum allowed ETH message size for post-handshake ETH/Snap streams.
     eth_max_message_size: usize,
+    /// Maximum uncompressed size of a message payload on the `p2p` stream.
+    p2p_max_payload_size: usize,
     /// Shared local range information that gets propagated to active sessions.
     /// This represents the range of blocks that this node can serve to other peers.
     local_range_info: BlockRangeInfo,
@@ -154,6 +156,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         extra_protocols: RlpxSubProtocols,
         handshake: Arc<dyn EthRlpxHandshake>,
         eth_max_message_size: usize,
+        p2p_max_payload_size: usize,
         reject_block_announcements: bool,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
@@ -191,6 +194,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             metrics: Default::default(),
             handshake,
             eth_max_message_size,
+            p2p_max_payload_size,
             local_range_info,
             reject_block_announcements,
         }
@@ -323,6 +327,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             start_pending_incoming_session(
                 self.handshake.clone(),
                 self.eth_max_message_size,
+                self.p2p_max_payload_size,
                 disconnect_rx,
                 session_id,
                 stream,
@@ -377,6 +382,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             start_pending_outbound_session(
                 self.handshake.clone(),
                 self.eth_max_message_size,
+                self.p2p_max_payload_size,
                 disconnect_rx,
                 pending_events,
                 session_id,
@@ -1032,6 +1038,7 @@ pub(crate) async fn pending_session_with_timeout<F, N: NetworkPrimitives>(
 pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
     eth_max_message_size: usize,
+    p2p_max_payload_size: usize,
     disconnect_rx: oneshot::Receiver<()>,
     session_id: SessionId,
     stream: TcpStream,
@@ -1046,6 +1053,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
     authenticate(
         handshake,
         eth_max_message_size,
+        p2p_max_payload_size,
         disconnect_rx,
         events,
         stream,
@@ -1067,6 +1075,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
 async fn start_pending_outbound_session<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
     eth_max_message_size: usize,
+    p2p_max_payload_size: usize,
     mut disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent<N>>,
     session_id: SessionId,
@@ -1112,6 +1121,7 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
     authenticate(
         handshake,
         eth_max_message_size,
+        p2p_max_payload_size,
         disconnect_rx,
         events,
         stream,
@@ -1132,6 +1142,7 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
 async fn authenticate<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
     eth_max_message_size: usize,
+    p2p_max_payload_size: usize,
     disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent<N>>,
     stream: TcpStream,
@@ -1158,7 +1169,7 @@ async fn authenticate<N: NetworkPrimitives>(
             }
         };
 
-        let unauthed = UnauthedP2PStream::new(stream);
+        let unauthed = UnauthedP2PStream::new(stream).with_max_payload_size(p2p_max_payload_size);
 
         authenticate_stream(
             handshake,

@@ -61,11 +61,14 @@ serde = { workspace = true, features = ["derive"] }
 url = { workspace = true, features = ["serde"] }
 thiserror.workspace = true
 derive_more.workspace = true
+fixed-cache.workspace = true
 rand.workspace = true
 tracing.workspace = true
 itertools.workspace = true
+parking_lot.workspace = true
 
 [dev-dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-db-models.workspace = true
 reth-storage-api = { workspace = true, features = ["std"] }
 serde_json.workspace = true

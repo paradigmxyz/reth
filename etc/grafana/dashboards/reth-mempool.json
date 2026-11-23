@@ -1253,7 +1253,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Number of transactions about to be imported into the pool.",
+      "description": "Number and encoded byte size, including blob sidecars, of transactions about to be imported into the pool.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1307,7 +1307,24 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Bytes Pending Import"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -1340,6 +1357,18 @@
           "legendFormat": "Transactions Pending Import",
           "range": true,
           "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_network_pending_pool_imports_bytes{$instance_label=\"$instance\"}",
+          "hide": false,
+          "legendFormat": "Bytes Pending Import",
+          "range": true,
+          "refId": "D"
         }
       ],
       "title": "Pending Pool Imports",

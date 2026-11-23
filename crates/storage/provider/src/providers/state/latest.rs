@@ -213,7 +213,9 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
     ) -> ProviderResult<AccountProof> {
         reth_trie_db::with_adapter!(self.0, |A| {
             let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
-            proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
+            proof
+                .overlay_account_proof(TrieInputSorted::from_unsorted(input), address, slots)
+                .map_err(ProviderError::from)
         })
     }
 
@@ -224,7 +226,9 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
     ) -> ProviderResult<MultiProof> {
         reth_trie_db::with_adapter!(self.0, |A| {
             let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
-            proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
+            proof
+                .overlay_multiproof(TrieInputSorted::from_unsorted(input), targets)
+                .map_err(ProviderError::from)
         })
     }
 

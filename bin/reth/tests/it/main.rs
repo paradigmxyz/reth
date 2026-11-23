@@ -6,6 +6,7 @@ use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_eth::TransactionRequest;
 use std::{fs, path::Path, process::Command};
 
+mod db;
 mod download;
 
 const RETH: &str = env!("CARGO_BIN_EXE_reth");

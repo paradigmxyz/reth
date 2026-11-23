@@ -2034,7 +2034,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
         on_chain_balance: U256,
         ancestor: Option<TransactionId>,
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
-        if let Some(ancestor) = ancestor {
+        // the cost of all preceding transactions of the sender
+        let mut cumulative_cost = if let Some(ancestor) = ancestor {
             let Some(ancestor_tx) = self.txs.get(&ancestor) else {
                 // ancestor tx is missing, so we can't insert the new blob
                 self.metrics.blob_transactions_nonce_gaps.increment(1);
@@ -2047,37 +2048,38 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(new_blob_tx) })
             }
 
-            // the max cost executing this transaction requires
-            let mut cumulative_cost = ancestor_tx.next_cumulative_cost() + new_blob_tx.cost();
+            ancestor_tx.next_cumulative_cost()
+        } else {
+            U256::ZERO
+        };
 
-            // check if the new blob would go into overdraft
-            if cumulative_cost > on_chain_balance {
-                // the transaction would go into overdraft
-                return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
-            }
+        // the max cost executing this transaction requires
+        cumulative_cost += new_blob_tx.cost();
 
-            // ensure that a replacement would not shift already propagated blob transactions into
-            // overdraft
-            let id = new_blob_tx.transaction_id;
-            let mut descendants = self.descendant_txs_inclusive(&id).peekable();
-            if let Some((maybe_replacement, _)) = descendants.peek() &&
-                **maybe_replacement == new_blob_tx.transaction_id
-            {
-                // replacement transaction
-                descendants.next();
-
-                // check if any of descendant blob transactions should be shifted into overdraft
-                for (_, tx) in descendants {
-                    cumulative_cost += tx.transaction.cost();
-                    if tx.transaction.is_eip4844() && cumulative_cost > on_chain_balance {
-                        // the transaction would shift
-                        return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
-                    }
-                }
-            }
-        } else if new_blob_tx.cost() > &on_chain_balance {
+        // check if the new blob would go into overdraft
+        if cumulative_cost > on_chain_balance {
             // the transaction would go into overdraft
             return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
+        }
+
+        // ensure that a replacement would not shift already propagated blob transactions into
+        // overdraft
+        let id = new_blob_tx.transaction_id;
+        let mut descendants = self.descendant_txs_inclusive(&id).peekable();
+        if let Some((maybe_replacement, _)) = descendants.peek() &&
+            **maybe_replacement == new_blob_tx.transaction_id
+        {
+            // replacement transaction
+            descendants.next();
+
+            // check if any of descendant blob transactions should be shifted into overdraft
+            for (_, tx) in descendants {
+                cumulative_cost += tx.transaction.cost();
+                if tx.transaction.is_eip4844() && cumulative_cost > on_chain_balance {
+                    // the transaction would shift
+                    return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
+                }
+            }
         }
 
         Ok(new_blob_tx)
@@ -2538,6 +2540,48 @@ mod tests {
 
         let inserted = pool.txs.get(&valid_tx.transaction_id).unwrap();
         assert_eq!(inserted.subpool, SubPool::Pending);
+    }
+
+    #[test]
+    fn test_blob_head_replacement_overdraft() {
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+
+        // `with_gas_limit` recomputes the cost after the fee setters
+        let head = MockTransaction::eip4844()
+            .with_max_fee(100)
+            .with_priority_fee(100)
+            .with_nonce(on_chain_nonce)
+            .with_gas_limit(10);
+        let child = head.next();
+        let head_id = f.validated(head.clone()).transaction_id;
+        let child_id = f.validated(child.clone()).transaction_id;
+        assert_eq!(*head.cost(), U256::from(1_000));
+
+        // both fit the balance
+        let on_chain_balance = U256::from(4_500);
+        pool.insert_tx(f.validated(head.clone()), on_chain_balance, on_chain_nonce).unwrap();
+        pool.insert_tx(f.validated(child), on_chain_balance, on_chain_nonce).unwrap();
+        assert_eq!(pool.txs.get(&child_id).unwrap().subpool, SubPool::Pending);
+
+        // the replacement fits the balance on its own, but not together with the child
+        let blob_fee = 3 * head.max_fee_per_blob_gas().unwrap();
+        let replacement = head
+            .rng_hash()
+            .with_max_fee(400)
+            .with_priority_fee(400)
+            .with_blob_fee(blob_fee)
+            .with_gas_limit(10);
+        assert_eq!(*replacement.cost(), U256::from(4_000));
+        let err =
+            pool.insert_tx(f.validated(replacement), on_chain_balance, on_chain_nonce).unwrap_err();
+        assert!(matches!(err, InsertErr::Overdraft { .. }), "{err:?}");
+
+        // nothing changed
+        assert_eq!(pool.txs.get(&head_id).unwrap().transaction.cost(), &U256::from(1_000));
+        assert_eq!(pool.txs.get(&child_id).unwrap().subpool, SubPool::Pending);
+        assert!(pool.txs.get(&child_id).unwrap().state.contains(TxState::ENOUGH_BALANCE));
     }
 
     #[test]

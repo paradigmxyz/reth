@@ -231,6 +231,8 @@ pub enum PeerRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
     },
     /// Requests receipts from the peer.
     ///
+    /// Only supported on sessions older than `eth/69`.
+    ///
     /// The response should be sent through the channel.
     GetReceipts {
         /// The request for receipts.
@@ -240,6 +242,8 @@ pub enum PeerRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
     },
     /// Requests receipts from the peer without bloom filter.
     ///
+    /// Only supported on `eth/69` sessions.
+    ///
     /// The response should be sent through the channel.
     GetReceipts69 {
         /// The request for receipts.
@@ -248,6 +252,8 @@ pub enum PeerRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         response: oneshot::Sender<RequestResult<Receipts69<N::Receipt>>>,
     },
     /// Requests receipts from the peer using eth/70 (supports `firstBlockReceiptIndex`).
+    ///
+    /// Only supported on `eth/70` and newer sessions.
     ///
     /// The response should be sent through the channel.
     GetReceipts70 {
@@ -323,6 +329,11 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
     #[inline]
     pub fn is_supported_by_eth_version(&self, version: EthVersion) -> bool {
         match self {
+            // The reply is decoded by the negotiated version, so each receipts request can only be
+            // answered on the versions that produce its response type.
+            Self::GetReceipts { .. } => version < EthVersion::Eth69,
+            Self::GetReceipts69 { .. } => version == EthVersion::Eth69,
+            Self::GetReceipts70 { .. } => version >= EthVersion::Eth70,
             Self::GetBlockAccessLists { .. } => version >= EthVersion::Eth71,
             Self::GetCells { .. } => version >= EthVersion::Eth72,
             _ => true,
@@ -458,5 +469,37 @@ mod tests {
 
         assert!(!req.is_supported_by_eth_version(EthVersion::Eth71));
         assert!(req.is_supported_by_eth_version(EthVersion::Eth72));
+    }
+
+    #[test]
+    fn test_get_receipts_version_support() {
+        let (tx, _rx) = oneshot::channel();
+        let req = PeerRequest::<EthNetworkPrimitives>::GetReceipts {
+            request: GetReceipts(vec![]),
+            response: tx,
+        };
+
+        assert!(req.is_supported_by_eth_version(EthVersion::Eth68));
+        assert!(!req.is_supported_by_eth_version(EthVersion::Eth69));
+
+        let (tx, _rx) = oneshot::channel();
+        let req = PeerRequest::<EthNetworkPrimitives>::GetReceipts69 {
+            request: GetReceipts(vec![]),
+            response: tx,
+        };
+
+        assert!(!req.is_supported_by_eth_version(EthVersion::Eth68));
+        assert!(req.is_supported_by_eth_version(EthVersion::Eth69));
+        assert!(!req.is_supported_by_eth_version(EthVersion::Eth70));
+
+        let (tx, _rx) = oneshot::channel();
+        let req = PeerRequest::<EthNetworkPrimitives>::GetReceipts70 {
+            request: GetReceipts70 { first_block_receipt_index: 0, block_hashes: vec![] },
+            response: tx,
+        };
+
+        assert!(!req.is_supported_by_eth_version(EthVersion::Eth69));
+        assert!(req.is_supported_by_eth_version(EthVersion::Eth70));
+        assert!(req.is_supported_by_eth_version(EthVersion::Eth71));
     }
 }

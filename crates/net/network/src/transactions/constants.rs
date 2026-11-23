@@ -43,6 +43,12 @@ pub mod tx_manager {
     pub const DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS: usize =
         SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 
+    /// Default maximum encoded byte size of pending pool imports to tolerate, including blob
+    /// sidecars.
+    ///
+    /// Default is 256 MiB, which holds about 320 transactions carrying six blobs each.
+    pub const DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS: usize = 256 * 1024 * 1024;
+
     /// Default limit for number of bad imports to keep track of.
     ///
     /// Default is 100 KiB, i.e. 3 200 transaction hashes.

@@ -5,7 +5,10 @@ use clap::{
     Args,
 };
 use eyre::ensure;
-use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
+use reth_cli_util::{
+    parse_duration_from_secs_or_ms,
+    parsers::{format_duration_as_secs_or_ms, parse_duration},
+};
 use reth_engine_primitives::{
     TreeConfig, DEFAULT_BACKFILL_RUN_THRESHOLD, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
     DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_NUM_STATE_MASKING_BLOCKS,
@@ -340,10 +343,21 @@ pub struct EngineArgs {
     )]
     pub num_state_masking_blocks: u64,
 
-    /// Configure the target number of blocks to keep in memory.
+    /// Configure how many of the most recent canonical blocks persistence leaves in memory.
+    ///
+    /// When more than `--engine.persistence-threshold` canonical blocks are held in memory, the
+    /// engine writes the canonical chain to disk up to `head - memory-block-buffer-target`. The
+    /// blocks above that height are kept only in memory, so a reorg of them does not unwind the
+    /// database. With state masking enabled, the `--engine.num-state-masking-blocks` blocks below
+    /// that height also stay in memory until a later cycle persists their state/trie updates.
+    ///
+    /// This is also the in-memory buffer that `--engine.persistence-backpressure-threshold` is
+    /// measured from.
     ///
     /// If omitted, this defaults to the lesser of `--engine.persistence-threshold` and the
-    /// configured default memory block buffer target.
+    /// configured default memory block buffer target. The value must not exceed
+    /// `--engine.persistence-threshold`, and with state masking enabled, its sum with
+    /// `--engine.num-state-masking-blocks` must be less than `--engine.persistence-threshold`.
     #[arg(long = "engine.memory-block-buffer-target")]
     pub memory_block_buffer_target: Option<u64>,
 
@@ -496,7 +510,7 @@ pub struct EngineArgs {
     /// Set to 0s to disable.
     #[arg(
         long = "engine.state-root-task-timeout",
-        value_parser = humantime::parse_duration,
+        value_parser = parse_duration,
         default_value = Resettable::from(DefaultEngineValues::get_global().state_root_task_timeout.as_ref().map(|v| v.as_str().into())),
     )]
     pub state_root_task_timeout: Option<Duration>,
@@ -574,7 +588,7 @@ pub struct EngineArgs {
     #[cfg(feature = "trie-debug")]
     #[arg(
         long = "engine.proof-jitter",
-        value_parser = humantime::parse_duration,
+        value_parser = parse_duration,
     )]
     pub proof_jitter: Option<Duration>,
 }
@@ -643,7 +657,7 @@ impl Default for EngineArgs {
             disable_sparse_trie_cache_pruning,
             state_root_task_timeout: state_root_task_timeout
                 .as_deref()
-                .map(|s| humantime::parse_duration(s).expect("valid default duration")),
+                .map(|s| parse_duration(s).expect("valid default duration")),
             share_execution_cache_with_payload_builder,
             share_sparse_trie_with_payload_builder,
             suppress_persistence_during_build,

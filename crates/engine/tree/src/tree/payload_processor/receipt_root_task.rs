@@ -140,40 +140,40 @@ mod tests {
     use crossbeam_channel::bounded;
     use reth_ethereum_primitives::{Receipt, TxType};
 
-    #[tokio::test]
-    async fn test_receipt_root_task_empty() {
+    #[reth_concurrency::test]
+    fn test_receipt_root_task_empty() {
         let (_tx, rx) = bounded::<IndexedReceipt<Receipt>>(1);
-        let (result_tx, result_rx) = oneshot::channel();
+        let (result_tx, mut result_rx) = oneshot::channel();
         drop(_tx);
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
-        tokio::task::spawn_blocking(move || handle.run(0)).await.unwrap();
+        std::thread::spawn(move || handle.run(0)).join().unwrap();
 
-        let (root, bloom) = result_rx.await.unwrap();
+        let (root, bloom) = result_rx.try_recv().unwrap();
 
         // Empty trie root
         assert_eq!(root, reth_trie_common::EMPTY_ROOT_HASH);
         assert_eq!(bloom, Bloom::ZERO);
     }
 
-    #[tokio::test]
-    async fn test_receipt_root_task_single_receipt() {
+    #[reth_concurrency::test]
+    fn test_receipt_root_task_single_receipt() {
         let receipts: Vec<Receipt> = vec![Receipt::default()];
 
         let (tx, rx) = bounded(1);
-        let (result_tx, result_rx) = oneshot::channel();
+        let (result_tx, mut result_rx) = oneshot::channel();
         let receipts_len = receipts.len();
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
-        let join_handle = tokio::task::spawn_blocking(move || handle.run(receipts_len));
+        let join_handle = std::thread::spawn(move || handle.run(receipts_len));
 
         for (i, receipt) in receipts.clone().into_iter().enumerate() {
             tx.send(IndexedReceipt::new(i, receipt)).unwrap();
         }
         drop(tx);
 
-        join_handle.await.unwrap();
-        let (root, _bloom) = result_rx.await.unwrap();
+        join_handle.join().unwrap();
+        let (root, _bloom) = result_rx.try_recv().unwrap();
 
         // Verify against the standard calculation
         let receipts_with_bloom: Vec<_> = receipts.iter().map(|r| r.with_bloom_ref()).collect();
@@ -182,24 +182,24 @@ mod tests {
         assert_eq!(root, expected_root);
     }
 
-    #[tokio::test]
-    async fn test_receipt_root_task_multiple_receipts() {
+    #[reth_concurrency::test]
+    fn test_receipt_root_task_multiple_receipts() {
         let receipts: Vec<Receipt> = vec![Receipt::default(); 5];
 
         let (tx, rx) = bounded(4);
-        let (result_tx, result_rx) = oneshot::channel();
+        let (result_tx, mut result_rx) = oneshot::channel();
         let receipts_len = receipts.len();
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
-        let join_handle = tokio::task::spawn_blocking(move || handle.run(receipts_len));
+        let join_handle = std::thread::spawn(move || handle.run(receipts_len));
 
         for (i, receipt) in receipts.into_iter().enumerate() {
             tx.send(IndexedReceipt::new(i, receipt)).unwrap();
         }
         drop(tx);
 
-        join_handle.await.unwrap();
-        let (root, bloom) = result_rx.await.unwrap();
+        join_handle.join().unwrap();
+        let (root, bloom) = result_rx.try_recv().unwrap();
 
         // Verify against expected values from existing test
         assert_eq!(
@@ -209,8 +209,8 @@ mod tests {
         assert_eq!(bloom, Bloom::ZERO);
     }
 
-    #[tokio::test]
-    async fn test_receipt_root_matches_standard_calculation() {
+    #[reth_concurrency::test]
+    fn test_receipt_root_matches_standard_calculation() {
         // Create some receipts with actual data
         let receipts = vec![
             Receipt {
@@ -244,26 +244,26 @@ mod tests {
 
         // Calculate using the task
         let (tx, rx) = bounded(4);
-        let (result_tx, result_rx) = oneshot::channel();
+        let (result_tx, mut result_rx) = oneshot::channel();
         let receipts_len = receipts.len();
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
-        let join_handle = tokio::task::spawn_blocking(move || handle.run(receipts_len));
+        let join_handle = std::thread::spawn(move || handle.run(receipts_len));
 
         for (i, receipt) in receipts.into_iter().enumerate() {
             tx.send(IndexedReceipt::new(i, receipt)).unwrap();
         }
         drop(tx);
 
-        join_handle.await.unwrap();
-        let (task_root, task_bloom) = result_rx.await.unwrap();
+        join_handle.join().unwrap();
+        let (task_root, task_bloom) = result_rx.try_recv().unwrap();
 
         assert_eq!(task_root, expected_root);
         assert_eq!(task_bloom, expected_bloom);
     }
 
-    #[tokio::test]
-    async fn test_receipt_root_task_out_of_order() {
+    #[reth_concurrency::test]
+    fn test_receipt_root_task_out_of_order() {
         let receipts: Vec<Receipt> = vec![Receipt::default(); 5];
 
         // Calculate expected values first (before we move receipts)
@@ -271,11 +271,11 @@ mod tests {
         let expected_root = calculate_receipt_root(&receipts_with_bloom);
 
         let (tx, rx) = bounded(4);
-        let (result_tx, result_rx) = oneshot::channel();
+        let (result_tx, mut result_rx) = oneshot::channel();
         let receipts_len = receipts.len();
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
-        let join_handle = tokio::task::spawn_blocking(move || handle.run(receipts_len));
+        let join_handle = std::thread::spawn(move || handle.run(receipts_len));
 
         // Send in reverse order to test out-of-order handling
         for (i, receipt) in receipts.into_iter().enumerate().rev() {
@@ -283,8 +283,8 @@ mod tests {
         }
         drop(tx);
 
-        join_handle.await.unwrap();
-        let (root, _bloom) = result_rx.await.unwrap();
+        join_handle.join().unwrap();
+        let (root, _bloom) = result_rx.try_recv().unwrap();
 
         assert_eq!(root, expected_root);
     }

@@ -514,6 +514,9 @@ RPC:
 
           [default: 256]
 
+      --rpc.max-trace-bytes <BYTES>
+          Max bytes a traced tx may record, defaults to 2x `--rpc.max-response-size`, 0 is unlimited
+
       --rpc.compute-state-root-for-eth-simulate
           Compute state roots for `eth_simulateV1` responses
 
@@ -768,6 +771,11 @@ TxPool:
 
           [default: 1]
 
+      --txpool.enforce-tracked-nonce
+          Reject transactions whose nonce is below the sender nonce tracked from canonical updates.
+
+          Closes the window in which a validation result that predates a block inserts an already mined nonce as pending. Assumes sender nonces only move forward, so this is meant for chains without reorgs and very low block times.
+
 Builder:
       --builder.extradata <EXTRA_DATA>
           Block extra data set by the payload builder.
@@ -935,7 +943,7 @@ Dev testnet:
       --dev.block-time <BLOCK_TIME>
           Interval between blocks.
 
-          Parses strings using [`humantime::parse_duration`]
+          Accepts a duration such as `12s`, `450ms` or `1m 30s`, e.g.
           --dev.block-time 12s
 
       --dev.finality-depth <FINALITY_DEPTH>
@@ -952,7 +960,7 @@ Dev testnet:
           local miner, giving the payload job time for multiple rebuild attempts with
           new transactions from the pool.
 
-          Parses strings using [`humantime::parse_duration`]
+          Accepts a duration such as `12s`, `450ms` or `1m 30s`, e.g.
           --dev.payload-wait-time 450ms
 
       --dev.mnemonic <MNEMONIC>
@@ -1058,9 +1066,13 @@ Engine:
           [default: 30]
 
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
-          Configure the target number of blocks to keep in memory.
+          Configure how many of the most recent canonical blocks persistence leaves in memory.
 
-          If omitted, this defaults to the lesser of `--engine.persistence-threshold` and the configured default memory block buffer target.
+          When more than `--engine.persistence-threshold` canonical blocks are held in memory, the engine writes the canonical chain to disk up to `head - memory-block-buffer-target`. The blocks above that height are kept only in memory, so a reorg of them does not unwind the database. With state masking enabled, the `--engine.num-state-masking-blocks` blocks below that height also stay in memory until a later cycle persists their state/trie updates.
+
+          This is also the in-memory buffer that `--engine.persistence-backpressure-threshold` is measured from.
+
+          If omitted, this defaults to the lesser of `--engine.persistence-threshold` and the configured default memory block buffer target. The value must not exceed `--engine.persistence-threshold`, and with state masking enabled, its sum with `--engine.num-state-masking-blocks` must be less than `--engine.persistence-threshold`.
 
       --engine.backfill-threshold <BACKFILL_RUN_THRESHOLD>
           Configure the largest gap, in blocks, between the local head and the forkchoice head that is closed by downloading the missing blocks directly. Larger gaps trigger a full pipeline (backfill) run instead.

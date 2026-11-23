@@ -47,6 +47,7 @@ rand = { workspace = true, optional = true }
 evm2 = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 alloy-signer.workspace = true
@@ -69,6 +70,7 @@ serde = [
     "evm2?/serde",
 ]
 test-utils = [
+    "reth-concurrency/test-utils",
     "alloy-primitives/getrandom",
     "dep:evm2",
     "alloy-signer",
