@@ -84,31 +84,34 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockchainProvider<N> {
-    /// Creates a provider like [`Self::new_with_writer`], without a writer of its canonical
-    /// in-memory state.
+    /// Creates a provider over `storage` without a writer of its canonical in-memory state,
+    /// fetching the latest, safe and finalized headers from the database to initialize the
+    /// provider.
     ///
     /// Nothing can change the chain info of the returned provider or send its notifications: its
     /// canonical head and its safe and finalized blocks stay the ones read from the database, and
     /// it never has a persisted block. Its in-memory blocks are those of `storage`, and change
     /// with them.
     pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
-        let canonical_in_memory_state = CanonicalInMemoryState::read_only(
+        let canonical_in_memory_state = CanonicalInMemoryState::without_writer(
             Self::chain_info_headers(&storage)?,
             storage.in_memory_state().clone(),
         );
-        let bal_store = storage.bal_store().clone();
-        Ok(Self { database: storage, canonical_in_memory_state, bal_store })
+        Ok(Self::with_canonical_in_memory_state(storage, canonical_in_memory_state))
     }
 
-    /// Creates a provider over `storage`, fetching the latest, safe and finalized headers from the
-    /// database to initialize the provider, and returns it with the writer of its canonical
+    /// Creates a provider like [`Self::new`], and returns it with the writer of its canonical
     /// in-memory state.
     ///
-    /// The provider and its clones read that state, and the writer is for the engine that changes
-    /// it.
+    /// The provider and its clones read that state, and it only changes through the returned
+    /// writer. The chain info and the canonical state notifications belong to the returned
+    /// provider and its clones.
     ///
-    /// `in_memory_state_writer` has to be the writer of the in-memory state of `storage`: the
-    /// provider reads the in-memory blocks through both.
+    /// `in_memory_state_writer` has to be the writer that [`InMemoryState::new`] returned with the
+    /// in-memory state of `storage`. Otherwise the canonical lookups of the provider and its state
+    /// providers read different blocks. The writer is consumed even if this returns an error.
+    ///
+    /// [`InMemoryState::new`]: reth_chain_state::InMemoryState::new
     pub fn new_with_writer(
         storage: ProviderFactory<N>,
         in_memory_state_writer: InMemoryStateWriter<N::Primitives>,
@@ -119,15 +122,23 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         );
         let canonical_in_memory_state =
             canonical_in_memory_state_writer.canonical_in_memory_state().clone();
-        let bal_store = storage.bal_store().clone();
-
         Ok((
-            Self { database: storage, canonical_in_memory_state, bal_store },
+            Self::with_canonical_in_memory_state(storage, canonical_in_memory_state),
             canonical_in_memory_state_writer,
         ))
     }
 
-    /// Returns the latest, safe and finalized headers stored in the database of `storage`.
+    /// Creates a provider over `storage` that reads `canonical_in_memory_state`.
+    fn with_canonical_in_memory_state(
+        storage: ProviderFactory<N>,
+        canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
+    ) -> Self {
+        let bal_store = storage.bal_store().clone();
+        Self { database: storage, canonical_in_memory_state, bal_store }
+    }
+
+    /// Returns the latest, safe and finalized headers stored in the database of `storage`. The
+    /// safe header is the finalized one if no safe block is stored.
     fn chain_info_headers(
         storage: &ProviderFactory<N>,
     ) -> ProviderResult<ChainInfoHeaders<HeaderTy<N>>> {
@@ -3394,7 +3405,8 @@ mod tests {
         (Address::random(), Account { nonce, balance: U256::from(nonce), ..Default::default() })
     }
 
-    /// [`BlockchainProvider::new`] needs a genesis header to initialize its chain tracker.
+    /// Creates a provider factory with a genesis header, which [`BlockchainProvider::new`] needs
+    /// to initialize its chain tracker, and the writer of its in-memory state.
     fn test_provider_factory_with_genesis(
     ) -> eyre::Result<(ProviderFactory<MockNodeTypesWithDB>, InMemoryStateWriter)> {
         let (factory, in_memory_state_writer) =

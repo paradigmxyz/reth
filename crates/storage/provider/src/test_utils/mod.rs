@@ -47,6 +47,10 @@ pub type MockNodeTypesWithDB<DB = Arc<TempDatabase<DatabaseEnv>>> =
     NodeTypesWithDBAdapter<MockNodeTypes, DB>;
 
 /// Creates test provider factory with mainnet chain spec.
+///
+/// Like every factory of this module but the one of
+/// [`create_test_provider_factory_with_in_memory_state_writer`], it has a read-only in-memory
+/// state, which never has blocks.
 pub fn create_test_provider_factory() -> ProviderFactory<MockNodeTypesWithDB> {
     create_test_provider_factory_with_chain_spec(MAINNET.clone())
 }

@@ -77,6 +77,7 @@ struct OverlayManagerInner<N: NodePrimitives> {
 }
 
 impl<N: NodePrimitives> Default for OverlayManager<N> {
+    /// Creates a manager for a read-only in-memory state, which never has blocks.
     fn default() -> Self {
         Self::new(InMemoryState::read_only())
     }

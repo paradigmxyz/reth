@@ -49,7 +49,7 @@ pub(crate) struct InMemoryStateMetrics {
 ///
 /// A node has one in-memory state. Clones are handles to the same blocks, pending block and
 /// metrics. The blocks only change through the [`InMemoryStateWriter`] that [`Self::new`] returns
-/// with the state, and a state from [`Self::read_only`] never has any.
+/// with the state, and a state from [`Self::read_only`] never has blocks.
 ///
 /// # Locking behavior on state updates
 ///
@@ -71,7 +71,7 @@ impl<N: NodePrimitives> InMemoryState<N> {
 
     /// Creates an in-memory state that has no writer and therefore never tracks a block.
     ///
-    /// This is the in-memory state of storage that is only read from disk.
+    /// This is the in-memory state of storage whose blocks are all on disk.
     #[must_use]
     pub fn read_only() -> Self {
         Self { inner: Arc::default() }
@@ -130,9 +130,9 @@ impl<N: NodePrimitives> InMemoryState<N> {
 
 /// Write access to the blocks of an [`InMemoryState`].
 ///
-/// At most one writer exists per in-memory state: the one [`InMemoryState::new`] returned with
-/// it. It cannot be cloned. The blocks are changed by the [`CanonicalInMemoryStateWriter`] that
-/// is created from it.
+/// At most one writer exists per in-memory state: [`InMemoryState::new`] returns it with the
+/// state, and nothing else creates or clones one. Whoever holds it is therefore the only one
+/// that changes the blocks, which it does by creating a [`CanonicalInMemoryStateWriter`] from it.
 #[derive(Debug)]
 pub struct InMemoryStateWriter<N: NodePrimitives = EthPrimitives> {
     in_memory_state: InMemoryState<N>,
@@ -144,7 +144,10 @@ impl<N: NodePrimitives> InMemoryStateWriter<N> {
     ///
     /// Returns what `f` returns, so that the blocks it removed are dropped after the lock is
     /// released.
-    #[expect(clippy::needless_pass_by_ref_mut, reason = "writing requires the unique writer")]
+    #[expect(
+        clippy::needless_pass_by_ref_mut,
+        reason = "the lock does not need `&mut self`, exclusive access to the unique writer does"
+    )]
     fn update<R>(&mut self, f: impl FnOnce(&mut InMemoryBlocks<N>) -> R) -> R {
         let inner = &self.in_memory_state.inner;
         let (result, InMemoryBlocksStats { count, earliest, latest }) = {
@@ -206,21 +209,23 @@ struct CanonicalInMemoryStateInner<N: NodePrimitives> {
 /// all canonical blocks not on disk yet and keeps track of the block range that
 /// is in memory.
 ///
-/// It is created with its [`CanonicalInMemoryStateWriter`], or without a writer by
-/// [`Self::read_only`]. This type and its clones only read: the blocks, the chain info and the
-/// notifications are changed through that writer.
+/// This type and its clones only read. It is created with its [`CanonicalInMemoryStateWriter`],
+/// which is the only way to change its chain info and to send its notifications, or by
+/// [`Self::without_writer`], and then they never change. Its blocks are those of an
+/// [`InMemoryState`] and change with them in both cases.
 #[derive(Debug, Clone)]
 pub struct CanonicalInMemoryState<N: NodePrimitives = EthPrimitives> {
     inner: Arc<CanonicalInMemoryStateInner<N>>,
 }
 
 impl<N: NodePrimitives> CanonicalInMemoryState<N> {
-    /// Creates a canonical state over the blocks of `in_memory_state` that has no writer, with
-    /// the canonical head and the safe and finalized blocks of `chain_info_headers`.
+    /// Creates a canonical state without a writer over the blocks of `in_memory_state`, with the
+    /// canonical head and the safe and finalized blocks of `chain_info_headers`.
     ///
     /// Nothing can change its chain info or send its notifications. Its blocks are those of
-    /// `in_memory_state`, and change with them.
-    pub fn read_only(
+    /// `in_memory_state` and change with them, so its block lookups can be ahead of its canonical
+    /// head if `in_memory_state` has a writer.
+    pub fn without_writer(
         chain_info_headers: ChainInfoHeaders<N::BlockHeader>,
         in_memory_state: InMemoryState<N>,
     ) -> Self {
