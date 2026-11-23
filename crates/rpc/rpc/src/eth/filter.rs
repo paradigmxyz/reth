@@ -7,7 +7,6 @@ use alloy_rpc_types_eth::{
     error::EthRpcErrorCode, Filter, FilterBlockOption, FilterChanges, FilterId,
     PendingTransactionFilterKind,
 };
-use async_trait::async_trait;
 use futures::{
     future::TryFutureExt,
     stream::{FuturesOrdered, StreamExt},
@@ -32,20 +31,27 @@ use reth_storage_api::{
     ProviderReceipt, ReceiptProvider,
 };
 use reth_tasks::Runtime;
-use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{
+    pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
+    PoolTransaction, TransactionPool, ValidPoolTransaction,
+};
 use std::{
     collections::{HashMap, VecDeque},
     fmt,
     iter::{Peekable, StepBy},
     ops::RangeInclusive,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
 use tokio::{
-    sync::{mpsc::Receiver, oneshot, Mutex},
+    sync::{
+        broadcast::{self, error::TryRecvError},
+        oneshot, Mutex,
+    },
     time::MissedTickBehavior,
 };
+use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tracing::{debug, error, trace};
 
 impl<Eth> EngineEthFilter<RpcLog<Eth::NetworkTypes>> for EthFilter<Eth>
@@ -62,6 +68,9 @@ where
         self.logs_for_filter(filter, limits).map_err(|e| e.into())
     }
 }
+
+/// The JSON-RPC error code for exceeding a limit, as defined by EIP-1474.
+const LIMIT_EXCEEDED_CODE: i32 = -32005;
 
 /// Threshold for deciding between cached and range mode processing
 const CACHED_MODE_BLOCK_THRESHOLD: u64 = 250;
@@ -159,10 +168,14 @@ where
             max_logs_per_response,
             stale_filter_ttl,
             max_response_size,
+            max_active_filters,
         } = config;
         let inner = EthFilterInner {
             eth_api,
             active_filters: ActiveFilters::new(),
+            max_active_filters,
+            pending_transaction_hashes: Arc::new(TxFeed::new(PENDING_TX_LISTENER_BUFFER_SIZE)),
+            full_pending_transactions: OnceLock::new(),
             id_provider: Arc::new(EthSubscriptionIdProvider::default()),
             max_headers_range: MAX_HEADERS_RANGE,
             task_spawner,
@@ -271,7 +284,7 @@ where
         };
 
         match kind {
-            FilterKind::PendingTransaction(filter) => Ok(match filter.drain().await {
+            FilterKind::PendingTransaction(filter) => Ok(match filter.drain() {
                 FilterChanges::Empty => FilterChanges::Empty,
                 FilterChanges::Hashes(hashes) => FilterChanges::Hashes(hashes),
                 FilterChanges::Transactions(transactions) => {
@@ -371,15 +384,13 @@ where
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
         trace!(target: "rpc::eth", "Serving eth_newFilter");
-        self.inner
-            .install_filter(FilterKind::<RpcTransaction<Eth::NetworkTypes>>::Log(Box::new(filter)))
-            .await
+        self.inner.install_filter(|| FilterKind::Log(Box::new(filter))).await
     }
 
     /// Handler for `eth_newBlockFilter`
     async fn new_block_filter(&self) -> RpcResult<FilterId> {
         trace!(target: "rpc::eth", "Serving eth_newBlockFilter");
-        self.inner.install_filter(FilterKind::<RpcTransaction<Eth::NetworkTypes>>::Block).await
+        self.inner.install_filter(|| FilterKind::Block).await
     }
 
     /// Handler for `eth_newPendingTransactionFilter`
@@ -389,26 +400,36 @@ where
     ) -> RpcResult<FilterId> {
         trace!(target: "rpc::eth", "Serving eth_newPendingTransactionFilter");
 
-        let transaction_kind = match kind.unwrap_or_default() {
-            PendingTransactionFilterKind::Hashes => {
-                let receiver = self.pool().pending_transactions_listener();
-                let pending_txs_receiver = PendingTransactionsReceiver::new(receiver);
-                FilterKind::PendingTransaction(PendingTransactionKind::Hashes(pending_txs_receiver))
-            }
-            PendingTransactionFilterKind::Full => {
-                let stream = self.pool().new_pending_pool_transactions_listener();
-                let full_txs_receiver = FullTransactionsReceiver::new(
-                    stream,
-                    dyn_clone::clone(self.inner.eth_api.converter()),
-                );
-                FilterKind::PendingTransaction(PendingTransactionKind::FullTransaction(Arc::new(
-                    full_txs_receiver,
-                )))
-            }
-        };
+        let kind = kind.unwrap_or_default();
 
-        // Install the filter and propagate any errors
-        self.inner.install_filter(transaction_kind).await
+        // The filter only subscribes to its feed once it is within the filter limit, so a rejected
+        // request neither starts a feed nor leaves a receiver behind.
+        self.inner
+            .install_filter(|| {
+                FilterKind::PendingTransaction(match kind {
+                    PendingTransactionFilterKind::Hashes => {
+                        PendingTransactionKind::Hashes(PendingTransactionsReceiver::new(
+                            self.inner
+                                .pending_transaction_hashes
+                                .subscribe(&self.inner.task_spawner, || {
+                                    ReceiverStream::new(self.pool().pending_transactions_listener())
+                                }),
+                        ))
+                    }
+                    PendingTransactionFilterKind::Full => {
+                        let feed = self.inner.full_pending_transactions.get_or_init(|| {
+                            Arc::new(PoolFullTransactionsFeed::new(
+                                self.pool().clone(),
+                                dyn_clone::clone(self.inner.eth_api.converter()),
+                            ))
+                        });
+                        PendingTransactionKind::FullTransaction(
+                            feed.subscribe(&self.inner.task_spawner),
+                        )
+                    }
+                })
+            })
+            .await
     }
 
     /// Handler for `eth_getFilterChanges`
@@ -468,6 +489,16 @@ struct EthFilterInner<Eth: EthApiTypes> {
     eth_api: Eth,
     /// All currently installed filters.
     active_filters: ActiveFilters<RpcTransaction<Eth::NetworkTypes>>,
+    /// Maximum number of installed filters, `None` if unlimited.
+    max_active_filters: Option<usize>,
+    /// The hashes of new pending transactions, shared by all pending transaction hash filters.
+    pending_transaction_hashes: Arc<TxFeed<TxHash>>,
+    /// The new pending transactions, shared by all full pending transaction filters.
+    ///
+    /// Filled by the first such filter, because the pool's transaction type is not known to this
+    /// type.
+    full_pending_transactions:
+        OnceLock<Arc<dyn FullTransactionsFeed<RpcTransaction<Eth::NetworkTypes>>>>,
     /// Provides ids to identify filters
     id_provider: Arc<dyn IdProvider>,
     /// limits for logs queries
@@ -645,10 +676,14 @@ where
         }
     }
 
-    /// Installs a new filter and returns the new identifier.
+    /// Installs the filter that `kind` returns and returns the new identifier.
+    ///
+    /// Returns [`EthFilterError::TooManyFilters`] without calling `kind` if the maximum number of
+    /// active filters is reached. The limit check and the insertion happen under the same lock, so
+    /// concurrent requests cannot exceed it, and `kind` runs under that lock, so it must not wait.
     async fn install_filter(
         &self,
-        kind: FilterKind<RpcTransaction<Eth::NetworkTypes>>,
+        kind: impl FnOnce() -> FilterKind<RpcTransaction<Eth::NetworkTypes>>,
     ) -> RpcResult<FilterId> {
         let last_poll_block_number = self.provider().best_block_number().to_rpc_result()?;
         let subscription_id = self.id_provider.next_id();
@@ -658,12 +693,17 @@ where
             jsonrpsee_types::SubscriptionId::Str(s) => FilterId::Str(s.into_owned()),
         };
         let mut filters = self.active_filters.inner.lock().await;
+        if let Some(max) = self.max_active_filters &&
+            filters.len() >= max
+        {
+            return Err(EthFilterError::TooManyFilters(max).into())
+        }
         filters.insert(
             id.clone(),
             ActiveFilter {
                 block: last_poll_block_number,
                 last_poll_timestamp: Instant::now(),
-                kind,
+                kind: kind(),
             },
         );
         Ok(id)
@@ -922,35 +962,32 @@ struct ActiveFilter<T> {
     kind: FilterKind<T>,
 }
 
-/// A receiver for pending transactions that returns all new transactions since the last poll.
+/// A receiver of the shared feed of pending transaction hashes.
+///
+/// Returns all hashes that were published since the last poll.
 #[derive(Debug, Clone)]
 struct PendingTransactionsReceiver {
-    txs_receiver: Arc<Mutex<Receiver<TxHash>>>,
+    txs_receiver: Arc<parking_lot::Mutex<broadcast::Receiver<TxHash>>>,
 }
 
 impl PendingTransactionsReceiver {
-    fn new(receiver: Receiver<TxHash>) -> Self {
-        Self { txs_receiver: Arc::new(Mutex::new(receiver)) }
+    fn new(receiver: broadcast::Receiver<TxHash>) -> Self {
+        Self { txs_receiver: Arc::new(parking_lot::Mutex::new(receiver)) }
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain<T>(&self) -> FilterChanges<T> {
+    fn drain<T>(&self) -> FilterChanges<T> {
         let mut pending_txs = Vec::new();
-        let mut prepared_stream = self.txs_receiver.lock().await;
-
-        while let Ok(tx_hash) = prepared_stream.try_recv() {
-            pending_txs.push(tx_hash);
-        }
-
-        // Convert the vector of hashes into FilterChanges::Hashes
+        drain_feed(&mut self.txs_receiver.lock(), |tx_hash| pending_txs.push(tx_hash));
         FilterChanges::Hashes(pending_txs)
     }
 }
 
-/// A structure to manage and provide access to a stream of full transaction details.
-#[derive(Debug, Clone)]
+/// A receiver of the shared feed of new pending transactions, that returns them as RPC
+/// transactions.
+#[derive(Debug)]
 struct FullTransactionsReceiver<T: PoolTransaction, TxCompat> {
-    txs_stream: Arc<Mutex<NewSubpoolTransactionStream<T>>>,
+    txs_receiver: parking_lot::Mutex<broadcast::Receiver<Arc<ValidPoolTransaction<T>>>>,
     converter: TxCompat,
 }
 
@@ -959,18 +996,11 @@ where
     T: PoolTransaction + 'static,
     TxCompat: RpcConvert<Primitives: NodePrimitives<SignedTx = T::Consensus>>,
 {
-    /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
-    fn new(stream: NewSubpoolTransactionStream<T>, converter: TxCompat) -> Self {
-        Self { txs_stream: Arc::new(Mutex::new(stream)), converter }
-    }
-
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
+    fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
         let mut pending_txs = Vec::new();
-        let mut prepared_stream = self.txs_stream.lock().await;
-
-        while let Ok(tx) = prepared_stream.try_recv() {
-            match self.converter.fill_pending(tx.transaction.to_consensus()) {
+        drain_feed(&mut self.txs_receiver.lock(), |tx| {
+            match self.converter.fill_pending(tx.to_consensus()) {
                 Ok(tx) => pending_txs.push(tx),
                 Err(err) => {
                     error!(target: "rpc",
@@ -979,26 +1009,74 @@ where
                     );
                 }
             }
-        }
+        });
         FilterChanges::Transactions(pending_txs)
     }
 }
 
 /// Helper trait for [`FullTransactionsReceiver`] to erase the `Transaction` type.
-#[async_trait]
 trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
-    async fn drain(&self) -> FilterChanges<T>;
+    fn drain(&self) -> FilterChanges<T>;
 }
 
-#[async_trait]
 impl<T, TxCompat> FullTransactionsFilter<RpcTransaction<TxCompat::Network>>
     for FullTransactionsReceiver<T, TxCompat>
 where
     T: PoolTransaction + 'static,
     TxCompat: RpcConvert<Primitives: NodePrimitives<SignedTx = T::Consensus>>,
 {
-    async fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
-        Self::drain(self).await
+    fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
+        Self::drain(self)
+    }
+}
+
+/// The shared feed of new pending transactions behind all full pending transaction filters.
+#[derive(Debug)]
+struct PoolFullTransactionsFeed<Pool: TransactionPool, TxCompat> {
+    pool: Pool,
+    converter: TxCompat,
+    feed: Arc<TxFeed<Arc<ValidPoolTransaction<Pool::Transaction>>>>,
+}
+
+impl<Pool, TxCompat> PoolFullTransactionsFeed<Pool, TxCompat>
+where
+    Pool: TransactionPool,
+{
+    /// Creates a feed without a producer.
+    fn new(pool: Pool, converter: TxCompat) -> Self {
+        Self { pool, converter, feed: Arc::new(TxFeed::new(NEW_TX_LISTENER_BUFFER_SIZE)) }
+    }
+}
+
+/// Helper trait for [`PoolFullTransactionsFeed`] to erase the pool type.
+trait FullTransactionsFeed<T>: fmt::Debug + Send + Sync + 'static {
+    /// Returns a filter over the feed that only sees the transactions published from now on.
+    ///
+    /// Starts the producer on `spawner` if the feed has none.
+    fn subscribe(&self, spawner: &Runtime) -> Arc<dyn FullTransactionsFilter<T>>;
+}
+
+impl<Pool, TxCompat> FullTransactionsFeed<RpcTransaction<TxCompat::Network>>
+    for PoolFullTransactionsFeed<Pool, TxCompat>
+where
+    Pool: TransactionPool<
+            Transaction: PoolTransaction<
+                Consensus = <TxCompat::Primitives as NodePrimitives>::SignedTx,
+            >,
+        > + 'static,
+    TxCompat: RpcConvert,
+{
+    fn subscribe(
+        &self,
+        spawner: &Runtime,
+    ) -> Arc<dyn FullTransactionsFilter<RpcTransaction<TxCompat::Network>>> {
+        let txs_receiver = self.feed.subscribe(spawner, || {
+            self.pool.new_pending_pool_transactions_listener().map(|event| event.transaction)
+        });
+        Arc::new(FullTransactionsReceiver {
+            txs_receiver: parking_lot::Mutex::new(txs_receiver),
+            converter: dyn_clone::clone(&self.converter),
+        })
     }
 }
 
@@ -1014,10 +1092,121 @@ enum PendingTransactionKind<T> {
 }
 
 impl<T: 'static> PendingTransactionKind<T> {
-    async fn drain(&self) -> FilterChanges<T> {
+    /// Returns the transactions published to the kind's feed since the last poll.
+    ///
+    /// A filter that is polled less often than its feed holds items loses the oldest ones, like a
+    /// lagging subscription does.
+    fn drain(&self) -> FilterChanges<T> {
         match self {
-            Self::Hashes(receiver) => receiver.drain().await,
-            Self::FullTransaction(receiver) => receiver.drain().await,
+            Self::Hashes(receiver) => receiver.drain(),
+            Self::FullTransaction(receiver) => receiver.drain(),
+        }
+    }
+}
+
+/// Broadcasts the new pending transactions of one filter kind to all filters of that kind.
+///
+/// The pool buffers new transactions per listener, so a listener for every filter would multiply
+/// that buffer and the pool's work per inserted transaction with the number of filters. All filters
+/// of a kind share one listener instead. A filter that is not polled for more than `capacity`
+/// transactions loses the oldest ones.
+#[derive(Debug)]
+struct TxFeed<T> {
+    /// Capacity of the broadcast channel.
+    capacity: usize,
+    /// The running producer's sender, if any.
+    ///
+    /// The producer holds the only strong sender, so if it dies, its filters end and the next
+    /// filter starts a new producer.
+    sender: parking_lot::Mutex<Option<broadcast::WeakSender<T>>>,
+}
+
+impl<T: Clone + Send + 'static> TxFeed<T> {
+    /// Creates a feed without a producer.
+    const fn new(capacity: usize) -> Self {
+        Self { capacity, sender: parking_lot::Mutex::new(None) }
+    }
+
+    /// Subscribes to the feed. If no producer is running, this starts one on `spawner` over the
+    /// stream that `source` returns.
+    ///
+    /// `source` runs before this returns, so the producer does not miss anything that is
+    /// published after the call.
+    fn subscribe<S>(
+        self: &Arc<Self>,
+        spawner: &Runtime,
+        source: impl FnOnce() -> S,
+    ) -> broadcast::Receiver<T>
+    where
+        S: Stream<Item = T> + Send + Unpin + 'static,
+    {
+        let mut slot = self.sender.lock();
+        if let Some(sender) = slot.as_ref().and_then(broadcast::WeakSender::upgrade) {
+            return sender.subscribe()
+        }
+        let (sender, receiver) = broadcast::channel(self.capacity);
+        *slot = Some(sender.downgrade());
+        let feed = self.clone();
+        let source = source();
+        spawner.spawn_task(async move { feed.produce(sender, source).await });
+        receiver
+    }
+
+    /// Broadcasts the items of `source` until the feed has no receivers left or `source` ends.
+    async fn produce<S: Stream<Item = T> + Unpin>(
+        &self,
+        sender: broadcast::Sender<T>,
+        mut source: S,
+    ) {
+        loop {
+            tokio::select! {
+                _ = sender.closed() => {
+                    if self.stop_if_unused(&sender) {
+                        break
+                    }
+                }
+                item = source.next() => {
+                    let Some(item) = item else {
+                        // Dropping the sender ends all filters of the feed.
+                        *self.sender.lock() = None;
+                        break
+                    };
+                    if sender.send(item).is_err() && self.stop_if_unused(&sender) {
+                        break
+                    }
+                }
+            }
+        }
+        debug!(target: "rpc::eth::filter", "pending transaction feed stopped");
+    }
+
+    /// Removes the producer behind `sender` from the feed if it has no receivers left, and returns
+    /// whether it did.
+    ///
+    /// Subscribing holds the same lock, so a new filter either joins before this check or starts a
+    /// new producer after it.
+    fn stop_if_unused(&self, sender: &broadcast::Sender<T>) -> bool {
+        let mut slot = self.sender.lock();
+        if sender.receiver_count() > 0 {
+            return false
+        }
+        *slot = None;
+        true
+    }
+}
+
+/// Passes everything that `receiver` has buffered to `f`, oldest first.
+///
+/// If the receiver lagged behind its feed, this skips to the oldest item that the feed still
+/// holds.
+fn drain_feed<T: Clone>(receiver: &mut broadcast::Receiver<T>, mut f: impl FnMut(T)) {
+    loop {
+        match receiver.try_recv() {
+            Ok(item) => f(item),
+            Err(TryRecvError::Lagged(skipped)) => {
+                debug!(target: "rpc::eth::filter", skipped, "pending transaction filter lagging behind its feed")
+            }
+            Err(TryRecvError::Empty | TryRecvError::Closed) => break,
         }
     }
 }
@@ -1108,6 +1297,9 @@ pub enum EthFilterError {
     /// Error thrown when a spawned task failed to deliver a response.
     #[error("internal filter error")]
     InternalError,
+    /// The maximum number of active filters is reached.
+    #[error("too many active filters, max {0}")]
+    TooManyFilters(usize),
 }
 
 impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
@@ -1120,6 +1312,9 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
             ),
             err @ EthFilterError::InternalError => {
                 rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
+            }
+            err @ EthFilterError::TooManyFilters(_) => {
+                rpc_error_with_code(LIMIT_EXCEEDED_CODE, err.to_string())
             }
             EthFilterError::EthAPIError(err) => err.into(),
             err @ EthFilterError::ReceiptsUnavailable(_) => {
@@ -1480,8 +1675,9 @@ mod tests {
     use super::*;
     use crate::{eth::EthApi, EthApiBuilder};
     use alloy_consensus::TxLegacy;
-    use alloy_network::Ethereum;
+    use alloy_network::{Ethereum, TransactionResponse};
     use alloy_primitives::{Bloom, FixedBytes};
+    use futures::stream;
     use jsonrpsee::{types::Id, MethodResponse, ResponsePayload};
     use rand::Rng;
     use reth_chainspec::{ChainSpec, ChainSpecProvider};
@@ -1491,11 +1687,14 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_convert::RpcConverter;
-    use reth_rpc_eth_api::{helpers::SpawnBlocking, node::RpcNodeCoreAdapter};
+    use reth_rpc_eth_api::{helpers::SpawnBlocking, node::RpcNodeCoreAdapter, RpcNodeCore};
     use reth_rpc_eth_types::receipt::EthReceiptConverter;
     use reth_tasks::Runtime;
     use reth_testing_utils::generators;
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_transaction_pool::{
+        test_utils::{testing_pool, MockTransaction, TestPool},
+        TransactionOrigin,
+    };
     use std::{collections::VecDeque, sync::Arc};
 
     #[test]
@@ -2481,5 +2680,263 @@ mod tests {
             .await
             .unwrap();
         assert!(logs.is_empty());
+    }
+
+    /// How long a test waits for the feed to deliver or stop.
+    const TIMEOUT: Duration = Duration::from_secs(5);
+
+    /// Returns a provider that has a best block, which installing a filter reads.
+    fn provider_with_head() -> MockEthProvider {
+        let provider = MockEthProvider::default();
+        provider.add_header(FixedBytes::random(), alloy_consensus::Header::default());
+        provider
+    }
+
+    fn hash_feed_sender<Eth: EthApiTypes>(
+        filter: &EthFilter<Eth>,
+    ) -> Option<broadcast::Sender<TxHash>> {
+        filter.inner.pending_transaction_hashes.sender.lock().as_ref()?.upgrade()
+    }
+
+    /// Returns the kind of the pending transaction filter with the given id.
+    async fn pending_kind<Eth: EthApiTypes + 'static>(
+        filter: &EthFilter<Eth>,
+        id: &FilterId,
+    ) -> PendingTransactionKind<RpcTransaction<Eth::NetworkTypes>> {
+        match filter.active_filters().inner.lock().await.get(id).unwrap().kind.clone() {
+            FilterKind::PendingTransaction(kind) => kind,
+            kind => panic!("not a pending transaction filter: {kind:?}"),
+        }
+    }
+
+    /// Drains the hash filter until it returned `count` hashes.
+    async fn drain_hashes<Eth: EthApiTypes + 'static>(
+        filter: &EthFilter<Eth>,
+        id: &FilterId,
+        count: usize,
+    ) -> Vec<TxHash> {
+        let kind = pending_kind(filter, id).await;
+        tokio::time::timeout(TIMEOUT, async {
+            let mut hashes = Vec::new();
+            while hashes.len() < count {
+                match kind.drain() {
+                    FilterChanges::Hashes(new) => hashes.extend(new),
+                    changes => panic!("unexpected changes {changes:?}"),
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            hashes
+        })
+        .await
+        .expect("filter did not receive the transactions")
+    }
+
+    /// Waits until the hash feed has stopped.
+    async fn wait_for_feed_stop<Eth: EthApiTypes>(filter: &EthFilter<Eth>) {
+        tokio::time::timeout(TIMEOUT, async {
+            while hash_feed_sender(filter).is_some() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("feed did not stop")
+    }
+
+    #[tokio::test]
+    async fn pending_hash_filters_share_a_feed() {
+        let eth_api = build_test_eth_api(provider_with_head());
+        let pool = eth_api.pool().clone();
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+
+        assert!(hash_feed_sender(&eth_filter).is_none());
+        let first = eth_filter.new_pending_transaction_filter(None).await.unwrap();
+        let second = eth_filter.new_pending_transaction_filter(None).await.unwrap();
+        assert_eq!(hash_feed_sender(&eth_filter).unwrap().receiver_count(), 2);
+
+        let hash = pool
+            .add_transaction(TransactionOrigin::External, MockTransaction::eip1559())
+            .await
+            .unwrap()
+            .hash;
+        assert_eq!(drain_hashes(&eth_filter, &first, 1).await, [hash]);
+        assert_eq!(drain_hashes(&eth_filter, &second, 1).await, [hash]);
+
+        // a filter only sees the transactions that arrive after it was created
+        let third = eth_filter.new_pending_transaction_filter(None).await.unwrap();
+        let next_hash = pool
+            .add_transaction(TransactionOrigin::External, MockTransaction::eip1559())
+            .await
+            .unwrap()
+            .hash;
+        for id in [&first, &second, &third] {
+            assert_eq!(drain_hashes(&eth_filter, id, 1).await, [next_hash]);
+        }
+    }
+
+    #[tokio::test]
+    async fn pending_hash_feed_stops_with_its_last_filter() {
+        let eth_api = build_test_eth_api(provider_with_head());
+        let pool = eth_api.pool().clone();
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+
+        let first = eth_filter.new_pending_transaction_filter(None).await.unwrap();
+        let second = eth_filter.new_pending_transaction_filter(None).await.unwrap();
+
+        // the feed outlives a filter that is uninstalled
+        assert!(eth_filter.uninstall_filter(first).await.unwrap());
+        assert_eq!(hash_feed_sender(&eth_filter).unwrap().receiver_count(), 1);
+
+        // and stops once the last filter is evicted as stale
+        eth_filter.clear_stale_filters(Instant::now() + Duration::from_secs(3600)).await;
+        assert!(!eth_filter.active_filters().contains(&second).await);
+        wait_for_feed_stop(&eth_filter).await;
+
+        // a later filter starts a new producer
+        let third = eth_filter.new_pending_transaction_filter(None).await.unwrap();
+        let hash = pool
+            .add_transaction(TransactionOrigin::External, MockTransaction::eip1559())
+            .await
+            .unwrap()
+            .hash;
+        assert_eq!(drain_hashes(&eth_filter, &third, 1).await, [hash]);
+    }
+
+    #[tokio::test]
+    async fn lagging_hash_filter_keeps_the_newest_hashes() {
+        const CAPACITY: usize = 4;
+
+        let hashes = (0..10u8).map(|byte| TxHash::repeat_byte(byte + 1)).collect::<Vec<_>>();
+        let feed = Arc::new(TxFeed::new(CAPACITY));
+        let runtime = Runtime::test();
+        // The source ends after it is forwarded, which stops the producer, and the filter has
+        // not been polled until then.
+        let receiver = PendingTransactionsReceiver::new(
+            feed.subscribe(&runtime, || stream::iter(hashes.clone())),
+        );
+        tokio::time::timeout(TIMEOUT, async {
+            while feed.sender.lock().is_some() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("feed did not stop");
+
+        let FilterChanges::Hashes(drained) = receiver.drain::<()>() else {
+            panic!("expected hashes")
+        };
+        assert_eq!(drained, hashes[hashes.len() - CAPACITY..]);
+        assert!(
+            matches!(receiver.drain::<()>(), FilterChanges::Hashes(hashes) if hashes.is_empty())
+        );
+    }
+
+    #[tokio::test]
+    async fn full_pending_filters_share_a_feed() {
+        let eth_api = build_test_eth_api(provider_with_head());
+        let pool = eth_api.pool().clone();
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+
+        let first = eth_filter
+            .new_pending_transaction_filter(Some(PendingTransactionFilterKind::Full))
+            .await
+            .unwrap();
+        let second = eth_filter
+            .new_pending_transaction_filter(Some(PendingTransactionFilterKind::Full))
+            .await
+            .unwrap();
+
+        let hash = pool
+            .add_transaction(TransactionOrigin::External, MockTransaction::eip1559())
+            .await
+            .unwrap()
+            .hash;
+
+        for id in [&first, &second] {
+            let kind = pending_kind(&eth_filter, id).await;
+            let txs = tokio::time::timeout(TIMEOUT, async {
+                loop {
+                    match kind.drain() {
+                        FilterChanges::Transactions(txs) if !txs.is_empty() => break txs,
+                        FilterChanges::Transactions(_) => {
+                            tokio::time::sleep(Duration::from_millis(5)).await
+                        }
+                        changes => panic!("unexpected changes {changes:?}"),
+                    }
+                }
+            })
+            .await
+            .expect("filter did not receive the transaction");
+            assert_eq!(txs.iter().map(|tx| tx.tx_hash()).collect::<Vec<_>>(), [hash]);
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn full_pending_filter_is_served_through_filter_changes() {
+        let eth_api = build_test_eth_api(provider_with_head());
+        let pool = eth_api.pool().clone();
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+
+        let id = eth_filter
+            .new_pending_transaction_filter(Some(PendingTransactionFilterKind::Full))
+            .await
+            .unwrap();
+        let hash = pool
+            .add_transaction(TransactionOrigin::External, MockTransaction::eip1559())
+            .await
+            .unwrap()
+            .hash;
+
+        // A filter can only be polled once without a new block, so this relies on the producer
+        // sharing the test's single thread: it has forwarded the transaction once this yields.
+        tokio::task::yield_now().await;
+
+        let FilterChanges::Transactions(txs) = eth_filter.filter_changes(id).await.unwrap() else {
+            panic!("expected transactions")
+        };
+        assert_eq!(txs.iter().map(|tx| tx.tx_hash()).collect::<Vec<_>>(), [hash]);
+    }
+
+    #[tokio::test]
+    async fn too_many_filters_are_rejected() {
+        let eth_api = build_test_eth_api(provider_with_head());
+        let config = EthFilterConfig::default().max_active_filters(Some(2));
+        let eth_filter = EthFilter::new(eth_api, config, Runtime::test());
+
+        let block_filter = eth_filter.new_block_filter().await.unwrap();
+        eth_filter.new_filter(Filter::new()).await.unwrap();
+
+        for kind in [None, Some(PendingTransactionFilterKind::Full)] {
+            let err = eth_filter.new_pending_transaction_filter(kind).await.unwrap_err();
+            assert_eq!(err.code(), -32005);
+            assert_eq!(err.message(), "too many active filters, max 2");
+        }
+        assert_eq!(eth_filter.new_block_filter().await.unwrap_err().code(), -32005);
+        assert_eq!(eth_filter.new_filter(Filter::new()).await.unwrap_err().code(), -32005);
+        assert_eq!(eth_filter.active_filters().len().await, 2);
+
+        // a rejected pending filter must not start a feed
+        assert!(hash_feed_sender(&eth_filter).is_none());
+        assert!(eth_filter.inner.full_pending_transactions.get().is_none());
+
+        // uninstalling frees a slot for any kind
+        assert!(eth_filter.uninstall_filter(block_filter).await.unwrap());
+        eth_filter.new_pending_transaction_filter(None).await.unwrap();
+        assert!(hash_feed_sender(&eth_filter).is_some());
+        assert_eq!(
+            eth_filter.new_block_filter().await.unwrap_err().message(),
+            "too many active filters, max 2"
+        );
+    }
+
+    #[tokio::test]
+    async fn unlimited_filters_when_no_maximum_is_configured() {
+        let eth_api = build_test_eth_api(provider_with_head());
+        let config = EthFilterConfig::default().max_active_filters(None);
+        let eth_filter = EthFilter::new(eth_api, config, Runtime::test());
+
+        for _ in 0..50 {
+            eth_filter.new_block_filter().await.unwrap();
+        }
+        assert_eq!(eth_filter.active_filters().len().await, 50);
     }
 }
