@@ -362,6 +362,9 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         }
         let env = self.inner.env().clone();
         self.commit()?;
+        // With `MDBX_NOSTICKYTHREADS`, MDBX skips the writer lock when syncing while any write
+        // transaction is open, so hold one to keep other writers out.
+        let _write_lock = env.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
         env.sync(true).map_err(|e| DatabaseError::Commit(e.into()))?;
         Ok(())
     }
