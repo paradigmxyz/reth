@@ -985,20 +985,30 @@ mod tests {
         assert!(received.is_sorted_by(|a, b| a < b), "{received:?}");
     }
 
-    #[tokio::test]
-    async fn new_producer_misses_nothing_published_before_it_runs() {
-        let (provider, mut canonical_in_memory_state_writer) = test_provider();
-        let pubsub = test_pubsub(provider.clone(), testing_pool());
-        let mut results = pubsub
-            .subscribe_shared(
-                |feeds| &feeds.new_heads,
-                |pubsub| pubsub.new_headers_stream().boxed(),
-            )
-            .await;
+    #[test]
+    fn new_producer_misses_nothing_published_before_it_runs() {
+        let rpc = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let forward = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let (pubsub, mut writer) = forward.block_on(async {
+            let (provider, writer) = test_provider();
+            (test_pubsub(provider, testing_pool()), writer)
+        });
+        let mut results = rpc.block_on(pubsub.subscribe_shared(
+            |feeds| &feeds.new_heads,
+            |pubsub| {
+                assert_eq!(
+                    tokio::runtime::Handle::current().id(),
+                    pubsub.inner.subscription_task_spawner.handle().id()
+                );
+                pubsub.new_headers_stream().boxed()
+            },
+        ));
 
         // Published before the spawned producer task first runs.
-        commit(&mut canonical_in_memory_state_writer, chain_with_logs(1));
-        tokio::time::timeout(TIMEOUT, results.recv()).await.unwrap().unwrap();
+        commit(&mut writer, chain_with_logs(1));
+        forward.block_on(async {
+            tokio::time::timeout(TIMEOUT, results.recv()).await.unwrap().unwrap()
+        });
     }
 
     #[tokio::test]
@@ -1044,41 +1054,20 @@ mod tests {
         assert!(feed.sender.lock().await.is_none());
     }
 
-    #[test]
-    fn shared_source_uses_subscription_runtime() {
-        let rpc = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        let forward = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        let pubsub = forward.block_on(async { test_pubsub(test_provider().0, testing_pool()) });
-        let mut receiver = rpc.block_on(pubsub.subscribe_shared(
-            |feeds| &feeds.new_heads,
-            |pubsub| {
-                assert_eq!(
-                    tokio::runtime::Handle::current().id(),
-                    pubsub.inner.subscription_task_spawner.handle().id()
-                );
-                stream::iter([1]).boxed()
-            },
-        ));
-        forward.block_on(async {
-            tokio::time::timeout(TIMEOUT, receiver.recv()).await.unwrap().unwrap()
-        });
-    }
-
     #[tokio::test]
     async fn joining_subscriber_waits_for_source_startup() {
         let feed = SharedFeed::new(1);
         let mut join = pin!(feed.subscribe(|_| panic!("expected to share the first producer")));
         let mut producer = None;
-        let _first = feed
+        let first = feed
             .subscribe(|sender| {
                 producer = Some(sender);
                 assert!(join.as_mut().now_or_never().is_none());
             })
             .await;
-        let mut second = tokio::time::timeout(TIMEOUT, join).await.unwrap();
-        let item = SharedResult::new(&1).unwrap();
-        assert_eq!(producer.unwrap().send(item).unwrap(), 2);
-        second.try_recv().unwrap();
+        let second = tokio::time::timeout(TIMEOUT, join).await.unwrap();
+        assert_eq!(producer.unwrap().receiver_count(), 2);
+        assert!(first.same_channel(&second));
     }
 
     #[tokio::test]
@@ -1191,6 +1180,7 @@ mod tests {
         drop(response);
         wait_until_stopped(&producer).await;
         drop(full);
-        assert_eq!(messages.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+        drop(tx);
+        assert_eq!(tokio::time::timeout(TIMEOUT, messages.recv()).await.unwrap(), None);
     }
 }
