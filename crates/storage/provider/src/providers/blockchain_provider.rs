@@ -756,6 +756,13 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for BlockchainProvider<N> {
     }
 }
 
+impl<N: ProviderNodeTypes> reth_storage_api::DurableBlockReader for BlockchainProvider<N> {
+    fn last_durable_block_num_hash(&self) -> ProviderResult<alloy_eips::BlockNumHash> {
+        // Read the database, not in-memory blocks that may be on an unpersisted fork.
+        self.database.last_durable_block_num_hash()
+    }
+}
+
 impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider<N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.consistent_provider()?.get_stage_checkpoint(id)
@@ -900,7 +907,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
 
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
             // we have a pending block
-            return self.state_provider_for_state(Arc::new(pending));
+            return self.state_provider_for_state(pending);
         }
 
         // fallback to latest state if the pending block is not available
@@ -911,14 +918,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() &&
             pending.hash() == block_hash
         {
-            return self.state_provider_for_state(Arc::new(pending)).map(Some);
+            return self.state_provider_for_state(pending).map(Some);
         }
         Ok(None)
     }
 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
-            return self.state_provider_for_state(Arc::new(pending)).map(Some)
+            return self.state_provider_for_state(pending).map(Some)
         }
 
         Ok(None)
@@ -1468,7 +1475,9 @@ mod tests {
                 })
                 .collect(),
         };
-        provider.canonical_in_memory_state.update_chain(chain);
+        if !in_memory_blocks.is_empty() {
+            provider.canonical_in_memory_state.update_chain(chain);
+        }
         for state in provider.canonical_in_memory_state.canonical_chain() {
             provider.database.overlay_manager().insert_block(state.block());
         }

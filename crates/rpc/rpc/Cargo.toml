@@ -87,7 +87,7 @@ sha2.workspace = true
 thiserror.workspace = true
 derive_more.workspace = true
 itertools.workspace = true
-humantime = { workspace = true, optional = true }
+jiff = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-testing-utils.workspace = true
@@ -103,7 +103,7 @@ jsonrpsee = { workspace = true, features = ["server"] }
 
 [features]
 js-tracer = [
-    "dep:humantime",
+    "dep:jiff",
     "evm2-inspectors/js-tracer",
     "reth-rpc-eth-types/js-tracer",
     "reth-rpc-eth-api/js-tracer",

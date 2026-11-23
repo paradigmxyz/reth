@@ -302,7 +302,8 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
         ),
     );
     subscribe.set_is_subscription();
-    let mut subscription = client.get_subscription::<ChainBlockTraceResult>(subscribe.await?).await;
+    let mut subscription =
+        client.get_subscription::<ChainBlockTraceResult>(subscribe.await?).await?;
 
     let traced = tokio::time::timeout(WAIT_TIMEOUT, subscription.recv()).await??;
     assert_eq!(traced.block, U256::from(2));
@@ -453,6 +454,7 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
             signature: Default::default(),
         },
         parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        apply_blacklist: true,
         registered_gas_limit: payload.block().gas_limit,
     };
 
@@ -520,6 +522,7 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
             signature: Default::default(),
         },
         parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        apply_blacklist: true,
         registered_gas_limit: payload.block().gas_limit,
     };
 
@@ -574,6 +577,7 @@ async fn test_flashbots_validate_v5() -> eyre::Result<()> {
             signature: Default::default(),
         },
         parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        apply_blacklist: true,
         registered_gas_limit: payload.block().gas_limit,
     };
 
@@ -640,6 +644,7 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
             signature: Default::default(),
         },
         parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        apply_blacklist: true,
         registered_gas_limit: payload.block().gas_limit,
     };
 

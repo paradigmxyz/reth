@@ -19,6 +19,7 @@ reth-prune-types.workspace = true
 reth-static-file-types.workspace = true
 reth-primitives-traits.workspace = true
 reth-engine-primitives.workspace = true
+reth-cli-util.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
@@ -36,5 +37,4 @@ tracing.workspace = true
 
 # misc
 pin-project.workspace = true
-humantime.workspace = true
 derive_more.workspace = true

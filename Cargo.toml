@@ -459,29 +459,29 @@ alloy-trie = { version = "0.9.9", default-features = false }
 
 alloy-hardforks = "0.4.11"
 
-alloy-consensus = { version = "2.5.0", default-features = false }
-alloy-contract = { version = "2.5.0", default-features = false }
-alloy-eips = { version = "2.5.0", default-features = false }
-alloy-genesis = { version = "2.5.0", default-features = false }
-alloy-json-rpc = { version = "2.5.0", default-features = false }
-alloy-network = { version = "2.5.0", default-features = false }
-alloy-node-bindings = "2.5.0"
-alloy-provider = { version = "2.5.0", features = ["reqwest", "debug-api"], default-features = false }
-alloy-rpc-client = { version = "2.5.0", default-features = false }
-alloy-rpc-types = { version = "2.5.0", features = ["eth"], default-features = false }
-alloy-rpc-types-admin = { version = "2.5.0", default-features = false }
-alloy-rpc-types-anvil = { version = "2.5.0", default-features = false }
-alloy-rpc-types-beacon = { version = "2.5.0", default-features = false }
-alloy-rpc-types-debug = { version = "2.5.0", default-features = false }
-alloy-rpc-types-engine = { version = "2.5.0", default-features = false }
-alloy-rpc-types-eth = { version = "2.5.0", default-features = false }
-alloy-rpc-types-mev = { version = "2.5.0", default-features = false }
-alloy-rpc-types-trace = { version = "2.5.0", default-features = false }
-alloy-rpc-types-txpool = { version = "2.5.0", default-features = false }
-alloy-serde = { version = "2.5.0", default-features = false }
-alloy-signer = { version = "2.5.0", default-features = false }
-alloy-signer-local = { version = "2.5.0", default-features = false }
-alloy-transport = { version = "2.5.0" }
+alloy-consensus = { version = "2.6.1", default-features = false }
+alloy-contract = { version = "2.6.1", default-features = false }
+alloy-eips = { version = "2.6.1", default-features = false }
+alloy-genesis = { version = "2.6.1", default-features = false }
+alloy-json-rpc = { version = "2.6.1", default-features = false }
+alloy-network = { version = "2.6.1", default-features = false }
+alloy-node-bindings = "2.6.1"
+alloy-provider = { version = "2.6.1", features = ["reqwest", "debug-api"], default-features = false }
+alloy-rpc-client = { version = "2.6.1", default-features = false }
+alloy-rpc-types = { version = "2.6.1", features = ["eth"], default-features = false }
+alloy-rpc-types-admin = { version = "2.6.1", default-features = false }
+alloy-rpc-types-anvil = { version = "2.6.1", default-features = false }
+alloy-rpc-types-beacon = { version = "2.6.1", default-features = false }
+alloy-rpc-types-debug = { version = "2.6.1", default-features = false }
+alloy-rpc-types-engine = { version = "2.6.1", default-features = false }
+alloy-rpc-types-eth = { version = "2.6.1", default-features = false }
+alloy-rpc-types-mev = { version = "2.6.1", default-features = false }
+alloy-rpc-types-trace = { version = "2.6.1", default-features = false }
+alloy-rpc-types-txpool = { version = "2.6.1", default-features = false }
+alloy-serde = { version = "2.6.1", default-features = false }
+alloy-signer = { version = "2.6.1", default-features = false }
+alloy-signer-local = { version = "2.6.1", default-features = false }
+alloy-transport = { version = "2.6.1" }
 
 # misc
 derive-where = { version = "1.6", default-features = false }
@@ -507,10 +507,9 @@ fdlimit = "0.3.0"
 fixed-map = { version = "0.9", default-features = false }
 flate2 = "1.0"
 hashbrown = { version = "0.17", default-features = false }
-humantime = "2.1"
 imbl = "7"
-humantime-serde = "1.1"
 itertools = { version = "0.14", default-features = false }
+jiff = { version = "0.2.37", default-features = false, features = ["std"] }
 linked_hash_set = "0.1"
 libc = "0.2"
 lz4 = "1.28.1"
@@ -539,7 +538,6 @@ zstd = "0.14.3"
 byteorder = "1"
 fixed-cache = { version = "0.1.10", default-features = false, features = ["alloc"] }
 moka = "0.12"
-chrono = "0.4.41"
 
 # metrics
 metrics = "0.24.0"
@@ -661,9 +659,8 @@ ratatui = { version = "0.30", default-features = false }
 ringbuffer = "0.16.0"
 rmp-serde = "1.3"
 roaring = "0.11.3"
-rolling-file = "0.2.0"
 similar = { version = "2.7", default-features = false }
-smolgen = "0.1.1"
+smolgen = "0.1.2"
 snap = "1.1.1"
 socket2 = { version = "0.6", default-features = false }
 sysinfo = { version = "0.38", default-features = false }

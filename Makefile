@@ -43,14 +43,14 @@ help: ## Display this help.
 
 .PHONY: install
 install: ## Build and install the reth binary under `$(CARGO_HOME)/bin`.
-	cargo install --path bin/reth --bin reth --force --locked \
+	VERGEN_IDEMPOTENT=0 cargo install --path bin/reth --bin reth --force --locked \
 		--features "$(FEATURES)" \
 		--profile "$(PROFILE)" \
 		$(CARGO_INSTALL_EXTRA_FLAGS)
 
 .PHONY: build
 build: ## Build the reth binary into `target` directory.
-	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
+	VERGEN_IDEMPOTENT=0 cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
 
 # Environment variables for reproducible builds
 # Set timestamp from last git commit for reproducible builds
@@ -65,6 +65,7 @@ build-%-reproducible:
 		echo "Error: Reproducible builds are only supported for reth, not $*"; \
 		exit 1; \
 	fi
+	VERGEN_IDEMPOTENT=0 \
 	SOURCE_DATE_EPOCH=$(SOURCE_DATE) \
 	RUSTFLAGS="-C symbol-mangling-version=v0 -C strip=none -C link-arg=-Wl,--build-id=none -C metadata='' --remap-path-prefix $$(pwd)=. $(RUSTFLAGS_REPRODUCIBLE_EXTRA)" \
 	LC_ALL=C \
@@ -77,7 +78,7 @@ build-debug: ## Build the reth binary into `target/debug` directory.
 	cargo build --bin reth --features "$(FEATURES)"
 # Builds the reth binary natively.
 build-native-%:
-	$(if $(EXTRA_RUSTFLAGS),RUSTFLAGS="$(EXTRA_RUSTFLAGS)") cargo build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+	$(if $(EXTRA_RUSTFLAGS),RUSTFLAGS="$(EXTRA_RUSTFLAGS)") VERGEN_IDEMPOTENT=0 cargo build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
 # The following commands use `cross` to build a cross-compile.
 #
@@ -100,7 +101,7 @@ build-native-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
 build-%:
-	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc $(EXTRA_RUSTFLAGS)" \
+	VERGEN_IDEMPOTENT=0 RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc $(EXTRA_RUSTFLAGS)" \
 		cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
@@ -227,15 +228,15 @@ update-book-cli: build-debug ## Update book cli documentation.
 
 .PHONY: profiling
 profiling: ## Builds `reth` with optimisations, but also symbols.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling
+	VERGEN_IDEMPOTENT=0 RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling
 
 .PHONY: maxperf
 maxperf: ## Builds `reth` with the most aggressive optimisations.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf
+	VERGEN_IDEMPOTENT=0 RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf
 
 .PHONY: maxperf-no-asm
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --no-default-features --features jemalloc,min-trace-logs,otlp,otlp-logs,portable,js-tracer,keccak-cache-global,gmp
+	VERGEN_IDEMPOTENT=0 RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --no-default-features --features jemalloc,min-trace-logs,otlp,otlp-logs,portable,js-tracer,keccak-cache-global,gmp
 
 fmt:
 	cargo +nightly fmt
