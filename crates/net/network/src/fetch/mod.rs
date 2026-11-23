@@ -193,7 +193,10 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     /// full history available
     fn next_best_peer(&self, requirement: BestPeerRequirements) -> Option<PeerId> {
         // Filter out peers without capacity or the required capabilities.
-        let mut available = self.peers.iter().filter(|(_, peer)| peer.can_request(&requirement));
+        let mut available = self
+            .peers
+            .iter()
+            .filter(|(_, peer)| peer.can_request(&requirement) && !self.is_draining(peer));
 
         let mut best_peer = available.next()?;
 
@@ -232,6 +235,18 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             !matches!(peer.state, PeerState::Closing) &&
                 peer.capabilities.supports_eth_at_least(&EthVersion::Eth71)
         })
+    }
+
+    /// Returns whether `peer` is finishing its `snap/2` requests for a queued download it can
+    /// serve, which needs it idle.
+    ///
+    /// Such a peer takes no more `snap/2` requests, since it only becomes idle once all of them
+    /// are answered.
+    fn is_draining(&self, peer: &Peer) -> bool {
+        !peer.state.is_idle() &&
+            self.queued_requests
+                .iter()
+                .any(|req| !req.is_snap() && peer.satisfies(&req.best_peer_requirements()))
     }
 
     /// Returns the next action to return
@@ -402,6 +417,9 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     /// Caution: this expects that the peer is _not_ closed.
     fn followup_request(&mut self, peer_id: PeerId) -> Option<BlockResponseOutcome> {
         let peer = self.peers.get(&peer_id)?;
+        if self.is_draining(peer) {
+            return None
+        }
         let req_idx = self.queued_requests.iter().position(|req| {
             // Find the first queued request this peer can serve within its capacity.
             peer.can_request(&req.best_peer_requirements())
@@ -2653,5 +2671,55 @@ mod tests {
         ));
         assert_eq!(responses.remove(0).await.unwrap().unwrap().1, range);
         assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SnapStateRange), None);
+    }
+
+    #[tokio::test]
+    async fn busy_snap_peer_drains_for_a_queued_download() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+        let peer = B512::random();
+        fetcher.new_active_peer(NewPeerInfo {
+            peer_id: peer,
+            best_hash: B256::ZERO,
+            best_number: 100,
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            timeout: Arc::new(AtomicU64::new(10)),
+            range_info: None,
+            supports_snap: true,
+        });
+        let code_request = |request_id| DownloadRequest::GetSnap {
+            request: SnapProtocolMessage::GetByteCodes(GetByteCodesMessage {
+                request_id,
+                hashes: vec![B256::ZERO],
+                response_bytes: 512 * 1024,
+            }),
+            response: oneshot::channel().0,
+            priority: Priority::Normal,
+        };
+        let codes = |request_id| {
+            Ok(SnapResponse::ByteCodes(ByteCodesMessage {
+                request_id,
+                codes: vec![Bytes::from_static(&[0xc0])],
+            }))
+        };
+        fetcher.prepare_block_request(peer, code_request(1));
+        fetcher.prepare_block_request(peer, code_request(2));
+        fetcher.queued_requests.push_back(DownloadRequest::GetBlockHeaders {
+            request: HeadersRequest::falling(1u64.into(), 1),
+            response: oneshot::channel().0,
+            priority: Priority::Normal,
+        });
+        fetcher.queued_requests.push_back(code_request(3));
+
+        // The queued headers need the peer idle, so it takes no more code requests.
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), None);
+        assert!(fetcher.on_snap_response(peer, codes(1)).is_none());
+
+        // Once its last code request is answered, the headers go next.
+        assert!(matches!(
+            fetcher.on_snap_response(peer, codes(2)),
+            Some(BlockResponseOutcome::Request(_, BlockRequest::GetBlockHeaders(_)))
+        ));
     }
 }
