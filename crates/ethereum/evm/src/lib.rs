@@ -158,12 +158,10 @@ where
     }
 
     fn transaction_validation_limits(&self) -> reth_evm::EvmTransactionValidationLimits {
-        let tx_gas_limit_cap = if self.version.feature(evm2::EvmFeatures::EIP8037) ||
-            self.version.tx_gas_limit_cap == u64::MAX
-        {
-            0
-        } else {
-            self.version.tx_gas_limit_cap
+        // `u64::MAX` means there is no cap, which the pool expects as `0`.
+        let tx_gas_limit_cap = match self.version.tx_gas_caps().0 {
+            u64::MAX => 0,
+            cap => cap,
         };
 
         reth_evm::EvmTransactionValidationLimits {
@@ -244,10 +242,11 @@ pub use factory::{
 pub use factory::{EthBigBlockExecutorFactory, EthBlockExecutorFactory, EvmFactory};
 
 mod convert;
-pub use convert::ExecutableRecoveredTx;
+pub use convert::{recover_authorizations, ExecutableRecoveredTx};
 
 mod execution;
 
+#[cfg(test)]
 mod dao_fork;
 
 mod receipt;
@@ -592,6 +591,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip7825::MAX_TX_GAS_LIMIT_OSAKA;
     use alloy_genesis::Genesis;
     use alloy_primitives::U256;
     use reth_chainspec::{Chain, ChainSpec};
@@ -617,6 +617,19 @@ mod tests {
 
             assert_eq!(env.blob_basefee, U256::from(blob_params.calc_blob_fee(excess_blob_gas)));
         }
+    }
+
+    #[test]
+    fn test_transaction_validation_limits_tx_gas_limit_cap() {
+        let cap = |spec| {
+            EthEvmEnv::<evm2::BaseEvmTypes>::new(spec, Default::default(), 1)
+                .transaction_validation_limits()
+                .tx_gas_limit_cap
+        };
+
+        assert_eq!(cap(evm2::SpecId::PRAGUE), 0);
+        assert_eq!(cap(evm2::SpecId::OSAKA), MAX_TX_GAS_LIMIT_OSAKA);
+        assert_eq!(cap(evm2::SpecId::AMSTERDAM), evm2::constants::MAX_TX_TOTAL_GAS_LIMIT_AMSTERDAM);
     }
 
     #[derive(Debug, Clone)]

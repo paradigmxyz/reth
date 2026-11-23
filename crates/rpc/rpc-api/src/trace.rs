@@ -9,8 +9,7 @@ use alloy_rpc_types_trace::{
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
 /// Ethereum trace API
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "trace"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "trace"))]
+#[rpc(server, namespace = "trace")]
 pub trait TraceApi<TxReq> {
     /// Executes the given call and returns a number of possible traces for it.
     #[method(name = "call")]

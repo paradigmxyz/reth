@@ -172,10 +172,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     // Atomically grab the next chunk of blocks.
                     let chunk_start =
                         next_block.fetch_add(blocks_per_chunk, Ordering::Relaxed);
-                    if chunk_start >= max_block {
+                    if chunk_start > max_block {
                         break;
                     }
-                    let chunk_end = (chunk_start + blocks_per_chunk).min(max_block);
+                    let chunk_end = (chunk_start + blocks_per_chunk).min(max_block + 1);
 
                     let mut executor = evm_config.batch_executor(db_at(chunk_start - 1)?);
                     let mut executor_created = Instant::now();

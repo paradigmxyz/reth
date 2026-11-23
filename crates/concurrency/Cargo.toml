@@ -1,0 +1,44 @@
+[package]
+name = "reth-concurrency"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Concurrency primitives for native execution and fuzz simulation"
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-primitives-traits.workspace = true
+
+# std
+reth-concurrency-macros = { workspace = true, optional = true }
+crossbeam-channel = { workspace = true, optional = true }
+rayon = { workspace = true, optional = true }
+parking_lot = { workspace = true, optional = true }
+
+# fuzz
+either = { workspace = true, optional = true }
+shuttle = { workspace = true, optional = true }
+shuttle-sync = { workspace = true, optional = true }
+shuttle-parking_lot = { workspace = true, optional = true, features = ["send_guard", "arc_lock"] }
+
+[features]
+default = ["std"]
+std = [
+    "dep:reth-concurrency-macros",
+    "reth-primitives-traits/std",
+    "dep:crossbeam-channel",
+    "dep:rayon",
+    "dep:parking_lot",
+    "either?/std",
+]
+fuzz = ["std", "dep:either", "dep:shuttle", "shuttle-sync/shuttle", "shuttle-parking_lot/shuttle"]
+test-utils = ["reth-primitives-traits/test-utils"]
+
+# Fuzz builds replace the native Rayon backend.
+[package.metadata.cargo-udeps.ignore]
+normal = ["rayon"]

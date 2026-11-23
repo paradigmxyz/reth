@@ -369,6 +369,7 @@ mod tests {
     use alloy_primitives::hex_literal::hex;
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_provider::test_utils::create_test_provider_factory;
+    use reth_storage_api::StorageSettingsCache;
 
     #[test]
     fn test_account_trie_order() {
@@ -413,7 +414,6 @@ mod tests {
     // tests that upsert and seek match on the storage trie cursor
     #[test]
     fn test_storage_cursor_abstraction() {
-        use reth_storage_api::StorageSettingsCache;
         use reth_trie::trie_cursor::{TrieCursor, TrieCursorFactory};
 
         let factory = create_test_provider_factory();

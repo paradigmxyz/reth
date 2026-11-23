@@ -458,6 +458,7 @@ Filters are objects with the following properties:
 
 -   `fromBlock`: Returns traces from the given block (a number, hash, or a tag like `latest`).
 -   `toBlock`: Returns traces to the given block.
+-   `blockHash`: Returns traces from the block with this hash. Cannot be combined with `fromBlock` or `toBlock`.
 -   `fromAddress`: Sent from these addresses
 -   `toAddress`: Sent to these addresses
 -   `after`: The offset trace number

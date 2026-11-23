@@ -44,8 +44,8 @@ pub(crate) fn prune_unlisted_outputs(
     let listed = planned
         .iter()
         .flat_map(|planned| &planned.archive.output_files)
-        .map(|output| verifier.output_path(&output.path))
-        .collect::<HashSet<_>>();
+        .map(|output| verifier.output_path(output))
+        .collect::<Result<HashSet<_>>>()?;
 
     let mut removed = 0;
     for entry in MANAGED_DATADIR_PATHS {

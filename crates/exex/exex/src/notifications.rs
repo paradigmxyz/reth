@@ -673,7 +673,8 @@ mod tests {
         let genesis_block = provider_factory
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
-        let provider = BlockchainProvider::new(provider_factory.clone())?;
+        let (provider, mut canonical_in_memory_state_writer) =
+            BlockchainProvider::new_with_writer(provider_factory.clone())?;
 
         let exex_head =
             ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };
@@ -713,9 +714,7 @@ mod tests {
         let provider_rw = provider_factory.provider_rw()?;
         provider_rw.insert_block(&node_head_block)?;
         provider_rw.commit()?;
-        provider
-            .canonical_in_memory_state()
-            .set_canonical_head(node_head_block.clone_sealed_header());
+        canonical_in_memory_state_writer.set_canonical_head(node_head_block.clone_sealed_header());
 
         // The ExEx recovers still at genesis and catches up, it needs block 1 again, but that
         // notification is long gone from the channel.

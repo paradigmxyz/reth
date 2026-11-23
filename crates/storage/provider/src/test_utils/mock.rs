@@ -36,9 +36,9 @@ use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory, DbTxProvider,
-    HashedPostStateProvider, HistoryInfo, HistoryReader, NodePrimitivesProvider,
-    StageCheckpointReader, StateProofProvider, StorageChangeSetReader, StorageRootProvider,
-    StorageSettingsCache,
+    DurableBlockReader, HashedPostStateProvider, HistoryInfo, HistoryReader,
+    NodePrimitivesProvider, StageCheckpointReader, StateProofProvider, StorageChangeSetReader,
+    StorageRootProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -76,6 +76,8 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     pub block_body_indices: Arc<Mutex<HashMap<BlockNumber, StoredBlockBodyIndices>>>,
     /// Local stage checkpoints
     stage_checkpoints: Arc<Mutex<HashMap<StageId, StageCheckpoint>>>,
+    /// Override for the next chain head lookup.
+    next_chain_info: Arc<Mutex<Option<ChainInfo>>>,
     /// The engine's pending block, if any
     pending_block_num_hash: Arc<Mutex<Option<BlockNumHash>>>,
     /// Local BAL store handle
@@ -133,6 +135,7 @@ where
             state_roots: self.state_roots.clone(),
             block_body_indices: self.block_body_indices.clone(),
             stage_checkpoints: self.stage_checkpoints.clone(),
+            next_chain_info: self.next_chain_info.clone(),
             pending_block_num_hash: self.pending_block_num_hash.clone(),
             bal_store: self.bal_store.clone(),
             database_provider_available: self.database_provider_available.clone(),
@@ -163,6 +166,7 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             state_roots: Default::default(),
             block_body_indices: Default::default(),
             stage_checkpoints: Default::default(),
+            next_chain_info: Default::default(),
             pending_block_num_hash: Default::default(),
             bal_store: Default::default(),
             database_provider_available: Default::default(),
@@ -314,6 +318,11 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
         self.block_body_indices.lock().insert(block_number, indices);
     }
 
+    /// Returns this head on the next chain info lookup, then resumes using the stored headers.
+    pub fn set_next_chain_info(&self, info: ChainInfo) {
+        *self.next_chain_info.lock() = Some(info);
+    }
+
     /// Adds a stage checkpoint to the local store.
     pub fn add_stage_checkpoint(&self, id: StageId, checkpoint: StageCheckpoint) {
         self.stage_checkpoints.lock().insert(id, checkpoint);
@@ -340,6 +349,7 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             state_roots: self.state_roots,
             block_body_indices: self.block_body_indices,
             stage_checkpoints: self.stage_checkpoints,
+            next_chain_info: self.next_chain_info,
             pending_block_num_hash: self.pending_block_num_hash,
             bal_store: self.bal_store,
             database_provider_available: self.database_provider_available,
@@ -877,6 +887,9 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> BlockNumReader
     for MockEthProvider<T, ChainSpec>
 {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
+        if let Some(info) = self.next_chain_info.lock().take() {
+            return Ok(info);
+        }
         let best_block_number = self.best_block_number()?;
         let lock = self.headers.lock();
 
@@ -1036,6 +1049,11 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> AccountReader for MockEthProvide
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         Ok(self.accounts.lock().get(address).cloned().map(|a| a.account))
     }
+}
+
+impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> DurableBlockReader
+    for MockEthProvider<T, ChainSpec>
+{
 }
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync> StageCheckpointReader

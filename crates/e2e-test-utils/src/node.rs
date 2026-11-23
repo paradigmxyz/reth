@@ -15,6 +15,7 @@ use alloy_provider::{
     fillers::{FillProvider, RecommendedFillers, TxFiller},
     Provider, ProviderBuilder, RootProvider,
 };
+use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_engine::{
     ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadStatus, PayloadStatusEnum,
 };
@@ -24,7 +25,6 @@ use futures_util::{
     future::{select, BoxFuture, Either},
     Future,
 };
-use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
 use reth_chainspec::EthereumHardforks;
 use reth_db::{mdbx::DatabaseArguments, open_db_read_only};
 use reth_engine_primitives::BeaconForkChoiceUpdateError;
@@ -1304,7 +1304,7 @@ where
     }
 
     /// Returns an RPC client.
-    pub fn rpc_client(&self) -> Option<HttpClient> {
+    pub fn rpc_client(&self) -> Option<RpcClient> {
         self.inner.rpc_server_handle().http_client()
     }
 
@@ -1419,9 +1419,36 @@ where
         let client =
             self.rpc_client().ok_or_else(|| eyre::eyre!("HTTP RPC client not available"))?;
 
-        let res: TestingBuildBlockResponseV1 =
-            client.request("testing_buildBlockV1", request.into_params()).await?;
+        let res = client
+            .request::<_, TestingBuildBlockResponseV1>(
+                "testing_buildBlockV1",
+                request.into_params(),
+            )
+            .await?;
         eyre::Ok(res)
+    }
+
+    /// Terminates the consensus engine after it persisted its canonical chain, and waits for it.
+    ///
+    /// Call this before [`Self::stop`] while a backfill is in flight, e.g. paused at a snap gate.
+    /// Stopping cancels the backfill, and its dropped task can end the engine loop with a fatal
+    /// error before the loop sees the shutdown signal, leaving the engine thread and its database
+    /// handles alive. The engine loop also reports a fatal error once the terminated engine
+    /// exits, so the future of [`Self::take_exit_future`] resolves with an error.
+    ///
+    /// Returns an error if shutdown was already requested or the engine does not terminate within
+    /// [`WAIT_TIMEOUT`].
+    pub async fn shutdown_engine(&self) -> eyre::Result<()> {
+        let done = self
+            .inner
+            .add_ons_handle
+            .engine_shutdown
+            .shutdown()
+            .ok_or_eyre("engine shutdown was already requested")?;
+        tokio::time::timeout(WAIT_TIMEOUT, done)
+            .await
+            .map_err(|_| eyre!("the engine did not shut down within {WAIT_TIMEOUT:?}"))??;
+        Ok(())
     }
 
     /// Stops the node and closes its database, keeping its datadir to launch the node again with
