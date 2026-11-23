@@ -709,7 +709,9 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::B256;
     use reth_eth_wire::{BlockBodies, Capabilities, Capability, EthNetworkPrimitives, EthVersion};
-    use reth_eth_wire_types::snap::{AccountRangeMessage, GetAccountRangeMessage};
+    use reth_eth_wire_types::snap::{
+        ByteCodesMessage, GetAccountRangeMessage, GetByteCodesMessage,
+    };
     use reth_ethereum_primitives::BlockBody;
     use reth_network_api::PeerRequestSender;
     use reth_network_p2p::{
@@ -813,19 +815,25 @@ mod tests {
         state.on_session_activated(SessionActivation {
             peer,
             capabilities: capabilities(),
+            version: EthVersion::Eth71,
             status: Arc::default(),
             request_tx: PeerRequestSender::new(peer, tx),
             timeout: Arc::new(AtomicU64::new(10)),
             range_info: None,
             supports_snap: true,
         });
-        let mut responses = Vec::new();
-        for request_id in 1..=4 {
-            responses.push(client.get_account_range(GetAccountRangeMessage {
+        // One range and three code requests, the most one peer takes at once.
+        let mut responses = vec![client.get_account_range(GetAccountRangeMessage {
+            request_id: 1,
+            root_hash: B256::ZERO,
+            starting_hash: B256::ZERO,
+            limit_hash: B256::repeat_byte(0xff),
+            response_bytes: 512 * 1024,
+        })];
+        for request_id in 2..=4 {
+            responses.push(client.get_byte_codes(GetByteCodesMessage {
                 request_id,
-                root_hash: B256::ZERO,
-                starting_hash: B256::ZERO,
-                limit_hash: B256::repeat_byte(0xff),
+                hashes: vec![B256::ZERO],
                 response_bytes: 512 * 1024,
             }));
         }
@@ -845,10 +853,9 @@ mod tests {
             let result = if id == 1 {
                 Err(RequestError::Timeout)
             } else {
-                Ok(SnapResponse::AccountRange(AccountRangeMessage {
+                Ok(SnapResponse::ByteCodes(ByteCodesMessage {
                     request_id: id,
-                    accounts: vec![],
-                    proof: vec![alloy_primitives::Bytes::from_static(&[0xc0])],
+                    codes: vec![alloy_primitives::Bytes::from_static(&[0xc0])],
                 }))
             };
             response.send(result).unwrap();
@@ -859,10 +866,10 @@ mod tests {
             if index == 0 {
                 assert_eq!(result.unwrap_err(), RequestError::Timeout);
             } else {
-                let SnapResponse::AccountRange(range) = result.unwrap().1 else {
-                    panic!("expected an account range")
+                let SnapResponse::ByteCodes(codes) = result.unwrap().1 else {
+                    panic!("expected byte codes")
                 };
-                assert_eq!(range.request_id, index as u64 + 1);
+                assert_eq!(codes.request_id, index as u64 + 1);
             }
         }
         assert!(state.active_peers[&peer].pending_snap_responses.is_empty());
