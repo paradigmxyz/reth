@@ -361,9 +361,9 @@ impl ArchiveFetcher {
                 )
             }
 
-            // A full response restarts the file, so its length replaces any earlier total.
-            if total_size.is_none() || (!is_partial && size.is_some()) {
-                total_size = size;
+            // A full response restarts the file, so an earlier response's total no longer applies.
+            if total_size.is_none() || !is_partial {
+                total_size = size.or(self.expected_size);
                 if !quiet && let Some(size) = size {
                     info!(target: "reth::cli",
                         file = %self.paths.file_name(),
@@ -1657,6 +1657,27 @@ mod tests {
 
         assert_eq!(downloaded.size, 10);
         assert_eq!(std::fs::read(downloaded.path).unwrap(), b"0123456789");
+    }
+
+    #[test]
+    fn sequential_full_restart_without_length_drops_earlier_total() {
+        let url = spawn_response_sequence_server(vec![
+            b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n0123",
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n\
+              14\r\n01234567890123456789\r\n0\r\n\r\n",
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new())
+            .with_retry_backoff(Some(Duration::ZERO));
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, None);
+
+        let error = fetcher.download(None, None).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "Server did not provide Content-Length or Content-Range header"
+        );
+        assert!(!dir.path().join("archive.tar.zst").exists());
     }
 
     #[test]
