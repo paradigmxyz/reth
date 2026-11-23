@@ -19,7 +19,7 @@ use alloy_primitives::{map::B256Set, Bytes, B256};
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
-    ForkchoiceUpdateError,
+    ForkchoiceUpdateError, PayloadError,
 };
 use assert_matches::assert_matches;
 use evm2::evm::Bal as EvmBal;
@@ -39,6 +39,7 @@ use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::PayloadServiceCommand;
+use reth_payload_primitives::NewPayloadError;
 use reth_primitives_traits::{Block as _, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
     test_utils::MockEthProvider, BalStoreHandle, BlockExecutionOutput, HeaderProvider,
@@ -605,6 +606,33 @@ fn block_access_list_decode_returns_invalid_with_null_latest_valid_hash() {
     let status = test_harness.tree.on_insert_block_error(error).unwrap();
     assert!(status.is_invalid());
     assert_eq!(status.latest_valid_hash, None);
+}
+
+#[test]
+fn payload_decode_error_returns_invalid_with_null_latest_valid_hash() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..2).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks);
+    let parent_hash = test_harness.tree.state.tree_state.canonical_block_hash();
+    let num_hash = NumHash::new(2, B256::random());
+
+    let decode_error = NewPayloadError::Eth(PayloadError::Decode(alloy_rlp::Error::Custom(
+        "Unexpected type flag",
+    )));
+    let status =
+        test_harness.tree.on_new_payload_error(decode_error, num_hash, parent_hash).unwrap();
+    assert_eq!(
+        status,
+        PayloadStatus::new(
+            PayloadStatusEnum::Invalid { validation_error: "Unexpected type flag".to_string() },
+            None,
+        )
+    );
+
+    // Other malformed payloads still report the known parent.
+    let extra_data_error = NewPayloadError::Eth(PayloadError::ExtraData(Bytes::new()));
+    let status =
+        test_harness.tree.on_new_payload_error(extra_data_error, num_hash, parent_hash).unwrap();
+    assert_eq!(status.latest_valid_hash, Some(parent_hash));
 }
 
 #[tokio::test]
@@ -2163,12 +2191,8 @@ fn test_on_new_payload_invalid_ancestor() {
         "Payload should be invalid when parent is marked invalid"
     );
 
-    // For invalid ancestors, the latest_valid_hash behavior varies
-    // We just verify it's marked as invalid
-    assert!(
-        outcome.outcome.latest_valid_hash.is_some() || outcome.outcome.latest_valid_hash.is_none(),
-        "Latest valid hash should be set appropriately for invalid ancestor"
-    );
+    // The parent of the invalid block is unknown, so no valid ancestor can be determined.
+    assert_eq!(outcome.outcome.latest_valid_hash, None);
 
     // Verify block 2 is now also marked as invalid
     assert!(
@@ -2896,8 +2920,13 @@ mod forkchoice_updated_tests {
         // Test FCU that points to a descendant of the invalid block
         // This is a bit tricky to test directly, but we can verify the check_invalid_ancestor
         // method
-        let result = test_harness.tree.check_invalid_ancestor(invalid_block_hash).unwrap();
-        assert!(result.is_some(), "Should detect invalid ancestor");
+        let status = test_harness
+            .tree
+            .check_invalid_ancestor(invalid_block_hash)
+            .unwrap()
+            .expect("Should detect invalid ancestor");
+        assert!(status.is_invalid());
+        assert_eq!(status.latest_valid_hash, None);
     }
 
     /// Test `OpStack` specific behavior with canonical head

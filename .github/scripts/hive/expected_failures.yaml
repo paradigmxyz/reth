@@ -50,10 +50,11 @@ eels/consume-enginex:
     - tests/ported_static/stTransactionTest/test_high_gas_price_paris.py::test_high_gas_price_paris[fork_Osaka-blockchain_test_engine_x_from_state_test]-reth
     - tests/ported_static/stTransactionTest/test_high_gas_price_paris.py::test_high_gas_price_paris[fork_Prague-blockchain_test_engine_x_from_state_test]-reth
   # Post-fork system contract deployment, see above.
-  - tests/prague/eip7251_consolidations/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine_x-deploy_after_fork-nonzero_balance]-reth
-  - tests/prague/eip7251_consolidations/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine_x-deploy_after_fork-zero_balance]-reth
-  - tests/prague/eip7002_el_triggerable_withdrawals/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine_x-deploy_after_fork-nonzero_balance]-reth
-  - tests/prague/eip7002_el_triggerable_withdrawals/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine_x-deploy_after_fork-zero_balance]-reth
+  - &post_fork_system_contract_deployments
+    - tests/prague/eip7251_consolidations/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine_x-deploy_after_fork-nonzero_balance]-reth
+    - tests/prague/eip7251_consolidations/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine_x-deploy_after_fork-zero_balance]-reth
+    - tests/prague/eip7002_el_triggerable_withdrawals/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine_x-deploy_after_fork-nonzero_balance]-reth
+    - tests/prague/eip7002_el_triggerable_withdrawals/test_contract_deployment.py::test_system_contract_deployment[fork_CancunToPragueAtTime15k-blockchain_test_engine_x-deploy_after_fork-zero_balance]-reth
   # The pinned EELS reth exception mapper does not map "gas limit below floor gas: required N, got
   # N" to INTRINSIC_GAS_BELOW_FLOOR_GAS_COST.
   - tests/amsterdam/eip2780_reduce_intrinsic_tx_gas/test_calldata_floor.py::test_calldata_floor[fork_Amsterdam-blockchain_test_engine_x_from_state_test-other_eoa-non-zero_value-below_floor_rejected]-reth
@@ -611,3 +612,11 @@ eels/consume-wirex:
   - tests/spurious_dragon/eip155_simple_replay_attack_protection/test_chain_id.py::test_legacy_chain_id_over_64_bits[fork_Prague-blockchain_test_engine_x_from_state_test-case_smallest_65_bit_chain_id]-reth
   - tests/spurious_dragon/eip155_simple_replay_attack_protection/test_chain_id.py::test_legacy_chain_id_over_64_bits[fork_Shanghai-blockchain_test_engine_x_from_state_test-case_chain_id_plus_2_64]-reth
   - tests/spurious_dragon/eip155_simple_replay_attack_protection/test_chain_id.py::test_legacy_chain_id_over_64_bits[fork_Shanghai-blockchain_test_engine_x_from_state_test-case_smallest_65_bit_chain_id]-reth
+
+# Block import shares the post-fork deployment cases with engine fixtures.
+ef-test-runner/blocktest:
+  - *post_fork_system_contract_deployments
+  # EIP-8282's builder exit contract is deployed after the fork in these two, which is the same
+  # case as above: the block is accepted where the fixture expects it to be rejected.
+  - tests/amsterdam/eip8282_builder_execution_requests/test_contract_deployment.py::test_builder_exit_contract_deployment[fork_BPO2ToAmsterdamAtTime15k-blockchain_test-deploy_after_fork-nonzero_balance]
+  - tests/amsterdam/eip8282_builder_execution_requests/test_contract_deployment.py::test_builder_exit_contract_deployment[fork_BPO2ToAmsterdamAtTime15k-blockchain_test-deploy_after_fork-zero_balance]
