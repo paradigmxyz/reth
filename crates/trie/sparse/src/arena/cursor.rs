@@ -59,7 +59,11 @@ pub(super) enum NextResult {
 pub(super) fn branch_idx(arena: &NodeArena, idx: Index) -> Option<Index> {
     match &arena[idx] {
         ArenaSparseNode::Branch(_) => Some(idx),
-        ArenaSparseNode::Extension { child, .. } => Some(*child),
+        ArenaSparseNode::Extension { child, .. }
+            if matches!(arena[*child], ArenaSparseNode::Branch(_)) =>
+        {
+            Some(*child)
+        }
         _ => None,
     }
 }
@@ -387,6 +391,18 @@ impl ArenaCursor {
             let head_idx = head.index;
             let head_path_len = head.path_len as usize;
 
+            let short_key = arena[head_idx].extension_key().copied().unwrap_or_default();
+            let logical_len = head_path_len + short_key.len();
+
+            // Paths inside or diverging from the extension key prove exclusion. The exact
+            // logical path may instead name its blinded backing branch for revelation.
+            if full_path.len() < logical_len ||
+                (!short_key.is_empty() &&
+                    full_path.slice_unchecked(head_path_len, logical_len) != short_key)
+            {
+                return SeekResult::Diverged;
+            }
+
             let head_branch = match &arena[head_idx] {
                 ArenaSparseNode::EmptyRoot { .. } => {
                     return SeekResult::EmptyRoot;
@@ -399,22 +415,19 @@ impl ArenaCursor {
                     };
                 }
                 ArenaSparseNode::Branch(b) => b,
-                ArenaSparseNode::Extension { child, .. } => arena[*child].branch_ref(),
+                ArenaSparseNode::Extension { child, .. } => {
+                    if matches!(arena[*child], ArenaSparseNode::BlindedBranch { .. }) {
+                        return SeekResult::Blinded;
+                    }
+                    arena[*child].branch_ref()
+                }
                 ArenaSparseNode::Subtrie(_) => {
                     return SeekResult::RevealedSubtrie;
                 }
                 _ => unreachable!("unexpected node type on stack: {:?}", arena[head_idx]),
             };
 
-            let short_key = arena[head_idx].extension_key().copied().unwrap_or_default();
-            let logical_len = head_path_len + short_key.len();
-
-            // If full_path doesn't extend past the branch's logical path, the target is at or
-            // within the extension's key — treat as diverged.
-            if full_path.len() <= logical_len ||
-                (!short_key.is_empty() &&
-                    full_path.slice_unchecked(head_path_len, logical_len) != short_key)
-            {
+            if full_path.len() == logical_len {
                 return SeekResult::Diverged;
             }
 

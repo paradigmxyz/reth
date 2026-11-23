@@ -68,13 +68,12 @@ impl LeafUpdate {
 pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Reveals the root from a batch produced by the V2 proof calculator.
     ///
-    /// `nodes` must contain a node at the empty path. An extension root must be accompanied by
-    /// its branch child in the same batch, including that branch's persistence masks.
+    /// `nodes` must contain a node at the empty path. An extension root may be revealed without
+    /// its branch child; the child remains blinded until a later proof supplies it and its masks.
     /// Root nodes may be consumed; remaining nodes can be passed to [`Self::reveal_nodes`].
     /// `retain_updates` controls whether trie updates should be tracked.
     ///
-    /// Returns an error if the root cannot be revealed. Standalone hashed extensions are not
-    /// supported.
+    /// Returns an error if the root cannot be revealed.
     ///
     /// # Panics
     ///
@@ -99,9 +98,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 
     /// Reveals one or more trie nodes if they have not been revealed before.
     ///
-    /// The batch must come from the V2 proof calculator, with every extension accompanied by
-    /// its branch child. Attaches nodes where their paths identify blinded nodes in the current
-    /// trie. Nodes already revealed, paths diverging from the trie, and paths naming absent
+    /// Extensions may be supplied without their branch children, which remain blinded until a
+    /// later proof reveals them. Attaches nodes where their paths identify blinded nodes in the
+    /// current trie. Nodes already revealed, paths diverging from the trie, and paths naming absent
     /// children may be skipped.
     ///
     /// # Arguments
@@ -230,8 +229,11 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// The callback receives `(key, parent)` where `key` is the full 32-byte hashed key
     /// (right-padded with zeros from the blinded path) and `parent` identifies the revealed logical
-    /// parent branch. No known parent indicates that the trie is entirely blind and the proof
-    /// must include the root.
+    /// parent branch. When no parent branch is known (including an extension root with a
+    /// blinded branch), the proof must include the root.
+    ///
+    /// Splitting an extension or collapsing onto it may require its blinded branch's masks,
+    /// even when the extension alone proves that the updated key is absent.
     ///
     /// The callback may be invoked multiple times for the same target across retry loops.
     /// Callers should deduplicate if needed.

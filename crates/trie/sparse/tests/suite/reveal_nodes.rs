@@ -433,8 +433,8 @@ pub(super) fn test_reveal_boundary_node_with_missing_upper_parent_branch<T: Spar
     assert_eq!(trie.root(epoch(1)), harness.original_root());
 }
 
-/// Incomplete extension pairs fail before earlier nodes in the batch become visible.
-pub(super) fn test_reveal_nodes_rejects_missing_extension_branch<T: SparseTrie>(
+/// Malformed extension children fail before earlier nodes in the batch become visible.
+pub(super) fn test_reveal_nodes_rejects_nonbranch_extension_child<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {
     let first = B256::right_padding_from(&[0x00]);
@@ -459,7 +459,8 @@ pub(super) fn test_reveal_nodes_rejects_missing_extension_branch<T: SparseTrie>(
         .iter()
         .any(|node| node.path == branch_path && matches!(node.node, TrieNode::Branch(_))));
     let mut incomplete = proof.clone();
-    incomplete.retain(|node| node.path != branch_path);
+    incomplete.iter_mut().find(|node| node.path == branch_path).unwrap().node =
+        TrieNode::Extension(extension.clone());
     let error = trie.reveal_nodes(&mut incomplete).unwrap_err();
     match error.kind() {
         SparseTrieErrorKind::Reveal { path, node } => {

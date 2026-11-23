@@ -149,12 +149,20 @@ pub(super) enum ArenaSparseNode {
     },
     /// A branch node with up to 16 children.
     Branch(ArenaSparseNodeBranch),
-    /// An extension node with a revealed branch child.
+    /// An extension node with a revealed or blinded branch child.
     Extension {
         /// The extension key.
         key: Nibbles,
         /// The extension's branch child in the arena.
         child: Index,
+    },
+    /// An unrevealed branch backing an extension. Its state caches the whole extension,
+    /// just as a revealed backing branch does.
+    BlindedBranch {
+        /// Cached or dirty state of the parent extension.
+        state: ArenaSparseNodeState,
+        /// The branch reference from the proof's extension node.
+        rlp_node: RlpNode,
     },
     /// A leaf node containing a value.
     Leaf {
@@ -176,11 +184,13 @@ pub(super) enum ArenaSparseNode {
 }
 
 impl ArenaSparseNode {
-    /// Returns the state of an `EmptyRoot`, `Branch`, `Leaf`, or `Subtrie` root node, or `None` for
-    /// other types.
+    /// Returns the state of an empty root, revealed or blinded branch, leaf, or subtrie root,
+    /// or `None` for other types.
     pub(super) fn state_ref(&self) -> Option<&ArenaSparseNodeState> {
         match self {
-            Self::EmptyRoot { state } | Self::Leaf { state, .. } => Some(state),
+            Self::EmptyRoot { state } |
+            Self::Leaf { state, .. } |
+            Self::BlindedBranch { state, .. } => Some(state),
             Self::Branch(b) => Some(&b.state),
             Self::Subtrie(s) => {
                 let root = &s.arena[s.root];
@@ -192,16 +202,18 @@ impl ArenaSparseNode {
         }
     }
 
-    /// Returns a mutable reference to the state of an `EmptyRoot`, `Branch`, or `Leaf` node.
+    /// Returns the mutable state of an empty root, revealed or blinded branch, or leaf.
     ///
     /// # Panics
     ///
-    /// Panics if called on a non-EmptyRoot/Branch/Leaf node.
+    /// Panics if called on an extension, subtrie, or vacant node.
     pub(super) fn state_mut(&mut self) -> &mut ArenaSparseNodeState {
         match self {
-            Self::EmptyRoot { state } | Self::Leaf { state, .. } => state,
+            Self::EmptyRoot { state } |
+            Self::Leaf { state, .. } |
+            Self::BlindedBranch { state, .. } => state,
             Self::Branch(b) => &mut b.state,
-            _ => panic!("state_mut called on non-EmptyRoot/Branch/Leaf node"),
+            _ => panic!("state_mut called on a node without its own state"),
         }
     }
 
@@ -299,8 +311,8 @@ impl ArenaSparseNode {
 }
 
 impl ArenaSparseNode {
-    /// Converts a calculator proof node into an arena node. Extensions must be paired with
-    /// their revealed branch, as checked before ingestion by `validate_extension_child`.
+    /// Converts a calculator proof node into an arena node, retaining a blinded backing branch
+    /// when the extension's separate branch proof is not supplied.
     pub(super) fn from_proof_node(
         arena: &mut NodeArena,
         proof_node: ProofTrieNode,
@@ -327,12 +339,13 @@ impl ArenaSparseNode {
                 })
             }
             TrieNode::Extension(extension) => {
-                let Some(branch) = extension_child else {
-                    unreachable!(
-                        "calculator extensions are paired with their branch before ingestion"
-                    )
-                };
-                let branch = Self::from_proof_node(arena, branch, None);
+                let branch = extension_child.map_or_else(
+                    || Self::BlindedBranch {
+                        state: ArenaSparseNodeState::Revealed,
+                        rlp_node: extension.child,
+                    },
+                    |branch| Self::from_proof_node(arena, branch, None),
+                );
                 let child = arena.insert(branch);
                 Self::Extension { key: extension.key, child }
             }
