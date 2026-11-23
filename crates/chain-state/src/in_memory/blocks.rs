@@ -47,21 +47,6 @@ pub(super) struct InMemoryBlocks<N: NodePrimitives> {
 }
 
 impl<N: NodePrimitives> InMemoryBlocks<N> {
-    /// Creates the blocks from the canonical blocks, their numbers and the pending block.
-    pub(super) fn new(
-        blocks: B256Map<Arc<BlockState<N>>>,
-        numbers: BTreeMap<BlockNumber, B256>,
-        pending: Option<BlockState<N>>,
-    ) -> Self {
-        let mut this =
-            Self { canonical: InMemoryCanonicalBlocks { blocks, numbers }, ..Default::default() };
-        if let Some(pending) = pending {
-            this.pending_hash = Some(pending.hash());
-            this.non_canonical.insert(Arc::new(pending));
-        }
-        this
-    }
-
     /// Returns the state of the tracked block with the given hash, canonical or not.
     pub(super) fn get(&self, hash: &B256) -> Option<&Arc<BlockState<N>>> {
         self.canonical.get(hash).or_else(|| self.non_canonical.blocks.get(hash))
