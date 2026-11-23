@@ -267,7 +267,8 @@ impl ArchiveProcessor {
             self.archive().url.clone(),
             cache_dir,
             self.ctx.session().clone(),
-            Some(self.archive().size),
+            // Older chunked manifests omit chunk sizes, which resolve to 0, meaning unknown.
+            Some(self.archive().size).filter(|size| *size > 0),
         );
 
         if self.archive.ty == super::manifest::SnapshotComponentType::State {
