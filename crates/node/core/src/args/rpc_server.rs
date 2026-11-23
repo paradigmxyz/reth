@@ -515,7 +515,14 @@ pub struct RpcServerArgs {
     pub http_decompression_algorithms: Option<Vec<String>>,
 
     /// Rpc Modules to be configured for the HTTP server
-    #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_api.as_ref().map(|v| v.to_string().into())))]
+    #[arg(
+        long = "http.api",
+        value_parser = DefaultValueParser {
+            inner: RpcModuleSelectionValueParser::default(),
+            default: &DefaultRpcServerArgs::get_global().http_api,
+        },
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_api.as_ref().map(|v| v.to_string().into())),
+    )]
     pub http_api: Option<RpcModuleSelection>,
 
     /// Http Corsdomain to allow request from
@@ -539,7 +546,14 @@ pub struct RpcServerArgs {
     pub ws_allowed_origins: Option<String>,
 
     /// Rpc Modules to be configured for the WS server
-    #[arg(long = "ws.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_api.as_ref().map(|v| v.to_string().into())))]
+    #[arg(
+        long = "ws.api",
+        value_parser = DefaultValueParser {
+            inner: RpcModuleSelectionValueParser::default(),
+            default: &DefaultRpcServerArgs::get_global().ws_api,
+        },
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_api.as_ref().map(|v| v.to_string().into())),
+    )]
     pub ws_api: Option<RpcModuleSelection>,
 
     /// Disable the IPC-RPC server
@@ -1184,6 +1198,10 @@ where
         } else {
             self.inner.parse_ref_(cmd, arg, value, source)
         }
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        self.inner.possible_values()
     }
 }
 
