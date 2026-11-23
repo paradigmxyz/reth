@@ -97,7 +97,8 @@ pub struct ExExHandle<N: NodePrimitives = EthPrimitives> {
     ///
     /// Used to ignore `FinishedHeight` events for reverted blocks that the `ExEx` emitted before
     /// it received the notifications. Events arrive in order, so once an event for a block that
-    /// was not reverted is accepted, no stale event can follow and the set is cleared.
+    /// was not reverted is accepted at or above a reverted height, no stale event can follow and
+    /// the set is cleared.
     reverted_blocks: HashSet<BlockNumHash>,
 }
 
@@ -501,7 +502,16 @@ where
                             debug!(target: "exex::manager", exex_id = %exex.id, ?height, "Ignoring finished height of a reverted block");
                         } else {
                             exex.finished_height = Some(height);
-                            exex.reverted_blocks.clear();
+                            // A block at or above a reverted height that was not reverted is on
+                            // the new branch, so the ExEx processed the reorg and no stale event
+                            // can follow. A lower block could still precede a stale event.
+                            if exex
+                                .reverted_blocks
+                                .iter()
+                                .any(|block| block.number <= height.number)
+                            {
+                                exex.reverted_blocks.clear();
+                            }
                         }
                     }
                 }
@@ -1325,7 +1335,9 @@ mod tests {
         }
         assert_eq!(exex_manager.exex_handles[0].finished_height, Some(a2));
 
-        // A stale event for A5 that the ExEx emitted before it received the reorgs is ignored.
+        // Stale events that the ExEx emitted before it received the reorgs: A2 below the fork is
+        // accepted, but does not stop A5 from being ignored.
+        event_tx.send(ExExEvent::FinishedHeight(a2)).unwrap();
         event_tx.send(ExExEvent::FinishedHeight(a5)).unwrap();
         let _ = exex_manager.as_mut().poll(&mut cx);
         assert_eq!(exex_manager.exex_handles[0].finished_height, Some(a2));
