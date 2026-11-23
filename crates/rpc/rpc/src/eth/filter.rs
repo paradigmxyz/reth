@@ -32,8 +32,8 @@ use reth_storage_api::{
 };
 use reth_tasks::Runtime;
 use reth_transaction_pool::{
-    pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
-    PoolTransaction, TransactionPool, ValidPoolTransaction,
+    NewSubpoolTransactionStream, PoolTransaction, SubPool, TransactionListenerKind,
+    TransactionPool, ValidPoolTransaction,
 };
 use std::{
     collections::{HashMap, VecDeque},
@@ -174,7 +174,7 @@ where
             eth_api,
             active_filters: ActiveFilters::new(),
             max_active_filters,
-            pending_transaction_hashes: Arc::new(TxFeed::new(PENDING_TX_LISTENER_BUFFER_SIZE)),
+            pending_transaction_hashes: Arc::new(TxFeed::new()),
             full_pending_transactions: OnceLock::new(),
             id_provider: Arc::new(EthSubscriptionIdProvider::default()),
             max_headers_range: MAX_HEADERS_RANGE,
@@ -409,11 +409,14 @@ where
                 FilterKind::PendingTransaction(match kind {
                     PendingTransactionFilterKind::Hashes => {
                         PendingTransactionKind::Hashes(PendingTransactionsReceiver::new(
-                            self.inner
-                                .pending_transaction_hashes
-                                .subscribe(&self.inner.task_spawner, || {
-                                    ReceiverStream::new(self.pool().pending_transactions_listener())
-                                }),
+                            self.inner.pending_transaction_hashes.subscribe(
+                                &self.inner.task_spawner,
+                                || {
+                                    let listener = self.pool().pending_transactions_listener();
+                                    let capacity = listener.max_capacity();
+                                    (ReceiverStream::new(listener), capacity)
+                                },
+                            ),
                         ))
                     }
                     PendingTransactionFilterKind::Full => {
@@ -1044,7 +1047,7 @@ where
 {
     /// Creates a feed without a producer.
     fn new(pool: Pool, converter: TxCompat) -> Self {
-        Self { pool, converter, feed: Arc::new(TxFeed::new(NEW_TX_LISTENER_BUFFER_SIZE)) }
+        Self { pool, converter, feed: Arc::new(TxFeed::new()) }
     }
 }
 
@@ -1071,7 +1074,13 @@ where
         spawner: &Runtime,
     ) -> Arc<dyn FullTransactionsFilter<RpcTransaction<TxCompat::Network>>> {
         let txs_receiver = self.feed.subscribe(spawner, || {
-            self.pool.new_pending_pool_transactions_listener().map(|event| event.transaction)
+            // Same listener as `new_pending_pool_transactions_listener`, which hides the capacity.
+            let listener =
+                self.pool.new_transactions_listener_for(TransactionListenerKind::PropagateOnly);
+            let capacity = listener.max_capacity();
+            let transactions = NewSubpoolTransactionStream::new(listener, SubPool::Pending)
+                .map(|event| event.transaction);
+            (transactions, capacity)
         });
         Arc::new(FullTransactionsReceiver {
             txs_receiver: parking_lot::Mutex::new(txs_receiver),
@@ -1108,12 +1117,11 @@ impl<T: 'static> PendingTransactionKind<T> {
 ///
 /// The pool buffers new transactions per listener, so a listener for every filter would multiply
 /// that buffer and the pool's work per inserted transaction with the number of filters. All filters
-/// of a kind share one listener instead. A filter that is not polled for more than `capacity`
-/// transactions loses the oldest ones.
+/// of a kind share one listener instead. The feed holds as many transactions as that listener's
+/// buffer, so a filter can fall as far behind as a listener of its own could before it loses the
+/// oldest ones.
 #[derive(Debug)]
 struct TxFeed<T> {
-    /// Capacity of the broadcast channel.
-    capacity: usize,
     /// The running producer's sender, if any.
     ///
     /// The producer holds the only strong sender, so if it dies, its filters end and the next
@@ -1123,19 +1131,19 @@ struct TxFeed<T> {
 
 impl<T: Clone + Send + 'static> TxFeed<T> {
     /// Creates a feed without a producer.
-    const fn new(capacity: usize) -> Self {
-        Self { capacity, sender: parking_lot::Mutex::new(None) }
+    const fn new() -> Self {
+        Self { sender: parking_lot::Mutex::new(None) }
     }
 
     /// Subscribes to the feed. If no producer is running, this starts one on `spawner` over the
-    /// stream that `source` returns.
+    /// stream that `source` returns, together with the capacity of the listener behind it.
     ///
     /// `source` runs before this returns, so the producer does not miss anything that is
     /// published after the call.
     fn subscribe<S>(
         self: &Arc<Self>,
         spawner: &Runtime,
-        source: impl FnOnce() -> S,
+        source: impl FnOnce() -> (S, usize),
     ) -> broadcast::Receiver<T>
     where
         S: Stream<Item = T> + Send + Unpin + 'static,
@@ -1144,10 +1152,10 @@ impl<T: Clone + Send + 'static> TxFeed<T> {
         if let Some(sender) = slot.as_ref().and_then(broadcast::WeakSender::upgrade) {
             return sender.subscribe()
         }
-        let (sender, receiver) = broadcast::channel(self.capacity);
+        let (source, capacity) = source();
+        let (sender, receiver) = broadcast::channel(capacity);
         *slot = Some(sender.downgrade());
         let feed = self.clone();
-        let source = source();
         spawner.spawn_task(async move { feed.produce(sender, source).await });
         receiver
     }
@@ -1692,8 +1700,8 @@ mod tests {
     use reth_tasks::Runtime;
     use reth_testing_utils::generators;
     use reth_transaction_pool::{
-        test_utils::{testing_pool, MockTransaction, TestPool},
-        TransactionOrigin,
+        test_utils::{testing_pool, MockTransaction, TestPool, TestPoolBuilder},
+        PoolConfig, TransactionOrigin,
     };
     use std::{collections::VecDeque, sync::Arc};
 
@@ -2806,12 +2814,12 @@ mod tests {
         const CAPACITY: usize = 4;
 
         let hashes = (0..10u8).map(|byte| TxHash::repeat_byte(byte + 1)).collect::<Vec<_>>();
-        let feed = Arc::new(TxFeed::new(CAPACITY));
+        let feed = Arc::new(TxFeed::new());
         let runtime = Runtime::test();
         // The source ends after it is forwarded, which stops the producer, and the filter has
         // not been polled until then.
         let receiver = PendingTransactionsReceiver::new(
-            feed.subscribe(&runtime, || stream::iter(hashes.clone())),
+            feed.subscribe(&runtime, || (stream::iter(hashes.clone()), CAPACITY)),
         );
         tokio::time::timeout(TIMEOUT, async {
             while feed.sender.lock().is_some() {
@@ -2828,6 +2836,45 @@ mod tests {
         assert!(
             matches!(receiver.drain::<()>(), FilterChanges::Hashes(hashes) if hashes.is_empty())
         );
+    }
+
+    #[tokio::test]
+    async fn hash_feed_holds_as_many_hashes_as_the_pool_listener() {
+        // More than the default listener buffer of 2048, which a fixed-size feed would cap at.
+        const BUFFER: usize = 4096;
+        const TXS: usize = 3000;
+
+        let provider = provider_with_head();
+        let pool = TestPool::from(TestPoolBuilder::default().with_config(PoolConfig {
+            pending_tx_listener_buffer_size: BUFFER,
+            ..Default::default()
+        }));
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            pool.clone(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+        let id = eth_filter.new_pending_transaction_filter(None).await.unwrap();
+
+        let txs = (0..TXS).map(|_| MockTransaction::eip1559()).collect::<Vec<_>>();
+        let hashes = txs.iter().map(|tx| *tx.hash()).collect::<Vec<_>>();
+        for result in pool.add_transactions(TransactionOrigin::External, txs).await {
+            result.unwrap();
+        }
+
+        // Poll only once the feed holds every hash, so the filter has to keep all of them.
+        let sender = hash_feed_sender(&eth_filter).unwrap();
+        tokio::time::timeout(TIMEOUT, async {
+            while sender.len() < TXS {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("feed did not hold every hash");
+        assert_eq!(drain_hashes(&eth_filter, &id, TXS).await, hashes);
     }
 
     #[tokio::test]
