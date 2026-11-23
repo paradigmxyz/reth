@@ -995,18 +995,16 @@ mod tests {
             .tx_ref()
             .put::<tables::AccountChangeSets>(3, AccountBeforeTx { address, info: None })
             .unwrap();
-        let state_trie_provider = OverlayStateProvider::<
-            &_,
-            reth_ethereum_primitives::EthPrimitives,
-        >::new_with_state_trie(
-            &*provider,
-            StateTrieOverlay::new(TrieInputSorted::new(
-                Arc::clone(&base_nodes),
-                Arc::default(),
-                Default::default(),
-            )),
-            provider.cached_storage_settings().is_v2(),
-        );
+        let state_trie_provider =
+            OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
+                &*provider,
+                StateTrieOverlay::new(TrieInputSorted::new(
+                    Arc::clone(&base_nodes),
+                    Arc::default(),
+                    Default::default(),
+                )),
+                provider.cached_storage_settings().is_v2(),
+            );
 
         let end = 2;
         for range in [1..=end, end + 1..=end] {
@@ -1248,14 +1246,12 @@ mod tests {
         reth_trie_db::with_adapter!(provider, |A| seed_tip_trie_tables::<_, A>(&*provider));
 
         let overlay = empty_overlay();
-        let state_trie_provider = OverlayStateProvider::<
-            &_,
-            reth_ethereum_primitives::EthPrimitives,
-        >::new_with_state_trie(
-            &*provider,
-            overlay,
-            provider.cached_storage_settings().is_v2(),
-        );
+        let state_trie_provider =
+            OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
+                &*provider,
+                overlay,
+                provider.cached_storage_settings().is_v2(),
+            );
         let actual = reth_trie_db::compute_range_trie_changesets(
             &*provider,
             &state_trie_provider,
@@ -1362,14 +1358,12 @@ mod tests {
 
         let expected = legacy_compute_range_trie_changesets(&*provider, 2..=3);
         let overlay = empty_overlay();
-        let state_trie_provider = OverlayStateProvider::<
-            &_,
-            reth_ethereum_primitives::EthPrimitives,
-        >::new_with_state_trie(
-            &*provider,
-            overlay,
-            provider.cached_storage_settings().is_v2(),
-        );
+        let state_trie_provider =
+            OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
+                &*provider,
+                overlay,
+                provider.cached_storage_settings().is_v2(),
+            );
         let actual = reth_trie_db::compute_range_trie_changesets(
             &*provider,
             &state_trie_provider,

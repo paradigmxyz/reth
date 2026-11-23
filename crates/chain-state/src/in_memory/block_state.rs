@@ -325,31 +325,29 @@ mod tests {
         parent.expect("nonempty chain")
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn deep_chain_drop_preserves_shared_tail() {
         const DEPTH: usize = 100_000;
 
-        reth_concurrency::sync::Runtime::new().run(|| {
-            // A recursive drop of either chain would overflow this stack.
-            std::thread::Builder::new()
-                .stack_size(64 * 1024)
-                .spawn(|| {
-                    let tail = block_state_chain(DEPTH, None);
-                    let tail_payload = Arc::downgrade(&tail.block_ref().execution_output);
-                    let head = block_state_chain(DEPTH, Some(tail.clone()));
-                    let head_payload = Arc::downgrade(&head.block_ref().execution_output);
+        // A recursive drop of either chain would overflow this stack.
+        std::thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(|| {
+                let tail = block_state_chain(DEPTH, None);
+                let tail_payload = Arc::downgrade(&tail.block_ref().execution_output);
+                let head = block_state_chain(DEPTH, Some(tail.clone()));
+                let head_payload = Arc::downgrade(&head.block_ref().execution_output);
 
-                    drop(head);
-                    assert_eq!(head_payload.strong_count(), 0);
-                    assert_eq!(Arc::strong_count(&tail), 1);
-                    assert_eq!(tail_payload.strong_count(), DEPTH);
+                drop(head);
+                assert_eq!(head_payload.strong_count(), 0);
+                assert_eq!(Arc::strong_count(&tail), 1);
+                assert_eq!(tail_payload.strong_count(), DEPTH);
 
-                    drop(tail);
-                    assert_eq!(tail_payload.strong_count(), 0);
-                })
-                .unwrap()
-                .join()
-                .unwrap();
-        });
+                drop(tail);
+                assert_eq!(tail_payload.strong_count(), 0);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }

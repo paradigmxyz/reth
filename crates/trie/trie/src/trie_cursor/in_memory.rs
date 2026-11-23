@@ -800,80 +800,78 @@ mod tests {
         assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x3])));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_all_storage_nodes_deleted_exact_keys() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
-            // This test reproduces an edge case where:
-            // - cursor is available
-            // - All in-memory entries are deletions (None values)
-            // - Database has corresponding entries
-            // - Expected: NO leaves should be returned (all deleted)
+        // This test reproduces an edge case where:
+        // - cursor is available
+        // - All in-memory entries are deletions (None values)
+        // - Database has corresponding entries
+        // - Expected: NO leaves should be returned (all deleted)
 
-            // Generate 42 trie node entries with keys distributed across the keyspace
-            let mut db_nodes: Vec<(Nibbles, BranchNodeCompact)> = (0..10)
-                .map(|i| {
-                    let key_bytes = vec![(i * 6) as u8, i as u8]; // Spread keys across keyspace
-                    let nibbles = Nibbles::unpack(key_bytes);
-                    (nibbles, BranchNodeCompact::new(i as u16, i as u16, 0, vec![], None))
-                })
-                .collect();
+        // Generate 42 trie node entries with keys distributed across the keyspace
+        let mut db_nodes: Vec<(Nibbles, BranchNodeCompact)> = (0..10)
+            .map(|i| {
+                let key_bytes = vec![(i * 6) as u8, i as u8]; // Spread keys across keyspace
+                let nibbles = Nibbles::unpack(key_bytes);
+                (nibbles, BranchNodeCompact::new(i as u16, i as u16, 0, vec![], None))
+            })
+            .collect();
 
-            db_nodes.sort_by_key(|(key, _)| *key);
-            db_nodes.dedup_by_key(|(key, _)| *key);
+        db_nodes.sort_by_key(|(key, _)| *key);
+        db_nodes.dedup_by_key(|(key, _)| *key);
 
-            for (key, _) in &db_nodes {
-                debug!("node at {key:?}");
-            }
+        for (key, _) in &db_nodes {
+            debug!("node at {key:?}");
+        }
 
-            // Create in-memory entries with same keys but all None values (deletions)
-            let in_memory_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)> =
-                db_nodes.iter().map(|(key, _)| (*key, None)).collect();
+        // Create in-memory entries with same keys but all None values (deletions)
+        let in_memory_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)> =
+            db_nodes.iter().map(|(key, _)| (*key, None)).collect();
 
-            let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
-            let db_nodes_arc = Arc::new(db_nodes_map);
-            let visited_keys = Arc::new(Mutex::new(Vec::new()));
-            let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
+        let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
+        let db_nodes_arc = Arc::new(db_nodes_map);
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
 
-            let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
-            let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
+        let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+        let mut cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
 
-            // Seek to beginning should return None (all nodes are deleted)
-            tracing::debug!("seeking to 0x");
-            let result = cursor.seek(Nibbles::default()).unwrap();
+        // Seek to beginning should return None (all nodes are deleted)
+        tracing::debug!("seeking to 0x");
+        let result = cursor.seek(Nibbles::default()).unwrap();
+        assert_eq!(
+            result, None,
+            "Expected no entries when all nodes are deleted, but got {:?}",
+            result
+        );
+
+        // Test seek operations at various positions - all should return None
+        let seek_keys = vec![
+            Nibbles::unpack([0x00]),
+            Nibbles::unpack([0x5d]),
+            Nibbles::unpack([0x5e]),
+            Nibbles::unpack([0x5f]),
+            Nibbles::unpack([0xc2]),
+            Nibbles::unpack([0xc5]),
+            Nibbles::unpack([0xc9]),
+            Nibbles::unpack([0xf0]),
+        ];
+
+        for seek_key in seek_keys {
+            tracing::debug!("seeking to {seek_key:?}");
+            let result = cursor.seek(seek_key).unwrap();
             assert_eq!(
                 result, None,
-                "Expected no entries when all nodes are deleted, but got {:?}",
-                result
+                "Expected None when seeking to {:?} but got {:?}",
+                seek_key, result
             );
+        }
 
-            // Test seek operations at various positions - all should return None
-            let seek_keys = vec![
-                Nibbles::unpack([0x00]),
-                Nibbles::unpack([0x5d]),
-                Nibbles::unpack([0x5e]),
-                Nibbles::unpack([0x5f]),
-                Nibbles::unpack([0xc2]),
-                Nibbles::unpack([0xc5]),
-                Nibbles::unpack([0xc9]),
-                Nibbles::unpack([0xf0]),
-            ];
-
-            for seek_key in seek_keys {
-                tracing::debug!("seeking to {seek_key:?}");
-                let result = cursor.seek(seek_key).unwrap();
-                assert_eq!(
-                    result, None,
-                    "Expected None when seeking to {:?} but got {:?}",
-                    seek_key, result
-                );
-            }
-
-            // next() should also always return None
-            let result = cursor.next().unwrap();
-            assert_eq!(result, None, "Expected None from next() but got {:?}", result);
-        });
+        // next() should also always return None
+        let result = cursor.next().unwrap();
+        assert_eq!(result, None, "Expected None from next() but got {:?}", result);
     }
 
     mod proptest_tests {

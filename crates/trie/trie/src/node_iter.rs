@@ -449,171 +449,161 @@ mod tests {
         assert_eq!(incremental_root, rebuilt_root);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_trie_node_iter() {
         reth_tracing::init_test_tracing();
 
-        reth_concurrency::sync::Runtime::new().run(move || {
-            fn empty_leaf_rlp_for_key(key: Nibbles) -> RlpNode {
-                RlpNode::from_rlp(&alloy_rlp::encode(LeafNode::new(
-                    key,
-                    alloy_rlp::encode(TrieAccount::default()),
-                )))
-            }
+        fn empty_leaf_rlp_for_key(key: Nibbles) -> RlpNode {
+            RlpNode::from_rlp(&alloy_rlp::encode(LeafNode::new(
+                key,
+                alloy_rlp::encode(TrieAccount::default()),
+            )))
+        }
 
-            // Extension (Key = 0x0000000000000000000000000000000000000000000000000000000000000)
-            // └── Branch (`branch_node_0`)
-            //     ├── 0 -> Branch (`branch_node_1`)
-            //     │      ├── 0 -> Leaf (`account_1`, Key = 0x0)
-            //     │      └── 1 -> Leaf (`account_2`, Key = 0x0)
-            //     ├── 1 -> Branch (`branch_node_2`)
-            //     │      ├── 0 -> Branch (`branch_node_3`)
-            //     │      │      ├── 0 -> Leaf (`account_3`, marked as changed)
-            //     │      │      └── 1 -> Leaf (`account_4`)
-            //     │      └── 1 -> Leaf (`account_5`, Key = 0x0)
+        // Extension (Key = 0x0000000000000000000000000000000000000000000000000000000000000)
+        // └── Branch (`branch_node_0`)
+        //     ├── 0 -> Branch (`branch_node_1`)
+        //     │      ├── 0 -> Leaf (`account_1`, Key = 0x0)
+        //     │      └── 1 -> Leaf (`account_2`, Key = 0x0)
+        //     ├── 1 -> Branch (`branch_node_2`)
+        //     │      ├── 0 -> Branch (`branch_node_3`)
+        //     │      │      ├── 0 -> Leaf (`account_3`, marked as changed)
+        //     │      │      └── 1 -> Leaf (`account_4`)
+        //     │      └── 1 -> Leaf (`account_5`, Key = 0x0)
 
-            let account_1 = B256::ZERO;
-            let account_2 = B256::with_last_byte(0x10);
-            let account_3 =
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000100");
-            let account_4 =
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000101");
-            let account_5 =
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000110");
+        let account_1 = B256::ZERO;
+        let account_2 = B256::with_last_byte(0x10);
+        let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000100");
+        let account_4 = b256!("0x0000000000000000000000000000000000000000000000000000000000000101");
+        let account_5 = b256!("0x0000000000000000000000000000000000000000000000000000000000000110");
 
-            let hash_builder_branch_nodes = get_hash_builder_branch_nodes(vec![
-                (Nibbles::unpack(account_1), Account::default()),
-                (Nibbles::unpack(account_2), Account::default()),
-                (Nibbles::unpack(account_3), Account::default()),
-                (Nibbles::unpack(account_4), Account::default()),
-                (Nibbles::unpack(account_5), Account::default()),
-            ]);
+        let hash_builder_branch_nodes = get_hash_builder_branch_nodes(vec![
+            (Nibbles::unpack(account_1), Account::default()),
+            (Nibbles::unpack(account_2), Account::default()),
+            (Nibbles::unpack(account_3), Account::default()),
+            (Nibbles::unpack(account_4), Account::default()),
+            (Nibbles::unpack(account_5), Account::default()),
+        ]);
 
-            let branch_node_1_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
-                vec![
-                    empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
-                    empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
-                ],
+        let branch_node_1_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
+            vec![
+                empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
+                empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
+            ],
+            TrieMask::new(0b11),
+        )));
+
+        let branch_node_3_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
+            vec![
+                empty_leaf_rlp_for_key(Nibbles::default()),
+                empty_leaf_rlp_for_key(Nibbles::default()),
+            ],
+            TrieMask::new(0b11),
+        )));
+
+        let branch_node_2 = (
+            Nibbles::from_nibbles([vec![0; 61], vec![1]].concat()),
+            BranchNodeCompact::new(
                 TrieMask::new(0b11),
-            )));
-
-            let branch_node_3_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
-                vec![
-                    empty_leaf_rlp_for_key(Nibbles::default()),
-                    empty_leaf_rlp_for_key(Nibbles::default()),
-                ],
+                TrieMask::new(0b00),
+                TrieMask::new(0b01),
+                vec![branch_node_3_rlp.as_hash().unwrap()],
+                None,
+            ),
+        );
+        let branch_node_2_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
+            vec![branch_node_3_rlp, empty_leaf_rlp_for_key(Nibbles::from_nibbles([0]))],
+            TrieMask::new(0b11),
+        )));
+        let branch_node_0 = (
+            Nibbles::from_nibbles([0; 61]),
+            BranchNodeCompact::new(
                 TrieMask::new(0b11),
-            )));
-
-            let branch_node_2 = (
-                Nibbles::from_nibbles([vec![0; 61], vec![1]].concat()),
-                BranchNodeCompact::new(
-                    TrieMask::new(0b11),
-                    TrieMask::new(0b00),
-                    TrieMask::new(0b01),
-                    vec![branch_node_3_rlp.as_hash().unwrap()],
-                    None,
-                ),
-            );
-            let branch_node_2_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
-                vec![branch_node_3_rlp, empty_leaf_rlp_for_key(Nibbles::from_nibbles([0]))],
+                TrieMask::new(0b10),
                 TrieMask::new(0b11),
-            )));
-            let branch_node_0 = (
-                Nibbles::from_nibbles([0; 61]),
-                BranchNodeCompact::new(
-                    TrieMask::new(0b11),
-                    TrieMask::new(0b10),
-                    TrieMask::new(0b11),
-                    vec![
-                        branch_node_1_rlp.as_hash().unwrap(),
-                        branch_node_2_rlp.as_hash().unwrap(),
-                    ],
-                    None,
-                ),
-            );
+                vec![branch_node_1_rlp.as_hash().unwrap(), branch_node_2_rlp.as_hash().unwrap()],
+                None,
+            ),
+        );
 
-            let mock_trie_nodes = vec![branch_node_0.clone(), branch_node_2.clone()];
-            pretty_assertions::assert_eq!(
-                hash_builder_branch_nodes.into_iter().sorted().collect::<Vec<_>>(),
-                mock_trie_nodes,
-            );
+        let mock_trie_nodes = vec![branch_node_0.clone(), branch_node_2.clone()];
+        pretty_assertions::assert_eq!(
+            hash_builder_branch_nodes.into_iter().sorted().collect::<Vec<_>>(),
+            mock_trie_nodes,
+        );
 
-            let trie_cursor_factory = MockTrieCursorFactory::new(
-                mock_trie_nodes.into_iter().collect(),
-                B256Map::default(),
-            );
+        let trie_cursor_factory =
+            MockTrieCursorFactory::new(mock_trie_nodes.into_iter().collect(), B256Map::default());
 
-            // Mark the account 3 as changed.
-            let mut prefix_set = PrefixSetMut::default();
-            prefix_set.insert(Nibbles::unpack(account_3));
-            let prefix_set = prefix_set.freeze();
+        // Mark the account 3 as changed.
+        let mut prefix_set = PrefixSetMut::default();
+        prefix_set.insert(Nibbles::unpack(account_3));
+        let prefix_set = prefix_set.freeze();
 
-            let walker = TrieWalker::<_>::state_trie(
-                trie_cursor_factory.account_trie_cursor().unwrap(),
-                prefix_set,
-            )
-            .unwrap();
+        let walker = TrieWalker::<_>::state_trie(
+            trie_cursor_factory.account_trie_cursor().unwrap(),
+            prefix_set,
+        )
+        .unwrap();
 
-            let hashed_cursor_factory = MockHashedCursorFactory::new(
-                BTreeMap::from([
-                    (account_1, Account::default()),
-                    (account_2, Account::default()),
-                    (account_3, Account::default()),
-                    (account_4, Account::default()),
-                    (account_5, Account::default()),
-                ]),
-                B256Map::default(),
-            );
+        let hashed_cursor_factory = MockHashedCursorFactory::new(
+            BTreeMap::from([
+                (account_1, Account::default()),
+                (account_2, Account::default()),
+                (account_3, Account::default()),
+                (account_4, Account::default()),
+                (account_5, Account::default()),
+            ]),
+            B256Map::default(),
+        );
 
-            let mut iter = TrieNodeIter::state_trie(
-                walker,
-                hashed_cursor_factory.hashed_account_cursor().unwrap(),
-            );
+        let mut iter = TrieNodeIter::state_trie(
+            walker,
+            hashed_cursor_factory.hashed_account_cursor().unwrap(),
+        );
 
-            // Walk the iterator until it's exhausted.
-            while iter.try_next().unwrap().is_some() {}
+        // Walk the iterator until it's exhausted.
+        while iter.try_next().unwrap().is_some() {}
 
-            pretty_assertions::assert_eq!(
-                *trie_cursor_factory.visited_account_keys(),
-                vec![
-                    KeyVisit {
-                        visit_type: KeyVisitType::SeekExact(Nibbles::default()),
-                        visited_key: None
-                    },
-                    KeyVisit {
-                        visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x0])),
-                        visited_key: Some(branch_node_0.0)
-                    },
-                    KeyVisit {
-                        visit_type: KeyVisitType::SeekNonExact(branch_node_2.0),
-                        visited_key: Some(branch_node_2.0)
-                    },
-                    KeyVisit {
-                        visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x1])),
-                        visited_key: None
-                    }
-                ]
-            );
-            pretty_assertions::assert_eq!(
-                *hashed_cursor_factory.visited_account_keys(),
-                vec![
-                    // Why do we always seek this key first?
-                    KeyVisit {
-                        visit_type: KeyVisitType::SeekNonExact(account_1),
-                        visited_key: Some(account_1)
-                    },
-                    // Seek to the modified account.
-                    KeyVisit {
-                        visit_type: KeyVisitType::SeekNonExact(account_3),
-                        visited_key: Some(account_3)
-                    },
-                    // Collect the siblings of the modified account
-                    KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_4) },
-                    KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_5) },
-                    KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
-                ],
-            );
-        });
+        pretty_assertions::assert_eq!(
+            *trie_cursor_factory.visited_account_keys(),
+            vec![
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekExact(Nibbles::default()),
+                    visited_key: None
+                },
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x0])),
+                    visited_key: Some(branch_node_0.0)
+                },
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(branch_node_2.0),
+                    visited_key: Some(branch_node_2.0)
+                },
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x1])),
+                    visited_key: None
+                }
+            ]
+        );
+        pretty_assertions::assert_eq!(
+            *hashed_cursor_factory.visited_account_keys(),
+            vec![
+                // Why do we always seek this key first?
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(account_1),
+                    visited_key: Some(account_1)
+                },
+                // Seek to the modified account.
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(account_3),
+                    visited_key: Some(account_3)
+                },
+                // Collect the siblings of the modified account
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_4) },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_5) },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
+            ],
+        );
     }
 }
