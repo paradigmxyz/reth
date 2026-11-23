@@ -46,13 +46,14 @@ pub struct TestRunnerCommand {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Run blockchain tests by importing their blocks. Exits 1 if any fixture fails, and 2 if a
-    /// path cannot be read or a fixture file cannot be loaded.
+    /// Run blockchain tests by importing their blocks. Exits 1 if any fixture fails, and 2 if no
+    /// fixture ran, a path cannot be read, or a fixture file cannot be loaded.
     #[command(name = "blocktest", display_name = "ef-test-runner")]
     BlockTest(BlockTestArgs),
     /// Run blockchain tests in the engine format through reth's Engine API handler, each on a
     /// datadir in the system temporary directory (`TMPDIR`; a tmpfs avoids disk syncs). Exits 1
-    /// if any fixture fails, and 2 if a path cannot be read or a fixture file cannot be loaded.
+    /// if any fixture fails, and 2 if no fixture ran, a path cannot be read, or a fixture file
+    /// cannot be loaded.
     #[command(name = "enginetest", display_name = "ef-test-runner")]
     EngineTest(EngineTestArgs),
 }
@@ -185,7 +186,8 @@ fn main() {
         std::process::exit(2);
     }
     if results.is_empty() {
-        eprintln!("warning: no fixtures found in the supplied paths");
+        eprintln!("error: no fixtures found in the supplied paths");
+        std::process::exit(2);
     }
     if !results.iter().all(|result| result.pass) {
         std::process::exit(1);
