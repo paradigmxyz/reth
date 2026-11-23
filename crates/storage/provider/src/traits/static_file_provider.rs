@@ -18,4 +18,21 @@ pub trait StaticFileProviderFactory: NodePrimitivesProvider {
         block: BlockNumber,
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>>;
+
+    /// Deletes all static files of the segment below the given block, like
+    /// [`StaticFileProvider::delete_segment_below_block`].
+    ///
+    /// CAUTION: destructive. Deletes files on disk.
+    ///
+    /// A provider that owns a database transaction must defer the deletion until its commit is
+    /// durable, so that a dropped provider or a crash never leaves a checkpoint behind the
+    /// deleted files. A provider without a transaction deletes the files immediately.
+    fn delete_static_files_below_block_on_commit(
+        &self,
+        segment: StaticFileSegment,
+        block: BlockNumber,
+    ) -> ProviderResult<()> {
+        self.static_file_provider().delete_segment_below_block(segment, block)?;
+        Ok(())
+    }
 }

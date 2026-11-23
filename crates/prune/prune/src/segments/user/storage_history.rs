@@ -145,11 +145,13 @@ impl StorageHistory {
             limiter.increment_deleted_entries_count();
         }
 
-        // Delete static file jars only when fully processed
+        // Delete static file jars only when fully processed, and only after the provider commit
+        // makes the pruned indices and the checkpoint durable.
         if done && let Some(last_block) = last_changeset_pruned_block {
-            provider
-                .static_file_provider()
-                .delete_segment_below_block(StaticFileSegment::StorageChangeSets, last_block + 1)?;
+            provider.delete_static_files_below_block_on_commit(
+                StaticFileSegment::StorageChangeSets,
+                last_block + 1,
+            )?;
         }
         trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned storage history (changesets from static files)");
 
@@ -332,8 +334,11 @@ impl StorageHistory {
         // but before MDBX commit, on restart the pruner checkpoint indicates data needs
         // re-pruning, but the RocksDB shards are already pruned - this is safe because pruning
         // is idempotent (re-pruning already-pruned shards is a no-op).
+        //
+        // The jars are deleted after that commit. A missing jar reads as empty blocks, so a jar
+        // deleted before the checkpoint is durable would leave its history shards unpruned.
         if done {
-            provider.static_file_provider().delete_segment_below_block(
+            provider.delete_static_files_below_block_on_commit(
                 StaticFileSegment::StorageChangeSets,
                 last_changeset_pruned_block + 1,
             )?;
@@ -359,17 +364,19 @@ mod tests {
     use alloy_primitives::{Address, BlockNumber, B256, U256};
     use assert_matches::assert_matches;
     use reth_db_api::{
-        models::{storage_sharded_key::StorageShardedKey, StorageSettings},
+        models::{storage_sharded_key::StorageShardedKey, StorageBeforeTx, StorageSettings},
         tables, BlockNumberList,
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
         DBProvider, DatabaseProviderFactory, PruneCheckpointReader, RocksDBProviderFactory,
+        StaticFileProviderFactory, StaticFileWriter,
     };
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use reth_static_file_types::{StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE};
     use reth_storage_api::StorageSettingsCache;
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
@@ -792,6 +799,81 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The changeset jars must outlive a provider that is dropped without a commit. Otherwise the
+    /// old checkpoint and the unpruned history shards point at changesets that no longer exist.
+    #[test]
+    fn prune_rocksdb_deletes_jars_on_commit() {
+        let db = TestStageDB::default();
+        db.factory.set_storage_settings_cache(StorageSettings::v2());
+
+        // One change in the last block of the first jar and one in the second jar, so that the
+        // first jar is not the highest one.
+        let address = Address::random();
+        let key = B256::random();
+        let first_jar_end = DEFAULT_BLOCKS_PER_STATIC_FILE - 1;
+        let change = StorageBeforeTx { address, key, value: U256::ZERO };
+        let static_file_provider = db.factory.static_file_provider();
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            for block in 0..first_jar_end {
+                writer.append_storage_changeset(Vec::new(), block).unwrap();
+            }
+            writer.append_storage_changeset(vec![change], first_jar_end).unwrap();
+            writer.append_storage_changeset(vec![change], first_jar_end + 1).unwrap();
+            writer.commit().unwrap();
+        }
+
+        let rocksdb = db.factory.rocksdb_provider();
+        let mut batch = rocksdb.batch();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::last(address, key),
+                &BlockNumberList::new_pre_sorted([first_jar_end, first_jar_end + 1]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        let to_block = first_jar_end;
+        let prune_mode = PruneMode::Before(to_block);
+        let segment = StorageHistory::new(prune_mode);
+        let input = || PruneInput {
+            previous_checkpoint: Some(PruneCheckpoint {
+                block_number: Some(first_jar_end - 1),
+                tx_number: None,
+                prune_mode,
+            }),
+            to_block,
+            limiter: PruneLimiter::default(),
+        };
+        let shard_blocks = || {
+            let shards = rocksdb.storage_history_shards(address, key).unwrap();
+            shards.iter().flat_map(|(_, blocks)| blocks.iter()).collect::<Vec<_>>()
+        };
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = segment.prune(&provider, input()).unwrap();
+        assert!(result.progress.is_finished());
+        drop(provider);
+
+        assert_eq!(
+            static_file_provider.get_lowest_range_end(StaticFileSegment::StorageChangeSets),
+            Some(first_jar_end)
+        );
+        assert_eq!(shard_blocks(), [first_jar_end, first_jar_end + 1]);
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = segment.prune(&provider, input()).unwrap();
+        assert!(result.progress.is_finished());
+        provider.commit().expect("commit");
+
+        assert_eq!(
+            static_file_provider.get_lowest_range_end(StaticFileSegment::StorageChangeSets),
+            Some(first_jar_end + 1)
+        );
+        assert_eq!(shard_blocks(), [first_jar_end + 1]);
     }
 
     /// A block holding at least a whole run's budget of changesets must not stall pruning: the
