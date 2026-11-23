@@ -614,4 +614,9 @@ eels/consume-wirex:
   - tests/spurious_dragon/eip155_simple_replay_attack_protection/test_chain_id.py::test_legacy_chain_id_over_64_bits[fork_Shanghai-blockchain_test_engine_x_from_state_test-case_smallest_65_bit_chain_id]-reth
 
 # Block import shares the post-fork deployment cases with engine fixtures.
-ef-test-runner/blocktest: *post_fork_system_contract_deployments
+ef-test-runner/blocktest:
+  - *post_fork_system_contract_deployments
+  # EIP-8282's builder exit contract is deployed after the fork in these two, which is the same
+  # case as above: the block is accepted where the fixture expects it to be rejected.
+  - tests/amsterdam/eip8282_builder_execution_requests/test_contract_deployment.py::test_builder_exit_contract_deployment[fork_BPO2ToAmsterdamAtTime15k-blockchain_test-deploy_after_fork-nonzero_balance]
+  - tests/amsterdam/eip8282_builder_execution_requests/test_contract_deployment.py::test_builder_exit_contract_deployment[fork_BPO2ToAmsterdamAtTime15k-blockchain_test-deploy_after_fork-zero_balance]
