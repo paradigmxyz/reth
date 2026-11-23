@@ -787,7 +787,7 @@ mod tests {
         provider.add_receipts(2, vec![second_receipt]);
         let api = OtterscanApi::new(
             crate::eth::EthApiBuilder::new(
-                provider.clone(),
+                provider,
                 testing_pool(),
                 NoopNetwork::default(),
                 EthEvmConfig::new(MAINNET.clone()),
@@ -796,12 +796,12 @@ mod tests {
         );
 
         // Each request sees the first block once, then the provider advances to the second.
-        provider.set_next_chain_info(first_head);
+        api.eth.provider().set_next_chain_info(first_head);
         let details = api.get_block_details(BlockNumberOrTag::Latest.into()).await.unwrap();
         assert_eq!(details.block.header.hash, first_hash);
         assert_eq!(details.total_fees, U256::from(42_000));
 
-        provider.set_next_chain_info(first_head);
+        api.eth.provider().set_next_chain_info(first_head);
         let page = api.get_block_transactions(BlockNumberOrTag::Latest.into(), 0, 1).await.unwrap();
         assert_eq!(page.fullblock.block.header.hash, first_hash);
         assert_eq!(page.fullblock.block.transactions.hashes().collect::<Vec<_>>(), [tx_hash]);
@@ -865,7 +865,7 @@ mod tests {
         provider.add_block(hash, block);
         let api = OtterscanApi::new(
             crate::eth::EthApiBuilder::new(
-                provider.clone(),
+                provider,
                 testing_pool(),
                 NoopNetwork::default(),
                 EthEvmConfig::new(MAINNET.clone()),
@@ -891,6 +891,7 @@ mod tests {
         }
 
         // Disabled pending must fail even when the provider can resolve the block and its receipts.
+        let provider = api.eth.provider();
         provider.add_receipts(1, vec![receipt]);
         provider.set_pending_block_num_hash(Some(BlockNumHash::new(1, hash)));
         let pending = BlockNumberOrTag::Pending;

@@ -1,6 +1,6 @@
 //! Database access for `eth_` block RPC methods. Loads block and receipt data w.r.t. network.
 
-use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
+use super::{LoadPendingBlock, SpawnBlocking};
 use crate::{
     node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcNodeCore,
     RpcReceipt,
@@ -102,10 +102,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     fn block_receipts(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = BlockReceiptsResult<Self::NetworkTypes, Self::Error>> + Send
-    where
-        Self: LoadReceipt,
-    {
+    ) -> impl Future<Output = BlockReceiptsResult<Self::NetworkTypes, Self::Error>> + Send {
         async move {
             self.load_block_and_receipts(block_id)
                 .await?
