@@ -293,12 +293,18 @@ cleanup() {
     sleep 1
   fi
   sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
+  rm -f "$JWT_SECRET"
   sudo chown -R "$(id -un):$(id -gn)" "$OUTPUT_DIR" 2>/dev/null || true
   sudo schelk recover -y --kill || true
 }
 TAIL_PID=
 TRACY_PID=
+# reth runs as root and creates a missing JWT secret with 0600 permissions, which
+# the bench client (run as this user) cannot read. Create it owned by this user,
+# outside the uploaded output dir, once cleanup is set to remove it.
+JWT_SECRET="$(mktemp)"
 trap cleanup EXIT
+od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$JWT_SECRET"
 
 sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
 sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
@@ -341,6 +347,7 @@ RETH_ARGS=(
   --ws
   --ws.api all
   --authrpc.port 8551
+  --authrpc.jwtsecret "$JWT_SECRET"
   --disable-discovery
   --no-persist-peers
 )
@@ -689,7 +696,7 @@ if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
   else
     $BENCH_NICE "$TXGEN_BENCH" send-blocks \
       --engine http://127.0.0.1:8551 \
-      --jwt-secret "$DATADIR/jwt.hex" \
+      --jwt-secret "$JWT_SECRET" \
       --input "$WARMUP_BLOCKS" \
       "${TXGEN_SEND_ARGS[@]}" \
       --wait-for-persistence never \
@@ -791,7 +798,7 @@ elif [ "$EXECUTION_MODE" = "rpc" ]; then
   TXGEN_REPLAY_ARGS=(send --rpc-url http://127.0.0.1:8545 --drain-timeout 300)
   BENCH_SCENARIO="rpc-replay"
 else
-  TXGEN_REPLAY_ARGS=(send-blocks --engine http://127.0.0.1:8551 --jwt-secret "$DATADIR/jwt.hex" --wait-for-persistence never)
+  TXGEN_REPLAY_ARGS=(send-blocks --engine http://127.0.0.1:8551 --jwt-secret "$JWT_SECRET" --wait-for-persistence never)
 fi
 
 # No Engine API traffic in call mode, so `latest` must not move while measuring.

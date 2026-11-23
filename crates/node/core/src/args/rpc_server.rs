@@ -1,5 +1,11 @@
 //! clap [`Args`] for RPC related arguments.
 
+// The clap `Args` derive builds every flag in one `augment_args` function, which needs about
+// 540 KB of stack in unoptimized builds. It runs once at startup on the main thread, and
+// splitting the struct would change field paths used by downstream nodes. Item-level lint
+// attributes on the struct do not reach the generated impl.
+#![allow(clippy::large_unopt_stack_frames)]
+
 use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},
     GasPriceOracleArgs, RpcStateCacheArgs,
@@ -41,6 +47,13 @@ pub(crate) const RPC_DEFAULT_MAX_REQUEST_SIZE_MB: u32 = 15;
 ///
 /// This is only relevant for very large trace responses.
 pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 160;
+
+/// Default trace byte limit per byte of the response limit.
+///
+/// Struct logs and `vmTrace` record about 1.5-5x their JSON size, since a 32-byte stack word
+/// serializes as short hex. Twice the response limit passes every mainnet block whose traces fit
+/// in the response, while keeping a block trace's memory bounded.
+const RPC_TRACE_BYTES_PER_RESPONSE_BYTE: u64 = 2;
 
 /// Default number of incoming connections.
 ///
@@ -90,6 +103,7 @@ pub struct DefaultRpcServerArgs {
     rpc_evm_memory_limit: u64,
     rpc_tx_fee_cap: u128,
     rpc_max_simulate_blocks: u64,
+    rpc_max_trace_bytes: Option<usize>,
     rpc_compute_state_root_for_eth_simulate: bool,
     rpc_eth_proof_window: u64,
     rpc_proof_permits: usize,
@@ -334,6 +348,12 @@ impl DefaultRpcServerArgs {
         self
     }
 
+    /// Set the default maximum bytes a single trace may record
+    pub const fn with_rpc_max_trace_bytes(mut self, v: Option<usize>) -> Self {
+        self.rpc_max_trace_bytes = v;
+        self
+    }
+
     /// Set whether to compute state roots for `eth_simulateV1` responses by default.
     pub const fn with_rpc_compute_state_root_for_eth_simulate(mut self, v: bool) -> Self {
         self.rpc_compute_state_root_for_eth_simulate = v;
@@ -429,6 +449,7 @@ impl Default for DefaultRpcServerArgs {
             rpc_evm_memory_limit: (1 << 32) - 1,
             rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
             rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
+            rpc_max_trace_bytes: None,
             rpc_compute_state_root_for_eth_simulate: false,
             rpc_eth_proof_window: constants::DEFAULT_ETH_PROOF_WINDOW,
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
@@ -531,7 +552,11 @@ pub struct RpcServerArgs {
 
     /// Set the permissions for the IPC socket file, in octal format.
     ///
-    /// If not specified, the permissions will be set by the system's umask.
+    /// Accepts modes up to `0o7777`, with an optional `0o` prefix. If not specified, the
+    /// permissions will be set by the system's umask.
+    ///
+    /// Startup fails if the mode is invalid or the platform cannot apply it before binding the
+    /// socket, which includes macOS.
     #[arg(long = "ipc.permissions", default_value = Resettable::from(DefaultRpcServerArgs::get_global().ipc_socket_permissions.as_ref().map(|v| v.to_string().into())))]
     pub ipc_socket_permissions: Option<String>,
 
@@ -570,9 +595,12 @@ pub struct RpcServerArgs {
     #[arg(long, default_value_t = DefaultRpcServerArgs::get_global().auth_ipc)]
     pub auth_ipc: bool,
 
-    /// Filename for auth IPC socket/pipe within the datadir
-    #[arg(long = "auth-ipc.path", default_value_t = DefaultRpcServerArgs::get_global().auth_ipc_path.clone())]
-    pub auth_ipc_path: String,
+    /// Path for the auth IPC socket/pipe. Explicit paths are used unchanged.
+    ///
+    /// If omitted, uses `/tmp/reth_engine_api.ipc`, with `-<instance>` appended when
+    /// `--instance` is set. Applications can override this default via `DefaultRpcServerArgs`.
+    #[arg(long = "auth-ipc.path")]
+    pub auth_ipc_path: Option<String>,
 
     /// Disable the auth/engine API server.
     ///
@@ -653,6 +681,8 @@ pub struct RpcServerArgs {
     pub rpc_max_logs_per_response: ZeroAsNoneU64,
 
     /// Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
+    ///
+    /// The calls of an `eth_callMany`, `trace_callMany` or `debug_traceCallMany` request share it.
     #[arg(
         long = "rpc.gascap",
         alias = "rpc-gascap",
@@ -689,6 +719,14 @@ pub struct RpcServerArgs {
         default_value_t = DefaultRpcServerArgs::get_global().rpc_max_simulate_blocks
     )]
     pub rpc_max_simulate_blocks: u64,
+
+    /// Max bytes a traced tx may record, defaults to 2x `--rpc.max-response-size`, 0 is unlimited.
+    #[arg(
+        long = "rpc.max-trace-bytes",
+        value_name = "BYTES",
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_max_trace_bytes.map(|v| v.to_string().into()))
+    )]
+    pub rpc_max_trace_bytes: Option<usize>,
 
     /// Compute state roots for `eth_simulateV1` responses.
     #[arg(
@@ -839,6 +877,8 @@ impl RpcServerArgs {
     /// * The `http_port` is scaled by a factor of `-instance`
     /// * The `ws_port` is scaled by a factor of `instance * 2`
     /// * The `ipcpath` is appended with the instance number: `/tmp/reth.ipc-<instance>`
+    /// * If `auth_ipc_path` is `None`, the default auth IPC path is appended with the instance
+    ///   number: `/tmp/reth_engine_api.ipc-<instance>`. Explicit paths are left unchanged.
     ///
     /// # Panics
     /// Warning: if `instance` is zero in debug mode, this will panic.
@@ -859,6 +899,9 @@ impl RpcServerArgs {
             self.ws_port += instance * 2 - 2;
             // append instance file to ipc path
             self.ipcpath = format!("{}-{}", self.ipcpath, instance);
+            if self.auth_ipc_path.is_none() {
+                self.auth_ipc_path = Some(format!("{}-{instance}", self.auth_ipc_path()));
+            }
         }
     }
 
@@ -918,20 +961,46 @@ impl RpcServerArgs {
 
     /// Returns `true` if the given RPC namespace is enabled on any transport.
     pub fn is_namespace_enabled(&self, ns: RethRpcModule) -> bool {
-        if self.http && self.http_api.as_ref().is_some_and(|api| api.contains(&ns)) {
+        if self.http &&
+            self.http_api.as_ref().unwrap_or(&RpcModuleSelection::Standard).contains(&ns)
+        {
             return true;
         }
-        if self.ws && self.ws_api.as_ref().is_some_and(|api| api.contains(&ns)) {
+        if self.ws && self.ws_api.as_ref().unwrap_or(&RpcModuleSelection::Standard).contains(&ns) {
             return true;
         }
-        // IPC exposes all modules when enabled
-        !self.ipcdisable
+        !self.ipcdisable && RpcModuleSelection::default_ipc_modules().contains(&ns)
     }
 
     /// Enables forced blob sidecar upcasting from EIP-4844 to EIP-7594 format.
     pub const fn with_force_blob_sidecar_upcasting(mut self) -> Self {
         self.rpc_force_blob_sidecar_upcasting = true;
         self
+    }
+
+    /// Returns the auth IPC endpoint to bind after instance adjustment.
+    ///
+    /// If no explicit or instance-adjusted path is set, returns the global default.
+    pub fn auth_ipc_path(&self) -> &str {
+        self.auth_ipc_path
+            .as_deref()
+            .unwrap_or_else(|| &DefaultRpcServerArgs::get_global().auth_ipc_path)
+    }
+
+    /// Returns the trace byte limit, `None` when `--rpc.max-trace-bytes 0` disables it.
+    ///
+    /// By default, a trace may record up to twice the configured RPC response size limit.
+    pub fn max_trace_bytes(&self) -> Option<usize> {
+        match self.rpc_max_trace_bytes {
+            Some(0) => None,
+            Some(bytes) => Some(bytes),
+            None => Some(
+                (u64::from(self.rpc_max_response_size.get()) * 1024 * 1024)
+                    .saturating_mul(RPC_TRACE_BYTES_PER_RESPONSE_BYTE)
+                    .try_into()
+                    .unwrap_or(usize::MAX),
+            ),
+        }
     }
 }
 
@@ -958,7 +1027,7 @@ impl Default for RpcServerArgs {
             auth_port,
             auth_jwtsecret,
             auth_ipc,
-            auth_ipc_path,
+            auth_ipc_path: _,
             disable_auth_server,
             rpc_jwtsecret,
             rpc_disable_metrics,
@@ -975,6 +1044,7 @@ impl Default for RpcServerArgs {
             rpc_evm_memory_limit,
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
+            rpc_max_trace_bytes,
             rpc_compute_state_root_for_eth_simulate,
             rpc_eth_proof_window,
             rpc_proof_permits,
@@ -1007,7 +1077,7 @@ impl Default for RpcServerArgs {
             auth_jwtsecret,
             auth_jwtsecret_hex: None,
             auth_ipc,
-            auth_ipc_path,
+            auth_ipc_path: None,
             disable_auth_server,
             rpc_jwtsecret,
             rpc_disable_metrics,
@@ -1024,6 +1094,7 @@ impl Default for RpcServerArgs {
             rpc_evm_memory_limit,
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
+            rpc_max_trace_bytes,
             rpc_compute_state_root_for_eth_simulate,
             rpc_eth_proof_window,
             rpc_proof_permits,
@@ -1292,6 +1363,26 @@ mod tests {
     }
 
     #[test]
+    fn test_rpc_max_trace_bytes() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.max_trace_bytes(), Some(320 * 1024 * 1024));
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.max-response-size", "10"])
+                .args;
+        assert_eq!(args.max_trace_bytes(), Some(20 * 1024 * 1024));
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.max-trace-bytes", "1024"])
+                .args;
+        assert_eq!(args.max_trace_bytes(), Some(1024));
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.max-trace-bytes", "0"]).args;
+        assert_eq!(args.max_trace_bytes(), None);
+    }
+
+    #[test]
     fn test_rpc_server_args() {
         let args = RpcServerArgs {
             http: true,
@@ -1315,7 +1406,7 @@ mod tests {
             auth_jwtsecret: Some(std::path::PathBuf::from("/tmp/jwt.hex")),
             auth_jwtsecret_hex: None,
             auth_ipc: false,
-            auth_ipc_path: "engine.ipc".to_string(),
+            auth_ipc_path: Some("engine.ipc".to_string()),
             disable_auth_server: false,
             rpc_jwtsecret: Some(
                 JwtSecret::from_hex(
@@ -1337,6 +1428,7 @@ mod tests {
             rpc_evm_memory_limit: 256,
             rpc_tx_fee_cap: 2_000_000_000_000_000_000u128,
             rpc_max_simulate_blocks: 256,
+            rpc_max_trace_bytes: Some(1 << 20),
             rpc_compute_state_root_for_eth_simulate: false,
             rpc_eth_proof_window: 100_000,
             rpc_proof_permits: 16,
@@ -1346,7 +1438,6 @@ mod tests {
             rpc_state_cache: RpcStateCacheArgs {
                 max_blocks: 5000,
                 max_receipts: 2000,
-                max_headers: 1000,
                 max_bals: 1000,
                 cache_computed_bals: true,
                 prewarm_bals: Some(0),
@@ -1427,6 +1518,8 @@ mod tests {
             "2.0",
             "--rpc.max-simulate-blocks",
             "256",
+            "--rpc.max-trace-bytes",
+            "1048576",
             "--rpc.eth-proof-window",
             "100000",
             "--rpc.proof-permits",
@@ -1439,8 +1532,6 @@ mod tests {
             "5000",
             "--rpc-cache.max-receipts",
             "2000",
-            "--rpc-cache.max-headers",
-            "1000",
             "--rpc-cache.max-bals",
             "1000",
             "--rpc-cache.cache-computed-bals",
@@ -1487,5 +1578,45 @@ mod tests {
         ]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_adjust_instance_ports_suffixes_ipc_paths() {
+        let paths: Vec<_> = (1..=3u16)
+            .map(|instance| {
+                let mut args = RpcServerArgs::default();
+                let ipcpath = args.ipcpath.clone();
+                let auth_ipc_path = args.auth_ipc_path().to_string();
+                args.adjust_instance_ports(Some(instance));
+                assert_eq!(args.ipcpath, format!("{ipcpath}-{instance}"));
+                assert_eq!(args.auth_ipc_path(), format!("{auth_ipc_path}-{instance}"));
+                args.auth_ipc_path().to_string()
+            })
+            .collect();
+
+        assert_eq!(
+            paths,
+            [
+                "/tmp/reth_engine_api.ipc-1",
+                "/tmp/reth_engine_api.ipc-2",
+                "/tmp/reth_engine_api.ipc-3"
+            ]
+        );
+
+        // Without an instance the paths are left untouched.
+        let mut args = RpcServerArgs::default();
+        let auth_ipc_path = args.auth_ipc_path().to_string();
+        args.adjust_instance_ports(None);
+        assert_eq!(args.auth_ipc_path(), auth_ipc_path);
+    }
+
+    #[test]
+    fn test_adjust_instance_ports_preserves_explicit_auth_ipc_path() {
+        for path in ["engine.ipc", constants::DEFAULT_ENGINE_API_IPC_ENDPOINT] {
+            let mut args =
+                CommandParser::<RpcServerArgs>::parse_from(["reth", "--auth-ipc.path", path]).args;
+            args.adjust_instance_ports(Some(2));
+            assert_eq!(args.auth_ipc_path(), path);
+        }
     }
 }

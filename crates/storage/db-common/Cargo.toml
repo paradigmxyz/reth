@@ -44,6 +44,7 @@ tracing.workspace = true
 [dev-dependencies]
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-storage-overlay.workspace = true
 reth-tasks.workspace = true
 
 [lints]

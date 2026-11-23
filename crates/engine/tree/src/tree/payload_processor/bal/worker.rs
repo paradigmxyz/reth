@@ -3,7 +3,7 @@ use alloy_consensus::Transaction;
 use alloy_eip7928::BlockAccessIndex;
 use alloy_primitives::{Address, B256, U256};
 use crossbeam_channel::{Receiver, Sender};
-use evm2::{bytecode::Bytecode, evm::AccountInfo};
+use evm2::{bytecode::Bytecode, evm::AccountInfo, AnyError};
 use reth_evm::{
     BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor,
     BlockValidationError, ConfigureEvm, Database, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
@@ -22,7 +22,7 @@ pub(super) enum BalWorkerError {
         tx_index: usize,
         /// The underlying recovery or conversion error.
         #[source]
-        source: Box<dyn core::error::Error + Send + Sync + 'static>,
+        source: AnyError,
     },
     /// EVM transaction execution failed.
     #[error("BAL worker EVM execution failed for transaction {tx_index}: {source}")]
@@ -103,8 +103,10 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
                     let tx = match tx {
                         Ok(tx) => tx,
                         Err(source) => {
-                            let error =
-                                BalWorkerError::Transaction { tx_index, source: Box::new(source) };
+                            let error = BalWorkerError::Transaction {
+                                tx_index,
+                                source: AnyError::new(source),
+                            };
                             if result_tx.send(Err(error)).is_err() {
                                 break 'worker;
                             }

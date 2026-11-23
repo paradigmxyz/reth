@@ -4,6 +4,10 @@
 [advisories]
 yanked = "warn"
 ignore = [
+    # https://rustsec.org/advisories/RUSTSEC-2026-0542 chrono is unmaintained
+    "RUSTSEC-2026-0542",
+    # https://rustsec.org/advisories/RUSTSEC-2026-0543 humantime is unmaintained
+    "RUSTSEC-2026-0543",
     # https://rustsec.org/advisories/RUSTSEC-2024-0436 paste! is unmaintained
     "RUSTSEC-2024-0436",
     # https://rustsec.org/advisories/RUSTSEC-2025-0141 bincode is unmaintained, need to transition all deps to wincode first
@@ -14,6 +18,8 @@ ignore = [
     "RUSTSEC-2026-0173",
     # https://rustsec.org/advisories/RUSTSEC-2026-0387 crypto-bigint 0.5.5 timing variability, only patched in 0.7.6 and pinned by elliptic-curve 0.13 (k256/p256)
     "RUSTSEC-2026-0387",
+    # https://rustsec.org/advisories/RUSTSEC-2026-0441 pin-utils is unmaintained, transitive dep via wasmtimer (alloy-contract)
+    "RUSTSEC-2026-0441",
 ]
 
 # This section is considered when running `cargo deny check bans`.

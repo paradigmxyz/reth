@@ -12,15 +12,16 @@ use reth_cli_util::cancellation::CancellationToken;
 use reth_fs_util as fs;
 use std::{
     any::Any,
-    collections::VecDeque,
-    fs::OpenOptions,
+    collections::{BTreeMap, VecDeque},
+    fs::{File, OpenOptions},
     io::{self, BufWriter, Read, Write},
+    os::unix::fs::FileExt,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc, Condvar, Mutex, MutexGuard,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tracing::{info, warn};
 use url::Url;
@@ -42,6 +43,12 @@ const SEGMENTED_DOWNLOAD_MAX_BACKOFF_SECS: u64 = 30;
 /// Segmented piece requests should time out quickly enough to recover from slow or stalled
 /// requests.
 const SEGMENTED_DOWNLOAD_REQUEST_TIMEOUT_SECS: u64 = 120;
+
+/// Bytes a piece download buffers before each write to the shared `.part` file.
+///
+/// Filesystems such as ext4 take an exclusive per-inode lock for every buffered write, so many
+/// pieces writing small chunks into one file contend on that lock instead of the disk.
+const SEGMENTED_DOWNLOAD_WRITE_BUFFER_SIZE: usize = 8 * 1024 * 1024;
 
 /// Paths for one downloaded archive and its `.part` file.
 #[derive(Debug, Clone)]
@@ -121,9 +128,27 @@ impl ArchiveFetcher {
     }
 
     /// Downloads the archive using the best strategy supported by the remote source.
+    ///
+    /// When `availability` is set, the downloaded bytes are published to it so the archive can
+    /// be read while it downloads. Segmented downloads publish the contiguous prefix as pieces
+    /// land; every other path publishes the whole archive once it is on disk.
     pub(crate) fn download(
         &self,
         download_progress: Option<&mut ArchiveDownloadProgress<'_>>,
+        availability: Option<&ArchiveAvailability>,
+    ) -> Result<DownloadedArchive> {
+        let downloaded = self.download_archive(download_progress, availability)?;
+        if let Some(availability) = availability {
+            availability.complete(&downloaded)?;
+        }
+        Ok(downloaded)
+    }
+
+    /// Downloads the archive, publishing progress to `availability` only on the segmented path.
+    fn download_archive(
+        &self,
+        download_progress: Option<&mut ArchiveDownloadProgress<'_>>,
+        availability: Option<&ArchiveAvailability>,
     ) -> Result<DownloadedArchive> {
         if let Some(path) = archive_file_url_path(&self.url)? {
             let size = fs::metadata(&path)?.len();
@@ -150,7 +175,7 @@ impl ArchiveFetcher {
                 self.download_sequential(super::MAX_DOWNLOAD_RETRIES, download_progress)
             }
             FetchStrategy::Segmented(plan) => {
-                self.download_segmented(probe.total_size, plan, download_progress)
+                self.download_segmented(probe.total_size, plan, download_progress, availability)
             }
         }
     }
@@ -364,6 +389,7 @@ impl ArchiveFetcher {
         total_size: u64,
         plan: SegmentedDownloadPlan,
         download_progress: Option<&mut ArchiveDownloadProgress<'_>>,
+        availability: Option<&ArchiveAvailability>,
     ) -> Result<DownloadedArchive> {
         let request_limiter = self.session.require_request_limiter()?;
         info!(target: "reth::cli",
@@ -383,7 +409,7 @@ impl ArchiveFetcher {
             self.session.clone(),
             download_progress,
         )
-        .run()
+        .run(availability)
     }
 
     /// Logs why this archive must fall back to the sequential fetch path.
@@ -442,6 +468,166 @@ pub(crate) struct DownloadedArchive {
     pub(crate) path: PathBuf,
     /// Total archive size in bytes.
     pub(crate) size: u64,
+}
+
+/// The prefix of an archive that a fetch has written to disk, so extraction can read the
+/// archive while it is still downloading.
+#[derive(Default)]
+pub(crate) struct ArchiveAvailability {
+    /// Current fetch state.
+    state: Mutex<AvailabilityState>,
+    /// Wakes readers when the state changes.
+    changed: Condvar,
+}
+
+/// Fetch state shared between one archive download and its reader.
+#[derive(Default)]
+enum AvailabilityState {
+    /// The fetch has not opened the archive file yet.
+    #[default]
+    Pending,
+    /// The first `available` of `total` bytes of `file` are written.
+    Open {
+        /// Archive file, shared with readers so a later rename or delete does not affect them.
+        file: Arc<File>,
+        /// Length of the written prefix.
+        available: u64,
+        /// Total archive size.
+        total: u64,
+    },
+    /// No more bytes will arrive, because the fetch or the reader failed.
+    Aborted,
+}
+
+impl ArchiveAvailability {
+    /// Shares the archive file once it is created, with nothing written yet.
+    fn open(&self, file: File, total: u64) {
+        let mut state = self.lock();
+        if !matches!(*state, AvailabilityState::Aborted) {
+            *state = AvailabilityState::Open { file: Arc::new(file), available: 0, total };
+            self.changed.notify_all();
+        }
+    }
+
+    /// Publishes that the first `len` bytes are written. The prefix never shrinks.
+    fn publish(&self, len: u64) {
+        let mut state = self.lock();
+        if let AvailabilityState::Open { available, total, .. } = &mut *state &&
+            len > *available
+        {
+            *available = len.min(*total);
+            self.changed.notify_all();
+        }
+    }
+
+    /// Publishes the whole downloaded archive, opening it if the fetch path never did.
+    fn complete(&self, downloaded: &DownloadedArchive) -> Result<()> {
+        if matches!(*self.lock(), AvailabilityState::Pending) {
+            self.open(fs::open(&downloaded.path)?, downloaded.size);
+        }
+        self.publish(downloaded.size);
+        Ok(())
+    }
+
+    /// Fails readers and stops the fetch because the archive will not complete.
+    ///
+    /// Returns `true` if this call aborted the archive, and `false` if it was already aborted or
+    /// fully published.
+    pub(crate) fn abort(&self) -> bool {
+        let mut state = self.lock();
+        match *state {
+            AvailabilityState::Aborted => false,
+            AvailabilityState::Open { available, total, .. } if available == total => false,
+            _ => {
+                *state = AvailabilityState::Aborted;
+                self.changed.notify_all();
+                true
+            }
+        }
+    }
+
+    /// Returns a guard that aborts this availability when dropped, so a reader never blocks
+    /// after the fetch returns early or unwinds.
+    pub(crate) fn abort_on_drop(&self) -> ArchiveAvailabilityAbortGuard<'_> {
+        ArchiveAvailabilityAbortGuard(self)
+    }
+
+    /// Returns whether the archive was aborted.
+    fn is_aborted(&self) -> bool {
+        matches!(*self.lock(), AvailabilityState::Aborted)
+    }
+
+    /// Blocks until bytes past `position` are written, then returns the file and the written
+    /// length, which equals `position` only at the end of the archive.
+    fn wait_past(&self, position: u64) -> io::Result<(Arc<File>, u64)> {
+        let mut state = self.lock();
+        loop {
+            match &*state {
+                AvailabilityState::Aborted => {
+                    return Err(io::Error::other("archive download stopped before completing"))
+                }
+                AvailabilityState::Open { file, available, total }
+                    if *available > position || available == total =>
+                {
+                    return Ok((Arc::clone(file), *available))
+                }
+                _ => state = self.changed.wait(state).unwrap_or_else(|e| e.into_inner()),
+            }
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, AvailabilityState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// Aborts an [`ArchiveAvailability`] when dropped.
+pub(crate) struct ArchiveAvailabilityAbortGuard<'a>(&'a ArchiveAvailability);
+
+impl Drop for ArchiveAvailabilityAbortGuard<'_> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Reads the published prefix of an archive, blocking at its end until more is written.
+pub(crate) struct ArchiveAvailabilityReader<'a> {
+    /// Availability published by the fetch.
+    availability: &'a ArchiveAvailability,
+    /// Next archive offset to read.
+    position: u64,
+}
+
+impl<'a> ArchiveAvailabilityReader<'a> {
+    /// Creates a reader starting at the beginning of the archive.
+    pub(crate) const fn new(availability: &'a ArchiveAvailability) -> Self {
+        Self { availability, position: 0 }
+    }
+}
+
+impl Read for ArchiveAvailabilityReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0)
+        }
+
+        let (file, available) = self.availability.wait_past(self.position)?;
+        let readable = usize::try_from(available - self.position).unwrap_or(usize::MAX);
+        if readable == 0 {
+            return Ok(0)
+        }
+
+        let len = buf.len().min(readable);
+        let read = file.read_at(&mut buf[..len], self.position)?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "archive is shorter than its published length",
+            ))
+        }
+        self.position += read as u64;
+        Ok(read)
+    }
 }
 
 /// Remote metadata used to choose between sequential and segmented download.
@@ -567,6 +753,32 @@ struct SegmentedWorkerContext<'a> {
     cancel_token: &'a CancellationToken,
     /// Session carrying the retry-delay override.
     session: &'a DownloadSession,
+    /// Receives the contiguous downloaded prefix, when the archive is read while downloading.
+    availability: Option<&'a ArchiveAvailability>,
+}
+
+impl SegmentedWorkerContext<'_> {
+    /// Returns why workers must stop: the command was cancelled, or the archive reader aborted.
+    fn stop_error(&self) -> Option<eyre::Error> {
+        if self.cancel_token.is_cancelled() {
+            return Some(eyre::eyre!("Download cancelled"))
+        }
+        self.availability
+            .is_some_and(ArchiveAvailability::is_aborted)
+            .then(|| eyre::eyre!("Archive reader stopped before the download completed"))
+    }
+
+    /// Sleeps for `delay`, waking every 100ms to return early once workers must stop.
+    fn backoff(&self, delay: Duration) {
+        let deadline = Instant::now() + delay;
+        while self.stop_error().is_none() {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return
+            }
+            std::thread::sleep(remaining.min(Duration::from_millis(100)));
+        }
+    }
 }
 
 impl SegmentedDownload {
@@ -583,11 +795,17 @@ impl SegmentedDownload {
     }
 
     /// Runs the segmented download to completion or returns the first fatal error.
-    fn run(self) -> Result<DownloadedArchive> {
+    ///
+    /// Publishes the contiguous downloaded prefix to `availability` as pieces land, and stops
+    /// early once `availability` is aborted.
+    fn run(self, availability: Option<&ArchiveAvailability>) -> Result<DownloadedArchive> {
         let Self { url, paths, total_size, plan, session } = self;
         {
             let file = fs::create_file(paths.part_path())?;
             file.set_len(total_size)?;
+        }
+        if let Some(availability) = availability {
+            availability.open(fs::open(paths.part_path())?, total_size);
         }
 
         let worker_count = plan.worker_count;
@@ -609,6 +827,7 @@ impl SegmentedDownload {
             shared,
             request_limiter: request_limiter.as_ref(),
             cancel_token,
+            availability,
         };
 
         std::thread::scope(|scope| {
@@ -642,7 +861,10 @@ impl SegmentedDownload {
             }
         });
 
-        if let Some(error) = terminal_failure.take() {
+        // Workers that stop between pieces exit without recording an error, so the file may be
+        // incomplete even when no worker failed.
+        let error = terminal_failure.take().or_else(|| worker_context.stop_error());
+        if let Some(error) = error {
             if let Some(shared) = shared {
                 shared.sub_active_download_bytes(piece_progress_bytes.load(Ordering::Relaxed));
             }
@@ -677,19 +899,22 @@ impl SegmentedDownload {
             }
         };
 
-        while let Some(piece) = state.next_piece(context.cancel_token) {
+        while !context.availability.is_some_and(ArchiveAvailability::is_aborted) &&
+            let Some(piece) = state.next_piece(context.cancel_token)
+        {
             match Self::download_piece_with_retries(
                 client,
-                context.url,
+                context,
                 &file,
                 piece,
-                context.shared,
                 &piece_progress_bytes,
-                context.request_limiter,
-                context.cancel_token,
-                context.session,
             ) {
-                Ok(()) => {}
+                Ok(()) => {
+                    let prefix = state.complete(piece);
+                    if let Some(availability) = context.availability {
+                        availability.publish(prefix);
+                    }
+                }
                 Err(PieceAttemptFailure::Retryable { error, .. }) if state.requeue(piece) => {
                     warn!(target: "reth::cli",
                         start = piece.start,
@@ -713,22 +938,20 @@ impl SegmentedDownload {
     /// Downloads one queued piece with per-piece retry/backoff.
     ///
     /// Each attempt acquires a permit from the shared request limit so whole-file and
-    /// piece downloads use the same fixed number of HTTP request slots.
-    #[expect(clippy::too_many_arguments)]
+    /// piece downloads use the same fixed number of HTTP request slots. Stops between attempts,
+    /// and during backoff, once the download is cancelled or the archive reader aborts.
     fn download_piece_with_retries(
         client: &BlockingClient,
-        url: &str,
+        context: SegmentedWorkerContext<'_>,
         file: &std::fs::File,
         piece: DownloadPiece,
-        shared: Option<&Arc<SharedProgress>>,
         piece_progress_bytes: &AtomicU64,
-        request_limiter: &DownloadRequestLimiter,
-        cancel_token: &CancellationToken,
-        session: &DownloadSession,
     ) -> std::result::Result<(), PieceAttemptFailure> {
+        let SegmentedWorkerContext { url, shared, request_limiter, cancel_token, session, .. } =
+            context;
         for attempt in 1..=SEGMENT_RETRY_ATTEMPTS {
-            if cancel_token.is_cancelled() {
-                return Err(PieceAttemptFailure::Terminal(eyre::eyre!("Download cancelled")))
+            if let Some(error) = context.stop_error() {
+                return Err(PieceAttemptFailure::Terminal(error))
             }
 
             let _request_permit = request_limiter
@@ -747,9 +970,7 @@ impl SegmentedDownload {
                 Err(PieceAttemptFailure::Retryable { error: _, throttled })
                     if attempt < SEGMENT_RETRY_ATTEMPTS =>
                 {
-                    std::thread::sleep(
-                        session.retry_delay(piece_retry_backoff(attempt, throttled)),
-                    );
+                    context.backoff(session.retry_delay(piece_retry_backoff(attempt, throttled)));
                 }
                 Err(failure) => return Err(failure),
             }
@@ -770,8 +991,6 @@ impl SegmentedDownload {
         piece_progress_bytes: &AtomicU64,
         cancel_token: &CancellationToken,
     ) -> std::result::Result<(), PieceAttemptFailure> {
-        use std::os::unix::fs::FileExt;
-
         let expected_len = piece.end - piece.start + 1;
 
         let response = match client
@@ -805,8 +1024,10 @@ impl SegmentedDownload {
             }
         };
 
-        let mut buf = [0u8; 64 * 1024];
+        let mut buf = vec![0u8; SEGMENTED_DOWNLOAD_WRITE_BUFFER_SIZE];
+        let mut filled = 0;
         let mut reader = response.take(expected_len);
+        // File offset of `buf[0]`.
         let mut offset = piece.start;
 
         loop {
@@ -814,12 +1035,16 @@ impl SegmentedDownload {
                 return Err(PieceAttemptFailure::Terminal(eyre::eyre!("Download cancelled")));
             }
 
-            match reader.read(&mut buf) {
+            match reader.read(&mut buf[filled..]) {
                 Ok(0) => break,
                 Ok(n) => {
-                    file.write_all_at(&buf[..n], offset)
-                        .map_err(|error| PieceAttemptFailure::Terminal(error.into()))?;
-                    offset += n as u64;
+                    filled += n;
+                    if filled == buf.len() {
+                        file.write_all_at(&buf, offset)
+                            .map_err(|error| PieceAttemptFailure::Terminal(error.into()))?;
+                        offset += filled as u64;
+                        filled = 0;
+                    }
                     if let Some(progress) = shared {
                         progress.record_session_fetched_bytes(n as u64);
                     }
@@ -833,6 +1058,9 @@ impl SegmentedDownload {
                 }
             }
         }
+        file.write_all_at(&buf[..filled], offset)
+            .map_err(|error| PieceAttemptFailure::Terminal(error.into()))?;
+        offset += filled as u64;
 
         let downloaded_len = offset - piece.start;
         if downloaded_len == expected_len {
@@ -866,16 +1094,35 @@ struct SegmentedDownloadState {
     failed: AtomicBool,
     /// Remaining number of times a piece that exhausted its retries may be requeued.
     requeues_left: AtomicU64,
+    /// Downloaded pieces and the contiguous prefix they form.
+    completed: Mutex<CompletedPieces>,
+}
+
+/// Downloaded pieces of one segmented archive.
+#[derive(Default)]
+struct CompletedPieces {
+    /// Length of the archive prefix made only of downloaded pieces.
+    prefix: u64,
+    /// Exclusive end byte of each downloaded piece past `prefix`, keyed by start byte.
+    pending: BTreeMap<u64, u64>,
 }
 
 impl SegmentedDownloadState {
     /// Creates the shared queue state for one segmented archive attempt.
     fn new(pieces: VecDeque<DownloadPiece>) -> Self {
         let requeues_left = AtomicU64::new(pieces.len() as u64);
-        Self { pieces: Mutex::new(pieces), failed: AtomicBool::new(false), requeues_left }
+        Self {
+            pieces: Mutex::new(pieces),
+            failed: AtomicBool::new(false),
+            requeues_left,
+            completed: Mutex::default(),
+        }
     }
 
     /// Puts a piece back on the queue, returning `false` once the requeue budget is spent.
+    ///
+    /// The piece goes to the front so the contiguous prefix that extraction reads is not held
+    /// back until the end of the archive.
     fn requeue(&self, piece: DownloadPiece) -> bool {
         if self
             .requeues_left
@@ -884,8 +1131,19 @@ impl SegmentedDownloadState {
         {
             return false
         }
-        self.pieces.lock().unwrap().push_back(piece);
+        self.pieces.lock().unwrap().push_front(piece);
         true
+    }
+
+    /// Records a downloaded piece and returns the length of the contiguous downloaded prefix.
+    fn complete(&self, piece: DownloadPiece) -> u64 {
+        let mut guard = self.completed.lock().unwrap();
+        let completed = &mut *guard;
+        completed.pending.insert(piece.start, piece.end + 1);
+        while let Some(end) = completed.pending.remove(&completed.prefix) {
+            completed.prefix = end;
+        }
+        completed.prefix
     }
 
     /// Returns the next piece unless cancellation or a fatal error stopped the attempt.
@@ -1015,7 +1273,7 @@ enum PieceAttemptFailure {
 }
 
 /// Converts a thread panic payload into a readable message.
-fn panic_payload_message(payload: Box<dyn Any + Send + 'static>) -> String {
+pub(crate) fn panic_payload_message(payload: Box<dyn Any + Send + 'static>) -> String {
     if let Some(message) = payload.downcast_ref::<&'static str>() {
         (*message).to_string()
     } else if let Some(message) = payload.downcast_ref::<String>() {
@@ -1030,7 +1288,10 @@ mod tests {
     use super::*;
     use reqwest::StatusCode;
     use reth_cli_util::cancellation::CancellationToken;
-    use std::io::Write;
+    use std::{
+        io::{BufRead, Write},
+        net::TcpListener,
+    };
 
     #[test]
     fn segmented_plan_skips_small_files() {
@@ -1107,7 +1368,7 @@ mod tests {
         let session = DownloadSession::new(None, None, CancellationToken::new());
         let fetcher = ArchiveFetcher::new(url, &cache_dir, session);
 
-        let downloaded = fetcher.download(None).unwrap();
+        let downloaded = fetcher.download(None, None).unwrap();
 
         assert_eq!(downloaded.path, archive_path);
         assert_eq!(downloaded.size, b"local archive bytes".len() as u64);
@@ -1124,6 +1385,214 @@ mod tests {
         assert!(state.requeue(first));
         assert!(state.requeue(first));
         assert!(!state.requeue(first));
-        assert_eq!(state.pieces.lock().unwrap().back(), Some(&first));
+        assert_eq!(state.pieces.lock().unwrap().front(), Some(&first));
+    }
+
+    #[test]
+    fn segmented_state_prefix_stops_at_first_missing_piece() {
+        let pieces = build_download_pieces(10, 4).into_iter().collect::<Vec<_>>();
+        let state = SegmentedDownloadState::new(VecDeque::new());
+
+        assert_eq!(state.complete(pieces[2]), 0);
+        assert_eq!(state.complete(pieces[0]), 4);
+        assert_eq!(state.complete(pieces[1]), 10);
+    }
+
+    #[test]
+    fn availability_reader_follows_published_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("archive.part");
+        let data = (0..=255u8).cycle().take(1000).collect::<Vec<_>>();
+        std::fs::write(&path, &data).unwrap();
+        let availability = ArchiveAvailability::default();
+
+        let read = std::thread::scope(|scope| {
+            let reader = scope.spawn(|| {
+                let mut read = Vec::new();
+                ArchiveAvailabilityReader::new(&availability).read_to_end(&mut read).map(|_| read)
+            });
+            availability.open(fs::open(&path).unwrap(), data.len() as u64);
+            for len in [300, 299, 1000] {
+                availability.publish(len);
+            }
+            reader.join().unwrap()
+        });
+
+        assert_eq!(read.unwrap(), data);
+        assert!(!availability.abort(), "a fully published archive stays readable");
+    }
+
+    #[test]
+    fn availability_reader_fails_when_download_aborts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("archive.part");
+        std::fs::write(&path, [7u8; 100]).unwrap();
+        let availability = ArchiveAvailability::default();
+        availability.open(fs::open(&path).unwrap(), 100);
+        availability.publish(40);
+
+        let mut reader = ArchiveAvailabilityReader::new(&availability);
+        let mut buf = [0u8; 100];
+        assert_eq!(reader.read(&mut buf).unwrap(), 40);
+        assert!(availability.abort());
+
+        let error = reader.read(&mut buf).unwrap_err();
+        assert_eq!(error.to_string(), "archive download stopped before completing");
+    }
+
+    #[test]
+    fn segmented_download_publishes_downloaded_prefix() {
+        let data = (0..=255u8).cycle().take(1024 * 1024 + 123).collect::<Vec<_>>();
+        let (url, _) = spawn_range_server(data.clone(), false);
+        let dir = tempfile::tempdir().unwrap();
+        let availability = ArchiveAvailability::default();
+
+        let (downloaded, read) = std::thread::scope(|scope| {
+            let reader = scope.spawn(|| {
+                let mut read = Vec::new();
+                ArchiveAvailabilityReader::new(&availability).read_to_end(&mut read).map(|_| read)
+            });
+            let downloaded = {
+                let _abort_guard = availability.abort_on_drop();
+                test_segmented_download(&url, dir.path(), data.len() as u64, test_session())
+                    .run(Some(&availability))
+            };
+            (downloaded, reader.join().unwrap())
+        });
+
+        assert_eq!(downloaded.unwrap().size, data.len() as u64);
+        assert_eq!(read.unwrap(), data);
+    }
+
+    #[test]
+    fn segmented_download_stops_once_reader_aborted() {
+        let (url, requests) = spawn_range_server(vec![0; 1024 * 1024], false);
+        let dir = tempfile::tempdir().unwrap();
+        let availability = ArchiveAvailability::default();
+        assert!(availability.abort());
+
+        let error = test_segmented_download(&url, dir.path(), 1024 * 1024, test_session())
+            .run(Some(&availability))
+            .unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "Parallel download failed: Archive reader stopped before the download completed"
+        );
+        assert_eq!(requests.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn segmented_download_backoff_stops_once_reader_aborts() {
+        let (url, requests) = spawn_range_server(Vec::new(), true);
+        let dir = tempfile::tempdir().unwrap();
+        let session = test_session().with_retry_backoff(Some(Duration::from_secs(30)));
+        let availability = ArchiveAvailability::default();
+        let started = Instant::now();
+
+        let result = std::thread::scope(|scope| {
+            let download = scope.spawn(|| {
+                test_segmented_download(&url, dir.path(), 1024 * 1024, session)
+                    .run(Some(&availability))
+            });
+            while requests.load(Ordering::SeqCst) == 0 {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(availability.abort());
+            download.join().unwrap()
+        });
+
+        assert_eq!(
+            format!("{:#}", result.unwrap_err()),
+            "Parallel download failed: Archive reader stopped before the download completed"
+        );
+        // Without stopping during backoff, workers would sleep through two 30s retry delays.
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    fn test_session() -> DownloadSession {
+        DownloadSession::new(None, Some(DownloadRequestLimiter::new(4)), CancellationToken::new())
+    }
+
+    /// Plans 64 KiB pieces so a small archive still exercises several workers.
+    fn test_segmented_download(
+        url: &str,
+        dir: &Path,
+        total_size: u64,
+        session: DownloadSession,
+    ) -> SegmentedDownload {
+        let piece_size = 64 * 1024;
+        let pieces = build_download_pieces(total_size, piece_size);
+        let plan = SegmentedDownloadPlan {
+            piece_size,
+            piece_count: pieces.len(),
+            worker_count: 4,
+            pieces,
+        };
+        SegmentedDownload::new(
+            url.to_string(),
+            DownloadPaths::from_url(url, dir),
+            total_size,
+            plan,
+            session,
+            None,
+        )
+    }
+
+    /// Serves `data` over HTTP on localhost with range support, or answers every request with
+    /// 503 when `unavailable` is set. Returns the URL and the number of requests received.
+    fn spawn_range_server(data: Vec<u8>, unavailable: bool) -> (String, Arc<AtomicU64>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/archive.tar.zst", listener.local_addr().unwrap());
+        let data = Arc::new(data);
+        let requests = Arc::new(AtomicU64::new(0));
+        let received = Arc::clone(&requests);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let (data, received) = (Arc::clone(&data), Arc::clone(&received));
+                std::thread::spawn(move || {
+                    let mut stream = stream.unwrap();
+                    let mut request = io::BufReader::new(stream.try_clone().unwrap());
+                    let mut range = None;
+                    loop {
+                        let mut line = String::new();
+                        if request.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                            break
+                        }
+                        if let Some(value) = line.to_ascii_lowercase().strip_prefix("range: bytes=")
+                        {
+                            let (start, end) = value.trim().split_once('-').unwrap();
+                            range = Some((
+                                start.parse::<usize>().unwrap(),
+                                end.parse::<usize>().unwrap(),
+                            ));
+                        }
+                    }
+                    received.fetch_add(1, Ordering::SeqCst);
+
+                    if unavailable {
+                        stream
+                            .write_all(
+                                b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\
+                                  Connection: close\r\n\r\n",
+                            )
+                            .unwrap();
+                        return
+                    }
+                    let (start, end) = range.unwrap();
+                    let body = &data[start..=end];
+                    write!(
+                        stream,
+                        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {start}-{end}/{}\r\n\
+                         Content-Length: {}\r\nConnection: close\r\n\r\n",
+                        data.len(),
+                        body.len()
+                    )
+                    .unwrap();
+                    stream.write_all(body).unwrap();
+                });
+            }
+        });
+        (url, requests)
     }
 }

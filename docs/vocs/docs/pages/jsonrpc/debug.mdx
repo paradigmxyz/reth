@@ -179,7 +179,7 @@ Similar to [`debug_executionWitness`](#debug_executionwitness), but accepts a bl
 
 ## `debug_intermediateRoots`
 
-Executes a block and returns a list of intermediate state roots: the state root after each transaction within the block. Accepts both canonical and non-canonical (bad or side) blocks by hash.
+Executes a block and returns a list of intermediate state roots: the state root after each transaction within the block. Accepts canonical blocks and the bad blocks returned by `debug_getBadBlocks` by hash. Execution stops at the first invalid transaction, so the list for a bad block can be shorter than its transaction list.
 
 | Client | Method invocation                                                   |
 | ------ | ------------------------------------------------------------------- |

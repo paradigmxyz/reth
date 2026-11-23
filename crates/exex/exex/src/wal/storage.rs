@@ -185,8 +185,9 @@ mod tests {
         Address, B256, U256,
     };
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
+    use reth_ethereum_primitives::Block;
     use reth_exex_types::ExExNotification;
-    use reth_primitives_traits::Account;
+    use reth_primitives_traits::{Account, Block as _};
     use reth_provider::Chain;
     use reth_testing_utils::generators::{self, random_block};
     use reth_trie_common::{
@@ -196,7 +197,7 @@ mod tests {
         BranchNodeCompact, HashedPostState, HashedStorage, HashedStorageSorted, LazyTrieData,
         Nibbles, SortedTrieData,
     };
-    use std::{collections::BTreeMap, fs::File, sync::Arc};
+    use std::{collections::BTreeMap, fs::File, io::Write, sync::Arc};
 
     #[test]
     fn test_roundtrip() -> eyre::Result<()> {
@@ -310,8 +311,6 @@ mod tests {
     #[test]
     #[ignore]
     fn generate_test_wal() -> eyre::Result<()> {
-        use std::io::Write;
-
         let notification = get_test_notification_data()?;
 
         // Serialize the notification
@@ -337,9 +336,6 @@ mod tests {
     /// Helper function to generate deterministic test data for WAL tests
     fn get_test_notification_data(
     ) -> eyre::Result<ExExNotification<reth_ethereum_primitives::EthPrimitives>> {
-        use reth_ethereum_primitives::Block;
-        use reth_primitives_traits::Block as _;
-
         // Create a block with a transaction
         let block = Block::default().seal_slow().try_recover()?;
         let block_number = block.header().number();

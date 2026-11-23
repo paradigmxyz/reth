@@ -258,6 +258,9 @@ struct EnvironmentInner {
 
 impl Drop for EnvironmentInner {
     fn drop(&mut self) {
+        #[cfg(feature = "read-tx-timeouts")]
+        self.txn_manager.stop_read_transaction_monitor();
+
         // Abort all pooled read transactions before closing the environment.
         self.ro_txn_pool.drain();
 

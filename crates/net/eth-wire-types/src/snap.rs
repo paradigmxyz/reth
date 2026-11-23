@@ -331,7 +331,8 @@ pub enum SnapProtocolMessage {
     BlockAccessLists(BlockAccessListsMessage),
 }
 
-/// Error decoding an inbound `snap` protocol message from its framed bytes.
+/// Error decoding an inbound `snap` protocol message from its framed bytes, or matching a response
+/// to its request.
 #[derive(thiserror::Error, Debug)]
 pub enum SnapProtocolError {
     /// The payload was empty and carried no message id.
@@ -344,6 +345,31 @@ pub enum SnapProtocolError {
     /// Decoding the RLP message body failed.
     #[error("RLP error: {0}")]
     Rlp(#[from] alloy_rlp::Error),
+    /// The response answers no request sent on this connection.
+    ///
+    /// The response is rejected before its body is decoded.
+    #[error("received unsolicited {message_id:?} response with request id {request_id}")]
+    UnsolicitedResponse {
+        /// The message id of the response.
+        message_id: SnapMessageId,
+        /// The request id the response carried.
+        request_id: u64,
+    },
+    /// A list in the response is longer than its request allows: more entries than requested, or
+    /// more range proof nodes than two boundary paths can hold.
+    ///
+    /// The response is rejected before its body is decoded.
+    #[error(
+        "{message_id:?} response with request id {request_id} holds a list longer than the {max_items} items its request allows"
+    )]
+    ResponseExceedsRequest {
+        /// The message id of the response.
+        message_id: SnapMessageId,
+        /// The request id the response carried.
+        request_id: u64,
+        /// The longest the list may be.
+        max_items: usize,
+    },
 }
 
 impl SnapProtocolMessage {

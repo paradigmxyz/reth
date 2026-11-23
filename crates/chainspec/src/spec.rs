@@ -40,6 +40,7 @@ use reth_ethereum_forks::{
 };
 use reth_network_peers::{holesky_nodes, hoodi_nodes, mainnet_nodes, sepolia_nodes, NodeRecord};
 use reth_primitives_traits::{sync::LazyLock, BlockHeader, SealedHeader};
+use NamedChain as C;
 
 /// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
 pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
@@ -770,8 +771,6 @@ impl<H: BlockHeader> ChainSpec<H> {
 
     /// Returns the known bootnode records for the given chain.
     pub fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
-        use NamedChain as C;
-
         match self.chain.try_into().ok()? {
             C::Mainnet => Some(mainnet_nodes()),
             C::Sepolia => Some(sepolia_nodes()),
@@ -2032,7 +2031,7 @@ Post-merge hard forks (timestamp based):
             &DEV,
             &[(
                 Head { number: 0, ..Default::default() },
-                ForkId { hash: ForkHash(hex!("0x0b1a4ef7")), next: 0 },
+                ForkId { hash: ForkHash(hex!("0x62d16ad0")), next: 0 },
             )],
         )
     }
@@ -2968,6 +2967,15 @@ Post-merge hard forks (timestamp based):
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
                 max_blobs_per_tx: 6,
                 blob_base_cost: 0,
+            },
+            // Without an osaka entry, Osaka keeps the chain's Prague blob counts.
+            osaka: BlobParams {
+                target_blob_count: 3,
+                max_blob_count: 6,
+                update_fraction: 3338477,
+                min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+                max_blobs_per_tx: 6,
+                blob_base_cost: 8192,
             },
             ..Default::default()
         };
