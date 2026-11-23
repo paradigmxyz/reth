@@ -870,12 +870,11 @@ impl RocksDBProvider {
         }
         entries.try_for_each(|entry| entry.map(drop))?;
         let options = Options::default();
-        let current = path.join("CURRENT");
+        // Listing column families reads the manifest named by CURRENT.
         eyre::ensure!(
-            current.try_exists()? &&
-                DB::list_cf(&options, path)?
-                    .iter()
-                    .any(|cf| cf == tables::TransactionHashNumbers::NAME),
+            DB::list_cf(&options, path)?
+                .iter()
+                .any(|cf| cf == tables::TransactionHashNumbers::NAME),
             "Refusing to destroy an unrecognized RocksDB directory at {}",
             path.display()
         );
@@ -888,6 +887,7 @@ impl RocksDBProvider {
         );
         DB::destroy(&options, path)
             .wrap_err_with(|| format!("Could not destroy RocksDB at {}", path.display()))?;
+        let current = path.join("CURRENT");
         eyre::ensure!(
             !current.try_exists()?,
             "RocksDB cleanup left {} in place",
