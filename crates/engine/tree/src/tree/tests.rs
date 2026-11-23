@@ -18,8 +18,8 @@ use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_primitives::{map::B256Set, Bytes, B256};
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
-    ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
-    ForkchoiceUpdateError, PayloadError,
+    ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV4,
+    ForkchoiceState, ForkchoiceUpdateError, PayloadError, PayloadValidationError,
 };
 use assert_matches::assert_matches;
 use evm2::evm::Bal as EvmBal;
@@ -633,6 +633,58 @@ fn payload_decode_error_returns_invalid_with_null_latest_valid_hash() {
     let status =
         test_harness.tree.on_new_payload_error(extra_data_error, num_hash, parent_hash).unwrap();
     assert_eq!(status.latest_valid_hash, Some(parent_hash));
+}
+
+#[test]
+fn block_access_list_decode_resend_returns_null_latest_valid_hash() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..2).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks);
+    let parent_hash = test_harness.tree.state.tree_state.canonical_block_hash();
+    let block = test_harness.block_builder.generate_random_block(2, parent_hash).into_block();
+
+    // A list header without its payload, so the access list bytes do not decode.
+    let invalid_bal = Bytes::from_static(&[0xc1]);
+    let empty_bal = Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]);
+    let mut statuses = Vec::new();
+    for bal in [invalid_bal, empty_bal] {
+        let payload =
+            ExecutionPayloadV4::from_block_unchecked_with_bal(B256::random(), &block, bal);
+        // The first delivery of the payload marked its block as invalid.
+        test_harness.tree.state.invalid_headers.insert(BlockWithParent {
+            block: NumHash::new(2, payload.payload_inner.payload_inner.payload_inner.block_hash),
+            parent: parent_hash,
+        });
+
+        let outcome = test_harness
+            .tree
+            .on_new_payload(ExecutionData {
+                payload: payload.into(),
+                sidecar: ExecutionPayloadSidecar::none(),
+            })
+            .unwrap();
+        statuses.push(outcome.outcome);
+    }
+
+    assert_eq!(
+        statuses[0],
+        PayloadStatus::new(
+            PayloadStatusEnum::Invalid {
+                validation_error: "failed to decode block access list: input too short".to_string(),
+            },
+            None,
+        )
+    );
+    // A cached block with a decodable access list is still answered from the invalid header
+    // cache.
+    assert_eq!(
+        statuses[1],
+        PayloadStatus::new(
+            PayloadStatusEnum::Invalid {
+                validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
+            },
+            Some(parent_hash),
+        )
+    );
 }
 
 #[tokio::test]
