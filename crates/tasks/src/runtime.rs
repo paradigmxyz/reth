@@ -931,24 +931,6 @@ impl Runtime {
         }
     }
 
-    /// Shuts down the owned Tokio runtime for all clones and joins its worker threads.
-    ///
-    /// Only the call that takes ownership of the runtime waits for its threads. Concurrent or
-    /// subsequent calls on other clones return without waiting for shutdown to finish.
-    ///
-    /// Async tasks are cancelled; running blocking tasks are allowed to finish. This waits
-    /// without a timeout, so callers must arrange for every blocking task to terminate, even
-    /// after async tasks have been cancelled. Externally supplied runtimes are left running.
-    ///
-    /// Do not call this from one of the runtime's blocking tasks: shutdown waits for that task
-    /// to finish.
-    ///
-    /// Panics if called from an async context while an owned runtime remains.
-    pub fn shutdown(self) {
-        let runtime = self.0.tokio_runtime.lock().unwrap().take();
-        drop(runtime);
-    }
-
     fn do_graceful_shutdown(&self, timeout: Option<Duration>) -> bool {
         let _ = self.0.task_events_tx.send(TaskEvent::GracefulShutdown);
         let deadline = timeout.map(|t| Instant::now() + t);
@@ -1347,7 +1329,6 @@ mod tests {
         let retained = runtime.clone();
 
         runtime.shutdown_timeout(Duration::from_secs(5));
-        retained.clone().shutdown();
 
         assert_eq!(retained.handle().spawn(async { 42 }).await.unwrap(), 42);
     }
@@ -1407,71 +1388,5 @@ mod tests {
         assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), 2);
         assert_eq!(runtime.prewarming_pool().current_num_threads(), 2);
         assert_eq!(runtime.state_trie_overlay_worker_pool().current_num_threads(), 2);
-    }
-
-    #[test]
-    fn shutdown_waits_for_blocking_tasks_with_live_runtime_clones() {
-        let runtime = RuntimeBuilder::new(Runtime::test_config()).build().unwrap();
-        let retained = runtime.clone();
-        let task_runtime = runtime.clone();
-        let (started, ready) = std::sync::mpsc::channel();
-        let (release, wait) = std::sync::mpsc::channel();
-        runtime.handle().spawn_blocking(move || {
-            let _runtime = task_runtime;
-            started.send(()).unwrap();
-            wait.recv_timeout(Duration::from_secs(5)).unwrap();
-        });
-        ready.recv_timeout(Duration::from_secs(5)).unwrap();
-
-        let (stopped, done) = std::sync::mpsc::channel();
-        let shutdown = thread::spawn(move || {
-            runtime.shutdown();
-            stopped.send(()).unwrap();
-        });
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while retained.0.tokio_runtime.lock().unwrap().is_some() {
-            assert!(Instant::now() < deadline, "shutdown did not take ownership of the runtime");
-            thread::yield_now();
-        }
-        retained.clone().shutdown();
-        let early = done.recv_timeout(Duration::from_millis(50));
-        release.send(()).unwrap();
-        if early.is_err() {
-            done.recv_timeout(Duration::from_secs(5)).unwrap();
-        }
-        shutdown.join().unwrap();
-        assert_eq!(early, Err(std::sync::mpsc::RecvTimeoutError::Timeout));
-        assert!(retained.0.tokio_runtime.lock().unwrap().is_none());
-        retained.shutdown();
-    }
-
-    #[tokio::test]
-    async fn joining_shutdown_cancels_tasks_with_live_runtime_clones() {
-        let runtime = RuntimeBuilder::new(Runtime::test_config()).build().unwrap();
-        let retained = runtime.clone();
-        let task_runtime = runtime.clone();
-        let (started, ready) = tokio::sync::oneshot::channel();
-        let task = runtime.handle().spawn(async move {
-            let _runtime = task_runtime;
-            started.send(()).unwrap();
-            std::future::pending::<()>().await;
-        });
-        ready.await.unwrap();
-
-        let blocking_runtime = runtime.clone();
-        let (started, ready) = tokio::sync::oneshot::channel();
-        let blocking = runtime.spawn_blocking_task(async move {
-            let _runtime = blocking_runtime;
-            started.send(()).unwrap();
-            std::future::pending::<()>().await;
-        });
-        ready.await.unwrap();
-
-        thread::spawn(move || runtime.shutdown()).join().unwrap();
-
-        blocking.await.unwrap();
-        assert!(task.await.unwrap_err().is_cancelled());
-        assert!(retained.handle().spawn(async {}).await.unwrap_err().is_cancelled());
-        retained.shutdown();
     }
 }
