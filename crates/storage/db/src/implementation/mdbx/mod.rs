@@ -771,7 +771,6 @@ mod tests {
     use alloy_primitives::{address, Address, B256, U256};
     use reth_db_api::{
         cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
-        database::ReaderTxnTracker,
         models::{AccountBeforeTx, IntegerList, ShardedKey},
         table::{Encode, Table, TableInfo},
         tables_to_generic,
@@ -779,12 +778,16 @@ mod tests {
     use reth_libmdbx::Error;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
+    use tempfile::TempDir;
+
+    #[cfg(unix)]
+    use reth_db_api::database::ReaderTxnTracker;
+    #[cfg(unix)]
     use std::{
         io::{BufRead, BufReader},
         process::{Command, Stdio},
         sync::mpsc,
     };
-    use tempfile::TempDir;
 
     /// Create database for testing. Returns the `TempDir` to prevent cleanup until test ends.
     fn create_test_db(kind: DatabaseEnvKind) -> (TempDir, DatabaseEnv) {
