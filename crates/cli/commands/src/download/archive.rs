@@ -263,8 +263,12 @@ impl ArchiveProcessor {
     fn run_cached_attempt(&self, format: CompressionFormat) -> Result<Option<ExtractedHashes>> {
         let cache_dir =
             self.ctx.cache_dir().ok_or_else(|| eyre::eyre!("Missing download cache directory"))?;
-        let fetcher =
-            ArchiveFetcher::new(self.archive().url.clone(), cache_dir, self.ctx.session().clone());
+        let fetcher = ArchiveFetcher::new(
+            self.archive().url.clone(),
+            cache_dir,
+            self.ctx.session().clone(),
+            Some(self.archive().size),
+        );
 
         if self.archive.ty == super::manifest::SnapshotComponentType::State {
             debug!(target: "reth::cli", url = %self.archive().url, "Downloading state snapshot archive");

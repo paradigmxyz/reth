@@ -117,14 +117,23 @@ pub(crate) struct ArchiveFetcher {
     paths: DownloadPaths,
     /// Shared command-scoped download state.
     session: DownloadSession,
+    /// Archive size declared by the manifest. `None` trusts the size the server reports.
+    expected_size: Option<u64>,
 }
 
 impl ArchiveFetcher {
     /// Creates a fetcher for one archive URL under the given target directory.
-    pub(crate) fn new(url: impl Into<String>, target_dir: &Path, session: DownloadSession) -> Self {
+    ///
+    /// When `expected_size` is set, the download fails if the server reports any other size.
+    pub(crate) fn new(
+        url: impl Into<String>,
+        target_dir: &Path,
+        session: DownloadSession,
+        expected_size: Option<u64>,
+    ) -> Self {
         let url = url.into();
         let paths = DownloadPaths::from_url(&url, target_dir);
-        Self { url, paths, session }
+        Self { url, paths, session, expected_size }
     }
 
     /// Downloads the archive using the best strategy supported by the remote source.
@@ -218,10 +227,26 @@ impl ArchiveFetcher {
             }
         };
 
-        Ok(RemoteArchiveProbe {
-            total_size: total_size.ok_or_else(|| eyre::eyre!("Server did not return file size"))?,
-            supports_ranges,
-        })
+        let total_size =
+            total_size.ok_or_else(|| eyre::eyre!("Server did not return file size"))?;
+        // A HEAD response reports a zero body length, so only a range probe gives the real size.
+        // Without range support the download is sequential, which checks the size of the GET.
+        if supports_ranges {
+            self.check_total_size(total_size)?;
+        }
+        Ok(RemoteArchiveProbe { total_size, supports_ranges })
+    }
+
+    /// Fails when the server-reported archive size differs from the manifest-declared size.
+    fn check_total_size(&self, total_size: u64) -> Result<()> {
+        if let Some(expected) = self.expected_size &&
+            expected != total_size
+        {
+            eyre::bail!(
+                "Archive size mismatch: manifest declares {expected} bytes, server reported {total_size}"
+            )
+        }
+        Ok(())
     }
 
     /// Downloads the archive as a single resumable stream using one request at a time.
@@ -293,16 +318,36 @@ impl ArchiveFetcher {
             };
 
             let is_partial = response.status() == StatusCode::PARTIAL_CONTENT;
+            let content_range = response
+                .headers()
+                .get("Content-Range")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.strip_prefix("bytes"))
+                .map(str::trim);
             let size = if is_partial {
-                response
-                    .headers()
-                    .get("Content-Range")
-                    .and_then(|value| value.to_str().ok())
+                content_range
                     .and_then(|value| value.split('/').next_back())
                     .and_then(|value| value.parse().ok())
             } else {
                 response.content_length()
             };
+            if let Some(size) = size {
+                self.check_total_size(size)?;
+            }
+
+            // Appending a range that starts elsewhere would silently corrupt the `.part` file.
+            let range_start = content_range
+                .and_then(|value| value.split('-').next())
+                .and_then(|value| value.parse::<u64>().ok());
+            if is_partial && range_start != Some(existing_size) {
+                // Resuming this `.part` file would fail the same way on the next run.
+                self.paths.cleanup_partial();
+                eyre::bail!(
+                    "Server resumed {} at byte {} instead of requested offset {existing_size}",
+                    self.paths.file_name(),
+                    range_start.map_or_else(|| "unknown".to_string(), |start| start.to_string())
+                )
+            }
 
             if total_size.is_none() {
                 total_size = size;
@@ -329,7 +374,8 @@ impl ArchiveFetcher {
             };
 
             let start_offset = if is_partial { existing_size } else { 0 };
-            let mut reader = response;
+            // Never write past the archive's total size, whatever the server streams.
+            let mut reader = response.take(current_total.saturating_sub(start_offset));
 
             let copy_result;
             let flush_result;
@@ -372,6 +418,16 @@ impl ArchiveFetcher {
                         self.session.retry_delay(Duration::from_secs(RETRY_BACKOFF_SECS)),
                     );
                 }
+                continue;
+            }
+
+            let downloaded = fs::metadata(self.paths.part_path())?.len();
+            if downloaded < current_total {
+                // The body ended early without an error, so resume from what landed.
+                last_error = Some(eyre::eyre!(
+                    "Download of {} ended at {downloaded} of {current_total} bytes",
+                    self.paths.file_name()
+                ));
                 continue;
             }
 
@@ -434,7 +490,17 @@ impl ArchiveFetcher {
     }
 
     /// Finalizes the downloaded archive and returns its on-disk location and size.
+    ///
+    /// Fails when the `.part` file does not hold exactly `size` bytes, so a short or overlong
+    /// download never reaches extraction.
     fn finalize_download(&self, size: u64) -> Result<DownloadedArchive> {
+        let downloaded = fs::metadata(self.paths.part_path())?.len();
+        if downloaded != size {
+            eyre::bail!(
+                "Downloaded {} has {downloaded} bytes, expected {size}",
+                self.paths.file_name()
+            )
+        }
         self.paths.finalize()?;
         if !self.quiet() {
             info!(target: "reth::cli", file = %self.paths.file_name(), "Download complete");
@@ -1366,7 +1432,7 @@ mod tests {
         std::fs::create_dir(&cache_dir).unwrap();
         let url = Url::from_file_path(&archive_path).unwrap().to_string();
         let session = DownloadSession::new(None, None, CancellationToken::new());
-        let fetcher = ArchiveFetcher::new(url, &cache_dir, session);
+        let fetcher = ArchiveFetcher::new(url, &cache_dir, session, None);
 
         let downloaded = fetcher.download(None, None).unwrap();
 
@@ -1510,6 +1576,89 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(10));
     }
 
+    #[test]
+    fn sequential_download_rejects_size_other_than_expected() {
+        let response = b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\nConnection: close\r\n\r\n\
+                         01234567890123456789";
+        let url = spawn_response_server(response.to_vec());
+        let dir = tempfile::tempdir().unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new());
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(10));
+
+        let error = fetcher.download(None, None).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "Archive size mismatch: manifest declares 10 bytes, server reported 20"
+        );
+        assert!(!dir.path().join("archive.tar.zst").exists());
+    }
+
+    #[test]
+    fn sequential_resume_rejects_range_not_starting_at_offset() {
+        let response = b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-9/10\r\n\
+                         Content-Length: 10\r\nConnection: close\r\n\r\n0123456789";
+        let url = spawn_response_server(response.to_vec());
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("archive.tar.zst.part"), b"01234").unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new());
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(10));
+
+        let error = fetcher.download(None, None).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "Server resumed archive.tar.zst at byte 0 instead of requested offset 5"
+        );
+        assert!(!dir.path().join("archive.tar.zst").exists());
+    }
+
+    #[test]
+    fn sequential_download_stops_at_declared_size() {
+        let response = b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-9/10\r\n\
+                         Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n\
+                         14\r\n01234567890123456789\r\n0\r\n\r\n";
+        let url = spawn_response_server(response.to_vec());
+        let dir = tempfile::tempdir().unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new());
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(10));
+
+        let downloaded = fetcher.download(None, None).unwrap();
+
+        assert_eq!(downloaded.size, 10);
+        assert_eq!(std::fs::read(downloaded.path).unwrap(), b"0123456789");
+    }
+
+    #[test]
+    fn download_without_range_support_accepts_expected_size() {
+        let response =
+            b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n0123456789";
+        let url = spawn_response_server(response.to_vec());
+        let dir = tempfile::tempdir().unwrap();
+        let fetcher = ArchiveFetcher::new(url, dir.path(), test_session(), Some(10));
+
+        let downloaded = fetcher.download(None, None).unwrap();
+
+        assert_eq!(std::fs::read(downloaded.path).unwrap(), b"0123456789");
+    }
+
+    #[test]
+    fn probe_rejects_size_other_than_expected() {
+        let response = b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-0/20\r\n\
+                         Content-Length: 1\r\nConnection: close\r\n\r\n0";
+        let url = spawn_response_server(response.to_vec());
+        let dir = tempfile::tempdir().unwrap();
+        let fetcher = ArchiveFetcher::new(url, dir.path(), test_session(), Some(10));
+
+        let error = fetcher.download(None, None).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "Archive size mismatch: manifest declares 10 bytes, server reported 20"
+        );
+        assert!(!dir.path().join("archive.tar.zst").exists());
+    }
+
     fn test_session() -> DownloadSession {
         DownloadSession::new(None, Some(DownloadRequestLimiter::new(4)), CancellationToken::new())
     }
@@ -1594,5 +1743,25 @@ mod tests {
             }
         });
         (url, requests)
+    }
+
+    /// Answers every HTTP request on localhost with the raw `response` bytes and returns the URL.
+    fn spawn_response_server(response: Vec<u8>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/archive.tar.zst", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let mut request = io::BufReader::new(stream.try_clone().unwrap());
+                loop {
+                    let mut line = String::new();
+                    if request.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                        break
+                    }
+                }
+                stream.write_all(&response).unwrap();
+            }
+        });
+        url
     }
 }
