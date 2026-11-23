@@ -2,22 +2,20 @@
 
 use super::{
     branch_data_mut, branch_idx, node_state_ref, ArenaCursor, ArenaSparseNode,
-    ArenaSparseNodeBranch, ArenaSparseNodeState, ArenaSparseSubtrie, BranchChild, BranchChildIdx,
-    NextResult, NodeArena, NodeIndex, PersistentArenaParallelSparseTrie, RemoveLeafResult,
-    SeekResult, UpsertLeafResult, TRACE_TARGET,
+    ArenaSparseNodeState, ArenaSparseSubtrie, BranchChild, BranchChildIdx, NextResult, NodeArena,
+    NodeIndex, PersistentArenaParallelSparseTrie, RemoveLeafResult, SeekResult, UpsertLeafResult,
+    TRACE_TARGET,
 };
 use crate::{
+    arena::{sort_proof_nodes, take_extension_child, validate_extension_child},
     LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, TrieNodeEpoch,
 };
 use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{map::B256Map, B256};
 use core::{cmp::Reverse, mem};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
-use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
-use reth_trie_common::{
-    BranchNodeMasks, Nibbles, ProofTrieNodeV2, ProofV2TargetParent, RlpNode, TrieNodeV2,
-};
-use smallvec::SmallVec;
+use reth_execution_errors::SparseTrieResult;
+use reth_trie_common::{Nibbles, ProofTrieNode, ProofV2TargetParent, RlpNode};
 use tracing::{instrument, trace};
 
 #[cfg(reth_sparse_trie_coverage)]
@@ -27,8 +25,7 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn set_root(
         &mut self,
-        root: TrieNodeV2,
-        masks: Option<BranchNodeMasks>,
+        nodes: &mut [ProofTrieNode],
         retain_updates: bool,
     ) -> SparseTrieResult<()> {
         debug_assert!(
@@ -36,50 +33,16 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
             "set_root called on a trie that already has revealed nodes"
         );
 
-        match root {
-            TrieNodeV2::EmptyRoot => {
-                trace!(target: TRACE_TARGET, "Setting empty root");
-                self.upper_arena[self.root] =
-                    ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Revealed };
-            }
-            TrieNodeV2::Leaf(leaf) => {
-                trace!(target: TRACE_TARGET, key = ?leaf.key, "Setting leaf root");
-                self.upper_arena[self.root] = ArenaSparseNode::Leaf {
-                    state: ArenaSparseNodeState::Revealed,
-                    key: leaf.key,
-                    value: leaf.value,
-                };
-            }
-            TrieNodeV2::Branch(branch) => {
-                trace!(target: TRACE_TARGET, state_mask = ?branch.state_mask, num_children = branch.state_mask.count_bits(), "Setting branch root");
-                let mut children = SmallVec::with_capacity(branch.state_mask.count_bits() as usize);
-                for (stack_ptr, _nibble) in branch.state_mask.iter().enumerate() {
-                    let child = self.upper_arena.insert_blinded(branch.stack[stack_ptr].clone());
-                    children.push(child);
-                }
-
-                let branch_node = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-                    state: ArenaSparseNodeState::Revealed,
-                    children,
-                    state_mask: branch.state_mask,
-                    branch_masks: masks.unwrap_or_default(),
-                });
-                if branch.key.is_empty() {
-                    self.upper_arena[self.root] = branch_node;
-                } else {
-                    let child = self.upper_arena.insert(branch_node);
-                    self.upper_arena[self.root] =
-                        ArenaSparseNode::Extension { key: branch.key, child };
-                }
-            }
-            TrieNodeV2::Extension(node) => {
-                return Err(SparseTrieErrorKind::Reveal {
-                    path: Nibbles::new(),
-                    node: Box::new(node),
-                }
-                .into());
-            }
-        }
+        let nodes = sort_proof_nodes(nodes);
+        assert!(
+            !nodes.is_empty() && nodes[0].path.is_empty(),
+            "calculator root batch must contain the root at the empty path"
+        );
+        validate_extension_child(&nodes[0], nodes.get(1))?;
+        let extension_child = take_extension_child(nodes, 0);
+        let root = mem::replace(&mut nodes[0], ProofTrieNode::empty());
+        self.upper_arena[self.root] =
+            Self::node_from_proof(&mut self.upper_arena, root, extension_child);
 
         self.set_updates(retain_updates);
         Ok(())
@@ -107,7 +70,7 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(num_nodes = nodes.len()))]
-    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()> {
+    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNode]) -> SparseTrieResult<()> {
         if nodes.is_empty() {
             return Ok(());
         }
@@ -118,7 +81,10 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
         }
 
         // Sort nodes lexicographically by path.
-        nodes.sort_unstable_by_key(|n| n.path);
+        let nodes = sort_proof_nodes(nodes);
+        for (index, node) in nodes.iter().enumerate() {
+            validate_extension_child(node, nodes.get(index + 1))?;
+        }
 
         let threshold = self.parallelism_thresholds.min_revealed_nodes;
 
@@ -132,7 +98,7 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
         // Walk the upper trie, revealing upper nodes inline and collecting subtrie work.
         // Subtries with enough nodes to reveal are taken for parallel processing; the rest
         // are revealed inline.
-        let mut taken: Vec<(NodeIndex, Box<ArenaSparseSubtrie>, Vec<ProofTrieNodeV2>)> = Vec::new();
+        let mut taken: Vec<(NodeIndex, Box<ArenaSparseSubtrie>, Vec<ProofTrieNode>)> = Vec::new();
 
         while node_idx < nodes.len() {
             let find_result = cursor.seek(&mut self.upper_arena, &nodes[node_idx].path);
@@ -145,13 +111,16 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
                 SeekResult::Blinded => {
                     // Save the proof node's path before reveal_node consumes it.
                     let child_path = nodes[node_idx].path;
+                    let extension_child = take_extension_child(nodes, node_idx);
+                    let next_idx = node_idx + 1 + usize::from(extension_child.is_some());
                     let child_idx = Self::reveal_node(
                         &mut self.upper_arena,
                         &cursor,
                         &mut nodes[node_idx],
+                        extension_child,
                         SeekResult::Blinded,
                     );
-                    node_idx += 1;
+                    node_idx = next_idx;
 
                     if let Some(child_idx) = child_idx {
                         self.maybe_wrap_in_subtrie(child_idx, &child_path);
@@ -176,8 +145,8 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
                         ) else {
                             unreachable!("RevealedSubtrie must point to a Subtrie node")
                         };
-                        let node_vec: Vec<ProofTrieNodeV2> = (subtrie_start..node_idx)
-                            .map(|i| mem::replace(&mut nodes[i], ProofTrieNodeV2::empty()))
+                        let node_vec: Vec<ProofTrieNode> = (subtrie_start..node_idx)
+                            .map(|i| mem::replace(&mut nodes[i], ProofTrieNode::empty()))
                             .collect();
                         taken.push((child_idx, subtrie, node_vec));
                     } else {

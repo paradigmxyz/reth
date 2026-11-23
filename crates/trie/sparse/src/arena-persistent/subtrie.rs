@@ -7,11 +7,11 @@ use super::{
     BranchChildIdx, NodeArena, NodeIndex, PersistentArenaParallelSparseTrie, RemoveLeafResult,
     SeekResult, TRACE_TARGET,
 };
-use crate::{LeafUpdate, SparseTrieUpdates, TrieNodeEpoch};
+use crate::{arena::take_extension_child, LeafUpdate, SparseTrieUpdates, TrieNodeEpoch};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::B256;
 use alloy_trie::TrieMask;
-use reth_trie_common::{Nibbles, ProofTrieNodeV2, ProofV2TargetParent, RlpNode};
+use reth_trie_common::{Nibbles, ProofTrieNode, ProofV2TargetParent, RlpNode};
 use tracing::{instrument, trace};
 
 #[cfg(reth_sparse_trie_coverage)]
@@ -362,7 +362,7 @@ impl ArenaSparseSubtrie {
 
     /// Reveals nodes inside this subtrie. Uses [`super::cursor::ArenaCursor::seek`] to locate the
     /// ancestor node, then replaces blinded children with the proof nodes.
-    pub(super) fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) {
+    pub(super) fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNode]) {
         if nodes.is_empty() {
             return;
         }
@@ -375,18 +375,24 @@ impl ArenaSparseSubtrie {
 
         self.buffers.cursor.reset(&self.arena, self.root, self.path);
 
-        for node in nodes.iter_mut() {
+        let mut node_idx = 0;
+        while node_idx < nodes.len() {
+            let extension_child = take_extension_child(nodes, node_idx);
+            let next_idx = node_idx + 1 + usize::from(extension_child.is_some());
+            let node = &mut nodes[node_idx];
             let find_result = self.buffers.cursor.seek(&mut self.arena, &node.path);
             if PersistentArenaParallelSparseTrie::reveal_node(
                 &mut self.arena,
                 &self.buffers.cursor,
                 node,
+                extension_child,
                 find_result,
             )
             .is_some_and(|child_idx| matches!(self.arena[child_idx], ArenaSparseNode::Leaf { .. }))
             {
                 self.num_leaves += 1;
             }
+            node_idx = next_idx;
         }
 
         // Drain remaining cursor entries, propagating dirty state.

@@ -83,7 +83,7 @@ use alloy_primitives::{keccak256, B256};
 use core::mem;
 use reth_trie_common::{
     BranchNodeCompact, BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles,
-    ProofTrieNodeV2, ProofV2TargetParent, RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
+    ProofTrieNode, ProofV2TargetParent, RlpNode, TrieNode, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
 use tracing::{instrument, trace};
@@ -1079,7 +1079,8 @@ impl PersistentArenaParallelSparseTrie {
     fn reveal_node(
         arena: &mut NodeArena,
         cursor: &ArenaCursor,
-        node: &mut ProofTrieNodeV2,
+        node: &mut ProofTrieNode,
+        extension_child: Option<ProofTrieNode>,
         find_result: SeekResult,
     ) -> Option<NodeIndex> {
         let SeekResult::Blinded = find_result else {
@@ -1119,8 +1120,9 @@ impl PersistentArenaParallelSparseTrie {
             "Revealing node",
         );
 
-        let proof_node = mem::replace(node, ProofTrieNodeV2::empty());
-        let child_idx = Self::insert_proof_node(arena, proof_node);
+        let proof_node = mem::replace(node, ProofTrieNode::empty());
+        let node = Self::node_from_proof(arena, proof_node, extension_child);
+        let child_idx = arena.insert(node);
         *node_state_mut(arena, child_idx) =
             ArenaSparseNodeState::Cached { rlp_node: cached_rlp, epoch: TrieNodeEpoch::UNMODIFIED };
         branch_data_mut(arena, head_idx).children[dense_child_idx] =
@@ -1128,41 +1130,45 @@ impl PersistentArenaParallelSparseTrie {
         Some(child_idx)
     }
 
-    /// Inserts a proof node, splitting a combined `BranchNodeV2` into an extension and its branch
-    /// child when its short key is non-empty.
-    fn insert_proof_node(arena: &mut NodeArena, proof_node: ProofTrieNodeV2) -> NodeIndex {
-        let ProofTrieNodeV2 { node, masks, .. } = proof_node;
-        let node = match node {
-            TrieNodeV2::EmptyRoot => {
+    /// Converts a calculator proof node, keeping each extension with its validated branch child.
+    fn node_from_proof(
+        arena: &mut NodeArena,
+        proof_node: ProofTrieNode,
+        extension_child: Option<ProofTrieNode>,
+    ) -> ArenaSparseNode {
+        let ProofTrieNode { node, masks, .. } = proof_node;
+        match node {
+            TrieNode::EmptyRoot => {
                 ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Revealed }
             }
-            TrieNodeV2::Leaf(leaf) => ArenaSparseNode::Leaf {
+            TrieNode::Leaf(leaf) => ArenaSparseNode::Leaf {
                 state: ArenaSparseNodeState::Revealed,
                 key: leaf.key,
                 value: leaf.value,
             },
-            TrieNodeV2::Branch(branch) => {
+            TrieNode::Branch(branch) => {
                 let children = branch.stack[..branch.state_mask.count_bits() as usize]
                     .iter()
                     .map(|rlp| arena.insert_blinded(rlp.clone()))
                     .collect();
-                let node = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+                ArenaSparseNode::Branch(ArenaSparseNodeBranch {
                     state: ArenaSparseNodeState::Revealed,
                     children,
                     state_mask: branch.state_mask,
                     branch_masks: masks.unwrap_or_default(),
-                });
-                if branch.key.is_empty() {
-                    node
-                } else {
-                    ArenaSparseNode::Extension { key: branch.key, child: arena.insert(node) }
-                }
+                })
             }
-            TrieNodeV2::Extension(_) => {
-                panic!("Extension nodes should be merged into branches by TrieNodeV2")
+            TrieNode::Extension(extension) => {
+                let Some(branch) = extension_child else {
+                    unreachable!(
+                        "calculator extensions are paired with their branch before ingestion"
+                    )
+                };
+                let branch = Self::node_from_proof(arena, branch, None);
+                let child = arena.insert(branch);
+                ArenaSparseNode::Extension { key: extension.key, child }
             }
-        };
-        arena.insert(node)
+        }
     }
 
     #[cfg(all(debug_assertions, not(feature = "fuzz")))]
@@ -1292,17 +1298,19 @@ mod tests {
     #[test]
     fn unsupported_root_preserves_update_retention_and_allows_valid_root() {
         let mut trie = PersistentArenaParallelSparseTrie::default();
-        let root = TrieNodeV2::Extension(reth_trie_common::ExtensionNode::new(
+        let root = TrieNode::Extension(reth_trie_common::ExtensionNode::new(
             Nibbles::from_nibbles([1]),
             RlpNode::word_rlp(&B256::ZERO),
         ));
-        let error = trie.set_root(root, None, true).unwrap_err();
+        let error = trie
+            .set_root(&mut [ProofTrieNode { path: Nibbles::new(), node: root, masks: None }], true)
+            .unwrap_err();
         assert!(
             matches!(error.kind(), SparseTrieErrorKind::Reveal { path, .. } if path.is_empty())
         );
         assert!(trie.buffers.updates.is_none());
 
-        trie.set_root(TrieNodeV2::EmptyRoot, None, true).unwrap();
+        trie.set_root(&mut [ProofTrieNode::empty()], true).unwrap();
         assert_eq!(trie.root(epoch(1)), EMPTY_ROOT_HASH);
         assert!(trie.buffers.updates.is_some());
     }
@@ -1529,7 +1537,7 @@ mod tests {
             let mut harness = ArenaTrieTestHarness::new(initial);
 
             // Initialize the APST from the harness root node.
-            let root_node = harness.root_node();
+            let mut root_nodes = harness.root_nodes();
             let mut apst = PersistentArenaParallelSparseTrie::default().with_parallelism_thresholds(
                 PersistentArenaParallelismThresholds {
                     min_dirty_leaves: 3,
@@ -1538,7 +1546,7 @@ mod tests {
                     min_leaves_for_prune: 3,
                 },
             );
-            apst.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
+            apst.set_root(&mut root_nodes, true).expect("set_root should succeed");
 
             harness.assert_changes(&mut apst, changeset1.clone());
 
@@ -1591,7 +1599,7 @@ mod tests {
                 min_leaves_for_prune: 0,
             },
         );
-        trie.set_root(TrieNodeV2::EmptyRoot, None, true).unwrap();
+        trie.set_root(&mut [ProofTrieNode::empty()], true).unwrap();
         apply_leaf_edits(
             &mut trie,
             &[
@@ -1717,9 +1725,9 @@ mod tests {
             Err(LeafLookupError::BlindedNode { .. })
         ));
 
-        let mut proof = [ProofTrieNodeV2 {
+        let mut proof = [ProofTrieNode {
             path: absent.slice(..3),
-            node: TrieNodeV2::Leaf(LeafNode::new(absent.slice(3..), vec![2; 40])),
+            node: TrieNode::Leaf(LeafNode::new(absent.slice(3..), vec![2; 40])),
             masks: None,
         }];
         snapshot.reveal_nodes(&mut proof).unwrap();
@@ -2071,6 +2079,134 @@ mod tests {
                 leaves.get(&key).copied(),
                 "leaf {key} at epoch {epoch:?}"
             );
+        }
+    }
+
+    #[test]
+    fn snapshot_reveals_duplicate_extension_pairs_in_parallel_subtries() {
+        let storage = [(0x11, 0x12), (0x91, 0x92)]
+            .into_iter()
+            .flat_map(|(sibling, prefix)| {
+                [
+                    (B256::right_padding_from(&[sibling]), U256::ONE),
+                    (B256::right_padding_from(&[prefix, 0x80]), U256::from(2)),
+                    (B256::right_padding_from(&[prefix, 0x34, 0x51]), U256::from(3)),
+                    (B256::right_padding_from(&[prefix, 0x34, 0x52]), U256::from(4)),
+                    (B256::right_padding_from(&[prefix, 0x34, 0x51, 0x10]), U256::from(5)),
+                ]
+            })
+            .collect();
+        let harness = ArenaTrieTestHarness::new(storage);
+        let keys = [
+            B256::right_padding_from(&[0x12, 0x34, 0x60]),
+            B256::right_padding_from(&[0x92, 0x34, 0x60]),
+        ];
+        let changes = keys.into_iter().map(|key| (key, U256::from(9))).collect();
+        let (expected_root, mut expected_updates) = harness.get_root_with_updates(&changes);
+        harness.minimize_trie_updates(&mut expected_updates);
+
+        for min_revealed_nodes in [0, usize::MAX] {
+            let mut original = PersistentArenaParallelSparseTrie::default()
+                .with_parallelism_thresholds(PersistentArenaParallelismThresholds {
+                    min_revealed_nodes,
+                    ..Default::default()
+                });
+            original.set_root(&mut harness.root_nodes(), true).unwrap();
+            let mut targets =
+                harness.storage().keys().copied().map(ProofV2Target::new).collect::<Vec<_>>();
+            let (mut upper_nodes, _) = harness.proof_v2(&mut targets);
+            // Reveal the lower roots, but leave their extension children blinded.
+            upper_nodes.retain(|node| node.path.len() <= UPPER_TRIE_MAX_DEPTH);
+            original.reveal_nodes(&mut upper_nodes).unwrap();
+            assert_eq!(original.root(epoch(0)), harness.original_root());
+            assert_eq!(original.take_updates(), SparseTrieUpdates::default());
+            for key in keys {
+                let prefix = Nibbles::unpack(key).slice(..UPPER_TRIE_MAX_DEPTH);
+                let subtrie = original
+                    .upper_arena
+                    .iter()
+                    .find_map(|(_, node)| match node {
+                        ArenaSparseNode::Subtrie(subtrie) if subtrie.path == prefix => {
+                            Some(subtrie)
+                        }
+                        _ => None,
+                    })
+                    .expect("each target has an existing depth-2 subtrie");
+                assert!(matches!(subtrie.arena[subtrie.root], ArenaSparseNode::Branch(_)));
+                assert!(matches!(
+                    original.find_leaf(&Nibbles::unpack(key), None),
+                    Err(LeafLookupError::BlindedNode { .. })
+                ));
+            }
+            let mut snapshot = original.snapshot();
+            let mut targets =
+                keys.map(|key| ProofV2Target::new(key).with_parent(ProofV2TargetParent::new(2)));
+            let (mut proof, _) = harness.proof_v2(&mut targets);
+            assert_eq!(proof.len(), 4, "two lower extension/branch pairs");
+            for key in keys {
+                let path = Nibbles::unpack(key);
+                let extension = proof.iter().find(|node| node.path == path.slice(..3)).unwrap();
+                let TrieNode::Extension(extension) = &extension.node else {
+                    panic!("each lower proof starts with an extension");
+                };
+                assert_eq!(extension.key, Nibbles::from_nibbles([4, 5]));
+                assert!(extension.child.is_hash());
+                let branch_path = path.slice(..4).join(&Nibbles::from_nibbles([5]));
+                let branch = proof.iter().find(|node| node.path == branch_path).unwrap();
+                assert!(matches!(branch.node, TrieNode::Branch(_)));
+                assert!(
+                    !branch.masks.unwrap().is_empty(),
+                    "the child branch has persisted descendants"
+                );
+            }
+            let mut overlapping = proof.clone();
+            for node in &mut overlapping {
+                node.masks = None;
+            }
+            proof.extend(overlapping);
+            snapshot.reveal_nodes(&mut proof).unwrap();
+            assert_eq!(snapshot.root(epoch(0)), harness.original_root());
+            assert_eq!(snapshot.take_updates(), SparseTrieUpdates::default());
+            for key in keys {
+                assert_eq!(
+                    snapshot.find_leaf(&Nibbles::unpack(key), None),
+                    Ok(LeafLookup::NonExistent)
+                );
+                assert!(matches!(
+                    original.find_leaf(&Nibbles::unpack(key), None),
+                    Err(LeafLookupError::BlindedNode { .. })
+                ));
+            }
+
+            apply_leaf_edits(&mut snapshot, &[(keys[0], &[9]), (keys[1], &[9])]);
+            assert_eq!(snapshot.root(epoch(1)), expected_root);
+            let mut updates = snapshot.take_updates();
+            for key in keys {
+                let parent = &updates.updated_nodes[&Nibbles::unpack(key).slice(..4)];
+                assert_eq!(parent.hash_mask.count_bits(), 1);
+                assert!(parent.hash_mask.is_bit_set(5));
+                assert_eq!(parent.tree_mask, parent.hash_mask);
+                assert_eq!(leaf_value(&snapshot, key), &[9]);
+                assert!(matches!(
+                    original.find_leaf(&Nibbles::unpack(key), None),
+                    Err(LeafLookupError::BlindedNode { .. })
+                ));
+            }
+            updates.updated_nodes.retain(|path, node| {
+                harness.storage_trie_updates().storage_nodes.get(path) != Some(node)
+            });
+            updates
+                .removed_nodes
+                .retain(|path| harness.storage_trie_updates().storage_nodes.contains_key(path));
+            assert_eq!(
+                updates,
+                SparseTrieUpdates {
+                    updated_nodes: expected_updates.storage_nodes.clone().into_iter().collect(),
+                    removed_nodes: expected_updates.removed_nodes.clone().into_iter().collect(),
+                }
+            );
+            assert_eq!(original.root(epoch(1)), harness.original_root());
+            assert_eq!(original.take_updates(), SparseTrieUpdates::default());
         }
     }
 }

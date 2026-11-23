@@ -5,9 +5,9 @@
 
 use alloy_primitives::{map::B256Map, B256, U256};
 use alloy_rlp::encode_fixed_size;
-use alloy_trie::EMPTY_ROOT_HASH;
+use alloy_trie::{nodes::TrieNode, EMPTY_ROOT_HASH};
 use reth_trie::test_utils::{storage_root_prehashed, TrieTestHarness};
-use reth_trie_common::{ExtensionNode, Nibbles, ProofV2Target, RlpNode, TrieNodeV2};
+use reth_trie_common::{ExtensionNode, Nibbles, ProofTrieNode, ProofV2Target, RlpNode};
 use reth_trie_sparse::{
     errors::SparseTrieErrorKind, ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafLookup,
     LeafLookupError, LeafUpdate, PersistentArenaParallelSparseTrie,
@@ -240,8 +240,8 @@ fn initialize<T: SparseTrie>(
     retain: bool,
     evidence: &mut Evidence,
 ) -> Result<(), DifferentialFailure> {
-    let root = harness.root_node();
-    succeeded(trie.set_root(root.node, root.masks, retain), "set-root")?;
+    let mut nodes = harness.root_nodes();
+    succeeded(trie.set_root(&mut nodes, retain), "set-root")?;
     evidence.hit("set_root");
     equal(harness.original_root(), oracle(harness.storage()), "oracle-agreement")?;
     Ok(())
@@ -628,8 +628,23 @@ fn exercise<T: SparseTrie + Clone>(
         harness.storage().keys().map(|key| ProofV2Target::new(*key)).collect::<Vec<_>>();
     let (all_nodes, _) = harness.proof_v2(&mut targets);
     for depth in [0, 1, 3, 4, 8, 32, 63, 64] {
-        let mut nodes =
-            all_nodes.iter().filter(|node| node.path.len() <= depth).cloned().collect::<Vec<_>>();
+        let mut nodes = Vec::new();
+        for node in all_nodes.iter().filter(|node| node.path.len() <= depth) {
+            nodes.push(node.clone());
+            // Extensions and their separate branch children form one revealable proof unit.
+            if let TrieNode::Extension(extension) = &node.node &&
+                node.path.len() + extension.key.len() > depth
+            {
+                let child_path = node.path.join(&extension.key);
+                nodes.push(
+                    all_nodes
+                        .iter()
+                        .find(|child| child.path == child_path)
+                        .expect("calculator proof includes extension branch child")
+                        .clone(),
+                );
+            }
+        }
         nodes.reverse();
         succeeded(trie.reveal_nodes(&mut nodes), "depth-reveal")?;
         evidence.hit("reveal_nodes");
@@ -932,7 +947,12 @@ fn root_and_fork_isolation<T: SparseTrie + Clone>(
         ExtensionNode::new(Nibbles::from_nibbles([1]), RlpNode::word_rlp(&harness.original_root()));
     let mut rejected = factory();
     evidence.hit("set_root");
-    match rejected.set_root(TrieNodeV2::Extension(extension.clone()), None, true) {
+    let mut nodes = [ProofTrieNode {
+        path: Nibbles::new(),
+        node: TrieNode::Extension(extension.clone()),
+        masks: None,
+    }];
+    match rejected.set_root(&mut nodes, true) {
         Err(error) => match error.into_kind() {
             SparseTrieErrorKind::Reveal { path, node } => {
                 equal(path, Nibbles::new(), "extension-error-path")?;

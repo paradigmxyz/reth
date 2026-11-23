@@ -140,7 +140,7 @@ fn node_tree_mask_bit(arena: &NodeArena, idx: Index) -> bool {
 
 /// Sorts and compacts proof batches, which may combine overlapping calculator outputs.
 /// All records for a path describe the same node; keep any supplied persistence masks.
-fn sort_proof_nodes(nodes: &mut [ProofTrieNode]) -> &mut [ProofTrieNode] {
+pub(super) fn sort_proof_nodes(nodes: &mut [ProofTrieNode]) -> &mut [ProofTrieNode] {
     nodes.sort_unstable_by_key(|node| node.path);
     let mut len = 0;
     for index in 0..nodes.len() {
@@ -160,7 +160,7 @@ fn sort_proof_nodes(nodes: &mut [ProofTrieNode]) -> &mut [ProofTrieNode] {
 
 /// Proof calculator v2 emits each retained extension together with its branch child.
 /// Reject incomplete pairs before taking subtries or changing the arena.
-fn validate_extension_child(
+pub(super) fn validate_extension_child(
     node: &ProofTrieNode,
     child: Option<&ProofTrieNode>,
 ) -> SparseTrieResult<()> {
@@ -181,7 +181,10 @@ fn validate_extension_child(
 
 /// Takes the adjacent branch of a validated extension pair. Sorted calculator proofs have no
 /// intermediate node between an extension and its branch.
-fn take_extension_child(nodes: &mut [ProofTrieNode], index: usize) -> Option<ProofTrieNode> {
+pub(super) fn take_extension_child(
+    nodes: &mut [ProofTrieNode],
+    index: usize,
+) -> Option<ProofTrieNode> {
     matches!(nodes[index].node, TrieNode::Extension(_))
         .then(|| mem::replace(&mut nodes[index + 1], ProofTrieNode::empty()))
 }

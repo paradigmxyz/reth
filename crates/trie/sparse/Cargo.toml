@@ -66,6 +66,7 @@ std = [
     "reth-primitives-traits/rayon",
     "reth-trie-common/std",
     "tracing/std",
+    "serde/std",
     "strum/std",
     "reth-tracing/std",
     "either/std",
