@@ -12,4 +12,6 @@ use reth_primitives_traits as _;
 
 pub mod sync;
 
+/// Marks a test that runs in the selected runtime. Requires the `std` feature.
+#[cfg(feature = "std")]
 pub use reth_concurrency_macros::test;

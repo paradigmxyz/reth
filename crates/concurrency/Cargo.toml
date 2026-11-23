@@ -12,10 +12,10 @@ description = "Concurrency primitives for native execution and fuzz simulation"
 workspace = true
 
 [dependencies]
-reth-concurrency-macros.workspace = true
 reth-primitives-traits.workspace = true
 
 # std
+reth-concurrency-macros = { workspace = true, optional = true }
 crossbeam-channel = { workspace = true, optional = true }
 rayon = { workspace = true, optional = true }
 parking_lot = { workspace = true, optional = true }
@@ -28,7 +28,14 @@ shuttle-parking_lot = { workspace = true, optional = true, features = ["send_gua
 
 [features]
 default = ["std"]
-std = ["reth-primitives-traits/std", "dep:crossbeam-channel", "dep:rayon", "dep:parking_lot", "either?/std"]
+std = [
+    "dep:reth-concurrency-macros",
+    "reth-primitives-traits/std",
+    "dep:crossbeam-channel",
+    "dep:rayon",
+    "dep:parking_lot",
+    "either?/std",
+]
 fuzz = ["std", "dep:either", "dep:shuttle", "shuttle-sync/shuttle", "shuttle-parking_lot/shuttle"]
 test-utils = ["reth-primitives-traits/test-utils"]
 
