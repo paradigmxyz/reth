@@ -2054,7 +2054,7 @@ mod tests {
     /// `StorageProofCalculator` to be reused after a mid-computation error left stale state.
     /// Before the fix, stale data in `branch_stack`, `child_stack`, and `branch_path`
     /// could cause a `usize` underflow panic in `pop_branch`.
-    #[test]
+    #[reth_concurrency::test]
     fn test_proof_calculator_reuse_after_error() {
         reth_tracing::init_test_tracing();
 
@@ -2112,7 +2112,7 @@ mod tests {
         pretty_assertions::assert_eq!(fresh_result, result);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_root_node_reuse_with_overlay() {
         let storage = BTreeMap::from([
             (B256::right_padding_from(&[0x10]), U256::ONE),
@@ -2147,7 +2147,7 @@ mod tests {
         pretty_assertions::assert_eq!(first_root, second_root);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_partial_storage_proof_after_root_calculation() {
         let slot_a = B256::right_padding_from(&[0xae, 0xd4, 0x00]);
         let slot_b = B256::right_padding_from(&[0xae, 0xd4, 0x10]);
@@ -2249,9 +2249,12 @@ mod tests {
                     })
             ) {
                 reth_tracing::init_test_tracing();
-                let harness = ProofTestHarness::new(storage);
+                reth_concurrency::sync::Runtime::new().run(move || {
+                    let harness = ProofTestHarness::new(storage);
 
-                harness.assert_proof(targets).expect("Proof generation failed");
+                    harness.assert_proof(targets).expect("Proof generation failed");
+                    Ok::<(), proptest::test_runner::TestCaseError>(())
+                })?;
             }
 
             #[test]
@@ -2261,52 +2264,55 @@ mod tests {
                 retain_unchanged in any::<bool>(),
                 target_indices in prop::collection::vec((0usize..100, 0usize..9), 0..10),
             ) {
-                let before = before.into_iter()
-                    .map(|(key, value)| (key, U256::from(value)))
-                    .collect::<BTreeMap<_, _>>();
-                let mut after = if retain_unchanged { before.clone() } else { BTreeMap::new() };
-                for (key, value) in changes {
-                    if value == 0 {
-                        after.remove(&key);
-                    } else {
-                        after.insert(key, U256::from(value));
+                reth_concurrency::sync::Runtime::new().run(move || {
+                    let before = before.into_iter()
+                        .map(|(key, value)| (key, U256::from(value)))
+                        .collect::<BTreeMap<_, _>>();
+                    let mut after = if retain_unchanged { before.clone() } else { BTreeMap::new() };
+                    for (key, value) in changes {
+                        if value == 0 {
+                            after.remove(&key);
+                        } else {
+                            after.insert(key, U256::from(value));
+                        }
                     }
-                }
-                let prefix_set = PrefixSetMut::from(
-                    before.keys().chain(after.keys())
-                        .filter(|key| before.get(*key) != after.get(*key))
-                        .map(Nibbles::unpack),
-                ).freeze();
-                let expected_root = crate::test_utils::storage_root_prehashed(
-                    after.iter().map(|(key, value)| (*key, *value)),
-                );
-                let mut targets = vec![ProofV2Target::new(B256::ZERO)];
-                let keys = before.keys().chain(after.keys()).copied().collect::<Vec<_>>();
-                if !keys.is_empty() {
-                    for (index, len) in target_indices {
-                        targets.push(ProofV2Target::new(keys[index % keys.len()])
-                            .with_parent(ProofV2TargetParent::new(len)));
+                    let prefix_set = PrefixSetMut::from(
+                        before.keys().chain(after.keys())
+                            .filter(|key| before.get(*key) != after.get(*key))
+                            .map(Nibbles::unpack),
+                    ).freeze();
+                    let expected_root = crate::test_utils::storage_root_prehashed(
+                        after.iter().map(|(key, value)| (*key, *value)),
+                    );
+                    let mut targets = vec![ProofV2Target::new(B256::ZERO)];
+                    let keys = before.keys().chain(after.keys()).copied().collect::<Vec<_>>();
+                    if !keys.is_empty() {
+                        for (index, len) in target_indices {
+                            targets.push(ProofV2Target::new(keys[index % keys.len()])
+                                .with_parent(ProofV2TargetParent::new(len)));
+                        }
                     }
-                }
-                let harness = TrieTestHarness::new(before);
-                let hashed_factory = MockHashedCursorFactory::new(
-                    BTreeMap::new(),
-                    std::iter::once((harness.hashed_address(), after)).collect(),
-                );
-                let trie_cursor = harness.trie_cursor_factory()
-                    .storage_trie_cursor(harness.hashed_address()).unwrap();
-                let hashed_cursor = hashed_factory
-                    .hashed_storage_cursor(harness.hashed_address()).unwrap();
-                let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
-                    .with_prefix_set(prefix_set);
-                let proof = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
+                    let harness = TrieTestHarness::new(before);
+                    let hashed_factory = MockHashedCursorFactory::new(
+                        BTreeMap::new(),
+                        std::iter::once((harness.hashed_address(), after)).collect(),
+                    );
+                    let trie_cursor = harness.trie_cursor_factory()
+                        .storage_trie_cursor(harness.hashed_address()).unwrap();
+                    let hashed_cursor = hashed_factory
+                        .hashed_storage_cursor(harness.hashed_address()).unwrap();
+                    let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
+                        .with_prefix_set(prefix_set);
+                    let proof = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
 
-                prop_assert_eq!(calculator.compute_root_hash(&proof).unwrap(), Some(expected_root));
+                    prop_assert_eq!(calculator.compute_root_hash(&proof).unwrap(), Some(expected_root));
+                    Ok::<(), proptest::test_runner::TestCaseError>(())
+                })?;
             }
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_exact_subtrie_targets_with_root_target() {
         reth_tracing::init_test_tracing();
 
@@ -2327,7 +2333,7 @@ mod tests {
         harness.assert_proof(targets).expect("Proof generation failed");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_rebases_singleton_subtrie_root_below_known_parent() {
         let slot = B256::right_padding_from(&[0xae, 0xd4, 0x09]);
         let slot_nibbles = Nibbles::unpack(slot);
@@ -2345,7 +2351,7 @@ mod tests {
         assert_eq!(leaf.key, slot_nibbles.slice(4..));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_rebases_singleton_leaf_at_max_parent_depth() {
         let slot = B256::repeat_byte(0xae);
         let slot_nibbles = Nibbles::unpack(slot);
@@ -2363,7 +2369,7 @@ mod tests {
         assert!(leaf.key.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_root_and_root_parent_targets_retain_both_singleton_representations() {
         let slot = B256::right_padding_from(&[0x20]);
         let slot_nibbles = Nibbles::unpack(slot);
@@ -2389,7 +2395,7 @@ mod tests {
         assert_eq!(child_leaf.key, slot_nibbles.slice(1..));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_exhausted_cursor_resets_at_equal_target_boundary() {
         let first = B256::ZERO;
         let last = B256::with_last_byte(1);
@@ -2412,7 +2418,7 @@ mod tests {
         assert!(leaf.key.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_rebases_compressed_branch_subtrie_root() {
         let slot_a = B256::right_padding_from(&[0xae, 0xd4, 0x00]);
         let slot_b = B256::right_padding_from(&[0xae, 0xd4, 0x10]);
@@ -2432,7 +2438,7 @@ mod tests {
         };
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_known_parent_retains_child() {
         let slot_a = B256::right_padding_from(&[0xae, 0xd2]);
         let slot_b = B256::right_padding_from(&[0xae, 0xd4]);
@@ -2448,7 +2454,7 @@ mod tests {
         assert!(proof.iter().any(|node| node.path == slot_nibbles.slice(0..4)));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_rebased_root_matches_direct_child_not_full_short_key() {
         let stored_slot = B256::right_padding_from(&[0xae, 0xd4, 0x09]);
         let same_child_target = B256::right_padding_from(&[0xae, 0xd4, 0xff]);
@@ -2466,7 +2472,7 @@ mod tests {
         assert!(proof.is_empty(), "a different direct child is unrelated to the target");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_known_parent_separate_child_ranges() {
         let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
         let stored_slot_b = B256::right_padding_from(&[0xeb, 0x53]);
@@ -2490,7 +2496,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_known_parent_does_not_use_stale_parent_mask() {
         let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
         let stored_slot = B256::right_padding_from(&[0xeb, 0x53]);
@@ -2530,7 +2536,7 @@ mod tests {
         assert_eq!(leaf.key, stored_slot_nibbles.slice(2..));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_empty_storage_respects_parent_context() {
         let harness = ProofTestHarness::new(BTreeMap::new());
         let slot = B256::ZERO;
@@ -2548,11 +2554,12 @@ mod tests {
         assert_eq!(root, Some(EMPTY_ROOT_HASH));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_big_trie() {
         use rand::prelude::*;
 
         reth_tracing::init_test_tracing();
+
         let mut rng = rand::rngs::SmallRng::seed_from_u64(1);
 
         let mut rand_b256 = || {
@@ -2584,7 +2591,7 @@ mod tests {
             .expect("Proof generation failed");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_node_with_masked_empty_child() {
         reth_tracing::init_test_tracing();
 
@@ -2640,7 +2647,7 @@ mod tests {
     /// the hashed cursor still has keys (at `0x70...`), so `proof_subtrie` does not break and
     /// re-enters `next_uncached_key_range` with `uncalculated_lower_bound = Some(0x7)`.
     /// Since `0x7` is past `0x6`, all remaining children are skipped and the branch is popped.
-    #[test]
+    #[reth_concurrency::test]
     fn test_node_with_masked_empty_child_lower_bound_past_branch() {
         reth_tracing::init_test_tracing();
 
@@ -2694,7 +2701,7 @@ mod tests {
     /// The prefix set contains the new key. Without prefix set support, the calculator would
     /// skip nibble 3 entirely and produce a stale root hash. With prefix set support, nibble 3
     /// is discovered and its subtrie is recalculated from leaves.
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_adds_child_nibbles() {
         reth_tracing::init_test_tracing();
 
@@ -2745,7 +2752,7 @@ mod tests {
     /// dirty. Without prefix set support, the calculator would use the stale cached hash for
     /// nibble 5 and produce a wrong root. With prefix set support, the cached hash is skipped
     /// and the subtrie is recalculated from the updated leaf data.
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_invalidates_cached_hash() {
         reth_tracing::init_test_tracing();
 
@@ -2797,7 +2804,7 @@ mod tests {
         B256::from_slice(&alloy_primitives::hex::decode(s).expect("valid hex string"))
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_root_proof_processes_sibling_after_cached_descendant() {
         reth_tracing::init_test_tracing();
 
@@ -2827,7 +2834,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_root_proof_processes_trailing_dirty_sibling() {
         reth_tracing::init_test_tracing();
 
@@ -2857,7 +2864,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_preserves_cached_siblings() {
         let storage = (0..4096u16)
             .map(|key| (B256::right_padding_from(&key.to_be_bytes()), U256::from(1)))
@@ -2893,7 +2900,7 @@ mod tests {
             .any(|visit| visit.visited_key == Some(clean_key)));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_finishes_branch_before_returning_to_ancestor() {
         let storage =
             [[0x10, 0x00, 0x00], [0x12, 0x10, 0x00], [0x12, 0x10, 0x20], [0x12, 0x11, 0x00]]
@@ -3000,17 +3007,17 @@ mod tests {
         pretty_assertions::assert_eq!(expected_root, root);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_branch_collapse_removed_child_before_remaining() {
         assert_branch_collapse(1, 0);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_branch_collapse_removed_child_after_remaining() {
         assert_branch_collapse(4, 9);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_root_proof_preserves_clean_sibling_after_cached_branch_collapse() {
         reth_tracing::init_test_tracing();
 
@@ -3050,7 +3057,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_range_skips_covered_cached_branch() {
         reth_tracing::init_test_tracing();
 
@@ -3079,7 +3086,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_cached_branch_extension_skips_diverging_target() {
         reth_tracing::init_test_tracing();
 
@@ -3190,7 +3197,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_cached_branch_extension_skips_diverging_target_before() {
         reth_tracing::init_test_tracing();
 
@@ -3301,7 +3308,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_skipped_parent_branch_with_unskipped_child() {
         reth_tracing::init_test_tracing();
 
@@ -3369,7 +3376,7 @@ mod tests {
         pretty_assertions::assert_eq!(expected_root, got_root);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_blinded_local_root_returns_trie_inconsistency() {
         let key = B256::right_padding_from(&[0x63, 0xaa]);
         let value = U256::ONE;
@@ -3395,7 +3402,7 @@ mod tests {
         ));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_cached_hash_with_deleted_leaf() {
         reth_tracing::init_test_tracing();
 

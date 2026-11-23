@@ -24,25 +24,38 @@
 // IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use std::{fmt, future::Future, net::SocketAddr, pin::Pin, sync::Arc, task::Poll, time::Duration};
+use std::{
+    borrow::Cow,
+    fmt,
+    future::Future,
+    net::SocketAddr,
+    pin::Pin,
+    sync::{Arc, OnceLock},
+    task::Poll,
+    time::Duration,
+};
 
 use crate::{
-    future::{ConnectionGuard, ServerHandle, StopHandle},
+    future::{ConnectionGuard, ConnectionPermit, ServerHandle, StopHandle},
     middleware::rpc::{catch_call_panic, RpcService},
-    transport::{http, ws, ws::BackgroundTaskParams},
+    transport::{
+        http, ws,
+        ws::{is_upgrade_request, upgrade_response, BackgroundTaskParams},
+    },
     utils::{
         accept_error_backoff, deserialize_notification, no_request_within, NotifyOnRequest,
-        PermitBody, WriteTimeoutIo, DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_WRITE_TIMEOUT,
+        PermitBody, WriteTimeoutIo, DEFAULT_FIRST_REQUEST_TIMEOUT, DEFAULT_PING_INTERVAL,
+        DEFAULT_WRITE_TIMEOUT,
     },
     HttpBody, HttpRequest, HttpResponse, LOG_TARGET,
 };
 
-use futures_util::{
-    future::{Either, FutureExt},
-    io::{BufReader, BufWriter},
+use futures_util::future::{Either, FutureExt};
+use hyper::body::{Bytes, Incoming};
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo, TokioTimer},
+    service::TowerToHyperService,
 };
-use hyper::body::Bytes;
-use hyper_util::rt::{TokioExecutor, TokioIo};
 use jsonrpsee_core::{
     id_providers::RandomIntegerIdProvider,
     middleware::{Batch, BatchEntry, BatchEntryErr, RpcServiceBuilder, RpcServiceT},
@@ -58,22 +71,28 @@ use jsonrpsee_types::{
         reject_too_big_batch_request, ErrorCode, BATCHES_NOT_SUPPORTED_CODE,
         BATCHES_NOT_SUPPORTED_MSG,
     },
-    ErrorObject, Id, Request,
+    ErrorObject, Id, Notification, Request, TwoPointZero,
 };
-use serde::de::{DeserializeSeed, Deserializer, Error as _, SeqAccess, Visitor};
-use soketto::handshake::http::is_upgrade_request;
+use serde::{
+    de::{
+        value::MapAccessDeserializer, DeserializeSeed, Deserializer, Error as _, IgnoredAny,
+        MapAccess, SeqAccess, Visitor,
+    },
+    Deserialize,
+};
 use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
-    sync::{mpsc, watch, Notify, OwnedSemaphorePermit},
+    sync::{mpsc, watch, Notify},
 };
-use tokio_util::compat::TokioAsyncReadCompatExt;
-use tower::{layer::util::Identity, Layer, Service};
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tower::{layer::util::Identity, Layer, Service, ServiceExt};
 use tracing::{instrument, Instrument};
 
 /// Default maximum connections allowed.
 const MAX_CONNECTIONS: u32 = 100;
 
-type Notif<'a> = Option<std::borrow::Cow<'a, JsonRawValue>>;
+/// The shortest batch entry that is a valid request: a notification with an empty method name.
+const SHORTEST_BATCH_REQUEST: &str = r#"{"jsonrpc":"2.0","method":""}"#;
 
 /// JSON RPC server.
 pub struct Server<HttpMiddleware = Identity, RpcMiddleware = Identity> {
@@ -207,11 +226,15 @@ pub struct ServerConfig {
     pub(crate) message_buffer_capacity: u32,
     /// ID provider.
     pub(crate) id_provider: Arc<dyn IdProvider>,
-    /// Timeout for receiving the first request of a connection.
+    /// Timeout for receiving the first request of a connection, and the next request head of an
+    /// HTTP/1 keep-alive connection.
     pub(crate) first_request_timeout: Option<Duration>,
     /// Timeout for writing a single message to a WebSocket connection and for a stalled HTTP
     /// response write.
     pub(crate) write_timeout: Duration,
+    /// Interval at which WebSocket connections are pinged. A connection that completes neither a
+    /// message nor a pong within twice this interval is closed.
+    pub(crate) ping_interval: Duration,
 }
 
 /// The builder to configure and create a JSON-RPC server configuration.
@@ -226,7 +249,11 @@ pub enum BatchRequestConfig {
     /// Each batch request is limited to `len` and any batch request bigger than `len` will not be
     /// processed.
     Limit(u32),
-    /// The batch request is unlimited.
+    /// The batch request is limited only by the maximum request size.
+    ///
+    /// A batch may hold as many entries as the shortest valid requests that fit in that size, so
+    /// no batch of valid requests is rejected, but entries that aren't requests (`0` takes two
+    /// bytes) can't make a batch any longer.
     Unlimited,
 }
 
@@ -239,7 +266,7 @@ pub struct ConnectionState {
     /// Connection ID
     pub(crate) conn_id: usize,
     /// Connection guard.
-    pub(crate) _conn_permit: Arc<OwnedSemaphorePermit>,
+    pub(crate) _conn_permit: Arc<ConnectionPermit>,
 }
 
 impl ConnectionState {
@@ -247,7 +274,7 @@ impl ConnectionState {
     pub fn new(
         stop_handle: StopHandle,
         conn_id: usize,
-        conn_permit: OwnedSemaphorePermit,
+        conn_permit: ConnectionPermit,
     ) -> ConnectionState {
         Self { stop_handle, conn_id, _conn_permit: Arc::new(conn_permit) }
     }
@@ -281,6 +308,7 @@ impl Default for ServerConfigBuilder {
             id_provider: Arc::new(RandomIntegerIdProvider),
             first_request_timeout: Some(DEFAULT_FIRST_REQUEST_TIMEOUT),
             write_timeout: DEFAULT_WRITE_TIMEOUT,
+            ping_interval: DEFAULT_PING_INTERVAL,
         })
     }
 }
@@ -406,7 +434,8 @@ impl ServerConfigBuilder {
     }
 
     /// Configure how long a connection may take to send its first request, e.g. the WebSocket
-    /// upgrade request, before it is closed. `None` disables the timeout.
+    /// upgrade request, before it is closed. An HTTP/1 keep-alive connection is closed as well
+    /// when it takes longer to send the head of its next request. `None` disables the timeout.
     ///
     /// Default is 30 seconds.
     pub fn set_first_request_timeout(mut self, first_request_timeout: Option<Duration>) -> Self {
@@ -620,8 +649,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 }
 
 /// Data required by the server to handle requests.
-#[derive(Debug, Clone)]
-struct ServiceData {
+struct ServiceData<S> {
     /// Registered server methods.
     methods: Methods,
     /// Stop handle.
@@ -632,16 +660,36 @@ struct ServiceData {
     conn_guard: ConnectionGuard,
     /// ServerConfig
     server_cfg: ServerConfig,
+    /// RPC service for the HTTP requests of the connection, built on the first one.
+    http_rpc_service: OnceLock<Arc<S>>,
 }
 
 /// jsonrpsee tower service without HTTP specific middleware.
 ///
+/// hyper clones the service for every request, so the connection's state is shared behind an
+/// [`Arc`].
+///
 /// # Note
 /// This is similar to [`hyper::service::service_fn`].
-#[derive(Debug, Clone)]
-pub struct TowerServiceNoHttp<L> {
-    inner: ServiceData,
+pub struct TowerServiceNoHttp<L: Layer<RpcService>> {
+    inner: Arc<ServiceData<L::Service>>,
     rpc_middleware: RpcServiceBuilder<L>,
+}
+
+impl<L: Layer<RpcService> + Clone> Clone for TowerServiceNoHttp<L> {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone(), rpc_middleware: self.rpc_middleware.clone() }
+    }
+}
+
+// Not derived, a derive would require the RPC service of the middleware to be `Debug` as well.
+impl<L: Layer<RpcService> + fmt::Debug> fmt::Debug for TowerServiceNoHttp<L> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TowerServiceNoHttp")
+            .field("conn_id", &self.inner.conn_id)
+            .field("rpc_middleware", &self.rpc_middleware)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<Body, RpcMiddleware> Service<HttpRequest<Body>> for TowerServiceNoHttp<RpcMiddleware>
@@ -668,16 +716,19 @@ where
         let request = request.map(HttpBody::new);
 
         let conn_guard = &self.inner.conn_guard;
-        let stop_handle = self.inner.stop_handle.clone();
         let conn_id = self.inner.conn_id;
 
-        tracing::trace!(target: LOG_TARGET, "{:?}", request);
+        tracing::trace!(
+            target: LOG_TARGET,
+            "{} {} {:?}",
+            request.method(),
+            request.uri(),
+            request.version()
+        );
 
         let Some(conn_permit) = conn_guard.try_acquire() else {
             return async move { Ok(http::response::too_many_requests()) }.boxed();
         };
-
-        let conn = ConnectionState::new(stop_handle.clone(), conn_id, conn_permit);
 
         let max_conns = conn_guard.max_connections();
         let curr_conns = max_conns - conn_guard.available_connections();
@@ -686,11 +737,11 @@ where
         let is_upgrade_request = is_upgrade_request(&request);
 
         if self.inner.server_cfg.enable_ws && is_upgrade_request {
-            let this = self.inner.clone();
+            let this = &self.inner;
+            let conn = ConnectionState::new(this.stop_handle.clone(), conn_id, conn_permit);
+            let server_cfg = this.server_cfg.clone();
 
-            let mut server = soketto::handshake::http::Server::new();
-
-            let response = match server.receive_request(&request) {
+            let response = match upgrade_response(&request) {
                 Ok(response) => {
                     let (tx, rx) = mpsc::channel(this.server_cfg.message_buffer_capacity as usize);
                     let sink =
@@ -722,15 +773,22 @@ where
                                 }
                             };
 
-                            let io = TokioIo::new(upgraded);
-
-                            let stream = BufReader::new(BufWriter::new(io.compat()));
-                            let mut ws_builder = server.into_builder(stream);
-                            ws_builder.set_max_message_size(this.server_cfg.max_request_body_size as usize);
-                            let (sender, receiver) = ws_builder.finish();
+                            let max_request_size = server_cfg.max_request_body_size as usize;
+                            // `tungstenite` reads a frame whole into its read buffer and never
+                            // shrinks it, so after a frame near the limit the connection keeps
+                            // that much allocated until it closes. An unfinished fragmented
+                            // message takes about twice its size: the collected fragments and the
+                            // read buffer that grew for them.
+                            // Frames that a client didn't mask have always been read.
+                            let ws_config = WebSocketConfig::default()
+                                .max_message_size(Some(max_request_size))
+                                .max_frame_size(Some(max_request_size))
+                                .accept_unmasked_frames(true);
+                            let (sender, receiver) =
+                                ws::split(TokioIo::new(upgraded), ws_config).await;
 
                             let params = BackgroundTaskParams {
-                                server_cfg: this.server_cfg,
+                                server_cfg,
                                 conn,
                                 ws_sender: sender,
                                 ws_receiver: receiver,
@@ -746,11 +804,15 @@ where
                         .in_current_span(),
                     );
 
-                    response.map(|()| HttpBody::empty())
+                    response
                 }
                 Err(e) => {
                     tracing::debug!(target: LOG_TARGET, "Could not upgrade connection: {}", e);
-                    HttpResponse::new(HttpBody::from(format!("Could not upgrade connection: {e}")))
+                    let mut response = HttpResponse::new(HttpBody::from(format!(
+                        "Could not upgrade connection: {e}"
+                    )));
+                    *response.status_mut() = hyper::StatusCode::BAD_REQUEST;
+                    response
                 }
             };
 
@@ -759,23 +821,27 @@ where
             let this = &self.inner;
             let max_response_size = this.server_cfg.max_response_body_size;
             let max_request_size = this.server_cfg.max_request_body_size;
-            let methods = this.methods.clone();
             let batch_config = this.server_cfg.batch_requests_config;
 
-            let rpc_service = self.rpc_middleware.service(RpcService::without_subscriptions(
-                methods,
-                max_response_size as usize,
-                this.conn_id.into(),
-            ));
+            let rpc_service = this
+                .http_rpc_service
+                .get_or_init(|| {
+                    Arc::new(self.rpc_middleware.service(RpcService::without_subscriptions(
+                        this.methods.clone(),
+                        max_response_size as usize,
+                        this.conn_id.into(),
+                    )))
+                })
+                .clone();
 
             Box::pin(async move {
                 let rp =
-                    http::call_with_service(request, batch_config, max_request_size, rpc_service)
+                    http::call_with_service(request, batch_config, max_request_size, &*rpc_service)
                         .await;
                 // NOTE: The `conn guard` must be held until the response body is written (or
                 // dropped) to respect the `max_connections` limit, because hyper writes the body
                 // after this future completes.
-                Ok(rp.map(|body| HttpBody::new(PermitBody::new(body, conn))))
+                Ok(rp.map(|body| HttpBody::new(PermitBody::new(body, conn_permit))))
             })
         } else {
             // NOTE: the `conn guard` is dropped when this function which is fine
@@ -798,10 +864,11 @@ struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
     methods: Methods,
 }
 
-#[instrument(name = "connection", skip_all, fields(remote_addr = %params.remote_addr, conn_id = %params.conn_id), level = "INFO")]
+#[instrument(name = "connection", target = LOG_TARGET, skip_all, fields(remote_addr = %params.remote_addr, conn_id = %params.conn_id), level = "INFO")]
 fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
     params: ProcessConnection<HttpMiddleware, RpcMiddleware>,
 ) where
+    RpcMiddleware: Layer<RpcService>,
     HttpMiddleware: Layer<TowerServiceNoHttp<RpcMiddleware>> + Send + 'static,
     <HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service: Service<HttpRequest, Response = HttpResponse<Body>, Error = BoxError>
         + Clone
@@ -835,27 +902,33 @@ fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
     let write_timeout = server_cfg.write_timeout;
 
     let tower_service = TowerServiceNoHttp {
-        inner: ServiceData {
+        inner: Arc::new(ServiceData {
             server_cfg,
             methods,
             stop_handle: stop_handle.clone(),
             conn_id,
             conn_guard: conn_guard.clone(),
-        },
+            http_rpc_service: OnceLock::new(),
+        }),
         rpc_middleware,
     };
 
     let service = http_middleware.service(tower_service);
 
-    tokio::spawn(async move {
+    let serve = async move {
         let request_received = Arc::new(Notify::new());
         // this requires Clone.
         let service = NotifyOnRequest::new(
-            crate::utils::TowerToHyperService::new(service),
+            TowerToHyperService::new(
+                service.map_request(|request: HttpRequest<Incoming>| request.map(HttpBody::new)),
+            ),
             request_received.clone(),
         );
         let io = TokioIo::new(WriteTimeoutIo::new(socket, write_timeout));
-        let builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+        let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+        // Also bounds how long an idle HTTP/1 keep-alive connection waits for its next request,
+        // which holds the socket without a connection permit.
+        builder.http1().timer(TokioTimer::new()).header_read_timeout(first_request_timeout);
         let conn = builder.serve_connection_with_upgrades(io, service);
         let stopped = stop_handle.shutdown();
 
@@ -876,7 +949,9 @@ fn process_connection<RpcMiddleware, HttpMiddleware, Body>(
             tracing::debug!(target: LOG_TARGET, "HTTP serve connection failed {:?}", e);
         }
         drop(drop_on_completion)
-    });
+    };
+    // `#[instrument]` only spans this function, so the connection span is carried into the task.
+    tokio::spawn(serve.in_current_span());
 }
 
 enum AcceptConnection<S> {
@@ -909,6 +984,9 @@ where
 /// Parses `body` as a single JSON-RPC message (`is_single`) or a batch, dispatches it to
 /// `rpc_service` and returns the serialized response.
 ///
+/// `max_request_size` is the request size limit the caller enforced on `body`, which bounds the
+/// entries of a [`BatchRequestConfig::Unlimited`] batch.
+///
 /// A panicking call is answered with an internal error. The caller sends the response only if it
 /// [is a method call](MethodResponse::is_method_call) or [a batch](MethodResponse::is_batch):
 /// notifications are not answered and subscription calls answer through the subscription sink.
@@ -916,6 +994,7 @@ pub async fn handle_rpc_call<S>(
     body: &[u8],
     is_single: bool,
     batch_config: BatchRequestConfig,
+    max_request_size: u32,
     rpc_service: &S,
 ) -> MethodResponse
 where
@@ -925,7 +1004,7 @@ where
     if is_single {
         if let Ok(req) = serde_json::from_slice::<Request<'_>>(body) {
             catch_call_panic(req.id(), || rpc_service.call(req)).await
-        } else if let Ok(notif) = deserialize_notification::<Notif>(body) {
+        } else if let Ok(notif) = deserialize_notification(body) {
             rpc_service.notification(notif).await
         } else {
             let (id, code) = prepare_error(body);
@@ -947,25 +1026,47 @@ where
                 return rp;
             }
             BatchRequestConfig::Limit(limit) => limit as usize,
-            BatchRequestConfig::Unlimited => usize::MAX,
+            // Every entry is decoded and kept until the batch runs, and an entry that isn't a
+            // request can take two bytes. A valid request takes at least the shortest one and a
+            // separating comma, so this never rejects a batch of valid requests.
+            BatchRequestConfig::Unlimited => {
+                max_request_size as usize / (SHORTEST_BATCH_REQUEST.len() + 1)
+            }
         };
 
-        let mut too_big = false;
-        let mut deserializer = serde_json::Deserializer::from_slice(body);
-        let batch = BatchSeed { max_len, too_big: &mut too_big }
-            .deserialize(&mut deserializer)
-            .and_then(|batch| deserializer.end().map(|()| batch));
-
-        match batch {
-            Ok(batch) => rpc_service.batch(Batch::from(batch)).await,
-            // The seed stops reading as soon as the batch exceeds the limit, which surfaces as a
-            // deserialization error.
-            Err(_) if too_big => {
-                MethodResponse::error(Id::Null, reject_too_big_batch_request(max_len))
-            }
-            Err(_) => MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::ParseError)),
+        match parse_batch(body, max_len) {
+            Ok(batch) => rpc_service.batch(batch).await,
+            Err(rp) => rp,
         }
     }
+}
+
+/// Reads `body` as a batch of at most `max_len` entries, or returns the response to a batch that
+/// can't be read.
+fn parse_batch(body: &[u8], max_len: usize) -> Result<Batch<'_>, MethodResponse> {
+    let mut entries = Vec::new();
+    let mut too_big = false;
+
+    // Most batches hold only valid requests, so the entries are decoded as they are read. Once an
+    // entry doesn't decode, the batch is read again from that entry on, classifying each raw entry
+    // to answer the invalid ones in place.
+    for raw in [false, true] {
+        let mut deserializer = serde_json::Deserializer::from_slice(body);
+        let read = BatchSeed { max_len, too_big: &mut too_big, entries: &mut entries, raw }
+            .deserialize(&mut deserializer)
+            .and_then(|()| deserializer.end());
+
+        if read.is_ok() {
+            return Ok(Batch::from(entries));
+        }
+        // The seed stops reading as soon as the batch exceeds the limit, which surfaces as a
+        // deserialization error.
+        if too_big {
+            return Err(MethodResponse::error(Id::Null, reject_too_big_batch_request(max_len)));
+        }
+    }
+
+    Err(MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::ParseError)))
 }
 
 /// Classifies a raw batch entry as a call, a notification or an invalid request.
@@ -978,7 +1079,7 @@ fn parse_batch_entry(call: &JsonRawValue) -> Result<BatchEntry<'_>, BatchEntryEr
 
     if let Ok(req) = serde_json::from_str(call.get()) {
         Ok(BatchEntry::Call(req))
-    } else if let Ok(notif) = deserialize_notification::<Notif>(call.get().as_bytes()) {
+    } else if let Ok(notif) = deserialize_notification(call.get().as_bytes()) {
         Ok(BatchEntry::Notification(notif))
     } else {
         let id = match serde_json::from_str::<jsonrpsee_types::InvalidRequest>(call.get()) {
@@ -990,44 +1091,119 @@ fn parse_batch_entry(call: &JsonRawValue) -> Result<BatchEntry<'_>, BatchEntryEr
     }
 }
 
-/// Reads a JSON array of batch entries, classifying each entry as it is read.
+/// A valid batch entry: a call if it has an `id`, a notification otherwise.
+///
+/// Unknown members use the raw pass, which validates UTF-8 even in ignored values.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ValidBatchEntry<'a> {
+    jsonrpc: TwoPointZero,
+    #[serde(borrow, default, deserialize_with = "deserialize_present_id")]
+    id: Option<Id<'a>>,
+    #[serde(borrow)]
+    method: Cow<'a, str>,
+    #[serde(borrow)]
+    params: Option<&'a JsonRawValue>,
+}
+
+impl<'a> From<ValidBatchEntry<'a>> for BatchEntry<'a> {
+    fn from(entry: ValidBatchEntry<'a>) -> Self {
+        let ValidBatchEntry { jsonrpc, id, method, params } = entry;
+        let params = params.map(Cow::Borrowed);
+        match id {
+            Some(id) => Self::Call(Request { jsonrpc, id, method, params }),
+            None => Self::Notification(Notification::new(method, params)),
+        }
+    }
+}
+
+/// Only runs for an `id` that is present, so `null` is an id and not a missing one.
+fn deserialize_present_id<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Id<'de>>, D::Error> {
+    Id::deserialize(deserializer).map(Some)
+}
+
+/// Decodes a [`ValidBatchEntry`] from a JSON object only, because its derived `Deserialize` impl
+/// also accepts a JSON array holding the fields in order.
+struct ValidBatchEntrySeed;
+
+impl<'de> DeserializeSeed<'de> for ValidBatchEntrySeed {
+    type Value = ValidBatchEntry<'de>;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_map(self)
+    }
+}
+
+impl<'de> Visitor<'de> for ValidBatchEntrySeed {
+    type Value = ValidBatchEntry<'de>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a JSON-RPC request object")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+        ValidBatchEntry::deserialize(MapAccessDeserializer::new(map))
+    }
+}
+
+/// Reads a JSON array of batch entries into `entries`.
+///
+/// Entries are decoded as they are read, or, if `raw`, classified from their raw JSON, after
+/// skipping the entries that `entries` already holds.
 ///
 /// Stops with an error as soon as an entry beyond `max_len` is read and sets `too_big`, so an
 /// oversized batch is never collected.
-struct BatchSeed<'a> {
+struct BatchSeed<'a, 'de> {
     max_len: usize,
     too_big: &'a mut bool,
+    entries: &'a mut Vec<Result<BatchEntry<'de>, BatchEntryErr<'de>>>,
+    raw: bool,
 }
 
-impl<'de> DeserializeSeed<'de> for BatchSeed<'_> {
-    type Value = Vec<Result<BatchEntry<'de>, BatchEntryErr<'de>>>;
+impl<'de> DeserializeSeed<'de> for BatchSeed<'_, 'de> {
+    type Value = ();
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
         deserializer.deserialize_seq(self)
     }
 }
 
-impl<'de> Visitor<'de> for BatchSeed<'_> {
-    type Value = Vec<Result<BatchEntry<'de>, BatchEntryErr<'de>>>;
+impl<'de> Visitor<'de> for BatchSeed<'_, 'de> {
+    type Value = ();
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("a batch of JSON-RPC requests")
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        // Not preallocated from the size hint, which the input controls.
-        let mut batch = Vec::new();
-
-        while let Some(call) = seq.next_element::<&'de JsonRawValue>()? {
-            if batch.len() == self.max_len {
-                *self.too_big = true;
-                return Err(A::Error::custom("batch too big"));
+        if self.raw {
+            for _ in 0..self.entries.len() {
+                seq.next_element::<IgnoredAny>()?;
             }
-
-            batch.push(parse_batch_entry(call));
         }
 
-        Ok(batch)
+        loop {
+            if self.entries.len() == self.max_len {
+                // Read the excess entry without decoding or allocating its fields.
+                if seq.next_element::<&'de JsonRawValue>()?.is_some() {
+                    *self.too_big = true;
+                    return Err(A::Error::custom("batch too big"));
+                }
+                return Ok(());
+            }
+
+            let entry = if self.raw {
+                seq.next_element::<&'de JsonRawValue>()?.map(parse_batch_entry)
+            } else {
+                seq.next_element_seed(ValidBatchEntrySeed)?.map(|entry| Ok(entry.into()))
+            };
+            let Some(entry) = entry else { return Ok(()) };
+
+            // Not preallocated from the size hint, which the input controls.
+            self.entries.push(entry);
+        }
     }
 }
 
@@ -1035,6 +1211,22 @@ impl<'de> Visitor<'de> for BatchSeed<'_> {
 mod tests {
     use super::*;
     use futures_util::future;
+    use test_case::test_case;
+
+    const CALL: &str = r#"{"jsonrpc":"2.0","method":"m","params":[1],"id":1}"#;
+
+    const NOTIFICATION: &str = r#"{"jsonrpc":"2.0","method":"m"}"#;
+
+    /// Classifies every entry of `body` from its raw JSON.
+    fn classify_raw_batch(body: &str, max_len: usize) -> Option<String> {
+        let (mut entries, mut too_big) = (Vec::new(), false);
+        let mut deserializer = serde_json::Deserializer::from_str(body);
+        BatchSeed { max_len, too_big: &mut too_big, entries: &mut entries, raw: true }
+            .deserialize(&mut deserializer)
+            .and_then(|()| deserializer.end())
+            .ok()
+            .map(|()| format!("{entries:?}"))
+    }
 
     #[tokio::test]
     async fn try_accept_conn_observes_stop_before_a_waiting_connection() {
@@ -1048,5 +1240,102 @@ mod tests {
 
         let accepted = try_accept_conn(&listener, future::ready(())).await;
         assert!(matches!(accepted, AcceptConnection::Shutdown));
+    }
+
+    #[test_case(&[CALL, CALL], usize::MAX; "calls")]
+    #[test_case(&[CALL, NOTIFICATION, r#"{"jsonrpc":"2.0","method":"m","id":null}"#], usize::MAX; "call, notification and null id")]
+    #[test_case(&[r#"{"id":"a","params":null,"method":"\"m\"","x":1,"jsonrpc":"2.0"}"#], usize::MAX; "escaped method, null params and unknown member")]
+    #[test_case(&[CALL, r#"{"jsonrpc":"2.0","id":2}"#, NOTIFICATION, CALL], usize::MAX; "missing method between valid entries")]
+    #[test_case(&[r#"{"jsonrpc":"1.0","method":"m","id":3}"#, CALL], usize::MAX; "wrong version first")]
+    #[test_case(&[CALL, r#"{"jsonrpc":"2.0","method":"m","id":{}}"#], usize::MAX; "object id")]
+    #[test_case(&[CALL, r#"{"jsonrpc":"2.0","method":"m","id":1,"id":2}"#], usize::MAX; "duplicate id")]
+    #[test_case(&[CALL, r#"["2.0",2,"m",[]]"#, "7", CALL], usize::MAX; "array and number entries")]
+    #[test_case(&[CALL, r#"{"id":2}"#], 2; "invalid entry at the limit")]
+    #[test_case(&[CALL, r#"{"id":2}"#, CALL], 2; "valid entry past the limit")]
+    #[test_case(&[CALL, CALL, r#"{"id":2}"#], 2; "invalid entry past the limit")]
+    #[test_case(&[CALL, r#"{"jsonrpc""#], usize::MAX; "not json")]
+    fn batch_entries_decode_like_their_raw_json(entries: &[&str], max_len: usize) {
+        let body = format!("[{}]", entries.join(","));
+        let batch = parse_batch(body.as_bytes(), max_len)
+            .ok()
+            .map(|batch| format!("{:?}", batch.into_iter().collect::<Vec<_>>()));
+        assert_eq!(batch, classify_raw_batch(&body, max_len));
+    }
+
+    #[test]
+    fn batch_with_invalid_utf8_is_a_parse_error() {
+        // Unknown members must still be validated as UTF-8 by the raw pass.
+        let body = b"[{\"jsonrpc\":\"2.0\",\"method\":\"m\",\"id\":1,\"x\":\"\xff\"}]";
+        let rp = parse_batch(body, usize::MAX).unwrap_err();
+        assert_eq!(rp.as_error_code(), Some(ErrorCode::ParseError.code()));
+    }
+
+    #[test]
+    fn valid_batch_entries_are_calls_or_notifications() {
+        let body = br#"[{"jsonrpc":"2.0","method":"a","id":null},{"jsonrpc":"2.0","method":"b"}]"#;
+        let batch = parse_batch(body, usize::MAX).unwrap().into_iter().collect::<Vec<_>>();
+        assert!(matches!(
+            batch.as_slice(),
+            [Ok(BatchEntry::Call(call)), Ok(BatchEntry::Notification(notification))]
+                if call.id == Id::Null && call.method == "a" && notification.method == "b"
+        ));
+    }
+
+    #[test_case(&[CALL.as_bytes(), CALL.as_bytes(), b"\"\xff\""], 1, reject_too_big_batch_request(1); "invalid utf8 after excess call")]
+    #[test_case(&[br#"{"id":2}"#, CALL.as_bytes(), b"\"\xff\""], 1, reject_too_big_batch_request(1); "invalid utf8 after fallback exceeds limit")]
+    #[test_case(&[CALL.as_bytes(), b"\"\xff\""], 1, ErrorCode::ParseError.into(); "invalid utf8 in excess entry")]
+    #[test_case(&[b"{\"jsonrpc\":\"2.0\",\"method\":\"m\",\"x\":\"\xff\"}", CALL.as_bytes()], 1, ErrorCode::ParseError.into(); "invalid utf8 before excess entry")]
+    #[test_case(&[CALL.as_bytes(), br#"{"jsonrpc"#], 1, ErrorCode::ParseError.into(); "malformed excess entry")]
+    #[test_case(&[CALL.as_bytes(), b"7", b"\"\xff\""], 1, reject_too_big_batch_request(1); "invalid utf8 after excess scalar")]
+    #[test_case(&[CALL.as_bytes(), b"\"\xff\""], 0, reject_too_big_batch_request(0); "zero limit ignores tail")]
+    fn batch_limit_preserves_parse_errors(
+        entries: &[&[u8]],
+        max_len: usize,
+        expected: ErrorObject<'_>,
+    ) {
+        let body = [b"[".as_slice(), entries.join(b",".as_slice()).as_slice(), b"]"].concat();
+        assert_eq!(
+            parse_batch(&body, max_len).unwrap_err().into_json(),
+            MethodResponse::error(Id::Null, expected).into_json()
+        );
+    }
+
+    #[test_case(b"[]", 0; "empty batch")]
+    #[test_case(b"[{\"jsonrpc\":\"2.0\",\"method\":\"m\"}]", 1; "notification")]
+    fn batch_at_limit_is_accepted(body: &[u8], max_len: usize) {
+        assert_eq!(parse_batch(body, max_len).unwrap().len(), max_len);
+    }
+
+    #[tokio::test]
+    async fn unlimited_batch_holds_what_fits_as_valid_requests() {
+        const MAX_REQUEST_SIZE: u32 = 1_000;
+        let max_len = MAX_REQUEST_SIZE as usize / (SHORTEST_BATCH_REQUEST.len() + 1);
+        let batch = |entry: &str, len: usize| format!("[{}]", vec![entry; len].join(","));
+        let service =
+            &RpcService::without_subscriptions(Methods::new(), usize::MAX, ConnectionId::default());
+        let call = |body: String| async move {
+            handle_rpc_call(
+                body.as_bytes(),
+                false,
+                BatchRequestConfig::Unlimited,
+                MAX_REQUEST_SIZE,
+                service,
+            )
+            .await
+        };
+
+        // The longest batch of valid requests within the request size limit is accepted.
+        let longest = batch(SHORTEST_BATCH_REQUEST, max_len);
+        assert!(longest.len() <= MAX_REQUEST_SIZE as usize);
+        assert!(batch(SHORTEST_BATCH_REQUEST, max_len + 1).len() > MAX_REQUEST_SIZE as usize);
+        assert!(call(longest).await.as_error_code().is_none());
+
+        // Shorter entries that aren't requests can't make the batch longer.
+        let invalid = batch("0", max_len + 1);
+        assert!(invalid.len() <= MAX_REQUEST_SIZE as usize);
+        assert_eq!(
+            call(invalid).await.into_json(),
+            MethodResponse::error(Id::Null, reject_too_big_batch_request(max_len)).into_json()
+        );
     }
 }

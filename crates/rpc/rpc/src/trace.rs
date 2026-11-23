@@ -9,15 +9,13 @@ use alloy_rpc_types_eth::{
     BlockOverrides, Index,
 };
 use alloy_rpc_types_trace::{
-    filter::TraceFilter,
+    filter::{TraceFilter, TraceFilterBlockOption},
     opcode::{BlockOpcodeGas, TransactionOpcodeGas},
     parity::*,
     tracerequest::TraceCallRequest,
 };
 use evm2_inspectors::{
-    opcode::OpcodeGasInspector,
-    storage::StorageInspector,
-    tracing::{TracingInspector, TracingInspectorConfig},
+    opcode::OpcodeGasInspector, storage::StorageInspector, tracing::TracingInspectorConfig,
 };
 use futures::{FutureExt, StreamExt};
 use jsonrpsee::core::RpcResult;
@@ -103,12 +101,9 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, evm_env, tx_env| {
-                let (inspector, res) = this.eth_api().inspect(
-                    &mut *db,
-                    evm_env,
-                    &tx_env,
-                    TracingInspector::new(config),
-                )?;
+                let inspector = this.eth_api().tracing_inspector(config);
+                let (inspector, res) =
+                    this.eth_api().inspect(&mut *db, evm_env, &tx_env, inspector)?;
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_request.trace_types, &mut *db)
@@ -182,8 +177,9 @@ where
                     )?;
                     budget.admit(&mut tx_env)?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
+                    let inspector = eth_api.tracing_inspector(config);
                     let (inspector, res) = eth_api
-                        .inspect(&mut db, evm_env, &tx_env, TracingInspector::new(config))
+                        .inspect(&mut db, evm_env, &tx_env, inspector)
                         .map_err(|err| budget.map_call_err(err))?;
                     budget.charge(&res.result)?;
 
@@ -383,7 +379,21 @@ where
     ) -> Result<Vec<LocalizedTransactionTrace>, Eth::Error> {
         // We'll reuse the matcher across multiple blocks that are traced in parallel
         let matcher = Arc::new(filter.matcher());
-        let TraceFilter { from_block, to_block, mut after, count, .. } = filter;
+        let (from_block, to_block) = match filter
+            .block_option()
+            .map_err(|err| EthApiError::InvalidParams(err.to_string()))?
+        {
+            TraceFilterBlockOption::Range { from_block, to_block } => (from_block, to_block),
+            TraceFilterBlockOption::AtBlockHash(hash) => {
+                let number = self
+                    .provider()
+                    .block_number(hash)
+                    .map_err(Eth::Error::from_eth_err)?
+                    .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
+                (Some(number), Some(number))
+            }
+        };
+        let TraceFilter { mut after, count, .. } = filter;
 
         let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
         let start = from_block.unwrap_or(latest_block);
@@ -967,6 +977,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn vm_trace_halts_past_byte_limit() {
+        let provider = MockEthProvider::default();
+        let target = Address::with_last_byte(0x42);
+        // JUMPDEST PUSH1 0 JUMP: loops until out of gas, recording steps but no memory.
+        provider.add_account(
+            target,
+            ExtendedAccount::new(0, U256::ZERO).with_bytecode(bytes!("5b600056")),
+        );
+        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        let call = TransactionRequest::default().to(target).gas_limit(1_000_000);
+
+        for max_trace_bytes in [None, Some(1 << 16)] {
+            let eth_api = EthApiBuilder::new(
+                provider.clone(),
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(provider.chain_spec()),
+            )
+            .max_trace_bytes(max_trace_bytes)
+            .build();
+            let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
+            let result = api.trace_call(TraceCallRequest::new(call.clone()).with_vm_trace()).await;
+            match max_trace_bytes {
+                None => assert!(result.unwrap().vm_trace.unwrap().ops.len() > 100_000),
+                Some(_) => assert_eq!(
+                    result.unwrap_err().to_string(),
+                    "fatal error: trace recorded byte limit exceeded"
+                ),
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn trace_filter_defaults_to_latest() {
         let provider = MockEthProvider::default();
         for number in [1, 2] {
@@ -1204,8 +1248,10 @@ mod tests {
             },
             body: BlockBody::default(),
         };
+        let block = block.seal_slow();
+        let block_hash = block.hash();
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&block.seal_slow().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
         provider_rw.update_pipeline_stages(1, false).unwrap();
         provider_rw.commit().unwrap();
 
@@ -1229,6 +1275,31 @@ mod tests {
                 TraceFilter { from_block: Some(0), to_block: Some(to_block), ..Default::default() };
             assert_eq!(trace_order(&api.trace_filter(filter).await.unwrap()), expected);
         }
+        for (hash, expected) in [(genesis_hash, vec![]), (block_hash, vec![(1, None, true)])] {
+            let filter = TraceFilter::default().block_hash(hash);
+            assert_eq!(trace_order(&api.trace_filter(filter).await.unwrap()), expected);
+        }
+
+        let unknown_hash = B256::repeat_byte(0x22);
+        let err =
+            api.trace_filter(TraceFilter::default().block_hash(unknown_hash)).await.unwrap_err();
+        assert!(
+            matches!(err, EthApiError::HeaderNotFound(id) if id == unknown_hash.into()),
+            "{err:?}"
+        );
+
+        let err = api
+            .trace_filter(TraceFilter::default().block_hash(block_hash).from_block(1))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                EthApiError::InvalidParams(msg)
+                    if msg == "cannot specify both blockHash and fromBlock/toBlock, choose one or the other"
+            ),
+            "{err:?}"
+        );
     }
 
     fn localized_transaction_trace(

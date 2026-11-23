@@ -280,7 +280,7 @@ where
     }
 
     /// Runs the hashing task that drains updates from the channel and converts them to
-    /// `HashedPostState` in parallel.
+    /// `HashedPostState` in parallel, until it forwards the finish marker or the channel closes.
     fn run_hashing_task(
         updates: CrossbeamReceiver<StateRootMessage>,
         hashed_state_tx: CrossbeamSender<SparseTrieTaskMessage>,
@@ -292,6 +292,7 @@ where
         while let Ok(message) = updates.recv() {
             total_idle_time += idle_start.elapsed();
 
+            let finished = matches!(message, StateRootMessage::FinishedStateUpdates);
             let msg = match message {
                 StateRootMessage::PrefetchProofs(targets) => {
                     SparseTrieTaskMessage::PrefetchProofs(targets)
@@ -308,7 +309,10 @@ where
                     SparseTrieTaskMessage::HashedState(state)
                 }
             };
-            if hashed_state_tx.send(msg).is_err() {
+            // Only hints can follow the finish marker, and the task ignores them. Returning here
+            // frees the shared hashing thread for the next block's task while a hint sender, such
+            // as a prewarm task queued behind earlier blocks, is still alive.
+            if hashed_state_tx.send(msg).is_err() || finished {
                 break;
             }
 
@@ -1800,7 +1804,29 @@ mod tests {
         assert_eq!(account_rlp_buf, encoded);
     }
 
-    #[test]
+    #[reth_concurrency::test]
+    fn hashing_task_returns_after_finish_marker_while_hint_sender_is_alive() {
+        let runtime = Runtime::test();
+        let (task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
+        // A hint sender outliving execution, like a prewarm task queued behind earlier blocks.
+        let _hint_tx = updates_tx.clone();
+        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
+        drop(updates_tx);
+
+        // The next block's hashing task runs on the same thread, so it must not wait for the hint
+        // sender to drop.
+        let (next_task_tx, next_task_rx) = std::sync::mpsc::channel();
+        runtime.spawn_blocking_named("trie-hashing", move || next_task_tx.send(()).unwrap());
+        next_task_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("hashing thread is still held by the finished task");
+        assert!(matches!(task.updates.try_recv(), Ok(SparseTrieTaskMessage::FinishedStateUpdates)));
+
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[reth_concurrency::test]
     fn checked_out_storage_trie_holds_back_its_updates_until_it_returns() {
         let runtime = Runtime::test();
         let trie = SparseStateTrie::default()
@@ -1906,7 +1932,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     #[allow(clippy::clone_on_copy)]
     fn in_flight_storage_updates_keep_latest_values_and_deletions() {
         let runtime = Runtime::test();
@@ -2019,7 +2045,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn unrelated_storage_proofs_do_not_retry_blocked_leaves() {
         let runtime = Runtime::test();
         let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
@@ -2057,7 +2083,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn canceled_task_disconnects_checked_out_storage_jobs() {
         let runtime = Runtime::test();
         let trie = SparseStateTrie::default()
@@ -2083,7 +2109,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn storage_job_panics_are_resumed_on_the_task() {
         let runtime = Runtime::test();
         let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
@@ -2116,7 +2142,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn blind_storage_proof_errors_are_returned_to_the_task() {
         let runtime = Runtime::test();
         let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
@@ -2144,7 +2170,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn large_storage_batches_run_off_thread() {
         let runtime = Runtime::test();
         let trie = SparseStateTrie::default()
@@ -2194,7 +2220,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     #[allow(clippy::clone_on_copy)]
     fn run_waits_for_storage_tries_hashed_off_thread() {
         let runtime = Runtime::test();
@@ -2246,7 +2272,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn first_leaf_batch_starts_proofs_before_input_queue_drains() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
@@ -2327,7 +2353,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn run_returns_parent_root_without_revealing_blind_trie_when_no_state_updates() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
@@ -2379,7 +2405,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn stall_check_waits_for_in_flight_proofs_then_reports_pending_updates() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
@@ -2463,8 +2489,8 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
-    fn run_ignores_hints_queued_after_updates_finish() {
+    #[reth_concurrency::test]
+    fn run_completes_when_hints_follow_updates_finish() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
@@ -2502,13 +2528,16 @@ mod tests {
         );
 
         updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
-        updates_tx.send(StateRootMessage::PrefetchProofs(Default::default())).unwrap();
+        // The hashing task returns after the finish marker, so this send fails if it already
+        // dropped the receiver.
+        let _ = updates_tx.send(StateRootMessage::PrefetchProofs(Default::default()));
 
+        // The hashing task forwards the finish marker and never forwards the hint after it.
         let wait_start = std::time::Instant::now();
-        while task.updates.len() < 2 {
+        while task.updates.is_empty() {
             assert!(
                 wait_start.elapsed() < std::time::Duration::from_secs(1),
-                "hashing task did not queue the test messages"
+                "hashing task did not queue the finish marker"
             );
             std::thread::yield_now();
         }

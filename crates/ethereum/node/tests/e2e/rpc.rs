@@ -302,7 +302,8 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
         ),
     );
     subscribe.set_is_subscription();
-    let mut subscription = client.get_subscription::<ChainBlockTraceResult>(subscribe.await?).await;
+    let mut subscription =
+        client.get_subscription::<ChainBlockTraceResult>(subscribe.await?).await?;
 
     let traced = tokio::time::timeout(WAIT_TIMEOUT, subscription.recv()).await??;
     assert_eq!(traced.block, U256::from(2));
@@ -453,6 +454,7 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
             signature: Default::default(),
         },
         parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        apply_blacklist: true,
         registered_gas_limit: payload.block().gas_limit,
     };
 
@@ -520,6 +522,7 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
             signature: Default::default(),
         },
         parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        apply_blacklist: true,
         registered_gas_limit: payload.block().gas_limit,
     };
 
@@ -574,6 +577,7 @@ async fn test_flashbots_validate_v5() -> eyre::Result<()> {
             signature: Default::default(),
         },
         parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        apply_blacklist: true,
         registered_gas_limit: payload.block().gas_limit,
     };
 
@@ -640,6 +644,7 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
             signature: Default::default(),
         },
         parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        apply_blacklist: true,
         registered_gas_limit: payload.block().gas_limit,
     };
 
@@ -1063,11 +1068,11 @@ async fn test_advance_while_send_raw_transaction_sync() -> eyre::Result<()> {
     Ok(())
 }
 
-/// Before Amsterdam `eth_call` ignores the EIP-7825 transaction gas cap. With Amsterdam's EIP-8037
-/// it caps execution gas, so a call that runs out of execution gas fails like the transaction
-/// would.
+/// Calls never go into a block, so `eth_call` and the call tracers lift the EIP-7825 transaction
+/// gas cap, which Amsterdam's EIP-8037 turns into an execution gas cap. `eth_createAccessList`
+/// prepares a transaction, so it keeps the execution gas cap under Amsterdam.
 #[tokio::test]
-async fn eth_call_caps_execution_gas_under_amsterdam() -> eyre::Result<()> {
+async fn eth_call_lifts_execution_gas_cap_under_amsterdam() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     // Loops `CALLDATALOAD(0)` times, about 26 gas each, then returns 1.
@@ -1083,29 +1088,49 @@ async fn eth_call_caps_execution_gas_under_amsterdam() -> eyre::Result<()> {
             .gas_limit(29_000_000)
             .input(Bytes::from(U256::from(iterations).to_be_bytes::<32>()).into())
     };
+    // About 26M gas of execution, above the 16,777,216 cap.
+    let heavy = call(1_000_000);
 
     for fork in [EthereumHardfork::Osaka, EthereumHardfork::Amsterdam] {
         let (node, _) = EthereumNode::test_setup_for(fork).build_single().await?;
         let provider = node.rpc_provider();
 
-        let ok: Bytes =
-            provider.raw_request("eth_call".into(), (call(10_000), "latest", &overrides)).await?;
-        assert_eq!(U256::from_be_slice(&ok), U256::ONE, "{fork}");
+        let output: Bytes =
+            provider.raw_request("eth_call".into(), (&heavy, "latest", &overrides)).await?;
+        assert_eq!(U256::from_be_slice(&output), U256::ONE, "{fork}");
 
-        // About 26M gas of execution, above the 16,777,216 cap.
-        let call_result = provider
-            .raw_request::<_, Bytes>("eth_call".into(), (call(1_000_000), "latest", &overrides))
-            .await;
+        let trace: serde_json::Value = provider
+            .raw_request(
+                "debug_traceCall".into(),
+                (
+                    &heavy,
+                    "latest",
+                    serde_json::json!({ "tracer": "callTracer", "stateOverrides": &overrides }),
+                ),
+            )
+            .await?;
+        assert!(trace.get("error").is_none(), "{fork}: {trace}");
+        assert_eq!(trace["output"], serde_json::json!(B256::with_last_byte(1)), "{fork}: {trace}");
+
+        let trace: serde_json::Value = provider
+            .raw_request("trace_call".into(), (&heavy, ["trace"], "latest", &overrides))
+            .await?;
+        assert_eq!(trace["output"], serde_json::json!(B256::with_last_byte(1)), "{fork}: {trace}");
+
+        // `eth_callMany` also goes through the per-request `CallManyBudget`.
+        let bundles = serde_json::json!([{ "transactions": [&heavy] }]);
+        let results: serde_json::Value =
+            provider.raw_request("eth_callMany".into(), (&bundles, None::<()>, &overrides)).await?;
+        assert!(results[0][0].get("error").is_none(), "{fork}: {results}");
+        assert_eq!(results[0][0]["value"], serde_json::json!(B256::with_last_byte(1)), "{fork}");
+
         let access_list: AccessListResult = provider
-            .raw_request("eth_createAccessList".into(), (call(1_000_000), "latest", &overrides))
+            .raw_request("eth_createAccessList".into(), (&heavy, "latest", &overrides))
             .await?;
         if fork == EthereumHardfork::Amsterdam {
-            let err = call_result.unwrap_err().to_string();
-            assert!(err.contains("out of gas"), "{err}");
             assert_eq!(access_list.gas_used, U256::from(16_777_216));
             assert!(access_list.error.is_some());
         } else {
-            assert_eq!(U256::from_be_slice(&call_result?), U256::ONE);
             assert!(access_list.gas_used > U256::from(26_000_000));
             assert!(access_list.error.is_none());
         }
@@ -1114,6 +1139,8 @@ async fn eth_call_caps_execution_gas_under_amsterdam() -> eyre::Result<()> {
     Ok(())
 }
 
+/// The EIP-8037 total transaction gas cap of `2^32 - 1` does not apply to calls either, so the
+/// default gas limit is the RPC gas cap.
 #[tokio::test]
 async fn eth_call_without_gas_with_max_rpc_gas_cap() -> eyre::Result<()> {
     let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Amsterdam)
@@ -1123,12 +1150,26 @@ async fn eth_call_without_gas_with_max_rpc_gas_cap() -> eyre::Result<()> {
         })
         .build_single()
         .await?;
+    let provider = node.rpc_provider();
 
-    let result = node
-        .rpc_provider()
-        .call(TransactionRequest::default().to(Address::with_last_byte(0x42)))
-        .await?;
+    let result =
+        provider.call(TransactionRequest::default().to(Address::with_last_byte(0x42))).await?;
     assert_eq!(result, Bytes::new());
+
+    // Returns the gas left at entry: `GAS PUSH0 MSTORE PUSH1 0x20 PUSH0 RETURN`.
+    let gas_left = Address::with_last_byte(0x43);
+    let overrides = StateOverride::from_iter([(
+        gas_left,
+        AccountOverride::default().with_code(bytes!("5a60005260206000f3")),
+    )]);
+    let output: Bytes = provider
+        .raw_request(
+            "eth_call".into(),
+            (TransactionRequest::default().to(gas_left), "latest", &overrides),
+        )
+        .await?;
+    assert!(U256::from_be_slice(&output) > U256::from(u32::MAX), "{output}");
+
     Ok(())
 }
 

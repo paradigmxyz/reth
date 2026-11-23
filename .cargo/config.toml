@@ -1,6 +1,11 @@
 [alias]
 docs = "doc --workspace --all-features --no-deps"
 
+[env]
+# Keeps the version build script from rerunning on every commit and build. Artifacts built for
+# users must set `VERGEN_IDEMPOTENT=0` to stamp the real build time.
+VERGEN_IDEMPOTENT = "1"
+
 [target.x86_64-pc-windows-msvc]
 rustflags = [
     # Increases the stack size to 10MB, which is

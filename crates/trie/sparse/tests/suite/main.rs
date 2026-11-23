@@ -155,7 +155,7 @@ macro_rules! sparse_trie_tests {
             use reth_trie_sparse::ArenaParallelSparseTrie;
 
             $(
-                #[test]
+                #[reth_concurrency::test]
                 fn $test_fn() {
                     super::$test_fn(ArenaParallelSparseTrie::default);
                 }
@@ -166,7 +166,7 @@ macro_rules! sparse_trie_tests {
             use reth_trie_sparse::{ArenaParallelSparseTrie, ArenaParallelismThresholds};
 
             $(
-                #[test]
+                #[reth_concurrency::test]
                 fn $test_fn() {
                     super::$test_fn(|| {
                         ArenaParallelSparseTrie::default().with_parallelism_thresholds(

@@ -1,9 +1,8 @@
-use crate::{formatter::LogFormat, LayerInfo, LogFilterReloadHandle};
+use crate::{formatter::LogFormat, rolling::RollingFileWriter, LayerInfo, LogFilterReloadHandle};
 #[cfg(feature = "otlp-logs")]
 use reth_tracing_otlp::{log_layer, OtlpLogsConfig};
 #[cfg(feature = "otlp")]
 use reth_tracing_otlp::{span_layer, OtlpConfig};
-use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use std::{
     fmt,
     fs::File,
@@ -326,9 +325,9 @@ impl FileInfo {
     ) -> eyre::Result<(tracing_appender::non_blocking::NonBlocking, WorkerGuard)> {
         let log_dir = self.create_log_dir()?;
         let (writer, guard) = tracing_appender::non_blocking(
-            RollingFileAppender::new(
+            RollingFileWriter::new(
                 log_dir.join(&self.file_name),
-                RollingConditionBasic::new().max_size(self.max_size_bytes),
+                self.max_size_bytes,
                 self.max_files,
             )
             .map_err(|err| eyre::eyre!("Could not initialize file logging: {err}"))?,

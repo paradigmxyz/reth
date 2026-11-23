@@ -620,7 +620,7 @@ mod test {
             config.bootstrap_nodes.into_iter().map(|node| format!("{node}")).collect::<Vec<_>>();
 
         for node in MULTI_ADDRESSES.split(&[',']) {
-            assert!(bootstrap_nodes.contains(&node.to_string()));
+            assert!(bootstrap_nodes.iter().any(|n| n == node));
         }
     }
 

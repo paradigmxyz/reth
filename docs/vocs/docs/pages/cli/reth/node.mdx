@@ -514,6 +514,9 @@ RPC:
 
           [default: 256]
 
+      --rpc.max-trace-bytes <BYTES>
+          Max bytes a traced tx may record, defaults to 2x `--rpc.max-response-size`, 0 is unlimited
+
       --rpc.compute-state-root-for-eth-simulate
           Compute state roots for `eth_simulateV1` responses
 
@@ -768,6 +771,11 @@ TxPool:
 
           [default: 1]
 
+      --txpool.enforce-tracked-nonce
+          Reject transactions whose nonce is below the sender nonce tracked from canonical updates.
+
+          Closes the window in which a validation result that predates a block inserts an already mined nonce as pending. Assumes sender nonces only move forward, so this is meant for chains without reorgs and very low block times.
+
 Builder:
       --builder.extradata <EXTRA_DATA>
           Block extra data set by the payload builder.
@@ -935,7 +943,7 @@ Dev testnet:
       --dev.block-time <BLOCK_TIME>
           Interval between blocks.
 
-          Parses strings using [`humantime::parse_duration`]
+          Accepts a duration such as `12s`, `450ms` or `1m 30s`, e.g.
           --dev.block-time 12s
 
       --dev.finality-depth <FINALITY_DEPTH>
@@ -952,7 +960,7 @@ Dev testnet:
           local miner, giving the payload job time for multiple rebuild attempts with
           new transactions from the pool.
 
-          Parses strings using [`humantime::parse_duration`]
+          Accepts a duration such as `12s`, `450ms` or `1m 30s`, e.g.
           --dev.payload-wait-time 450ms
 
       --dev.mnemonic <MNEMONIC>
