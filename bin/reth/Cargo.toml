@@ -99,6 +99,7 @@ default = [
     "keccak-cache-global",
     "asm-keccak",
     "gmp",
+    "bn254-mcl",
     "min-trace-logs",
     "portable",
 ]
@@ -110,6 +111,10 @@ jit = [
 gmp = [
     "reth-ethereum-cli/gmp",
     "reth-node-ethereum/gmp",
+]
+bn254-mcl = [
+    "reth-ethereum-cli/bn254-mcl",
+    "reth-node-ethereum/bn254-mcl",
 ]
 
 otlp = [
