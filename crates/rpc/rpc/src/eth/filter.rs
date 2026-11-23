@@ -75,6 +75,13 @@ const LIMIT_EXCEEDED_CODE: i32 = -32005;
 /// bounds how long past its TTL an abandoned filter can hold a slot.
 const STALE_FILTER_SWEEPS_PER_TTL: u32 = 4;
 
+/// Upper bound on the capacity of a [`TxFeed`].
+///
+/// Unlike the pool's listener channels, a broadcast channel allocates all of its slots up front, so
+/// following an arbitrarily large configured listener buffer could allocate gigabytes for the first
+/// pending filter.
+const MAX_TX_FEED_CAPACITY: usize = 1 << 16;
+
 /// Threshold for deciding between cached and range mode processing
 const CACHED_MODE_BLOCK_THRESHOLD: u64 = 250;
 
@@ -212,7 +219,10 @@ where
     /// `stale_filter_ttl`.
     /// Nonetheless, this endless future frees the thread at every await point.
     async fn watch_and_clear_stale_filters(&self) {
-        let period = self.inner.stale_filter_ttl / STALE_FILTER_SWEEPS_PER_TTL;
+        // `interval_at` panics on a zero period, which a tiny TTL truncates to, and the timer does
+        // not resolve below a millisecond.
+        let period = (self.inner.stale_filter_ttl / STALE_FILTER_SWEEPS_PER_TTL)
+            .max(Duration::from_millis(1));
         let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
@@ -1155,7 +1165,7 @@ impl<T: Clone + Send + 'static> TxFeed<T> {
             return sender.subscribe()
         }
         let (source, capacity) = source();
-        let (sender, receiver) = broadcast::channel(capacity);
+        let (sender, receiver) = broadcast::channel(capacity.min(MAX_TX_FEED_CAPACITY));
         *slot = Some(sender.downgrade());
         let feed = self.clone();
         spawner.spawn_task(async move { feed.produce(sender, source).await });
@@ -1737,17 +1747,20 @@ mod tests {
         assert_eq!(end, *range.end());
     }
 
-    // Helper function to create a test EthApi instance
-    #[expect(clippy::type_complexity)]
-    fn build_test_eth_api(
-        provider: MockEthProvider,
-    ) -> EthApi<
+    type TestEthApi = EthApi<
         RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
         RpcConverter<Ethereum, EthEvmConfig, EthReceiptConverter<ChainSpec>>,
-    > {
+    >;
+
+    // Helper function to create a test EthApi instance
+    fn build_test_eth_api(provider: MockEthProvider) -> TestEthApi {
+        build_test_eth_api_with_pool(provider, testing_pool())
+    }
+
+    fn build_test_eth_api_with_pool(provider: MockEthProvider, pool: TestPool) -> TestEthApi {
         EthApiBuilder::new(
             provider.clone(),
-            testing_pool(),
+            pool,
             NoopNetwork::default(),
             EthEvmConfig::new(provider.chain_spec()),
         )
@@ -2846,18 +2859,11 @@ mod tests {
         const BUFFER: usize = 4096;
         const TXS: usize = 3000;
 
-        let provider = provider_with_head();
         let pool = TestPool::from(TestPoolBuilder::default().with_config(PoolConfig {
             pending_tx_listener_buffer_size: BUFFER,
             ..Default::default()
         }));
-        let eth_api = EthApiBuilder::new(
-            provider.clone(),
-            pool.clone(),
-            NoopNetwork::default(),
-            EthEvmConfig::new(provider.chain_spec()),
-        )
-        .build();
+        let eth_api = build_test_eth_api_with_pool(provider_with_head(), pool.clone());
         let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let id = eth_filter.new_pending_transaction_filter(None).await.unwrap();
 
@@ -2877,6 +2883,33 @@ mod tests {
         .await
         .expect("feed did not hold every hash");
         assert_eq!(drain_hashes(&eth_filter, &id, TXS).await, hashes);
+    }
+
+    #[tokio::test]
+    async fn feeds_cap_a_huge_pool_listener_buffer() {
+        // The pool's listener channels never allocate their buffer, but a feed of this capacity
+        // could not be allocated.
+        const BUFFER: usize = usize::MAX >> 4;
+
+        let pool = TestPool::from(TestPoolBuilder::default().with_config(PoolConfig {
+            pending_tx_listener_buffer_size: BUFFER,
+            new_tx_listener_buffer_size: BUFFER,
+            ..Default::default()
+        }));
+        let eth_api = build_test_eth_api_with_pool(provider_with_head(), pool.clone());
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+
+        let id = eth_filter.new_pending_transaction_filter(None).await.unwrap();
+        eth_filter
+            .new_pending_transaction_filter(Some(PendingTransactionFilterKind::Full))
+            .await
+            .unwrap();
+        let hash = pool
+            .add_transaction(TransactionOrigin::External, MockTransaction::eip1559())
+            .await
+            .unwrap()
+            .hash;
+        assert_eq!(drain_hashes(&eth_filter, &id, 1).await, [hash]);
     }
 
     #[tokio::test]
@@ -3084,5 +3117,17 @@ mod tests {
 
         assert!(!eth_filter.active_filters().contains(&id).await);
         eth_filter.new_block_filter().await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn tiny_stale_filter_ttl_keeps_the_sweeper_running() {
+        let config = EthFilterConfig::default().stale_filter_ttl(Duration::from_nanos(3));
+        let eth_filter =
+            EthFilter::new(build_test_eth_api(provider_with_head()), config, Runtime::test());
+
+        // A zero sweep period would panic here instead of sweeping until the timeout.
+        tokio::time::timeout(Duration::from_millis(10), eth_filter.watch_and_clear_stale_filters())
+            .await
+            .unwrap_err();
     }
 }
