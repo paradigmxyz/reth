@@ -842,8 +842,7 @@ mod tests {
         };
         let block4 = updates(1);
         let block9 = updates(2);
-        // Block 9 masks block 4's write, so the persisted trie does not contain the block-5
-        // value.
+        // Block 9 masks block 4's write, so the persisted trie does not contain the block-5 value.
         let masked = TrieUpdatesSorted::disjointed_merge_batch(&[&block4], &[&block9]);
         assert!(masked.is_empty());
         provider.write_trie_updates_sorted(&masked).unwrap();

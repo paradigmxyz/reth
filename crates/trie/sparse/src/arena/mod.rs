@@ -3404,45 +3404,45 @@ mod tests {
             reth_concurrency::sync::Runtime::new().run(move || {
                 info!(target: TRACE_TARGET, ?shuffle_seed, "PROPTEST START");
 
-                // Filter out zero-valued entries from the initial dataset (zeros mean "absent").
-                let initial: BTreeMap<B256, U256> = initial.into_iter()
-                    .filter(|(_, v)| !v.is_zero())
-                    .collect();
+            // Filter out zero-valued entries from the initial dataset (zeros mean "absent").
+            let initial: BTreeMap<B256, U256> = initial.into_iter()
+                .filter(|(_, v)| !v.is_zero())
+                .collect();
 
-                let mut rng = rand::rngs::StdRng::seed_from_u64(shuffle_seed);
+            let mut rng = rand::rngs::StdRng::seed_from_u64(shuffle_seed);
 
-                let changeset1 = build_changeset(&initial, changeset1_new_keys, overlap_pct, delete_pct, &mut rng);
-                for (i, (k, v)) in changeset1.iter().enumerate() {
-                    trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 1 entry");
-                }
+            let changeset1 = build_changeset(&initial, changeset1_new_keys, overlap_pct, delete_pct, &mut rng);
+            for (i, (k, v)) in changeset1.iter().enumerate() {
+                trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 1 entry");
+            }
 
-                let mut harness = ArenaTrieTestHarness::new(initial);
+            let mut harness = ArenaTrieTestHarness::new(initial);
 
-                // Initialize the APST from the harness root node.
-                let root_node = harness.root_node();
-                let mut apst = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
-                    ArenaParallelismThresholds {
-                        min_dirty_leaves: 3,
-                        min_revealed_nodes: 3,
-                        min_updates: 3,
-                        min_leaves_for_prune: 3,
-                    },
-                );
-                apst.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
+            // Initialize the APST from the harness root node.
+            let root_node = harness.root_node();
+            let mut apst = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
+                ArenaParallelismThresholds {
+                    min_dirty_leaves: 3,
+                    min_revealed_nodes: 3,
+                    min_updates: 3,
+                    min_leaves_for_prune: 3,
+                },
+            );
+            apst.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
 
-                harness.assert_changes(&mut apst, changeset1.clone());
+            harness.assert_changes(&mut apst, changeset1.clone());
 
-                // Update the harness base dataset to reflect the first changeset.
-                harness.apply_changeset(changeset1);
+            // Update the harness base dataset to reflect the first changeset.
+            harness.apply_changeset(changeset1);
 
-                // All nodes were cached at epoch 0, so this maximally prunes the trie before the
-                // second update round.
-                apst.prune(epoch(1));
+            // All nodes were cached at epoch 0, so this maximally prunes the trie before the
+            // second update round.
+            apst.prune(epoch(1));
 
-                let changeset2 = build_changeset(harness.storage(), changeset2_new_keys, overlap_pct, delete_pct, &mut rng);
-                for (i, (k, v)) in changeset2.iter().enumerate() {
-                    trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 2 entry");
-                }
+            let changeset2 = build_changeset(harness.storage(), changeset2_new_keys, overlap_pct, delete_pct, &mut rng);
+            for (i, (k, v)) in changeset2.iter().enumerate() {
+                trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 2 entry");
+            }
 
                 harness.assert_changes(&mut apst, changeset2);
             });

@@ -753,8 +753,8 @@ mod tests {
             Some(&leaf_value)
         );
 
-        // Remove the leaf node and check that the storage trie does not contain the leaf node
-        // and value
+        // Remove the leaf node and check that the storage trie does not contain the leaf node and
+        // value
         let mut updates = B256Map::from_iter([(B256::ZERO, LeafUpdate::Changed(Vec::new()))]);
         sparse
             .storage_trie_mut(&B256::ZERO)

@@ -705,11 +705,10 @@ mod tests {
     #[reth_concurrency::test]
     fn shadow_tx_with_revert() {
         // A tx that reverts in a deployed contract. Both paths must produce identical receipts
-        // (success = false, gas charged, state rolled back except for gas payment + nonce
-        // bump).
+        // (success = false, gas charged, state rolled back except for gas payment + nonce bump).
         //
-        // Deploys `0x60006000fd` (PUSH1 0 PUSH1 0 REVERT) at `contract`. Sender calls it; the
-        // call reverts; fees + nonce still apply.
+        // Deploys `0x60006000fd` (PUSH1 0 PUSH1 0 REVERT) at `contract`. Sender calls it; the call
+        // reverts; fees + nonce still apply.
         let evm_config = test_evm_config();
         let contract = Address::repeat_byte(0xde);
         let key = generate_key(&mut rng());
@@ -729,8 +728,8 @@ mod tests {
     #[reth_concurrency::test]
     fn shadow_tx_with_sstore() {
         // Tx calls a deployed contract that does `SSTORE(0, 0x42)`. The storage write must
-        // commit identically across serial and BAL paths even though the canonical state
-        // applies a diff produced by a worker EVM.
+        // commit identically across serial and BAL paths even though the canonical state applies
+        // a diff produced by a worker EVM.
         //
         // Bytecode: PUSH1 0x42, PUSH1 0x00, SSTORE, STOP → `0x60 0x42 0x60 0x00 0x55 0x00`.
         let evm_config = test_evm_config();
