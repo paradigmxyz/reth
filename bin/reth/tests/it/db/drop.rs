@@ -1,20 +1,23 @@
 use super::*;
-use reth_chainspec::{ChainSpec, DEV, SEPOLIA};
+use reth_chainspec::{DEV, SEPOLIA};
 use reth_provider::providers::RocksDBProvider;
 
 #[cfg(unix)]
 use std::os::unix::fs::{symlink, PermissionsExt};
 
+const DROP: &[&str] = &["drop", "--force"];
+
 #[track_caller]
-fn reth_error(args: &[&str]) -> String {
-    let output = Command::new(RETH).env("RUST_LOG", "off").args(args).output().unwrap();
-    assert_eq!(output.status.code(), Some(1), "args {args:?}: {output:?}");
-    String::from_utf8(output.stderr).unwrap().lines().next().unwrap().to_owned()
+fn run(cmd: &str, dir: &Path, chain: &str, args: &[&str]) -> String {
+    reth_ok(&[&[cmd, "--datadir", dir.to_str().unwrap(), "--chain", chain], args].concat())
 }
 
 #[track_caller]
-fn run(check: fn(&[&str]) -> String, cmd: &str, dir: &Path, chain: &str, args: &[&str]) -> String {
-    check(&[&[cmd, "--datadir", dir.to_str().unwrap(), "--chain", chain], args].concat())
+fn drop_error(dir: &Path, chain: &str, args: &[&str]) -> String {
+    let args = [&["db", "--datadir", dir.to_str().unwrap(), "--chain", chain], args, DROP].concat();
+    let output = Command::new(RETH).env("RUST_LOG", "off").args(&args).output().unwrap();
+    assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+    String::from_utf8(output.stderr).unwrap().lines().next().unwrap().to_owned()
 }
 
 #[test]
@@ -24,57 +27,47 @@ fn cleans_custom_rocksdb_history() {
     let rocks = external.path();
     let dir = node.path();
     let rocks_args = ["--datadir.rocksdb", rocks.to_str().unwrap()];
-    let genesis = |addr: &str| {
-        json!({
-            "config": {"chainId": 65500}, "difficulty": "0x1", "gasLimit": "0x1c9c380",
-            "alloc": { (addr): { "balance": "0x1" } }
-        })
-        .to_string()
-    };
-    let old = Address::with_last_byte(1).to_string();
-    let new = Address::with_last_byte(2).to_string();
-    let invoke = |check, cmd, chain: &str, args: &[&str]| {
-        run(check, cmd, dir, chain, &[&rocks_args[..], args].concat())
-    };
-    let history = |chain: &str, addr: &str| {
-        invoke(reth_ok, "db", chain, &["get", "rocksdb", "accounts-history", addr])
-    };
-    let old_chain = genesis(&old);
-    let new_chain = genesis(&new);
-    invoke(reth_ok, "init", &old_chain, &[]);
+    // The old and new genesis must differ even though their chain IDs match.
+    let mut genesis = SEPOLIA.genesis.clone();
+    genesis.config.chain_id = DEV.chain.id();
+    let old = genesis.alloc.keys().next().unwrap().to_string();
+    let new = DEV.genesis.alloc.keys().next().unwrap().to_string();
+    let old_chain = serde_json::to_string(&genesis).unwrap();
+    let invoke =
+        |cmd, chain: &str, args: &[&str]| run(cmd, dir, chain, &[&rocks_args[..], args].concat());
+    let history =
+        |chain, addr: &str| invoke("db", chain, &["get", "rocksdb", "accounts-history", addr]);
+    invoke("init", &old_chain, &[]);
     let keep = rocks.join("keep.txt");
     fs::write(&keep, b"keep").unwrap();
-    assert_eq!(invoke(reth_ok, "db", &old_chain, &["drop"]), format!(
+    assert_eq!(invoke("db", &old_chain, &["drop"]), format!(
         "Permanently delete data at these paths?\n  MDBX: {}\n  RocksDB (dedicated directory): {}\n  Static files: {}\n  ExEx WAL: {}\nThis cannot be undone. (y/N): Database drop aborted!\n",
         dir.join("db").display(), rocks.display(), dir.join("static_files").display(), dir.join("exex/wal").display()
     ));
-    let drop_args = ["drop", "--force"];
-    let spec = ChainSpec::from_genesis(serde_json::from_str(&new_chain).unwrap());
     assert_eq!(
-        invoke(reth_error, "db", &new_chain, &drop_args),
-        format!("Error: Database does not contain the configured genesis {}", spec.genesis_hash())
+        drop_error(dir, "dev", &rocks_args),
+        format!("Error: Database does not contain the configured genesis {}", DEV.genesis_hash())
     );
     let archive = rocks.join("archive");
     fs::create_dir_all(&archive).unwrap();
     let log = archive.join("20261123.log");
-    fs::write(&log, b"application log").unwrap();
+    fs::rename(&keep, &log).unwrap();
     assert_eq!(
-        invoke(reth_error, "db", &old_chain, &drop_args),
+        drop_error(dir, &old_chain, &rocks_args),
         format!("Error: Move the contents of {} before dropping RocksDB", archive.display())
     );
-    assert_eq!(fs::read(&log).unwrap(), b"application log");
-    fs::remove_file(log).unwrap();
+    fs::rename(log, &keep).unwrap();
     let writer = RocksDBProvider::new(rocks).unwrap();
     assert_eq!(
-        invoke(reth_error, "db", &old_chain, &drop_args),
+        drop_error(dir, &old_chain, &rocks_args),
         format!("Error: Could not destroy RocksDB at {}", rocks.display())
     );
     drop(writer);
     assert_eq!(serde_json::from_str::<Vec<u64>>(&history(&old_chain, &old)).unwrap(), [0]);
-    invoke(reth_ok, "db", &old_chain, &drop_args);
-    invoke(reth_ok, "init", &new_chain, &[]);
-    assert_eq!(history(&new_chain, &old), "");
-    assert_eq!(serde_json::from_str::<Vec<u64>>(&history(&new_chain, &new)).unwrap(), [0]);
+    invoke("db", &old_chain, DROP);
+    invoke("init", "dev", &[]);
+    assert_eq!(history("dev", &old), "");
+    assert_eq!(serde_json::from_str::<Vec<u64>>(&history("dev", &new)).unwrap(), [0]);
     assert_eq!(fs::read(keep).unwrap(), b"keep");
 }
 
@@ -84,25 +77,34 @@ fn clears_imported_transaction_lookup() {
         .join("../../crates/rpc/rpc-e2e-tests/testdata/rpc-compat");
     let node = tempfile::tempdir().unwrap();
     let genesis = fixture.join("genesis.json");
-    let invoke =
-        |cmd, args: &[&str]| run(reth_ok, cmd, node.path(), genesis.to_str().unwrap(), args);
-    invoke(
-        "import",
-        &[
-            "--storage.v2=true",
-            "--fail-on-invalid-block",
-            fixture.join("chain.rlp").to_str().unwrap(),
-        ],
-    );
+    let chain = genesis.to_str().unwrap();
+    let dir = node.path();
+    let invoke = |cmd, args: &[&str]| run(cmd, dir, chain, args);
+    let blocks = fixture.join("chain.rlp");
+    invoke("import", &["--storage.v2=true", "--fail-on-invalid-block", blocks.to_str().unwrap()]);
     // The third transaction in block 2 has transaction number 6.
-    let lookup = [
-        "get",
-        "rocksdb",
-        "transaction-hash-numbers",
-        "0x5bc704d4eb4ce7fe319705d2f888516961426a177f2799c9f934b5df7466dd33",
-    ];
+    let hash = "0x5bc704d4eb4ce7fe319705d2f888516961426a177f2799c9f934b5df7466dd33";
+    let lookup = ["get", "rocksdb", "transaction-hash-numbers", hash];
+
+    #[cfg(unix)]
+    {
+        let rocks = dir.join("rocksdb");
+        let original = rocks.metadata().unwrap().permissions();
+        fs::set_permissions(&rocks, fs::Permissions::from_mode(0o300)).unwrap();
+        // Privileged runners may still be able to list the directory.
+        if let Err(err) = fs::read_dir(&rocks) {
+            assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+            assert_eq!(
+                drop_error(dir, chain, &[]),
+                format!("Error: failed to read dir {rocks:?}: {err}")
+            );
+            assert!(dir.join("db/mdbx.dat").is_file());
+            assert!(rocks.join("CURRENT").is_file());
+        }
+        fs::set_permissions(&rocks, original).unwrap();
+    }
     assert_eq!(invoke("db", &lookup).trim(), "6");
-    invoke("db", &["drop", "--force"]);
+    invoke("db", DROP);
     invoke("init", &["--storage.v2=true"]);
     assert_eq!(invoke("db", &lookup), "");
 }
@@ -111,7 +113,7 @@ fn clears_imported_transaction_lookup() {
 fn protects_external_directories_and_drops_legacy_stores() {
     let node = tempfile::tempdir().unwrap();
     let dir = node.path();
-    run(reth_ok, "init", dir, "dev", &["--storage.v2=false"]);
+    run("init", dir, "dev", &["--storage.v2=false"]);
     let rocks = dir.join("rocksdb");
     if rocks.exists() {
         fs::remove_dir_all(&rocks).unwrap();
@@ -119,15 +121,8 @@ fn protects_external_directories_and_drops_legacy_stores() {
     let external = tempfile::tempdir().unwrap();
     let log = external.path().join("000007.log");
     fs::write(&log, b"keep").unwrap();
-    let refused = |path: &Path| {
-        run(
-            reth_error,
-            "db",
-            dir,
-            "dev",
-            &["--datadir.rocksdb", path.to_str().unwrap(), "drop", "--force"],
-        )
-    };
+    let refused =
+        |path: &Path| drop_error(dir, "dev", &["--datadir.rocksdb", path.to_str().unwrap()]);
     let unrecognized = format!(
         "Error: Refusing to destroy an unrecognized RocksDB directory at {}",
         external.path().display()
@@ -153,7 +148,7 @@ fn protects_external_directories_and_drops_legacy_stores() {
         format!("Error: Database directories overlap: {root:?} and {:?}", root.join("db"))
     );
     fs::create_dir_all(dir.join("exex/wal")).unwrap();
-    run(reth_ok, "db", dir, "dev", &["drop", "--force"]);
+    run("db", dir, "dev", DROP);
     assert!(!rocks.exists());
     assert!(!dir.join("db").exists());
     assert!(!dir.join("exex/wal").exists());
@@ -162,59 +157,27 @@ fn protects_external_directories_and_drops_legacy_stores() {
 
 #[test]
 fn checks_static_genesis_independently() {
-    let node = tempfile::tempdir().unwrap();
-    let other = tempfile::tempdir().unwrap();
-    let dir = node.path();
-    let foreign = other.path().join("static_files");
-    run(reth_ok, "init", dir, "dev", &[]);
-    run(reth_ok, "init", other.path(), "sepolia", &[]);
-    let drop_error = |chain, args: &[&str]| {
-        run(reth_error, "db", dir, chain, &[args, &["drop", "--force"]].concat())
-    };
-    let mismatch = |path: &Path, hash| {
-        format!(
-            "Error: Static files at {} do not contain the configured genesis {hash}",
-            path.display()
-        )
-    };
-    assert_eq!(
-        drop_error("dev", &["--datadir.static-files", foreign.to_str().unwrap()]),
-        mismatch(&foreign, DEV.genesis_hash())
+    let dev = tempfile::tempdir().unwrap();
+    let sepolia = tempfile::tempdir().unwrap();
+    let dir = dev.path();
+    let dev_static = dir.join("static_files");
+    run("init", dir, "dev", &[]);
+    run("init", sepolia.path(), "sepolia", &[]);
+    let mismatch = format!(
+        "Error: Static files at {} do not contain the configured genesis {}",
+        dev_static.display(),
+        SEPOLIA.genesis_hash()
     );
-    run(reth_ok, "db", dir, "dev", &["clear", "mdbx", "HeaderNumbers"]);
-    assert_eq!(
-        drop_error("sepolia", &[]),
-        mismatch(&dir.join("static_files"), SEPOLIA.genesis_hash())
-    );
+    let foreign = ["--datadir.static-files", dev_static.to_str().unwrap()];
+    assert_eq!(drop_error(sepolia.path(), "sepolia", &foreign), mismatch);
+    run("db", dir, "dev", &["clear", "mdbx", "HeaderNumbers"]);
+    assert_eq!(drop_error(dir, "sepolia", &[]), mismatch);
     let missing = dir.join("missing-static");
     assert_eq!(
-        drop_error("dev", &["--datadir.static-files", missing.to_str().unwrap()]),
+        drop_error(dir, "dev", &["--datadir.static-files", missing.to_str().unwrap()]),
         format!("Error: Database does not contain the configured genesis {}", DEV.genesis_hash())
     );
-    assert!(other.path().join("rocksdb/CURRENT").is_file());
+    assert!(sepolia.path().join("rocksdb/CURRENT").is_file());
     assert!(dir.join("rocksdb/CURRENT").is_file());
-    run(reth_ok, "db", dir, "dev", &["drop", "--force"]);
-}
-
-#[cfg(unix)]
-#[test]
-fn requires_readable_rocksdb_directory() {
-    let node = tempfile::tempdir().unwrap();
-    let dir = node.path();
-    run(reth_ok, "init", dir, "dev", &[]);
-    let rocks = dir.join("rocksdb");
-    let original = rocks.metadata().unwrap().permissions();
-    fs::set_permissions(&rocks, fs::Permissions::from_mode(0o300)).unwrap();
-    // Privileged test runners may still enumerate mode 0300.
-    if let Err(err) = fs::read_dir(&rocks) {
-        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
-        assert_eq!(
-            run(reth_error, "db", dir, "dev", &["drop", "--force"]),
-            format!("Error: failed to read dir {rocks:?}: {err}")
-        );
-        assert!(dir.join("db/mdbx.dat").is_file());
-        assert!(rocks.join("CURRENT").is_file());
-    }
-    fs::set_permissions(&rocks, original).unwrap();
-    run(reth_ok, "db", dir, "dev", &["drop", "--force"]);
+    run("db", dir, "dev", DROP);
 }
