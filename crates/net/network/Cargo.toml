@@ -102,6 +102,7 @@ alloy-trie.workspace = true
 
 # misc
 criterion.workspace = true
+lean_vm.workspace = true
 test-case.workspace = true
 url.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }

@@ -9689,6 +9689,7 @@ dependencies = [
  "enr",
  "futures",
  "itertools 0.14.0",
+ "lean_vm",
  "metrics",
  "parking_lot",
  "pin-project",

@@ -5,8 +5,9 @@ use alloy_consensus::{Transaction, TxEip8141};
 use alloy_eips::{
     eip2718::Decodable2718,
     eip8288::{
-        prove, DependencyEvidence, DependencyWrapper, ProofError, MAX_AGGREGATE_DEPENDENCIES,
-        MAX_PROOF_BYTES, MAX_WRAPPER_BYTES,
+        prove, DependencyEvidence, DependencyWrapper, ProofError, SignatureDependency,
+        MAX_AGGREGATE_DEPENDENCIES, MAX_LEANSIG_DEPS_PER_WRAPPER, MAX_PROOF_BYTES,
+        MAX_WRAPPER_BYTES,
     },
 };
 use alloy_primitives::{bytes::BytesMut, map::B256Set, Bytes, B256};
@@ -97,7 +98,7 @@ impl<P: TransactionPool + 'static> DependencyAdmission<P> {
         let (transactions, evidence) = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             let _entered = span.enter();
-            let wrapper = DependencyWrapper::decode(&raw)?;
+            let wrapper = decode_wrapper(&raw)?;
             let mut transactions = Vec::with_capacity(wrapper.transactions.len());
             let mut hashes = BTreeSet::new();
             for raw in wrapper.transactions {
@@ -311,7 +312,7 @@ fn announce(peer: &mut Peer, snapshot: &Snapshot) {
         })
         .collect();
     let wrapper = DependencyWrapper { transactions, evidence: snapshot.evidence.clone() };
-    let Ok(raw) = wrapper.encode() else { return };
+    let Ok(raw) = encode_wrapper(&wrapper) else { return };
     let mut message = BytesMut::with_capacity(raw.len() + 1);
     message.extend_from_slice(&[WRAPPER_MESSAGE]);
     message.extend_from_slice(&raw);
@@ -400,11 +401,11 @@ impl<P: TransactionPool + 'static> DependencyAdmission<P> {
                                     continue;
                                 }
                             };
+                            let Some(added) = additional_wrapper_dependencies(&dependencies, &deps) else { continue };
                             let raw = tx.transaction.encoded_2718_consensus();
                             // Reserve room for the proof, dependency list, and RLP framing.
-                            let next_bytes = bytes + raw.len() + deps.len() * 100 + 16;
-                            if next_bytes > MAX_WRAPPER_BYTES - MAX_PROOF_BYTES ||
-                                dependencies.len() + deps.len() > MAX_AGGREGATE_DEPENDENCIES { break }
+                            let next_bytes = bytes + raw.len() + added * 100 + 16;
+                            if next_bytes > MAX_WRAPPER_BYTES - MAX_PROOF_BYTES { break }
                             bytes = next_bytes;
                             dependencies.extend(deps);
                             transactions.push((*tx.transaction.hash(), raw));
@@ -439,9 +440,175 @@ impl<P: TransactionPool + 'static> DependencyAdmission<P> {
     }
 }
 
+// Keep the transport bound separate from the larger block-evidence bound.
+fn decode_wrapper(raw: &[u8]) -> Result<DependencyWrapper, ProofError> {
+    let wrapper = DependencyWrapper::decode(raw)?;
+    if wrapper.evidence.dependencies().len() > MAX_LEANSIG_DEPS_PER_WRAPPER {
+        return Err(ProofError::Wrapper)
+    }
+    Ok(wrapper)
+}
+
+fn encode_wrapper(wrapper: &DependencyWrapper) -> Result<Bytes, ProofError> {
+    if wrapper.evidence.dependencies().len() > MAX_LEANSIG_DEPS_PER_WRAPPER {
+        return Err(ProofError::Wrapper)
+    }
+    wrapper.encode()
+}
+
+// Transaction dependencies are already sorted and deduplicated by signature_dependencies.
+fn additional_wrapper_dependencies(
+    current: &BTreeSet<SignatureDependency>,
+    additional: &[SignatureDependency],
+) -> Option<usize> {
+    let added = additional.iter().filter(|dependency| !current.contains(*dependency)).count();
+    (current.len() + added <= MAX_LEANSIG_DEPS_PER_WRAPPER).then_some(added)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip8288::LEANSPHINCS_SCHEME;
+    use alloy_primitives::U256;
+    use alloy_rlp::RlpEncodable;
+    use reth_transaction_pool::test_utils::testing_pool;
+
+    fn dependencies(count: usize) -> Vec<SignatureDependency> {
+        (0..count)
+            .map(|index| SignatureDependency {
+                scheme: LEANSPHINCS_SCHEME,
+                data_hash: B256::from(U256::from(index)),
+                verification_key_hash: B256::repeat_byte(1),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn wrapper_selection_counts_distinct_dependencies() {
+        let dependencies = dependencies(MAX_LEANSIG_DEPS_PER_WRAPPER);
+        let selected = dependencies[..MAX_LEANSIG_DEPS_PER_WRAPPER - 1].iter().copied().collect();
+        assert_eq!(additional_wrapper_dependencies(&selected, &dependencies), Some(1));
+        assert_eq!(additional_wrapper_dependencies(&selected, &dependencies[..1]), Some(0));
+    }
+
+    #[test]
+    fn wrapper_selection_skips_excess_and_accepts_later_shared_dependencies() {
+        let dependencies = dependencies(MAX_LEANSIG_DEPS_PER_WRAPPER + 1);
+        assert_eq!(additional_wrapper_dependencies(&BTreeSet::new(), &dependencies), None);
+        let selected = dependencies[..MAX_LEANSIG_DEPS_PER_WRAPPER].iter().copied().collect();
+        assert_eq!(
+            additional_wrapper_dependencies(
+                &selected,
+                &dependencies[MAX_LEANSIG_DEPS_PER_WRAPPER..],
+            ),
+            None
+        );
+        assert_eq!(additional_wrapper_dependencies(&selected, &dependencies[..1]), Some(0));
+    }
+
+    #[derive(RlpEncodable)]
+    struct WireContent<T> {
+        dependencies: Vec<SignatureDependency>,
+        witnesses: T,
+    }
+
+    #[derive(RlpEncodable)]
+    struct WireWrapper<T> {
+        transactions: Vec<Bytes>,
+        mode: u8,
+        content: WireContent<T>,
+    }
+
+    #[test]
+    fn wrapper_codec_bounds_both_modes_without_limiting_block_evidence() {
+        for count in [
+            MAX_LEANSIG_DEPS_PER_WRAPPER - 1,
+            MAX_LEANSIG_DEPS_PER_WRAPPER,
+            MAX_LEANSIG_DEPS_PER_WRAPPER + 1,
+        ] {
+            let dependencies = dependencies(count);
+            let transactions = vec![Bytes::from(vec![1; 32])];
+            let proof = Bytes::from_static(&[1]);
+            let direct = alloy_rlp::encode(WireWrapper {
+                transactions: transactions.clone(),
+                mode: 0,
+                content: WireContent {
+                    dependencies: dependencies.clone(),
+                    witnesses: vec![Bytes::from(vec![0; lean_vm::lean_sphincs::SIG_SIZE]); count],
+                },
+            });
+            let aggregate = alloy_rlp::encode(WireWrapper {
+                transactions: transactions.clone(),
+                mode: 1,
+                content: WireContent {
+                    dependencies: dependencies.clone(),
+                    witnesses: proof.clone(),
+                },
+            });
+            for raw in [direct, aggregate] {
+                if count <= MAX_LEANSIG_DEPS_PER_WRAPPER {
+                    let decoded = decode_wrapper(&raw).unwrap();
+                    assert_eq!(decoded.evidence.dependencies(), dependencies);
+                    assert_eq!(encode_wrapper(&decoded).unwrap(), raw);
+                } else {
+                    assert_eq!(decode_wrapper(&raw).unwrap_err(), ProofError::Wrapper);
+                }
+            }
+            let wrapper = DependencyWrapper {
+                transactions,
+                evidence: Arc::new(DependencyEvidence::aggregate(dependencies, proof).unwrap()),
+            };
+            if count <= MAX_LEANSIG_DEPS_PER_WRAPPER {
+                assert!(encode_wrapper(&wrapper).is_ok());
+            } else {
+                assert_eq!(encode_wrapper(&wrapper).unwrap_err(), ProofError::Wrapper);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn oversized_wrapper_is_rejected_before_transaction_resolution() {
+        let pool = testing_pool();
+        let admission = DependencyAdmission::new(pool.clone());
+        let wrapper = DependencyWrapper {
+            transactions: vec![Bytes::copy_from_slice(B256::repeat_byte(1).as_slice())],
+            evidence: Arc::new(
+                DependencyEvidence::aggregate(
+                    dependencies(MAX_LEANSIG_DEPS_PER_WRAPPER + 1),
+                    Bytes::from_static(&[1]),
+                )
+                .unwrap(),
+            ),
+        };
+        // The pinned codec permits this block-sized evidence, but admission must reject it.
+        assert!(matches!(
+            admission.submit(wrapper.encode().unwrap()).await,
+            Err(DependencyAdmissionError::Proof(ProofError::Wrapper)),
+        ));
+        assert_eq!(pool.pool_size().total, 0);
+    }
+
+    #[test]
+    fn oversized_snapshot_is_not_announced() {
+        let hash = B256::repeat_byte(1);
+        let snapshot = Snapshot {
+            transactions: vec![(hash, Bytes::from(vec![2; 33]))],
+            hashes: Arc::new(std::iter::once(hash).collect()),
+            evidence: Arc::new(
+                DependencyEvidence::aggregate(
+                    dependencies(MAX_LEANSIG_DEPS_PER_WRAPPER + 1),
+                    Bytes::from_static(&[1]),
+                )
+                .unwrap(),
+            ),
+        };
+        let (outgoing, mut incoming) = mpsc::channel(1);
+        let mut peer = Peer { outgoing, known: Arc::default(), needs_full: true };
+        announce(&mut peer, &snapshot);
+        assert_eq!(incoming.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+        assert!(peer.known.is_empty());
+        assert!(peer.needs_full);
+    }
 
     #[test]
     fn announcements_recover_full_transactions_and_respect_backpressure() {
@@ -449,7 +616,7 @@ mod tests {
         let raw = Bytes::from(vec![2; 33]);
         let snapshot = Snapshot {
             transactions: vec![(hash, raw.clone())],
-            hashes: Arc::new([hash].into_iter().collect()),
+            hashes: Arc::new(std::iter::once(hash).collect()),
             evidence: Arc::new(DependencyEvidence::aggregate(vec![], Bytes::new()).unwrap()),
         };
         let (outgoing, mut incoming) = mpsc::channel(1);
