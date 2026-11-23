@@ -3086,8 +3086,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn take_state_above(
         &self,
         block: BlockNumber,
+        end: BlockNumber,
     ) -> ProviderResult<ExecutionOutcome<Self::Receipt>> {
-        let range = block + 1..=self.last_block_number()?;
+        let range = block + 1..=end;
 
         if range.is_empty() {
             return Ok(ExecutionOutcome::default())
@@ -3095,7 +3096,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let start_block_number = *range.start();
 
         // We are not removing block meta as it is used to get block changesets.
-        let block_bodies = self.block_body_indices_range(range.clone())?;
+        let block_bodies = self.block_body_indices_range(range)?;
 
         // get transaction receipts
         let from_transaction_num =
@@ -3103,7 +3104,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let to_transaction_num =
             block_bodies.last().expect("already checked if there are blocks").last_tx_num();
 
-        let storage_range = BlockNumberAddress::range(range.clone());
         let storage_changeset = if let Some(highest_block) = self
             .static_file_provider
             .get_highest_static_file_block(StaticFileSegment::StorageChangeSets) &&
@@ -3115,7 +3115,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             changeset_writer.prune_storage_changesets(block)?;
             changesets
         } else {
-            self.take::<tables::StorageChangeSets>(storage_range)?.into_iter().collect()
+            // Revert every changeset above `block`, including any above `end`.
+            self.take::<tables::StorageChangeSets>(
+                BlockNumberAddress((block + 1, Address::ZERO))..,
+            )?
+            .into_iter()
+            .collect()
         };
 
         // if there are static files for this segment, prune them.
@@ -3135,7 +3140,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         } else {
             // Have to remove from static files if they exist, otherwise remove using `take` for the
             // changeset tables
-            self.take::<tables::AccountChangeSets>(range)?
+            self.take::<tables::AccountChangeSets>(block + 1..)?
         };
 
         let (state, reverts) = if self.cached_storage_settings().use_hashed_state() {
@@ -3658,7 +3663,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         self.unwind_trie_state_from(block + 1)?;
 
         // get execution res
-        let execution_state = self.take_state_above(block)?;
+        let execution_state = self.take_state_above(block, *range.end())?;
 
         let blocks = self.recovered_block_range(range)?;
 
@@ -6227,5 +6232,40 @@ mod tests {
             assert_eq!(provider.last_finalized_block_number().unwrap(), finalized);
             assert_eq!(provider.last_safe_block_number().unwrap(), safe);
         }
+    }
+
+    #[test]
+    fn take_state_outcome_stops_at_execution_tip() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        let provider = factory.database_provider_rw().unwrap();
+        let tx = provider.tx_ref();
+        for block in 0..=3 {
+            tx.put::<tables::BlockBodyIndices>(
+                block,
+                StoredBlockBodyIndices { first_tx_num: 0, tx_count: 0 },
+            )
+            .unwrap();
+        }
+        // State above the execution tip must still be reverted.
+        tx.put::<tables::AccountChangeSets>(
+            3,
+            AccountBeforeTx { address: Address::ZERO, info: None },
+        )
+        .unwrap();
+        tx.put::<tables::PlainAccountState>(Address::ZERO, Account::default()).unwrap();
+        let sf = factory.static_file_provider();
+        let mut headers = sf.latest_writer(StaticFileSegment::Headers).unwrap();
+        for number in 0..=3 {
+            let header = Header { number, ..Default::default() };
+            headers.append_header(&header, &header.hash_slow()).unwrap();
+        }
+        headers.commit().unwrap();
+        drop(headers);
+        assert_eq!(provider.last_block_number().unwrap(), 3);
+        let outcome = provider.take_state_above(1, 2).unwrap();
+        assert_eq!(outcome.first_block(), 2);
+        assert_eq!(outcome.len(), 1);
+        assert_eq!(tx.get::<tables::PlainAccountState>(Address::ZERO).unwrap(), None);
     }
 }

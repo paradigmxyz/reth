@@ -1661,7 +1661,6 @@ mod tests {
             10,
             config.invalid_header_hit_eviction_threshold(),
             alloy_eips::BlockNumHash::new(0, genesis_hash),
-            crate::engine::EngineApiKind::Ethereum,
             overlay_manager.clone(),
         );
         let mut root_from_regular = state_root(accumulated_state.clone());
