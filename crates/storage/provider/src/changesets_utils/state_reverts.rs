@@ -1,6 +1,6 @@
 use alloy_primitives::{B256, U256};
 use reth_trie::bundle_state::RevertToSlot;
-use std::iter::Peekable;
+use std::{cmp::Ordering, iter::Peekable};
 
 /// Iterator over storage reverts.
 /// See [`StorageRevertsIter::next`] for more details.
@@ -47,7 +47,6 @@ where
         match (self.reverts.peek(), self.wiped.peek()) {
             (Some(revert), Some(wiped)) => {
                 // Compare the keys and return the lesser.
-                use std::cmp::Ordering;
                 match revert.0.cmp(&wiped.0) {
                     Ordering::Less => self.next_revert(),
                     Ordering::Greater => self.next_wiped(),

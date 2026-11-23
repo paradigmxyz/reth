@@ -4,7 +4,6 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Transaction, TransactionReceipt};
 use eyre::Result;
-use jsonrpsee::core::client::ClientT;
 use reth_chainspec::EthereumHardfork;
 use reth_db::tables;
 use reth_e2e_test_utils::{node::Finality, wait::poll_until, E2ETestSetupExt};

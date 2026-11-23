@@ -5,7 +5,6 @@ use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{HelloMessage, UnauthedP2PStream};
 use reth_network::config::rng_secret_key;
 use reth_network_peers::{pk2id, AnyNode};
-use secp256k1::SECP256K1;
 use tokio::net::TcpStream;
 
 /// RLPx commands
@@ -28,7 +27,7 @@ impl Command {
                     TcpStream::connect((node_record.address, node_record.tcp_port)).await?;
                 let ecies_stream = ECIESStream::connect(outgoing, key, node_record.id).await?;
 
-                let peer_id = pk2id(&key.public_key(SECP256K1));
+                let peer_id = pk2id(&key.public_key());
                 let hello = HelloMessage::builder(peer_id).build();
 
                 let (_, their_hello) =

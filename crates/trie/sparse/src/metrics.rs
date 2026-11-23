@@ -1,5 +1,6 @@
 //! Metrics for the sparse state trie
 
+use core::mem::take;
 use reth_metrics::{metrics::Histogram, Metrics};
 
 /// Metrics for the sparse state trie
@@ -16,7 +17,6 @@ pub(crate) struct SparseStateTrieMetrics {
 impl SparseStateTrieMetrics {
     /// Record the metrics into the histograms
     pub(crate) fn record(&mut self) {
-        use core::mem::take;
         self.histograms
             .multiproof_total_account_nodes
             .record(take(&mut self.multiproof_total_account_nodes) as f64);

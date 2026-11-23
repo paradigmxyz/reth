@@ -261,6 +261,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             nat,
             handshake,
             eth_max_message_size,
+            p2p_max_payload_size,
             required_block_hashes,
         } = config;
 
@@ -318,6 +319,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             extra_protocols,
             handshake,
             eth_max_message_size,
+            p2p_max_payload_size,
             network_mode.is_stake(),
         );
 
@@ -1236,7 +1238,7 @@ mod tests {
                     ..Default::default()
                 };
                 let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(
-                    SecretKey::new(&mut rand_08::thread_rng()),
+                    SecretKey::new(&mut rand::rng()),
                     Runtime::test(),
                 )
                 .disable_discovery()
@@ -1290,7 +1292,7 @@ mod tests {
     async fn inbound_replacement_refreshes_pending_connection_metrics() {
         let config = || {
             NetworkConfigBuilder::<EthNetworkPrimitives>::new(
-                SecretKey::new(&mut rand_08::thread_rng()),
+                SecretKey::new(&mut rand::rng()),
                 Runtime::test(),
             )
             .disable_discovery()
@@ -1341,7 +1343,7 @@ mod tests {
     #[tokio::test]
     async fn incoming_handshake_failure_refreshes_pending_connection_metrics() {
         let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(
-            SecretKey::new(&mut rand_08::thread_rng()),
+            SecretKey::new(&mut rand::rng()),
             Runtime::test(),
         )
         .disable_discovery()

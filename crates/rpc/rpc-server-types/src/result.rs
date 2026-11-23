@@ -144,10 +144,7 @@ pub fn rpc_err(
     jsonrpsee_types::error::ErrorObject::owned(
         code,
         msg.into(),
-        data.map(|data| {
-            jsonrpsee_core::to_json_raw_value(&alloy_primitives::hex::encode_prefixed(data))
-                .expect("serializing String can't fail")
-        }),
+        data.map(alloy_primitives::hex::encode_prefixed),
     )
 }
 
@@ -166,5 +163,17 @@ mod tests {
         let rpc_res = res.map_internal_err(|_| "This is a message");
         let val = rpc_res.unwrap();
         assert_eq!(val, 100);
+    }
+
+    #[test]
+    fn rpc_error_data_is_a_hex_string() {
+        for (data, expected) in [
+            (None, None),
+            (Some(&[][..]), Some(r#""0x""#)),
+            (Some(&[0, 1, 255][..]), Some(r#""0x0001ff""#)),
+        ] {
+            let err = rpc_err(jsonrpsee_types::error::INTERNAL_ERROR_CODE, "test error", data);
+            assert_eq!(err.data().map(|data| data.get()), expected);
+        }
     }
 }

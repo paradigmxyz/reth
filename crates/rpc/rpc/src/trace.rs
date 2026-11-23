@@ -9,16 +9,13 @@ use alloy_rpc_types_eth::{
     BlockOverrides, Index,
 };
 use alloy_rpc_types_trace::{
-    filter::TraceFilter,
+    filter::{TraceFilter, TraceFilterBlockOption},
     opcode::{BlockOpcodeGas, TransactionOpcodeGas},
     parity::*,
     tracerequest::TraceCallRequest,
 };
-use async_trait::async_trait;
 use evm2_inspectors::{
-    opcode::OpcodeGasInspector,
-    storage::StorageInspector,
-    tracing::{TracingInspector, TracingInspectorConfig},
+    opcode::OpcodeGasInspector, storage::StorageInspector, tracing::TracingInspectorConfig,
 };
 use futures::{FutureExt, StreamExt};
 use jsonrpsee::core::RpcResult;
@@ -31,7 +28,7 @@ use reth_rpc_eth_api::{
     helpers::{LoadTransaction, Trace, TraceExt},
     FromEthApiError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{error::EthApiError, EthConfig};
+use reth_rpc_eth_types::{error::EthApiError, utils::CallManyBudget, EthConfig};
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
@@ -104,12 +101,9 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, evm_env, tx_env| {
-                let (inspector, res) = this.eth_api().inspect(
-                    &mut *db,
-                    evm_env,
-                    &tx_env,
-                    TracingInspector::new(config),
-                )?;
+                let inspector = this.eth_api().tracing_inspector(config);
+                let (inspector, res) =
+                    this.eth_api().inspect(&mut *db, evm_env, &tx_env, inspector)?;
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_request.trace_types, &mut *db)
@@ -161,6 +155,7 @@ where
         calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
+        let mut budget = CallManyBudget::new(calls.len(), self.eth_api().call_gas_limit())?;
         let at = block_id.unwrap_or_default();
         let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
 
@@ -174,19 +169,19 @@ where
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
                     }
-                    let (evm_env, tx_env) = eth_api.prepare_call_env(
+                    let (evm_env, mut tx_env) = eth_api.prepare_call_env(
                         evm_env.clone(),
                         call,
                         &mut db,
                         Default::default(),
                     )?;
+                    budget.admit(&mut tx_env)?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
-                    let (inspector, res) = eth_api.inspect(
-                        &mut db,
-                        evm_env,
-                        &tx_env,
-                        TracingInspector::new(config),
-                    )?;
+                    let inspector = eth_api.tracing_inspector(config);
+                    let (inspector, res) = eth_api
+                        .inspect(&mut db, evm_env, &tx_env, inspector)
+                        .map_err(|err| budget.map_call_err(err))?;
+                    budget.charge(&res.result)?;
 
                     let trace_res = inspector
                         .into_parity_builder()
@@ -384,7 +379,21 @@ where
     ) -> Result<Vec<LocalizedTransactionTrace>, Eth::Error> {
         // We'll reuse the matcher across multiple blocks that are traced in parallel
         let matcher = Arc::new(filter.matcher());
-        let TraceFilter { from_block, to_block, mut after, count, .. } = filter;
+        let (from_block, to_block) = match filter
+            .block_option()
+            .map_err(|err| EthApiError::InvalidParams(err.to_string()))?
+        {
+            TraceFilterBlockOption::Range { from_block, to_block } => (from_block, to_block),
+            TraceFilterBlockOption::AtBlockHash(hash) => {
+                let number = self
+                    .provider()
+                    .block_number(hash)
+                    .map_err(Eth::Error::from_eth_err)?
+                    .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
+                (Some(number), Some(number))
+            }
+        };
+        let TraceFilter { mut after, count, .. } = filter;
 
         let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
         let start = from_block.unwrap_or(latest_block);
@@ -708,7 +717,6 @@ fn apply_trace_filter_pagination(
     None
 }
 
-#[async_trait]
 impl<Eth> TraceApiServer<RpcTxReq<Eth::NetworkTypes>> for TraceApi<Eth>
 where
     Eth: TraceExt,
@@ -727,7 +735,7 @@ where
         let _permit = self.acquire_trace_permit().await;
         let request =
             TraceCallRequest { call, trace_types, block_id, state_overrides, block_overrides };
-        Ok(Self::trace_call(self, request).await.map_err(Into::into)?)
+        Self::trace_call(self, request).await.map_err(Into::into)
     }
 
     /// Handler for `trace_callMany`
@@ -737,7 +745,7 @@ where
         block_id: Option<BlockId>,
     ) -> RpcResult<Vec<TraceResults>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_call_many(self, calls, block_id).await.map_err(Into::into)?)
+        Self::trace_call_many(self, calls, block_id).await.map_err(Into::into)
     }
 
     /// Handler for `trace_rawTransaction`
@@ -748,9 +756,7 @@ where
         block_id: Option<BlockId>,
     ) -> RpcResult<TraceResults> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_raw_transaction(self, data, trace_types, block_id)
-            .await
-            .map_err(Into::into)?)
+        Self::trace_raw_transaction(self, data, trace_types, block_id).await.map_err(Into::into)
     }
 
     /// Handler for `trace_replayBlockTransactions`
@@ -760,9 +766,7 @@ where
         trace_types: HashSet<TraceType>,
     ) -> RpcResult<Option<Vec<TraceResultsWithTransactionHash>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::replay_block_transactions(self, block_id, trace_types)
-            .await
-            .map_err(Into::into)?)
+        Self::replay_block_transactions(self, block_id, trace_types).await.map_err(Into::into)
     }
 
     /// Handler for `trace_replayTransaction`
@@ -772,7 +776,7 @@ where
         trace_types: HashSet<TraceType>,
     ) -> RpcResult<Option<TraceResultsWithTransactionHash>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::replay_transaction(self, transaction, trace_types).await.map_err(Into::into)?)
+        Self::replay_transaction(self, transaction, trace_types).await.map_err(Into::into)
     }
 
     /// Handler for `trace_block`
@@ -781,7 +785,7 @@ where
         block_id: BlockId,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_block(self, block_id).await.map_err(Into::into)?)
+        Self::trace_block(self, block_id).await.map_err(Into::into)
     }
 
     /// Handler for `trace_filter`
@@ -791,7 +795,7 @@ where
     /// # Limitations
     /// This currently requires block filter fields, since reth does not have address indices yet.
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>> {
-        Ok(Self::trace_filter(self, filter).await.map_err(Into::into)?)
+        Self::trace_filter(self, filter).await.map_err(Into::into)
     }
 
     /// Returns transaction trace at given index.
@@ -802,9 +806,9 @@ where
         indices: Vec<Index>,
     ) -> RpcResult<Option<LocalizedTransactionTrace>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_get(self, hash, indices.into_iter().map(Into::into).collect())
+        Self::trace_get(self, hash, indices.into_iter().map(Into::into).collect())
             .await
-            .map_err(Into::into)?)
+            .map_err(Into::into)
     }
 
     /// Handler for `trace_transaction`
@@ -813,7 +817,7 @@ where
         hash: B256,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_transaction(self, hash).await.map_err(Into::into)?)
+        Self::trace_transaction(self, hash).await.map_err(Into::into)
     }
 
     /// Handler for `trace_transactionOpcodeGas`
@@ -822,13 +826,13 @@ where
         tx_hash: B256,
     ) -> RpcResult<Option<TransactionOpcodeGas>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_transaction_opcode_gas(self, tx_hash).await.map_err(Into::into)?)
+        Self::trace_transaction_opcode_gas(self, tx_hash).await.map_err(Into::into)
     }
 
     /// Handler for `trace_blockOpcodeGas`
     async fn trace_block_opcode_gas(&self, block_id: BlockId) -> RpcResult<Option<BlockOpcodeGas>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::trace_block_opcode_gas(self, block_id).await.map_err(Into::into)?)
+        Self::trace_block_opcode_gas(self, block_id).await.map_err(Into::into)
     }
 }
 
@@ -912,16 +916,18 @@ pub struct BlockStorageAccess {
 mod tests {
     use super::*;
     use crate::EthApiBuilder;
-    use alloy_consensus::Header;
+    use alloy_consensus::{Header, TxLegacy};
     use alloy_genesis::Genesis;
-    use alloy_primitives::bytes;
+    use alloy_primitives::{bytes, Signature, TxKind};
     use alloy_rpc_types_eth::TransactionRequest;
+    use reth_chain_state::CanonStateNotification;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_common::init::init_genesis;
-    use reth_ethereum_primitives::{Block, BlockBody};
+    use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives_traits::Block as _;
+    use reth_primitives_traits::{Block as _, RecoveredBlock, SignerRecoverable};
     use reth_provider::{
         providers::BlockchainProvider,
         test_utils::{
@@ -929,6 +935,7 @@ mod tests {
         },
         BlockWriter, StageCheckpointWriter,
     };
+    use reth_rpc_eth_types::cache::cache_new_blocks_task;
     use reth_transaction_pool::test_utils::testing_pool;
 
     #[tokio::test]
@@ -965,8 +972,42 @@ mod tests {
 
         let module = api.into_rpc();
         let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
-        let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(response["result"], serde_json::to_value(latest).unwrap());
+    }
+
+    #[tokio::test]
+    async fn vm_trace_halts_past_byte_limit() {
+        let provider = MockEthProvider::default();
+        let target = Address::with_last_byte(0x42);
+        // JUMPDEST PUSH1 0 JUMP: loops until out of gas, recording steps but no memory.
+        provider.add_account(
+            target,
+            ExtendedAccount::new(0, U256::ZERO).with_bytecode(bytes!("5b600056")),
+        );
+        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        let call = TransactionRequest::default().to(target).gas_limit(1_000_000);
+
+        for max_trace_bytes in [None, Some(1 << 16)] {
+            let eth_api = EthApiBuilder::new(
+                provider.clone(),
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(provider.chain_spec()),
+            )
+            .max_trace_bytes(max_trace_bytes)
+            .build();
+            let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
+            let result = api.trace_call(TraceCallRequest::new(call.clone()).with_vm_trace()).await;
+            match max_trace_bytes {
+                None => assert!(result.unwrap().vm_trace.unwrap().ops.len() > 100_000),
+                Some(_) => assert_eq!(
+                    result.unwrap_err().to_string(),
+                    "fatal error: trace recorded byte limit exceeded"
+                ),
+            }
+        }
     }
 
     #[tokio::test]
@@ -1000,7 +1041,7 @@ mod tests {
             "jsonrpc": "2.0", "id": 1, "method": "trace_filter", "params": [{"toBlock": "0x1"}],
         });
         let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
-        let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(
             response["error"],
             serde_json::json!({
@@ -1012,19 +1053,6 @@ mod tests {
 
     #[tokio::test]
     async fn trace_get_selects_tree_paths() {
-        use crate::EthApiBuilder;
-        use alloy_consensus::{Header, TxLegacy};
-        use alloy_primitives::{Signature, TxKind};
-        use reth_chain_state::CanonStateNotification;
-        use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
-        use reth_evm_ethereum::EthEvmConfig;
-        use reth_execution_types::{Chain, ExecutionOutcome};
-        use reth_network_api::noop::NoopNetwork;
-        use reth_primitives_traits::{RecoveredBlock, SignerRecoverable};
-        use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-        use reth_rpc_eth_types::cache::cache_new_blocks_task;
-        use reth_transaction_pool::test_utils::testing_pool;
-
         let provider = MockEthProvider::default();
         // The root calls 0x43 (which calls 0x44), then calls 0x45.
         for (address, code) in [
@@ -1100,7 +1128,7 @@ mod tests {
                 "jsonrpc": "2.0", "id": 1, "method": "trace_get", "params": [hash, indices],
             });
             let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
-            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            let response: serde_json::Value = serde_json::from_str(&response).unwrap();
             assert!(response.get("error").is_none(), "{response}");
             assert_eq!(response["result"], serde_json::to_value(expected).unwrap());
         }
@@ -1111,12 +1139,6 @@ mod tests {
 
     #[tokio::test]
     async fn replay_missing_transaction_returns_null() {
-        use crate::EthApiBuilder;
-        use reth_evm_ethereum::EthEvmConfig;
-        use reth_network_api::noop::NoopNetwork;
-        use reth_provider::test_utils::MockEthProvider;
-        use reth_transaction_pool::test_utils::testing_pool;
-
         let provider = MockEthProvider::default();
         let eth_api = EthApiBuilder::new(
             provider.clone(),
@@ -1135,26 +1157,13 @@ mod tests {
                 "params": [B256::with_last_byte(1), types],
             });
             let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
-            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            let response: serde_json::Value = serde_json::from_str(&response).unwrap();
             assert_eq!(response, serde_json::json!({"jsonrpc": "2.0", "id": 1, "result": null}));
         }
     }
 
     #[tokio::test]
     async fn replay_transaction_includes_transaction_hash() {
-        use crate::EthApiBuilder;
-        use alloy_consensus::{Header, TxLegacy};
-        use alloy_primitives::{Signature, TxKind};
-        use reth_chain_state::CanonStateNotification;
-        use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
-        use reth_evm_ethereum::EthEvmConfig;
-        use reth_execution_types::{Chain, ExecutionOutcome};
-        use reth_network_api::noop::NoopNetwork;
-        use reth_primitives_traits::{RecoveredBlock, SignerRecoverable};
-        use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-        use reth_rpc_eth_types::cache::cache_new_blocks_task;
-        use reth_transaction_pool::test_utils::testing_pool;
-
         let provider = MockEthProvider::default();
         let tx = TransactionSigned::new_unhashed(
             TxLegacy {
@@ -1211,7 +1220,7 @@ mod tests {
                 "params": [hash, types],
             });
             let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
-            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            let response: serde_json::Value = serde_json::from_str(&response).unwrap();
             assert!(response.get("error").is_none(), "{response}");
             assert_eq!(response["result"]["transactionHash"], serde_json::json!(hash));
 
@@ -1239,8 +1248,10 @@ mod tests {
             },
             body: BlockBody::default(),
         };
+        let block = block.seal_slow();
+        let block_hash = block.hash();
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(&block.seal_slow().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
         provider_rw.update_pipeline_stages(1, false).unwrap();
         provider_rw.commit().unwrap();
 
@@ -1264,6 +1275,31 @@ mod tests {
                 TraceFilter { from_block: Some(0), to_block: Some(to_block), ..Default::default() };
             assert_eq!(trace_order(&api.trace_filter(filter).await.unwrap()), expected);
         }
+        for (hash, expected) in [(genesis_hash, vec![]), (block_hash, vec![(1, None, true)])] {
+            let filter = TraceFilter::default().block_hash(hash);
+            assert_eq!(trace_order(&api.trace_filter(filter).await.unwrap()), expected);
+        }
+
+        let unknown_hash = B256::repeat_byte(0x22);
+        let err =
+            api.trace_filter(TraceFilter::default().block_hash(unknown_hash)).await.unwrap_err();
+        assert!(
+            matches!(err, EthApiError::HeaderNotFound(id) if id == unknown_hash.into()),
+            "{err:?}"
+        );
+
+        let err = api
+            .trace_filter(TraceFilter::default().block_hash(block_hash).from_block(1))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                EthApiError::InvalidParams(msg)
+                    if msg == "cannot specify both blockHash and fromBlock/toBlock, choose one or the other"
+            ),
+            "{err:?}"
+        );
     }
 
     fn localized_transaction_trace(
@@ -1315,19 +1351,6 @@ mod tests {
 
     #[tokio::test]
     async fn replay_block_vmtrace_includes_root_and_callcode_bytecode() {
-        use crate::EthApiBuilder;
-        use alloy_consensus::{Header, TxLegacy};
-        use alloy_primitives::{Signature, TxKind};
-        use reth_chain_state::CanonStateNotification;
-        use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
-        use reth_evm_ethereum::EthEvmConfig;
-        use reth_execution_types::{Chain, ExecutionOutcome};
-        use reth_network_api::noop::NoopNetwork;
-        use reth_primitives_traits::{RecoveredBlock, SignerRecoverable};
-        use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-        use reth_rpc_eth_types::cache::cache_new_blocks_task;
-        use reth_transaction_pool::test_utils::testing_pool;
-
         let provider = MockEthProvider::default();
         let target = Address::with_last_byte(0x42);
         let child = Address::with_last_byte(0x43);

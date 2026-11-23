@@ -1,7 +1,6 @@
 use crate::EngineApiError;
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated};
-use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_payload_primitives::PayloadTypes;
@@ -26,7 +25,6 @@ impl<Payload: PayloadTypes> RethEngineApi<Payload> {
     }
 }
 
-#[async_trait]
 impl<Payload: PayloadTypes> RethEngineApiServer<Payload::ExecutionData> for RethEngineApi<Payload> {
     async fn reth_new_payload(
         &self,

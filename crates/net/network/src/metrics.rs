@@ -183,6 +183,9 @@ pub struct TransactionsManagerMetrics {
     /* ================ POOL IMPORTS ================ */
     /// Number of transactions about to be imported into the pool.
     pub(crate) pending_pool_imports: Gauge,
+    /// Encoded byte size of the transactions about to be imported into the pool, including blob
+    /// sidecars.
+    pub(crate) pending_pool_imports_bytes: Gauge,
     /// Total number of bad imports, imports that fail because the transaction is badly formed
     /// (i.e. have no chance of passing validation, unlike imports that fail due to e.g. nonce
     /// gaps).
@@ -192,6 +195,10 @@ pub struct TransactionsManagerMetrics {
     /// capacity. Note, this is not a limit to the number of inflight requests, but a health
     /// measure.
     pub(crate) capacity_pending_pool_imports: Counter,
+    /// Encoded byte size of pending pool imports at which the
+    /// [`TransactionPool`](reth_transaction_pool::TransactionPool) is considered to be at
+    /// capacity. Like [`Self::capacity_pending_pool_imports`], this is a health measure.
+    pub(crate) capacity_pending_pool_imports_bytes: Counter,
     /// Total number of transactions ignored because pending pool imports are at capacity.
     pub(crate) skipped_transactions_pending_pool_imports_at_capacity: Counter,
     /// The time it took to prepare transactions for import. This is mostly sender recovery.
@@ -562,6 +569,10 @@ pub struct EthRequestHandlerMetrics {
 
     /// Number of `snap/2` (EIP-8189) requests received
     pub(crate) snap_requests_received_total: Counter,
+
+    /// Number of `snap/2` state range requests answered empty without being served: the queue
+    /// was full, the peer already held a place in it, or the request waited too long
+    pub(crate) snap_state_range_requests_unserved_total: Counter,
 
     /// Duration in seconds of call to poll
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
