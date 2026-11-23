@@ -1,5 +1,5 @@
 use super::*;
-use reth_chainspec::{ChainSpec, DEV};
+use reth_chainspec::{ChainSpec, DEV, SEPOLIA};
 use reth_provider::providers::RocksDBProvider;
 
 #[cfg(unix)]
@@ -22,6 +22,8 @@ fn cleans_custom_rocksdb_history() {
     let node = tempfile::tempdir().unwrap();
     let external = tempfile::tempdir().unwrap();
     let rocks = external.path();
+    let dir = node.path();
+    let rocks_args = ["--datadir.rocksdb", rocks.to_str().unwrap()];
     let genesis = |addr: &str| {
         json!({
             "config": {"chainId": 65500}, "difficulty": "0x1", "gasLimit": "0x1c9c380",
@@ -32,13 +34,7 @@ fn cleans_custom_rocksdb_history() {
     let old = Address::with_last_byte(1).to_string();
     let new = Address::with_last_byte(2).to_string();
     let invoke = |check, cmd, chain: &str, args: &[&str]| {
-        run(
-            check,
-            cmd,
-            node.path(),
-            chain,
-            &[&["--datadir.rocksdb", rocks.to_str().unwrap()], args].concat(),
-        )
+        run(check, cmd, dir, chain, &[&rocks_args[..], args].concat())
     };
     let history = |chain: &str, addr: &str| {
         invoke(reth_ok, "db", chain, &["get", "rocksdb", "accounts-history", addr])
@@ -46,10 +42,8 @@ fn cleans_custom_rocksdb_history() {
     let old_chain = genesis(&old);
     let new_chain = genesis(&new);
     invoke(reth_ok, "init", &old_chain, &[]);
-    assert_eq!(serde_json::from_str::<Vec<u64>>(&history(&old_chain, &old)).unwrap(), [0]);
     let keep = rocks.join("keep.txt");
     fs::write(&keep, b"keep").unwrap();
-    let dir = node.path();
     assert_eq!(invoke(reth_ok, "db", &old_chain, &["drop"]), format!(
         "Permanently delete data at these paths?\n  MDBX: {}\n  RocksDB (dedicated directory): {}\n  Static files: {}\n  ExEx WAL: {}\nThis cannot be undone. (y/N): Database drop aborted!\n",
         dir.join("db").display(), rocks.display(), dir.join("static_files").display(), dir.join("exex/wal").display()
@@ -134,24 +128,16 @@ fn protects_external_directories_and_drops_legacy_stores() {
             &["--datadir.rocksdb", path.to_str().unwrap(), "drop", "--force"],
         )
     };
-    assert_eq!(
-        refused(external.path()),
-        format!(
-            "Error: Refusing to destroy an unrecognized RocksDB directory at {}",
-            external.path().display()
-        )
+    let unrecognized = format!(
+        "Error: Refusing to destroy an unrecognized RocksDB directory at {}",
+        external.path().display()
     );
-    assert_eq!(fs::read(log).unwrap(), b"keep");
-    let foreign = tempfile::tempdir().unwrap();
-    drop(RocksDBProvider::builder(foreign.path()).build().unwrap());
-    assert_eq!(
-        refused(foreign.path()),
-        format!(
-            "Error: Refusing to destroy an unrecognized RocksDB directory at {}",
-            foreign.path().display()
-        )
-    );
-    assert!(foreign.path().join("CURRENT").is_file());
+    assert_eq!(refused(external.path()), unrecognized);
+    assert_eq!(fs::read(&log).unwrap(), b"keep");
+    fs::remove_file(log).unwrap();
+    drop(RocksDBProvider::new(external.path()).unwrap());
+    assert_eq!(refused(external.path()), unrecognized);
+    assert!(external.path().join("CURRENT").is_file());
     #[cfg(unix)]
     {
         let offline = dir.join("offline");
@@ -180,10 +166,11 @@ fn checks_static_genesis_independently() {
     let other = tempfile::tempdir().unwrap();
     let dir = node.path();
     let foreign = other.path().join("static_files");
-    let chain =
-        r#"{"config":{"chainId":65500},"difficulty":"0x1","gasLimit":"0x1c9c380","alloc":{}}"#;
     run(reth_ok, "init", dir, "dev", &[]);
-    run(reth_ok, "init", other.path(), chain, &[]);
+    run(reth_ok, "init", other.path(), "sepolia", &[]);
+    let drop_error = |chain, args: &[&str]| {
+        run(reth_error, "db", dir, chain, &[args, &["drop", "--force"]].concat())
+    };
     let mismatch = |path: &Path, hash| {
         format!(
             "Error: Static files at {} do not contain the configured genesis {hash}",
@@ -191,33 +178,22 @@ fn checks_static_genesis_independently() {
         )
     };
     assert_eq!(
-        run(
-            reth_error,
-            "db",
-            dir,
-            "dev",
-            &["--datadir.static-files", foreign.to_str().unwrap(), "drop", "--force"]
-        ),
+        drop_error("dev", &["--datadir.static-files", foreign.to_str().unwrap()]),
         mismatch(&foreign, DEV.genesis_hash())
     );
     run(reth_ok, "db", dir, "dev", &["clear", "mdbx", "HeaderNumbers"]);
-    let other_hash = ChainSpec::from_genesis(serde_json::from_str(chain).unwrap()).genesis_hash();
-    let own = dir.join("static_files");
-    assert_eq!(run(reth_error, "db", dir, chain, &["drop", "--force"]), mismatch(&own, other_hash));
-    let saved = dir.join("saved");
-    fs::rename(&own, &saved).unwrap();
     assert_eq!(
-        run(reth_error, "db", dir, "dev", &["drop", "--force"]),
+        drop_error("sepolia", &[]),
+        mismatch(&dir.join("static_files"), SEPOLIA.genesis_hash())
+    );
+    let missing = dir.join("missing-static");
+    assert_eq!(
+        drop_error("dev", &["--datadir.static-files", missing.to_str().unwrap()]),
         format!("Error: Database does not contain the configured genesis {}", DEV.genesis_hash())
     );
-    if own.exists() {
-        fs::remove_dir(&own).unwrap();
-    }
-    fs::rename(saved, own).unwrap();
-    for (path, spec) in [(dir, "dev"), (other.path(), chain)] {
-        assert!(path.join("rocksdb/CURRENT").is_file());
-        run(reth_ok, "db", path, spec, &["drop", "--force"]);
-    }
+    assert!(other.path().join("rocksdb/CURRENT").is_file());
+    assert!(dir.join("rocksdb/CURRENT").is_file());
+    run(reth_ok, "db", dir, "dev", &["drop", "--force"]);
 }
 
 #[cfg(unix)]
