@@ -1127,17 +1127,18 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
     fn parse_ref(
         &self,
         _cmd: &Command,
-        _arg: Option<&Arg>,
+        arg: Option<&Arg>,
         value: &OsStr,
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
+        let arg = arg.map(ToString::to_string).unwrap_or_else(|| "...".to_owned());
         // This accepts any module name, creating Other(name) for unknowns, but rejects the `all`
         // and `none` keywords mixed with other modules.
         val.parse::<RpcModuleSelection>().map_err(|_| {
             clap::Error::raw(
                 clap::error::ErrorKind::ValueValidation,
-                format!("invalid RPC module selection '{val}': `all` and `none` cannot be combined with other modules\n"),
+                format!("invalid value '{val}' for '{arg}': `all` and `none` cannot be combined with other modules\n"),
             )
         })
     }
@@ -1257,6 +1258,7 @@ mod tests {
                     panic!("{flag} {api} should be rejected")
                 };
                 assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation, "{flag} {api}");
+                assert!(err.to_string().contains(flag), "{err}");
             }
         }
     }
