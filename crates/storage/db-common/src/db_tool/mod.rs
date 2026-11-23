@@ -9,9 +9,11 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DatabaseError, RawTable, TableRawRow,
 };
+use reth_fs_util as fs;
 use reth_node_types::NodeTypesWithDB;
 use reth_provider::{providers::ProviderNodeTypes, ChainSpecProvider, DBProvider, ProviderFactory};
-use std::{rc::Rc, sync::Arc};
+use std::{path::Path, rc::Rc, sync::Arc};
+use tracing::info;
 
 /// Wrapper over DB that implements many useful DB queries.
 #[derive(Debug)]
@@ -127,6 +129,31 @@ impl<N: ProviderNodeTypes> DbTool<N> {
             .db_ref()
             .view(|tx| tx.cursor_dup_read::<T>()?.seek_by_key_subkey(key, subkey))?
             .map_err(|e| eyre::eyre!(e))
+    }
+
+    /// Drops the database, the static files and ExEx WAL at the given paths.
+    pub fn drop<P: AsRef<Path>>(
+        &self,
+        db_path: P,
+        static_files_path: P,
+        exex_wal_path: P,
+    ) -> Result<()> {
+        let db_path = db_path.as_ref();
+        info!(target: "reth::cli", "Dropping database at {:?}", db_path);
+        fs::remove_dir_all(db_path)?;
+
+        let static_files_path = static_files_path.as_ref();
+        info!(target: "reth::cli", "Dropping static files at {:?}", static_files_path);
+        fs::remove_dir_all(static_files_path)?;
+        fs::create_dir_all(static_files_path)?;
+
+        if exex_wal_path.as_ref().exists() {
+            let exex_wal_path = exex_wal_path.as_ref();
+            info!(target: "reth::cli", "Dropping ExEx WAL at {:?}", exex_wal_path);
+            fs::remove_dir_all(exex_wal_path)?;
+        }
+
+        Ok(())
     }
 
     /// Drops the provided table from the database.

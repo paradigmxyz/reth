@@ -1,5 +1,6 @@
 use super::*;
 use alloy_primitives::{Address, B256, U256};
+use reth_chainspec::DEV;
 use reth_db::{
     init_db,
     mdbx::DatabaseArguments,
@@ -142,4 +143,30 @@ fn db_get_mdbx_raw_table_range() {
     );
 }
 
-mod drop;
+#[test]
+fn db_drop_clears_rocksdb_history() {
+    let node = tempfile::tempdir().unwrap();
+    let rocks = tempfile::tempdir().unwrap();
+    let paths = [
+        "--datadir",
+        node.path().to_str().unwrap(),
+        "--datadir.rocksdb",
+        rocks.path().to_str().unwrap(),
+    ];
+    let run = |cmd: &str, chain: &str, args: &[&str]| {
+        reth_ok(&[&[cmd, "--chain", chain], paths.as_slice(), args].concat())
+    };
+    let account = Address::ZERO.to_string();
+    let genesis = json!({
+        "config": { "chainId": DEV.chain.id() },
+        "alloc": { (&account): { "balance": "0x1" } }
+    })
+    .to_string();
+    let history = ["get", "rocksdb", "accounts-history", &account];
+
+    run("init", &genesis, &["--storage.v2=true"]);
+    assert_eq!(serde_json::from_str::<Vec<u64>>(&run("db", &genesis, &history)).unwrap(), [0]);
+    run("db", &genesis, &["drop", "--force"]);
+    run("init", "dev", &["--storage.v2=true"]);
+    assert_eq!(run("db", "dev", &history), "");
+}
