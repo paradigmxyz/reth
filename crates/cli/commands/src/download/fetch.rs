@@ -349,6 +349,17 @@ impl ArchiveFetcher {
                     range_start.map_or_else(|| "unknown".to_string(), |start| start.to_string())
                 )
             }
+            // A different total means the remote archive changed under the `.part` file.
+            if is_partial &&
+                let (Some(known), Some(size)) = (total_size, size) &&
+                known != size
+            {
+                self.paths.cleanup_partial();
+                eyre::bail!(
+                    "Server changed the size of {} from {known} to {size} bytes during the download",
+                    self.paths.file_name()
+                )
+            }
 
             // A full response restarts the file, so its length replaces any earlier total.
             if total_size.is_none() || (!is_partial && size.is_some()) {
@@ -1633,25 +1644,10 @@ mod tests {
 
     #[test]
     fn sequential_full_response_replaces_earlier_total() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}/archive.tar.zst", listener.local_addr().unwrap());
-        std::thread::spawn(move || {
-            let responses: [&[u8]; 2] = [
-                b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\nConnection: close\r\n\r\n0123",
-                b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n0123456789",
-            ];
-            for (stream, response) in listener.incoming().zip(responses) {
-                let mut stream = stream.unwrap();
-                let mut request = io::BufReader::new(stream.try_clone().unwrap());
-                loop {
-                    let mut line = String::new();
-                    if request.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
-                        break
-                    }
-                }
-                stream.write_all(response).unwrap();
-            }
-        });
+        let url = spawn_response_sequence_server(vec![
+            b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\nConnection: close\r\n\r\n0123",
+            b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n0123456789",
+        ]);
         let dir = tempfile::tempdir().unwrap();
         let session = DownloadSession::new(None, None, CancellationToken::new())
             .with_retry_backoff(Some(Duration::ZERO));
@@ -1661,6 +1657,27 @@ mod tests {
 
         assert_eq!(downloaded.size, 10);
         assert_eq!(std::fs::read(downloaded.path).unwrap(), b"0123456789");
+    }
+
+    #[test]
+    fn sequential_resume_rejects_changed_total() {
+        let url = spawn_response_sequence_server(vec![
+            b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\nConnection: close\r\n\r\n0123",
+            b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 4-9/10\r\n\
+                  Content-Length: 6\r\nConnection: close\r\n\r\n456789",
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new())
+            .with_retry_backoff(Some(Duration::ZERO));
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, None);
+
+        let error = fetcher.download(None, None).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "Server changed the size of archive.tar.zst from 20 to 10 bytes during the download"
+        );
+        assert!(!dir.path().join("archive.tar.zst.part").exists());
     }
 
     #[test]
@@ -1809,6 +1826,26 @@ mod tests {
                     }
                 }
                 stream.write_all(&response).unwrap();
+            }
+        });
+        url
+    }
+
+    /// Answers successive HTTP requests on localhost with each of `responses` once, in order.
+    fn spawn_response_sequence_server(responses: Vec<&'static [u8]>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/archive.tar.zst", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for (stream, response) in listener.incoming().zip(responses) {
+                let mut stream = stream.unwrap();
+                let mut request = io::BufReader::new(stream.try_clone().unwrap());
+                loop {
+                    let mut line = String::new();
+                    if request.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                        break
+                    }
+                }
+                stream.write_all(response).unwrap();
             }
         });
         url
