@@ -16,7 +16,7 @@ use alloy_rpc_types_eth::{
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
 use evm2::evm::{CacheDB, DynDatabase};
-use evm2_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
+use evm2_inspectors::access_list::AccessListInspector;
 use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{ProviderError, RethError};
@@ -69,7 +69,8 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
         payload: SimulatePayload<RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>>,
         block: Option<BlockId>,
     ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send {
-        async move {
+        let timeout = self.eth_api_settings().evm_timeout;
+        let simulation = async move {
             if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
                 return Err(EthApiError::other(EthSimulateError::TooManyBlocks).into())
             }
@@ -225,11 +226,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                     let trace_transfers =
                         trace_transfers && !evm_env.version().feature(evm2::EvmFeatures::EIP7708);
                     let mut evm = this.evm_config().evm_with_env(&mut db, evm_env.clone());
-                    if trace_transfers {
-                        // prepare inspector to capture transfer inside the evm so they are recorded
-                        // and included in logs
-                        evm.set_inspector(TransferInspector::new(false).with_logs(true));
-                    }
+                    simulate::configure_inspector(&mut evm, trace_transfers, timeout);
                     let mut builder =
                         this.evm_config().create_block_builder(evm, evm_env, &parent, ctx);
                     if build_bal {
@@ -275,6 +272,14 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                 Ok(blocks)
             })
             .await
+        };
+        async move {
+            if timeout.is_zero() {
+                return simulation.await
+            }
+            tokio::time::timeout(timeout, simulation)
+                .await
+                .map_err(|_| Self::Error::from_eth_err(EthApiError::ExecutionTimedOut(timeout)))?
         }
     }
 

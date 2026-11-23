@@ -1408,6 +1408,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
         .eth_state_cache_config(self.config.cache)
         .task_spawner(self.components.task_executor().clone())
         .gas_cap(self.config.rpc_gas_cap.into())
+        .evm_timeout(self.config.rpc_evm_timeout)
         .max_simulate_blocks(self.config.rpc_max_simulate_blocks)
         .max_trace_bytes(self.config.rpc_max_trace_bytes)
         .compute_state_root_for_eth_simulate(self.config.compute_state_root_for_eth_simulate)

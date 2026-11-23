@@ -14,7 +14,11 @@ use alloy_rpc_types_eth::{
     state::StateOverride,
     BlockId, BlockOverrides, BlockTransactionsKind,
 };
-use evm2::{interpreter::InstrStop, precompiles::MovePrecompileError, EvmFeatures, TxResult};
+use evm2::{
+    interpreter::{InstrStop, Interpreter},
+    precompiles::MovePrecompileError,
+    EvmFeatures, EvmTypesHost, ExecutionError, Inspector, TxResult,
+};
 use evm2_inspectors::transfer::TransferInspector;
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_errors::ProviderResult;
@@ -30,7 +34,7 @@ use reth_rpc_server_types::result::rpc_err;
 use reth_storage_api::{noop::NoopProvider, HashedPostStateProvider, StateProvider};
 use reth_tasks::cancel::is_cancelled;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
-use std::mem;
+use std::{mem, time::Duration};
 
 /// Fallback seconds added between simulated block timestamps when neither the user nor the chain
 /// hint provides a value.
@@ -337,6 +341,14 @@ where
     }
     builder.apply_pre_execution_changes()?;
 
+    // Enable transfer logs only for transactions, between the pre- and post-block system calls.
+    // SAFETY: The inspector types have no lifetime parameters.
+    let trace_with_cancel = unsafe {
+        builder.evm_mut().with_inspector(|(_, tracer): &mut InterruptibleTransferInspector| {
+            *tracer = Some(TransferInspector::new(false).with_logs(true));
+        })
+    }
+    .is_some();
     let mut results = Vec::with_capacity(calls.len());
     let mut cumulative_tx_gas_used: u64 = 0;
     let mut block_regular_gas_used: u64 = 0;
@@ -408,12 +420,20 @@ where
 
         // The transfer tracer keeps the transaction's logs, with the synthetic transfer logs
         // among them, outside the EVM's own logs.
-        // SAFETY: `TransferInspector` has no lifetime parameters.
-        if let Some(logs) = unsafe {
-            builder
-                .evm_mut()
-                .with_inspector(|inspector: &mut TransferInspector| inspector.take_logs())
-        } && let Some(result) = results.last_mut()
+        // SAFETY: The inspector types have no lifetime parameters.
+        let evm = builder.evm_mut();
+        let logs = unsafe {
+            if trace_with_cancel {
+                evm.with_inspector(|(_, tracer): &mut InterruptibleTransferInspector| {
+                    tracer.as_mut().map(TransferInspector::take_logs)
+                })
+                .flatten()
+            } else {
+                evm.with_inspector(TransferInspector::take_logs)
+            }
+        };
+        if let Some(logs) = logs &&
+            let Some(result) = results.last_mut()
         {
             result.logs = logs;
         }
@@ -431,6 +451,9 @@ where
         block_state_gas_used = block_state_gas_used.saturating_add(gas_output.state_gas_used());
     }
 
+    if trace_with_cancel {
+        builder.evm_mut().set_inspector(SimulationCancel::default());
+    }
     let result = if let Some(simulation_state) = simulation_state {
         builder.finish_with_state_root(&state_provider, |output| {
             simulation_state
@@ -723,12 +746,47 @@ impl SimulatedState {
     }
 }
 
+/// Installs the inspectors needed by a simulated block. A nonzero timeout enables cancellation
+/// during EVM execution, including system calls. Transfer logs are collected only for transactions.
+pub fn configure_inspector(evm: &mut impl RethEvm, trace_transfers: bool, timeout: Duration) {
+    if !timeout.is_zero() {
+        evm.set_inspect_system_calls(true);
+        if trace_transfers {
+            evm.set_inspector((SimulationCancel::default(), None::<TransferInspector>));
+        } else {
+            evm.set_inspector(SimulationCancel::default());
+        }
+    } else if trace_transfers {
+        evm.set_inspector(TransferInspector::new(false).with_logs(true));
+    }
+}
+
+type InterruptibleTransferInspector = (SimulationCancel, Option<TransferInspector>);
+
+/// Checks cancellation on frame entry and every 256 instructions within a frame.
+#[derive(Debug, Default)]
+struct SimulationCancel {
+    steps: u8,
+}
+
+impl<T: EvmTypesHost> Inspector<T> for SimulationCancel {
+    fn initialize_interp(&mut self, interp: &mut Interpreter<'_, '_, T>) {
+        if is_cancelled() {
+            interp.fail(ExecutionError::Fatal("simulation cancelled".into()));
+        }
+    }
+
+    fn step(&mut self, interp: &mut Interpreter<'_, '_, T>) {
+        self.steps = self.steps.wrapping_add(1);
+        if self.steps == 0 {
+            self.initialize_interp(interp);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{
-        apply_precompile_overrides, sanitize_chain, EthSimulateError, ProviderResult,
-        SimulatedState, INTERNAL_ERROR_CODE,
-    };
+    use super::*;
     use crate::{cache::db::apply_state_overrides_with_state, error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
     use alloy_consensus::Header;
@@ -743,13 +801,17 @@ mod tests {
         BlockOverrides, TransactionRequest,
     };
     use evm2::{
+        bytecode::Bytecode,
         ethereum::ethereum_tx_registry,
-        evm::{AccountInfo, CacheDB, EmptyDB, InMemoryDB},
-        BaseEvmTypes, Evm, Precompiles, SpecId,
+        evm::{AccountInfo, CacheDB, EmptyDB, InMemoryDB, SystemTx},
+        interpreter::op,
+        registry::HandlerError,
+        BaseEvmTypes, Evm, InspectorConfig, Precompiles, SpecId,
     };
     use reth_evm::BundleState;
     use reth_primitives_traits::SealedHeader;
     use reth_storage_api::HashedPostStateProvider;
+    use reth_tasks::CancelOnDrop;
     use reth_trie_common::{HashedPostState, KeccakKeyHasher};
     use std::{
         collections::BTreeMap,
@@ -764,6 +826,38 @@ mod tests {
             EmptyDB::default(),
             Precompiles::base(SpecId::PRAGUE),
         )
+    }
+
+    #[test]
+    fn cancelled_system_call_stops_inside_the_frame() {
+        // The request expires after frame entry, before the next cancellation checkpoint.
+        struct DropRequest(Option<CancelOnDrop>);
+
+        impl Inspector<BaseEvmTypes> for DropRequest {
+            fn inspector_config(&self) -> InspectorConfig {
+                InspectorConfig::without_steps()
+            }
+
+            fn initialize_interp(&mut self, _: &mut Interpreter<'_, '_, BaseEvmTypes>) {
+                self.0.take();
+            }
+        }
+
+        let contract = Address::repeat_byte(0x42);
+        let mut evm = test_evm();
+        let code = Bytecode::new_legacy([op::PUSH0, op::POP].repeat(128).into());
+        evm.overlay_db_mut().insert_account_info(&contract, AccountInfo::default().with_code(code));
+        configure_inspector(&mut evm, false, Duration::from_secs(1));
+        let request = CancelOnDrop::default();
+        let inspector = evm.clear_inspector().unwrap();
+        evm.set_inspector((inspector, DropRequest(Some(request.clone()))));
+        let err = request.scope(|| {
+            evm.system_call(SystemTx::new(contract, Bytes::new()))
+                .map(|tx| tx.discard())
+                .unwrap_err()
+        });
+        assert!(matches!(err, HandlerError::Fatal(_)));
+        assert_eq!(err.to_string(), "fatal error: simulation cancelled");
     }
 
     /// Mimics the parent-state storage reads of the database-backed providers and counts them.

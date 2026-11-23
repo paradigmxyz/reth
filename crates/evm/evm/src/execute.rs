@@ -97,6 +97,10 @@ pub trait Evm {
     where
         I: evm2::Inspector<Self::EvmTypes> + 'static;
 
+    /// Controls whether the installed inspector observes system calls. The default does
+    /// nothing for implementations without system call inspection.
+    fn set_inspect_system_calls(&mut self, _inspect: bool) {}
+
     /// Runs `f` on the inspector set by [`Self::set_inspector`] if it has type `I`.
     ///
     /// # Safety
@@ -192,6 +196,10 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
 
     fn set_inspector<I: evm2::Inspector<T> + 'a>(&mut self, inspector: I) {
         evm2::Evm::set_inspector(self, inspector);
+    }
+
+    fn set_inspect_system_calls(&mut self, inspect: bool) {
+        evm2::Evm::set_inspect_system_calls(self, inspect);
     }
 
     unsafe fn with_inspector<I, R>(&mut self, f: impl FnOnce(&mut I) -> R) -> Option<R>
