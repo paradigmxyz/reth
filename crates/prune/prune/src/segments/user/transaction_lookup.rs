@@ -62,6 +62,9 @@ where
         provider: &Provider,
         mut input: PruneInput,
     ) -> Result<SegmentOutput, PrunerError> {
+        // The stored checkpoint, before it may be replaced with the static file starting point.
+        let stored_checkpoint = input.previous_checkpoint;
+
         // It is not possible to prune TransactionLookup data for which we don't have transaction
         // data. If the TransactionLookup checkpoint is lagging behind (which can happen e.g. when
         // pre-merge history is dropped and then later tx lookup pruning is enabled) then we can
@@ -167,7 +170,7 @@ where
         if limiter.is_limit_reached() {
             return Ok(SegmentOutput::not_done(
                 limiter.interrupt_reason(),
-                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+                stored_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
             ))
         }
 
@@ -603,6 +606,46 @@ mod tests {
             db.table::<tables::TransactionHashNumbers>().unwrap().len(),
             tx_hash_numbers_len
         );
+    }
+
+    #[test]
+    fn prune_time_limit_reached_keeps_checkpoint_below_static_files() {
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+        let first_retained_block = DEFAULT_BLOCKS_PER_STATIC_FILE;
+        let blocks = random_block_range(
+            &mut rng,
+            first_retained_block - 1..=first_retained_block + 1,
+            BlockRangeParams { tx_count: 1..2, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).unwrap();
+
+        // Transaction zero is in a block below the lowest static file.
+        let static_files = db.factory.static_file_provider();
+        {
+            let mut writer = static_files
+                .get_writer(first_retained_block, StaticFileSegment::Transactions)
+                .unwrap();
+            for (tx_number, block) in blocks.iter().enumerate().skip(1) {
+                writer.append_transaction(tx_number as u64, &block.body().transactions[0]).unwrap();
+                writer.increment_block(block.number).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        let limiter =
+            PruneLimiter::default().set_deleted_entries_limit(10).set_time_limit(Duration::ZERO);
+        sleep(Duration::from_millis(1));
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = TransactionLookup::new(PruneMode::Before(first_retained_block + 1))
+            .prune(
+                &provider,
+                PruneInput { previous_checkpoint: None, to_block: first_retained_block, limiter },
+            )
+            .unwrap();
+
+        // The static file starting point is not saved as a checkpoint.
+        assert_eq!(result, SegmentOutput::not_done(PruneInterruptReason::Timeout, None));
     }
 
     #[test]
