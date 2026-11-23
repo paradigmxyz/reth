@@ -156,9 +156,16 @@ impl<DB: Database> ReaderTxnTracker for DB {
         let start = Instant::now();
         let mut last_reader_check = start;
         let mut last_warn = start;
-        while let Some(oldest_reader_txnid) = Database::oldest_reader_txnid(self) &&
-            oldest_reader_txnid < committed_txnid
-        {
+        loop {
+            let oldest_reader_txnid = Database::oldest_reader_txnid(self);
+            match oldest_reader_txnid {
+                Some(oldest) if oldest >= committed_txnid => break,
+                // `None` means no readers only while the environment still answers queries. A
+                // fatal MDBX error makes every query fail while open read transactions keep
+                // their snapshots, so keep waiting in that case.
+                None if Database::last_txnid(self).is_some() => break,
+                _ => {}
+            }
             if last_reader_check.elapsed() >= READER_CHECK_INTERVAL {
                 if let Err(err) = Database::reader_check(self) {
                     error!(target: "storage::db", %err, "Failed to clear stale database readers");
@@ -168,7 +175,7 @@ impl<DB: Database> ReaderTxnTracker for DB {
             if last_warn.elapsed() >= SLOW_READERS_WARN_INTERVAL {
                 warn!(
                     target: "storage::db",
-                    oldest_reader_txnid,
+                    ?oldest_reader_txnid,
                     committed_txnid,
                     elapsed = ?start.elapsed(),
                     "Waiting for database readers older than the last commit to finish"
