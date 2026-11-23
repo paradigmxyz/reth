@@ -1392,7 +1392,10 @@ mod tests {
     use alloy_primitives::{B256, U256};
     use itertools::Itertools;
     use rand::Rng;
-    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, NewCanonicalChain};
+    use reth_chain_state::{
+        test_utils::{test_canonical_in_memory_state_writer, TestBlockBuilder},
+        ExecutedBlock, InMemoryState, NewCanonicalChain,
+    };
     use reth_db_api::{
         models::{AccountBeforeTx, StorageBeforeTx, StorageSettings},
         table::Compress,
@@ -1480,7 +1483,8 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let provider = BlockchainProvider::new(factory)?;
+        let (provider, mut canonical_in_memory_state_writer) =
+            BlockchainProvider::new_with_writer(factory)?;
         let consistent_provider = provider.consistent_provider()?;
 
         // Useful blocks
@@ -1520,7 +1524,7 @@ mod tests {
                 ..Default::default()
             }],
         };
-        consistent_provider.canonical_in_memory_state.update_chain(chain);
+        canonical_in_memory_state_writer.update_chain(chain);
         let consistent_provider = provider.consistent_provider()?;
 
         // Now the block should be found in memory
@@ -1577,7 +1581,7 @@ mod tests {
             .is_none());
 
         // Insert the last block into the pending state
-        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+        canonical_in_memory_state_writer.set_pending_block(ExecutedBlock {
             recovered_block: Arc::new(RecoveredBlock::new_sealed(
                 last_in_mem_block.clone(),
                 Default::default(),
@@ -1624,7 +1628,8 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let provider = BlockchainProvider::new(factory)?;
+        let (provider, mut canonical_in_memory_state_writer) =
+            BlockchainProvider::new_with_writer(factory)?;
         let consistent_provider = provider.consistent_provider()?;
 
         // First in memory block
@@ -1654,7 +1659,7 @@ mod tests {
                 ..Default::default()
             }],
         };
-        consistent_provider.canonical_in_memory_state.update_chain(chain);
+        canonical_in_memory_state_writer.update_chain(chain);
 
         let consistent_provider = provider.consistent_provider()?;
 
@@ -1738,7 +1743,8 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new(factory)?;
+        let (provider, mut canonical_in_memory_state_writer) =
+            BlockchainProvider::new_with_writer(factory)?;
 
         let in_memory_changesets = in_memory_changesets.into_iter().next().unwrap();
         let chain = NewCanonicalChain::Commit {
@@ -1773,7 +1779,7 @@ mod tests {
                 })
                 .unwrap()],
         };
-        provider.canonical_in_memory_state.update_chain(chain);
+        canonical_in_memory_state_writer.update_chain(chain);
 
         let consistent_provider = provider.consistent_provider()?;
 
@@ -1914,7 +1920,8 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new(factory)?;
+        let (provider, mut canonical_in_memory_state_writer) =
+            BlockchainProvider::new_with_writer(factory)?;
 
         let in_mem_block = in_memory_blocks.first().unwrap();
         let senders = in_mem_block.senders().expect("failed to recover senders");
@@ -1944,7 +1951,7 @@ mod tests {
                 ..Default::default()
             }],
         };
-        provider.canonical_in_memory_state.update_chain(chain);
+        canonical_in_memory_state_writer.update_chain(chain);
 
         let consistent_provider = provider.consistent_provider()?;
 
@@ -2015,7 +2022,8 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new(factory)?;
+        let (provider, mut canonical_in_memory_state_writer) =
+            BlockchainProvider::new_with_writer(factory)?;
 
         let mut new = Vec::new();
         for (block, (previous, next)) in in_memory_blocks.into_iter().zip([(100, 200), (200, 300)])
@@ -2039,7 +2047,7 @@ mod tests {
                 ..Default::default()
             });
         }
-        provider.canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new });
+        canonical_in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new });
 
         let consistent_provider = provider.consistent_provider()?;
 
@@ -2089,10 +2097,12 @@ mod tests {
         provider_rw.save_prune_checkpoint(PruneSegment::AccountHistory, partial_genesis)?;
         provider_rw.commit()?;
 
-        let canonical = CanonicalInMemoryState::empty();
-        canonical.update_chain(NewCanonicalChain::Commit {
+        let mut canonical_in_memory_state_writer =
+            test_canonical_in_memory_state_writer(InMemoryState::default());
+        canonical_in_memory_state_writer.update_chain(NewCanonicalChain::Commit {
             new: vec![TestBlockBuilder::eth().get_executed_block_with_number(1, B256::ZERO)],
         });
+        let canonical = canonical_in_memory_state_writer.canonical_in_memory_state().clone();
         let provider = ConsistentProvider::new(factory.clone(), canonical.clone())?;
         for error in [
             provider.account_block_changeset(0).unwrap_err(),
@@ -2148,7 +2158,12 @@ mod tests {
         assert!(db
             .account_changesets_range((Bound::Excluded(u64::MAX), Bound::Unbounded))?
             .is_empty());
-        let provider = ConsistentProvider::new(factory, CanonicalInMemoryState::empty())?;
+        let provider = ConsistentProvider::new(
+            factory,
+            test_canonical_in_memory_state_writer(InMemoryState::default())
+                .canonical_in_memory_state()
+                .clone(),
+        )?;
         assert_eq!(provider.account_changesets_range(u64::MAX..=u64::MAX)?, [(u64::MAX, account)]);
         assert_eq!(
             provider.storage_changesets_range(u64::MAX..)?,
@@ -2190,7 +2205,12 @@ mod tests {
         }
         static_files.initialize_index()?;
 
-        let provider = ConsistentProvider::new(factory.clone(), CanonicalInMemoryState::empty())?;
+        let provider = ConsistentProvider::new(
+            factory.clone(),
+            test_canonical_in_memory_state_writer(InMemoryState::default())
+                .canonical_in_memory_state()
+                .clone(),
+        )?;
         assert_eq!(
             provider.account_changesets_range(first..)?,
             [(first, account.clone()), (last, account)]

@@ -1694,14 +1694,11 @@ fn threshold_persistence_uses_canonical_in_memory_chain_length() {
         .with_persistence_threshold(3)
         .with_memory_block_buffer_target(0)
         .with_num_state_masking_blocks(2);
-    test_harness.tree.persistence_state.last_persisted_block =
-        blocks[7].recovered_block().num_hash();
-    test_harness.tree.persistence_state.last_state_trie_persisted_block =
-        blocks[5].recovered_block().num_hash();
-    test_harness.tree.canonical_in_memory_state().remove_persisted_blocks_until(
-        blocks[7].recovered_block().num_hash(),
-        blocks[5].recovered_block().number(),
-    );
+    test_harness
+        .tree
+        .persistence_state
+        .finish(blocks[7].recovered_block().num_hash(), blocks[5].recovered_block().num_hash());
+    test_harness.tree.on_new_persisted_block().unwrap();
 
     assert_eq!(test_harness.tree.canonical_in_memory_state().canonical_chain().count(), 4);
     assert!(test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).is_some());
