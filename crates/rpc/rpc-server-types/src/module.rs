@@ -498,7 +498,9 @@ pub trait RpcModuleValidator: Clone + Send + Sync + 'static {
             // served.
             let selection = Self::parse_selection(name)
                 .map_err(|e| format!("Invalid RPC module '{name}' in {arg_name}: {e}"))?;
-            if !matches!(selection, RpcModuleSelection::Selection(s) if s.len() == 1) {
+            if name.contains(',') ||
+                !matches!(selection, RpcModuleSelection::Selection(s) if s.len() == 1)
+            {
                 return Err(format!("Invalid RPC module '{name}' in {arg_name}: not a module name"))
             }
         }
@@ -809,7 +811,7 @@ mod test {
             assert!(RpcModuleSelection::from_str(s).is_err(), "{s}");
             assert!(DefaultRpcModuleValidator::parse_selection(s).is_err(), "{s}");
         }
-        for name in ["all", "NONE"] {
+        for name in ["all", "NONE", "eth,eth"] {
             let selection = RpcModuleSelection::from([
                 RethRpcModule::Eth,
                 RethRpcModule::Other(name.to_string()),
