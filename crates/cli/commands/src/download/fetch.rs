@@ -350,7 +350,8 @@ impl ArchiveFetcher {
                 )
             }
 
-            if total_size.is_none() {
+            // A full response restarts the file, so its length replaces any earlier total.
+            if total_size.is_none() || (!is_partial && size.is_some()) {
                 total_size = size;
                 if !quiet && let Some(size) = size {
                     info!(target: "reth::cli",
@@ -1623,6 +1624,38 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let session = DownloadSession::new(None, None, CancellationToken::new());
         let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(10));
+
+        let downloaded = fetcher.download(None, None).unwrap();
+
+        assert_eq!(downloaded.size, 10);
+        assert_eq!(std::fs::read(downloaded.path).unwrap(), b"0123456789");
+    }
+
+    #[test]
+    fn sequential_full_response_replaces_earlier_total() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/archive.tar.zst", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let responses: [&[u8]; 2] = [
+                b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\nConnection: close\r\n\r\n0123",
+                b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n0123456789",
+            ];
+            for (stream, response) in listener.incoming().zip(responses) {
+                let mut stream = stream.unwrap();
+                let mut request = io::BufReader::new(stream.try_clone().unwrap());
+                loop {
+                    let mut line = String::new();
+                    if request.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                        break
+                    }
+                }
+                stream.write_all(response).unwrap();
+            }
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new())
+            .with_retry_backoff(Some(Duration::ZERO));
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, None);
 
         let downloaded = fetcher.download(None, None).unwrap();
 
