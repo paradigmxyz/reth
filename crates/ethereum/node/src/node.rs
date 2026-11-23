@@ -8,7 +8,7 @@ use crate::{
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardfork, EthereumHardforks, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_engine_primitives::EngineTypes;
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -22,8 +22,10 @@ use reth_evm_ethereum::{
     JitBackend, JitMetrics, JitMode, RethEvmFactory, RuntimeConfig, RuntimeTuning,
 };
 use reth_network::{
-    primitives::BasicNetworkPrimitives, protocol::IntoRlpxSubProtocol, NetworkHandle,
-    NetworkProtocols, PeersInfo,
+    primitives::BasicNetworkPrimitives,
+    protocol::IntoRlpxSubProtocol,
+    transactions::dependencies::{DependencyAdmission, DependencyProtocolHandler},
+    NetworkHandle, NetworkProtocols, PeersInfo,
 };
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
@@ -354,16 +356,27 @@ where
         let eth_config =
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
 
-        let dependency_rpc = ctx
-            .config
-            .chain
-            .genesis()
-            .config
-            .extra_fields
-            .get("eip8288Time")
-            .and_then(serde_json::Value::as_u64)
-            .map(|_| crate::eip8288::Admission::new(ctx.node.pool().clone()).rpc())
-            .transpose()?;
+        let dependency_rpc =
+            if ctx.config.chain.fork(EthereumHardfork::Bogota).as_timestamp().is_some() {
+                let mut module =
+                    jsonrpsee::RpcModule::new(DependencyAdmission::new(ctx.node.pool().clone()));
+                module.register_async_method(
+                    "eth_sendDependencyWrapper",
+                    |params, context, _| async move {
+                        let raw: alloy_primitives::Bytes = params.one()?;
+                        context.submit(raw).await.map_err(|error| {
+                            jsonrpsee::types::ErrorObjectOwned::owned(
+                                -32000,
+                                error.to_string(),
+                                None::<()>,
+                            )
+                        })
+                    },
+                )?;
+                Some(module)
+            } else {
+                None
+            };
 
         let testing_skip_invalid_transactions = ctx.config.rpc.testing_skip_invalid_transactions;
         let testing_gas_limit_override = ctx.config.rpc.testing_gas_limit;
@@ -785,22 +798,18 @@ where
         pool: Pool,
     ) -> eyre::Result<Self::Network> {
         let network = ctx.network_builder().await?;
-        let dependencies_configured = ctx
+        let admission = ctx
             .chain_spec()
-            .genesis()
-            .config
-            .extra_fields
-            .get("eip8288Time")
-            .and_then(serde_json::Value::as_u64)
-            .is_some();
-        let admission =
-            dependencies_configured.then(|| crate::eip8288::Admission::new(pool.clone()));
+            .fork(EthereumHardfork::Bogota)
+            .as_timestamp()
+            .is_some()
+            .then(|| DependencyAdmission::new(pool.clone()));
         let handle = ctx.start_network(network, pool);
         if let Some(admission) = admission &&
             !handle.tx_gossip_disabled()
         {
-            let (handler, events) = crate::eip8288::protocol();
-            info!(target: "reth::eip8288", profile = reth_eip8288::PROFILE,
+            let (handler, events) = DependencyProtocolHandler::channel();
+            info!(target: "reth::eip8288", profile = alloy_eips::eip8288::PROFILE,
                 "Enabled experimental dependency wrapper transport");
             handle.add_rlpx_sub_protocol(handler.into_rlpx_sub_protocol());
             let span = tracing::Span::current();
@@ -809,7 +818,7 @@ where
                 move |shutdown| async move {
                     tokio::select! {
                         _ = shutdown => {},
-                        _ = crate::eip8288::run(admission, events).instrument(span) => {},
+                        _ = admission.run(events).instrument(span) => {},
                     }
                 },
             );

@@ -1,5 +1,6 @@
 //! Transaction pool errors
 
+use crate::ProofError;
 use std::any::Any;
 
 use alloy_eips::eip4844::BlobTransactionValidationError;
@@ -259,8 +260,8 @@ pub enum Eip8141PoolTransactionError {
     PublicMempoolPolicy(&'static str),
     /// Dependency evidence is missing, invalid, or does not cover the transaction.
     #[error(transparent)]
-    DependencyEvidence(#[from] reth_eip8288::ProofError),
-    /// Dependency frames require the experimental EIP-8288 activation.
+    DependencyEvidence(#[from] ProofError),
+    /// Dependency frames require the embedding client's proof-verification support.
     #[error("EIP-8288 dependency frames are disabled")]
     DependencyFramesDisabled,
 }

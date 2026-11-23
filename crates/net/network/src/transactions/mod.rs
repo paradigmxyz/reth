@@ -11,6 +11,8 @@ pub mod announcement;
 pub mod config;
 /// Default and spec'd bounds.
 pub mod constants;
+/// Bounded dependency-wrapper admission, gossip, and recursive aggregation.
+pub mod dependencies;
 /// Component responsible for fetching transactions from [`NewPooledTransactionHashes`].
 pub mod fetcher;
 /// Defines the traits for transaction-related policies.

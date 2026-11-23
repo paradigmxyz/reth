@@ -276,8 +276,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+pub use alloy_eips::eip8288::{DependencyEvidence, ProofError};
 pub use imbl::OrdMap;
-pub use reth_eip8288::{DependencyEvidence, ProofError};
 
 pub use crate::{
     batcher::{BatchTxProcessor, BatchTxRequest},
@@ -484,11 +484,11 @@ where
         self.pool.block_info()
     }
 
-    fn dependency_aggregate(&self) -> Option<Arc<reth_eip8288::DependencyEvidence>> {
+    fn dependency_aggregate(&self) -> Option<Arc<DependencyEvidence>> {
         self.pool.dependency_aggregate.read().clone()
     }
 
-    fn set_dependency_aggregate(&self, evidence: Option<Arc<reth_eip8288::DependencyEvidence>>) {
+    fn set_dependency_aggregate(&self, evidence: Option<Arc<DependencyEvidence>>) {
         *self.pool.dependency_aggregate.write() = evidence;
     }
 

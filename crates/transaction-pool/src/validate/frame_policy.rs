@@ -114,7 +114,7 @@ impl FrameValidationPolicy {
         let max_verify_gas = max_verify_gas.max(MAX_VERIFY_GAS);
         if tx.frames.iter().any(|frame| frame.mode == FrameMode::DependencyVerify) {
             let dependencies =
-                tx.dependencies().map_err(|_| "invalid EIP-8288 dependency frame")?;
+                tx.signature_dependencies().map_err(|_| "invalid EIP-8288 dependency frame")?;
             if dependencies.len() > MAX_SIGS_PER_TX {
                 return Err("too many EIP-8288 signature dependencies");
             }
@@ -250,7 +250,7 @@ mod tests {
     use super::*;
     use alloy_eips::{
         eip8141::{FrameAddress, FrameLimits, EXPIRY_DATA_LENGTH, EXPIRY_VERIFIER},
-        eip8288::{Dependency, LEANSPHINCS_SCHEME, LEANSPHINCS_VERIFICATION_GAS},
+        eip8288::{SignatureDependency, LEANSPHINCS_SCHEME, LEANSPHINCS_VERIFICATION_GAS},
     };
     use alloy_primitives::{b256, Bytes, U256};
 
@@ -539,7 +539,7 @@ mod tests {
         let mut data = Vec::new();
         for index in 0..count {
             data.extend_from_slice(
-                &Dependency {
+                &SignatureDependency {
                     scheme: LEANSPHINCS_SCHEME,
                     data_hash: B256::ZERO,
                     verification_key_hash: B256::from(U256::from(if distinct { index } else { 0 })),

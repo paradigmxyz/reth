@@ -7,7 +7,7 @@ use alloy_eips::{
         TransactionFees, ATOMIC_BATCH_FLAG, EXPIRY_VERIFIER, EXPIRY_VERIFIER_RUNTIME,
     },
     eip8250::{nonce_slot, NONCE_MANAGER, NONCE_MANAGER_CODE},
-    eip8288::{Dependency, LEANSPHINCS_SCHEME},
+    eip8288::{DependencyEvidence, DependencyWrapper, SignatureDependency, LEANSPHINCS_SCHEME},
     Decodable2718,
 };
 use alloy_primitives::{Address, Bytes, B256, U256};
@@ -16,7 +16,6 @@ use alloy_signer_local::PrivateKeySigner;
 use lean_vm::lean_sphincs;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{test_genesis, wait::poll_until, wallet::Wallet, E2ETestSetupExt};
-use reth_eip8288::{DependencyEvidence, DependencyWrapper};
 use reth_node_ethereum::EthereumNode;
 use reth_rpc_eth_api::helpers::LoadPendingBlock;
 use reth_transaction_pool::TransactionPool;
@@ -33,14 +32,7 @@ const fn recipient() -> Address {
 }
 
 fn chain_spec() -> Arc<reth_chainspec::ChainSpec> {
-    frame_chain_spec(false)
-}
-
-fn frame_chain_spec(dependencies: bool) -> Arc<reth_chainspec::ChainSpec> {
     let mut genesis = test_genesis();
-    if dependencies {
-        genesis.config.extra_fields.insert("eip8288Time".into(), json!(0));
-    }
     genesis.gas_limit = 1_000_000;
     // Devnet contracts are ordinary genesis allocations, not fork-installed code. The nonce
     // manager must be nonempty so EIP-161 does not clear its keyed-nonce storage after execution.
@@ -441,7 +433,7 @@ async fn keyed_nonce_query_requires_activation() -> eyre::Result<()> {
 fn lean_sphincs_wrapper(signer: &PrivateKeySigner) -> eyre::Result<DependencyWrapper> {
     let seed = [7; lean_sphincs::SECRET_KEY_LEN];
     let key = lean_sphincs::key_gen(&seed);
-    let declared = Dependency {
+    let declared = SignatureDependency {
         scheme: LEANSPHINCS_SCHEME,
         data_hash: B256::ZERO,
         verification_key_hash: B256::from(key.to_bytes()),
@@ -461,7 +453,7 @@ fn lean_sphincs_wrapper(signer: &PrivateKeySigner) -> eyre::Result<DependencyWra
         ],
     );
     let tx = TxEip8141::decode_2718_exact(&raw)?;
-    let dependencies = tx.dependencies()?;
+    let dependencies = tx.signature_dependencies()?;
     let signature = lean_sphincs::sign(&seed, &tx.signature_hash().0);
     Ok(DependencyWrapper {
         transactions: vec![raw],
@@ -475,7 +467,7 @@ fn lean_sphincs_wrapper(signer: &PrivateKeySigner) -> eyre::Result<DependencyWra
 #[tokio::test(flavor = "multi_thread")]
 async fn lean_sphincs_wrapper_is_gossiped_and_mined() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let (mut nodes, wallet) = EthereumNode::test_setup(2, frame_chain_spec(true)).build().await?;
+    let (mut nodes, wallet) = EthereumNode::test_setup(2, chain_spec()).build().await?;
     let follower = nodes.pop().unwrap();
     let mut producer = nodes.pop().unwrap();
     let wrapper = lean_sphincs_wrapper(&wallet.signer(0))?;
@@ -510,7 +502,7 @@ async fn lean_sphincs_wrapper_is_gossiped_and_mined() -> eyre::Result<()> {
 #[tokio::test]
 async fn invalid_dependency_wrappers_never_admit_transactions() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let (node, wallet) = EthereumNode::test_setup(1, frame_chain_spec(true)).build_single().await?;
+    let (node, wallet) = EthereumNode::test_setup(1, chain_spec()).build_single().await?;
     let mut forged = lean_sphincs_wrapper(&wallet.signer(0))?;
     forged.evidence = Arc::new(DependencyEvidence::direct(
         forged.evidence.dependencies().to_vec(),

@@ -60,7 +60,8 @@ use crate::{
     validate::{
         FrameValidation, TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
     },
-    AddedTransactionOutcome, AllTransactionsEvents, PriceBumpConfig,
+    AddedTransactionOutcome, AllTransactionsEvents, DependencyEvidence, PriceBumpConfig,
+    ProofError,
 };
 use alloy_consensus::{
     error::ValueError,
@@ -130,13 +131,13 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     fn block_info(&self) -> BlockInfo;
 
     /// Returns the most recent bounded aggregate available to payload construction.
-    fn dependency_aggregate(&self) -> Option<Arc<reth_eip8288::DependencyEvidence>> {
+    fn dependency_aggregate(&self) -> Option<Arc<DependencyEvidence>> {
         None
     }
 
     /// Replaces the single aggregate retained as a proving optimization.
     /// Payload construction independently verifies coverage and the proof.
-    fn set_dependency_aggregate(&self, _evidence: Option<Arc<reth_eip8288::DependencyEvidence>>) {}
+    fn set_dependency_aggregate(&self, _evidence: Option<Arc<DependencyEvidence>>) {}
 
     /// Imports an _external_ transaction.
     ///
@@ -1536,16 +1537,16 @@ pub trait PoolTransaction:
     }
 
     /// Returns immutable dependency evidence attached by wrapper admission.
-    fn dependency_evidence(&self) -> Option<&Arc<reth_eip8288::DependencyEvidence>> {
+    fn dependency_evidence(&self) -> Option<&Arc<DependencyEvidence>> {
         None
     }
 
     /// Attaches wrapper evidence. Admission independently checks coverage and validity.
     fn set_dependency_evidence(
         &mut self,
-        _evidence: Arc<reth_eip8288::DependencyEvidence>,
-    ) -> Result<(), reth_eip8288::ProofError> {
-        Err(reth_eip8288::ProofError::MissingEvidence)
+        _evidence: Arc<DependencyEvidence>,
+    ) -> Result<(), ProofError> {
+        Err(ProofError::MissingEvidence)
     }
 
     /// Attaches frame validation metadata.
@@ -1734,7 +1735,7 @@ pub struct EthPooledTransaction<T = TransactionSigned> {
     /// Optional validation metadata for an EIP-8141 frame transaction.
     pub frame_validation: Option<Arc<FrameValidation>>,
     /// Shared immutable witnesses for EIP-8288 dependencies, excluded from the transaction hash.
-    pub dependency_evidence: Option<Arc<reth_eip8288::DependencyEvidence>>,
+    pub dependency_evidence: Option<Arc<DependencyEvidence>>,
 }
 
 impl<T: SignedTransaction> EthPooledTransaction<T> {
@@ -1855,16 +1856,16 @@ impl PoolTransaction for EthPooledTransaction {
         self.frame_validation.as_ref()
     }
 
-    fn dependency_evidence(&self) -> Option<&Arc<reth_eip8288::DependencyEvidence>> {
+    fn dependency_evidence(&self) -> Option<&Arc<DependencyEvidence>> {
         self.dependency_evidence.as_ref()
     }
 
     fn set_dependency_evidence(
         &mut self,
-        evidence: Arc<reth_eip8288::DependencyEvidence>,
-    ) -> Result<(), reth_eip8288::ProofError> {
+        evidence: Arc<DependencyEvidence>,
+    ) -> Result<(), ProofError> {
         if !self.is_eip8141() {
-            return Err(reth_eip8288::ProofError::Coverage);
+            return Err(ProofError::Coverage);
         }
         self.dependency_evidence = Some(evidence);
         Ok(())

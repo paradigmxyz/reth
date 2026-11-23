@@ -323,10 +323,7 @@ impl<ChainSpec, F: EvmFactory> EthEvmConfig<ChainSpec, F> {
     {
         let factory = self.executor_factory.evm_factory();
         let mut version = factory.version(spec, self.chain_spec().chain_id());
-        if reth_chainspec::is_eip8288_active_at_timestamp(
-            self.chain_spec().as_ref(),
-            block.timestamp.saturating_to(),
-        ) {
+        if self.chain_spec().is_bogota_active_at_timestamp(block.timestamp.saturating_to()) {
             version.features.insert(evm2::EvmFeatures::EIP8288);
         }
         if let Some(blob_params) = blob_params {

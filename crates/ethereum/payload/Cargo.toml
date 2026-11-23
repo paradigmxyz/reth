@@ -29,14 +29,13 @@ reth-chainspec.workspace = true
 reth-payload-validator.workspace = true
 reth-storage-api.workspace = true
 reth-trie-common.workspace = true
-reth-eip8288.workspace = true
 
 # ethereum
 alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 # alloy
-alloy-eips.workspace = true
+alloy-eips = { workspace = true, features = ["eip8288-proofs"] }
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 

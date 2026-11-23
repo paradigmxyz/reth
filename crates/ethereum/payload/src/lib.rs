@@ -262,8 +262,7 @@ where
         .map(|user_limit| std::cmp::min(user_limit, protocol_max_blob_count).max(1))
         .unwrap_or(protocol_max_blob_count);
     let is_osaka = chain_spec.is_osaka_active_at_timestamp(attributes.timestamp());
-    let dependencies_active =
-        reth_chainspec::is_eip8288_active_at_timestamp(chain_spec.as_ref(), attributes.timestamp());
+    let dependencies_active = chain_spec.is_bogota_active_at_timestamp(attributes.timestamp());
     let mut dependency_inputs = Vec::new();
     let mut dependency_input_ids = std::collections::HashSet::new();
     let withdrawals_rlp_length =
@@ -397,7 +396,7 @@ where
                 &pool_tx,
                 InvalidPoolTransactionError::Eip8141(
                     reth_transaction_pool::error::Eip8141PoolTransactionError::DependencyEvidence(
-                        reth_eip8288::ProofError::MissingEvidence,
+                        alloy_eips::eip8288::ProofError::MissingEvidence,
                     ),
                 ),
             );
@@ -535,8 +534,9 @@ where
     };
 
     let block = if dependencies_active {
-        let dependencies = reth_eip8288::transaction_dependencies(&block.body().transactions)
-            .map_err(PayloadBuilderError::other)?;
+        let dependencies =
+            alloy_consensus::TxEip8141::collect_signature_dependencies(&block.body().transactions)
+                .map_err(PayloadBuilderError::other)?;
         if let Some(aggregate) = pool.dependency_aggregate() &&
             dependencies.iter().any(|dep| aggregate.dependencies().binary_search(dep).is_ok())
         {
@@ -547,7 +547,7 @@ where
                 dependency_inputs.push(aggregate);
             }
         }
-        let proof = reth_eip8288::prove(&dependencies, &dependency_inputs)
+        let proof = alloy_eips::eip8288::prove(&dependencies, &dependency_inputs)
             .map_err(PayloadBuilderError::other)?;
         if cancel.is_cancelled() {
             return Ok(BuildOutcome::Cancelled);

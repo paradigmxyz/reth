@@ -74,30 +74,14 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// An explicit genesis list overrides the mainnet default, including an empty list. Other
     /// chains default to no accounts and must configure their own pre-fork state exceptions.
     fn eip8253_accounts(&self) -> &[Address] {
-        self.genesis().config.eip8253_accounts.as_deref().unwrap_or_else(|| {
+        self.genesis().config.zero_nonce_storage_accounts.as_deref().unwrap_or_else(|| {
             if self.genesis_hash() == MAINNET_GENESIS_HASH {
-                &alloy_genesis::EIP8253_MAINNET_ACCOUNTS
+                &alloy_eips::eip8253::MAINNET_ACCOUNTS
             } else {
                 &[]
             }
         })
     }
-}
-
-/// Whether Bogota and the explicitly configured experimental dependency-proof profile are active.
-/// `eip8288Time` is a numeric timestamp in genesis config; absence leaves the profile disabled.
-pub fn is_eip8288_active_at_timestamp<C: EthChainSpec + EthereumHardforks>(
-    chain_spec: &C,
-    timestamp: u64,
-) -> bool {
-    chain_spec.is_bogota_active_at_timestamp(timestamp) &&
-        chain_spec
-            .genesis()
-            .config
-            .extra_fields
-            .get("eip8288Time")
-            .and_then(|activation| activation.as_u64())
-            .is_some_and(|activation| timestamp >= activation)
 }
 
 impl<H: BlockHeader> EthChainSpec for ChainSpec<H> {

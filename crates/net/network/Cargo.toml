@@ -40,7 +40,7 @@ reth-lru.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true
-alloy-eips.workspace = true
+alloy-eips = { workspace = true, features = ["eip8288-proofs"] }
 alloy-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
 enr = { workspace = true, features = ["serde", "rust-secp256k1"] }

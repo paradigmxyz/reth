@@ -1401,7 +1401,7 @@ mod tests {
 
     #[test]
     fn eip8253_chain_accounts_preserve_genesis() {
-        assert_eq!(MAINNET.eip8253_accounts(), &alloy_genesis::EIP8253_MAINNET_ACCOUNTS);
+        assert_eq!(MAINNET.eip8253_accounts(), &alloy_eips::eip8253::MAINNET_ACCOUNTS);
         for spec in [&*SEPOLIA, &*HOLESKY, &*HOODI] {
             assert!(spec.eip8253_accounts().is_empty());
         }
@@ -1409,7 +1409,7 @@ mod tests {
             let mut genesis = Genesis::default();
             genesis.config.chain_id = 1;
             genesis.config.bogota_time = Some(0);
-            genesis.config.eip8253_accounts = accounts.clone();
+            genesis.config.zero_nonce_storage_accounts = accounts.clone();
             let address = Address::with_last_byte(1);
             genesis.alloc.insert(
                 address,
@@ -1427,7 +1427,7 @@ mod tests {
             assert_eq!(spec.genesis_hash(), expected.hash_slow());
         }
         let mut mainnet = MAINNET.as_ref().clone();
-        mainnet.genesis.config.eip8253_accounts = Some(vec![]);
+        mainnet.genesis.config.zero_nonce_storage_accounts = Some(vec![]);
         assert!(mainnet.eip8253_accounts().is_empty());
     }
 

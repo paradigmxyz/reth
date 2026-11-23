@@ -23,9 +23,6 @@ reth-node-builder.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
-reth-network-api.workspace = true
-reth-eth-wire.workspace = true
-reth-eip8288.workspace = true
 reth-evm = { workspace = true, features = ["blst", "c-kzg", "p256-aws-lc-rs"] }
 reth-evm-ethereum = { workspace = true, features = ["std", "blst", "c-kzg", "p256-aws-lc-rs"] }
 reth-rpc.workspace = true
@@ -50,7 +47,7 @@ reth-engine-tree.workspace = true
 reth-network-p2p.workspace = true
 # ethereum
 alloy-consensus.workspace = true
-alloy-eips.workspace = true
+alloy-eips = { workspace = true, features = ["eip8288-proofs"] }
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 jsonrpsee.workspace = true
@@ -64,7 +61,6 @@ tokio-util.workspace = true
 
 # misc
 eyre.workspace = true
-thiserror.workspace = true
 ethereum_ssz.workspace = true
 ethereum_ssz_derive.workspace = true
 futures.workspace = true

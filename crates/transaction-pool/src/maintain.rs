@@ -5,8 +5,8 @@ use crate::{
     error::PoolError,
     metrics::MaintainPoolMetrics,
     traits::{CanonicalStateUpdate, EthPoolTransaction, TransactionPool, TransactionPoolExt},
-    AllPoolTransactions, BlobTransactionSidecarVariant, BlockInfo, PoolTransaction, PoolUpdateKind,
-    TransactionOrigin,
+    AllPoolTransactions, BlobTransactionSidecarVariant, BlockInfo, DependencyEvidence,
+    PoolTransaction, PoolUpdateKind, TransactionOrigin,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction};
 use alloy_eips::{merge::SLOT_DURATION_SECS, BlockNumberOrTag, Decodable2718};
@@ -404,7 +404,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                             .recursive_stark()
                             .filter(|proof| !proof.stark_proof.is_empty())
                             .and_then(|proof| {
-                                let deps = match reth_eip8288::transaction_dependencies(
+                                let deps = match alloy_consensus::TxEip8141::collect_signature_dependencies(
                                     block.body().transactions(),
                                 ) {
                                     Ok(deps) => deps,
@@ -413,7 +413,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                                         return None;
                                     }
                                 };
-                                match reth_eip8288::DependencyEvidence::aggregate(
+                                match DependencyEvidence::aggregate(
                                     deps,
                                     proof.stark_proof.clone(),
                                 ) {

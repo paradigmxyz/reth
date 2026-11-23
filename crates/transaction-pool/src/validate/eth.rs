@@ -10,7 +10,7 @@ use crate::{
     metrics::TxPoolValidationMetrics,
     traits::TransactionOrigin,
     validate::ValidTransaction,
-    Address, EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
+    Address, EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig, ProofError,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 
@@ -584,13 +584,13 @@ where
                     return Err(Eip8141PoolTransactionError::DependencyFramesDisabled.into());
                 }
                 let dependencies = frame
-                    .dependencies()
-                    .map_err(reth_eip8288::ProofError::from)
+                    .signature_dependencies()
+                    .map_err(ProofError::from)
                     .map_err(Eip8141PoolTransactionError::DependencyEvidence)?;
                 transaction
                     .dependency_evidence()
                     .ok_or(Eip8141PoolTransactionError::DependencyEvidence(
-                        reth_eip8288::ProofError::MissingEvidence,
+                        ProofError::MissingEvidence,
                     ))?
                     .covers(&dependencies)
                     .map_err(Eip8141PoolTransactionError::DependencyEvidence)?;
@@ -1119,9 +1119,10 @@ where
             self.fork_tracker.amsterdam.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        if self.chain_spec().is_bogota_active_at_timestamp(new_tip_block.timestamp()) {
-            self.fork_tracker.bogota.store(true, std::sync::atomic::Ordering::Relaxed);
-        }
+        self.fork_tracker.bogota.store(
+            self.chain_spec().is_bogota_active_at_timestamp(new_tip_block.timestamp()),
+            std::sync::atomic::Ordering::Relaxed,
+        );
 
         self.fork_tracker
             .tip_timestamp
@@ -1821,7 +1822,7 @@ mod tests {
         eip2930::{AccessList, AccessListItem},
         eip7702::Authorization,
         eip8141::{Frame, FrameLimits, FrameMode, TransactionFees},
-        eip8288::{Dependency, LEANSPHINCS_SCHEME, LEANSPHINCS_VERIFICATION_GAS},
+        eip8288::{SignatureDependency, LEANSPHINCS_SCHEME, LEANSPHINCS_VERIFICATION_GAS},
     };
     use alloy_primitives::{hex, Address, Bytes, Sealable, Signature, B256, U256};
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
@@ -3067,11 +3068,16 @@ mod tests {
     #[test]
     fn dependency_frames_require_activation_before_evidence() {
         for activation in [None, Some(1), Some(0)] {
-            let mut spec = ChainSpecBuilder::mainnet().bogota_activated().build();
+            let mut builder = ChainSpecBuilder::mainnet().bogota_activated();
+            builder = builder.with_fork(
+                reth_chainspec::EthereumHardfork::Bogota,
+                activation.map_or(
+                    reth_chainspec::ForkCondition::Never,
+                    reth_chainspec::ForkCondition::Timestamp,
+                ),
+            );
+            let mut spec = builder.build();
             spec.genesis.timestamp = 0;
-            if let Some(timestamp) = activation {
-                spec.genesis.config.extra_fields.insert("eip8288Time".into(), timestamp.into());
-            }
             let evm_config = EthEvmConfig::new(Arc::new(spec.clone()));
             let provider = MockEthProvider::default().with_chain_spec(spec).with_genesis_block();
             let validator = EthTransactionValidatorBuilder::new(provider, evm_config)
@@ -3084,7 +3090,7 @@ mod tests {
                     mode: FrameMode::DependencyVerify,
                     limits: FrameLimits { execution: LEANSPHINCS_VERIFICATION_GAS, state: 0 },
                     data: Bytes::copy_from_slice(
-                        &Dependency {
+                        &SignatureDependency {
                             scheme: LEANSPHINCS_SCHEME,
                             data_hash: B256::ZERO,
                             verification_key_hash: B256::repeat_byte(1),
@@ -3121,7 +3127,7 @@ mod tests {
                                 error,
                                 InvalidPoolTransactionError::Eip8141(
                                     Eip8141PoolTransactionError::DependencyEvidence(
-                                        reth_eip8288::ProofError::MissingEvidence
+                                        ProofError::MissingEvidence
                                     )
                                 )
                             ),
@@ -3131,8 +3137,8 @@ mod tests {
                         assert!(
                             matches!(
                                 error,
-                                InvalidPoolTransactionError::Eip8141(
-                                    Eip8141PoolTransactionError::DependencyFramesDisabled
+                                InvalidPoolTransactionError::Consensus(
+                                    InvalidTransactionError::TxTypeNotSupported
                                 )
                             ),
                             "{error:?}"

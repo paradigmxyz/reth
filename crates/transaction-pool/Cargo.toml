@@ -27,10 +27,9 @@ reth-fs-util.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
 reth-lru.workspace = true
-reth-eip8288.workspace = true
 
 # ethereum
-alloy-eips = { workspace = true, features = ["kzg"] }
+alloy-eips = { workspace = true, features = ["kzg", "eip8288-proofs"] }
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-consensus = { workspace = true, features = ["kzg"] }
