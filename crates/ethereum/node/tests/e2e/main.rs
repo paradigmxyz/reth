@@ -10,6 +10,7 @@ mod exex;
 mod finality;
 mod forkchoice;
 mod invalid_payload;
+mod metrics;
 mod p2p;
 mod pool;
 mod prestate;

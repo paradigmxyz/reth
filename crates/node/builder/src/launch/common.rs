@@ -782,9 +782,9 @@ where
         self.right().static_file_provider()
     }
 
-    /// This launches the prometheus endpoint.
+    /// Starts the configured Prometheus HTTP listener and push task.
     ///
-    /// Convenience function to [`Self::start_prometheus_endpoint`]
+    /// Convenience function to [`Self::start_prometheus_endpoint`].
     pub async fn with_prometheus_server(self) -> eyre::Result<Self>
     where
         T::ChainSpec: EthereumHardforks,
@@ -793,7 +793,7 @@ where
         Ok(self)
     }
 
-    /// Starts the prometheus endpoint.
+    /// Starts the configured Prometheus HTTP listener and push task.
     pub async fn start_prometheus_endpoint(&self) -> eyre::Result<()>
     where
         T::ChainSpec: EthereumHardforks,
@@ -801,8 +801,8 @@ where
         // ensure recorder runs upkeep periodically
         install_prometheus_recorder().spawn_upkeep();
 
-        let listen_addr = self.node_config().metrics.prometheus;
-        if let Some(addr) = listen_addr {
+        let metrics = &self.node_config().metrics;
+        if metrics.prometheus.is_some() || metrics.push_gateway_url.is_some() {
             let prune_config = self.prune_config();
             let pruning_mode =
                 PruneConfigKind::from_config(&prune_config, self.chain_spec().as_ref()).as_str();
@@ -815,8 +815,8 @@ where
                 } else {
                     self.node_config().storage_settings()
                 };
-            let config = MetricServerConfig::new(
-                addr,
+            let config = MetricServerConfig::new_with_optional_listener(
+                metrics.prometheus,
                 VersionInfo {
                     version: version_metadata().cargo_pkg_version.as_ref(),
                     build_timestamp: version_metadata().vergen_build_timestamp.as_ref(),
@@ -836,10 +836,7 @@ where
                 prune_config: serde_json::to_string(&prune_config)
                     .expect("serializing PruneConfig should not fail"),
             })
-            .with_push_gateway(
-                self.node_config().metrics.push_gateway_url.clone(),
-                self.node_config().metrics.push_gateway_interval,
-            );
+            .with_push_gateway(metrics.push_gateway_url.clone(), metrics.push_gateway_interval);
 
             MetricServer::new(config).serve().await?;
         }

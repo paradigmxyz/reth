@@ -26,7 +26,7 @@ const MAX_CONCURRENT_METRICS_REQUESTS: usize = 4;
 /// Configuration for the [`MetricServer`]
 #[derive(Debug)]
 pub struct MetricServerConfig {
-    listen_addr: SocketAddr,
+    listen_addr: Option<SocketAddr>,
     version_info: VersionInfo,
     chain_spec_info: ChainSpecInfo,
     storage_settings_info: Option<StorageSettingsInfo>,
@@ -41,6 +41,26 @@ impl MetricServerConfig {
     /// Create a new [`MetricServerConfig`] with the given configuration
     pub const fn new(
         listen_addr: SocketAddr,
+        version_info: VersionInfo,
+        chain_spec_info: ChainSpecInfo,
+        task_executor: TaskExecutor,
+        hooks: Hooks,
+        pprof_dump_dir: PathBuf,
+    ) -> Self {
+        Self::new_with_optional_listener(
+            Some(listen_addr),
+            version_info,
+            chain_spec_info,
+            task_executor,
+            hooks,
+            pprof_dump_dir,
+        )
+    }
+
+    /// Creates a configuration with an optional HTTP listener. Pass `None` to push metrics
+    /// to a [gateway](Self::with_push_gateway) without opening a local metrics port.
+    pub const fn new_with_optional_listener(
+        listen_addr: Option<SocketAddr>,
         version_info: VersionInfo,
         chain_spec_info: ChainSpecInfo,
         task_executor: TaskExecutor,
@@ -86,7 +106,7 @@ impl MetricServer {
         Self { config }
     }
 
-    /// Spawns the metrics server
+    /// Starts the configured HTTP listener and push gateway task.
     pub async fn serve(&self) -> eyre::Result<()> {
         let MetricServerConfig {
             listen_addr,
@@ -100,19 +120,21 @@ impl MetricServer {
             pprof_dump_dir,
         } = &self.config;
 
-        let hooks_for_endpoint = hooks.clone();
-        let executor_for_hooks = task_executor.clone();
-        self.start_endpoint(
-            *listen_addr,
-            Arc::new(move || {
-                hooks_for_endpoint.refresh_background(&executor_for_hooks);
-                hooks_for_endpoint.iter().for_each(|hook| hook());
-            }),
-            task_executor.clone(),
-            pprof_dump_dir.clone(),
-        )
-        .await
-        .wrap_err_with(|| format!("Could not start Prometheus endpoint at {listen_addr}"))?;
+        if let Some(listen_addr) = listen_addr {
+            let hooks_for_endpoint = hooks.clone();
+            let executor_for_hooks = task_executor.clone();
+            self.start_endpoint(
+                *listen_addr,
+                Arc::new(move || {
+                    hooks_for_endpoint.refresh_background(&executor_for_hooks);
+                    hooks_for_endpoint.iter().for_each(|hook| hook());
+                }),
+                task_executor.clone(),
+                pprof_dump_dir.clone(),
+            )
+            .await
+            .wrap_err_with(|| format!("Could not start Prometheus endpoint at {listen_addr}"))?;
+        }
 
         // Start push-gateway task if configured
         if let Some(url) = push_gateway_url {
