@@ -116,8 +116,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// Create new database provider factory.
     ///
     /// `overlay_manager` carries the in-memory state that [`Self::in_memory_state`] returns. A
-    /// default manager has an empty in-memory state of its own, which fits storage whose blocks
-    /// are all on disk.
+    /// default manager has a read-only in-memory state, which never has blocks: that fits storage
+    /// whose blocks are all on disk.
     ///
     /// The storage backends used by the produced factory MAY be inconsistent.
     /// It is recommended to call [`Self::check_consistency`] after

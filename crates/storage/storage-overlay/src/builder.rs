@@ -848,7 +848,7 @@ enum AnchorForParent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::canonical_in_memory_state_writer_for;
+    use crate::test_utils::overlay_manager_with_writer;
     use alloy_primitives::{keccak256, map::HashMap, Address, U256};
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, NewCanonicalChain};
@@ -1028,8 +1028,7 @@ mod tests {
         // The state trie frontier sits at block 1 while Finish is at block 3, so the in-memory
         // chain straddles the state-masking frontier.
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
-        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        let (manager, mut canonical_in_memory_state_writer) = overlay_manager_with_writer();
         canonical_in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: blocks[2..=4].to_vec() });
         let provider = factory.provider().unwrap();
@@ -1091,8 +1090,7 @@ mod tests {
     #[reth_concurrency::test]
     fn managed_overlay_starts_at_state_trie_frontier() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
-        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        let (manager, mut canonical_in_memory_state_writer) = overlay_manager_with_writer();
         for block in &blocks[2..=4] {
             canonical_in_memory_state_writer.insert_executed(block.clone());
         }
@@ -1122,8 +1120,7 @@ mod tests {
     #[reth_concurrency::test]
     fn managed_overlay_skips_when_finish_is_the_anchor() {
         let (factory, blocks) = setup_frontiers(3, 3);
-        let manager = OverlayManager::default();
-        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        let (manager, mut canonical_in_memory_state_writer) = overlay_manager_with_writer();
         canonical_in_memory_state_writer.insert_executed(blocks[4].clone());
         let provider = factory.provider().unwrap();
 
@@ -1266,8 +1263,7 @@ mod tests {
     #[reth_concurrency::test]
     fn execution_overlay_uses_managed_blocks_after_the_anchor() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
-        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        let (manager, mut canonical_in_memory_state_writer) = overlay_manager_with_writer();
         for block in &blocks[2..=4] {
             canonical_in_memory_state_writer.insert_executed(block.clone());
         }
@@ -1340,8 +1336,7 @@ mod tests {
             "the managed chain must not contain the durable Finish block"
         );
 
-        let manager = OverlayManager::default();
-        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        let (manager, mut canonical_in_memory_state_writer) = overlay_manager_with_writer();
         canonical_in_memory_state_writer.insert_executed(side_block_two.clone());
         canonical_in_memory_state_writer.insert_executed(side_block_three.clone());
         let provider = factory.provider().unwrap();
@@ -1367,8 +1362,7 @@ mod tests {
     #[reth_concurrency::test]
     fn managed_overlay_uses_persisted_parent_even_if_retained() {
         let (factory, blocks) = setup_frontiers(2, 3);
-        let manager = OverlayManager::default();
-        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        let (manager, mut canonical_in_memory_state_writer) = overlay_manager_with_writer();
         canonical_in_memory_state_writer.insert_executed(blocks[1].clone());
         let provider = factory.provider().unwrap();
         let builder = manager.overlay_builder(blocks[1].recovered_block().hash());
@@ -1385,8 +1379,7 @@ mod tests {
 
     #[reth_concurrency::test]
     fn builder_appends_block_to_parent_state() {
-        let manager = OverlayManager::default();
-        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        let (manager, mut canonical_in_memory_state_writer) = overlay_manager_with_writer();
         let blocks = test_blocks();
         for block in &blocks[2..=4] {
             canonical_in_memory_state_writer.insert_executed(block.clone());
@@ -1458,8 +1451,7 @@ mod tests {
             .should_skip_overlay_for_reused_sparse_trie(B256::with_last_byte(3), parent_hash,));
 
         let blocks = test_blocks();
-        let manager = OverlayManager::default();
-        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        let (manager, mut canonical_in_memory_state_writer) = overlay_manager_with_writer();
         for block in &blocks[2..=4] {
             canonical_in_memory_state_writer.insert_executed(block.clone());
         }
