@@ -322,8 +322,9 @@ impl ArchiveFetcher {
                 .headers()
                 .get("Content-Range")
                 .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.strip_prefix("bytes"))
-                .map(str::trim);
+                .and_then(|value| value.trim().split_once(' '))
+                .filter(|(unit, _)| unit.eq_ignore_ascii_case("bytes"))
+                .map(|(_, range)| range.trim());
             let size = if is_partial {
                 content_range
                     .and_then(|value| value.split('/').next_back())
@@ -1626,6 +1627,21 @@ mod tests {
         let downloaded = fetcher.download(None, None).unwrap();
 
         assert_eq!(downloaded.size, 10);
+        assert_eq!(std::fs::read(downloaded.path).unwrap(), b"0123456789");
+    }
+
+    #[test]
+    fn sequential_resume_accepts_mixed_case_range_unit() {
+        let response = b"HTTP/1.1 206 Partial Content\r\nContent-Range: Bytes 5-9/10\r\n\
+                         Content-Length: 5\r\nConnection: close\r\n\r\n56789";
+        let url = spawn_response_server(response.to_vec());
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("archive.tar.zst.part"), b"01234").unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new());
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(10));
+
+        let downloaded = fetcher.download(None, None).unwrap();
+
         assert_eq!(std::fs::read(downloaded.path).unwrap(), b"0123456789");
     }
 
