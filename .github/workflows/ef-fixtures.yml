@@ -42,6 +42,8 @@ jobs:
         run: |
           mkdir runner
           cp target/hivetests/ef-test-runner .github/scripts/report-ef-fixtures.py .github/scripts/hive/expected_failures.yaml runner/
+      - name: Test the fixture reporter
+        run: /usr/bin/python3 -m unittest discover -s .github/scripts -p 'test_report_ef_fixtures.py' -v
       - uses: &upload actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ef-test-runner
@@ -56,12 +58,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - *secure
-      - name: Download latest mainnet fixtures
+      - name: Download pinned mainnet fixtures
         env:
           GH_TOKEN: ${{ github.token }}
+          # Pinned so that an upstream release cannot change what this workflow runs, and so that
+          # the expected failures below stay in step with the fixtures. Bump deliberately.
+          FIXTURES_TAG: tests@v21.0.3
         run: |
-          gh api repos/ethereum/execution-specs/releases/latest > release.json
-          jq -er '.tag_name | select(startswith("tests@"))' release.json
+          gh api "repos/ethereum/execution-specs/releases/tags/$FIXTURES_TAG" > release.json
           asset=$(jq -ce '.assets[] | select(.name == "fixtures.tar.gz")' release.json)
           curl -fsSL --retry 3 "$(jq -er .browser_download_url <<< "$asset")" -o fixtures.tar.gz
           digest=$(jq -er '.digest | capture("^sha256:(?<hash>[0-9a-f]{64})$").hash' <<< "$asset")
