@@ -266,7 +266,8 @@ impl FromStr for RpcModuleSelection {
         if s.is_empty() {
             return Ok(Self::Selection(Default::default()))
         }
-        let modules = s.split(',').map(str::trim);
+        // Empty items, such as from a trailing comma in "eth,", are ignored.
+        let modules = s.split(',').map(str::trim).filter(|m| !m.is_empty());
         // The keywords are matched case-insensitively, so "all", "ALL", "aLl" etc. are accepted.
         //
         // They select the whole set and are only valid on their own: mixing them with module
@@ -276,9 +277,10 @@ impl FromStr for RpcModuleSelection {
         if modules.clone().count() > 1 && modules.clone().any(is_keyword) {
             return Err(ParseError::VariantNotFound)
         }
-        if s.trim().eq_ignore_ascii_case("all") {
+        let single = modules.clone().next().unwrap_or_default();
+        if single.eq_ignore_ascii_case("all") {
             Ok(Self::All)
-        } else if s.trim().eq_ignore_ascii_case("none") {
+        } else if single.eq_ignore_ascii_case("none") {
             Ok(Self::Selection(Default::default()))
         } else {
             Self::try_from_selection(modules)
@@ -811,6 +813,14 @@ mod test {
             assert!(RpcModuleSelection::from_str(s).is_err(), "{s}");
             assert!(DefaultRpcModuleValidator::parse_selection(s).is_err(), "{s}");
         }
+        // Empty items are ignored rather than mixed with keywords or rejected as modules.
+        assert_eq!(RpcModuleSelection::from_str("all,").unwrap(), RpcModuleSelection::All);
+        assert!(RpcModuleSelection::from_str(",none").unwrap().is_empty());
+        for s in ["eth,", "eth,,admin"] {
+            let selection = DefaultRpcModuleValidator::parse_selection(s).unwrap();
+            assert!(DefaultRpcModuleValidator::validate_selection(&selection, "http.api").is_ok());
+        }
+
         for name in ["all", "NONE", "eth,eth"] {
             let selection = RpcModuleSelection::from([
                 RethRpcModule::Eth,
