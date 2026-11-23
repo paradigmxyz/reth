@@ -179,6 +179,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             range,
             partial_state_trie,
             finish,
+            None,
             true,
         )
     }
@@ -189,6 +190,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         range: RangeInclusive<BlockNumber>,
         partial_state_trie: BlockNumHash,
         finish: BlockNumHash,
+        finish_state: Option<Arc<BlockState<N>>>,
         write_reverts_to_cache: bool,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
@@ -206,6 +208,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             range,
             partial_state_trie,
             finish,
+            finish_state,
             write_reverts_to_cache,
         )
     }

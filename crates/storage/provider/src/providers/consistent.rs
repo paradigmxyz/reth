@@ -25,10 +25,11 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider,
+    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, StateProviderBox,
     StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_storage_overlay::OverlayStateProvider;
 use reth_trie::bundle_state::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
@@ -74,11 +75,21 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         Ok(Self { storage_provider, head_block, canonical_in_memory_state: state })
     }
 
-    /// Consumes this consistent view and returns its database provider snapshot.
-    pub(crate) fn into_database_provider(
-        self,
-    ) -> <ProviderFactory<N> as DatabaseProviderFactory>::Provider {
-        self.storage_provider
+    /// Consumes this consistent view and returns the historical state provider at `block_hash`
+    /// over its database provider snapshot.
+    ///
+    /// The overlay reads in-memory blocks from the head block of this view first. Persistence that
+    /// completes after the snapshot was opened can remove blocks that the snapshot still needs
+    /// from the live in-memory state. Callers such as RPC choose the block, so the trie reverts it
+    /// accumulates stay out of the changeset cache the engine shares.
+    pub(crate) fn into_historical_state_provider(self, block_hash: B256) -> StateProviderBox {
+        let overlay_builder = self
+            .storage_provider
+            .overlay_manager()
+            .overlay_builder(block_hash)
+            .with_snapshot_state(self.head_block)
+            .without_trie_revert_caching();
+        Box::new(OverlayStateProvider::new(self.storage_provider, overlay_builder))
     }
 
     // Helper function to convert range bounds

@@ -191,6 +191,12 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     /// This is shared with the caller so that a chain the caller already holds (for example the
     /// canonical in-memory chain) can be reused instead of looked up again.
     parent_state: Option<Arc<BlockState<N>>>,
+    /// Canonical in-memory chain captured before the database snapshot was opened.
+    ///
+    /// Persistence removes blocks from the live in-memory state once the state trie covers them.
+    /// A snapshot opened before that still needs them to mask its state above its partial state
+    /// trie frontier.
+    snapshot_state: Option<Arc<BlockState<N>>>,
     /// Anchor hash of the reused sparse trie, if this task reused one.
     reused_sparse_trie_anchor_hash: Option<B256>,
     /// Whether building the overlay may query revert changesets.
@@ -212,6 +218,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             parent_hash,
             overlay_manager,
             parent_state,
+            snapshot_state: None,
             reused_sparse_trie_anchor_hash: None,
             no_reverts: false,
             overlay_cache_config: OverlayCacheConfig::default(),
@@ -242,6 +249,19 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// engine shares.
     pub const fn without_trie_revert_caching(mut self) -> Self {
         self.write_reverts_to_cache = false;
+        self
+    }
+
+    /// Resolves in-memory blocks from `snapshot_state` before the live in-memory state.
+    ///
+    /// `snapshot_state` must be the canonical head captured before the database snapshot that the
+    /// overlay is built for was opened. Its chain then holds every in-memory block that the
+    /// snapshot needs, even after persistence removed them from the live in-memory state.
+    pub fn with_snapshot_state(mut self, snapshot_state: Option<Arc<BlockState<N>>>) -> Self {
+        self.snapshot_state = snapshot_state;
+        if let Some(parent_state) = self.snapshot_block_state(self.parent_hash) {
+            self.parent_state = Some(parent_state);
+        }
         self
     }
 
@@ -477,6 +497,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                             revert_blocks.clone(),
                             state_trie_tip_block,
                             finish_tip_block,
+                            self.snapshot_block_state(finish_tip_block.hash),
                             self.write_reverts_to_cache,
                         )?;
                     retrieve_trie_reverts_duration = start.elapsed();
@@ -489,9 +510,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     // masked DB rows. Complete the trie at Finish before applying those prefixes.
                     let start = Instant::now();
                     let finish_state = self
-                        .overlay_manager
-                        .in_memory_state()
-                        .state_by_hash(finish_tip_block.hash)
+                        .snapshot_block_state(finish_tip_block.hash)
+                        .or_else(|| {
+                            self.overlay_manager
+                                .in_memory_state()
+                                .state_by_hash(finish_tip_block.hash)
+                        })
                         .ok_or_else(|| {
                             ProviderError::other(StateTrieOverlayError {
                                 tip_hash: finish_tip_block.hash,
@@ -727,6 +751,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 Ok(Some(anchor.number + 1..=finish.number))
             }
         }
+    }
+
+    /// Returns the chain that ends at `hash` if the in-memory chain captured with the database
+    /// snapshot contains that block.
+    fn snapshot_block_state(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
+        self.snapshot_state.clone()?.iter().find(|state| state.hash() == hash)
     }
 
     /// Returns true if managed overlay resolution can be skipped for this builder.
@@ -1085,6 +1115,46 @@ mod tests {
                 account_node_paths(&hash_trie),
                 "block {index}"
             );
+        }
+    }
+
+    #[reth_concurrency::test]
+    fn snapshot_state_survives_manager_block_removal() {
+        // The state trie frontier sits at block 1 while Finish is at block 3, so the in-memory
+        // blocks 2 and 3 mask the persisted state.
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = OverlayManager::default();
+        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        canonical_in_memory_state_writer
+            .update_chain(NewCanonicalChain::Commit { new: blocks[2..=4].to_vec() });
+        let head_state = canonical_in_memory_state_writer.canonical_in_memory_state().head_state();
+        let provider = factory.provider().unwrap();
+
+        // A parent at the state trie frontier, and a parent that is one of the masking blocks.
+        let expected = [1usize, 2].map(|index| {
+            let overlay = manager
+                .overlay_builder(blocks[index].recovered_block().hash())
+                .build_state_trie_overlay(&provider, false)
+                .unwrap();
+            (index, account_keys(&overlay), account_node_paths(&overlay))
+        });
+
+        // Persistence removes the masking blocks after the database snapshot was opened.
+        canonical_in_memory_state_writer.clear_state();
+
+        for (index, account_keys_before, account_node_paths_before) in expected {
+            let builder = manager.overlay_builder(blocks[index].recovered_block().hash());
+            assert!(
+                builder.build_state_trie_overlay(&provider, false).is_err(),
+                "block {index} must not resolve from the live in-memory state"
+            );
+
+            let overlay = builder
+                .with_snapshot_state(head_state.clone())
+                .build_state_trie_overlay(&provider, false)
+                .unwrap();
+            assert_eq!(account_keys(&overlay), account_keys_before, "block {index}");
+            assert_eq!(account_node_paths(&overlay), account_node_paths_before, "block {index}");
         }
     }
 
