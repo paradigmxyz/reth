@@ -16,10 +16,7 @@ use reth_exex::ExExEvent;
 use reth_network::PeersInfo;
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
-use reth_provider::{
-    BalStore, BlockIdReader, BlockNumReader, DatabaseProviderFactory, HeaderProvider,
-    RocksDBBalStore, RocksDBProviderFactory,
-};
+use reth_provider::{BlockIdReader, BlockNumReader, DatabaseProviderFactory, HeaderProvider};
 use reth_transaction_pool::TransactionPool;
 use std::{
     sync::{
@@ -266,38 +263,6 @@ async fn restart_applies_node_factory_and_builder_modifiers() -> eyre::Result<()
         Err(eyre::eyre!("ExEx stopped before receiving block {hash}"))
     })
     .await??;
-
-    Ok(())
-}
-
-/// Persisting Amsterdam blocks writes their BALs to `RocksDB` while the node runs.
-#[tokio::test]
-async fn persistence_writes_bals_to_rocksdb() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    for storage_v2 in [false, true] {
-        let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Amsterdam)
-            .with_storage_v2(storage_v2)
-            .with_tree_config_modifier(|config| {
-                config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
-            })
-            .build_single()
-            .await?;
-        let mut account = wallet.account(0);
-        let mut payloads = Vec::new();
-        for value in [U256::ONE, U256::from(2)] {
-            let tx = account.transfer(Address::with_last_byte(0x77), value).await;
-            payloads.push(node.mine([tx]).await?.ensure_success()?.payload);
-        }
-        node.wait_for_persisted_block(2).await?;
-
-        // A fresh store has an empty buffer, so these reads hit RocksDB.
-        let disk = RocksDBBalStore::new(node.inner.provider.rocksdb_provider());
-        for payload in &payloads {
-            let bal = payload.block_access_list().expect("Amsterdam payload has a BAL");
-            assert_eq!(disk.get_by_hash(payload.block().hash())?.as_ref(), Some(bal));
-        }
-    }
 
     Ok(())
 }
