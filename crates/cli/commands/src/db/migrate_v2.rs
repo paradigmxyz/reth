@@ -498,7 +498,7 @@ impl Command {
 mod tests {
     use super::*;
     use alloy_primitives::{B256, U256};
-    use reth_db::models::{AccountBeforeTx, BlockNumberAddress};
+    use reth_db::models::AccountBeforeTx;
     use reth_db_common::init::insert_genesis_header;
     use reth_primitives_traits::StorageEntry;
     use reth_provider::{
@@ -526,47 +526,33 @@ mod tests {
     fn assert_migrates_changesets(genesis: u64) {
         let factory = create_test_provider_factory_with_genesis_block_number(genesis);
         factory.set_storage_settings_cache(StorageSettings::v1());
-        let snapshot_tip = genesis + 1;
         let tip = genesis + 3;
         let address = Address::with_last_byte(7);
         let key = B256::with_last_byte(3);
 
-        // An older restore could record the snapshot tip as pruned while retaining its MDBX
-        // rows. A later prune starts after that checkpoint and can leave a gap above those rows.
+        // An older restore could leave MDBX rows below the prune checkpoints and a gap above
+        // those rows. Only storage has a readable row after its checkpoint.
+        let accounts =
+            [genesis, genesis + 1].map(|block| (block, AccountBeforeTx { address, info: None }));
+        let storage = [genesis, genesis + 1, tip]
+            .map(|block| ((block, address).into(), StorageEntry::new(key, U256::from(block))));
+        let provider_rw = factory.database_provider_rw().unwrap();
+        insert_genesis_header(&provider_rw, factory.chain_spec().as_ref()).unwrap();
+        provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(genesis)).unwrap();
+        for (segment, boundary) in
+            [(PruneSegment::AccountHistory, tip), (PruneSegment::StorageHistory, tip - 1)]
         {
-            let provider_rw = factory.database_provider_rw().unwrap();
-            insert_genesis_header(&provider_rw, factory.chain_spec().as_ref()).unwrap();
             provider_rw
-                .save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(genesis))
+                .save_prune_checkpoint(segment, PruneCheckpoint::pruned_through(boundary))
                 .unwrap();
-            // Each segment can have a different checkpoint above surviving MDBX rows.
-            for (segment, boundary) in
-                [(PruneSegment::AccountHistory, tip), (PruneSegment::StorageHistory, tip - 1)]
-            {
-                provider_rw
-                    .save_prune_checkpoint(segment, PruneCheckpoint::pruned_through(boundary))
-                    .unwrap();
-            }
-            for block in genesis..=snapshot_tip {
-                provider_rw
-                    .tx_ref()
-                    .put::<tables::AccountChangeSets>(
-                        block,
-                        AccountBeforeTx { address, info: None },
-                    )
-                    .unwrap();
-            }
-            for block in (genesis..=snapshot_tip).chain([tip]) {
-                provider_rw
-                    .tx_ref()
-                    .put::<tables::StorageChangeSets>(
-                        BlockNumberAddress((block, address)),
-                        StorageEntry { key, value: U256::from(block) },
-                    )
-                    .unwrap();
-            }
-            provider_rw.commit().unwrap();
         }
+        for (block, row) in &accounts {
+            provider_rw.tx_ref().put::<tables::AccountChangeSets>(*block, row.clone()).unwrap();
+        }
+        for (key, row) in storage {
+            provider_rw.tx_ref().put::<tables::StorageChangeSets>(key, row).unwrap();
+        }
+        provider_rw.commit().unwrap();
 
         Command::migrate_account_changesets(&factory, tip).unwrap();
         Command::migrate_storage_changesets(&factory, tip).unwrap();
@@ -579,38 +565,19 @@ mod tests {
             assert_eq!(static_files.get_lowest_range_start(segment), Some(genesis), "{segment}");
             assert_eq!(static_files.get_highest_static_file_block(segment), Some(tip), "{segment}");
         }
+        assert_eq!(static_files.account_changesets_range(genesis..=tip).unwrap(), accounts);
+        assert_eq!(static_files.storage_changesets_range(genesis..=tip).unwrap(), storage);
+
         factory.set_storage_settings_cache(StorageSettings::v2());
         let provider = BlockchainProvider::new(factory).unwrap();
-        for block in genesis..=snapshot_tip {
-            assert_eq!(
-                static_files.account_block_changeset(block).unwrap(),
-                vec![AccountBeforeTx { address, info: None }],
-                "block {block}"
-            );
-        }
-        for block in (genesis..=snapshot_tip).chain([tip]) {
-            assert_eq!(
-                static_files.storage_changeset(block).unwrap(),
-                vec![(
-                    BlockNumberAddress((block, address)),
-                    StorageEntry { key, value: U256::from(block) }
-                )],
-                "block {block}"
-            );
-        }
-        assert!(static_files.account_block_changeset(tip - 1).unwrap().is_empty());
-        assert!(static_files.storage_changeset(tip - 1).unwrap().is_empty());
+        let assert_pruned = |error, block| {
+            assert!(matches!(error, ProviderError::StateAtBlockPruned(n) if n == block), "{error}");
+        };
         for block in genesis..=tip {
-            assert!(matches!(
-                provider.account_block_changeset(block),
-                Err(ProviderError::StateAtBlockPruned(pruned)) if pruned == block
-            ));
-            if block < tip {
-                assert!(matches!(
-                    provider.storage_changeset(block),
-                    Err(ProviderError::StateAtBlockPruned(pruned)) if pruned == block
-                ));
-            }
+            assert_pruned(provider.account_block_changeset(block).unwrap_err(), block);
+        }
+        for block in genesis..tip {
+            assert_pruned(provider.storage_changeset(block).unwrap_err(), block);
         }
         assert_eq!(
             provider.storage_changeset(tip).unwrap(),
