@@ -495,13 +495,12 @@ pub trait RpcModuleValidator: Clone + Send + Sync + 'static {
             };
 
             // Try to parse and validate using the configured validator
-            // This will check for typos and other validation rules. A name must parse as a
-            // module, not as a whole-selection keyword like `all` or `none`, which would not be
-            // served.
+            // This will check for typos and other validation rules. A name must parse back to
+            // exactly this module: keywords like `all`, lists like "eth,eth", and padded names
+            // like " eth " parse to something else, which would not be served.
             let selection = Self::parse_selection(name)
                 .map_err(|e| format!("Invalid RPC module '{name}' in {arg_name}: {e}"))?;
-            if name.contains(',') ||
-                !matches!(selection, RpcModuleSelection::Selection(s) if s.len() == 1)
+            if !matches!(&selection, RpcModuleSelection::Selection(s) if s.len() == 1 && s.contains(module))
             {
                 return Err(format!("Invalid RPC module '{name}' in {arg_name}: not a module name"))
             }
@@ -821,7 +820,11 @@ mod test {
             assert!(DefaultRpcModuleValidator::validate_selection(&selection, "http.api").is_ok());
         }
 
-        for name in ["all", "NONE", "eth,eth"] {
+        // Lenient accepts unknown names such as "[eth" as custom modules, the default does not.
+        let bracketed = RpcModuleSelection::from([RethRpcModule::Other("[eth".to_string())]);
+        assert!(DefaultRpcModuleValidator::validate_selection(&bracketed, "http.api").is_err());
+
+        for name in ["all", "NONE", "eth,eth", " eth ", "eth\t"] {
             let selection = RpcModuleSelection::from([
                 RethRpcModule::Eth,
                 RethRpcModule::Other(name.to_string()),
