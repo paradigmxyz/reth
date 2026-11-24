@@ -266,15 +266,24 @@ impl FromStr for RpcModuleSelection {
         if s.is_empty() {
             return Ok(Self::Selection(Default::default()))
         }
-        let mut modules = s.split(',').map(str::trim).peekable();
-        let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
-        // We convert to lowercase to make the comparison case-insensitive
+        // Empty items, such as from a trailing comma in "eth,", are ignored.
+        let modules = s.split(',').map(str::trim).filter(|m| !m.is_empty());
+        // The keywords are matched case-insensitively, so "all", "ALL", "aLl" etc. are accepted.
         //
-        // This is a way to allow typing "all" and "ALL" and "All" and "aLl" etc.
-        match first.to_lowercase().as_str() {
-            "all" => Ok(Self::All),
-            "none" => Ok(Self::Selection(Default::default())),
-            _ => Self::try_from_selection(modules),
+        // They select the whole set and are only valid on their own: mixing them with module
+        // names, such as "all,testing" or "eth,none", is rejected instead of silently dropping
+        // or misinterpreting some of the names.
+        let is_keyword = |m: &str| m.eq_ignore_ascii_case("all") || m.eq_ignore_ascii_case("none");
+        if modules.clone().count() > 1 && modules.clone().any(is_keyword) {
+            return Err(ParseError::VariantNotFound)
+        }
+        let single = modules.clone().next().unwrap_or_default();
+        if single.eq_ignore_ascii_case("all") {
+            Ok(Self::All)
+        } else if single.eq_ignore_ascii_case("none") {
+            Ok(Self::Selection(Default::default()))
+        } else {
+            Self::try_from_selection(modules)
         }
     }
 }
@@ -486,9 +495,15 @@ pub trait RpcModuleValidator: Clone + Send + Sync + 'static {
             };
 
             // Try to parse and validate using the configured validator
-            // This will check for typos and other validation rules
-            Self::parse_selection(name)
+            // This will check for typos and other validation rules. A name must parse back to
+            // exactly this module: keywords like `all`, lists like "eth,eth", and padded names
+            // like " eth " parse to something else, which would not be served.
+            let selection = Self::parse_selection(name)
                 .map_err(|e| format!("Invalid RPC module '{name}' in {arg_name}: {e}"))?;
+            if !matches!(&selection, RpcModuleSelection::Selection(s) if s.len() == 1 && s.contains(module))
+            {
+                return Err(format!("Invalid RPC module '{name}' in {arg_name}: not a module name"))
+            }
         }
 
         Ok(())
@@ -791,6 +806,32 @@ mod test {
         let result = RpcModuleSelection::from_str("NONE");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), RpcModuleSelection::Selection(Default::default()));
+
+        // Keywords mixed with module names are rejected in any position.
+        for s in ["all,testing", "none,eth", "eth,all", "eth, NONE", "all,all", "eth,all,admin"] {
+            assert!(RpcModuleSelection::from_str(s).is_err(), "{s}");
+            assert!(DefaultRpcModuleValidator::parse_selection(s).is_err(), "{s}");
+        }
+        // Empty items are ignored rather than mixed with keywords or rejected as modules.
+        assert_eq!(RpcModuleSelection::from_str("all,").unwrap(), RpcModuleSelection::All);
+        assert!(RpcModuleSelection::from_str(",none").unwrap().is_empty());
+        for s in ["eth,", "eth,,admin"] {
+            let selection = DefaultRpcModuleValidator::parse_selection(s).unwrap();
+            assert!(DefaultRpcModuleValidator::validate_selection(&selection, "http.api").is_ok());
+        }
+
+        // Lenient accepts unknown names such as "[eth" as custom modules, the default does not.
+        let bracketed = RpcModuleSelection::from([RethRpcModule::Other("[eth".to_string())]);
+        assert!(DefaultRpcModuleValidator::validate_selection(&bracketed, "http.api").is_err());
+
+        for name in ["all", "NONE", "eth,eth", " eth ", "eth\t"] {
+            let selection = RpcModuleSelection::from([
+                RethRpcModule::Eth,
+                RethRpcModule::Other(name.to_string()),
+            ]);
+            assert!(DefaultRpcModuleValidator::validate_selection(&selection, "http.api").is_err());
+            assert!(LenientRpcModuleValidator::validate_selection(&selection, "http.api").is_err());
+        }
 
         // Test valid selections: "eth,admin"
         let result = RpcModuleSelection::from_str("eth,admin");
