@@ -149,11 +149,11 @@ jobs:
         env:
           NEW_REV: ${{ steps.update.outputs.new_rev }}
         run: |
-          # Re-resolve Cargo.lock for the new evm2 rev. When the new rev raises the minimum version
-          # of a dependency that Cargo.lock pins lower (such as alloy-eip7928 0.4.11 -> ^0.4.12),
-          # cargo refuses to move the pin: unlock just the crates it names, all in one update, and
-          # retry, so the rest of the lockfile stays as is. Stop on any other error, or when a crate
-          # comes up again after being unlocked.
+          # Re-resolve Cargo.lock for the new evm2 rev. When the new rev's requirements conflict
+          # with a version Cargo.lock pins (such as alloy-eip7928 0.4.11 against ^0.4.12), cargo
+          # refuses to move the pin: unlock the crates it names, all in one update, and retry.
+          # `cargo update -p` may also move those crates' own dependencies; the lockfile diff lands
+          # in the PR for review. Stop on any other error, or when a crate comes up again.
           crates=()
           resolved=false
           resolve=(cargo metadata --format-version 1)
@@ -171,7 +171,7 @@ jobs:
               echo "$out"
               exit 1
             fi
-            echo "evm2 needs a newer version than Cargo.lock's $crate; unlocking it"
+            echo "evm2's requirements conflict with Cargo.lock's $crate; unlocking it"
             crates+=("$crate")
             resolve=(cargo update)
             for c in "${crates[@]}"; do resolve+=(-p "$c"); done
