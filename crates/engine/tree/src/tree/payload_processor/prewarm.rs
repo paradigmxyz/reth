@@ -182,16 +182,16 @@ where
             // cache, in parallel with prewarm execution. The pool is only present in this mode if
             // the configuration opts in with `ConfigureEvm::warms_tx_targets`.
             let warm_pool = ctx.bal_prewarm_pool.as_deref().zip(ctx.saved_cache.as_ref());
-            if let Some((warm_pool, saved_cache)) = warm_pool {
-                // Cancelled prewarming skips the targets still queued, so finishing does not wait
-                // for them.
+            // Cancelled prewarming skips the targets still queued, so finishing does not wait for
+            // them. Dropping the block ends it, also if dispatching panics.
+            let mut warm_block = warm_pool.map(|(warm_pool, saved_cache)| {
                 warm_pool.begin_cancellable_block(
                     Self::warm_provider_builder(ctx),
                     saved_cache.cache().clone(),
                     ctx.env.txpool_snapshot.clone(),
                     Arc::clone(&ctx.terminate_execution),
-                );
-            }
+                )
+            });
             // Transactions to execute again when their results become stale.
             let mut refresh_txs = Vec::new();
             {
@@ -258,9 +258,7 @@ where
 
                     // Waits for the warm pool to load the dispatched targets, while the spawned
                     // executions keep running.
-                    if let Some((warm_pool, _)) = warm_pool {
-                        warm_pool.end_block();
-                    }
+                    drop(warm_block.take());
 
                     // Send withdrawal prefetch targets after all transactions dispatched
                     if let Some(state_root_hint_stream) = state_root_hint_stream &&

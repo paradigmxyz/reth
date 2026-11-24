@@ -84,15 +84,19 @@ impl BalPrewarmPool {
     }
 
     /// Like [`begin_block`](Self::begin_block), but workers skip the block's queued warm
-    /// targets once `stop` is set, so [`end_block`](Self::end_block) returns without loading them.
+    /// targets once `stop` is set, so ending the block returns without loading them.
+    ///
+    /// The block ends when the returned [`PrewarmBlock`] is dropped, also while unwinding, so the
+    /// workers never keep the block's provider and cache.
     pub fn begin_cancellable_block(
         &self,
         build: Arc<BuildProviderFn>,
         caches: ExecutionCache,
         txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
         stop: Arc<AtomicBool>,
-    ) {
+    ) -> PrewarmBlock<'_> {
         self.begin_block_inner(build, caches, txpool_snapshot, Some(stop));
+        PrewarmBlock { pool: self }
     }
 
     fn begin_block_inner(
@@ -251,6 +255,20 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                 drop(end_tx);
             }
         }
+    }
+}
+
+/// A block begun with [`BalPrewarmPool::begin_cancellable_block`]. Dropping it ends the block with
+/// [`BalPrewarmPool::end_block`].
+#[derive(Debug)]
+#[must_use = "dropping the block ends it"]
+pub struct PrewarmBlock<'a> {
+    pool: &'a BalPrewarmPool,
+}
+
+impl Drop for PrewarmBlock<'_> {
+    fn drop(&mut self) {
+        self.pool.end_block();
     }
 }
 
