@@ -1901,4 +1901,31 @@ mod tests {
             "dead reader slot must be cleared"
         );
     }
+
+    #[test]
+    fn commit_durable_syncs_non_durable_env() {
+        let tempdir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
+        let mut env = DatabaseEnv::open(
+            tempdir.path(),
+            DatabaseEnvKind::RW,
+            DatabaseArguments::test().with_sync_mode(Some(SyncMode::SafeNoSync)),
+        )
+        .expect(ERROR_DB_CREATION);
+        env.create_tables().expect(ERROR_TABLE_CREATION);
+        let info = || env.info().unwrap();
+
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
+        tx.put::<CanonicalHeaders>(1, B256::ZERO).expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+        assert!(info().last_steady_txnid() < Some(info().last_txnid() as u64));
+
+        // Read-only transactions don't sync.
+        env.tx().expect(ERROR_INIT_TX).commit_durable().expect(ERROR_COMMIT);
+        assert!(info().last_steady_txnid() < Some(info().last_txnid() as u64));
+
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
+        tx.put::<CanonicalHeaders>(2, B256::ZERO).expect(ERROR_PUT);
+        tx.commit_durable().expect(ERROR_COMMIT);
+        assert_eq!(info().last_steady_txnid(), Some(info().last_txnid() as u64));
+    }
 }
