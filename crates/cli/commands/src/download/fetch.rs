@@ -343,6 +343,8 @@ impl ArchiveFetcher {
             if is_partial && range_start != Some(existing_size) {
                 // Resuming this `.part` file would likely fail the same way, so retry from scratch.
                 self.paths.cleanup_partial();
+                // The deleted bytes' total no longer applies to the fresh download.
+                total_size = self.expected_size;
                 last_error = Some(eyre::eyre!(
                     "Server resumed {} at byte {} instead of requested offset {existing_size}",
                     self.paths.file_name(),
@@ -1666,6 +1668,31 @@ mod tests {
               14\r\n01234567890123456789\r\n0\r\n\r\n",
         ]);
         let dir = tempfile::tempdir().unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new())
+            .with_retry_backoff(Some(Duration::ZERO));
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, None);
+
+        let error = fetcher.download(None, None).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "Server did not provide Content-Length or Content-Range header"
+        );
+        assert!(!dir.path().join("archive.tar.zst").exists());
+    }
+
+    #[test]
+    fn sequential_wrong_offset_restart_drops_earlier_total() {
+        let url = spawn_response_sequence_server(vec![
+            b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 2-3/10\r\n\
+              Content-Length: 10\r\nConnection: close\r\n\r\n23",
+            b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-9/10\r\n\
+              Content-Length: 10\r\nConnection: close\r\n\r\nXXXXXXXXXX",
+            b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-19/*\r\n\
+              Content-Length: 20\r\nConnection: close\r\n\r\n01234567890123456789",
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("archive.tar.zst.part"), b"01").unwrap();
         let session = DownloadSession::new(None, None, CancellationToken::new())
             .with_retry_backoff(Some(Duration::ZERO));
         let fetcher = ArchiveFetcher::new(url, dir.path(), session, None);
