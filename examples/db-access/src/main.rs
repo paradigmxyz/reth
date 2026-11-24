@@ -46,8 +46,11 @@ fn main() -> eyre::Result<()> {
 
     state_provider_example(factory.latest()?, &provider, provider.best_block_number()?)?;
     state_provider_example(
-        BlockchainProvider::new_without_writer(factory.clone())?
-            .history_by_block_number(block_num)?,
+        BlockchainProvider::new(
+            factory.clone(),
+            factory.canonical_in_memory_state_without_writer()?,
+        )
+        .history_by_block_number(block_num)?,
         &provider,
         block_num,
     )?;

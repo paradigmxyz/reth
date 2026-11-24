@@ -1894,7 +1894,8 @@ mod tests {
 
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new_without_writer(factory)?;
+        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer()?;
+        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
         let outcome = provider.get_state(1)?.expect("should return execution outcome");
 
         let state = &outcome.bundle.state;

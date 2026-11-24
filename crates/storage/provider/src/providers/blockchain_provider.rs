@@ -85,11 +85,15 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
 impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// Creates a provider over `storage` that reads `canonical_in_memory_state`.
     ///
-    /// `canonical_in_memory_state` is the state of a [`CanonicalInMemoryStateWriter`], which is
-    /// the only way to change it. That writer has to be created from the
-    /// [`ProviderFactory::chain_info_headers`] of `storage` and from the writer that
-    /// [`InMemoryState::new`] returned with the in-memory state of `storage`. Otherwise the
-    /// canonical lookups of the provider and its state providers read different blocks.
+    /// `canonical_in_memory_state` has to be over the in-memory state of `storage`, and start from
+    /// the [`ProviderFactory::chain_info_headers`] of `storage`. Otherwise the canonical lookups of
+    /// the provider and its state providers read different blocks. It is either:
+    ///
+    /// - the state of a [`CanonicalInMemoryStateWriter`] created from the writer that
+    ///   [`InMemoryState::new`] returned with the in-memory state of `storage`, which is then the
+    ///   only way to change it, or
+    /// - the [`ProviderFactory::canonical_in_memory_state_without_writer`] of `storage`, for a
+    ///   provider whose chain info never changes.
     ///
     /// The chain info and the canonical state notifications of the provider and its clones are
     /// those of `canonical_in_memory_state`.
@@ -102,22 +106,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     ) -> Self {
         let bal_store = storage.bal_store().clone();
         Self { database: storage, canonical_in_memory_state, bal_store }
-    }
-
-    /// Creates a provider over `storage` without a writer of its canonical in-memory state,
-    /// fetching the latest, safe and finalized headers from the database to initialize the
-    /// provider.
-    ///
-    /// Nothing can change the chain info of the returned provider or send its notifications: its
-    /// canonical head and its safe and finalized blocks stay the ones read from the database, and
-    /// it never has a persisted block. Its in-memory blocks are those of `storage`, and change
-    /// with them.
-    pub fn new_without_writer(storage: ProviderFactory<N>) -> ProviderResult<Self> {
-        let canonical_in_memory_state = CanonicalInMemoryState::without_writer(
-            storage.chain_info_headers()?,
-            storage.in_memory_state().clone(),
-        );
-        Ok(Self::new(storage, canonical_in_memory_state))
     }
 
     /// Gets a clone of `canonical_in_memory_state`.
@@ -3389,7 +3377,8 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new_without_writer(factory)?;
+        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer()?;
+        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
 
         let mut expected: Vec<_> = accounts
             .iter()
@@ -3414,7 +3403,10 @@ mod tests {
     #[test]
     fn state_range_view_checks_snap_attempt_on_its_snapshot() -> eyre::Result<()> {
         let (factory, _) = test_provider_factory_with_genesis()?;
-        let provider = BlockchainProvider::new_without_writer(factory.clone())?;
+        let provider = BlockchainProvider::new(
+            factory.clone(),
+            factory.canonical_in_memory_state_without_writer()?,
+        );
         let (address, account) = random_account(1);
         let mut attempt = SnapAttempt::start(None, BlockNumHash::default(), B256::ZERO);
 
@@ -3452,7 +3444,8 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new_without_writer(factory)?;
+        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer()?;
+        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
         let state = provider.state_range_provider(EMPTY_ROOT_HASH)?.unwrap();
 
         // Budget only fits a single account.
@@ -3478,7 +3471,8 @@ mod tests {
         provider_rw.insert_storage_for_hashing([(address, slots)])?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new_without_writer(factory)?;
+        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer()?;
+        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
         let state = provider.state_range_provider(EMPTY_ROOT_HASH)?.unwrap();
 
         let expected_root = provider.latest()?.storage_root(address, HashedStorage::default())?;
@@ -3522,7 +3516,8 @@ mod tests {
         )])?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new_without_writer(factory)?;
+        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer()?;
+        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
 
         // The first node of a sorted boundary proof is always the trie root, so this checks the
         // proof was generated against the real, current root rather than a stale or empty one.
@@ -3572,7 +3567,10 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider::new_without_writer(factory.clone())?;
+        let provider = BlockchainProvider::new(
+            factory.clone(),
+            factory.canonical_in_memory_state_without_writer()?,
+        );
         assert!(provider.state_range_provider(recent_root)?.is_some());
         assert!(provider.state_range_provider(expired_root)?.is_none());
 
@@ -3991,7 +3989,8 @@ mod tests {
 
         // Resolving the anchor root must revert the later account and storage changes; state B
         // must not leak into the response.
-        let provider = BlockchainProvider::new_without_writer(factory)?;
+        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer()?;
+        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
         let state =
             provider.state_range_provider(anchor_root)?.expect("retained root must resolve");
         let range = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
@@ -4044,7 +4043,8 @@ mod tests {
         writer.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(5))?;
         writer.commit()?;
 
-        let provider = BlockchainProvider::new_without_writer(factory)?;
+        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer()?;
+        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
         assert!(provider.canonical_in_memory_state.head_state().is_none());
         assert!(provider.receipt(0)?.is_some());
         for (number, receipts) in expected.into_iter().enumerate() {
@@ -4065,7 +4065,8 @@ mod tests {
             factory.clone(),
             canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
         );
-        let other = BlockchainProvider::new_without_writer(factory)?;
+        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer()?;
+        let other = BlockchainProvider::new(factory, canonical_in_memory_state);
         let genesis = provider.canonical_in_memory_state.get_canonical_head();
         let block = TestBlockBuilder::eth().get_executed_block_with_number(1, genesis.hash());
         let hash = block.recovered_block().hash();
