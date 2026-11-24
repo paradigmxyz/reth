@@ -480,6 +480,21 @@ impl Info {
             Mode::ReadWrite { sync_mode: SyncMode::Durable }
         }
     }
+
+    /// Returns the id of the latest transaction whose meta page MDBX marked steady, which a new
+    /// boot rolls back to after an unclean shutdown. Under [`SyncMode::NoMetaSync`] that meta page
+    /// may not be flushed yet.
+    pub fn last_steady_txnid(&self) -> Option<u64> {
+        // Mirrors `SIGN_IS_STEADY` in mdbx.c: signatures 0 and 1 mark empty and weak metas.
+        const DATASIGN_WEAK: u64 = 1;
+        self.0
+            .mi_meta_sign
+            .iter()
+            .zip(self.0.mi_meta_txnid)
+            .filter(|(sign, _)| **sign > DATASIGN_WEAK)
+            .map(|(_, txnid)| txnid)
+            .max()
+    }
 }
 
 impl fmt::Debug for Environment {
