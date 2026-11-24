@@ -491,7 +491,7 @@ pub(super) fn test_standalone_extension_snapshot_isolation<T: SparseTrie + Clone
                 storage.insert(B256::from(key), U256::from(3));
             }
             let harness = SuiteTestHarness::new(storage);
-            let (full, _) = harness.proof_v2(&mut [ProofV2Target::new(first)]);
+            let (mut full, _) = harness.proof_v2(&mut [ProofV2Target::new(first)]);
             let mut partial =
                 full.iter().filter(|node| node.path.len() <= depth).cloned().collect::<Vec<_>>();
             let mut source = (new_trie)();
@@ -524,7 +524,7 @@ pub(super) fn test_standalone_extension_snapshot_isolation<T: SparseTrie + Clone
             source.clear();
             drop(source);
             drop(fork);
-            sibling.reveal_nodes(&mut full.clone()).unwrap();
+            sibling.reveal_nodes(&mut full).unwrap();
             assert_eq!(sibling.find_leaf(&Nibbles::unpack(first), None), Ok(LeafLookup::Exists));
             assert_eq!(sibling.root(epoch(4)), harness.original_root());
             survivor.prune(epoch(3));

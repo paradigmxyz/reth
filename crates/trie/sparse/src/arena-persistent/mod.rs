@@ -2355,7 +2355,10 @@ mod tests {
 
         let mut hydrated = source.snapshot();
         let mut opaque = source.snapshot();
-        assert!(core::ptr::eq(&source.upper_arena[source.root], &opaque.upper_arena[opaque.root]));
+        assert!(core::ptr::eq(
+            &raw const source.upper_arena[source.root],
+            &raw const opaque.upper_arena[opaque.root]
+        ));
         assert_eq!(opaque.root(epoch(10)), harness.original_root());
         let opaque_root = opaque.root;
         PersistentArenaParallelSparseTrie::encode_blinded_extension(
@@ -2363,7 +2366,10 @@ mod tests {
             opaque_root,
             &mut opaque.buffers.rlp_buf,
         );
-        assert!(core::ptr::eq(&source.upper_arena[source.root], &opaque.upper_arena[opaque.root]));
+        assert!(core::ptr::eq(
+            &raw const source.upper_arena[source.root],
+            &raw const opaque.upper_arena[opaque.root]
+        ));
         let cached_extension = hydrated.upper_arena[hydrated.root].state_ref().cloned();
         // Replay the extension together with its backing proof, as overlapping batches do.
         let mut batch = vec![root_proof];
