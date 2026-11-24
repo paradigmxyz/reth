@@ -114,6 +114,17 @@ pub(crate) struct PlannedArchive {
     pub(crate) archive: SnapshotArchive,
 }
 
+impl PlannedArchive {
+    /// Whether this archive can change the MDBX database used to classify the snapshot.
+    pub(super) fn writes_database(&self) -> bool {
+        self.ty == SnapshotComponentType::State ||
+            self.archive.output_files.iter().any(|output| {
+                let path = Path::new(&output.path);
+                path.strip_prefix(".").unwrap_or(path).starts_with("db")
+            })
+    }
+}
+
 /// The archive list for a modular snapshot download.
 #[derive(Debug)]
 pub(crate) struct PlannedDownloads {

@@ -526,11 +526,13 @@ mod tests {
     fn assert_migrates_changesets(genesis: u64) {
         let factory = create_test_provider_factory_with_genesis_block_number(genesis);
         factory.set_storage_settings_cache(StorageSettings::v1());
+        let snapshot_tip = genesis + 1;
         let tip = genesis + 3;
         let address = Address::with_last_byte(7);
         let key = B256::with_last_byte(3);
 
-        // v1 history in MDBX: one account and one storage change per block, from genesis on.
+        // An older restore could record the snapshot tip as pruned while retaining its MDBX
+        // rows. A later prune starts after that checkpoint and can leave a gap above those rows.
         {
             let provider_rw = factory.database_provider_rw().unwrap();
             insert_genesis_header(&provider_rw, factory.chain_spec().as_ref()).unwrap();
@@ -545,7 +547,7 @@ mod tests {
                     .save_prune_checkpoint(segment, PruneCheckpoint::pruned_through(boundary))
                     .unwrap();
             }
-            for block in genesis..=tip {
+            for block in genesis..=snapshot_tip {
                 provider_rw
                     .tx_ref()
                     .put::<tables::AccountChangeSets>(
@@ -553,6 +555,8 @@ mod tests {
                         AccountBeforeTx { address, info: None },
                     )
                     .unwrap();
+            }
+            for block in (genesis..=snapshot_tip).chain([tip]) {
                 provider_rw
                     .tx_ref()
                     .put::<tables::StorageChangeSets>(
@@ -577,12 +581,14 @@ mod tests {
         }
         factory.set_storage_settings_cache(StorageSettings::v2());
         let provider = BlockchainProvider::new(factory).unwrap();
-        for block in genesis..=tip {
+        for block in genesis..=snapshot_tip {
             assert_eq!(
                 static_files.account_block_changeset(block).unwrap(),
                 vec![AccountBeforeTx { address, info: None }],
                 "block {block}"
             );
+        }
+        for block in (genesis..=snapshot_tip).chain([tip]) {
             assert_eq!(
                 static_files.storage_changeset(block).unwrap(),
                 vec![(
@@ -591,6 +597,10 @@ mod tests {
                 )],
                 "block {block}"
             );
+        }
+        assert!(static_files.account_block_changeset(tip - 1).unwrap().is_empty());
+        assert!(static_files.storage_changeset(tip - 1).unwrap().is_empty());
+        for block in genesis..=tip {
             assert!(matches!(
                 provider.account_block_changeset(block),
                 Err(ProviderError::StateAtBlockPruned(pruned)) if pruned == block

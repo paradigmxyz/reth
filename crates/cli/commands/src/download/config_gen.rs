@@ -2,10 +2,9 @@ use crate::download::{
     manifest::{ComponentManifest, ComponentSelection, SnapshotComponentType, SnapshotManifest},
     SelectionPreset,
 };
-use eyre::WrapErr;
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_config::config::{BlocksPerFileConfig, Config, PruneConfig, StaticFilesConfig};
-use reth_db::{models::StorageSettings, tables};
+use reth_db::{mdbx, models::StorageSettings, tables, DatabaseError};
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_node_core::args::DefaultPruningValues;
 use reth_prune_types::{
@@ -48,6 +47,7 @@ pub(super) fn write_prune_checkpoints_tx<Tx>(
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
     snapshot_block: u64,
     is_v2: bool,
+    explicit_history: bool,
 ) -> eyre::Result<()>
 where
     Tx: DbTx + DbTxMut,
@@ -67,43 +67,42 @@ where
         (PruneSegment::Bodies, segments.bodies_history),
     ] {
         let checkpoint = match segment {
-            // V1 bundles both history tables and the transaction index with their checkpoints.
-            PruneSegment::AccountHistory |
-            PruneSegment::StorageHistory |
-            PruneSegment::TransactionLookup
-                if !is_v2 =>
-            {
-                continue
-            }
-            // The selected changesets determine how far back a reader can go.
+            PruneSegment::TransactionLookup if !is_v2 => continue,
             PruneSegment::AccountHistory | PruneSegment::StorageHistory => {
                 let component = if segment == PruneSegment::AccountHistory {
                     SnapshotComponentType::AccountChangesets
                 } else {
                     SnapshotComponentType::StorageChangesets
                 };
-                let target = match selections.get(&component) {
-                    Some(ComponentSelection::All) => None,
-                    Some(ComponentSelection::Distance(distance)) => {
+                // V1 bundles its changesets in MDBX. Only a v2 selection can omit rows.
+                let target = match (is_v2, selections.get(&component)) {
+                    (false, _) | (_, Some(ComponentSelection::All)) => None,
+                    (_, Some(ComponentSelection::Distance(distance))) => {
                         snapshot_block.checked_sub(*distance)
                     }
-                    Some(ComponentSelection::Since(block)) => {
+                    (_, Some(ComponentSelection::Since(block))) => {
                         block.checked_sub(1).map(|target| target.min(snapshot_block))
                     }
-                    Some(ComponentSelection::None) | None => Some(snapshot_block),
+                    (_, Some(ComponentSelection::None) | None) => Some(snapshot_block),
                 };
-                let Some(target) = target else { continue };
-                // Downloading a wider range cannot restore history already pruned by the source.
-                let existing = tx
-                    .get::<tables::PruneCheckpoints>(segment)?
-                    .and_then(|checkpoint| checkpoint.block_number);
-                let block = existing.map_or(target, |existing| existing.max(target));
-                // An archive policy can retain future history even when the snapshot omitted it.
-                PruneCheckpoint {
-                    block_number: Some(block),
-                    tx_number: None,
-                    prune_mode: mode.unwrap_or_else(|| PruneMode::before_inclusive(block)),
+                if target.is_none() && !explicit_history {
+                    continue
                 }
+                let existing = tx.get::<tables::PruneCheckpoints>(segment)?;
+                // Preserve the source progress when the download includes all bundled history.
+                let (block_number, tx_number) = match (target, existing) {
+                    (Some(target), checkpoint) => {
+                        let source = checkpoint.and_then(|cp| cp.block_number);
+                        (Some(source.map_or(target, |block| block.max(target))), None)
+                    }
+                    (None, Some(checkpoint)) => (checkpoint.block_number, checkpoint.tx_number),
+                    (None, None) => continue,
+                };
+                // Unlimited retention keeps the old boundary without advertising a rolling window.
+                let prune_mode = mode.unwrap_or_else(|| {
+                    PruneMode::Before(block_number.map_or(0, |block| block.saturating_add(1)))
+                });
+                PruneCheckpoint { block_number, tx_number, prune_mode }
             }
             _ => {
                 let Some(prune_mode) = mode else { continue };
@@ -130,43 +129,43 @@ pub(super) fn snapshot_uses_v2(
     tx: &impl DbTx,
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
 ) -> eyre::Result<bool> {
-    let Some(bytes) = tx.get::<tables::Metadata>(keys::STORAGE_SETTINGS.to_owned())? else {
-        return Ok(false)
+    let bytes = match tx.get::<tables::Metadata>(keys::STORAGE_SETTINGS.to_owned()) {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => return Ok(false),
+        // Snapshots predating storage settings can also lack the metadata table itself.
+        Err(DatabaseError::Open(err)) if err == mdbx::Error::NotFound.into() => return Ok(false),
+        Err(err) => return Err(err.into()),
     };
     if let Ok(settings) = serde_json::from_slice::<StorageSettings>(&bytes) {
         return Ok(settings.is_v2())
     }
 
-    // Older releases stored independent backend flags. Only accept placements the v1 reader
-    // can serve for this download.
-    let flags = serde_json::from_slice::<BTreeMap<&str, bool>>(&bytes)
-        .wrap_err("Invalid storage settings in snapshot database")?;
-    eyre::ensure!(
-        flags.contains_key("receipts_in_static_files"),
-        "Unrecognized snapshot storage settings"
-    );
-    for (name, enabled) in flags {
-        let supported = match name {
-            "receipts_in_static_files" => true,
-            "transaction_senders_in_static_files" => {
-                !enabled ||
-                    matches!(
-                        selections.get(&SnapshotComponentType::TransactionSenders),
-                        None | Some(ComponentSelection::None)
-                    )
+    // The node defaults to v1 for unrecognized settings. Some old releases explicitly placed
+    // tables on backends the v1 reader cannot use.
+    if let Ok(flags) = serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes)
+    {
+        for (name, value) in flags {
+            if value.as_bool() != Some(true) {
+                continue
             }
-            "storages_history_in_rocksdb" |
-            "transaction_hash_numbers_in_rocksdb" |
-            "account_history_in_rocksdb" |
-            "account_changesets_in_static_files" |
-            "storage_changesets_in_static_files" |
-            "use_hashed_state" => !enabled,
-            _ => false,
-        };
-        eyre::ensure!(
-            supported,
-            "Unsupported legacy snapshot setting for this download: {name}={enabled}"
-        );
+            let incompatible = match name.as_str() {
+                "transaction_senders_in_static_files" => matches!(
+                    selections.get(&SnapshotComponentType::TransactionSenders),
+                    Some(selection) if *selection != ComponentSelection::None
+                ),
+                "storages_history_in_rocksdb" |
+                "transaction_hash_numbers_in_rocksdb" |
+                "account_history_in_rocksdb" |
+                "account_changesets_in_static_files" |
+                "storage_changesets_in_static_files" |
+                "use_hashed_state" => true,
+                _ => false,
+            };
+            eyre::ensure!(
+                !incompatible,
+                "Unsupported legacy snapshot setting for this download: {name}=true"
+            );
+        }
     }
     Ok(false)
 }
@@ -413,7 +412,8 @@ mod tests {
 
         {
             let tx = db.tx_mut().unwrap();
-            write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block, true).unwrap();
+            write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block, true, false)
+                .unwrap();
             tx.commit().unwrap();
         }
 
@@ -453,7 +453,7 @@ mod tests {
         );
 
         let tx = db.tx_mut().unwrap();
-        write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block, true).unwrap();
+        write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block, true, false).unwrap();
         tx.commit().unwrap();
 
         db.tx().unwrap().get::<tables::PruneCheckpoints>(PruneSegment::AccountHistory).unwrap()
@@ -483,7 +483,7 @@ mod tests {
             (None, &omitted, indexed),
             (Some(serde_json::json!(StorageSettings::v2())), &omitted, StageCheckpoint::default()),
             (Some(serde_json::json!(StorageSettings::v2())), &included, indexed),
-            (Some(serde_json::json!("unknown")), &included, indexed),
+            (Some(serde_json::json!({"account_history_in_rocksdb": true})), &included, indexed),
         ] {
             let dir = tempfile::tempdir()?;
             let path = dir.path().join("db");
@@ -499,9 +499,12 @@ mod tests {
             command.finalize_modular_download(
                 selections,
                 &empty_manifest(),
-                Some(SelectionPreset::Archive),
+                command.download_config(
+                    selections,
+                    &empty_manifest(),
+                    Some(SelectionPreset::Archive),
+                ),
                 dir.path(),
-                &path,
             )?;
             let db = reth_db::init_db(&path, reth_db::mdbx::DatabaseArguments::test())?;
             let tx = db.tx()?;
@@ -823,7 +826,7 @@ mod tests {
         );
         // Same order as the download finalization.
         let tx = db.tx_mut().unwrap();
-        write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block, true).unwrap();
+        write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block, true, false).unwrap();
         reset_index_stage_checkpoints_tx(&tx).unwrap();
 
         for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
@@ -866,7 +869,8 @@ mod tests {
                 None::<&reth_chainspec::ChainSpec>,
             );
             let tx = db.tx_mut().unwrap();
-            write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block, true).unwrap();
+            write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block, true, false)
+                .unwrap();
             let mut checkpoints = Vec::new();
             for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
                 let checkpoint = tx.get::<tables::PruneCheckpoints>(segment).unwrap();
@@ -926,7 +930,7 @@ mod tests {
                     .unwrap();
                 }
 
-                write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block, true)
+                write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block, true, false)
                     .unwrap();
 
                 let expected = existing_boundary.unwrap_or_default().max(selected_boundary);
@@ -948,17 +952,27 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_without_metadata_table_uses_v1() -> eyre::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let db = reth_db::create_db(dir.path(), mdbx::DatabaseArguments::test())?;
+        assert!(!snapshot_uses_v2(&db.tx()?, &BTreeMap::new())?);
+        Ok(())
+    }
+
+    #[test]
     fn rejects_unsupported_snapshot_layouts() -> eyre::Result<()> {
         let dir = tempfile::tempdir()?;
         let db = reth_db::init_db(dir.path(), reth_db::mdbx::DatabaseArguments::test())?;
         let tx = db.tx_mut()?;
         let selections =
             BTreeMap::from([(SnapshotComponentType::TransactionSenders, ComponentSelection::All)]);
+        for bytes in [b"invalid".as_slice(), br#"{}"#, br#"{"future_flag":false}"#] {
+            tx.put::<tables::Metadata>(keys::STORAGE_SETTINGS.to_owned(), bytes.to_vec())?;
+            assert!(!snapshot_uses_v2(&tx, &selections)?);
+        }
         for (settings, expected) in [
-            (serde_json::json!("unknown"), "Invalid storage settings in snapshot database"),
-            (serde_json::json!({}), "Unrecognized snapshot storage settings"),
-            (serde_json::json!({"receipts_in_static_files": false, "unknown": false}),
-                "Unsupported legacy snapshot setting for this download: unknown=false"),
+            (serde_json::json!({"account_changesets_in_static_files": true, "unknown": [1]}),
+                "Unsupported legacy snapshot setting for this download: account_changesets_in_static_files=true"),
             (serde_json::json!({"receipts_in_static_files": false, "account_changesets_in_static_files": true}),
                 "Unsupported legacy snapshot setting for this download: account_changesets_in_static_files=true"),
             (serde_json::json!({"receipts_in_static_files": false, "account_history_in_rocksdb": true}),

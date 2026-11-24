@@ -818,6 +818,11 @@ pub(crate) fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::ta
             }
         }
 
+        let done = progress.archives_done.load(Ordering::Relaxed);
+        if done < progress.total_archives {
+            info!(target: "reth::cli", archives = format_args!("{done}/{}", progress.total_archives), "Snapshot archive processing stopped");
+            return
+        }
         let completed = progress.verified_output_bytes();
         let completed_display = DownloadProgress::format_size(completed);
         let output_total = DownloadProgress::format_size(progress.total_output_bytes);

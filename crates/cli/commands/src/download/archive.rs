@@ -19,6 +19,7 @@ use reth_cli_util::cancellation::CancellationToken;
 use reth_fs_util as fs;
 use std::{
     collections::HashSet,
+    future::Future,
     io::BufReader,
     panic::{self, AssertUnwindSafe},
     path::Path,
@@ -42,6 +43,7 @@ pub(crate) async fn run_modular_downloads(
     download_concurrency: usize,
     cancel_token: CancellationToken,
     retry_backoff: Option<Duration>,
+    validate_layout: impl Future<Output = Result<()>>,
 ) -> Result<()> {
     let download_cache_dir = target_dir.join(DOWNLOAD_CACHE_DIR);
     fs::create_dir_all(&download_cache_dir)?;
@@ -65,7 +67,7 @@ pub(crate) async fn run_modular_downloads(
         session,
     );
 
-    ModularDownloadJob::new(ctx, download_concurrency).run(planned_downloads).await
+    ModularDownloadJob::new(ctx, download_concurrency).run(planned_downloads, validate_layout).await
 }
 
 /// Schedules modular archive work for one run of `reth download`.
@@ -83,7 +85,11 @@ impl ModularDownloadJob {
     }
 
     /// Runs all planned archives and waits for the shared progress task to finish.
-    async fn run(self, planned_downloads: CheckedDownloads) -> Result<()> {
+    async fn run(
+        self,
+        planned_downloads: CheckedDownloads,
+        validate_layout: impl Future<Output = Result<()>>,
+    ) -> Result<()> {
         let shared = Arc::clone(
             self.ctx.session().progress().expect("modular downloads always use shared progress"),
         );
@@ -93,22 +99,49 @@ impl ModularDownloadJob {
             shared.record_reused_archive(reused.archive.size, reused.archive.output_size());
         }
         let ctx = self.ctx.clone();
-        let results: Vec<Result<()>> = stream::iter(planned_downloads.pending)
-            .map(move |archive| {
-                let ctx = ctx.clone();
-                async move { Self::process_archive(ctx, archive).await }
-            })
-            .buffer_unordered(self.archive_concurrency)
-            .collect()
-            .await;
+        let cancel = self.ctx.session().cancel_token();
+        let mut pending_db =
+            planned_downloads.pending.iter().filter(|archive| archive.writes_database()).count();
+        let mut remaining = planned_downloads.pending.len();
+        let mut processing = stream::iter(
+            planned_downloads.pending.into_iter().take_while(|_| !cancel.is_cancelled()),
+        )
+        .map(move |archive| {
+            let ctx = ctx.clone();
+            let writes_db = archive.writes_database();
+            async move { (writes_db, Self::process_archive(ctx, archive).await) }
+        })
+        .buffer_unordered(self.archive_concurrency);
 
+        let mut validate_layout = Some(validate_layout);
+        let mut error = None;
+        loop {
+            // Reused database files are ready immediately. If the database finished last, the
+            // finalizer checks it in its own transaction.
+            if pending_db == 0 &&
+                remaining > 0 &&
+                error.is_none() &&
+                !cancel.is_cancelled() &&
+                let Some(validate) = validate_layout.take() &&
+                let Err(err) = validate.await
+            {
+                error = Some(err);
+                // Stop scheduling and drain in-flight blocking workers before returning.
+                cancel.cancel();
+            }
+            let Some((writes_db, result)) = processing.next().await else { break };
+            remaining -= 1;
+            pending_db -= usize::from(writes_db);
+            if let Err(err) = result {
+                error.get_or_insert(err);
+            }
+        }
         shared.done.notify_one();
         let _ = progress_handle.await;
-
-        for result in results {
-            result?;
+        if let Some(err) = error {
+            return Err(err)
         }
-
+        eyre::ensure!(!cancel.is_cancelled(), "Snapshot download cancelled");
         Ok(())
     }
 
@@ -161,6 +194,10 @@ impl ArchiveProcessor {
         let mut extracted = None;
 
         loop {
+            eyre::ensure!(
+                !self.ctx.session().cancel_token().is_cancelled(),
+                "Snapshot download cancelled"
+            );
             match state {
                 ArchiveAttemptState::RunAttempt => {
                     self.cleanup_outputs();
@@ -426,5 +463,31 @@ impl ArchiveMode {
             Self::Cached => processor.run_cached_attempt(format),
             Self::Streaming => processor.run_streaming_attempt(format),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cancelled_download_without_pending_archives_fails() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let downloads = CheckedDownloads {
+            pending: Vec::new(),
+            reused: Vec::new(),
+            total_download_size: 0,
+            total_output_size: 0,
+        };
+
+        let error = run_modular_downloads(downloads, dir.path(), None, 1, cancel, None, async {
+            unreachable!("no pending archives")
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(error.to_string(), "Snapshot download cancelled");
+        Ok(())
     }
 }
