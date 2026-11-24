@@ -99,11 +99,21 @@ where
     /// The last hashed key that was returned by the cursor.
     /// De facto, this is a current cursor position.
     last_key: Option<B256>,
+    /// The last seek, while the cursor has not moved since.
+    last_seek: Option<LastSeek<V::NonZero>>,
     #[cfg(debug_assertions)]
     /// Tracks whether `seek` has been called.
     seeked: bool,
     /// Reference to the full post state.
     post_state: &'a HashedPostStateSorted,
+}
+
+/// The key of a seek and the entry it returned. The same entry is the first one at or after any key
+/// between the two, so a seek there does not walk the removed overlay entries again.
+#[derive(Debug)]
+struct LastSeek<V> {
+    key: B256,
+    entry: Option<(B256, V)>,
 }
 
 #[derive(Debug)]
@@ -141,6 +151,7 @@ where
             db_cursor_state: DbCursorState::NeedsPosition,
             post_state_cursor,
             last_key: None,
+            last_seek: None,
             #[cfg(debug_assertions)]
             seeked: false,
             post_state,
@@ -165,6 +176,7 @@ where
             db_cursor_state: DbCursorState::NeedsPosition,
             post_state_cursor,
             last_key: None,
+            last_seek: None,
             #[cfg(debug_assertions)]
             seeked: false,
             post_state,
@@ -299,6 +311,13 @@ where
     /// The returned account key is memoized and the cursor remains positioned at that key until
     /// [`HashedCursor::seek`] or [`HashedCursor::next`] are called.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        if let Some(last_seek) = &self.last_seek &&
+            last_seek.key <= key &&
+            last_seek.entry.as_ref().is_none_or(|(entry_key, _)| key <= *entry_key)
+        {
+            return Ok(last_seek.entry.clone())
+        }
+
         // Forward scans can reuse cursor positions; backward seeks and exhausted cursors cannot.
         if self.last_key.is_none_or(|last| key < last) {
             self.reset();
@@ -323,6 +342,7 @@ where
 
             let entry = Some((key, value));
             self.set_last_key(&entry);
+            self.last_seek = Some(LastSeek { key, entry: entry.clone() });
             return Ok(entry)
         }
 
@@ -335,6 +355,7 @@ where
 
         let entry = self.choose_next_entry()?;
         self.set_last_key(&entry);
+        self.last_seek = Some(LastSeek { key, entry: entry.clone() });
         Ok(entry)
     }
 
@@ -349,6 +370,8 @@ where
         {
             debug_assert!(self.seeked, "Cursor must be seek'd before next is called");
         }
+
+        self.last_seek = None;
 
         // A `last_key` of `None` indicates that the cursor is exhausted.
         let Some(last_key) = self.last_key else {
@@ -379,13 +402,14 @@ where
     }
 
     fn reset(&mut self) {
-        let Self { cursor, db_cursor_state, post_state_cursor, last_key, .. } = self;
+        let Self { cursor, db_cursor_state, post_state_cursor, last_key, last_seek, .. } = self;
 
         cursor.reset();
         post_state_cursor.reset();
 
         *db_cursor_state = DbCursorState::NeedsPosition;
         *last_key = None;
+        *last_seek = None;
         #[cfg(debug_assertions)]
         {
             self.seeked = false;
@@ -423,6 +447,7 @@ where
 mod tests {
     use super::*;
     use crate::hashed_cursor::mock::MockHashedCursor;
+    use alloy_primitives::map::B256Map;
     use parking_lot::Mutex;
     use std::{collections::BTreeMap, sync::Arc};
     use tracing::debug;
@@ -501,6 +526,83 @@ mod tests {
         let result = cursor.seek(key(0x02)).unwrap();
         assert_eq!(result, Some((key(0x03), U256::from(3))));
         assert!(!visited_keys.lock().is_empty(), "exact overlay deletion should consult the DB");
+    }
+
+    #[reth_concurrency::test]
+    fn test_seeks_over_removed_storage_read_the_db_once() {
+        let keys: Vec<B256> = (0..1000u16)
+            .map(|i| {
+                let mut key = B256::ZERO;
+                key[..2].copy_from_slice(&i.to_be_bytes());
+                key
+            })
+            .collect();
+        let db_nodes: BTreeMap<B256, U256> = keys.iter().map(|k| (*k, U256::from(1))).collect();
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockHashedCursor::new(Arc::new(db_nodes), visited_keys.clone());
+        let post_state = storage_post_state(keys.iter().map(|k| (*k, U256::ZERO)).collect());
+        let mut cursor = HashedPostStateCursor::new_storage(mock_cursor, &post_state, B256::ZERO);
+
+        for key in &keys {
+            assert_eq!(cursor.seek(*key).unwrap(), None);
+        }
+        assert!(
+            visited_keys.lock().len() <= keys.len() + 1,
+            "seeking every removed key read the DB {} times",
+            visited_keys.lock().len()
+        );
+    }
+
+    #[reth_concurrency::test]
+    fn test_seeks_before_a_live_slot_after_removed_storage_read_the_db_once() {
+        let keys: Vec<B256> = (0..1000u16)
+            .map(|i| {
+                let mut key = B256::ZERO;
+                key[..2].copy_from_slice(&i.to_be_bytes());
+                key
+            })
+            .collect();
+        let live = B256::repeat_byte(0xff);
+        let db_nodes: BTreeMap<B256, U256> = keys.iter().map(|k| (*k, U256::from(1))).collect();
+        let visited_keys = Arc::new(Mutex::new(Vec::new()));
+        let mock_cursor = MockHashedCursor::new(Arc::new(db_nodes), visited_keys.clone());
+        let mut overlay: Vec<_> = keys.iter().map(|k| (*k, U256::ZERO)).collect();
+        overlay.push((live, U256::from(7)));
+        let post_state = storage_post_state(overlay);
+        let mut cursor = HashedPostStateCursor::new_storage(mock_cursor, &post_state, B256::ZERO);
+
+        for key in &keys {
+            assert_eq!(cursor.seek(*key).unwrap(), Some((live, U256::from(7))));
+        }
+        assert!(
+            visited_keys.lock().len() <= keys.len() + 1,
+            "seeking every removed key read the DB {} times",
+            visited_keys.lock().len()
+        );
+    }
+
+    #[reth_concurrency::test]
+    fn test_seek_after_switching_storage_does_not_reuse_the_last_seek() {
+        let (removed, live) = (key(0x0a), key(0x0b));
+        let mut db_storages = B256Map::default();
+        db_storages.insert(removed, BTreeMap::from([(key(0x01), U256::from(1))]));
+        db_storages.insert(live, BTreeMap::from([(key(0x05), U256::from(5))]));
+        let visited: B256Map<_> =
+            [(removed, Mutex::default()), (live, Mutex::default())].into_iter().collect();
+        let mock_cursor =
+            MockHashedCursor::new_storage(Arc::new(db_storages), Arc::new(visited), removed)
+                .unwrap();
+        let mut storages = B256Map::default();
+        storages.insert(
+            removed,
+            reth_trie_common::HashedStorageSorted { storage_slots: vec![(key(0x01), U256::ZERO)] },
+        );
+        let post_state = HashedPostStateSorted::new(Vec::new(), storages);
+        let mut cursor = HashedPostStateCursor::new_storage(mock_cursor, &post_state, removed);
+
+        assert_eq!(cursor.seek(key(0x01)).unwrap(), None);
+        cursor.set_hashed_address(live);
+        assert_eq!(cursor.seek(key(0x02)).unwrap(), Some((key(0x05), U256::from(5))));
     }
 
     mod proptest_tests {
@@ -698,6 +800,43 @@ mod tests {
                                 break;
                             }
                         }
+                    }
+                }
+            }
+
+        /// Tests `HashedPostStateCursor` against a pre-merged cursor for seeks to any key, including
+        /// removed keys, keys between entries, backward seeks and seeks after the cursor is
+        /// exhausted.
+        #[reth_concurrency::test]
+        fn proptest_hashed_post_state_cursor_any_seek(
+                db_nodes in sorted_db_nodes_strategy(),
+                post_state_nodes in sorted_post_state_nodes_strategy(),
+                ops in prop::collection::vec((any::<bool>(), any::<u8>()), 1..200),
+            ) {
+                let expected_combined = merge_with_overlay(db_nodes.clone(), post_state_nodes.clone());
+                let mut control_cursor = MockHashedCursor::new(
+                    Arc::new(expected_combined.into_iter().collect()),
+                    Arc::new(Mutex::new(Vec::new())),
+                );
+                let mock_cursor = MockHashedCursor::new(
+                    Arc::new(db_nodes.into_iter().collect()),
+                    Arc::new(Mutex::new(Vec::new())),
+                );
+                let post_state = storage_post_state(post_state_nodes);
+                let mut test_cursor = HashedPostStateCursor::new_storage(mock_cursor, &post_state, B256::ZERO);
+
+                // `next` is only defined after a seek that returned an entry.
+                let mut positioned = false;
+                for (is_next, byte) in ops {
+                    if is_next && positioned {
+                        let control_result = control_cursor.next().unwrap();
+                        assert_eq!(control_result, test_cursor.next().unwrap(), "next mismatch");
+                        positioned = control_result.is_some();
+                    } else {
+                        let key = B256::repeat_byte(byte);
+                        let control_result = control_cursor.seek(key).unwrap();
+                        assert_eq!(control_result, test_cursor.seek(key).unwrap(), "seek mismatch for key {key:?}");
+                        positioned = control_result.is_some();
                     }
                 }
             }
