@@ -809,6 +809,16 @@ where
             static_file_provider.get_writer(block, StaticFileSegment::AccountChangeSets)?;
         let mut storage_changeset_writer =
             static_file_provider.get_writer(block, StaticFileSegment::StorageChangeSets)?;
+        // A genesis file recreated by the reset above starts at genesis, as `init_genesis` makes
+        // it, instead of being padded with empty blocks from the start of its fixed range.
+        let genesis_block = static_file_provider.genesis_block_number();
+        for writer in [&mut account_changeset_writer, &mut storage_changeset_writer] {
+            if writer.user_header().block_range().is_none() &&
+                writer.user_header().expected_block_range().contains(genesis_block)
+            {
+                writer.user_header_mut().set_expected_block_start(genesis_block);
+            }
+        }
         prepare_account_changeset_writer(&mut account_changeset_writer, block)?;
         prepare_storage_changeset_writer(&mut storage_changeset_writer, block)?;
 
@@ -1966,6 +1976,11 @@ mod tests {
         );
         for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
         {
+            assert_eq!(
+                static_files.get_lowest_range_start(segment),
+                Some(UNALIGNED_GENESIS),
+                "{segment}"
+            );
             let writer = static_files.latest_writer(segment).unwrap();
             assert_eq!(writer.next_block_number(), UNALIGNED_GENESIS + 1, "{segment}");
         }

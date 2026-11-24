@@ -1270,7 +1270,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 // Keyed by the range the file is named after, as `update_index` does. The header's
                 // expected range may start later than the name: `init_genesis` moves the first
                 // changeset file's expected start to a non-zero genesis block.
-                expected_block_ranges_by_max_block.insert(header.expected_block_end(), *file_range);
+                expected_block_ranges_by_max_block.insert(file_range.end(), *file_range);
 
                 // Update max tx -> block_range index
                 if let Some(tx_range) = header.tx_range() {
