@@ -206,6 +206,17 @@ where
     // Get the genesis block number from the chain spec
     let genesis_block_number = chain.genesis_header().number();
 
+    let existing_genesis = |block_hash| -> Result<_, InitStorageError> {
+        if !factory.cached_storage_settings().is_v2() {
+            let tx = factory.database_provider_rw()?.into_tx();
+            if let Some(tip) = tx.get::<tables::StageCheckpoints>(StageId::Execution.to_string())? {
+                tables::PruneCheckpoints::mark_history_at_tip(&tx, tip.block_number)?;
+                tx.commit()?;
+            }
+        }
+        Ok(block_hash)
+    };
+
     // Check if we already have the genesis header or if we have the wrong one.
     match factory.block_hash(genesis_block_number) {
         Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, _)) => {}
@@ -223,7 +234,7 @@ where
                     }
 
                     debug!("Genesis already written, skipping.");
-                    return Ok(hash)
+                    return existing_genesis(hash)
                 }
 
                 // A static-first genesis commit can be interrupted before its MDBX transaction
@@ -261,7 +272,7 @@ where
                     storage_hash = %block_hash,
                     "Genesis hash mismatch with chainspec; trusting DB per --debug.skip-genesis-validation"
                 );
-                return Ok(block_hash)
+                return existing_genesis(block_hash)
             } else {
                 return Err(InitStorageError::GenesisHashMismatch {
                     chainspec_hash: hash,
@@ -1426,8 +1437,12 @@ mod tests {
         Database,
     };
     use reth_provider::{
+        providers::BlockchainProvider,
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
-        ProviderFactory, RocksDBProviderFactory,
+        ChangeSetReader, ProviderFactory, PruneCheckpointReader, RocksDBProviderFactory,
+    };
+    use reth_prune_types::{
+        PruneCheckpoint, PruneMode, PruneSegment, MINIMUM_UNWIND_SAFE_DISTANCE,
     };
     use reth_storage_overlay::OverlayManager;
     use std::{collections::BTreeMap, sync::Arc};
@@ -2294,6 +2309,41 @@ mod tests {
 
         // Should succeed (warning is logged, not an error)
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn reopen_marks_legacy_history_at_execution_tip() -> eyre::Result<()> {
+        let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
+        let settings = StorageSettings::v1();
+        init_genesis_with_settings(&factory, settings)?;
+        let provider = factory.provider_rw()?;
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(10))?;
+        let account = PruneSegment::AccountHistory;
+        let storage = PruneSegment::StorageHistory;
+        let checkpoint = |block| PruneCheckpoint {
+            block_number: Some(block),
+            tx_number: None,
+            prune_mode: PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE),
+        };
+        for (segment, height) in [(account, 10), (storage, 6)] {
+            provider.tx_ref().put::<tables::PruneCheckpoints>(segment, checkpoint(height))?;
+        }
+        provider.commit()?;
+
+        // Start on the existing database, then persist the first block executed after upgrade.
+        init_genesis_with_settings(&factory, settings)?;
+        let provider = factory.provider_rw()?;
+        let row = AccountBeforeTx { address: Address::ZERO, info: None };
+        provider.tx_ref().put::<tables::AccountChangeSets>(11, row.clone())?;
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(11))?;
+        provider.commit()?;
+        let provider = BlockchainProvider::new(factory)?;
+        assert_eq!(provider.account_block_changeset(11)?, [row]);
+        assert_eq!(
+            provider.get_prune_checkpoints()?,
+            [(account, checkpoint(10)), (storage, checkpoint(7))]
+        );
+        Ok(())
     }
 
     #[test]

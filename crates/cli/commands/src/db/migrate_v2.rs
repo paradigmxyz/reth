@@ -14,13 +14,14 @@ use reth_db_api::{
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
+    BlockNumberList,
 };
 use reth_node_builder::NodeTypesWithDBAdapter;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockNumReader, DBProvider, DatabaseProviderFactory,
     MetadataProvider, MetadataWriter, ProviderFactory, PruneCheckpointReader,
-    RocksDBProviderFactory, StageCheckpointWriter, StaticFileProviderFactory, StaticFileWriter,
-    StorageSettings,
+    PruneCheckpointWriter, RocksDBProviderFactory, StageCheckpointWriter,
+    StaticFileProviderFactory, StaticFileWriter, StorageSettings,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -86,17 +87,21 @@ impl Command {
         Self::migrate_receipts::<NodeTypesWithDBAdapter<N, DatabaseEnv>>(&provider_factory, tip)?;
 
         // === Phase 3: Migrate indices → RocksDB ===
-        Self::migrate_to_rocksdb::<_, tables::TransactionHashNumbers>(&provider_factory)?;
-        Self::migrate_to_rocksdb::<_, tables::AccountsHistory>(&provider_factory)?;
-        Self::migrate_to_rocksdb::<_, tables::StoragesHistory>(&provider_factory)?;
+        Self::migrate_to_rocksdb::<_, tables::TransactionHashNumbers>(&provider_factory, |_| true)?;
+        Self::migrate_history_to_rocksdb::<_, tables::AccountsHistory>(
+            &provider_factory,
+            PruneSegment::AccountHistory,
+            tip,
+        )?;
+        Self::migrate_history_to_rocksdb::<_, tables::StoragesHistory>(
+            &provider_factory,
+            PruneSegment::StorageHistory,
+            tip,
+        )?;
 
         // === Phase 4: Flip metadata to v2 ===
         info!(target: "reth::cli", "Writing StorageSettings v2 metadata");
-        {
-            let provider_rw = provider_factory.database_provider_rw()?;
-            provider_rw.write_storage_settings(StorageSettings::v2())?;
-            provider_rw.commit()?;
-        }
+        Self::write_v2_storage_settings(&provider_factory, tip)?;
         info!(target: "reth::cli", "Storage settings updated to v2");
 
         // === Phase 5: Clear migrated and recomputable MDBX tables ===
@@ -117,6 +122,23 @@ impl Command {
         // We return here — the pipeline step is handled in mod.rs after
         // reopening the database with the compacted copy.
         info!(target: "reth::cli", "Migration complete. You should now restart the node and let it run the pipeline to rebuild the remaining data.");
+        Ok(())
+    }
+
+    fn write_v2_storage_settings<N: ProviderNodeTypes>(
+        factory: &ProviderFactory<N>,
+        tip: BlockNumber,
+    ) -> eyre::Result<()> {
+        let provider_rw = factory.database_provider_rw()?;
+        // Carry v1 read boundaries into v2, where the legacy MDBX encoding no longer applies.
+        for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
+            if let Some(mut checkpoint) = provider_rw.get_prune_checkpoint(segment)? {
+                checkpoint.block_number = checkpoint.block_number.map(|block| block.min(tip));
+                provider_rw.save_prune_checkpoint(segment, checkpoint)?;
+            }
+        }
+        provider_rw.write_storage_settings(StorageSettings::v2())?;
+        provider_rw.commit()?;
         Ok(())
     }
 
@@ -317,8 +339,28 @@ impl Command {
         Ok(())
     }
 
+    /// Copies the indices the v2 pruner can still visit. It resumes after the checkpoint,
+    /// even when the v1 changeset at that boundary was only partially pruned.
+    fn migrate_history_to_rocksdb<N: ProviderNodeTypes, T: Table<Value = BlockNumberList>>(
+        factory: &ProviderFactory<N>,
+        segment: PruneSegment,
+        tip: BlockNumber,
+    ) -> eyre::Result<()> {
+        let boundary = factory
+            .get_prune_checkpoint(segment)?
+            .and_then(|checkpoint| checkpoint.block_number)
+            .map(|block| block.min(tip));
+        Self::migrate_to_rocksdb::<_, T>(factory, |blocks| {
+            if let Some(block) = boundary {
+                blocks.remove_range(..=block);
+            }
+            !blocks.is_empty()
+        })
+    }
+
     fn migrate_to_rocksdb<N: ProviderNodeTypes, T: Table>(
         factory: &ProviderFactory<N>,
+        retain: impl Fn(&mut T::Value) -> bool,
     ) -> eyre::Result<()> {
         info!(target: "reth::cli", table = T::NAME, "Migrating MDBX table → RocksDB");
 
@@ -331,9 +373,11 @@ impl Command {
 
         let mut count = 0u64;
         for entry in cursor.walk(None)? {
-            let (key, value) = entry?;
-            batch.put::<T>(key, &value)?;
-            count += 1;
+            let (key, mut value) = entry?;
+            if retain(&mut value) {
+                batch.put::<T>(key, &value)?;
+                count += 1;
+            }
         }
 
         batch.commit()?;
@@ -498,12 +542,14 @@ mod tests {
     use super::*;
     use alloy_primitives::{B256, U256};
     use reth_db::models::{AccountBeforeTx, BlockNumberAddress};
+    use reth_db_api::models::storage_sharded_key::StorageShardedKey;
     use reth_primitives_traits::StorageEntry;
     use reth_provider::{
         test_utils::create_test_provider_factory_with_genesis_block_number, ChangeSetReader,
         StorageChangeSetReader, StorageSettingsCache,
     };
-    use reth_prune_types::PruneCheckpoint;
+    use reth_prune_types::{PruneCheckpoint, PruneMode};
+    use reth_static_file_types::StaticFileSegment::{AccountChangeSets, StorageChangeSets};
 
     /// A genesis at a block that is not the start of a static file range, as on chains that
     /// start from carried-over state.
@@ -584,5 +630,64 @@ mod tests {
                 "block {block}"
             );
         }
+    }
+
+    #[test]
+    fn migrate_legacy_history_at_execution_tip() -> eyre::Result<()> {
+        let tip = 10;
+        let checkpoint = |block| PruneCheckpoint {
+            prune_mode: PruneMode::Full,
+            ..PruneCheckpoint::pruned_through(block)
+        };
+        let account = PruneSegment::AccountHistory;
+        let storage = PruneSegment::StorageHistory;
+        // The old storage pruner stopped partway through the boundary block.
+        for boundary in [tip - 1, tip] {
+            let factory = create_test_provider_factory_with_genesis_block_number(0);
+            let provider = factory.provider_rw()?;
+            let tx = provider.tx_ref();
+            tx.put::<tables::PruneCheckpoints>(account, checkpoint(tip))?;
+            tx.put::<tables::PruneCheckpoints>(storage, checkpoint(boundary - 1))?;
+            let row = ((boundary, Address::ZERO).into(), StorageEntry::new(B256::ZERO, U256::ONE));
+            tx.put::<tables::StorageChangeSets>(row.0, row.1)?;
+            let cold = StorageShardedKey::last(Address::ZERO, B256::ZERO);
+            let hot_entry = StorageEntry::new(B256::with_last_byte(1), U256::ONE);
+            let hot = StorageShardedKey::last(Address::ZERO, hot_entry.key);
+            for block in boundary..=tip {
+                tx.put::<tables::StorageChangeSets>((block, Address::ZERO).into(), hot_entry)?;
+            }
+            tx.put::<tables::StoragesHistory>(
+                cold.clone(),
+                BlockNumberList::new_pre_sorted([boundary]),
+            )?;
+            tx.put::<tables::StoragesHistory>(
+                hot.clone(),
+                BlockNumberList::new_pre_sorted(boundary..=tip),
+            )?;
+            provider.commit()?;
+
+            Command::migrate_account_changesets(&factory, tip)?;
+            Command::migrate_storage_changesets(&factory, tip)?;
+            Command::migrate_history_to_rocksdb::<_, tables::StoragesHistory>(
+                &factory, storage, tip,
+            )?;
+            Command::write_v2_storage_settings(&factory, tip)?;
+            let rocks = factory.rocksdb_provider();
+            assert_eq!(rocks.get::<tables::StoragesHistory>(cold)?, None);
+            assert_eq!(
+                rocks.get::<tables::StoragesHistory>(hot)?,
+                (boundary < tip).then(|| BlockNumberList::new_pre_sorted([tip]))
+            );
+            let migrated = factory.provider()?;
+            assert_eq!(migrated.storage_settings()?, Some(StorageSettings::v2()));
+            let saved = |segment| migrated.tx_ref().get::<tables::PruneCheckpoints>(segment);
+            assert_eq!(saved(account)?, Some(checkpoint(tip)));
+            assert_eq!(saved(storage)?, Some(checkpoint(boundary)));
+            let files = factory.static_file_provider();
+            assert_eq!(files.storage_changeset(boundary)?, [row, (row.0, hot_entry)]);
+            files.latest_writer(AccountChangeSets)?.begin_account_changeset(tip + 1)?;
+            files.latest_writer(StorageChangeSets)?.begin_storage_changeset(tip + 1)?;
+        }
+        Ok(())
     }
 }

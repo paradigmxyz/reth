@@ -777,12 +777,15 @@ mod tests {
     use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
     use assert_matches::assert_matches;
     use reth_consensus::ConsensusError;
+    use reth_db_api::{tables, transaction::DbTxMut};
     use reth_errors::ProviderError;
     use reth_provider::test_utils::{
         create_test_provider_factory, create_test_provider_factory_with_genesis_block_number,
         MockNodeTypesWithDB,
     };
-    use reth_prune::PruneModes;
+    use reth_prune::{
+        PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_UNWIND_SAFE_DISTANCE,
+    };
     use reth_testing_utils::generators::{self, random_block_with_parent};
     use tokio_stream::StreamExt;
 
@@ -1369,6 +1372,42 @@ mod tests {
                 Some(ControlFlow::Unwind { target: genesis, bad_block: block(genesis + 1) })
             );
         }
+    }
+
+    #[test]
+    fn resume_legacy_unwind_at_execution_tip() {
+        let factory = create_test_provider_factory();
+        let rw = factory.database_provider_rw().unwrap();
+        let tip = 10;
+        let legacy = PruneCheckpoint {
+            prune_mode: PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE),
+            ..PruneCheckpoint::pruned_through(tip)
+        };
+        rw.tx_ref().put::<tables::PruneCheckpoints>(PruneSegment::StorageHistory, legacy).unwrap();
+        for (id, height) in
+            [(StageId::Headers, tip + 1), (StageId::Execution, tip), (StageId::Finish, tip)]
+        {
+            rw.save_stage_checkpoint(id, StageCheckpoint::new(height)).unwrap();
+        }
+        rw.write_pipeline_unwind(Some(&PipelineUnwind {
+            target: tip,
+            stages: vec!["Headers".into(), "Execution".into()],
+            bad_block: None,
+        }))
+        .unwrap();
+        rw.commit().unwrap();
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+            .add_stage(
+                TestStage::new(StageId::Headers)
+                    .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(tip) })),
+            )
+            .add_stage(TestStage::new(StageId::Execution))
+            .build(
+                factory.clone(),
+                StaticFileProducer::new(factory.clone(), PruneModes::default()),
+            );
+        pipeline.resume_unwind().unwrap();
+        assert_eq!(factory.provider().unwrap().pipeline_unwind().unwrap(), None);
     }
 
     #[test]

@@ -22,10 +22,12 @@ use crate::{
         bal::{StoredBlockAccessList, StoredBlockAccessListKey},
         blocks::{HeaderHash, StoredBlockOmmers},
         storage_sharded_key::StorageShardedKey,
-        AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
+        AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey, StorageSettings,
         StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
     table::{Decode, DupSort, Encode, Table, TableInfo},
+    transaction::{DbTx, DbTxMut},
+    DatabaseError,
 };
 use alloy_consensus::Header;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
@@ -581,6 +583,72 @@ impl Table for PackedStoragesTrie {
 
 impl DupSort for PackedStoragesTrie {
     type SubKey = PackedStoredNibblesSubKey;
+}
+
+impl PruneCheckpoints {
+    // Compact stores the two Option flags in the low bits of the first byte. Old readers
+    // ignore its padding and old writers zero it, even when they rewrite the same height.
+    const EXACT_HISTORY_BOUNDARY: u8 = 1 << 7;
+
+    /// Reads the highest possibly incomplete block. Legacy MDBX history checkpoints can
+    /// precede an interrupted block by one, unless their prune mode excluded that block.
+    pub fn read(
+        tx: &impl DbTx,
+        segment: PruneSegment,
+        settings: StorageSettings,
+    ) -> Result<Option<PruneCheckpoint>, DatabaseError> {
+        if settings.is_v2() || !(segment.is_account_history() || segment.is_storage_history()) {
+            return tx.get::<Self>(segment)
+        }
+        let Some(raw) = tx.get::<RawTable<Self>>(segment.into())? else { return Ok(None) };
+        let mut checkpoint = raw.value()?;
+        if raw.raw_value()[0] & Self::EXACT_HISTORY_BOUNDARY == 0 &&
+            let Some(block) = checkpoint.block_number &&
+            block < BlockNumber::MAX &&
+            let Some(next) = checkpoint.prune_mode.next_pruned_block(Some(block)) &&
+            // Startup recovery may read the checkpoint before genesis initialization marks the tip.
+            tx.get::<StageCheckpoints>(reth_stages_types::StageId::Execution.to_string())?
+                .is_none_or(|tip| tip.block_number != block)
+        {
+            checkpoint.block_number = Some(next);
+        }
+        Ok(Some(checkpoint))
+    }
+
+    /// Writes a v1 history checkpoint with its exact-boundary bit in the same value.
+    pub fn write(
+        tx: &impl DbTxMut,
+        segment: PruneSegment,
+        checkpoint: PruneCheckpoint,
+        settings: StorageSettings,
+    ) -> Result<(), DatabaseError> {
+        if settings.is_v2() || !(segment.is_account_history() || segment.is_storage_history()) {
+            return tx.put::<Self>(segment, checkpoint)
+        }
+        const {
+            assert!(PruneCheckpoint::bitflag_encoded_bytes() == 1);
+            assert!(PruneCheckpoint::bitflag_unused_bits() > 0);
+        }
+        let mut bytes = RawValue::new(checkpoint).into_value();
+        bytes[0] |= Self::EXACT_HISTORY_BOUNDARY;
+        tx.put::<RawTable<Self>>(segment.into(), RawValue::from_vec(bytes))
+    }
+
+    /// Marks legacy v1 history checkpoints at the execution tip as exact before the next
+    /// block is executed. Its changesets cannot have been partially pruned yet.
+    pub fn mark_history_at_tip(
+        tx: &(impl DbTx + DbTxMut),
+        tip: BlockNumber,
+    ) -> Result<(), DatabaseError> {
+        for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
+            if let Some(checkpoint) = tx.get::<Self>(segment)? &&
+                checkpoint.block_number == Some(tip)
+            {
+                Self::write(tx, segment, checkpoint, StorageSettings::v1())?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Keys for the `ChainState` table.
