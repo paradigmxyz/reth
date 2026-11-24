@@ -183,10 +183,13 @@ where
             // the configuration opts in with `ConfigureEvm::warms_tx_targets`.
             let warm_pool = ctx.bal_prewarm_pool.as_deref().zip(ctx.saved_cache.as_ref());
             if let Some((warm_pool, saved_cache)) = warm_pool {
-                warm_pool.begin_block(
+                // Cancelled prewarming skips the targets still queued, so finishing does not wait
+                // for them.
+                warm_pool.begin_cancellable_block(
                     Self::warm_provider_builder(ctx),
                     saved_cache.cache().clone(),
                     ctx.env.txpool_snapshot.clone(),
+                    Arc::clone(&ctx.terminate_execution),
                 );
             }
             // Transactions to execute again when their results become stale.
