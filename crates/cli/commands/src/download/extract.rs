@@ -12,7 +12,7 @@ use eyre::{Result, WrapErr};
 use lz4::Decoder;
 use reqwest::blocking::Client as BlockingClient;
 use reth_cli_util::cancellation::CancellationToken;
-use reth_fs_util as fs;
+use reth_fs_util::{self as fs, FsPathError};
 use std::{
     cell::RefCell,
     collections::HashSet,
@@ -410,8 +410,7 @@ impl FileHasher {
         if !self.outputs.contains(&path) {
             return Ok(false)
         }
-        let entry_type = entry.header().entry_type();
-        if !entry_type.is_file() && !entry_type.is_contiguous() {
+        if !is_regular_file(entry) {
             return Ok(false)
         }
         let start = entry.raw_file_position();
@@ -568,12 +567,12 @@ fn write_regular_file<R: Read>(
     }
     ensure_inside(root, parent)?;
 
-    match std::fs::remove_file(dest) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
-    }
-    let file = std::fs::OpenOptions::new().write(true).create_new(true).open(dest)?;
+    fs::remove_file_if_exists(dest)?;
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dest)
+        .map_err(|error| FsPathError::create_file(error, dest))?;
     let mut writer = BufWriter::with_capacity(EXTRACTED_FILE_WRITE_SIZE, file);
     let written = io::copy(entry, &mut writer)?;
     let file = writer.into_inner().map_err(|error| error.into_error())?;
@@ -582,9 +581,11 @@ fn write_regular_file<R: Read>(
     if let Ok(mode) = entry.header().mode() {
         file.set_permissions(std::fs::Permissions::from_mode(mode & 0o777))?;
     }
-    if let Ok(mtime) = entry.header().mtime() {
-        // Like `tar`, avoid zero modification times.
-        file.set_modified(UNIX_EPOCH + Duration::from_secs(mtime.max(1)))?;
+    // Like `tar`, avoid zero modification times. Times `SystemTime` cannot represent are skipped.
+    if let Ok(mtime) = entry.header().mtime() &&
+        let Some(modified) = UNIX_EPOCH.checked_add(Duration::from_secs(mtime.max(1)))
+    {
+        file.set_modified(modified)?;
     }
     Ok(())
 }
@@ -1301,7 +1302,7 @@ mod tests {
 
         // A decode error on the decoder thread fails extraction.
         let target = tempfile::tempdir().unwrap();
-        assert!(extract_archive_hashed(
+        let error = extract_archive_hashed(
             &tar[..tar.len() - 4],
             CompressionFormat::Zstd,
             target.path(),
@@ -1310,7 +1311,8 @@ mod tests {
             None,
             || {},
         )
-        .is_err());
+        .unwrap_err();
+        assert_eq!(error.root_cause().to_string(), "incomplete frame");
 
         // An unpack error stops the input before waiting for the decoder, which is blocked on
         // input that would otherwise never end.
@@ -1346,6 +1348,25 @@ mod tests {
             error.root_cause().to_string(),
             "Archive links are unsupported: `static_files/link`"
         );
+    }
+
+    #[test]
+    fn regular_file_with_unrepresentable_mtime_is_extracted() {
+        let mut archive = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(4);
+        header.set_mode(0o600);
+        header.set_mtime(u64::MAX);
+        header.set_cksum();
+        archive.append_data(&mut header, "db/data", b"data".as_slice()).unwrap();
+        let tar = zstd::encode_all(archive.into_inner().unwrap().as_slice(), 0).unwrap();
+
+        let target = tempfile::tempdir().unwrap();
+        extract_archive_raw(tar.as_slice(), CompressionFormat::Zstd, target.path(), None, None)
+            .unwrap();
+        let path = target.path().join("db/data");
+        assert_eq!(fs::read(&path).unwrap(), b"data");
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
     }
 
     #[test]
