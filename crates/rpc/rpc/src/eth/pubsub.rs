@@ -9,15 +9,13 @@ use alloy_rpc_types_eth::{
     },
     Filter,
 };
-use futures::{
-    stream::{BoxStream, FusedStream},
-    FutureExt, StreamExt,
-};
+use futures::{stream::BoxStream, FutureExt, StreamExt};
 use jsonrpsee::{
     server::{PendingSubscriptionAcceptError, SharedResult, SubscriptionMessage},
     types::ErrorObject,
     PendingSubscriptionSink, SubscriptionSink,
 };
+use parking_lot::Mutex;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
 use reth_rpc_convert::RpcHeader;
@@ -35,7 +33,7 @@ use reth_transaction_pool::{
 use serde::Serialize;
 use tokio::sync::{
     broadcast::{self, error::RecvError},
-    oneshot, Mutex,
+    oneshot,
 };
 use tokio_stream::{
     wrappers::{BroadcastStream, ReceiverStream},
@@ -247,23 +245,22 @@ where
 
     /// Subscribes to the shared feed that `feed` selects, starting a producer over the stream that
     /// `items` returns if the feed has none.
-    async fn subscribe_shared<T: Serialize + Send + 'static>(
+    fn subscribe_shared<T: Serialize + Send + 'static>(
         &self,
         feed: fn(&SharedFeeds) -> &SharedFeed,
         items: for<'a> fn(&'a Self) -> BoxStream<'a, T>,
     ) -> broadcast::Receiver<SharedResult> {
-        feed(&self.inner.feeds)
-            .subscribe(|sender| {
-                let pubsub = self.clone();
-                let mut producer = Box::pin(async move {
-                    feed(&pubsub.inner.feeds).produce(sender, items(&pubsub)).await
-                });
-                let _guard = self.inner.subscription_task_spawner.handle().enter();
-                if producer.as_mut().now_or_never().is_none() {
-                    self.inner.subscription_task_spawner.spawn_task(producer);
-                }
-            })
-            .await
+        feed(&self.inner.feeds).subscribe(|sender| {
+            let pubsub = self.clone();
+            let mut producer = Box::pin(async move {
+                let items = items(&pubsub);
+                feed(&pubsub.inner.feeds).produce(sender, items).await;
+            });
+            let _guard = self.inner.subscription_task_spawner.handle().enter();
+            if producer.as_mut().now_or_never().is_none() {
+                self.inner.subscription_task_spawner.spawn_task(producer);
+            }
+        })
     }
 }
 
@@ -323,23 +320,15 @@ impl From<SubscriptionSerializeError> for ErrorObject<'static> {
     }
 }
 
-/// Polls a lazy source once before acknowledgement, retaining any immediately available item.
-fn start_stream<S: Stream + Unpin>(stream: S) -> impl FusedStream<Item = S::Item> + Unpin {
-    let mut stream = stream.peekable();
-    let _ = Pin::new(&mut stream).peek().now_or_never();
-    stream
-}
-
 /// Pipes all stream items to the subscription sink.
 async fn pipe_from_stream<T, St>(
     sink: impl Future<Output = Result<SubscriptionSink, PendingSubscriptionAcceptError>>,
-    stream: St,
+    mut stream: St,
 ) -> Result<(), ErrorObject<'static>>
 where
     St: Stream<Item = T> + Unpin,
     T: Serialize,
 {
-    let mut stream = start_stream(stream);
     let Ok(sink) = sink.await else { return Ok(()) };
     loop {
         tokio::select! {
@@ -372,9 +361,8 @@ where
 /// Sends the notifications of a shared feed to the subscription sink.
 async fn pipe_from_shared(
     sink: impl Future<Output = Result<SubscriptionSink, PendingSubscriptionAcceptError>>,
-    results: impl Future<Output = broadcast::Receiver<SharedResult>>,
+    mut results: broadcast::Receiver<SharedResult>,
 ) {
-    let mut results = results.await;
     let Ok(sink) = sink.await else { return };
     let forward = async {
         loop {
@@ -502,16 +490,16 @@ struct SharedFeed {
 impl SharedFeed {
     /// Creates a feed without a producer.
     const fn new(capacity: usize) -> Self {
-        Self { capacity, sender: Mutex::const_new(None) }
+        Self { capacity, sender: Mutex::new(None) }
     }
 
-    /// Starts the producer under the feed lock so concurrent subscribers cannot join before
-    /// its first poll has attached the upstream source.
-    async fn subscribe(
+    /// Starts the producer under the feed lock so concurrent subscribers join after the
+    /// upstream listener is attached.
+    fn subscribe(
         &self,
         start: impl FnOnce(broadcast::Sender<SharedResult>),
     ) -> broadcast::Receiver<SharedResult> {
-        let mut slot = self.sender.lock().await;
+        let mut slot = self.sender.lock();
         if let Some(sender) = slot.as_ref().and_then(broadcast::WeakSender::upgrade) {
             return sender.subscribe()
         }
@@ -528,17 +516,17 @@ impl SharedFeed {
         sender: broadcast::Sender<SharedResult>,
         items: BoxStream<'_, T>,
     ) {
-        let mut items = start_stream(items);
-        // An ended source must release its sender before another subscriber can join it.
-        if items.is_terminated() {
+        let mut items = items.peekable();
+        // Release an already-ended source before a second subscriber can join its channel.
+        if matches!(Pin::new(&mut items).peek().now_or_never(), Some(None)) {
             return
         }
-        // The startup poll only attaches the source. Serialize items in the spawned task.
+        // Leave any buffered first item for the spawned task to serialize outside the feed lock.
         tokio::task::yield_now().await;
         loop {
             tokio::select! {
                 _ = sender.closed() => {
-                    if self.stop_if_unused(&sender).await {
+                    if self.stop_if_unused(&sender) {
                         break
                     }
                 }
@@ -546,12 +534,12 @@ impl SharedFeed {
                     let Some(item) = item else {
                         // Dropping the sender ends all subscriptions, like the end of their own
                         // streams did.
-                        *self.sender.lock().await = None;
+                        *self.sender.lock() = None;
                         break
                     };
                     match SharedResult::new(&item) {
                         Ok(result) => {
-                            if sender.send(result).is_err() && self.stop_if_unused(&sender).await {
+                            if sender.send(result).is_err() && self.stop_if_unused(&sender) {
                                 break
                             }
                         }
@@ -571,8 +559,8 @@ impl SharedFeed {
     ///
     /// Subscribing holds the same lock, so a new subscriber either joins before this check or
     /// starts a new producer after it.
-    async fn stop_if_unused(&self, sender: &broadcast::Sender<SharedResult>) -> bool {
-        let mut slot = self.sender.lock().await;
+    fn stop_if_unused(&self, sender: &broadcast::Sender<SharedResult>) -> bool {
+        let mut slot = self.sender.lock();
         if sender.receiver_count() > 0 {
             return false
         }
@@ -656,7 +644,7 @@ mod tests {
         TransactionOrigin,
     };
     use serde_json::Value;
-    use std::{pin::pin, time::Duration};
+    use std::{future::pending, pin::pin, sync::mpsc::channel, thread, time::Duration};
     use tokio::{
         runtime::{Builder, Handle},
         sync::mpsc,
@@ -761,8 +749,7 @@ mod tests {
 
     /// Returns how many subscribers the feed's running producer has, or `None` without one.
     fn feed_subscribers(feed: &SharedFeed) -> Option<usize> {
-        let Ok(slot) = feed.sender.try_lock() else { return None };
-        slot.as_ref()?.upgrade().map(|sender| sender.receiver_count())
+        feed.sender.lock().as_ref()?.upgrade().map(|sender| sender.receiver_count())
     }
 
     /// Waits until each feed has a running producer with the given number of subscribers.
@@ -886,13 +873,13 @@ mod tests {
         // Nothing runs before the first subscriber, even when blocks arrive.
         commit(&mut canonical_in_memory_state_writer, chain_with_logs(1));
         tokio::task::yield_now().await;
-        assert!(feed.sender.lock().await.is_none());
+        assert!(feed.sender.lock().is_none());
 
         // Two subscribers share one producer.
         let (first_id, mut first) = subscribe(&module, r#"["newHeads"]"#).await;
         let (second_id, mut second) = subscribe(&module, r#"["newHeads"]"#).await;
         wait_for_producers(&[(feed, 2)]).await;
-        let producer = feed.sender.lock().await.clone().unwrap();
+        let producer = feed.sender.lock().clone().unwrap();
         commit(&mut canonical_in_memory_state_writer, chain_with_logs(2));
         let notification = next_notification(&mut first).await;
         assert_eq!(
@@ -913,7 +900,7 @@ mod tests {
         // It stops when the last one leaves.
         unsubscribe(&module, &second_id).await;
         wait_until_stopped(&producer).await;
-        assert!(feed.sender.lock().await.is_none());
+        assert!(feed.sender.lock().is_none());
 
         // The next subscriber starts a new one.
         let (_, mut third) = subscribe(&module, r#"["newHeads"]"#).await;
@@ -975,16 +962,19 @@ mod tests {
         let (_, mut notifications) =
             forward.block_on(async { tokio::time::timeout(TIMEOUT, request).await.unwrap() });
 
-        let mut results = rpc.block_on(pubsub.subscribe_shared(
-            |feeds| &feeds.new_heads,
-            |pubsub| {
-                assert_eq!(
-                    Handle::current().id(),
-                    pubsub.inner.subscription_task_spawner.handle().id()
-                );
-                pubsub.new_headers_stream().boxed()
-            },
-        ));
+        let mut results = {
+            let _guard = rpc.enter();
+            pubsub.subscribe_shared(
+                |feeds| &feeds.new_heads,
+                |pubsub| {
+                    assert_eq!(
+                        Handle::current().id(),
+                        pubsub.inner.subscription_task_spawner.handle().id()
+                    );
+                    pubsub.new_headers_stream().boxed()
+                },
+            )
+        };
 
         // Commit once after the receipt acknowledgement, before the new header producer runs.
         commit(&mut writer, chain);
@@ -1006,7 +996,7 @@ mod tests {
         let feed = &pubsub.inner.feeds.new_heads;
         let (id, _notifications) = subscribe(&module, r#"["newHeads"]"#).await;
         wait_for_producers(&[(feed, 1)]).await;
-        let producer = feed.sender.lock().await.clone().unwrap();
+        let producer = feed.sender.lock().clone().unwrap();
 
         // The test doesn't read, so the subscription task ends up waiting for room to send.
         for number in 0..=NOTIFICATION_BUFFER as u64 {
@@ -1023,13 +1013,11 @@ mod tests {
         const ITEMS: usize = 4 * PER_BLOCK_FEED_CAPACITY;
 
         let pubsub = test_pubsub(test_provider().0, testing_pool());
-        let mut ended = pubsub
-            .subscribe_shared(|feeds| &feeds.new_heads, |_| stream::empty::<usize>().boxed())
-            .await;
+        let mut ended =
+            pubsub.subscribe_shared(|feeds| &feeds.new_heads, |_| stream::empty::<usize>().boxed());
         // A source that ended on its first poll must be replaced before any spawned task runs.
-        let mut results = pubsub
-            .subscribe_shared(|feeds| &feeds.new_heads, |_| stream::iter(0..ITEMS).boxed())
-            .await;
+        let mut results =
+            pubsub.subscribe_shared(|feeds| &feeds.new_heads, |_| stream::iter(0..ITEMS).boxed());
 
         assert!(matches!(ended.try_recv(), Err(broadcast::error::TryRecvError::Closed)));
 
@@ -1039,51 +1027,35 @@ mod tests {
         }
         // The end of the source ends the feed.
         assert!(matches!(results.recv().await, Err(RecvError::Closed)));
-        assert!(pubsub.inner.feeds.new_heads.sender.lock().await.is_none());
+        assert!(pubsub.inner.feeds.new_heads.sender.lock().is_none());
     }
 
-    #[tokio::test]
-    async fn joining_subscriber_waits_for_source_startup() {
-        let feed = SharedFeed::new(1);
-        let mut join = pin!(feed.subscribe(|_| panic!("expected to share the first producer")));
-        let mut producer = None;
-        let first = feed
-            .subscribe(|sender| {
-                producer = Some(sender);
-                let sink = async { panic!("acknowledged before the shared source attached") };
-                assert!(pipe_from_shared(sink, join.as_mut()).now_or_never().is_none());
-            })
-            .await;
-        let second = tokio::time::timeout(TIMEOUT, join).await.unwrap();
-        assert_eq!(producer.unwrap().receiver_count(), 2);
-        assert!(first.same_channel(&second));
+    #[test]
+    fn joining_subscriber_waits_for_source_startup() {
+        let feed = &SharedFeed::new(1);
+        let (started, starting) = channel();
+        let (resume, paused) = channel();
+        thread::scope(|scope| {
+            let first = scope.spawn(move || {
+                feed.subscribe(|sender| {
+                    started.send(sender).unwrap();
+                    paused.recv_timeout(TIMEOUT).unwrap();
+                })
+            });
+            let producer = starting.recv_timeout(TIMEOUT).unwrap();
+            assert!(feed.sender.try_lock().is_none(), "feed exposed during source startup");
+            resume.send(()).unwrap();
+            let second = feed.subscribe(|_| panic!("expected to share the first producer"));
+            let first = first.join().unwrap();
+            assert!(first.same_channel(&second));
+            assert_eq!(producer.receiver_count(), 2);
+        });
     }
 
-    #[tokio::test]
-    async fn direct_subscription_retains_item_ready_on_first_poll() {
-        let mut module = RpcModule::new(());
-        module
-            .register_subscription(
-                "eth_subscribe",
-                "eth_subscription",
-                "eth_unsubscribe",
-                |_, pending, _| async move {
-                    let (attached, mut check) = oneshot::channel();
-                    let stream = stream::once(async move {
-                        attached.send(()).unwrap();
-                        42
-                    });
-                    let accept = async move {
-                        assert_eq!(check.try_recv(), Ok(()));
-                        pending.accept().await
-                    };
-                    pipe_from_stream(accept, stream.boxed()).await.unwrap();
-                },
-            )
-            .unwrap();
-        let (id, mut notifications) =
-            tokio::time::timeout(TIMEOUT, subscribe(&module, "[]")).await.unwrap();
-        assert_eq!(next_notification(&mut notifications).await, serialized_notification(&id, &42));
+    #[test]
+    fn direct_subscription_waits_for_acknowledgement_before_polling() {
+        let stream = stream::iter([42]).inspect(|_| panic!("polled before acknowledgement"));
+        assert!(pipe_from_stream(pending(), stream).now_or_never().is_none());
     }
 
     #[tokio::test]
@@ -1127,7 +1099,7 @@ mod tests {
                 },
             );
             wait_for_producers(&[(feed, 1)]).await;
-            (response, feed.sender.lock().await.clone().unwrap(), full, messages)
+            (response, feed.sender.lock().clone().unwrap(), full, messages)
         };
 
         let (canceled, producer, full, mut messages) = start(1).await;

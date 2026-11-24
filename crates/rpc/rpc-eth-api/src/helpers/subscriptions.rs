@@ -13,8 +13,8 @@ use tracing::error;
 /// Provides streams subscriptions for `eth_subscribe`.
 ///
 /// Override the default methods to inject additional data sources (e.g. flashblocks).
-/// Attach upstream listeners during construction or the first poll so events published after
-/// the subscription acknowledgement are available to the stream.
+/// Register upstream listeners before returning the stream so they can receive events
+/// immediately after acknowledgement, even before the first poll.
 pub trait EthSubscriptions:
     RpcNodeCore + EthApiTypes<RpcConvert: RpcConvert<Primitives = Self::Primitives>>
 {
