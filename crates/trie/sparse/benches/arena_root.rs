@@ -68,6 +68,7 @@ fn account_value(rng: &mut StdRng, storage_root: B256) -> Vec<u8> {
         balance: U256::from(rng.random::<u128>()),
         storage_root,
         code_hash: random_b256(rng),
+        ..Default::default()
     })
 }
 

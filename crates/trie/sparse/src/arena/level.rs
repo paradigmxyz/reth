@@ -4,7 +4,7 @@
 //! the dirty nodes of one or more arenas are first collected per depth. Then all dirty leaves
 //! are encoded and hashed as one batch, and the branches of each depth, deepest first, are
 //! encoded and hashed as one batch (the children of a depth are all cached once the deeper
-//! depths are done). Hashing many independent inputs at once lets [keccak256_batch] use
+//! depths are done). Hashing many independent inputs at once lets [`keccak256_batch`] use
 //! multi-buffer SIMD implementations.
 
 use super::{
@@ -213,7 +213,7 @@ pub(super) fn hash_levels(
         let mut rlp = mem::take(&mut lb.rlp);
         rlp.clear();
         lb.hash_ranges(&mut rlp);
-        for (&(job, idx, epoch), rlp_node) in lb.leaves.iter().zip(rlp.drain(..)) {
+        for (&(job, idx, epoch), rlp_node) in lb.leaves.iter().zip(rlp.iter_mut().map(mem::take)) {
             *jobs[job as usize].arena[idx].state_mut() =
                 ArenaSparseNodeState::Cached { rlp_node, epoch };
         }
@@ -271,7 +271,9 @@ pub(super) fn hash_levels(
         }
 
         // Write back cached state and record trie updates.
-        for ((node, pending), rlp_node) in level.iter().zip(&lb.pending).zip(rlp.drain(..)) {
+        for ((node, pending), rlp_node) in
+            level.iter().zip(&lb.pending).zip(rlp.iter_mut().map(mem::take))
+        {
             let job = &mut jobs[node.job as usize];
             let arena = &mut *job.arena;
             let head_idx = node.idx;
@@ -305,7 +307,7 @@ pub(super) fn hash_levels(
     }
 }
 
-/// RLP-encodes the branch at head_idx (whose children must all be cached) into enc, and
+/// RLP-encodes the branch at `head_idx` (whose children must all be cached) into `enc`, and
 /// returns the start offset of the encoding with the branch's new epoch and masks.
 ///
 /// Equivalent to collecting the children's [`RlpNode`]s, computing
