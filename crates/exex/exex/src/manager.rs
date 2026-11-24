@@ -1,5 +1,6 @@
 use crate::{
-    wal::Wal, ExExEvent, ExExNotification, ExExNotifications, FinishedExExHeight, WalHandle,
+    notifications::rewind_to_fork_block, wal::Wal, ExExEvent, ExExNotification, ExExNotifications,
+    FinishedExExHeight, WalHandle,
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
@@ -157,13 +158,9 @@ impl<N: NodePrimitives> ExExHandle<N> {
                 // reorgs and reverts lower than its finished height.
                 ExExNotification::ChainReorged { old, .. } |
                 ExExNotification::ChainReverted { old } => {
-                    // If the finished block is reverted, it no longer proves that the ExEx
-                    // processed the blocks at its height, so fall back to the fork block, which
-                    // is on both branches. Otherwise, commits of the new branch below the old
-                    // finished height would be skipped.
-                    if old.block_number(finished_height.hash) == Some(finished_height.number) {
-                        self.finished_height = Some(old.fork_block());
-                    }
+                    let mut finished_height = finished_height;
+                    rewind_to_fork_block(&mut finished_height, old);
+                    self.finished_height = Some(finished_height);
                 }
             }
         }
