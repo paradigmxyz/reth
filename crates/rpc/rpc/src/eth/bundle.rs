@@ -424,7 +424,7 @@ mod tests {
     use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip2718::Encodable2718, BlockNumberOrTag};
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{Address, TxKind};
-    use reth_chain_state::ExecutedBlock;
+    use reth_chain_state::{CanonicalInMemoryStateWriter, ExecutedBlock};
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Block as EthBlock;
@@ -432,7 +432,11 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::RecoveredBlock;
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+        providers::BlockchainProvider,
+        test_utils::{
+            create_test_provider_factory_with_chain_spec,
+            create_test_provider_factory_with_in_memory_state_writer,
+        },
     };
     use reth_rpc_eth_api::helpers::SpawnBlocking;
     use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
@@ -469,10 +473,17 @@ mod tests {
             )]);
         let chain_spec =
             Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
-        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let (factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(chain_spec);
         init_genesis(&factory).unwrap();
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(factory).unwrap();
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers().unwrap(),
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         let eth_api = EthApiBuilder::new(
             provider.clone(),

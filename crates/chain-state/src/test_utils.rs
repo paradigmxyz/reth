@@ -1,6 +1,6 @@
 use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
-    CanonStateSubscriptions, CanonicalInMemoryStateWriter, ChainInfoHeaders, InMemoryState,
+    CanonStateSubscriptions, CanonicalInMemoryStateWriter, ChainInfoHeaders, InMemoryStateWriter,
 };
 use alloy_consensus::{Header, SignableTransaction, TxEip1559, TxReceipt, EMPTY_ROOT_HASH};
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, INITIAL_BASE_FEE};
@@ -454,15 +454,15 @@ impl CanonStateSubscriptions for TestCanonStateSubscriptions {
     }
 }
 
-/// Creates the writer of a canonical state over the blocks of `in_memory_state`.
+/// Creates the writer of a canonical state over the blocks `in_memory_state_writer` writes.
 ///
 /// The canonical head of the state is the default header, and it has no safe or finalized block.
 pub fn test_canonical_in_memory_state_writer(
-    in_memory_state: InMemoryState,
+    in_memory_state_writer: InMemoryStateWriter,
 ) -> CanonicalInMemoryStateWriter {
     CanonicalInMemoryStateWriter::new(
         ChainInfoHeaders { canonical_head: SealedHeader::default(), safe: None, finalized: None },
-        in_memory_state,
+        in_memory_state_writer,
     )
 }
 
