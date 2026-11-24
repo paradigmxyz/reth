@@ -116,7 +116,7 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
 
-    #[test]
+    #[reth_concurrency::test]
     fn pending_trie_exposes_block_hash_before_completion() {
         let block_hash = B256::with_last_byte(1);
         let anchor_hash = B256::with_last_byte(2);
@@ -129,7 +129,7 @@ mod tests {
         assert!(preserved.into_trie_for(block_hash).unwrap().is_some());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn pending_trie_with_mismatched_parent_does_not_wait() {
         let block_hash = B256::with_last_byte(1);
         let other_block_hash = B256::with_last_byte(2);

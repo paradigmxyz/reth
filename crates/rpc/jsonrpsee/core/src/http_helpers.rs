@@ -26,10 +26,10 @@
 
 //! Shared HTTP utilities.
 
-use crate::BoxError;
+use crate::{classify_message, BoxError};
 use bytes::{Buf, Bytes};
 use http_body::Frame;
-use http_body_util::{BodyExt, Limited};
+use http_body_util::{BodyExt, LengthLimitError, Limited};
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -159,35 +159,27 @@ where
     let mut is_single = None;
 
     while let Some(frame_or_err) = limited_body.frame().await {
-        let frame = frame_or_err.map_err(HttpError::Stream)?;
+        let frame = frame_or_err.map_err(|err| {
+            if err.is::<LengthLimitError>() {
+                HttpError::TooLarge
+            } else {
+                HttpError::Stream(err)
+            }
+        })?;
         let Some(data) = frame.data_ref() else {
             continue;
         };
 
         // If it's the first chunk, trim the whitespaces to determine whether it's valid JSON-RPC
-        // call. Only the four JSON whitespace characters count, not for example form feed.
+        // call.
         if received_data.is_empty() {
-            let first_non_whitespace = data
-                .chunk()
-                .iter()
-                .enumerate()
-                .take(128)
-                .find(|(_, byte)| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r'));
-
-            let skip = match first_non_whitespace {
-                Some((idx, b'{')) => {
-                    is_single = Some(true);
-                    idx
-                }
-                Some((idx, b'[')) => {
-                    is_single = Some(false);
-                    idx
-                }
-                _ => return Err(HttpError::Malformed),
+            let Some((data, single)) = classify_message(data.chunk()) else {
+                return Err(HttpError::Malformed);
             };
+            is_single = Some(single);
 
             // ignore whitespace as these doesn't matter just makes the JSON decoding slower.
-            received_data.extend_from_slice(&data.chunk()[skip..]);
+            received_data.extend_from_slice(data);
         } else {
             received_data.extend_from_slice(data.chunk());
         }

@@ -1,22 +1,12 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-fixture_variant="${1:-amsterdam}"
-# EELS simulator image tag, tests@v21.0.1 covers Osaka, BPO and Amsterdam
-eels_tag="v21.0.1"
-
-case "${fixture_variant}" in
-    amsterdam)
-        eels_fork="Amsterdam"
-        ;;
-    osaka)
-        eels_fork="Osaka"
-        ;;
-    *)
-        echo "unknown hive fixture variant: ${fixture_variant}"
-        exit 1
-        ;;
-esac
+# EELS release fixtures cover Osaka, BPO and Amsterdam.
+eels_tag="v21.0.3"
+# Pin all consume simulators to the tests@v21.0.3 release images.
+enginex_tag="${eels_tag}@sha256:e78b6d347db7080ae69c2512d829ebad59dfd8cfd993339a1df384a01f1607c4"
+wirex_tag="${eels_tag}@sha256:98fb625ac3385629364ab2bc3c187ccdf4c38c1027ddc4cb34101c4230ba11ac"
+reorg_tag="${eels_tag}@sha256:3bad340f1f8d24809beb93b8ba06a89ca854b604d7af136ed3fec9939a0af010"
 
 # Create the hive_assets directory
 mkdir hive_assets/
@@ -28,15 +18,18 @@ go build .
 
 # Run each hive command in the background for each simulator and wait
 echo "Building images"
-./hive -client reth --sim "ethereum/eels/consume-engine" \
-    --sim.buildarg tag="${eels_tag}" \
+./hive -client reth --sim "ethereum/eels/consume-enginex" \
+    --sim.buildarg tag="${enginex_tag}" \
     --sim.timelimit 1s || true &
-./hive -client reth --sim "ethereum/eels/consume-rlp" \
-    --sim.buildarg tag="${eels_tag}" \
+./hive -client reth --sim "ethereum/eels/consume-wirex" \
+    --sim.buildarg tag="${wirex_tag}" \
+    --sim.timelimit 1s || true &
+./hive -client reth --sim "ethereum/eels/consume-reorg" \
+    --sim.buildarg tag="${reorg_tag}" \
     --sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/eels/execute-blobs" \
     --sim.buildarg tag="${eels_tag}" \
-    --sim.buildarg fork="${eels_fork}" \
+    --sim.buildarg fork=Amsterdam \
     --sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
 ./hive -client reth --sim "devp2p" -sim.timelimit 1s || true &
@@ -53,8 +46,9 @@ docker save hive/hiveproxy:latest -o ../hive_assets/hiveproxy.tar & saving_pids+
 docker save hive/simulators/devp2p:latest -o ../hive_assets/devp2p.tar & saving_pids+=( $! )
 docker save hive/simulators/ethereum/engine:latest -o ../hive_assets/engine.tar & saving_pids+=( $! )
 docker save hive/simulators/ethereum/rpc-compat:latest -o ../hive_assets/rpc_compat.tar & saving_pids+=( $! )
-docker save hive/simulators/ethereum/eels/consume-engine:latest -o ../hive_assets/eels_engine.tar & saving_pids+=( $! )
-docker save hive/simulators/ethereum/eels/consume-rlp:latest -o ../hive_assets/eels_rlp.tar & saving_pids+=( $! )
+docker save hive/simulators/ethereum/eels/consume-enginex:latest -o ../hive_assets/eels_enginex.tar & saving_pids+=( $! )
+docker save hive/simulators/ethereum/eels/consume-wirex:latest -o ../hive_assets/eels_wirex.tar & saving_pids+=( $! )
+docker save hive/simulators/ethereum/eels/consume-reorg:latest -o ../hive_assets/eels_reorg.tar & saving_pids+=( $! )
 docker save hive/simulators/ethereum/eels/execute-blobs:latest -o ../hive_assets/eels_blobs.tar & saving_pids+=( $! )
 docker save hive/simulators/smoke/genesis:latest -o ../hive_assets/smoke_genesis.tar & saving_pids+=( $! )
 docker save hive/simulators/smoke/network:latest -o ../hive_assets/smoke_network.tar & saving_pids+=( $! )
