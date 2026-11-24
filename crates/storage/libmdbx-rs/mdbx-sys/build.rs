@@ -21,6 +21,9 @@ fn main() {
 
     let flags = format!("{:?}", cc.get_compiler().cflags_env());
     cc.define("MDBX_BUILD_FLAGS", flags.as_str())
+        // libmdbx falls back to `__DATE__ __TIME__` for its build info, which makes every build
+        // of libmdbx.a differ. Nothing reads it, so leave it out.
+        .define("MDBX_BUILD_TIMESTAMP", "\"unknown\"")
         .define("MDBX_TXN_CHECKOWNER", "0")
         // Disable posix_fallocate() usage. On filesystems that do not support fallocate (e.g. ZFS),
         // glibc's posix_fallocate() emulates it by writing zeros, which can spuriously fail with

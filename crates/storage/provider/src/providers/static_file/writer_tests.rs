@@ -1014,6 +1014,43 @@ mod tests {
     }
 
     #[test]
+    fn test_unwind_receipts_across_empty_file() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 2);
+        let segment = StaticFileSegment::Receipts;
+        let replacement = Receipt { cumulative_gas_used: 1, ..Default::default() };
+
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            writer.increment_block(0).unwrap();
+            writer.append_receipt(0, &Receipt::default()).unwrap();
+            // Blocks 1..=3 have no receipts, so the file for blocks 2..=3 holds no rows.
+            for block in 1..=4 {
+                writer.increment_block(block).unwrap();
+            }
+            writer.append_receipt(1, &Receipt::default()).unwrap();
+            writer.commit().unwrap();
+        }
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            writer.prune_receipts(1, 0).unwrap();
+            writer.commit().unwrap();
+            writer.increment_block(1).unwrap();
+            writer.append_receipt(1, &replacement).unwrap();
+            writer.commit().unwrap();
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 2);
+        assert_eq!(provider.receipt(1).unwrap(), Some(replacement));
+        assert_eq!(provider.get_highest_static_file_block(segment), Some(1));
+        let header = provider.latest_writer(segment).unwrap().user_header().clone();
+        assert_eq!(header.block_range(), Some((0..=1).into()));
+        assert_eq!(header.tx_range(), Some((0..=1).into()));
+        assert!(!provider.directory().join(segment.filename(&(2..=3).into())).exists());
+    }
+
+    #[test]
     fn test_unwind_within_anchor_in_later_file() {
         let (static_dir, _) = create_test_static_files_dir();
         let provider = setup_test_provider(&static_dir, 500);

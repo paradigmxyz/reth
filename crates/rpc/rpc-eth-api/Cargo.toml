@@ -57,12 +57,12 @@ tokio.workspace = true
 # misc
 auto_impl.workspace = true
 dyn-clone.workspace = true
-serde_json.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["raw_value"] }
 tracing.workspace = true
 
 [features]
 js-tracer = ["evm2-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
-client = ["jsonrpsee/client", "jsonrpsee/async-client"]
 account-ext = [
     "alloy-rpc-types-eth/account-ext",
     "reth-primitives-traits/account-ext",

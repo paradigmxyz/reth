@@ -188,8 +188,8 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     overlay_manager: OverlayManager<N>,
     /// Snapshot of the in-memory chain ending at the requested parent.
     ///
-    /// This is shared with the caller so that a chain that is already maintained elsewhere (for
-    /// example the canonical in-memory chain) can be reused instead of rebuilt.
+    /// This is shared with the caller so that a chain the caller already holds (for example the
+    /// canonical in-memory chain) can be reused instead of looked up again.
     parent_state: Option<Arc<BlockState<N>>>,
     /// Anchor hash of the reused sparse trie, if this task reused one.
     reused_sparse_trie_anchor_hash: Option<B256>,
@@ -239,7 +239,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// Retains the trie reverts this builder accumulates in a small bounded set instead of the
     /// changeset cache.
     ///
-    /// Use it for anchors an untrusted peer chooses: reverts in the changeset cache are keyed by
+    /// Use it for anchors a peer or RPC caller chooses: reverts in the changeset cache are keyed by
     /// the anchor and stay until their start block is evicted, so they would otherwise pile up in
     /// the cache the engine shares.
     pub const fn with_bounded_trie_revert_cache(mut self) -> Self {
@@ -267,7 +267,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     #[cfg(test)]
     fn anchor_at_parent<Provider>(&self, provider: &Provider) -> ProviderResult<AnchorForParent>
     where
-        Provider: StageCheckpointReader + BlockNumReader + PruneCheckpointReader,
+        Provider: StageCheckpointReader
+            + BlockNumReader
+            + PruneCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader,
     {
         let (partial_state_trie, finish) = database_state_frontiers(provider)?;
         self.anchor_at_parent_with_frontiers(provider, partial_state_trie, finish)
@@ -281,7 +285,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         finish: BlockNumHash,
     ) -> ProviderResult<AnchorForParent>
     where
-        Provider: BlockNumReader + PruneCheckpointReader,
+        Provider: BlockNumReader + PruneCheckpointReader + ChangeSetReader + StorageChangeSetReader,
     {
         let mut in_mem_chain = self
             .parent_state
@@ -358,13 +362,17 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         }
 
         // Otherwise reverts are required; we check the changesets to make sure they are actually
-        // available before signaling that they are required.
+        // available before signaling that they are required. The first block of the lowest
+        // changeset file bounds them like a prune checkpoint: a node bootstrapped without
+        // changesets from genesis has no checkpoint for the history it never had.
         let account_history = provider
             .get_prune_checkpoint(PruneSegment::AccountHistory)?
-            .and_then(|checkpoint| checkpoint.block_number);
+            .and_then(|checkpoint| checkpoint.block_number)
+            .max(provider.lowest_account_changeset_block()?);
         let storage_history = provider
             .get_prune_checkpoint(PruneSegment::StorageHistory)?
-            .and_then(|checkpoint| checkpoint.block_number);
+            .and_then(|checkpoint| checkpoint.block_number)
+            .max(provider.lowest_storage_changeset_block()?);
         let lower_bound = account_history.max(storage_history).unwrap_or_default();
         let available_range = lower_bound..=finish.number;
         if !available_range.contains(&anchor.number) {
@@ -484,7 +492,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     let start = Instant::now();
                     let finish_state = self
                         .overlay_manager
-                        .block_state(finish_tip_block.hash)
+                        .in_memory_state()
+                        .state_by_hash(finish_tip_block.hash)
                         .ok_or_else(|| {
                             ProviderError::other(StateTrieOverlayError {
                                 tip_hash: finish_tip_block.hash,
@@ -841,11 +850,10 @@ enum AnchorForParent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::canonical_in_memory_state_writer_for;
     use alloy_primitives::{keccak256, map::HashMap, Address, U256};
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
-    use reth_chain_state::{
-        test_utils::TestBlockBuilder, CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
-    };
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, NewCanonicalChain};
     use reth_db::{
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
@@ -934,16 +942,6 @@ mod tests {
         (factory, blocks)
     }
 
-    /// Tracks `blocks` in a [`CanonicalInMemoryState`] the way the engine does, so the resulting
-    /// `Arc<BlockState>` chain matches what state providers hold.
-    fn canonical_in_memory_state(
-        blocks: &[ExecutedBlock<EthPrimitives>],
-    ) -> CanonicalInMemoryState<EthPrimitives> {
-        let state = CanonicalInMemoryState::empty();
-        state.update_chain(NewCanonicalChain::Commit { new: blocks.to_vec() });
-        state
-    }
-
     const fn anchor_num_hash(anchor: &AnchorForParent) -> BlockNumHash {
         match anchor {
             AnchorForParent::NoReverts { anchor } |
@@ -959,7 +957,7 @@ mod tests {
         overlay.input().nodes.account_nodes_ref().iter().map(|(path, _)| *path).collect()
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_overlay_extends_bundle_state() {
         let address = Address::with_last_byte(1);
         let no_storage = Address::with_last_byte(2);
@@ -986,7 +984,7 @@ mod tests {
         assert_eq!(overlay.code_hashes[&code_hash], code);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_overlay_zeroes_unobserved_storage_for_destroyed_accounts() {
         let address = Address::with_last_byte(1);
         let mut state = BundleState::default();
@@ -1008,7 +1006,7 @@ mod tests {
         assert_eq!(overlay.storage_value(address, U256::ZERO), Some(U256::ZERO));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_overlay_storage_changes_preserve_account_fallback() {
         let address = Address::with_last_byte(1);
         let info = AccountInfo::default().with_balance(U256::from(5));
@@ -1027,23 +1025,25 @@ mod tests {
         assert_eq!(overlay.accounts[&address], Some(info));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn overlay_builder_for_state_matches_hash_lookup() {
         // The state trie frontier sits at block 1 while Finish is at block 3, so the in-memory
         // chain straddles the state-masking frontier.
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
-        for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
-        }
-        let canonical = canonical_in_memory_state(&blocks[2..=4]);
+        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        canonical_in_memory_state_writer
+            .update_chain(NewCanonicalChain::Commit { new: blocks[2..=4].to_vec() });
         let provider = factory.provider().unwrap();
 
         // The head, a block below the head, and the oldest in-memory block, whose chain no longer
         // covers the Finish frontier and therefore anchors below it.
         for index in [4usize, 3, 2] {
             let hash = blocks[index].recovered_block().hash();
-            let state = canonical.state_by_hash(hash).expect("canonical state for in-memory block");
+            let state = canonical_in_memory_state_writer
+                .canonical_in_memory_state()
+                .state_by_hash(hash)
+                .expect("canonical state for in-memory block");
             assert_eq!(state.hash(), hash);
 
             let from_hash = manager.overlay_builder(hash);
@@ -1090,12 +1090,13 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn managed_overlay_starts_at_state_trie_frontier() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
+        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
         for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
+            canonical_in_memory_state_writer.insert_executed(block.clone());
         }
         let provider = factory.provider().unwrap();
 
@@ -1120,11 +1121,12 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn managed_overlay_skips_when_finish_is_the_anchor() {
         let (factory, blocks) = setup_frontiers(3, 3);
         let manager = OverlayManager::default();
-        manager.insert_block(blocks[4].clone());
+        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        canonical_in_memory_state_writer.insert_executed(blocks[4].clone());
         let provider = factory.provider().unwrap();
 
         let overlay = manager
@@ -1137,7 +1139,7 @@ mod tests {
         assert!(overlay.input().nodes.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn no_reverts_errors_when_reverts_are_required() {
         let (factory, blocks) = setup_frontiers(2, 3);
         let provider = factory.provider().unwrap();
@@ -1150,7 +1152,7 @@ mod tests {
         assert!(error.to_string().contains("reverts are disabled"));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn appended_overlay_rejects_noncanonical_anchor_when_reverts_are_required() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let provider = factory.provider().unwrap();
@@ -1171,7 +1173,7 @@ mod tests {
         ));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn state_trie_overlay_invalidates_reverts_and_fork_without_trie_changesets() {
         let (factory, blocks) = setup_frontiers(3, 3);
         let provider_rw = factory.provider_rw().unwrap();
@@ -1213,7 +1215,7 @@ mod tests {
             .contains(&Nibbles::unpack(B256::with_last_byte(34))));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_overlay_marks_historical_fallback() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let provider_rw = factory.provider_rw().unwrap();
@@ -1263,12 +1265,13 @@ mod tests {
         assert!(overlay.code_hashes.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_overlay_uses_managed_blocks_after_the_anchor() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
+        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
         for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
+            canonical_in_memory_state_writer.insert_executed(block.clone());
         }
         let provider = factory.provider().unwrap();
 
@@ -1295,7 +1298,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_overlay_marks_historical_fallback_for_managed_fork() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let address = Address::with_last_byte(1);
@@ -1340,8 +1343,9 @@ mod tests {
         );
 
         let manager = OverlayManager::default();
-        manager.insert_block(side_block_two.clone());
-        manager.insert_block(side_block_three.clone());
+        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        canonical_in_memory_state_writer.insert_executed(side_block_two.clone());
+        canonical_in_memory_state_writer.insert_executed(side_block_three.clone());
         let provider = factory.provider().unwrap();
 
         let (overlay, fallback_block_number) = manager
@@ -1362,11 +1366,12 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn managed_overlay_uses_persisted_parent_even_if_retained() {
         let (factory, blocks) = setup_frontiers(2, 3);
         let manager = OverlayManager::default();
-        manager.insert_block(blocks[1].clone());
+        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        canonical_in_memory_state_writer.insert_executed(blocks[1].clone());
         let provider = factory.provider().unwrap();
         let builder = manager.overlay_builder(blocks[1].recovered_block().hash());
         match builder.anchor_at_parent(&provider).unwrap() {
@@ -1380,12 +1385,13 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn builder_appends_block_to_parent_state() {
         let manager = OverlayManager::default();
+        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
         let blocks = test_blocks();
         for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
+            canonical_in_memory_state_writer.insert_executed(block.clone());
         }
 
         let block = TestBlockBuilder::eth().get_executed_block_with_number(
@@ -1406,7 +1412,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn overlay_after_state_trie_frontier_requires_managed_coverage() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let provider = factory.provider().unwrap();
@@ -1421,7 +1427,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn managed_overlay_skips_manager_for_persisted_parent() {
         let parent_hash = B256::with_last_byte(1);
         let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
@@ -1431,7 +1437,7 @@ mod tests {
         assert!(state.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn managed_overlay_errors_if_parent_is_not_persisted_or_managed() {
         let parent_hash = B256::with_last_byte(1);
         let anchor_hash = B256::with_last_byte(2);
@@ -1442,7 +1448,7 @@ mod tests {
         assert!(err.to_string().contains("cannot be anchored"));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn managed_overlay_skip_requires_both_frontiers() {
         let parent_hash = B256::with_last_byte(1);
         let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
@@ -1455,8 +1461,9 @@ mod tests {
 
         let blocks = test_blocks();
         let manager = OverlayManager::default();
+        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
         for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
+            canonical_in_memory_state_writer.insert_executed(block.clone());
         }
         let builder = manager
             .overlay_builder(blocks[4].recovered_block().hash())

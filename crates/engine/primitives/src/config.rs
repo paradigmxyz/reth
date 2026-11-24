@@ -1,7 +1,7 @@
 //! Engine tree configuration.
 
 use alloy_eips::merge::EPOCH_SLOTS;
-use core::time::Duration;
+use core::{num::NonZeroUsize, time::Duration};
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 50;
@@ -225,6 +225,8 @@ pub struct TreeConfig {
     /// When set, BAL storage slots are not read into the execution cache. BAL hashed-state
     /// streaming for parallel state-root computation is controlled separately.
     disable_bal_batch_io: bool,
+    /// BAL read-set prewarm threads; `None` uses the production pool's default.
+    bal_prewarm_threads: Option<NonZeroUsize>,
     /// Whether block execution reuses transaction prewarming results.
     prewarm_reuse: bool,
     /// Whether to skip trie state-root computation during engine validation.
@@ -283,6 +285,7 @@ impl Default for TreeConfig {
             disable_bal_parallel_execution: false,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            bal_prewarm_threads: None,
             prewarm_reuse: false,
             skip_state_root: false,
             #[cfg(feature = "trie-debug")]
@@ -373,6 +376,7 @@ impl TreeConfig {
             disable_bal_parallel_execution: false,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            bal_prewarm_threads: None,
             prewarm_reuse: false,
             skip_state_root: false,
             #[cfg(feature = "trie-debug")]
@@ -826,6 +830,17 @@ impl TreeConfig {
     /// Setter for whether to disable BAL state prefetching during prewarm.
     pub const fn without_bal_batch_io(mut self, disable_bal_batch_io: bool) -> Self {
         self.disable_bal_batch_io = disable_bal_batch_io;
+        self
+    }
+
+    /// Returns the BAL read-set prewarm pool size, or `None` for the production default.
+    pub const fn bal_prewarm_threads(&self) -> Option<NonZeroUsize> {
+        self.bal_prewarm_threads
+    }
+
+    /// Sets the nonzero number of BAL read-set prewarm workers per engine.
+    pub const fn with_bal_prewarm_threads(mut self, threads: NonZeroUsize) -> Self {
+        self.bal_prewarm_threads = Some(threads);
         self
     }
 

@@ -16,7 +16,7 @@ use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
-use reth_primitives_traits::{AlloyBlockHeader, FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, PruneCheckpointReader, StageCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
@@ -269,8 +269,9 @@ impl ChangesetCache {
     /// * `provider` - Database provider for DB access and block lookups
     /// * `range` - Block range to accumulate reverts for (inclusive)
     /// * `write_reverts_to_cache` - Whether to retain the accumulated reverts in the range cache.
-    ///   Callers serving ranges an untrusted peer chooses pass `false`, since entries there stay
-    ///   until their start block is evicted. Their reverts are retained in a bounded set instead.
+    ///   Callers serving anchors a peer or RPC caller chooses pass `false`, since entries there
+    ///   stay until their start block is evicted. Their reverts are retained in a bounded set
+    ///   instead.
     ///
     /// # Returns
     ///
@@ -444,9 +445,12 @@ impl ChangesetCache {
         // Forward updates are a best-effort optimization to speed up compute_range_trie_changesets,
         // missing blocks do not affect correctness.
         let mut forward_updates = overlay_manager
-            .parent_chain(finish.hash)
-            .take_while(|block| block.recovered_block().number() >= start_block)
-            .map(|block| (block.recovered_block().number(), block.trie_updates()))
+            .in_memory_state()
+            .state_by_hash(finish.hash)
+            .iter()
+            .flat_map(|state| state.chain())
+            .take_while(|state| state.number() >= start_block)
+            .map(|state| (state.number(), state.block_ref().trie_updates()))
             .collect::<Vec<_>>();
         forward_updates.reverse();
 
@@ -718,7 +722,7 @@ impl ChangesetCacheInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::StateTrieOverlay;
+    use crate::{test_utils::canonical_in_memory_state_writer_for, StateTrieOverlay};
     use alloy_consensus::Header;
     use alloy_primitives::{
         keccak256,
@@ -895,7 +899,7 @@ mod tests {
         provider.write_trie_updates(trie_updates).unwrap();
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn consumers_restore_trie_values_masked_by_deferred_blocks() {
         let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
         let factory = create_test_provider_factory();
@@ -967,7 +971,7 @@ mod tests {
         assert_eq!(cached(), 7);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn calculated_reverts_preserve_deletions_across_frontiers() {
         let factory = create_test_provider_factory();
         let blocks = TestBlockBuilder::eth().get_executed_blocks(0..4).collect::<Vec<_>>();
@@ -1006,12 +1010,13 @@ mod tests {
         provider_rw.commit().unwrap();
 
         let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
         for (block, updates) in [
             (&blocks[1], Arc::new(storage_updates(vec![(removed, Some(node))]))),
             (&blocks[2], Arc::clone(&finish_updates)),
             (&blocks[3], Arc::default()),
         ] {
-            manager.insert_block(ExecutedBlock::new(
+            canonical_in_memory_state_writer.insert_executed(ExecutedBlock::new(
                 Arc::clone(&block.recovered_block),
                 Arc::clone(&block.execution_output),
                 SortedTrieData::new(Arc::default(), updates),
@@ -1048,7 +1053,7 @@ mod tests {
         assert!(Arc::ptr_eq(&cached, &advanced));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn calculated_historical_range_excludes_tail_reverts() {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
@@ -1097,7 +1102,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn persisted_range_retains_transient_nodes_without_executed_blocks() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 2);
@@ -1203,7 +1208,7 @@ mod tests {
         assert_eq!(first, at_first);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn cached_range_merge_keeps_oldest_revert_values() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 2);
@@ -1275,7 +1280,7 @@ mod tests {
         (cache, BlockNumHash::new(end_block, B256::with_last_byte(end_block as u8)))
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn bounded_ranges_evict_least_recently_used() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 6);
@@ -1304,7 +1309,7 @@ mod tests {
         assert_eq!(rebuilt, ranges[1]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn bounded_range_is_extended_when_finish_advances() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 3);
@@ -1335,7 +1340,7 @@ mod tests {
         assert!(Arc::ptr_eq(bounded_ranges.get(&key).unwrap(), &extended));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn bounded_range_from_another_fork_is_not_extended() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 3);
@@ -1362,7 +1367,7 @@ mod tests {
         assert!(cache.bounded_ranges.lock().peek(&reorged_key).is_some());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn aggregate_range_reverts_to_pre_range_state() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 3);
@@ -1498,7 +1503,7 @@ mod tests {
         assert_eq!(cache.inner.read().entries.len(), 2);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn aggregate_range_matches_legacy_per_block_merge_with_storage_wipe() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 3);

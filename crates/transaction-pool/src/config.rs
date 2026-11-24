@@ -242,16 +242,10 @@ impl PriceBumpConfig {
             return true
         }
 
-        let existing_max_priority_fee_per_gas =
-            existing.max_priority_fee_per_gas().unwrap_or_default();
-        let replacement_max_priority_fee_per_gas =
-            maybe_replacement.max_priority_fee_per_gas().unwrap_or_default();
-
-        // Check max priority fee per gas (relevant for EIP-1559 transactions only)
-        if existing_max_priority_fee_per_gas != 0 &&
-            replacement_max_priority_fee_per_gas != 0 &&
-            replacement_max_priority_fee_per_gas <
-                required_bumped_fee(existing_max_priority_fee_per_gas)
+        // Check if the priority fee is underpriced. Legacy and EIP-2930 transactions have no
+        // separate priority fee, so their gas price counts as the tip.
+        if maybe_replacement.priority_fee_or_price() <
+            required_bumped_fee(existing.priority_fee_or_price())
         {
             return true
         }
@@ -345,7 +339,7 @@ impl LocalTransactionConfig {
 
 #[cfg(test)]
 mod tests {
-    use alloy_consensus::{TxEip1559, TxEip4844};
+    use alloy_consensus::{TxEip1559, TxEip4844, TxLegacy, TypedTransaction};
 
     use super::*;
 
@@ -394,6 +388,35 @@ mod tests {
         let mut underpriced = replacement;
         underpriced.max_fee_per_blob_gas -= 1;
         assert!(config.is_replacement_underpriced(&existing, &underpriced));
+    }
+
+    #[test]
+    fn zero_tip_replacement_requires_priority_fee_bump() {
+        let config = PriceBumpConfig::default();
+        let existing =
+            TxEip1559 { max_fee_per_gas: 100, max_priority_fee_per_gas: 90, ..Default::default() };
+        let replacement =
+            TxEip1559 { max_fee_per_gas: 110, max_priority_fee_per_gas: 0, ..Default::default() };
+        assert!(config.is_replacement_underpriced(&existing, &replacement));
+
+        let existing = TxEip1559 { max_fee_per_gas: 100, ..Default::default() };
+        let replacement = TxEip1559 { max_fee_per_gas: 110, ..Default::default() };
+        assert!(!config.is_replacement_underpriced(&existing, &replacement));
+    }
+
+    #[test]
+    fn legacy_gas_price_counts_as_priority_fee() {
+        let config = PriceBumpConfig::default();
+        let existing = TypedTransaction::Legacy(TxLegacy { gas_price: 100, ..Default::default() });
+        let replacement = |max_priority_fee_per_gas| {
+            TypedTransaction::Eip1559(TxEip1559 {
+                max_fee_per_gas: 110,
+                max_priority_fee_per_gas,
+                ..Default::default()
+            })
+        };
+        assert!(config.is_replacement_underpriced(&existing, &replacement(109)));
+        assert!(!config.is_replacement_underpriced(&existing, &replacement(110)));
     }
 
     #[test]
