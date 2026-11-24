@@ -209,8 +209,7 @@ where
             self.state.buffer.lowest_ancestor(&sync_target_state.head_block_hash)
         {
             let current_head_num = self.state.tree_state.current_canonical_head.number;
-            // The buffered block itself is already available. Only download the gap to its
-            // parent; if that parent is the new tip, connect the buffered blocks below.
+            // The buffered block is already available; only its missing ancestors need downloading.
             let missing_parent_num = lowest_buffered.number().saturating_sub(1);
 
             if let Some(distance) =
@@ -227,6 +226,15 @@ where
 
                 self.emit_event(EngineApiEvent::Download(
                     DownloadRequest::block_range(lowest_buffered.parent_hash(), distance)
+                        .with_access_lists(self.should_download_access_lists()),
+                ));
+                return Ok(());
+            }
+
+            // Equal heights do not identify the same parent on a fork.
+            if lowest_buffered.parent_hash() != self.state.tree_state.current_canonical_head.hash {
+                self.emit_event(EngineApiEvent::Download(
+                    DownloadRequest::single_block(lowest_buffered.parent_hash())
                         .with_access_lists(self.should_download_access_lists()),
                 ));
                 return Ok(());
