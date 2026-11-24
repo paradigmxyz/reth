@@ -492,6 +492,28 @@ where
         factory == TypeId::of::<factory::RethEvmFactory>()
     }
 
+    fn warms_tx_targets(&self) -> bool {
+        true
+    }
+
+    fn tx_warm_targets(
+        &self,
+        tx: &reth_ethereum_primitives::TransactionSigned,
+        signer: Address,
+        target: &mut dyn FnMut(Address, &[B256]),
+    ) {
+        use alloy_consensus::Transaction as _;
+        target(signer, &[]);
+        if let Some(to) = tx.to() {
+            target(to, &[]);
+        }
+        if let Some(access_list) = tx.access_list() {
+            for item in access_list.iter() {
+                target(item.address, &item.storage_keys);
+            }
+        }
+    }
+
     #[cfg(feature = "std")]
     fn prewarm_tx_result<'a>(
         &self,
