@@ -1129,9 +1129,7 @@ fn into_database_error(error: ProviderError) -> DatabaseError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        test_utils::canonical_in_memory_state_writer_for, ExecutionOverlay, OverlayManager,
-    };
+    use crate::{test_utils::overlay_manager_with_writer, ExecutionOverlay, OverlayManager};
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{Address, U256};
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
@@ -1229,10 +1227,9 @@ mod tests {
     #[reth_concurrency::test]
     fn overlay_cache_is_keyed_by_both_durable_frontiers() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
-        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
         for block in &blocks[2..=3] {
-            canonical_in_memory_state_writer.insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory.clone(),
@@ -1265,10 +1262,9 @@ mod tests {
     #[reth_concurrency::test]
     fn overlays_are_computed_lazily() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
-        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
         for block in &blocks[2..=3] {
-            canonical_in_memory_state_writer.insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
@@ -1293,10 +1289,9 @@ mod tests {
     #[reth_concurrency::test]
     fn state_trie_overlay_cache_is_keyed_by_trie_changesets() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
-        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
         for block in &blocks[2..=3] {
-            canonical_in_memory_state_writer.insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
@@ -1327,10 +1322,9 @@ mod tests {
     #[reth_concurrency::test]
     fn lazy_overlays_survive_manager_block_removal() {
         let (factory, blocks) = setup_frontiers(1, 1);
-        let manager = OverlayManager::default();
-        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
         for block in &blocks[2..=3] {
-            canonical_in_memory_state_writer.insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
@@ -1338,7 +1332,7 @@ mod tests {
         );
         let provider = state_provider_factory.database_provider_ro().unwrap();
 
-        canonical_in_memory_state_writer.clear_state();
+        in_memory_state_writer.clear_state();
         for block in &blocks[2..=3] {
             let hash = block.recovered_block().hash();
             assert!(manager.in_memory_state().state_by_hash(hash).is_none());
@@ -1358,9 +1352,8 @@ mod tests {
     #[reth_concurrency::test]
     fn skipped_state_trie_overlay_is_not_cached_or_used_for_state_roots() {
         let (factory, blocks) = setup_frontiers(3, 3);
-        let manager = OverlayManager::default();
-        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
-        canonical_in_memory_state_writer.insert_executed(blocks[4].clone());
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
+        in_memory_state_writer.insert_executed(blocks[4].clone());
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
             manager
