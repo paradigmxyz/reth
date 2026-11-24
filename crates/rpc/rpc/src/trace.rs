@@ -1255,8 +1255,7 @@ mod tests {
         provider_rw.update_pipeline_stages(1, false).unwrap();
         provider_rw.commit().unwrap();
 
-        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer().unwrap();
-        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
+        let provider = BlockchainProvider::new(factory).unwrap();
         let eth_api = EthApiBuilder::new(
             provider.clone(),
             testing_pool(),

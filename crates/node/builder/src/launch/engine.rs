@@ -166,7 +166,7 @@ impl<B> EngineNodeLauncher<B> {
             ctx.provider_factory().chain_info_headers()?,
             in_memory_state_writer,
         );
-        let blockchain_db = BlockchainProvider::new(
+        let blockchain_db = BlockchainProvider::with_canonical_in_memory_state(
             ctx.provider_factory().clone(),
             canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
         );

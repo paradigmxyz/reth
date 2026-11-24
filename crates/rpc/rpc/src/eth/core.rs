@@ -1741,8 +1741,7 @@ mod tests {
             Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
-        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer().unwrap();
-        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
+        let provider = BlockchainProvider::new(factory).unwrap();
         let api = EthApiBuilder::new(
             provider.clone(),
             testing_pool(),
@@ -1986,8 +1985,7 @@ mod tests {
         );
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
-        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer().unwrap();
-        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
+        let provider = BlockchainProvider::new(factory).unwrap();
         let api = EthApiBuilder::new(
             provider.clone(),
             testing_pool(),
@@ -2193,10 +2191,7 @@ mod tests {
             provider_rw.update_pipeline_stages(2, false).unwrap();
             provider_rw.commit().unwrap();
 
-            let canonical_in_memory_state =
-                factory.canonical_in_memory_state_without_writer().unwrap();
-            let api =
-                build_test_eth_api(BlockchainProvider::new(factory, canonical_in_memory_state));
+            let api = build_test_eth_api(BlockchainProvider::new(factory).unwrap());
             for block in &blocks {
                 let mut by_hash = Vec::new();
                 for (sender, tx) in block.transactions_with_sender() {

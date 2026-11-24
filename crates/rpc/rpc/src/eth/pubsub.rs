@@ -632,7 +632,7 @@ mod tests {
             factory.chain_info_headers().unwrap(),
             in_memory_state_writer,
         );
-        let provider = BlockchainProvider::new(
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
             factory,
             canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
         );
