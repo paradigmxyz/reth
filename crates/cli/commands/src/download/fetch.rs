@@ -377,6 +377,19 @@ impl ArchiveFetcher {
                 eyre::eyre!("Server did not provide Content-Length or Content-Range header")
             })?;
 
+            // A range ending past the known size contradicts it, even with an unknown total.
+            if is_partial &&
+                let Some(range) = range &&
+                range.end >= current_total
+            {
+                eyre::bail!(
+                    "Server sent bytes {}-{} of {}, past its {current_total}-byte size",
+                    range.start,
+                    range.end,
+                    self.paths.file_name()
+                )
+            }
+
             let file = if is_partial && existing_size > 0 {
                 OpenOptions::new()
                     .append(true)
@@ -1865,7 +1878,7 @@ mod tests {
     }
 
     #[test]
-    fn sequential_download_accepts_maximal_range_with_unknown_total() {
+    fn sequential_download_rejects_range_past_expected_size() {
         let url = spawn_response_server(vec![
             b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-18446744073709551615/*\r\n\
               Content-Length: 4\r\nConnection: close\r\n\r\n0123",
@@ -1874,9 +1887,13 @@ mod tests {
         let session = DownloadSession::new(None, None, CancellationToken::new());
         let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(4));
 
-        let downloaded = fetcher.download(None, None).unwrap();
+        let error = fetcher.download(None, None).unwrap_err();
 
-        assert_eq!(std::fs::read(downloaded.path).unwrap(), b"0123");
+        assert_eq!(
+            format!("{error:#}"),
+            "Server sent bytes 0-18446744073709551615 of archive.tar.zst, past its 4-byte size"
+        );
+        assert!(!dir.path().join("archive.tar.zst").exists());
     }
 
     #[test]
