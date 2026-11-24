@@ -166,7 +166,9 @@ where
 /// Maximum number of range reverts retained for anchors that untrusted peers choose.
 ///
 /// A syncing peer sends many requests against one root, so a few entries cover the roots being
-/// served and the `Finish` block they were last rebuilt for.
+/// served and the `Finish` block they were last rebuilt for. Snap ranges are only served for roots
+/// of the last `SNAPSHOT_STATE_RETENTION` (128) blocks up to `Finish`, so each entry holds the
+/// reverts of at most 127 blocks.
 const MAX_BOUNDED_RANGES: u32 = 4;
 
 /// Thread-safe changeset cache.
