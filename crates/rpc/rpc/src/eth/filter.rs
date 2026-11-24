@@ -1050,13 +1050,25 @@ where
 
     /// Returns the error for a block whose receipts cannot be read although its header was found.
     ///
-    /// The receipts were pruned, unless the block was reorged out after its header was read.
+    /// The receipts were pruned, unless the block was reorged out after its header was read. The
+    /// history boundary is read again, since pruning may have moved it past the block after
+    /// [`Self::block_logs_may_match`] checked it.
     fn missing_receipts(
         provider: &Eth::Provider,
         header: &SealedHeader<<Eth::Provider as HeaderProvider>::Header>,
     ) -> EthFilterError {
         match provider.block_number(header.hash()) {
-            Ok(Some(_)) => EthFilterError::ReceiptsUnavailable(header.number()),
+            Ok(Some(_)) => match provider.earliest_block_number() {
+                Ok(earliest_available) if header.number() < earliest_available => {
+                    EthApiError::PrunedHistoryUnavailable {
+                        requested: header.number(),
+                        earliest_available,
+                    }
+                    .into()
+                }
+                Ok(_) => EthFilterError::ReceiptsUnavailable(header.number()),
+                Err(err) => err.into(),
+            },
             Ok(None) => ProviderError::HeaderNotFound(header.hash().into()).into(),
             Err(err) => err.into(),
         }
@@ -3560,6 +3572,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_missing_receipts_rechecks_expired_history() {
+        let provider = MockEthProvider::default();
+        let (header, _) = add_block_with_logs(&provider);
+        // pruning moved the history boundary past the block after its bloom was checked.
+        provider.set_earliest_block_number(header.number() + 1);
+
+        let err = EthFilterInner::<TestEthApi>::missing_receipts(&provider, &header);
+        assert!(
+            matches!(
+                err,
+                EthFilterError::EthAPIError(EthApiError::PrunedHistoryUnavailable {
+                    requested: 7,
+                    earliest_available: 8
+                })
+            ),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]
