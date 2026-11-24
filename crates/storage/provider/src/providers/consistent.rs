@@ -2246,7 +2246,7 @@ mod tests {
     fn find_block_by_hash_reads_tree_blocks_of_the_supplied_state() -> eyre::Result<()> {
         let factory = create_test_provider_factory();
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::default());
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
         let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::ZERO);
         let recovered = Arc::clone(&block.recovered_block);
         canonical_in_memory_state_writer.insert_executed(block);
