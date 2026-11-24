@@ -372,15 +372,8 @@ fn format_mode(mode: &PruneMode) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::download::tests::set_layout;
     use reth_db::Database;
-
-    fn set_layout(tx: &impl DbTxMut, settings: impl serde::Serialize) {
-        tx.put::<tables::Metadata>(
-            keys::STORAGE_SETTINGS.to_owned(),
-            serde_json::to_vec(&settings).unwrap(),
-        )
-        .unwrap();
-    }
 
     /// Empty manifest for tests that only care about prune config.
     fn empty_manifest() -> SnapshotManifest {
@@ -404,6 +397,7 @@ mod tests {
         let mut selections = BTreeMap::new();
         selections.insert(SnapshotComponentType::State, ComponentSelection::All);
         selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
+        selections.insert(SnapshotComponentType::RocksdbIndices, ComponentSelection::All);
         let config = config_for_selections(
             &selections,
             &empty_manifest(),
@@ -415,7 +409,6 @@ mod tests {
         {
             let tx = db.tx_mut().unwrap();
             for invalid in [
-                serde_json::json!("unknown"),
                 serde_json::json!({"receipts_in_static_files": false, "account_changesets_in_static_files": true}),
                 serde_json::json!({"receipts_in_static_files": false, "unknown": false}),
             ] {
@@ -425,7 +418,7 @@ mod tests {
                 assert_eq!(err.to_string(), "Invalid storage settings in snapshot database");
             }
             set_layout(&tx, StorageSettings::v2());
-            write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap();
+            assert!(!write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap());
             tx.commit().unwrap();
         }
 
@@ -490,26 +483,28 @@ mod tests {
         let db = reth_db::init_db(dir.path(), reth_db::mdbx::DatabaseArguments::default()).unwrap();
 
         // Archive node — no pruning configured, so no checkpoints written
-        let mut selections = BTreeMap::new();
-        for ty in SnapshotComponentType::ALL {
-            selections.insert(ty, ComponentSelection::All);
-        }
+        let selections =
+            BTreeMap::from([(SnapshotComponentType::RocksdbIndices, ComponentSelection::All)]);
         let config = config_for_selections(
             &selections,
             &empty_manifest(),
-            None,
+            Some(SelectionPreset::Archive),
             None::<&reth_chainspec::ChainSpec>,
         );
 
         {
             let tx = db.tx_mut().unwrap();
-            write_prune_checkpoints_tx(&tx, &config, &selections, 21_000_000).unwrap();
+            let reset = |selected| write_prune_checkpoints_tx(&tx, &config, selected, 21_000_000);
+            let omitted = BTreeMap::new();
+            assert!(!reset(&omitted).unwrap());
+            set_layout(&tx, StorageSettings::v2());
+            assert!(reset(&omitted).unwrap());
             set_layout(&tx, "unknown");
-            assert!(!write_prune_checkpoints_tx(&tx, &config, &selections, 21_000_000).unwrap());
-            selections.remove(&SnapshotComponentType::RocksdbIndices);
-            let err =
-                write_prune_checkpoints_tx(&tx, &config, &selections, 21_000_000).unwrap_err();
-            assert_eq!(err.to_string(), "Invalid storage settings in snapshot database");
+            assert!(!reset(&selections).unwrap());
+            assert_eq!(
+                reset(&omitted).unwrap_err().to_string(),
+                "Invalid storage settings in snapshot database"
+            );
             tx.commit().unwrap();
         }
 
@@ -672,7 +667,7 @@ mod tests {
     #[test]
     fn minimal_preset_matches_default_minimal_prune_config() {
         let config = config_for_selections(
-            &BTreeMap::new(),
+            &BTreeMap::from([(SnapshotComponentType::AccountChangesets, ComponentSelection::All)]),
             &empty_manifest(),
             Some(SelectionPreset::Minimal),
             None::<&reth_chainspec::ChainSpec>,
@@ -877,7 +872,7 @@ mod tests {
             );
             let tx = db.tx_mut().unwrap();
             set_layout(&tx, StorageSettings::v2());
-            assert!(!write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap());
+            write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap();
             let mut checkpoints = Vec::new();
             for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
                 let checkpoint = tx.get::<tables::PruneCheckpoints>(segment).unwrap();

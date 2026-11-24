@@ -504,6 +504,7 @@ mod tests {
         StorageChangeSetReader, StorageSettingsCache,
     };
     use reth_prune_types::PruneCheckpoint;
+    use reth_storage_api::PruneCheckpointWriter;
 
     /// A genesis at a block that is not the start of a static file range, as on chains that
     /// start from carried-over state.
@@ -530,11 +531,9 @@ mod tests {
         {
             let provider_rw = factory.provider_rw().unwrap();
             // Older v1 snapshot restores could set a checkpoint above surviving MDBX rows.
+            let checkpoint = PruneCheckpoint::pruned_through(tip);
             for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
-                provider_rw
-                    .tx_ref()
-                    .put::<tables::PruneCheckpoints>(segment, PruneCheckpoint::pruned_through(tip))
-                    .unwrap();
+                provider_rw.save_prune_checkpoint(segment, checkpoint).unwrap();
             }
             for block in genesis..=tip {
                 provider_rw
