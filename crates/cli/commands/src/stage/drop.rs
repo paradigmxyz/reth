@@ -223,14 +223,31 @@ impl<C: ChainSpecParser> Command<C> {
         provider_rw.commit()?;
 
         // `RocksDB` writes are not part of the MDBX transaction. Clear the `RocksDB` index only
-        // after the checkpoint reset commits: if the command stops before the clear, the startup
-        // consistency check sees checkpoint 0 and clears the stale index. At checkpoint 0 the
-        // stages rebuild the index from block 0, so the command does not write genesis history.
+        // after the checkpoint reset commits: if the command stops before the index is rebuilt,
+        // the startup consistency check sees checkpoint 0 and clears the stale index. Write the
+        // genesis history back after the clear: if the changeset tip is still 0, the startup check
+        // returns before it reseeds genesis, and live persistence does not rebuild the index.
         if storage_v2 {
             let rocksdb = tool.provider_factory.rocksdb_provider();
             match self.stage {
-                StageEnum::AccountHistory => rocksdb.clear::<tables::AccountsHistory>()?,
-                StageEnum::StorageHistory => rocksdb.clear::<tables::StoragesHistory>()?,
+                StageEnum::AccountHistory => {
+                    rocksdb.clear::<tables::AccountsHistory>()?;
+                    let provider_rw = tool.provider_factory.unwind_provider_rw()?;
+                    insert_genesis_account_history(
+                        &provider_rw,
+                        self.env.chain.genesis().alloc.iter(),
+                    )?;
+                    provider_rw.commit()?;
+                }
+                StageEnum::StorageHistory => {
+                    rocksdb.clear::<tables::StoragesHistory>()?;
+                    let provider_rw = tool.provider_factory.unwind_provider_rw()?;
+                    insert_genesis_storage_history(
+                        &provider_rw,
+                        self.env.chain.genesis().alloc.iter(),
+                    )?;
+                    provider_rw.commit()?;
+                }
                 StageEnum::TxLookup => rocksdb.clear::<tables::TransactionHashNumbers>()?,
                 _ => {}
             }
