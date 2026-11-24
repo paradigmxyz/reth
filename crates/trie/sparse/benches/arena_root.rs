@@ -15,6 +15,9 @@
 //! - KS (default 500,2000,5000,20000): dirty storage leaves per block.
 //! - BLOCKS (default 20) measured blocks per K and mode, after WARMUP (default 3).
 //! - MODES (default depth_first,level_batched): hashing strategies, interleaved per block.
+//! - HOT (default 0): if set, each trie keeps only HOT hot keys revealed: after building, the hot
+//!   keys are updated and every other node is pruned (blinded), as a long-running node's sparse
+//!   tries look. Blocks then only touch hot keys. 0 keeps every node revealed.
 //!
 //! Run with:
 //! cargo bench -p reth-trie-sparse --bench arena_root --features alloy-primitives/asm-keccak
@@ -68,7 +71,7 @@ fn account_value(rng: &mut StdRng, storage_root: B256) -> Vec<u8> {
     })
 }
 
-fn build(n: usize, seed: u64, value: impl Fn(&mut StdRng) -> Vec<u8>) -> Trie {
+fn build(n: usize, hot: usize, seed: u64, value: impl Fn(&mut StdRng) -> Vec<u8>) -> Trie {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut trie = new_trie();
     let mut keys = Vec::with_capacity(n);
@@ -85,8 +88,21 @@ fn build(n: usize, seed: u64, value: impl Fn(&mut StdRng) -> Vec<u8>) -> Trie {
         apply(&mut trie, &mut updates);
         done += m;
     }
+    // Build with the depth-first path so that profiles of the level-batched path only see
+    // per-block work.
+    trie.set_hashing_strategy(HashingStrategy::DepthFirst);
     trie.root(TrieNodeEpoch::new(0));
     trie.take_updates();
+    if hot > 0 {
+        // Touch the hot keys at epoch 1 and blind everything older.
+        keys.truncate(hot);
+        let mut updates: B256Map<LeafUpdate> =
+            keys.iter().map(|k| (*k, LeafUpdate::Changed(value(&mut rng)))).collect();
+        apply(&mut trie, &mut updates);
+        trie.root(TrieNodeEpoch::new(1));
+        trie.take_updates();
+        trie.prune(TrieNodeEpoch::new(1));
+    }
     Trie { trie, keys }
 }
 
@@ -108,6 +124,7 @@ fn main() {
     let tokens = env_usize("TOKENS", 4);
     let blocks = env_usize("BLOCKS", 20);
     let warmup = env_usize("WARMUP", 3);
+    let hot = env_usize("HOT", 0);
     let ks: Vec<usize> = std::env::var("KS")
         .unwrap_or_else(|_| "500,2000,5000,20000".to_string())
         .split(',')
@@ -124,17 +141,19 @@ fn main() {
         .collect();
 
     let t0 = Instant::now();
-    let mut storages: Vec<Trie> =
-        (0..tokens).into_par_iter().map(|t| build(slots, 1000 + t as u64, storage_value)).collect();
-    let mut account = build(accounts, 7, |rng| account_value(rng, EMPTY_ROOT_HASH));
+    let mut storages: Vec<Trie> = (0..tokens)
+        .into_par_iter()
+        .map(|t| build(slots, hot, 1000 + t as u64, storage_value))
+        .collect();
+    let mut account = build(accounts, hot, 7, |rng| account_value(rng, EMPTY_ROOT_HASH));
     eprintln!(
-        "built {tokens} x {slots} slots + {accounts} accounts in {:.1}s on {} threads",
+        "built {tokens} x {slots} slots + {accounts} accounts (hot {hot}) in {:.1}s on {} threads",
         t0.elapsed().as_secs_f64(),
         rayon::current_num_threads()
     );
 
     let mut rng = StdRng::seed_from_u64(42);
-    let mut epoch = 1u64;
+    let mut epoch = 2u64;
     println!("K\tmode\tupd_ms\thash_storage_ms\thash_account_ms\thash_ms\ttotal_ms");
     for &k in &ks {
         let mut samples: Vec<Vec<Sample>> = vec![Vec::new(); modes.len()];
