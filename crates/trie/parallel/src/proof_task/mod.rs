@@ -31,12 +31,12 @@ use alloy_primitives::B256;
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult, StateProofProvider};
-use reth_tasks::{Runtime, WorkerPool};
+use reth_tasks::{DedicatedThreadPool, Runtime};
 use reth_trie::{DecodedMultiProofV2, MultiProofTargetsV2, ProofV2Target};
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc,
     },
     time::Duration,
@@ -359,7 +359,7 @@ enum ProofWorkerKind {
 
 impl ProofWorkerKind {
     /// Returns the runtime pool the workers of this kind run on.
-    fn pool(self, runtime: &Runtime) -> &WorkerPool {
+    fn pool(self, runtime: &Runtime) -> &DedicatedThreadPool {
         match self {
             Self::Storage => runtime.proof_storage_worker_pool(),
             Self::Account => runtime.proof_account_worker_pool(),
@@ -371,14 +371,6 @@ impl ProofWorkerKind {
         match self {
             Self::Storage => "storage",
             Self::Account => "account",
-        }
-    }
-
-    /// Returns the name of the blocking task that hosts the pool's workers.
-    const fn task_name(self) -> &'static str {
-        match self {
-            Self::Storage => "storage-workers",
-            Self::Account => "account-workers",
         }
     }
 
@@ -395,7 +387,8 @@ impl ProofWorkerKind {
     }
 }
 
-/// Runs `run` as `worker_count` workers of the given kind on a blocking task.
+/// Runs `run` as `worker_count` workers of the given kind, each on its own thread of the kind's
+/// pool.
 ///
 /// A worker that fails to open its provider, at start or after a panicking job, sends a
 /// [`ProofWorkerError`] to the result channel and stops.
@@ -409,12 +402,13 @@ fn spawn_workers<Factory, J>(
     Factory: Send + Sync + 'static,
     J: Send + 'static,
 {
-    let rt = runtime.clone();
     let parent_span = tracing::Span::current();
-    runtime.spawn_blocking_named(kind.task_name(), move || {
-        let next_worker_id = AtomicUsize::new(0);
-        kind.pool(&rt).broadcast(worker_count, |_| {
-            let worker_id = next_worker_id.fetch_add(1, Ordering::Relaxed);
+    let worker = Arc::new(worker);
+    let pool = kind.pool(runtime);
+    for worker_id in 0..worker_count {
+        let worker = Arc::clone(&worker);
+        let parent_span = parent_span.clone();
+        pool.spawn(move || {
             let _guard = kind.span(&parent_span, worker_id).entered();
 
             if let Err(error) = run(&worker, worker_id) {
@@ -434,7 +428,7 @@ fn spawn_workers<Factory, J>(
                 let _ = worker.result_tx.send(Err(error));
             }
         });
-    });
+    }
 }
 
 /// State shared by the workers of one pool, each holding its own database transaction.
@@ -848,13 +842,16 @@ mod tests {
         );
         let runtime = reth_tasks::Runtime::test();
 
-        // Occupy both pools' blocking tasks so the workers start only after the handle is dropped.
+        // Occupy every thread of both pools so the workers start only after the handle is dropped.
         let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(0);
         for kind in [ProofWorkerKind::Storage, ProofWorkerKind::Account] {
-            let release_rx = release_rx.clone();
-            runtime.spawn_blocking_named(kind.task_name(), move || {
-                release_rx.recv().unwrap_err();
-            });
+            let pool = kind.pool(&runtime);
+            for _ in 0..pool.num_threads() {
+                let release_rx = release_rx.clone();
+                pool.spawn(move || {
+                    release_rx.recv().unwrap_err();
+                });
+            }
         }
 
         let proof_worker_handle = ProofWorkerHandle::new(

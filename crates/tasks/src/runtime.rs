@@ -6,13 +6,16 @@
 //! - Dedicated rayon thread pools for different workloads (with `rayon` feature)
 //! - [`BlockingTaskGuard`] for rate-limiting expensive operations (with `rayon` feature)
 
-#[cfg(feature = "rayon")]
-use crate::pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, WorkerPool};
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
     worker_map::WorkerMap,
     PanickedTaskError, TaskEvent, TaskManager,
+};
+#[cfg(feature = "rayon")]
+use crate::{
+    pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, WorkerPool},
+    DedicatedThreadPool,
 };
 use futures_util::{
     future::{select, BoxFuture},
@@ -313,10 +316,10 @@ struct RuntimeInner {
     blocking_guard: BlockingTaskGuard,
     /// Proof storage worker pool (trie storage proof computation).
     #[cfg(feature = "rayon")]
-    proof_storage_worker_pool: WorkerPool,
+    proof_storage_worker_pool: DedicatedThreadPool,
     /// Proof account worker pool (trie account proof computation).
     #[cfg(feature = "rayon")]
-    proof_account_worker_pool: WorkerPool,
+    proof_account_worker_pool: DedicatedThreadPool,
     /// Proof storage worker thread count the operator configured explicitly, if any.
     #[cfg(feature = "rayon")]
     proof_storage_worker_threads_override: Option<usize>,
@@ -413,13 +416,13 @@ impl Runtime {
 
     /// Get the proof storage worker pool.
     #[cfg(feature = "rayon")]
-    pub fn proof_storage_worker_pool(&self) -> &WorkerPool {
+    pub fn proof_storage_worker_pool(&self) -> &DedicatedThreadPool {
         &self.0.proof_storage_worker_pool
     }
 
     /// Get the proof account worker pool.
     #[cfg(feature = "rayon")]
-    pub fn proof_account_worker_pool(&self) -> &WorkerPool {
+    pub fn proof_account_worker_pool(&self) -> &DedicatedThreadPool {
         &self.0.proof_account_worker_pool
     }
 
@@ -1040,14 +1043,14 @@ impl RuntimeBuilder {
                 .proof_storage_worker_threads_override()
                 .unwrap_or(default_proof_worker_threads);
             let proof_storage_worker_pool =
-                WorkerPool::new(proof_storage_worker_threads, "proof-strg");
+                DedicatedThreadPool::new(proof_storage_worker_threads, "proof-strg");
 
             let proof_account_worker_threads = config
                 .rayon
                 .proof_account_worker_threads_override()
                 .unwrap_or(default_proof_worker_threads);
             let proof_account_worker_pool =
-                WorkerPool::new(proof_account_worker_threads, "proof-acct");
+                DedicatedThreadPool::new(proof_account_worker_threads, "proof-acct");
 
             let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
             let prewarming_pool = Arc::new(WorkerPool::new(prewarming_threads, "prewarm"));
@@ -1237,8 +1240,8 @@ mod tests {
 
         let resolved = runtime.cpu_pool().current_num_threads();
         assert!(resolved >= 1);
-        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), resolved * 4);
-        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), resolved * 4);
+        assert_eq!(runtime.proof_storage_worker_pool().num_threads(), resolved * 4);
+        assert_eq!(runtime.proof_account_worker_pool().num_threads(), resolved * 4);
     }
 
     #[cfg(feature = "rayon")]
@@ -1251,8 +1254,8 @@ mod tests {
             config.rayon.proof_storage_worker_threads = Some(configured);
             config.rayon.proof_account_worker_threads = Some(configured);
             let runtime = RuntimeBuilder::new(config).build().unwrap();
-            assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), configured);
-            assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), configured);
+            assert_eq!(runtime.proof_storage_worker_pool().num_threads(), configured);
+            assert_eq!(runtime.proof_account_worker_pool().num_threads(), configured);
             assert_eq!(runtime.proof_storage_worker_threads_override(), Some(configured));
             assert_eq!(runtime.proof_account_worker_threads_override(), Some(configured));
         }
@@ -1269,8 +1272,8 @@ mod tests {
         let runtime = RuntimeBuilder::new(config).build().unwrap();
 
         let default = runtime.cpu_pool().current_num_threads() * 4;
-        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), default);
-        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), default);
+        assert_eq!(runtime.proof_storage_worker_pool().num_threads(), default);
+        assert_eq!(runtime.proof_account_worker_pool().num_threads(), default);
         assert_eq!(runtime.proof_storage_worker_threads_override(), None);
         assert_eq!(runtime.proof_account_worker_threads_override(), None);
     }
@@ -1377,15 +1380,17 @@ mod tests {
 
         // Worker pools are lazy — not initialized until first access.
         assert!(!runtime.0.bal_streaming_pool.is_initialized());
-        assert!(!runtime.0.proof_storage_worker_pool.is_initialized());
+        assert_eq!(runtime.0.proof_storage_worker_pool.spawned_threads(), 0);
         assert!(!runtime.0.state_trie_overlay_worker_pool.is_initialized());
 
         // Accessing them triggers initialization and returns the configured thread count.
         assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 2);
         assert!(runtime.0.bal_streaming_pool.is_initialized());
 
-        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), 2);
-        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), 2);
+        // Proof pools spawn threads per job, not on access.
+        assert_eq!(runtime.proof_storage_worker_pool().num_threads(), 2);
+        assert_eq!(runtime.proof_account_worker_pool().num_threads(), 2);
+        assert_eq!(runtime.0.proof_storage_worker_pool.spawned_threads(), 0);
         assert_eq!(runtime.prewarming_pool().current_num_threads(), 2);
         assert_eq!(runtime.state_trie_overlay_worker_pool().current_num_threads(), 2);
     }

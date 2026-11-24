@@ -32,6 +32,7 @@ use tokio::{
 use tracing::debug;
 
 pub mod cancel;
+pub mod dedicated_pool;
 pub mod lazy;
 pub mod metrics;
 pub mod runtime;
@@ -51,6 +52,7 @@ pub mod for_each_ordered;
 pub use for_each_ordered::ForEachOrdered;
 
 pub use cancel::{CancelOnDrop, ManualCancel};
+pub use dedicated_pool::DedicatedThreadPool;
 pub use lazy::LazyHandle;
 #[cfg(feature = "rayon")]
 pub use runtime::RayonConfig;
