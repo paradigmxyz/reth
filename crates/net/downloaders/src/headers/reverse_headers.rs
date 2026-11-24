@@ -1400,6 +1400,46 @@ mod tests {
         }
     }
 
+    /// Never answers requests starting at `stalled_start` and answers every other request with
+    /// only its first header.
+    #[derive(Clone, Debug)]
+    struct StallingHeadersClient {
+        stalled_start: u64,
+    }
+
+    impl DownloadClient for StallingHeadersClient {
+        fn report_bad_message(&self, _peer_id: PeerId) {}
+
+        fn num_connected_peers(&self) -> usize {
+            1
+        }
+    }
+
+    impl HeadersClient for StallingHeadersClient {
+        type Header = Header;
+        type Output = futures::future::Either<
+            futures::future::Pending<PeerRequestResult<Vec<Header>>>,
+            futures::future::Ready<PeerRequestResult<Vec<Header>>>,
+        >;
+
+        fn get_headers_with_priority(
+            &self,
+            request: HeadersRequest,
+            _priority: Priority,
+        ) -> Self::Output {
+            let start = request.start.as_number().unwrap();
+            if start == self.stalled_start {
+                return futures::future::Either::Left(futures::future::pending())
+            }
+
+            let response = vec![Header { number: start, ..Default::default() }];
+            futures::future::Either::Right(futures::future::ready(Ok(WithPeerId::new(
+                PeerId::default(),
+                response,
+            ))))
+        }
+    }
+
     /// Tests that `replace_number` works the same way as `Option::replace`
     #[test]
     fn test_replace_number_semantics() {
@@ -1821,6 +1861,25 @@ mod tests {
         assert_eq!(downloader.next_chain_tip_block_number, 4);
         assert_eq!(client.numeric_requests(), vec![(4, 2)]);
         assert_eq!(client.bad_message_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn partial_responses_do_not_grow_buffer_past_limit() {
+        let mut downloader = ReverseHeadersDownloaderBuilder::default()
+            .request_limit(10)
+            .max_buffered_responses(2)
+            .build(StallingHeadersClient { stalled_start: 30 }, Arc::new(TestConsensus::default()));
+        downloader.local_head = Some(SealedHeader::default());
+        downloader.sync_target = Some(SyncTargetBlock::from_number(31));
+        downloader.next_request_block_number = 30;
+        downloader.next_chain_tip_block_number = 30;
+
+        // The next expected range never arrives and every other request gets a one-header
+        // response, so nothing buffered can be validated.
+        assert!(futures::poll!(downloader.next()).is_pending());
+
+        // the two lower ranges plus the one suffix requested while the buffer had room
+        assert_eq!(downloader.buffered_responses.len(), 3);
     }
 
     #[test]
