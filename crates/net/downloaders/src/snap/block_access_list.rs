@@ -21,7 +21,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tracing::debug;
+use tracing::warn;
 
 /// Downloads block access lists and authenticates each against its header's hash.
 ///
@@ -220,11 +220,11 @@ impl BlockAccessListVerifier {
         response: SnapResponse,
     ) -> Result<BlockAccessListsMessage, RequestError> {
         let SnapResponse::BlockAccessLists(response) = response else {
-            debug!(target: "downloaders::snap", "Expected block access lists response");
+            warn!(target: "downloaders::snap", "Expected block access lists response");
             return Err(RequestError::BadResponse)
         };
         if response.request_id != self.request_id {
-            debug!(
+            warn!(
                 target: "downloaders::snap",
                 expected = self.request_id,
                 got = response.request_id,
@@ -233,7 +233,7 @@ impl BlockAccessListVerifier {
             return Err(RequestError::BadResponse)
         }
         if response.block_access_lists.0.len() > self.blocks.len() {
-            debug!(
+            warn!(
                 target: "downloaders::snap",
                 requested = self.blocks.len(),
                 got = response.block_access_lists.0.len(),
@@ -262,7 +262,7 @@ impl BlockAccessListVerifier {
             // charge us the decode of a list it was never able to serve.
             let raw = RawBal::new(raw);
             raw.ensure_hash(access_list_hash).map_err(|error| {
-                debug!(
+                warn!(
                     target: "downloaders::snap",
                     %block_hash,
                     expected = %error.expected,
@@ -272,7 +272,7 @@ impl BlockAccessListVerifier {
                 RequestError::BadResponse
             })?;
             let decoded = DecodedBal::from_raw_bal(raw).map_err(|error| {
-                debug!(target: "downloaders::snap", %block_hash, %error, "Invalid block access list");
+                warn!(target: "downloaders::snap", %block_hash, %error, "Invalid block access list");
                 RequestError::BadResponse
             })?;
             block_access_lists.push((block_hash, Some(decoded)));

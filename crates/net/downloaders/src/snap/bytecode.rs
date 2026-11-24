@@ -18,7 +18,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tracing::debug;
+use tracing::warn;
 
 /// Downloads contract bytecode and authenticates each blob against a requested hash.
 ///
@@ -126,11 +126,11 @@ impl SnapVerifier for BytecodeVerifier {
 
     fn verify(self, peer_id: PeerId, response: SnapResponse) -> Result<Self::Output, RequestError> {
         let SnapResponse::ByteCodes(response) = response else {
-            debug!(target: "downloaders::snap", "Expected byte codes response");
+            warn!(target: "downloaders::snap", "Expected byte codes response");
             return Err(RequestError::BadResponse)
         };
         if response.request_id != self.request_id {
-            debug!(
+            warn!(
                 target: "downloaders::snap",
                 expected = self.request_id,
                 got = response.request_id,
@@ -139,7 +139,7 @@ impl SnapVerifier for BytecodeVerifier {
             return Err(RequestError::BadResponse)
         }
         if response.codes.len() > self.hashes.len() {
-            debug!(
+            warn!(
                 target: "downloaders::snap",
                 requested = self.hashes.len(),
                 got = response.codes.len(),
@@ -159,7 +159,7 @@ impl SnapVerifier for BytecodeVerifier {
         for code in response.codes {
             let hash = keccak256(&code);
             let Some(offset) = remaining.iter().position(|requested| *requested == hash) else {
-                debug!(target: "downloaders::snap", %hash, "Unrequested or out-of-order bytecode");
+                warn!(target: "downloaders::snap", %hash, "Unrequested or out-of-order bytecode");
                 return Err(RequestError::BadResponse)
             };
             remaining = &remaining[offset + 1..];

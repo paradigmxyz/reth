@@ -23,7 +23,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tracing::{debug, warn};
+use tracing::warn;
 
 // Keeps storage requests inclusive through the full trie keyspace.
 const MAX_HASH: B256 = B256::repeat_byte(0xff);
@@ -308,11 +308,11 @@ impl StorageRangeVerifier {
         response: SnapResponse,
     ) -> Result<Option<StorageRangesMessage>, RequestError> {
         let SnapResponse::StorageRanges(mut response) = response else {
-            debug!(target: "downloaders::snap", "Expected storage ranges response");
+            warn!(target: "downloaders::snap", "Expected storage ranges response");
             return Err(RequestError::BadResponse)
         };
         if response.request_id != self.request.request_id {
-            debug!(
+            warn!(
                 target: "downloaders::snap",
                 expected = self.request.request_id,
                 got = response.request_id,
@@ -321,7 +321,7 @@ impl StorageRangeVerifier {
             return Err(RequestError::BadResponse)
         }
         if response.slots.len() > self.request.account_hashes.len() {
-            debug!(target: "downloaders::snap", "Storage response contains extra ranges");
+            warn!(target: "downloaders::snap", "Storage response contains extra ranges");
             return Err(RequestError::BadResponse)
         }
         if response.slots.is_empty() {
@@ -354,7 +354,7 @@ impl StorageRangeVerifier {
 
         // One boundary slot may sit past the inclusive limit and is verified before removal.
         if slots.iter().filter(|slot| slot.hash > limit).nth(1).is_some() {
-            debug!(target: "downloaders::snap", %account_hash, "Storage range exceeds limit");
+            warn!(target: "downloaders::snap", %account_hash, "Storage range exceeds limit");
             return Err(RequestError::BadResponse)
         }
 
@@ -362,7 +362,7 @@ impl StorageRangeVerifier {
         let leaves = decoded.iter().map(|(hash, value)| (*hash, alloy_rlp::encode(value)));
         let next = verify_range_proof(self.storage_roots[index], origin, limit, leaves, proof)
             .map_err(|error| {
-                debug!(
+                warn!(
                     target: "downloaders::snap",
                     %account_hash,
                     %error,
@@ -374,7 +374,7 @@ impl StorageRangeVerifier {
         // Resuming at or before the origin would reissue this request forever, so a peer that
         // reports one has withheld a slot it was asked for.
         if next.is_some_and(|next| next <= origin) {
-            debug!(target: "downloaders::snap", %account_hash, "Storage range does not advance");
+            warn!(target: "downloaders::snap", %account_hash, "Storage range does not advance");
             return Err(RequestError::BadResponse)
         }
 
@@ -429,11 +429,11 @@ impl StorageRangeVerifier {
                 return Err(RequestError::BadResponse)
             }
             let value = slot.value().map_err(|error| {
-                debug!(target: "downloaders::snap", %account_hash, %error, "Invalid storage value");
+                warn!(target: "downloaders::snap", %account_hash, %error, "Invalid storage value");
                 RequestError::BadResponse
             })?;
             if value.is_zero() {
-                debug!(target: "downloaders::snap", %account_hash, "Storage trie contains zero leaf");
+                warn!(target: "downloaders::snap", %account_hash, "Storage trie contains zero leaf");
                 return Err(RequestError::BadResponse)
             }
             previous = Some(slot.hash);

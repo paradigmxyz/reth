@@ -20,7 +20,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tracing::debug;
+use tracing::warn;
 
 mod block_access_list;
 mod bytecode;
@@ -257,11 +257,11 @@ impl SnapVerifier for GetAccountRangeMessage {
 
     fn verify(self, peer_id: PeerId, response: SnapResponse) -> Result<Self::Output, RequestError> {
         let SnapResponse::AccountRange(response) = response else {
-            debug!(target: "downloaders::snap", "Expected account range response");
+            warn!(target: "downloaders::snap", "Expected account range response");
             return Err(RequestError::BadResponse)
         };
         if response.request_id != self.request_id {
-            debug!(
+            warn!(
                 target: "downloaders::snap",
                 expected = self.request_id,
                 got = response.request_id,
@@ -294,7 +294,7 @@ fn verify_account_range(
 ) -> Result<VerifiedAccountRange, RequestError> {
     // Allow only the single out-of-range account needed as a boundary witness.
     if response.accounts.iter().filter(|data| data.hash > request.limit_hash).nth(1).is_some() {
-        debug!(target: "downloaders::snap", "Account range runs past the requested limit");
+        warn!(target: "downloaders::snap", "Account range runs past the requested limit");
         return Err(RequestError::BadResponse)
     }
 
@@ -327,7 +327,7 @@ fn verify_proof(
     let leaves = accounts.iter().map(|(hash, account)| (*hash, alloy_rlp::encode(account)));
     verify_range_proof(request.root_hash, request.starting_hash, request.limit_hash, leaves, proof)
         .map_err(|error| {
-            debug!(target: "downloaders::snap", %error, "Invalid account range proof");
+            warn!(target: "downloaders::snap", %error, "Invalid account range proof");
             RequestError::BadResponse
         })
 }
