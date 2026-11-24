@@ -696,14 +696,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let config_path = target_dir.join("reth.toml");
         let config =
             if config_path.try_exists()? { Config::from_path(config_path)? } else { generated };
-        config_gen::write_prune_checkpoints_tx(
-            &tx,
-            &config,
-            selections,
-            manifest,
-            is_v2,
-            self.explicit_history_selection().is_some(),
-        )?;
+        config_gen::write_prune_checkpoints_tx(&tx, &config, selections, manifest, is_v2)?;
         if is_v2 && rocksdb_indices_missing(selections) {
             config_gen::reset_index_stage_checkpoints_tx(&tx)?;
         }
@@ -1801,13 +1794,12 @@ mod tests {
 
     #[tokio::test]
     async fn restore_bundled_v1_history() -> Result<()> {
-        for (setting, flag, mode, expected_storage) in [
-            ("receipts_in_static_files", "--with-state-history", None, SOURCE_BOUNDARY),
+        for (setting, flag, mode) in [
+            ("receipts_in_static_files", "--with-state-history", None),
             (
                 "transaction_senders_in_static_files",
                 "--minimal",
                 Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
-                SOURCE_HISTORY,
             ),
         ] {
             let source = tempdir()?;
@@ -1829,7 +1821,7 @@ mod tests {
             let target = restore_history(&source, flag, mode).await?;
             let db = snapshot_db(&target)?;
             let tx = db.tx()?;
-            assert_eq!(history_checkpoints(&tx)?, [None, Some(expected_storage)]);
+            assert_eq!(history_checkpoints(&tx)?, [None, Some(SOURCE_HISTORY)]);
             assert_eq!(
                 tx.get::<tables::PruneCheckpoints>(PruneSegment::TransactionLookup)?,
                 Some(SOURCE_HISTORY)
@@ -1848,14 +1840,18 @@ mod tests {
     #[tokio::test]
     async fn future_history_keeps_v1_checkpoint_progress() -> Result<()> {
         let source = tempdir()?;
+        let interrupted = PruneCheckpoint {
+            block_number: Some(4),
+            tx_number: None,
+            prune_mode: PruneMode::Before(SNAPSHOT_TIP),
+        };
         let unstarted = PruneCheckpoint { block_number: None, ..SOURCE_HISTORY };
-        snapshot_db(&source)?
-            .update(|tx| set_history_checkpoints(tx, SOURCE_HISTORY, unstarted))?;
+        snapshot_db(&source)?.update(|tx| set_history_checkpoints(tx, interrupted, unstarted))?;
         let mode = PruneMode::Before(20);
         let target = restore_history(&source, "--with-state-history-since=20", Some(mode)).await?;
         assert_eq!(
             history_checkpoints(&snapshot_db(&target)?.tx()?)?,
-            [SOURCE_HISTORY, unstarted].map(|cp| Some(PruneCheckpoint { prune_mode: mode, ..cp }))
+            [Some(interrupted), Some(unstarted)]
         );
         Ok(())
     }
@@ -1953,13 +1949,14 @@ mod tests {
         let configured = PruneCheckpoint { prune_mode: history_mode, ..SOURCE_BOUNDARY };
         for (layout, flag, expected) in [
             (StorageSettings::v2(), "--archive", [configured, tip]),
-            (StorageSettings::v1(), "--with-state-history-since=20", [configured, SOURCE_BOUNDARY]),
+            (StorageSettings::v1(), "--with-state-history-since=20", [SOURCE_HISTORY; 2]),
             (StorageSettings::v1(), "--minimal", [SOURCE_HISTORY; 2]),
         ] {
             let dir = tempdir()?;
             write_config(&config, dir.path())?;
             snapshot_db(&dir)?.update(|tx| {
                 set_layout(tx, layout);
+                tx.put::<tables::PruneCheckpoints>(PruneSegment::Receipts, SOURCE_HISTORY).unwrap();
                 tx.put::<tables::StageCheckpoints>(stage.clone(), indexed).unwrap();
                 set_history_checkpoints(tx, SOURCE_HISTORY, SOURCE_HISTORY);
             })?;
@@ -1977,6 +1974,10 @@ mod tests {
             assert_eq!(
                 tx.get::<tables::PruneCheckpoints>(PruneSegment::Bodies)?,
                 Some(PruneCheckpoint { prune_mode: bodies_mode, ..tip })
+            );
+            assert_eq!(
+                tx.get::<tables::PruneCheckpoints>(PruneSegment::Receipts)?,
+                Some(SOURCE_HISTORY)
             );
             assert_eq!(tx.get::<tables::StageCheckpoints>(stage.clone())?, Some(indexed));
             assert_eq!(tx.get::<tables::PruneCheckpoints>(PruneSegment::TransactionLookup)?, None);
