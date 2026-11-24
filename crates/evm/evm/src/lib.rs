@@ -733,9 +733,11 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Calls `target` with each account, and the storage slots of that account, that executing
     /// `tx` from `signer` is expected to read.
     ///
-    /// Only called if [`Self::warms_tx_targets`] returns `true`, for every transaction prewarming
-    /// receives, before the transaction is executed. Targets are only loaded into the execution
-    /// cache, so missing or extra targets affect performance, not execution results.
+    /// Only called if [`Self::warms_tx_targets`] returns `true` and the execution cache is enabled,
+    /// for transactions that prewarming dispatches for speculative execution, before dispatching
+    /// them. It is not called for transactions that block execution already passed or that arrive
+    /// after prewarming stops. Targets are only loaded into the execution cache, so missing or
+    /// extra targets affect performance, not execution results.
     fn tx_warm_targets(
         &self,
         tx: &TxTy<Self::Primitives>,
