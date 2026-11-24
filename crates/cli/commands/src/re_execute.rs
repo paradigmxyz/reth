@@ -159,7 +159,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         })?;
                         eyre::Ok(StateProviderDatabase(
                             state_provider_factory
-                                .state_provider_from_database(provider, hash)
+                                .state_provider_from_database(provider, hash)?
                                 .into_evm_state_provider(),
                         ))
                     }

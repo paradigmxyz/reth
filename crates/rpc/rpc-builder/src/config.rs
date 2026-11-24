@@ -101,6 +101,9 @@ impl RethRpcServerConfig for RpcServerArgs {
             .max_trace_filter_blocks(self.rpc_max_trace_filter_blocks)
             .max_blocks_per_filter(self.rpc_max_blocks_per_filter.unwrap_or_max())
             .max_logs_per_response(self.rpc_max_logs_per_response.unwrap_or_max() as usize)
+            .max_active_filters(
+                self.rpc_max_active_filters.0.map(|max| usize::try_from(max).unwrap_or(usize::MAX)),
+            )
             .eth_proof_window(self.rpc_eth_proof_window)
             .rpc_gas_cap(self.rpc_gas_cap)
             .rpc_max_simulate_blocks(self.rpc_max_simulate_blocks)
@@ -521,12 +524,15 @@ mod tests {
             "0",
             "--rpc-max-logs-per-response",
             "0",
+            "--rpc-max-active-filters",
+            "0",
         ])
         .args;
 
         let config = args.eth_config().filter_config();
         assert_eq!(config.max_blocks_per_filter, Some(u64::MAX));
         assert_eq!(config.max_logs_per_response, Some(usize::MAX));
+        assert_eq!(config.max_active_filters, None);
     }
 
     #[test]
@@ -537,6 +543,8 @@ mod tests {
             "100",
             "--rpc-max-logs-per-response",
             "200",
+            "--rpc-max-active-filters",
+            "300",
             "--rpc.max-response-size",
             "5",
         ])
@@ -545,6 +553,7 @@ mod tests {
         let config = args.eth_config().filter_config();
         assert_eq!(config.max_blocks_per_filter, Some(100));
         assert_eq!(config.max_logs_per_response, Some(200));
+        assert_eq!(config.max_active_filters, Some(300));
         assert_eq!(config.max_response_size, Some(5 * 1024 * 1024));
     }
 
