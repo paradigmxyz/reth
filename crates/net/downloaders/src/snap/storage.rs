@@ -23,7 +23,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tracing::debug;
+use tracing::{debug, warn, warn_span};
 
 // Keeps storage requests inclusive through the full trie keyspace.
 const MAX_HASH: B256 = B256::repeat_byte(0xff);
@@ -276,6 +276,14 @@ impl StorageRangeVerifier {
         peer_id: PeerId,
         response: SnapResponse,
     ) -> Result<StorageRangeOutcome, RequestError> {
+        let _span = warn_span!(
+            target: "downloaders::snap",
+            "storage_ranges",
+            ?peer_id,
+            request_id = self.request.request_id,
+            root_hash = %self.request.root_hash,
+        )
+        .entered();
         let Some(response) = self.accepted_response(response)? else {
             return Ok(StorageRangeOutcome::Unavailable { peer_id })
         };
@@ -352,19 +360,29 @@ impl StorageRangeVerifier {
             (B256::ZERO, MAX_HASH)
         };
 
+        let _span = warn_span!(
+            target: "downloaders::snap",
+            "storage_range",
+            index,
+            %account_hash,
+            storage_root = %self.storage_roots[index],
+            %origin,
+            %limit,
+        )
+        .entered();
+
         // One boundary slot may sit past the inclusive limit and is verified before removal.
         if slots.iter().filter(|slot| slot.hash > limit).nth(1).is_some() {
-            debug!(target: "downloaders::snap", %account_hash, "Storage range exceeds limit");
+            debug!(target: "downloaders::snap", "Storage range exceeds limit");
             return Err(RequestError::BadResponse)
         }
 
-        let mut decoded = Self::decode_slots(account_hash, origin, slots)?;
+        let mut decoded = decode_slots(origin, slots)?;
         let leaves = decoded.iter().map(|(hash, value)| (*hash, alloy_rlp::encode(value)));
         let next = verify_range_proof(self.storage_roots[index], origin, limit, leaves, proof)
             .map_err(|error| {
                 debug!(
                     target: "downloaders::snap",
-                    %account_hash,
                     %error,
                     "Invalid storage range proof"
                 );
@@ -374,7 +392,7 @@ impl StorageRangeVerifier {
         // Resuming at or before the origin would reissue this request forever, so a peer that
         // reports one has withheld a slot it was asked for.
         if next.is_some_and(|next| next <= origin) {
-            debug!(target: "downloaders::snap", %account_hash, "Storage range does not advance");
+            debug!(target: "downloaders::snap", "Storage range does not advance");
             return Err(RequestError::BadResponse)
         }
 
@@ -404,38 +422,6 @@ impl StorageRangeVerifier {
             StorageRangeContinuation::NextAccount { account_index, account_hash }
         })
     }
-
-    // Storage values are canonical non-zero trie leaves.
-    fn decode_slots(
-        account_hash: B256,
-        origin: B256,
-        slots: &[StorageData],
-    ) -> Result<Vec<(B256, U256)>, RequestError> {
-        let mut decoded = Vec::with_capacity(slots.len());
-        let mut previous = None;
-
-        for slot in slots {
-            if slot.hash < origin || previous.is_some_and(|previous| slot.hash <= previous) {
-                debug!(
-                    target: "downloaders::snap",
-                    %account_hash,
-                    "Storage slots precede origin or are not strictly ordered"
-                );
-                return Err(RequestError::BadResponse)
-            }
-            let value = slot.value().map_err(|error| {
-                debug!(target: "downloaders::snap", %account_hash, %error, "Invalid storage value");
-                RequestError::BadResponse
-            })?;
-            if value.is_zero() {
-                debug!(target: "downloaders::snap", %account_hash, "Storage trie contains zero leaf");
-                return Err(RequestError::BadResponse)
-            }
-            previous = Some(slot.hash);
-            decoded.push((slot.hash, value));
-        }
-        Ok(decoded)
-    }
 }
 
 // One account's verified slots and whether it continues within the request limit.
@@ -444,6 +430,43 @@ struct VerifiedRange {
     range: VerifiedStorageRange,
     // First slot after the range when it remains within the requested limit.
     within_limit: Option<B256>,
+}
+
+// Storage values are canonical non-zero trie leaves.
+fn decode_slots(origin: B256, slots: &[StorageData]) -> Result<Vec<(B256, U256)>, RequestError> {
+    let mut decoded = Vec::with_capacity(slots.len());
+    let mut previous = None;
+
+    for (slot_index, slot) in slots.iter().enumerate() {
+        let reason = if slot.hash < origin {
+            "before_origin"
+        } else if previous.is_some_and(|previous| slot.hash <= previous) {
+            "not_strictly_ordered"
+        } else {
+            let value = slot.value().map_err(|error| {
+                debug!(target: "downloaders::snap", %error, "Invalid storage value");
+                RequestError::BadResponse
+            })?;
+            if value.is_zero() {
+                debug!(target: "downloaders::snap", "Storage trie contains zero leaf");
+                return Err(RequestError::BadResponse)
+            }
+            previous = Some(slot.hash);
+            decoded.push((slot.hash, value));
+            continue
+        };
+        warn!(
+            target: "downloaders::snap",
+            reason,
+            slot_index,
+            slot_hash = %slot.hash,
+            previous_hash = ?previous,
+            slot_count = slots.len(),
+            "Invalid storage slot order"
+        );
+        return Err(RequestError::BadResponse)
+    }
+    Ok(decoded)
 }
 
 #[cfg(test)]
@@ -455,10 +478,14 @@ mod tests {
     use alloy_primitives::Bytes;
     use reth_network_p2p::{error::PeerRequestResult, priority::Priority};
     use reth_network_peers::WithPeerId;
+    use reth_tracing::tracing_subscriber;
     use reth_trie_common::{
         proof::ProofRetainer, HashBuilder, Nibbles, TrieAccount, EMPTY_ROOT_HASH,
     };
-    use std::sync::Arc;
+    use std::{
+        io,
+        sync::{Arc, Mutex},
+    };
 
     fn key(value: u64) -> B256 {
         B256::left_padding_from(&value.to_be_bytes())
@@ -1005,5 +1032,89 @@ mod tests {
                 supplied: key(900),
             }
         );
+    }
+
+    #[test]
+    fn invalid_slot_order_records_reason_and_request_context() {
+        let all = slots(&[(key(1), 11), (key(2), 12)]);
+        let (root, _) = storage_root(&all, &[]);
+        let accounts = vec![(key(100), account(root))];
+        let peer_id = PeerId::repeat_byte(0x11);
+        let logs = Arc::new(Mutex::new(Vec::new()));
+        let writer = Arc::clone(&logs);
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_target(false)
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(move || LogWriter(Arc::clone(&writer)))
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, || {
+            // Register both span callsites before rebuilding interest for this scoped subscriber.
+            // Other tests may register the same callsites concurrently without a subscriber.
+            let verifier =
+                StorageRangeVerifier { request: request(&accounts), storage_roots: vec![root] };
+            verifier
+                .verify_response(
+                    peer_id,
+                    SnapResponse::StorageRanges(StorageRangesMessage {
+                        request_id: 1,
+                        slots: vec![wire_slots(&all)],
+                        proof: Vec::new(),
+                    }),
+                )
+                .unwrap();
+            tracing::callsite::rebuild_interest_cache();
+            assert!(logs.lock().unwrap().is_empty());
+
+            let before_origin = (key(2), vec![all[0]], "before_origin", 0, None);
+            let duplicate = (key(1), vec![all[0], all[0]], "not_strictly_ordered", 1, Some(key(1)));
+            let descending =
+                (key(1), vec![all[1], all[0]], "not_strictly_ordered", 1, Some(key(2)));
+            for (origin, returned, reason, slot_index, previous) in
+                [before_origin, duplicate, descending]
+            {
+                let mut request = request(&accounts);
+                request.starting_hash = origin.into();
+                let verifier = StorageRangeVerifier { request, storage_roots: vec![root] };
+                let response = SnapResponse::StorageRanges(StorageRangesMessage {
+                    request_id: 1,
+                    slots: vec![wire_slots(&returned)],
+                    proof: Vec::new(),
+                });
+
+                assert_eq!(
+                    verifier.verify_response(peer_id, response),
+                    Err(RequestError::BadResponse)
+                );
+                let logged = String::from_utf8(std::mem::take(&mut *logs.lock().unwrap())).unwrap();
+                assert_eq!(
+                    logged,
+                    format!(
+                        " WARN storage_ranges{{peer_id={peer_id:?} request_id=1 root_hash={STATE_ROOT}}}:\
+                         storage_range{{index=0 account_hash={} storage_root={root} origin={origin} limit={MAX_HASH}}}: \
+                         Invalid storage slot order reason={reason:?} slot_index={slot_index} \
+                         slot_hash={} previous_hash={previous:?} slot_count={}\n",
+                        key(100),
+                        key(1),
+                        returned.len(),
+                    )
+                );
+            }
+        });
+    }
+
+    struct LogWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl io::Write for LogWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
     }
 }
