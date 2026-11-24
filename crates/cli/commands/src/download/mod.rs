@@ -79,9 +79,6 @@
 //! aggregate progress for modular downloads. It tracks fetched bytes separately from completed
 //! bytes so repeated fetches during retries do not overstate completion.
 //!
-//! Once all database archives verify, the download checks their storage layout and cancels
-//! outstanding archives if the selected components cannot be served.
-//!
 //! After all required archives are complete, [`DownloadCommand`] finalizes the directory by
 //! writing the derived node configuration and updating prune or index-stage checkpoints. A
 //! successful command leaves a data directory that matches the snapshot shape that was selected.
@@ -116,7 +113,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, MAINNET}
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_config::config::Config;
-use reth_db::{init_db, open_db_read_only, Database};
+use reth_db::{init_db, Database};
 use reth_db_api::transaction::DbTx;
 use reth_fs_util as fs;
 use reth_node_core::args::DefaultPruningValues;
@@ -593,34 +590,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             "Downloading all archives"
         );
 
-        let config = self.download_config(&selections, &prepared.manifest, preset);
-        let validate_layout = async {
-            if !self.should_write_prune_checkpoints(&config) &&
-                !rocksdb_indices_missing(&selections)
-            {
-                return Ok(())
-            }
-            let db_path = target_dir.join("db");
-            let static_files_dir =
-                static_files_dir.clone().unwrap_or_else(|| target_dir.join("static_files"));
-            let args = self.env.db.database_args();
-            let selections = selections.clone();
-            reth_tasks::spawn_blocking(move || {
-                if !db_path.join("mdbx.dat").try_exists()? {
-                    return Ok(())
-                }
-                // A custom static-file root can route more archives into the database directory.
-                if static_files_dir.try_exists()? &&
-                    db_path.canonicalize()?.starts_with(static_files_dir.canonicalize()?)
-                {
-                    return Ok(())
-                }
-                let db = open_db_read_only(db_path, args)?;
-                config_gen::snapshot_uses_v2(&db.tx()?, &selections)?;
-                Ok(())
-            })
-            .await?
-        };
         run_modular_downloads(
             downloads,
             target_dir,
@@ -628,10 +597,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             self.download_concurrency.max(1),
             cancel_token,
             self.retry_backoff,
-            validate_layout,
         )
         .await?;
 
+        let config = self.download_config(&selections, &prepared.manifest, preset);
         self.finalize_modular_download(&selections, &prepared.manifest, config, target_dir)?;
 
         Ok(Some(prepared))
@@ -718,35 +687,24 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         &self,
         selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
         manifest: &SnapshotManifest,
-        mut config: Config,
+        generated: Config,
         target_dir: &Path,
     ) -> Result<()> {
         let db = init_db(target_dir.join("db"), self.env.db.database_args())?;
         let tx = db.tx_mut()?;
-        let write_checkpoints = self.should_write_prune_checkpoints(&config);
-        let indices_missing = rocksdb_indices_missing(selections);
-        // Use the final database contents for checkpoint decisions in this transaction.
-        let is_v2 = (write_checkpoints || indices_missing) &&
-            config_gen::snapshot_uses_v2(&tx, selections)?;
-        if write_checkpoints {
-            // A retry keeps the existing reth.toml, including its history retention policy.
-            let explicit_history = self.explicit_history_selection().is_some();
-            let config_path = target_dir.join("reth.toml");
-            if (is_v2 || explicit_history) && config_path.try_exists()? {
-                let stored = Config::from_path(config_path)?.prune.segments;
-                config.prune.segments.account_history = stored.account_history;
-                config.prune.segments.storage_history = stored.storage_history;
-            }
-            config_gen::write_prune_checkpoints_tx(
-                &tx,
-                &config,
-                selections,
-                manifest.block,
-                is_v2,
-                explicit_history,
-            )?;
-        }
-        if is_v2 && indices_missing {
+        let is_v2 = config_gen::snapshot_uses_v2(&tx, selections)?;
+        let config_path = target_dir.join("reth.toml");
+        let config =
+            if config_path.try_exists()? { Config::from_path(config_path)? } else { generated };
+        config_gen::write_prune_checkpoints_tx(
+            &tx,
+            &config,
+            selections,
+            manifest,
+            is_v2,
+            self.explicit_history_selection().is_some(),
+        )?;
+        if is_v2 && rocksdb_indices_missing(selections) {
             config_gen::reset_index_stage_checkpoints_tx(&tx)?;
         }
         if write_config(&config, target_dir)? {
@@ -763,11 +721,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         Ok(())
-    }
-
-    fn should_write_prune_checkpoints(&self, config: &Config) -> bool {
-        config.prune.segments != PruneModes::default() ||
-            self.explicit_history_selection().is_some()
     }
 
     /// Determines which components to download based on CLI flags or interactive selection.
@@ -1688,53 +1641,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unsupported_layout_stops_queued_downloads() -> Result<()> {
+    async fn restore_rejects_incompatible_layout_at_finalization() -> Result<()> {
         let source = tempfile::tempdir()?;
         init_db(source.path().join("db"), DatabaseArguments::test())?.update(|tx| {
-            set_layout(
-                tx,
-                serde_json::json!({
-                    "receipts_in_static_files": false,
-                    "account_changesets_in_static_files": true,
-                }),
-            );
+            set_layout(tx, serde_json::json!({"account_changesets_in_static_files": true}));
         })?;
-        manifest::tests::write_test_static_files(source.path(), StaticFileSegment::Headers, 10);
-        let archives = tempfile::tempdir()?;
-        let manifest =
-            generate_manifest(source.path(), archives.path(), None, 10, 1, 10, None, false)?;
-        let path = archives.path().join("manifest.json");
-        fs::write(&path, serde_json::to_vec(&manifest)?)?;
-
-        for reused_state in [false, true] {
-            let target = tempfile::tempdir()?;
-            if reused_state {
-                let state =
-                    &manifest.snapshot_archives_for_distance(SnapshotComponentType::State, None)[0];
-                fs::create_dir_all(target.path().join("db"))?;
-                for file in &state.output_files {
-                    std::fs::copy(source.path().join(&file.path), target.path().join(&file.path))?;
-                }
-                fs::remove_file(archives.path().join(&state.file_name))?;
-            }
-
-            let error = DownloadCommand::<EthereumChainSpecParser>::parse_from([
-                "reth",
-                "--manifest-path",
-                path.to_str().unwrap(),
-                "--datadir",
-                target.path().to_str().unwrap(),
-                "--with-state-history",
-                "--download-concurrency=1",
-                "--retry-backoff=0ms",
-            ])
-            .execute::<()>()
-            .await
-            .unwrap_err();
-            assert_eq!(error.to_string(), "Unsupported legacy snapshot setting for this download: account_changesets_in_static_files=true");
-            assert!(!target.path().join("static_files").exists());
-            assert!(!target.path().join("reth.toml").exists());
-        }
+        manifest::tests::write_test_static_files(
+            source.path(),
+            StaticFileSegment::Headers,
+            SNAPSHOT_TIP,
+        );
+        let error = restore_history(source.path(), "--archive", None).await.unwrap_err();
+        assert_eq!(error.to_string(), "Unsupported legacy snapshot setting for this download: account_changesets_in_static_files=true");
         Ok(())
     }
 
@@ -1856,14 +1774,22 @@ mod tests {
 
     #[tokio::test]
     async fn restore_bundled_v1_history() -> Result<()> {
-        for static_senders in [false, true] {
+        let retained = PruneCheckpoint {
+            prune_mode: PruneMode::Distance(20_000),
+            ..PruneCheckpoint::pruned_through(3)
+        };
+        for (static_senders, flag, mode, expected_storage) in [
+            (false, "--with-state-history", None, PruneCheckpoint::pruned_through(3)),
+            (true, "--with-state-history", None, PruneCheckpoint::pruned_through(3)),
+            (false, "--minimal", Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)), retained),
+        ] {
             let source = tempfile::tempdir()?;
-            let stage = StageId::TransactionLookup.to_string();
+            let stages = [
+                StageId::TransactionLookup,
+                StageId::IndexAccountHistory,
+                StageId::IndexStorageHistory,
+            ];
             let indexed = StageCheckpoint::new(SNAPSHOT_TIP);
-            let retained = PruneCheckpoint {
-                prune_mode: PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE),
-                ..PruneCheckpoint::pruned_through(3)
-            };
             let pruned = [PruneSegment::StorageHistory, PruneSegment::TransactionLookup];
             {
                 let db = init_db(source.path().join("db"), DatabaseArguments::test())?;
@@ -1878,27 +1804,34 @@ mod tests {
                     "account_changesets_in_static_files": false,
                 });
                 set_layout(&tx, layout);
-                tx.put::<tables::StageCheckpoints>(stage.clone(), indexed)?;
-                tx.put::<tables::StageCheckpointProgresses>(stage.clone(), vec![1, 2, 3])?;
+                for stage in stages {
+                    tx.put::<tables::StageCheckpoints>(stage.to_string(), indexed)?;
+                    tx.put::<tables::StageCheckpointProgresses>(stage.to_string(), vec![1, 2, 3])?;
+                }
                 for segment in pruned {
                     tx.put::<tables::PruneCheckpoints>(segment, retained)?;
                 }
                 tx.commit()?;
             }
-            let target = restore_history(source.path(), "--with-state-history", None).await?;
+            let target = restore_history(source.path(), flag, mode).await?;
             let db = init_db(target.path().join("db"), DatabaseArguments::test())?;
             let tx = db.tx()?;
             assert_eq!(tx.get::<tables::PruneCheckpoints>(PruneSegment::AccountHistory)?, None);
             assert_eq!(
                 tx.get::<tables::PruneCheckpoints>(PruneSegment::StorageHistory)?,
-                Some(PruneCheckpoint::pruned_through(3))
+                Some(expected_storage)
             );
             assert_eq!(
                 tx.get::<tables::PruneCheckpoints>(PruneSegment::TransactionLookup)?,
                 Some(retained)
             );
-            assert_eq!(tx.get::<tables::StageCheckpoints>(stage.clone())?, Some(indexed));
-            assert_eq!(tx.get::<tables::StageCheckpointProgresses>(stage)?, Some(vec![1, 2, 3]));
+            for stage in stages {
+                assert_eq!(tx.get::<tables::StageCheckpoints>(stage.to_string())?, Some(indexed));
+                assert_eq!(
+                    tx.get::<tables::StageCheckpointProgresses>(stage.to_string())?,
+                    Some(vec![1, 2, 3])
+                );
+            }
         }
         Ok(())
     }
@@ -2004,32 +1937,67 @@ mod tests {
     }
 
     #[test]
-    fn restore_retry_uses_existing_history_policy() -> Result<()> {
-        let command = DownloadCommand::<EthereumChainSpecParser>::parse_from([
-            "reth",
-            "--with-state-history-since=20",
-        ]);
-        let manifest =
+    fn restore_retry_uses_existing_prune_config() -> Result<()> {
+        let source = PruneCheckpoint {
+            prune_mode: PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE),
+            ..PruneCheckpoint::pruned_through(3)
+        };
+        let mut manifest =
             SnapshotManifest { block: SNAPSHOT_TIP, ..manifest_with_archive_only_components() };
-        let resolved = command.resolve_components(&manifest)?;
-        for is_v2 in [false, true] {
+        for component in
+            [SnapshotComponentType::AccountChangesets, SnapshotComponentType::StorageChangesets]
+        {
+            manifest.components.insert(
+                component.key().to_owned(),
+                ComponentManifest::Single(SingleArchive {
+                    file: format!("{}.tar.zst", component.key()),
+                    size: 1,
+                    decompressed_size: 0,
+                    blake3: None,
+                    output_files: vec![],
+                }),
+            );
+        }
+        let history_mode = PruneMode::Distance(20_000);
+        let future = "--with-state-history-since=20";
+        let tip = PruneCheckpoint::pruned_through(SNAPSHOT_TIP);
+        for (layout, flag, expected_account, expected_storage) in [
+            (
+                StorageSettings::v2(),
+                "--archive",
+                PruneCheckpoint { prune_mode: history_mode, ..source },
+                PruneCheckpoint::pruned_through(3),
+            ),
+            (StorageSettings::v1(), "--minimal", source, source),
+            (
+                StorageSettings::v1(),
+                future,
+                PruneCheckpoint { prune_mode: history_mode, ..source },
+                PruneCheckpoint::pruned_through(3),
+            ),
+            (
+                StorageSettings::v2(),
+                future,
+                PruneCheckpoint { prune_mode: history_mode, ..tip },
+                tip,
+            ),
+        ] {
+            let command = DownloadCommand::<EthereumChainSpecParser>::parse_from(["reth", flag]);
+            let resolved = command.resolve_components(&manifest)?;
             let dir = tempfile::tempdir()?;
             let path = dir.path().join("db");
-            let source = PruneCheckpoint {
-                prune_mode: PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE),
-                ..PruneCheckpoint::pruned_through(3)
-            };
             {
                 let db = init_db(&path, DatabaseArguments::test())?;
                 let tx = db.tx_mut()?;
-                set_layout(&tx, if is_v2 { StorageSettings::v2() } else { StorageSettings::v1() });
+                set_layout(&tx, layout);
                 for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
                     tx.put::<tables::PruneCheckpoints>(segment, source)?;
                 }
                 tx.commit()?;
             }
             let mut config = Config::default();
-            config.prune.segments.account_history = Some(PruneMode::Distance(20_000));
+            config.prune.segments.account_history = Some(history_mode);
+            config.prune.segments.bodies_history = Some(PruneMode::Distance(30_000));
             write_config(&config, dir.path())?;
             command.finalize_modular_download(
                 &resolved.selections,
@@ -2039,14 +2007,20 @@ mod tests {
             )?;
             let db = init_db(path, DatabaseArguments::test())?;
             let tx = db.tx()?;
-            let boundary = PruneCheckpoint::pruned_through(if is_v2 { SNAPSHOT_TIP } else { 3 });
+            assert_eq!(
+                tx.get::<tables::PruneCheckpoints>(PruneSegment::Bodies)?,
+                Some(PruneCheckpoint {
+                    prune_mode: PruneMode::Distance(30_000),
+                    ..PruneCheckpoint::pruned_through(SNAPSHOT_TIP)
+                })
+            );
             assert_eq!(
                 tx.get::<tables::PruneCheckpoints>(PruneSegment::AccountHistory)?,
-                Some(PruneCheckpoint { prune_mode: PruneMode::Distance(20_000), ..boundary })
+                Some(expected_account)
             );
             assert_eq!(
                 tx.get::<tables::PruneCheckpoints>(PruneSegment::StorageHistory)?,
-                Some(boundary)
+                Some(expected_storage)
             );
         }
         Ok(())

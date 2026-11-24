@@ -69,13 +69,13 @@ changeset archives and writes that future boundary to the generated `reth.toml`.
 Legacy snapshots with changesets and history indices in MDBX carry that history
 in the state archive. This includes v1.10 snapshots with static-file receipts,
 and snapshots with static-file senders when the download omits senders.
-When checkpoint updates depend on the storage layout, the downloader checks
-the verified database and stops with the name of any incompatible legacy
-backend setting.
+After all archives are verified, the downloader checks the storage layout
+before updating checkpoints. It reports any known legacy backend setting that
+is incompatible with the selected download.
 
 An explicit state-history selection keeps the source pruning boundary for
 bundled history and applies the configured retention policy to its checkpoint.
-On a retry, the node keeps the policy from the existing `reth.toml`.
+On a retry, the downloader uses the pruning settings from the existing `reth.toml`.
 
 When `reth db migrate-v2` moves history from an older restore, it copies surviving
 changesets even below the recorded prune checkpoint. A block can be partially
