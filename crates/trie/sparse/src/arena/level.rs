@@ -115,6 +115,15 @@ pub(super) fn root_needs_level_hashing(arena: &NodeArena, root: Index) -> bool {
         !matches!(node_state_ref(arena, root), Some(ArenaSparseNodeState::Cached { .. }))
 }
 
+/// Prefetches every child of the branch (or extension's branch) at idx.
+#[inline]
+fn prefetch_children(arena: &NodeArena, idx: Index) {
+    let branch = branch_data(arena, idx);
+    for &child in &branch.children {
+        arena.prefetch(child);
+    }
+}
+
 /// Encodes the leaf at idx into the batch if it is not cached, recording it in lb.leaves.
 #[inline]
 fn push_leaf(
@@ -158,6 +167,7 @@ pub(super) fn hash_levels(
         let job_idx = job_idx as u32;
         let arena = &*job.arena;
         lb.stack.clear();
+        prefetch_children(arena, job.root);
         lb.stack.push(LevelNode { job: job_idx, idx: job.root, path: job.base_path });
         while let Some(node) = lb.stack.pop() {
             let branch = branch_data(arena, node.idx);
@@ -187,6 +197,9 @@ pub(super) fn hash_levels(
                     _ => false,
                 };
                 if descend {
+                    // Start loading the grandchildren now; they are inspected when this child
+                    // is popped.
+                    prefetch_children(arena, child_idx);
                     let mut path = child_base;
                     path.push_unchecked(nibble);
                     lb.stack.push(LevelNode { job: job_idx, idx: child_idx, path });
@@ -217,7 +230,14 @@ pub(super) fn hash_levels(
         lb.clear_batch();
         lb.pending.clear();
         let mut has_extensions = false;
-        for node in &level {
+        const PREFETCH_AHEAD: usize = 2;
+        for node in level.iter().take(PREFETCH_AHEAD) {
+            prefetch_children(&*jobs[node.job as usize].arena, node.idx);
+        }
+        for (i, node) in level.iter().enumerate() {
+            if let Some(ahead) = level.get(i + PREFETCH_AHEAD) {
+                prefetch_children(&*jobs[ahead.job as usize].arena, ahead.idx);
+            }
             let arena = &*jobs[node.job as usize].arena;
             has_extensions |= arena[node.idx].extension_key().is_some();
             let pending = encode_branch(arena, node.idx, new_epoch, &mut lb.enc);

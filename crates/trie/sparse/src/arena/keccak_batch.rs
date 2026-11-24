@@ -4,6 +4,10 @@ use alloy_primitives::{keccak256, B256};
 
 /// Hashes every input with keccak256, writing the hash of `inputs[i]` to `out[i]`.
 ///
+/// This is the single entry point for level-batched hashing, so that a multi-buffer (SIMD)
+/// keccak implementation hashing several inputs per permutation can be swapped in. Currently
+/// hashes one input at a time.
+///
 /// # Panics
 ///
 /// Panics if `inputs` and `out` have different lengths.

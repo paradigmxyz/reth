@@ -29,6 +29,41 @@ impl NodeArena {
         Self { nodes: Vec::new(), free: Vec::new(), blinded: Vec::new(), blinded_free: Vec::new() }
     }
 
+    /// Hints the CPU to start loading the node (or blinded RLP) referenced by child into cache.
+    ///
+    /// Has no effect on non-x86_64 targets.
+    #[inline(always)]
+    pub(super) fn prefetch(&self, child: BranchChild) {
+        #[cfg(target_arch = "x86_64")]
+        {
+            use core::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};
+            let (ptr, len) = match child.revealed_index() {
+                Some(idx) => (
+                    self.nodes.as_ptr().wrapping_add(idx.get()).cast::<i8>(),
+                    size_of::<ArenaSparseNode>(),
+                ),
+                None => (
+                    self.blinded
+                        .as_ptr()
+                        .wrapping_add(child.blinded_slot().unwrap_or_default() as usize)
+                        .cast::<i8>(),
+                    size_of::<RlpNode>(),
+                ),
+            };
+            // SAFETY: prefetching has no side effects and never faults, whatever the address.
+            #[allow(unused_unsafe)]
+            unsafe {
+                _mm_prefetch::<_MM_HINT_T0>(ptr);
+                _mm_prefetch::<_MM_HINT_T0>(ptr.wrapping_add(len - 1));
+                if len > 128 {
+                    _mm_prefetch::<_MM_HINT_T0>(ptr.wrapping_add(64));
+                }
+            }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        let _ = child;
+    }
+
     /// Creates an empty arena with room for `capacity` nodes.
     pub(super) fn with_capacity(capacity: usize) -> Self {
         Self { nodes: Vec::with_capacity(capacity), ..Self::new() }
