@@ -5,6 +5,7 @@ use std::{
     collections::VecDeque,
     panic::{catch_unwind, AssertUnwindSafe},
     sync::Arc,
+    thread::{self, JoinHandle},
 };
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
@@ -21,9 +22,12 @@ type Job = Box<dyn FnOnce() + Send + 'static>;
 /// thread walks the collector's list of every thread that ever pinned, so large rayon pools
 /// make every rayon thread in the process slower. Threads in this pool never pin the collector
 /// and never spin.
+///
+/// Dropping the pool waits for every queued and running job to finish.
 #[derive(Debug)]
 pub struct DedicatedThreadPool {
     shared: Arc<Shared>,
+    handles: Mutex<Vec<JoinHandle<()>>>,
     num_threads: usize,
     thread_name_prefix: &'static str,
 }
@@ -61,7 +65,12 @@ impl DedicatedThreadPool {
     /// Creates a pool of at most `num_threads` threads (at least one), named
     /// `"{prefix}-{index:02}"`. No thread is spawned until the first job.
     pub fn new(num_threads: usize, thread_name_prefix: &'static str) -> Self {
-        Self { shared: Arc::default(), num_threads: num_threads.max(1), thread_name_prefix }
+        Self {
+            shared: Arc::default(),
+            handles: Mutex::default(),
+            num_threads: num_threads.max(1),
+            thread_name_prefix,
+        }
     }
 
     /// Returns the maximum number of threads of the pool.
@@ -97,12 +106,13 @@ impl DedicatedThreadPool {
 
     fn spawn_thread(&self, index: usize) {
         let shared = Arc::clone(&self.shared);
-        std::thread::Builder::new()
+        let handle = thread::Builder::new()
             .name(format!("{}-{index:02}", self.thread_name_prefix))
             .spawn(move || shared.run())
             .unwrap_or_else(|err| {
                 panic!("failed to spawn {} thread: {err}", self.thread_name_prefix)
             });
+        self.handles.lock().push(handle);
     }
 }
 
@@ -133,6 +143,13 @@ impl Drop for DedicatedThreadPool {
     fn drop(&mut self) {
         self.shared.state.lock().shutdown = true;
         self.shared.job_available.notify_all();
+        for handle in self.handles.get_mut().drain(..) {
+            // A job can own the last reference to the pool and drop it on a pool thread, which
+            // cannot join itself. That thread exits on its own once the job returns.
+            if handle.thread().id() != thread::current().id() {
+                let _ = handle.join();
+            }
+        }
     }
 }
 
@@ -198,6 +215,21 @@ mod tests {
         done.sort_unstable();
         assert_eq!(done, (0..10).collect::<Vec<_>>());
         assert!(pool.spawned_threads() <= 2);
+    }
+
+    #[test]
+    fn drop_waits_for_queued_and_running_jobs() {
+        let pool = DedicatedThreadPool::new(1, "drain");
+        let done = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        for _ in 0..3 {
+            let done = done.clone();
+            pool.spawn(move || {
+                std::thread::sleep(Duration::from_millis(5));
+                done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            });
+        }
+        drop(pool);
+        assert_eq!(done.load(std::sync::atomic::Ordering::Relaxed), 3);
     }
 
     #[test]

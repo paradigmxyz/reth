@@ -1434,7 +1434,7 @@ mod tests {
                 Err(RecvTimeoutError::Disconnected)
             ));
         }
-        for name in ["sparse-trie", "storage-workers", "account-workers"] {
+        for name in ["sparse-trie"] {
             runtime.spawn_blocking_named(name, || {}).get();
         }
     }
@@ -1484,7 +1484,7 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("handed-off trie must be completed");
         drop(handle);
-        for name in ["sparse-trie", "trie-hashing", "storage-workers", "account-workers", "drop"] {
+        for name in ["sparse-trie", "trie-hashing", "drop"] {
             runtime.spawn_blocking_named(name, || {}).get();
         }
     }
@@ -1747,7 +1747,7 @@ mod tests {
                 assert_eq!(preserved.anchor_hash(), genesis_hash);
             }
         }
-        for name in ["sparse-trie", "trie-hashing", "storage-workers", "account-workers", "drop"] {
+        for name in ["sparse-trie", "trie-hashing", "drop"] {
             runtime.spawn_blocking_named(name, || {}).get();
         }
     }

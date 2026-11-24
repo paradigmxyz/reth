@@ -1665,10 +1665,10 @@ mod tests {
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerCounts};
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
+    /// Waits for the hashing task. Proof workers finish once their handle is dropped, and the
+    /// runtime waits for them when it is dropped.
     fn drain_sparse_trie_tasks(runtime: &Runtime) {
-        for task_name in ["trie-hashing", "storage-workers", "account-workers"] {
-            runtime.spawn_blocking_named(task_name, || {}).get();
-        }
+        runtime.spawn_blocking_named("trie-hashing", || {}).get();
     }
 
     fn test_task(
