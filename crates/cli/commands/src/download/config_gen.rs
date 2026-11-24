@@ -1,6 +1,6 @@
 use crate::download::{
     manifest::{ComponentManifest, ComponentSelection, SnapshotComponentType, SnapshotManifest},
-    SelectionPreset,
+    rocksdb_indices_missing, SelectionPreset,
 };
 use eyre::WrapErr;
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
@@ -41,14 +41,14 @@ pub fn write_config(config: &Config, data_dir: &Path) -> eyre::Result<bool> {
     Ok(true)
 }
 
-/// Writes prune checkpoints and returns the restored layout for index stage recovery.
-/// An archive with opaque storage settings has no known layout.
+/// Writes prune checkpoints and returns whether missing RocksDB indices require resetting the
+/// index stages in the same transaction.
 pub(crate) fn write_prune_checkpoints_tx<Tx>(
     tx: &Tx,
     config: &Config,
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
     snapshot_block: u64,
-) -> eyre::Result<Option<StorageSettings>>
+) -> eyre::Result<bool>
 where
     Tx: DbTx + DbTxMut,
 {
@@ -67,20 +67,24 @@ where
     .filter_map(|(segment, mode)| mode.map(|m| (segment, m)))
     .collect();
 
+    let indices_missing = rocksdb_indices_missing(selections);
+    if checkpoints.is_empty() && !indices_missing {
+        return Ok(false)
+    }
+
     let settings = match tx.get::<tables::Metadata>(keys::STORAGE_SETTINGS.to_owned())? {
         None => StorageSettings::v1(),
         Some(bytes) => match serde_json::from_slice(&bytes) {
             Ok(settings) => settings,
             Err(_) if is_legacy_v1_layout(&bytes) => StorageSettings::v1(),
-            // An archive can retain unknown settings when no prune policy needs them.
-            Err(_) if checkpoints.is_empty() => return Ok(None),
             Err(error) => {
                 return Err(error).wrap_err("Invalid storage settings in snapshot database")
             }
         },
     };
+    let reset_indices = settings.is_v2() && indices_missing;
     if checkpoints.is_empty() {
-        return Ok(Some(settings));
+        return Ok(reset_indices);
     }
 
     // Look up the last tx number for the snapshot block from BlockBodyIndices
@@ -141,13 +145,14 @@ where
         );
     }
 
-    Ok(Some(settings))
+    Ok(reset_indices)
 }
 
-/// Earlier v1 nodes stored one flag per backend, with every flag disabled.
+/// Legacy nodes could use static files for receipts while keeping state, changesets and indices
+/// in MDBX. Later per-backend flags defaulted to false when absent.
 fn is_legacy_v1_layout(bytes: &[u8]) -> bool {
     let Ok(mut flags) = serde_json::from_slice::<BTreeMap<&str, bool>>(bytes) else { return false };
-    flags.remove("receipts_in_static_files") == Some(false) &&
+    flags.remove("receipts_in_static_files").is_some() &&
         flags.into_iter().all(|(name, enabled)| {
             !enabled &&
                 matches!(
@@ -163,8 +168,7 @@ fn is_legacy_v1_layout(bytes: &[u8]) -> bool {
         })
 }
 
-/// Stage IDs for index stages whose output is stored in RocksDB and is never
-/// distributed in snapshots.
+/// Stages backed by the optional RocksDB index component in a v2 snapshot.
 const INDEX_STAGE_IDS: [&str; 3] =
     ["TransactionLookup", "IndexAccountHistory", "IndexStorageHistory"];
 
@@ -180,8 +184,8 @@ const INDEX_PRUNE_SEGMENTS: [PruneSegment; 1] = [PruneSegment::TransactionLookup
 ///
 /// A snapshot's mdbx comes from a fully synced node, so it has stage checkpoints
 /// at the tip for `TransactionLookup`, `IndexAccountHistory`, and
-/// `IndexStorageHistory`. Since we don't distribute the rocksdb indices those
-/// stages produced, we must reset their checkpoints to block 0. Otherwise the
+/// `IndexStorageHistory`. When the download omits the RocksDB indices those
+/// stages produced, we reset their checkpoints to block 0. Otherwise the
 /// pipeline would see "already done" and skip rebuilding entirely.
 ///
 /// We intentionally do not reset `SenderRecovery`: sender static files are
@@ -412,7 +416,7 @@ mod tests {
             let tx = db.tx_mut().unwrap();
             for invalid in [
                 serde_json::json!("unknown"),
-                serde_json::json!({"receipts_in_static_files": true}),
+                serde_json::json!({"receipts_in_static_files": false, "account_changesets_in_static_files": true}),
                 serde_json::json!({"receipts_in_static_files": false, "unknown": false}),
             ] {
                 set_layout(&tx, invalid);
@@ -501,10 +505,11 @@ mod tests {
             let tx = db.tx_mut().unwrap();
             write_prune_checkpoints_tx(&tx, &config, &selections, 21_000_000).unwrap();
             set_layout(&tx, "unknown");
-            assert_eq!(
-                write_prune_checkpoints_tx(&tx, &config, &selections, 21_000_000).unwrap(),
-                None
-            );
+            assert!(!write_prune_checkpoints_tx(&tx, &config, &selections, 21_000_000).unwrap());
+            selections.remove(&SnapshotComponentType::RocksdbIndices);
+            let err =
+                write_prune_checkpoints_tx(&tx, &config, &selections, 21_000_000).unwrap_err();
+            assert_eq!(err.to_string(), "Invalid storage settings in snapshot database");
             tx.commit().unwrap();
         }
 
@@ -825,12 +830,10 @@ mod tests {
             None,
             None::<&reth_chainspec::ChainSpec>,
         );
-        assert!(super::super::should_reset_index_stage_checkpoints(&selections));
-
         // Same order as the download finalization.
         let tx = db.tx_mut().unwrap();
         set_layout(&tx, StorageSettings::v2());
-        write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap();
+        assert!(write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap());
         reset_index_stage_checkpoints_tx(&tx).unwrap();
 
         for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
@@ -872,10 +875,9 @@ mod tests {
                 None,
                 None::<&reth_chainspec::ChainSpec>,
             );
-            assert!(!super::super::should_reset_index_stage_checkpoints(&selections));
             let tx = db.tx_mut().unwrap();
             set_layout(&tx, StorageSettings::v2());
-            write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap();
+            assert!(!write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap());
             let mut checkpoints = Vec::new();
             for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
                 let checkpoint = tx.get::<tables::PruneCheckpoints>(segment).unwrap();

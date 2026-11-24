@@ -62,6 +62,11 @@ reth download \
     -y
 ```
 
+`--with-state-history-since N` configures the node to retain state history
+from block `N` onward. If `N` is above the snapshot height, the download skips
+changeset archives and writes that future boundary to the generated `reth.toml`.
+Legacy v1 snapshots carry their changesets and history indices in the state database.
+
 ## Further reading
 
 -   [Storage V2](/run/storage) - understand the default storage layout

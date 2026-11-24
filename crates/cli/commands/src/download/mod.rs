@@ -681,17 +681,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             config_for_selections(selections, manifest, preset, Some(self.env.chain.as_ref()));
         let db = init_db(db_path, self.env.db.database_args())?;
         let tx = db.tx_mut()?;
-        let settings =
-            config_gen::write_prune_checkpoints_tx(&tx, &config, selections, manifest.block)?;
-        if settings.is_none_or(|settings| settings.is_v2()) &&
-            should_reset_index_stage_checkpoints(selections)
-        {
+        if config_gen::write_prune_checkpoints_tx(&tx, &config, selections, manifest.block)? {
             config_gen::reset_index_stage_checkpoints_tx(&tx)?;
         }
-        if settings.is_some_and(|settings| !settings.is_v2()) &&
-            let Some(selection) = self.explicit_history_selection(manifest.block)
-        {
-            // V1 has no separate changeset files. The flags still select pruning for future blocks.
+        // Checkpoints describe the restored data. Explicit flags select pruning for future blocks,
+        // including ranges that start after the snapshot and v1 history bundled in MDBX.
+        if let Some(selection) = self.explicit_history_selection() {
             let mode =
                 config_gen::selection_to_prune_mode(selection, Some(MINIMUM_UNWIND_SAFE_DISTANCE));
             config.prune.segments.account_history = mode;
@@ -765,14 +760,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 self.with_txs,
                 self.with_txs_since,
                 self.with_txs_distance,
-                manifest.block,
             );
             let receipt_selection = explicit_component_selection(
                 self.with_receipts,
                 self.with_receipts_since,
                 self.with_receipts_distance,
-                manifest.block,
             );
+            let history_selection = self.explicit_history_selection();
             // Required components always All
             if available(SnapshotComponentType::State) {
                 selections.insert(SnapshotComponentType::State, ComponentSelection::All);
@@ -780,22 +774,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             if available(SnapshotComponentType::Headers) {
                 selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
             }
-            if let Some(selection) = tx_selection &&
-                available(SnapshotComponentType::Transactions)
-            {
-                selections.insert(SnapshotComponentType::Transactions, selection);
-            }
-            if let Some(selection) = receipt_selection &&
-                available(SnapshotComponentType::Receipts)
-            {
-                selections.insert(SnapshotComponentType::Receipts, selection);
-            }
-            if let Some(selection) = self.explicit_history_selection(manifest.block) {
-                if available(SnapshotComponentType::AccountChangesets) {
-                    selections.insert(SnapshotComponentType::AccountChangesets, selection);
-                }
-                if available(SnapshotComponentType::StorageChangesets) {
-                    selections.insert(SnapshotComponentType::StorageChangesets, selection);
+            for (ty, selection) in [
+                (SnapshotComponentType::Transactions, tx_selection),
+                (SnapshotComponentType::Receipts, receipt_selection),
+                (SnapshotComponentType::AccountChangesets, history_selection),
+                (SnapshotComponentType::StorageChangesets, history_selection),
+            ] {
+                if let Some(selection) = selection &&
+                    available(ty) &&
+                    !matches!(selection, ComponentSelection::Since(block) if block > manifest.block)
+                {
+                    selections.insert(ty, selection);
                 }
             }
             if self.with_senders && available(SnapshotComponentType::TransactionSenders) {
@@ -833,12 +822,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         Ok(ResolvedComponents { selections: selected, preset })
     }
 
-    fn explicit_history_selection(&self, snapshot_block: u64) -> Option<ComponentSelection> {
+    fn explicit_history_selection(&self) -> Option<ComponentSelection> {
         explicit_component_selection(
             self.with_state_history,
             self.with_state_history_since,
             self.with_state_history_distance,
-            snapshot_block,
         )
     }
 
@@ -976,12 +964,11 @@ fn explicit_component_selection(
     all: bool,
     since: Option<u64>,
     distance: Option<u64>,
-    snapshot_block: u64,
 ) -> Option<ComponentSelection> {
     if all {
         Some(ComponentSelection::All)
     } else if let Some(block) = since {
-        (block <= snapshot_block).then_some(ComponentSelection::Since(block))
+        Some(ComponentSelection::Since(block))
     } else {
         distance.map(ComponentSelection::Distance)
     }
@@ -1078,8 +1065,8 @@ fn inject_rocksdb_indices(
     }
 }
 
-/// Returns `true` when RocksDB-backed index stages should be reset after download.
-fn should_reset_index_stage_checkpoints(
+/// Returns whether the download omits the RocksDB index files.
+fn rocksdb_indices_missing(
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
 ) -> bool {
     !matches!(selections.get(&SnapshotComponentType::RocksdbIndices), Some(ComponentSelection::All))
@@ -1197,10 +1184,13 @@ mod tests {
     use manifest::{ComponentManifest, OutputFileChecksum, SingleArchive};
     use reth_chainspec::{HOLESKY, MAINNET};
     use reth_config::config::Config;
+    use reth_db::{mdbx::DatabaseArguments, models::StorageSettings};
     use reth_db_api::{tables, transaction::DbTxMut};
     use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
     use reth_prune_types::{PruneCheckpoint, PruneSegment};
     use reth_stages_types::{StageCheckpoint, StageId};
+    use reth_static_file_types::DEFAULT_BLOCKS_PER_STATIC_FILE;
+    use reth_storage_api::metadata::keys;
 
     #[derive(Parser)]
     struct CommandParser<T: Args> {
@@ -1592,7 +1582,7 @@ mod tests {
             Some(&ComponentSelection::All)
         );
         assert_eq!(selections.get(&SnapshotComponentType::TransactionSenders), None);
-        assert!(!should_reset_index_stage_checkpoints(&selections));
+        assert!(!rocksdb_indices_missing(&selections));
     }
 
     #[test]
@@ -1604,17 +1594,17 @@ mod tests {
         inject_rocksdb_indices(&mut selections, &manifest);
 
         assert!(selections.is_empty());
-        assert!(should_reset_index_stage_checkpoints(&selections));
+        assert!(rocksdb_indices_missing(&selections));
     }
 
     #[test]
-    fn should_reset_index_stage_checkpoints_without_rocksdb_indices() {
+    fn omitted_rocksdb_indices_are_missing() {
         let mut selections = BTreeMap::new();
         selections.insert(SnapshotComponentType::Transactions, ComponentSelection::All);
-        assert!(should_reset_index_stage_checkpoints(&selections));
+        assert!(rocksdb_indices_missing(&selections));
 
         selections.insert(SnapshotComponentType::RocksdbIndices, ComponentSelection::All);
-        assert!(!should_reset_index_stage_checkpoints(&selections));
+        assert!(!rocksdb_indices_missing(&selections));
     }
 
     #[test]
@@ -1732,53 +1722,159 @@ mod tests {
         manifest.chain_id = 1;
         assert!(args.full_preset_selections(&manifest).is_ok());
     }
-    #[test]
-    fn restore_bundled_v1_history() -> Result<()> {
-        let manifest = SnapshotManifest { block: 10, ..manifest_with_archive_only_components() };
+
+    #[tokio::test]
+    async fn restore_bundled_v1_history() -> Result<()> {
+        let source = tempfile::tempdir()?;
+        let archives = tempfile::tempdir()?;
+        let stage = StageId::TransactionLookup.to_string();
+        let indexed = StageCheckpoint::new(10);
         let retained = PruneCheckpoint::pruned_through(3);
-        for flag in ["--archive", "--minimal", "--with-state-history"] {
-            let dir = tempfile::tempdir()?;
-            let path = dir.path().join("db");
-            let db = init_db(&path, Default::default())?;
+        {
+            let db = init_db(source.path().join("db"), DatabaseArguments::test())?;
             let tx = db.tx_mut()?;
-            tx.put::<tables::StageCheckpoints>(
-                StageId::IndexStorageHistory.to_string(),
-                StageCheckpoint::new(10),
+            // v1.10 could put only receipts in static files and keep all indices in MDBX.
+            let settings = serde_json::json!({
+                "receipts_in_static_files": true,
+                "transaction_senders_in_static_files": false,
+                "storages_history_in_rocksdb": false,
+                "transaction_hash_numbers_in_rocksdb": false,
+                "account_history_in_rocksdb": false,
+                "account_changesets_in_static_files": false,
+            });
+            tx.put::<tables::Metadata>(
+                keys::STORAGE_SETTINGS.to_owned(),
+                serde_json::to_vec(&settings)?,
             )?;
+            tx.put::<tables::StageCheckpoints>(stage.clone(), indexed)?;
+            tx.put::<tables::StageCheckpointProgresses>(stage.clone(), vec![1, 2, 3])?;
+            tx.put::<tables::StageCheckpoints>(StageId::IndexStorageHistory.to_string(), indexed)?;
+            tx.put::<tables::PruneCheckpoints>(PruneSegment::TransactionLookup, retained)?;
             tx.put::<tables::PruneCheckpoints>(PruneSegment::StorageHistory, retained)?;
             tx.commit()?;
-            drop(db);
+        }
+        let manifest = manifest::generate_manifest(
+            source.path(),
+            archives.path(),
+            None,
+            indexed.block_number,
+            1,
+            DEFAULT_BLOCKS_PER_STATIC_FILE,
+            None,
+            false,
+        )?;
+        let manifest_path = archives.path().join("manifest.json");
+        fs::write(&manifest_path, serde_json::to_vec(&manifest)?)?;
 
-            let command = DownloadCommand::<EthereumChainSpecParser>::parse_from(["reth", flag]);
-            let resolved = command.resolve_components(&manifest)?;
-            command.finalize_modular_download(
-                &resolved.selections,
-                &manifest,
-                resolved.preset,
-                dir.path(),
-                &path,
-            )?;
-            let db = init_db(&path, Default::default())?;
+        for (flags, expected_mode) in [
+            (&["--archive"][..], None),
+            (&["--minimal"], Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE))),
+            (&["--with-state-history"], None),
+            (&["--with-state-history-since", "11"], Some(PruneMode::Before(11))),
+        ] {
+            let dir = tempfile::tempdir()?;
+            let command = DownloadCommand::<EthereumChainSpecParser>::parse_from(
+                [
+                    "reth",
+                    "--manifest-path",
+                    manifest_path.to_str().unwrap(),
+                    "--datadir",
+                    dir.path().to_str().unwrap(),
+                ]
+                .into_iter()
+                .chain(flags.iter().copied()),
+            );
+            command.execute::<()>().await?;
+            let db = init_db(dir.path().join("db"), DatabaseArguments::test())?;
             let tx = db.tx()?;
             assert_eq!(
                 tx.get::<tables::PruneCheckpoints>(PruneSegment::AccountHistory)?,
                 None,
-                "{flag}"
+                "{flags:?}"
             );
+            for segment in [PruneSegment::StorageHistory, PruneSegment::TransactionLookup] {
+                assert_eq!(
+                    tx.get::<tables::PruneCheckpoints>(segment)?,
+                    Some(retained),
+                    "{flags:?}"
+                );
+            }
+            for id in [StageId::IndexStorageHistory, StageId::TransactionLookup] {
+                assert_eq!(
+                    tx.get::<tables::StageCheckpoints>(id.to_string())?,
+                    Some(indexed),
+                    "{flags:?}"
+                );
+            }
             assert_eq!(
-                tx.get::<tables::PruneCheckpoints>(PruneSegment::StorageHistory)?,
-                Some(retained),
-                "{flag}"
-            );
-            assert_eq!(
-                tx.get::<tables::StageCheckpoints>(StageId::IndexStorageHistory.to_string())?,
-                Some(StageCheckpoint::new(10)),
-                "{flag}"
+                tx.get::<tables::StageCheckpointProgresses>(stage.clone())?,
+                Some(vec![1, 2, 3]),
+                "{flags:?}"
             );
             let config = Config::from_path(dir.path().join("reth.toml"))?;
-            assert_eq!(config.prune.segments.account_history.is_some(), command.minimal, "{flag}");
-            assert_eq!(config.prune.segments.storage_history.is_some(), command.minimal, "{flag}");
+            assert_eq!(config.prune.segments.account_history, expected_mode, "{flags:?}");
+            assert_eq!(config.prune.segments.storage_history, expected_mode, "{flags:?}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn future_history_keeps_the_v2_snapshot_boundary() -> Result<()> {
+        let mut manifest =
+            SnapshotManifest { block: 10, ..manifest_with_archive_only_components() };
+        for component in
+            [SnapshotComponentType::AccountChangesets, SnapshotComponentType::StorageChangesets]
+        {
+            manifest.components.insert(
+                component.key().to_owned(),
+                ComponentManifest::Single(SingleArchive {
+                    file: format!("{}.tar.zst", component.key()),
+                    size: 1,
+                    decompressed_size: 0,
+                    blake3: None,
+                    output_files: vec![],
+                }),
+            );
+        }
+        let command = DownloadCommand::<EthereumChainSpecParser>::parse_from([
+            "reth",
+            "--with-state-history-since",
+            "11",
+        ]);
+        let resolved = command.resolve_components(&manifest)?;
+        assert!(collect_planned_archives(&manifest, &resolved.selections)?.archives.is_empty());
+
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("db");
+        {
+            let db = init_db(&path, DatabaseArguments::test())?;
+            let tx = db.tx_mut()?;
+            tx.put::<tables::Metadata>(
+                keys::STORAGE_SETTINGS.to_owned(),
+                serde_json::to_vec(&StorageSettings::v2())?,
+            )?;
+            tx.commit()?;
+        }
+        command.finalize_modular_download(
+            &resolved.selections,
+            &manifest,
+            resolved.preset,
+            dir.path(),
+            &path,
+        )?;
+        let db = init_db(&path, DatabaseArguments::test())?;
+        let tx = db.tx()?;
+        for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
+            let checkpoint = tx.get::<tables::PruneCheckpoints>(segment)?.unwrap();
+            assert_eq!(checkpoint.block_number, Some(manifest.block));
+        }
+        assert_eq!(
+            tx.get::<tables::StageCheckpoints>(StageId::TransactionLookup.to_string())?,
+            Some(StageCheckpoint::default())
+        );
+        let config = Config::from_path(dir.path().join("reth.toml"))?;
+        assert_eq!(config.prune.segments.account_history, Some(PruneMode::Before(11)));
+        assert_eq!(config.prune.segments.storage_history, Some(PruneMode::Before(11)));
         Ok(())
     }
 }
