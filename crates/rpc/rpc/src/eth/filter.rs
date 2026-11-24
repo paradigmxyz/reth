@@ -590,43 +590,32 @@ where
                     return Ok(all_logs)
                 }
 
-                // Everything else is read from the provider on blocking tasks, which share the
+                // Everything else is read from the provider on one blocking task, which shares the
                 // budget for blocking IO requests with the range scans instead of blocking an
                 // executor thread.
-                if let Some(receipts) = receipts {
-                    return self
-                        .spawn_blocking_io_with_permit(move |eth_api| {
-                            let header = eth_api
-                                .provider()
-                                .sealed_header_by_hash(block_hash)?
-                                .ok_or(ProviderError::HeaderNotFound(block_hash.into()))?;
-                            if !Self::block_logs_may_match(eth_api.provider(), &filter, &header)? {
-                                return Ok(Vec::new())
-                            }
-                            Self::block_logs_from_provider(&eth_api, &filter, &header, &receipts)
-                        })
-                        .await
-                }
-
-                let header = self
-                    .spawn_blocking_io_with_permit(move |eth_api| {
-                        Ok(eth_api
-                            .provider()
-                            .sealed_header_by_hash(block_hash)?
-                            .ok_or(ProviderError::HeaderNotFound(block_hash.into()))?)
-                    })
-                    .await?;
-                if !Self::block_logs_may_match(self.provider(), &filter, &header)? {
-                    return Ok(Vec::new())
-                }
-
-                // Through the cache, so that later queries of this block find the receipts there.
-                let receipts = self
-                    .eth_cache()
-                    .get_receipts(block_hash)
-                    .await?
-                    .ok_or_else(|| Self::missing_receipts(self.provider(), &header))?;
+                let cache = self.eth_cache().clone();
                 self.spawn_blocking_io_with_permit(move |eth_api| {
+                    let provider = eth_api.provider();
+                    let header = provider
+                        .sealed_header_by_hash(block_hash)?
+                        .ok_or(ProviderError::HeaderNotFound(block_hash.into()))?;
+                    if !Self::block_logs_may_match(provider, &filter, &header)? {
+                        return Ok(Vec::new())
+                    }
+                    let receipts = match receipts {
+                        Some(receipts) => receipts,
+                        None => {
+                            let receipts = Arc::new(
+                                provider
+                                    .receipts_by_block(block_hash.into())?
+                                    .ok_or_else(|| Self::missing_receipts(provider, &header))?,
+                            );
+                            // Kept for later queries of this block, as a read through the cache
+                            // would.
+                            cache.insert_receipts(block_hash, receipts.clone());
+                            receipts
+                        }
+                    };
                     Self::block_logs_from_provider(&eth_api, &filter, &header, &receipts)
                 })
                 .await
@@ -988,11 +977,12 @@ where
         // Looking up a transaction by its id costs about as much as decoding four of the block's
         // transactions, so they are all read at once if more than a quarter of the receipts have
         // matching logs.
-        let matching_receipts = receipts
+        let more_than_a_quarter_match = receipts
             .iter()
             .filter(|receipt| receipt.logs().iter().any(|log| filter.matches(log)))
-            .count();
-        if matching_receipts * 4 > receipts.len() {
+            .nth(receipts.len() / 4)
+            .is_some();
+        if more_than_a_quarter_match {
             // Reading them by hash fails instead of returning the transactions of another block if
             // this one was reorged out in the meantime.
             let transactions = provider
