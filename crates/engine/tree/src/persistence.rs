@@ -456,6 +456,28 @@ mod tests {
         SaveBlocksInput::new(blocks, prev_tip, prev_tip, new_tip, new_tip)
     }
 
+    /// A BAL store whose flush and prune both fail.
+    #[derive(Debug)]
+    struct FailingBalStore;
+
+    impl BalStore for FailingBalStore {
+        fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
+            Ok(())
+        }
+
+        fn flush(&self, _blocks: &[NumHash]) -> ProviderResult<()> {
+            Err(ProviderError::other(std::io::Error::other("BAL store flush failed")))
+        }
+
+        fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
+            Err(ProviderError::other(std::io::Error::other("BAL store prune failed")))
+        }
+
+        fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+            Ok(vec![None; block_hashes.len()])
+        }
+    }
+
     #[reth_concurrency::test]
     fn test_pruner_prunes_bal_store() {
         reth_tracing::init_test_tracing();
@@ -494,8 +516,8 @@ mod tests {
     fn test_pruner_ignores_bal_store_prune_error() {
         reth_tracing::init_test_tracing();
 
-        let provider = create_test_provider_factory()
-            .with_bal_store(BalStoreHandle::new(FailingPruneBalStore));
+        let provider =
+            create_test_provider_factory().with_bal_store(BalStoreHandle::new(FailingBalStore));
         let (_finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
         let pruner =
@@ -524,23 +546,6 @@ mod tests {
             service.on_remove_blocks_above(1),
             Err(PersistenceError::ProviderError(ProviderError::HeaderNotFound(_)))
         ));
-    }
-
-    #[derive(Debug)]
-    struct FailingPruneBalStore;
-
-    impl BalStore for FailingPruneBalStore {
-        fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
-            Ok(())
-        }
-
-        fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
-            Err(ProviderError::other(std::io::Error::other("BAL store prune failed")))
-        }
-
-        fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
-            Ok(vec![None; block_hashes.len()])
-        }
     }
 
     #[reth_concurrency::test]
@@ -602,8 +607,8 @@ mod tests {
     #[reth_concurrency::test]
     fn test_save_blocks_does_not_commit_on_bal_flush_error() {
         reth_tracing::init_test_tracing();
-        let provider = create_test_provider_factory()
-            .with_bal_store(BalStoreHandle::new(FailingFlushBalStore));
+        let provider =
+            create_test_provider_factory().with_bal_store(BalStoreHandle::new(FailingBalStore));
         init_genesis(&provider).unwrap();
 
         let (_finished_exex_height_tx, finished_exex_height_rx) =
@@ -623,27 +628,6 @@ mod tests {
             Err(PersistenceError::ProviderError(_))
         ));
         assert_eq!(provider.last_block_number().unwrap(), 0);
-    }
-
-    #[derive(Debug)]
-    struct FailingFlushBalStore;
-
-    impl BalStore for FailingFlushBalStore {
-        fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
-            Ok(())
-        }
-
-        fn flush(&self, _blocks: &[NumHash]) -> ProviderResult<()> {
-            Err(ProviderError::other(std::io::Error::other("BAL store flush failed")))
-        }
-
-        fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
-            Ok(0)
-        }
-
-        fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
-            Ok(vec![None; block_hashes.len()])
-        }
     }
 
     #[reth_concurrency::test]

@@ -1,9 +1,11 @@
 //! Tests for stopping a node and starting it again on its datadir.
 
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, Address, U256, U64};
+use alloy_primitives::{Address, U256, U64};
 use alloy_provider::Provider;
-use alloy_rpc_types_engine::ExecutionPayloadBodiesV2;
+use alloy_rpc_types_engine::{
+    ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
+};
 use futures::TryStreamExt;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
@@ -268,9 +270,41 @@ async fn restart_applies_node_factory_and_builder_modifiers() -> eyre::Result<()
     Ok(())
 }
 
-/// Persisted Amsterdam BALs are served by both Engine API body endpoints after reopening the node.
+/// Persisting Amsterdam blocks writes their BALs to `RocksDB` while the node runs.
 #[tokio::test]
-async fn persisted_bals_survive_restart() -> eyre::Result<()> {
+async fn persistence_writes_bals_to_rocksdb() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    for storage_v2 in [false, true] {
+        let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Amsterdam)
+            .with_storage_v2(storage_v2)
+            .with_tree_config_modifier(|config| {
+                config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+            })
+            .build_single()
+            .await?;
+        let mut account = wallet.account(0);
+        let mut payloads = Vec::new();
+        for value in [U256::ONE, U256::from(2)] {
+            let tx = account.transfer(Address::with_last_byte(0x77), value).await;
+            payloads.push(node.mine([tx]).await?.ensure_success()?.payload);
+        }
+        node.wait_for_persisted_block(2).await?;
+
+        // A fresh store has an empty buffer, so these reads hit RocksDB.
+        let disk = RocksDBBalStore::new(node.inner.provider.rocksdb_provider());
+        for payload in &payloads {
+            let bal = payload.block_access_list().expect("Amsterdam payload has a BAL");
+            assert_eq!(disk.get_by_hash(payload.block().hash())?.as_ref(), Some(bal));
+        }
+    }
+
+    Ok(())
+}
+
+/// A restarted node serves the BALs it persisted from both Engine API V2 payload body endpoints.
+#[tokio::test]
+async fn restart_serves_persisted_bals() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     for storage_v2 in [false, true] {
@@ -289,45 +323,33 @@ async fn persisted_bals_survive_restart() -> eyre::Result<()> {
             payloads.push(node.mine([tx]).await?.ensure_success()?.payload);
         }
         node.wait_for_persisted_block(2).await?;
+        let hashes = payloads.iter().map(|payload| payload.block().hash()).collect::<Vec<_>>();
+        let expected = payloads
+            .iter()
+            .map(|payload| {
+                Some(ExecutionPayloadBodyV2 {
+                    block_access_list: Some(
+                        payload.block_access_list().expect("Amsterdam payload has a BAL").clone(),
+                    ),
+                    ..ExecutionPayloadBodyV1::from(payload.block().clone().into_block()).into()
+                })
+            })
+            .collect::<Vec<_>>();
 
-        // An empty BAL cache forces disk reads before graceful shutdown can flush anything else.
-        {
-            let disk = RocksDBBalStore::new(node.inner.provider.rocksdb_provider());
-            for payload in &payloads {
-                let bal = payload.block_access_list().expect("Amsterdam payload has a BAL");
-                assert_eq!(Some(keccak256(bal)), payload.block().block_access_list_hash);
-                assert_eq!(disk.get_by_hash(payload.block().hash())?.as_ref(), Some(bal));
-            }
-        }
+        let node = node.restart().await?;
 
-        for restart in [false, true] {
-            if restart {
-                node = node.restart().await?;
-            }
-            let client = node.auth_server_handle().http_client();
-            let hashes = payloads.iter().map(|payload| payload.block().hash()).collect::<Vec<_>>();
-            let by_hash = client
-                .request::<_, ExecutionPayloadBodiesV2>(
-                    "engine_getPayloadBodiesByHashV2",
-                    (hashes,),
-                )
-                .await?;
-            let by_range = client
-                .request::<_, ExecutionPayloadBodiesV2>(
-                    "engine_getPayloadBodiesByRangeV2",
-                    (U64::from(1), U64::from(2)),
-                )
-                .await?;
-
-            assert_eq!(by_hash, by_range);
-            assert_eq!(by_hash.len(), payloads.len());
-            for (body, payload) in by_hash.into_iter().zip(&payloads) {
-                assert_eq!(
-                    body.expect("persisted block has a body").block_access_list.as_ref(),
-                    payload.block_access_list(),
-                );
-            }
-        }
+        let client = node.auth_server_handle().http_client();
+        let by_hash = client
+            .request::<_, ExecutionPayloadBodiesV2>("engine_getPayloadBodiesByHashV2", (hashes,))
+            .await?;
+        assert_eq!(by_hash, expected);
+        let by_range = client
+            .request::<_, ExecutionPayloadBodiesV2>(
+                "engine_getPayloadBodiesByRangeV2",
+                (U64::from(1), U64::from(2)),
+            )
+            .await?;
+        assert_eq!(by_range, expected);
     }
 
     Ok(())
