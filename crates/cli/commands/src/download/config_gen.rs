@@ -2,15 +2,17 @@ use crate::download::{
     manifest::{ComponentManifest, ComponentSelection, SnapshotComponentType, SnapshotManifest},
     SelectionPreset,
 };
+use eyre::WrapErr;
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_config::config::{BlocksPerFileConfig, Config, PruneConfig, StaticFilesConfig};
-use reth_db::tables;
+use reth_db::{models::StorageSettings, tables};
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_node_core::args::DefaultPruningValues;
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneSegment, MINIMUM_DISTANCE, MINIMUM_UNWIND_SAFE_DISTANCE,
 };
 use reth_stages_types::StageCheckpoint;
+use reth_storage_api::metadata::keys;
 use std::{collections::BTreeMap, path::Path};
 use tracing::info;
 
@@ -39,13 +41,14 @@ pub fn write_config(config: &Config, data_dir: &Path) -> eyre::Result<bool> {
     Ok(true)
 }
 
-/// Writes prune checkpoints to the provided write transaction.
+/// Writes prune checkpoints and returns the restored layout for index stage recovery.
+/// An archive with opaque storage settings has no known layout.
 pub(crate) fn write_prune_checkpoints_tx<Tx>(
     tx: &Tx,
     config: &Config,
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
     snapshot_block: u64,
-) -> eyre::Result<()>
+) -> eyre::Result<Option<StorageSettings>>
 where
     Tx: DbTx + DbTxMut,
 {
@@ -64,8 +67,20 @@ where
     .filter_map(|(segment, mode)| mode.map(|m| (segment, m)))
     .collect();
 
+    let settings = match tx.get::<tables::Metadata>(keys::STORAGE_SETTINGS.to_owned())? {
+        None => StorageSettings::v1(),
+        Some(bytes) => match serde_json::from_slice(&bytes) {
+            Ok(settings) => settings,
+            Err(_) if is_legacy_v1_layout(&bytes) => StorageSettings::v1(),
+            // An archive can retain unknown settings when no prune policy needs them.
+            Err(_) if checkpoints.is_empty() => return Ok(None),
+            Err(error) => {
+                return Err(error).wrap_err("Invalid storage settings in snapshot database")
+            }
+        },
+    };
     if checkpoints.is_empty() {
-        return Ok(());
+        return Ok(Some(settings));
     }
 
     // Look up the last tx number for the snapshot block from BlockBodyIndices
@@ -74,6 +89,14 @@ where
 
     for (segment, prune_mode) in &checkpoints {
         let (block_number, tx_number) = match segment {
+            // V1 bundles both history tables and the transaction index with their checkpoints.
+            PruneSegment::AccountHistory |
+            PruneSegment::StorageHistory |
+            PruneSegment::TransactionLookup
+                if !settings.is_v2() =>
+            {
+                continue
+            }
             // Record the history actually selected, not the future pruning policy, which may
             // retain a minimum distance even when no changesets were downloaded.
             PruneSegment::AccountHistory | PruneSegment::StorageHistory => {
@@ -118,7 +141,26 @@ where
         );
     }
 
-    Ok(())
+    Ok(Some(settings))
+}
+
+/// Earlier v1 nodes stored one flag per backend, with every flag disabled.
+fn is_legacy_v1_layout(bytes: &[u8]) -> bool {
+    let Ok(mut flags) = serde_json::from_slice::<BTreeMap<&str, bool>>(bytes) else { return false };
+    flags.remove("receipts_in_static_files") == Some(false) &&
+        flags.into_iter().all(|(name, enabled)| {
+            !enabled &&
+                matches!(
+                    name,
+                    "transaction_senders_in_static_files" |
+                        "storages_history_in_rocksdb" |
+                        "transaction_hash_numbers_in_rocksdb" |
+                        "account_history_in_rocksdb" |
+                        "account_changesets_in_static_files" |
+                        "storage_changesets_in_static_files" |
+                        "use_hashed_state"
+                )
+        })
 }
 
 /// Stage IDs for index stages whose output is stored in RocksDB and is never
@@ -283,7 +325,7 @@ pub(crate) fn config_for_selections(
 /// `min_distance` enforces the minimum blocks required for this segment.
 /// When set, `None` and distances below the minimum are clamped to it
 /// instead of producing `PruneMode::Full` which reth would reject.
-fn selection_to_prune_mode(
+pub(super) fn selection_to_prune_mode(
     sel: ComponentSelection,
     min_distance: Option<u64>,
 ) -> Option<PruneMode> {
@@ -328,6 +370,14 @@ mod tests {
     use super::*;
     use reth_db::Database;
 
+    fn set_layout(tx: &impl DbTxMut, settings: StorageSettings) {
+        tx.put::<tables::Metadata>(
+            keys::STORAGE_SETTINGS.to_owned(),
+            serde_json::to_vec(&settings).unwrap(),
+        )
+        .unwrap();
+    }
+
     /// Empty manifest for tests that only care about prune config.
     fn empty_manifest() -> SnapshotManifest {
         SnapshotManifest {
@@ -360,6 +410,7 @@ mod tests {
 
         {
             let tx = db.tx_mut().unwrap();
+            set_layout(&tx, StorageSettings::v2());
             write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap();
             tx.commit().unwrap();
         }
@@ -400,6 +451,7 @@ mod tests {
         );
 
         let tx = db.tx_mut().unwrap();
+        set_layout(&tx, StorageSettings::v2());
         write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap();
         tx.commit().unwrap();
 
@@ -437,6 +489,7 @@ mod tests {
 
         {
             let tx = db.tx_mut().unwrap();
+            set_layout(&tx, StorageSettings::v2());
             write_prune_checkpoints_tx(&tx, &config, &selections, 21_000_000).unwrap();
             tx.commit().unwrap();
         }
@@ -762,6 +815,7 @@ mod tests {
 
         // Same order as the download finalization.
         let tx = db.tx_mut().unwrap();
+        set_layout(&tx, StorageSettings::v2());
         write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap();
         reset_index_stage_checkpoints_tx(&tx).unwrap();
 
@@ -806,6 +860,7 @@ mod tests {
             );
             assert!(!super::super::should_reset_index_stage_checkpoints(&selections));
             let tx = db.tx_mut().unwrap();
+            set_layout(&tx, StorageSettings::v2());
             write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap();
             let mut checkpoints = Vec::new();
             for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
@@ -866,6 +921,7 @@ mod tests {
                     .unwrap();
                 }
 
+                set_layout(&tx, StorageSettings::v2());
                 write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap();
 
                 let expected = existing_boundary.unwrap_or_default().max(selected_boundary);

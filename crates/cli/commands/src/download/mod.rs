@@ -116,7 +116,7 @@ use reth_db::{init_db, Database};
 use reth_db_api::transaction::DbTx;
 use reth_fs_util as fs;
 use reth_node_core::args::DefaultPruningValues;
-use reth_prune_types::{PruneMode, PruneModes};
+use reth_prune_types::{PruneMode, PruneModes, MINIMUM_UNWIND_SAFE_DISTANCE};
 use source::{
     discover_manifest_url, fetch_manifest_from_source, fetch_snapshot_api_entries,
     print_snapshot_listing, resolve_manifest_base_url,
@@ -677,29 +677,31 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         target_dir: &Path,
         db_path: &Path,
     ) -> Result<()> {
-        let config =
+        let mut config =
             config_for_selections(selections, manifest, preset, Some(self.env.chain.as_ref()));
+        let db = init_db(db_path, self.env.db.database_args())?;
+        let tx = db.tx_mut()?;
+        let settings =
+            config_gen::write_prune_checkpoints_tx(&tx, &config, selections, manifest.block)?;
+        if settings.is_none_or(|settings| settings.is_v2()) &&
+            should_reset_index_stage_checkpoints(selections)
+        {
+            config_gen::reset_index_stage_checkpoints_tx(&tx)?;
+        }
+        if settings.is_some_and(|settings| !settings.is_v2()) &&
+            let Some(selection) = self.explicit_history_selection(manifest.block)
+        {
+            // V1 has no separate changeset files. The flags still select pruning for future blocks.
+            let mode =
+                config_gen::selection_to_prune_mode(selection, Some(MINIMUM_UNWIND_SAFE_DISTANCE));
+            config.prune.segments.account_history = mode;
+            config.prune.segments.storage_history = mode;
+        }
         if write_config(&config, target_dir)? {
             let desc = config_gen::describe_prune_config(&config);
             info!(target: "reth::cli", "{}", desc.join(", "));
         }
-
-        let db = init_db(db_path, self.env.db.database_args())?;
-        let should_write_prune = config.prune.segments != Default::default();
-        let should_reset_indices = should_reset_index_stage_checkpoints(selections);
-        if should_write_prune || should_reset_indices {
-            let tx = db.tx_mut()?;
-
-            if should_write_prune {
-                config_gen::write_prune_checkpoints_tx(&tx, &config, selections, manifest.block)?;
-            }
-
-            if should_reset_indices {
-                config_gen::reset_index_stage_checkpoints_tx(&tx)?;
-            }
-
-            tx.commit()?;
-        }
+        tx.commit()?;
 
         if self.env.chain.chain().id() == manifest.chain_id {
             let start_command = startup_node_command::<C>(self.env.chain.as_ref());
@@ -771,13 +773,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 self.with_receipts_distance,
                 manifest.block,
             );
-            let state_history_selection = explicit_component_selection(
-                self.with_state_history,
-                self.with_state_history_since,
-                self.with_state_history_distance,
-                manifest.block,
-            );
-
             // Required components always All
             if available(SnapshotComponentType::State) {
                 selections.insert(SnapshotComponentType::State, ComponentSelection::All);
@@ -795,7 +790,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             {
                 selections.insert(SnapshotComponentType::Receipts, selection);
             }
-            if let Some(selection) = state_history_selection {
+            if let Some(selection) = self.explicit_history_selection(manifest.block) {
                 if available(SnapshotComponentType::AccountChangesets) {
                     selections.insert(SnapshotComponentType::AccountChangesets, selection);
                 }
@@ -836,6 +831,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             selections.into_iter().filter(|(_, sel)| *sel != ComponentSelection::None).collect();
 
         Ok(ResolvedComponents { selections: selected, preset })
+    }
+
+    fn explicit_history_selection(&self, snapshot_block: u64) -> Option<ComponentSelection> {
+        explicit_component_selection(
+            self.with_state_history,
+            self.with_state_history_since,
+            self.with_state_history_distance,
+            snapshot_block,
+        )
     }
 
     /// Builds the default minimal component selection for the manifest.
@@ -1192,7 +1196,11 @@ mod tests {
     use extract::CompressionFormat;
     use manifest::{ComponentManifest, OutputFileChecksum, SingleArchive};
     use reth_chainspec::{HOLESKY, MAINNET};
+    use reth_config::config::Config;
+    use reth_db_api::{tables, transaction::DbTxMut};
     use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+    use reth_prune_types::{PruneCheckpoint, PruneSegment};
+    use reth_stages_types::{StageCheckpoint, StageId};
 
     #[derive(Parser)]
     struct CommandParser<T: Args> {
@@ -1723,5 +1731,54 @@ mod tests {
         );
         manifest.chain_id = 1;
         assert!(args.full_preset_selections(&manifest).is_ok());
+    }
+    #[test]
+    fn restore_bundled_v1_history() -> Result<()> {
+        let manifest = SnapshotManifest { block: 10, ..manifest_with_archive_only_components() };
+        let retained = PruneCheckpoint::pruned_through(3);
+        for flag in ["--archive", "--minimal", "--with-state-history"] {
+            let dir = tempfile::tempdir()?;
+            let path = dir.path().join("db");
+            let db = init_db(&path, Default::default())?;
+            let tx = db.tx_mut()?;
+            tx.put::<tables::StageCheckpoints>(
+                StageId::IndexStorageHistory.to_string(),
+                StageCheckpoint::new(10),
+            )?;
+            tx.put::<tables::PruneCheckpoints>(PruneSegment::StorageHistory, retained)?;
+            tx.commit()?;
+            drop(db);
+
+            let command = DownloadCommand::<EthereumChainSpecParser>::parse_from(["reth", flag]);
+            let resolved = command.resolve_components(&manifest)?;
+            command.finalize_modular_download(
+                &resolved.selections,
+                &manifest,
+                resolved.preset,
+                dir.path(),
+                &path,
+            )?;
+            let db = init_db(&path, Default::default())?;
+            let tx = db.tx()?;
+            assert_eq!(
+                tx.get::<tables::PruneCheckpoints>(PruneSegment::AccountHistory)?,
+                None,
+                "{flag}"
+            );
+            assert_eq!(
+                tx.get::<tables::PruneCheckpoints>(PruneSegment::StorageHistory)?,
+                Some(retained),
+                "{flag}"
+            );
+            assert_eq!(
+                tx.get::<tables::StageCheckpoints>(StageId::IndexStorageHistory.to_string())?,
+                Some(StageCheckpoint::new(10)),
+                "{flag}"
+            );
+            let config = Config::from_path(dir.path().join("reth.toml"))?;
+            assert_eq!(config.prune.segments.account_history.is_some(), command.minimal, "{flag}");
+            assert_eq!(config.prune.segments.storage_history.is_some(), command.minimal, "{flag}");
+        }
+        Ok(())
     }
 }

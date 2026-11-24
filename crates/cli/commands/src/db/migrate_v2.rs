@@ -120,7 +120,7 @@ impl Command {
         Ok(())
     }
 
-    /// The first block whose `segment` history the migration moves to static files: the block
+    /// The first block expected to have complete `segment` history: the block
     /// after the prune checkpoint, and no earlier than the genesis block, which is not block 0 on
     /// every chain.
     fn history_start(
@@ -131,7 +131,7 @@ impl Command {
         Ok(provider
             .get_prune_checkpoint(segment)?
             .and_then(|cp| cp.block_number)
-            .map_or(0, |b| b + 1)
+            .map_or(0, |b| b.saturating_add(1))
             .max(genesis_block))
     }
 
@@ -146,8 +146,11 @@ impl Command {
         let mut cursor = provider.tx_ref().cursor_read::<tables::AccountChangeSets>()?;
 
         let genesis_block = sf_provider.genesis_block_number();
+        // Older restores can leave changesets below their history checkpoint.
+        let first_row = cursor.first()?.map_or(tip, |(block, _)| block);
         let first_block =
-            Self::history_start(&provider, PruneSegment::AccountHistory, genesis_block)?;
+            Self::history_start(&provider, PruneSegment::AccountHistory, genesis_block)?
+                .min(first_row.max(genesis_block));
 
         let mut writer = sf_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
         // Start an empty genesis file at genesis, as `init_genesis` does, instead of padding
@@ -202,8 +205,11 @@ impl Command {
         let mut cursor = provider.tx_ref().cursor_read::<tables::StorageChangeSets>()?;
 
         let genesis_block = sf_provider.genesis_block_number();
+        // Older restores can leave changesets below their history checkpoint.
+        let first_row = cursor.first()?.map_or(tip, |(key, _)| key.block_number());
         let first_block =
-            Self::history_start(&provider, PruneSegment::StorageHistory, genesis_block)?;
+            Self::history_start(&provider, PruneSegment::StorageHistory, genesis_block)?
+                .min(first_row.max(genesis_block));
 
         let mut writer = sf_provider.latest_writer(StaticFileSegment::StorageChangeSets)?;
         // Start an empty genesis file at genesis, as `init_genesis` does, instead of padding
@@ -497,6 +503,7 @@ mod tests {
         test_utils::create_test_provider_factory_with_genesis_block_number, ChangeSetReader,
         StorageChangeSetReader, StorageSettingsCache,
     };
+    use reth_prune_types::PruneCheckpoint;
 
     /// A genesis at a block that is not the start of a static file range, as on chains that
     /// start from carried-over state.
@@ -522,6 +529,13 @@ mod tests {
         // v1 history in MDBX: one account and one storage change per block, from genesis on.
         {
             let provider_rw = factory.provider_rw().unwrap();
+            // Older v1 snapshot restores could set a checkpoint above surviving MDBX rows.
+            for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
+                provider_rw
+                    .tx_ref()
+                    .put::<tables::PruneCheckpoints>(segment, PruneCheckpoint::pruned_through(tip))
+                    .unwrap();
+            }
             for block in genesis..=tip {
                 provider_rw
                     .tx_ref()
