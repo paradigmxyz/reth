@@ -974,52 +974,47 @@ impl PeersManager {
     /// Called for a newly discovered peer.
     ///
     /// If the peer already exists, then the address, kind and `fork_id` will be updated. A new
-    /// untrusted peer is skipped if its subnet already has [`MAX_DISCOVERED_PEERS_PER_SUBNET`]
-    /// basic peers, and replaces an idle basic peer once [`MAX_DISCOVERED_PEERS`] are tracked.
+    /// untrusted peer replaces an idle basic peer once its subnet has
+    /// [`MAX_DISCOVERED_PEERS_PER_SUBNET`] or the set has [`MAX_DISCOVERED_PEERS`] basic peers, and
+    /// is skipped if there is none.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId>) {
-        let is_new =
-            !self.peers.contains_key(&peer_id) && !self.trusted_peer_ids.contains(&peer_id);
-        if is_new && self.is_subnet_full(addr.tcp().ip()) {
-            trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "Skipping discovered peer from full subnet");
-            return
+        let ip = addr.tcp().ip();
+        if !self.peers.contains_key(&peer_id) && !self.trusted_peer_ids.contains(&peer_id) {
+            let subnet = discovery_subnet(ip);
+            let in_subnet =
+                |peer: &Peer| subnet.is_some() && discovery_subnet(peer.addr.tcp().ip()) == subnet;
+            let (mut basic_peers, mut subnet_peers) = (0, 0);
+            for peer in self.peers.values().filter(|peer| peer.kind.is_basic()) {
+                basic_peers += 1;
+                subnet_peers += usize::from(in_subnet(peer));
+            }
+            let subnet_full = subnet_peers >= MAX_DISCOVERED_PEERS_PER_SUBNET;
+            if subnet_full || basic_peers >= MAX_DISCOVERED_PEERS {
+                // A rejected peer must not cost an existing one.
+                if !self.ip_filter.is_allowed(&ip) || self.ban_list.is_banned(&peer_id, &ip) {
+                    return
+                }
+                // A full subnet replaces one of its own peers, so the first peers seen there cannot
+                // hold it. Backed off peers go first, since unreachable identities fill the set.
+                let Some(evicted) = self
+                    .peers
+                    .iter()
+                    .filter(|(_, peer)| {
+                        peer.kind.is_basic() &&
+                            peer.state.is_idle() &&
+                            (!subnet_full || in_subnet(peer))
+                    })
+                    .min_by_key(|(_, peer)| (!peer.backed_off, peer.reputation))
+                    .map(|(peer_id, _)| *peer_id)
+                else {
+                    trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "Skipping discovered peer, no idle peer to replace");
+                    return
+                };
+                trace!(target: "net::peers", ?evicted, ?peer_id, "Evicting idle peer for a discovered peer");
+                self.remove_peer(evicted);
+            }
         }
-        self.add_peer_kind(peer_id, None, addr, fork_id);
-        if is_new {
-            self.evict_discovered_peer_over_limit(peer_id);
-        }
-    }
-
-    /// Returns whether the subnet of `ip` already has [`MAX_DISCOVERED_PEERS_PER_SUBNET`] basic
-    /// peers.
-    fn is_subnet_full(&self, ip: IpAddr) -> bool {
-        let Some(subnet) = discovery_subnet(ip) else { return false };
-        self.peers
-            .values()
-            .filter(|peer| {
-                peer.kind.is_basic() && discovery_subnet(peer.addr.tcp().ip()) == Some(subnet)
-            })
-            .take(MAX_DISCOVERED_PEERS_PER_SUBNET)
-            .count() ==
-            MAX_DISCOVERED_PEERS_PER_SUBNET
-    }
-
-    /// Removes an idle basic peer other than `added` when more than [`MAX_DISCOVERED_PEERS`] basic
-    /// peers are tracked, or `added` itself when no other peer is idle.
-    fn evict_discovered_peer_over_limit(&mut self, added: PeerId) {
-        if self.peers.values().filter(|peer| peer.kind.is_basic()).count() <= MAX_DISCOVERED_PEERS {
-            return
-        }
-        // Backed off peers go first, since unreachable identities are what fills the set.
-        let evicted = self
-            .peers
-            .iter()
-            .filter(|(peer_id, peer)| {
-                **peer_id != added && peer.kind.is_basic() && peer.state.is_idle()
-            })
-            .min_by_key(|(_, peer)| (!peer.backed_off, peer.reputation))
-            .map_or(added, |(peer_id, _)| *peer_id);
-        trace!(target: "net::peers", ?evicted, "Evicting idle peer over the discovered peer limit");
-        self.remove_peer(evicted);
+        self.add_peer_kind(peer_id, None, addr, fork_id)
     }
 
     /// Marks the given peer as trusted.
@@ -4837,9 +4832,10 @@ mod tests {
             (0..MAX_DISCOVERED_PEERS_PER_SUBNET).map(|_| PeerId::random()).collect::<Vec<_>>();
         for (i, peer_id) in subnet_peers.iter().enumerate() {
             peers.add_peer(*peer_id, addr(&format!("1.2.3.{i}")), None);
+            peers.peers.get_mut(peer_id).unwrap().state = PeerConnectionState::Out;
         }
 
-        // another host in the full /24 is skipped
+        // another host in the full /24 is skipped, since no peer there is idle
         let skipped = PeerId::random();
         peers.add_peer(skipped, addr("1.2.3.200"), None);
         assert!(!peers.peers.contains_key(&skipped));
@@ -4925,6 +4921,37 @@ mod tests {
 
         let peers = PeersManager::new(config);
         assert_eq!(peers.peers.len(), MAX_DISCOVERED_PEERS);
+    }
+
+    #[tokio::test]
+    async fn test_full_subnet_replaces_idle_peer() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = |ip: &str| PeerAddr::from_tcp(SocketAddr::new(ip.parse().unwrap(), 30303));
+        for i in 0..MAX_DISCOVERED_PEERS_PER_SUBNET {
+            peers.add_peer(PeerId::random(), addr(&format!("1.2.3.{i}")), None);
+        }
+        // Ties go to the first peer in iteration order, so back off the last one.
+        let backed_off = *peers.peers.keys().last().unwrap();
+        peers.peers.get_mut(&backed_off).unwrap().backed_off = true;
+        // a worse peer in another subnet is not replaced for this one
+        let elsewhere = PeerId::random();
+        peers.add_peer(elsewhere, addr("1.2.4.1"), None);
+        let peer = peers.peers.get_mut(&elsewhere).unwrap();
+        peer.backed_off = true;
+        peer.reputation = BANNED_REPUTATION;
+
+        // a banned peer does not cost an existing one
+        let banned = PeerId::random();
+        peers.ban_list.ban_peer(banned);
+        peers.add_peer(banned, addr("1.2.3.200"), None);
+        assert!(peers.peers.contains_key(&backed_off));
+
+        let discovered = PeerId::random();
+        peers.add_peer(discovered, addr("1.2.3.201"), None);
+        assert!(peers.peers.contains_key(&discovered));
+        assert!(!peers.peers.contains_key(&backed_off));
+        assert!(peers.peers.contains_key(&elsewhere));
+        assert_eq!(peers.peers.len(), MAX_DISCOVERED_PEERS_PER_SUBNET + 1);
     }
 
     #[tokio::test]
