@@ -177,18 +177,34 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     ///
     /// Callers such as RPC choose the block, so the trie reverts it accumulates stay out of the
     /// changeset cache the engine shares.
+    ///
+    /// Returns an error if this snapshot's state tables have advanced past its finished block.
     pub fn state_provider_from_database(
         &self,
         provider: StateRangeDbProvider<N>,
         block_hash: B256,
-    ) -> StateProviderBox {
-        Box::new(OverlayStateProvider::new(
+    ) -> ProviderResult<StateProviderBox> {
+        if Self::execution_ahead_of_finish(&provider, provider.best_block_number()?)? {
+            return Err(ProviderError::StateUnavailableDuringSync)
+        }
+
+        Ok(Box::new(OverlayStateProvider::new(
             provider,
             self.database
                 .overlay_manager()
                 .overlay_builder(block_hash)
                 .without_trie_revert_caching(),
-        ))
+        )))
+    }
+
+    /// Checks the state tables' progress against `Finish` using the snapshot that will serve reads.
+    fn execution_ahead_of_finish(
+        provider: &StateRangeDbProvider<N>,
+        finish_block_number: BlockNumber,
+    ) -> ProviderResult<bool> {
+        Ok(provider
+            .get_stage_checkpoint(StageId::Execution)?
+            .is_some_and(|execution| execution.block_number > finish_block_number))
     }
 
     /// Returns a historical state provider for `block_hash` using a consistent view.
@@ -196,18 +212,25 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// If `block_hash` is in the view's in-memory snapshot, the overlay is built from that
     /// snapshot instead of the live in-memory state: blocks may have been persisted after the
     /// view's database transaction was opened and then evicted from it.
+    ///
+    /// Returns an error if the view's state tables have advanced past its finished block.
     fn state_provider_from_consistent_view(
         &self,
         provider: ConsistentProvider<N>,
         block_hash: B256,
-    ) -> StateProviderBox {
+    ) -> ProviderResult<StateProviderBox> {
         let Some(state) = provider.in_memory_state_by_hash(block_hash) else {
             return self.state_provider_from_database(provider.into_database_provider(), block_hash)
         };
-        Box::new(OverlayStateProvider::new(
-            provider.into_database_provider(),
+        let provider = provider.into_database_provider();
+        if Self::execution_ahead_of_finish(&provider, provider.best_block_number()?)? {
+            return Err(ProviderError::StateUnavailableDuringSync)
+        }
+
+        Ok(Box::new(OverlayStateProvider::new(
+            provider,
             self.database.overlay_manager().overlay_builder_for_state(state),
-        ))
+        )))
     }
 
     /// Returns the canonical in-memory block with `state_root`.
@@ -235,10 +258,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         // A pipeline run commits executed state before it moves `Finish`, so until then the state
         // tables are ahead of every retained block.
         let Some(finish) = provider.get_stage_checkpoint(StageId::Finish)? else { return Ok(None) };
-        if provider
-            .get_stage_checkpoint(StageId::Execution)?
-            .is_some_and(|execution| execution.block_number > finish.block_number)
-        {
+        if Self::execution_ahead_of_finish(&provider, finish.block_number)? {
             return Ok(None)
         }
 
@@ -894,30 +914,28 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(self.state_provider_from_consistent_view(provider, hash))
+        self.state_provider_from_consistent_view(provider, hash)
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        Ok(self.state_provider_from_consistent_view(provider, block_hash))
+        self.state_provider_from_consistent_view(provider, block_hash)
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?hash, "Getting state by block hash");
         if let Some(state) = self.canonical_in_memory_state.state_by_hash(hash) {
-            self.state_provider_for_state(state)
-        } else if let Ok(state) = self.history_by_block_hash(hash) {
-            // This could be tracked by a historical block
-            Ok(state)
-        } else if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
-            // .. or this could be the pending state
-            Ok(pending)
-        } else {
-            // if we couldn't find it anywhere, then we should return an error
-            Err(ProviderError::StateForHashNotFound(hash))
+            return self.state_provider_for_state(state)
         }
+
+        match self.history_by_block_hash(hash) {
+            Err(ProviderError::BlockHashNotFound(_)) => (),
+            result => return result,
+        }
+
+        self.pending_state_by_hash(hash)?.ok_or(ProviderError::StateForHashNotFound(hash))
     }
 
     /// Returns the state provider for pending state.
@@ -3378,6 +3396,29 @@ mod tests {
         provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0))?;
         provider_rw.commit()?;
         Ok(factory)
+    }
+
+    #[test]
+    fn historical_state_checks_pipeline_progress_on_its_snapshot() -> eyre::Result<()> {
+        let factory = test_provider_factory_with_genesis()?;
+        let provider = BlockchainProvider::new(factory.clone())?;
+        let before_execution = factory.provider()?;
+        let genesis_hash = before_execution.block_hash(0)?.expect("genesis exists");
+
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(1))?;
+        provider_rw.commit()?;
+
+        assert!(provider.state_provider_from_database(before_execution, genesis_hash).is_ok());
+        for result in [
+            provider.history_by_block_number(0),
+            provider.state_by_block_hash(genesis_hash),
+            provider.state_by_block_number_or_tag(BlockNumberOrTag::Number(0)),
+        ] {
+            assert!(matches!(result, Err(ProviderError::StateUnavailableDuringSync)));
+        }
+
+        Ok(())
     }
 
     #[test]
