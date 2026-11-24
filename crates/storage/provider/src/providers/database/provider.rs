@@ -4208,7 +4208,10 @@ impl<TX: Send, N: NodeTypes> StoragePath for DatabaseProvider<TX, N> {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
+        test_utils::{
+            blocks::BlockchainTestData, create_test_provider_factory,
+            create_test_provider_factory_with_chain_spec_and_db_args,
+        },
         BlockWriter,
     };
     use alloy_consensus::Header;
@@ -4222,6 +4225,8 @@ mod tests {
         test_utils::{test_canonical_in_memory_state_writer, TestBlockBuilder},
         ExecutedBlock,
     };
+    use reth_chainspec::MAINNET;
+    use reth_db::mdbx::{DatabaseArguments, SyncMode};
     use reth_db_api::models::{SnapAttempt, StorageSettings};
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
@@ -4432,6 +4437,32 @@ mod tests {
 
         done_rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn unwind_commit_syncs_non_durable_db() {
+        let factory = create_test_provider_factory_with_chain_spec_and_db_args(
+            MAINNET.clone(),
+            DatabaseArguments::test().with_sync_mode(Some(SyncMode::SafeNoSync)),
+        );
+        let info = || factory.db_ref().db().info().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.write_metadata("unwind-sync-test", vec![1]).unwrap();
+        provider_rw.commit().unwrap();
+        assert!(
+            info().last_steady_txnid() < Some(info().last_txnid() as u64),
+            "safe-no-sync commits must not be steady"
+        );
+
+        let provider_rw = factory.unwind_provider_rw().unwrap();
+        provider_rw.write_metadata("unwind-sync-test", vec![2]).unwrap();
+        provider_rw.commit().unwrap();
+        assert_eq!(
+            info().last_steady_txnid(),
+            Some(info().last_txnid() as u64),
+            "the unwind commit must be steady"
+        );
     }
 
     #[test]
