@@ -1708,7 +1708,10 @@ fn jitter_rotation_interval(mean: Duration) -> Duration {
 /// address is not globally routable so local networks and devnets are never limited.
 fn discovery_subnet(ip: IpAddr) -> Option<IpNet> {
     let ip = ip.to_canonical();
-    if !is_global(&ip) {
+    // `is_global` treats every IPv6 address but loopback and unspecified as global.
+    let private_v6 =
+        matches!(ip, IpAddr::V6(ip) if ip.is_unique_local() || ip.is_unicast_link_local());
+    if !is_global(&ip) || private_v6 {
         return None
     }
     Some(match ip {
@@ -4894,7 +4897,16 @@ mod tests {
         assert_eq!(subnet("1.2.3.4"), net("1.2.3.0/24"));
         assert_eq!(subnet("::ffff:1.2.3.4"), net("1.2.3.0/24"));
         assert_eq!(subnet("2a01:4f8:1:ffff::1"), net("2a01:4f8:1::/48"));
-        for local in ["0.0.0.0", "127.0.0.1", "10.0.0.1", "192.168.1.1", "169.254.0.1", "::1"] {
+        for local in [
+            "0.0.0.0",
+            "127.0.0.1",
+            "10.0.0.1",
+            "192.168.1.1",
+            "169.254.0.1",
+            "::1",
+            "fd00::1",
+            "fe80::1",
+        ] {
             assert_eq!(subnet(local), None);
         }
     }
