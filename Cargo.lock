@@ -3471,6 +3471,13 @@ version = "2.11.0"
 dependencies = [
  "clap",
  "ef-tests",
+ "reth-node-core",
+ "reth-node-version-build",
+ "reth-provider",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -3483,26 +3490,48 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types-engine",
+ "futures",
+ "jsonrpsee",
  "rayon",
  "reth-chainspec",
  "reth-consensus",
  "reth-db",
  "reth-db-api",
  "reth-db-common",
+ "reth-engine-primitives",
+ "reth-engine-tree",
+ "reth-eth-wire-types",
  "reth-ethereum-consensus",
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
+ "reth-network-api",
+ "reth-network-p2p",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-node-types",
+ "reth-payload-builder",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-prune",
+ "reth-rpc-api",
+ "reth-rpc-engine-api",
+ "reth-stages-api",
+ "reth-static-file",
  "reth-storage-overlay",
  "reth-tasks",
  "reth-tracing",
+ "reth-transaction-pool",
  "reth-trie",
  "reth-trie-db",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
+ "tokio",
+ "tokio-stream",
+ "tracing",
  "walkdir",
 ]
 
@@ -4469,9 +4498,9 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "form_urlencoded"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+checksum = "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e"
 dependencies = [
  "percent-encoding",
 ]
@@ -8015,6 +8044,7 @@ dependencies = [
  "pin-project",
  "rand 0.9.5",
  "reth-chainspec",
+ "reth-concurrency",
  "reth-ethereum-primitives",
  "reth-execution-types",
  "reth-metrics",
@@ -8093,6 +8123,7 @@ dependencies = [
  "reth-cli-runner",
  "reth-cli-util",
  "reth-codecs",
+ "reth-concurrency",
  "reth-config",
  "reth-consensus",
  "reth-db",
@@ -8217,10 +8248,20 @@ dependencies = [
  "either",
  "parking_lot",
  "rayon",
+ "reth-concurrency-macros",
  "reth-primitives-traits",
  "shuttle",
  "shuttle-parking_lot",
  "shuttle-sync",
+]
+
+[[package]]
+name = "reth-concurrency-macros"
+version = "2.11.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -8699,6 +8740,7 @@ dependencies = [
  "rayon",
  "reth-chain-state",
  "reth-chainspec",
+ "reth-concurrency",
  "reth-consensus",
  "reth-db",
  "reth-db-common",
@@ -9097,6 +9139,7 @@ dependencies = [
  "metrics",
  "moka",
  "rayon",
+ "reth-concurrency",
  "reth-ethereum-primitives",
  "reth-execution-errors",
  "reth-execution-types",
@@ -9124,6 +9167,7 @@ dependencies = [
  "metrics",
  "rayon",
  "reth-chainspec",
+ "reth-concurrency",
  "reth-ethereum-forks",
  "reth-ethereum-primitives",
  "reth-evm",
@@ -9145,6 +9189,7 @@ dependencies = [
  "fixed-cache",
  "metrics",
  "parking_lot",
+ "reth-concurrency",
  "reth-errors",
  "reth-evm",
  "reth-metrics",
@@ -9761,9 +9806,11 @@ dependencies = [
  "jsonrpsee",
  "rand 0.9.5",
  "reqwest",
+ "reth-chain-state",
  "reth-chainspec",
  "reth-consensus",
  "reth-db",
+ "reth-db-common",
  "reth-downloaders",
  "reth-e2e-test-utils",
  "reth-engine-local",
@@ -9804,6 +9851,7 @@ dependencies = [
  "reth-stages-types",
  "reth-static-file",
  "reth-storage-api",
+ "reth-storage-overlay",
  "reth-tasks",
  "reth-testing-utils",
  "reth-tracing",
@@ -10030,7 +10078,6 @@ dependencies = [
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
- "alloy-rpc-types-engine",
  "assert_matches",
  "evm2",
  "eyre",
@@ -10082,6 +10129,7 @@ dependencies = [
  "assert_matches",
  "itertools 0.14.0",
  "metrics",
+ "reth-concurrency",
  "reth-config",
  "reth-db-api",
  "reth-errors",
@@ -10441,6 +10489,7 @@ dependencies = [
  "reqwest",
  "reth-chain-state",
  "reth-chainspec",
+ "reth-concurrency",
  "reth-db-models",
  "reth-errors",
  "reth-ethereum-primitives",
@@ -10720,7 +10769,6 @@ dependencies = [
  "alloy-eip7928",
  "alloy-eips",
  "alloy-primitives",
- "alloy-rpc-types-engine",
  "auto_impl",
  "reth-chain-state",
  "reth-chainspec",
@@ -10764,6 +10812,7 @@ dependencies = [
  "parking_lot",
  "rayon",
  "reth-chain-state",
+ "reth-concurrency",
  "reth-db",
  "reth-db-api",
  "reth-errors",
@@ -10792,7 +10841,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-types",
- "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "dashmap",
  "reth-chain-state",
@@ -10824,6 +10872,7 @@ dependencies = [
  "parking_lot",
  "pin-project",
  "rayon",
+ "reth-concurrency",
  "reth-metrics",
  "thiserror 2.0.21",
  "thread-priority",
@@ -10967,6 +11016,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.5",
+ "reth-concurrency",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives-traits",
@@ -11006,6 +11056,7 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rayon",
  "reth-codecs",
+ "reth-concurrency",
  "reth-primitives-traits",
  "serde",
  "serde_json",
@@ -11050,6 +11101,7 @@ dependencies = [
  "metrics",
  "rand 0.9.5",
  "reth-chainspec",
+ "reth-concurrency",
  "reth-db-common",
  "reth-ethereum-primitives",
  "reth-execution-errors",
@@ -11079,6 +11131,7 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.9.5",
  "rayon",
+ "reth-concurrency",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives-traits",
@@ -13270,9 +13323,9 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "url"
-version = "2.5.8"
+version = "2.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+checksum = "f00cd2407bb42c0ef17be88d4cf020f5cceffd121665bac9b8b9493a369b3b1a"
 dependencies = [
  "form_urlencoded",
  "idna",

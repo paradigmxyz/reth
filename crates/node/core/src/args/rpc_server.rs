@@ -99,6 +99,7 @@ pub struct DefaultRpcServerArgs {
     rpc_max_trace_filter_blocks: u64,
     rpc_max_blocks_per_filter: ZeroAsNoneU64,
     rpc_max_logs_per_response: ZeroAsNoneU64,
+    rpc_max_active_filters: ZeroAsNoneU64,
     rpc_gas_cap: u64,
     rpc_evm_memory_limit: u64,
     rpc_tx_fee_cap: u128,
@@ -324,6 +325,12 @@ impl DefaultRpcServerArgs {
         self
     }
 
+    /// Set the default max active filters
+    pub const fn with_rpc_max_active_filters(mut self, v: ZeroAsNoneU64) -> Self {
+        self.rpc_max_active_filters = v;
+        self
+    }
+
     /// Set the default gas cap
     pub const fn with_rpc_gas_cap(mut self, v: u64) -> Self {
         self.rpc_gas_cap = v;
@@ -445,6 +452,7 @@ impl Default for DefaultRpcServerArgs {
             rpc_max_trace_filter_blocks: constants::DEFAULT_MAX_TRACE_FILTER_BLOCKS,
             rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
+            rpc_max_active_filters: (constants::DEFAULT_MAX_ACTIVE_FILTERS as u64).into(),
             rpc_gas_cap: constants::gas_oracle::RPC_DEFAULT_GAS_CAP,
             rpc_evm_memory_limit: (1 << 32) - 1,
             rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
@@ -679,6 +687,12 @@ pub struct RpcServerArgs {
     /// Maximum number of logs that can be returned in a single response. (0 = no limit)
     #[arg(long = "rpc.max-logs-per-response", alias = "rpc-max-logs-per-response", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_logs_per_response)]
     pub rpc_max_logs_per_response: ZeroAsNoneU64,
+
+    /// Maximum number of filters that can be installed at the same time, across all
+    /// `eth_newFilter`, `eth_newBlockFilter` and `eth_newPendingTransactionFilter` filters. (0 =
+    /// no limit)
+    #[arg(long = "rpc.max-active-filters", alias = "rpc-max-active-filters", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_active_filters)]
+    pub rpc_max_active_filters: ZeroAsNoneU64,
 
     /// Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
     ///
@@ -1040,6 +1054,7 @@ impl Default for RpcServerArgs {
             rpc_max_trace_filter_blocks,
             rpc_max_blocks_per_filter,
             rpc_max_logs_per_response,
+            rpc_max_active_filters,
             rpc_gas_cap,
             rpc_evm_memory_limit,
             rpc_tx_fee_cap,
@@ -1090,6 +1105,7 @@ impl Default for RpcServerArgs {
             rpc_max_trace_filter_blocks,
             rpc_max_blocks_per_filter,
             rpc_max_logs_per_response,
+            rpc_max_active_filters,
             rpc_gas_cap,
             rpc_evm_memory_limit,
             rpc_tx_fee_cap,
@@ -1424,6 +1440,7 @@ mod tests {
             rpc_max_trace_filter_blocks: 4000,
             rpc_max_blocks_per_filter: 1000u64.into(),
             rpc_max_logs_per_response: 10000u64.into(),
+            rpc_max_active_filters: 500u64.into(),
             rpc_gas_cap: 50_000_000,
             rpc_evm_memory_limit: 256,
             rpc_tx_fee_cap: 2_000_000_000_000_000_000u128,
@@ -1510,6 +1527,8 @@ mod tests {
             "1000",
             "--rpc.max-logs-per-response",
             "10000",
+            "--rpc.max-active-filters",
+            "500",
             "--rpc.gascap",
             "50000000",
             "--rpc.evm-memory-limit",

@@ -80,6 +80,8 @@ pub enum ProviderOrBlock<'a, P: BlockReader> {
 
 /// Appends all matching and converted logs of a block's receipts.
 /// If the log matches, look up the corresponding transaction hash.
+///
+/// Returns the total length in bytes of the topics and data of the appended logs.
 pub fn append_matching_block_logs<P, C>(
     all_logs: &mut Vec<RpcLog<C::Network>>,
     converter: &C,
@@ -88,14 +90,14 @@ pub fn append_matching_block_logs<P, C>(
     header: &SealedHeaderFor<C::Primitives>,
     receipts: &[P::Receipt],
     removed: bool,
-) -> Result<(), EthApiError>
+) -> Result<usize, EthApiError>
 where
     P: BlockReader<Transaction: SignedTransaction>,
     C: RpcConvert<Primitives: NodePrimitives<Block = ProviderBlock<P>, Receipt = P::Receipt>>,
 {
     let block_num_hash = header.num_hash();
     if !filter.matches_block(&block_num_hash) {
-        return Ok(());
+        return Ok(0);
     }
 
     // Tracks the index of a log in the entire block.
@@ -105,6 +107,8 @@ where
     // This is useful for blocks with multiple matching logs because it
     // prevents re-querying the block body indices.
     let mut loaded_first_tx_num = None;
+
+    let mut payload_len = 0;
 
     // Iterate over receipts and append matching logs.
     for (receipt_idx, receipt) in receipts.iter().enumerate() {
@@ -146,6 +150,7 @@ where
                     };
                 }
 
+                payload_len += size_of_val(log.topics()) + log.data.data.len();
                 let log = Log {
                     inner: log.clone(),
                     block_hash: Some(block_num_hash.hash),
@@ -166,7 +171,7 @@ where
         }
     }
 
-    Ok(())
+    Ok(payload_len)
 }
 
 /// Computes the block range based on the filter range and current block numbers.

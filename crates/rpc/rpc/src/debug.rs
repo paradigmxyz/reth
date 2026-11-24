@@ -858,9 +858,9 @@ where
 
     /// Executes a block and returns the state root after each transaction.
     ///
-    /// The block is canonical, a non-canonical block the engine tree still holds, or a bad block
-    /// the engine rejected. Execution stops at the first transaction that is invalid on top of
-    /// its predecessors, so the result for a bad block holds the roots before that transaction.
+    /// The block is either canonical or a bad block the engine rejected. Execution stops at the
+    /// first transaction that is invalid on top of its predecessors, so the result for a bad block
+    /// holds the roots before that transaction.
     pub async fn intermediate_roots(&self, block_hash: B256) -> Result<Vec<B256>, Eth::Error> {
         let block = match self.eth_api().recovered_block(block_hash.into()).await? {
             Some(block) => block,
@@ -1639,7 +1639,11 @@ impl JsTraceInterrupt {
     /// Lets this interrupt stop the JS tracers of `inspector`, including those in a mux tracer.
     #[cfg_attr(
         not(feature = "js-tracer"),
-        expect(clippy::missing_const_for_fn, reason = "only JS tracers can be interrupted")
+        expect(
+            unused_mut,
+            clippy::missing_const_for_fn,
+            reason = "only JS tracers can be interrupted"
+        )
     )]
     fn attach(&self, mut inspector: DebugInspector) -> DebugInspector {
         #[cfg(feature = "js-tracer")]

@@ -1646,6 +1646,40 @@ mod tests {
         assert_eq!(estimated, U256::from(21_000));
     }
 
+    /// `eth_estimateGas` waits for a blocking IO permit, like `eth_call`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn estimate_gas_takes_blocking_io_permit() {
+        let provider = MockEthProvider::default();
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header { number: 1, gas_limit: 30_000_000, ..Default::default() },
+                body: BlockBody::default(),
+            },
+        );
+        let api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .max_blocking_io_requests(1)
+        .build();
+        let request = TransactionRequest::default().with_to(Address::repeat_byte(0xaa));
+
+        let permit = api.acquire_owned_blocking_io().await.unwrap();
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            EthApiServer::estimate_gas(&api, request.clone(), None, None, None)
+        )
+        .await
+        .is_err());
+
+        drop(permit);
+        let estimated = EthApiServer::estimate_gas(&api, request, None, None, None).await.unwrap();
+        assert_eq!(estimated, U256::from(21_000));
+    }
+
     #[tokio::test]
     async fn header_responses_omit_size_while_blocks_keep_it() {
         let provider = MockEthProvider::default();
