@@ -229,7 +229,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
 
         Ok(Box::new(OverlayStateProvider::new(
             provider,
-            self.database.overlay_manager().overlay_builder_for_state(state),
+            self.database
+                .overlay_manager()
+                .overlay_builder_for_state(state)
+                .without_trie_revert_caching(),
         )))
     }
 
