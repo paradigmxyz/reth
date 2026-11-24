@@ -18,9 +18,9 @@ Inputs are version-3 JSON text: `version`, an unsigned 64-bit `fixture_seed`,
 and `rounds` containing exactly sixteen ordered action lists. The fixture seed
 generates a starting trie with densely branching and long shared-prefix paths,
 plus fixed checks of the sparse-trie API; explicit actions
-are never regenerated during execution. Each round accepts up to thirty-two actions:
+are never regenerated during execution. Partial proofs can reveal an extension before its branch child; later reveals and update retries hydrate that child. Each round accepts up to thirty-two actions:
 `update_batch` (up to four 32-byte hexadecimal key/value changes, zero values delete),
-`reveal` (supply a proof derived from that leaf map for a key), `prune` (replace
+`reveal` (supply a depth-limited proof derived from that leaf map for a key), `prune` (replace
 old nodes with their hashes, using a cutoff on sequentially numbered update epochs), `snapshot` and `clone` (copy and check the root), and
 `tracking_reset` (clear the retained-update accumulator).
 Repeated keys in a batch use its last value. Empty batches and action lists are
@@ -47,7 +47,7 @@ A trie "fork" here means an independent in-memory snapshot, not a blockchain
 fork. Persistent snapshots share unchanged nodes; writes must not leak between
 copies. A nested snapshot is a snapshot of a snapshot. Existing fixed checks
 mutate sibling copies and verify survivors after their source is cleared or
-dropped; arbitrary snapshot ancestry and drop order are not mutable tape actions.
+dropped. Fixed extension-only checks also snapshot or clone opaque children, hydrate and mutate the copy, and verify the source remains unchanged. Arbitrary snapshot ancestry and drop order are not mutable tape actions.
 The mandatory check sequence runs alongside generated actions. Thirteen local mutation
 operators edit those actions, batches, keys, values and prune cutoffs; they are listed
 in the Native calling interface section below.
