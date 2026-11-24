@@ -151,19 +151,25 @@ jobs:
         run: |
           # Re-resolve Cargo.lock for the new evm2 rev. When the new rev raises the minimum version
           # of a dependency that Cargo.lock pins lower (such as alloy-eip7928 0.4.11 -> ^0.4.12),
-          # cargo refuses to move the pin: unlock just that crate and retry, so the rest of the
-          # lockfile stays as is.
+          # cargo refuses to move the pin: unlock just the crates it names, all in one update, and
+          # retry, so the rest of the lockfile stays as is. Stop on any other error, or when a crate
+          # comes up again after being unlocked.
+          crates=()
+          resolve=(cargo metadata --format-version 1)
           for _ in $(seq 1 10); do
-            if out=$(CARGO_TERM_COLOR=never cargo metadata --format-version 1 2>&1 >/dev/null); then
+            if out=$(CARGO_TERM_COLOR=never "${resolve[@]}" 2>&1 >/dev/null); then
+              echo "$out"
               break
             fi
             crate=$(grep -m1 'failed to select a version for' <<< "$out" | cut -d "\`" -f2 || true)
-            if [ -z "$crate" ]; then
+            if [ -z "$crate" ] || [[ " ${crates[*]} " == *" $crate "* ]]; then
               echo "$out"
               exit 1
             fi
             echo "evm2 needs a newer $crate than Cargo.lock pins; unlocking it"
-            cargo update -p "$crate"
+            crates+=("$crate")
+            resolve=(cargo update)
+            for c in "${crates[@]}"; do resolve+=(-p "$c"); done
           done
           cargo metadata --format-version 1 > /dev/null
           git add -A
