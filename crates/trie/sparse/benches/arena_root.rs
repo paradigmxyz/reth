@@ -1,26 +1,26 @@
 //! Tempo-shaped sparse trie root benchmark.
 //!
-//! Builds TOKENS large, fully revealed storage tries (token-balance-like slots with random
+//! Builds `TOKENS` large, fully revealed storage tries (token-balance-like slots with random
 //! hashed keys) plus an account trie, then simulates blocks: each block changes K storage
 //! slots spread evenly across the tokens and K / 4 accounts, and computes every root.
 //!
 //! Phases are timed separately per block:
-//! - upd: update_leaves on all storage tries and on the account trie,
-//! - hash: root() on all storage tries (in parallel, as the engine does) plus the account trie.
+//! - upd: `update_leaves` on all storage tries and on the account trie,
+//! - hash: `root()` on all storage tries (in parallel, as the engine does) plus the account trie.
 //!
 //! Configuration via environment variables:
 //! - SLOTS (default 2,000,000): slots per token storage trie.
 //! - ACCOUNTS (default 1,000,000): accounts in the account trie.
 //! - TOKENS (default 4).
 //! - KS (default 500,2000,5000,20000): dirty storage leaves per block.
-//! - BLOCKS (default 20) measured blocks per K and mode, after WARMUP (default 3).
-//! - MODES (default depth_first,level_batched): hashing strategies, interleaved per block.
+//! - BLOCKS (default 20) measured blocks per K and mode, after `WARMUP` (default 3).
+//! - MODES (default `depth_first,level_batched`): hashing strategies, interleaved per block.
 //! - HOT (default 0): if set, each trie keeps only HOT hot keys revealed: after building, the hot
 //!   keys are updated and every other node is pruned (blinded), as a long-running node's sparse
 //!   tries look. Blocks then only touch hot keys. 0 keeps every node revealed.
 //!
 //! Run with:
-//! cargo bench -p reth-trie-sparse --bench arena_root --features alloy-primitives/asm-keccak
+//! `cargo bench -p reth-trie-sparse --bench arena_root --features alloy-primitives/asm-keccak`
 #![allow(missing_docs, unreachable_pub)]
 
 use alloy_primitives::{map::B256Map, B256, U256};
@@ -62,6 +62,7 @@ fn storage_value(rng: &mut StdRng) -> Vec<u8> {
     alloy_rlp::encode(U256::from(rng.random::<u128>() | 1))
 }
 
+#[allow(clippy::needless_update)] // `TrieAccount` has more fields with some features.
 fn account_value(rng: &mut StdRng, storage_root: B256) -> Vec<u8> {
     alloy_rlp::encode(TrieAccount {
         nonce: rng.random::<u32>() as u64,
