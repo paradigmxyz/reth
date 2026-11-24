@@ -12,21 +12,22 @@ use eyre::{Result, WrapErr};
 use lz4::Decoder;
 use reqwest::blocking::Client as BlockingClient;
 use reth_cli_util::cancellation::CancellationToken;
-use reth_fs_util as fs;
+use reth_fs_util::{self as fs, FsPathError};
 use std::{
     cell::RefCell,
     collections::HashSet,
-    io::{self, Read},
+    io::{self, BufWriter, Read},
     mem,
     ops::Range,
+    os::unix::fs::PermissionsExt,
     path::{Component, Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{sync_channel, SyncSender},
+        mpsc::{sync_channel, Receiver, SendError, SyncSender, TrySendError},
         Arc,
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, UNIX_EPOCH},
 };
 use tar::Archive;
 use tracing::{info, warn};
@@ -43,6 +44,15 @@ const FILE_HASH_BATCH_SIZE: usize = 1 << 20;
 
 /// Batches buffered for the hashing thread before extraction waits for it.
 const FILE_HASH_QUEUE_LEN: usize = 16;
+
+/// Size of each decoded buffer handed from the decoder thread to the unpack thread.
+const DECODED_CHUNK_SIZE: usize = 1 << 20;
+
+/// Decoded buffers queued between the decoder thread and the unpack thread.
+const DECODED_CHUNK_QUEUE_LEN: usize = 16;
+
+/// Bytes written to an extracted regular file per write.
+const EXTRACTED_FILE_WRITE_SIZE: usize = 8 << 20;
 
 /// Supported compression formats for snapshots
 #[derive(Debug, Clone, Copy)]
@@ -133,40 +143,133 @@ pub(crate) fn extract_archive_raw<R: Read>(
 /// Extracts a compressed tar archive like [`extract_archive_raw`], hashing each declared output
 /// written as a regular file from the bytes written to it so verification does not have to read
 /// it back. `outputs` holds the destination paths of the archive's declared outputs.
-pub(crate) fn extract_archive_hashed<R: Read>(
+///
+/// Decompression runs on its own thread, feeding the tar unpack and file writes on the calling
+/// thread through a bounded queue of decoded buffers, so a large archive is not limited by one
+/// core doing both. The whole compressed stream is decoded, including bytes after the tar end
+/// marker, so the compression checksum is validated. `on_unpack_error` runs as soon as
+/// unpacking fails, before this waits for the decoder, so the caller can stop whatever feeds
+/// `reader`.
+pub(crate) fn extract_archive_hashed<R: Read + Send>(
     reader: R,
     format: CompressionFormat,
     target_dir: &Path,
     static_files_dir: Option<&Path>,
     outputs: HashSet<PathBuf>,
     progress: Option<&mut ArchiveExtractionProgress>,
+    on_unpack_error: impl FnOnce(),
 ) -> Result<ExtractedHashes> {
-    let hasher = RefCell::new(FileHasher::spawn(outputs));
-    match format {
-        CompressionFormat::Lz4 => unpack_archive(
-            Archive::new(FileHashTee {
-                inner: Decoder::new(reader)?,
-                position: 0,
-                hasher: &hasher,
-            }),
+    let (sender, chunks) = sync_channel(DECODED_CHUNK_QUEUE_LEN);
+    let (recycled, reusable) = sync_channel(DECODED_CHUNK_QUEUE_LEN);
+    thread::scope(|scope| {
+        let decoder = scope.spawn(move || decode_archive(reader, format, &sender, &reusable));
+        let hasher = RefCell::new(FileHasher::spawn(outputs));
+        let mut chunks =
+            DecodedChunks { chunks, recycled, chunk: DecodedChunk::default(), offset: 0 };
+        let unpacked = unpack_archive(
+            Archive::new(FileHashTee { inner: &mut chunks, position: 0, hasher: &hasher }),
             target_dir,
             static_files_dir,
             progress,
             Some(&hasher),
-        )?,
-        CompressionFormat::Zstd => unpack_archive(
-            Archive::new(FileHashTee {
-                inner: ZstdDecoder::new(reader)?,
-                position: 0,
-                hasher: &hasher,
-            }),
-            target_dir,
-            static_files_dir,
-            progress,
-            Some(&hasher),
-        )?,
+        )
+        .and_then(|()| Ok(io::copy(&mut chunks, &mut io::sink()).map(drop)?));
+        if unpacked.is_err() {
+            on_unpack_error();
+        }
+        // Stops a decoder that is still sending.
+        drop(chunks);
+        decoder.join().map_err(|_| eyre::eyre!("Archive decoder thread panicked"))?;
+        unpacked?;
+        hasher.into_inner().join()
+    })
+}
+
+/// Decodes `reader` into recycled buffers and sends them, in order, until the end of the
+/// stream or until the receiver is gone, which only happens when unpacking stopped. A decode
+/// error is sent in place of the next buffer.
+fn decode_archive<R: Read>(
+    reader: R,
+    format: CompressionFormat,
+    sender: &SyncSender<io::Result<DecodedChunk>>,
+    reusable: &Receiver<Vec<u8>>,
+) {
+    let decode = || -> io::Result<()> {
+        let mut decoder: Box<dyn Read + '_> = match format {
+            CompressionFormat::Lz4 => Box::new(Decoder::new(reader)?),
+            CompressionFormat::Zstd => Box::new(ZstdDecoder::new(reader)?),
+        };
+        loop {
+            let mut buf = reusable.try_recv().unwrap_or_default();
+            // Only zeroes new buffers, since recycled ones keep their full length.
+            buf.resize(DECODED_CHUNK_SIZE, 0);
+            let len = loop {
+                match decoder.read(&mut buf) {
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                    result => break result?,
+                }
+            };
+            if len == 0 {
+                return Ok(())
+            }
+            if sender.send(Ok(DecodedChunk { buf, len })).is_err() {
+                return Ok(())
+            }
+        }
+    };
+    if let Err(error) = decode() {
+        // The receiver is gone only after unpacking stopped, which reports its own error.
+        match sender.send(Err(error)) {
+            Ok(()) | Err(SendError(_)) => {}
+        }
     }
-    hasher.into_inner().join()
+}
+
+/// Presents decoded buffers from [`decode_archive`] as one byte stream, returning each consumed
+/// buffer to the decoder for reuse.
+struct DecodedChunks {
+    /// Decoded buffers, or the decode error that ended the stream.
+    chunks: Receiver<io::Result<DecodedChunk>>,
+    /// Consumed buffers returned to the decoder.
+    recycled: SyncSender<Vec<u8>>,
+    /// Buffer being read.
+    chunk: DecodedChunk,
+    /// Bytes of `chunk` already read.
+    offset: usize,
+}
+
+impl Read for DecodedChunks {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0)
+        }
+        if self.offset == self.chunk.len {
+            // Recycle before blocking so the decoder can reuse this buffer for the chunk being
+            // waited on. A full queue or a finished decoder just drops it.
+            match self.recycled.try_send(mem::take(&mut self.chunk).buf) {
+                Ok(()) | Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {}
+            }
+            // Reset with the take, so reads after the end of the stream or an error find an
+            // empty chunk again.
+            self.offset = 0;
+            match self.chunks.recv() {
+                Ok(chunk) => self.chunk = chunk?,
+                Err(_) => return Ok(0),
+            }
+        }
+        let len = buf.len().min(self.chunk.len - self.offset);
+        buf[..len].copy_from_slice(&self.chunk.buf[self.offset..self.offset + len]);
+        self.offset += len;
+        Ok(len)
+    }
+}
+
+/// A buffer from [`decode_archive`] whose first `len` bytes are decoded. The buffer keeps its
+/// full length so the decoder can refill it without zeroing it again.
+#[derive(Default)]
+struct DecodedChunk {
+    buf: Vec<u8>,
+    len: usize,
 }
 
 fn unpack_archive<R: Read>(
@@ -318,8 +421,7 @@ impl FileHasher {
         if !self.outputs.contains(&path) {
             return Ok(false)
         }
-        let entry_type = entry.header().entry_type();
-        if !entry_type.is_file() && !entry_type.is_contiguous() {
+        if !is_regular_file(entry) {
             return Ok(false)
         }
         let start = entry.raw_file_position();
@@ -436,7 +538,77 @@ fn unpack_static_file<R: Read>(
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
+    if is_regular_file(entry) {
+        return write_regular_file(entry, &dest, &root)
+    }
     entry.unpack(dest)?;
+    Ok(())
+}
+
+/// Returns whether `entry` holds its data as one sequential run of bytes.
+fn is_regular_file<R: Read>(entry: &tar::Entry<'_, R>) -> bool {
+    let entry_type = entry.header().entry_type();
+    entry_type.is_file() || entry_type.is_contiguous()
+}
+
+/// Writes a regular file entry to `dest` in large blocks.
+///
+/// `tar` copies file data in 8 KiB writes, which costs a syscall and a filesystem lock per
+/// 8 KiB. This mirrors `tar`'s unpacking of a regular file into `root`: missing parent
+/// directories are created only inside `root`, an existing file is replaced, and the
+/// permission bits and modification time are restored.
+fn write_regular_file<R: Read>(
+    entry: &mut tar::Entry<'_, R>,
+    dest: &Path,
+    root: &Path,
+) -> Result<()> {
+    let parent = dest.parent().ok_or_else(|| eyre::eyre!("Invalid archive path"))?;
+    let mut missing = Vec::new();
+    let mut ancestor = parent;
+    while ancestor.symlink_metadata().is_err() {
+        missing.push(ancestor);
+        let Some(next) = ancestor.parent() else { break };
+        ancestor = next;
+    }
+    for dir in missing.into_iter().rev() {
+        if let Some(dir_parent) = dir.parent() {
+            ensure_inside(root, dir_parent)?;
+        }
+        fs::create_dir_all(dir)?;
+    }
+    ensure_inside(root, parent)?;
+
+    fs::remove_file_if_exists(dest)?;
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dest)
+        .map_err(|error| FsPathError::create_file(error, dest))?;
+    let mut writer = BufWriter::with_capacity(EXTRACTED_FILE_WRITE_SIZE, file);
+    let written = io::copy(entry, &mut writer)?;
+    let file = writer.into_inner().map_err(|error| error.into_error())?;
+    eyre::ensure!(written == entry.size(), "Archive entry ended early: {}", dest.display());
+
+    if let Ok(mode) = entry.header().mode() {
+        file.set_permissions(std::fs::Permissions::from_mode(mode & 0o777))?;
+    }
+    // Like `tar`, avoid zero modification times. Times `SystemTime` cannot represent are skipped.
+    if let Ok(mtime) = entry.header().mtime() &&
+        let Some(modified) = UNIX_EPOCH.checked_add(Duration::from_secs(mtime.max(1)))
+    {
+        file.set_modified(modified)?;
+    }
+    Ok(())
+}
+
+/// Fails unless `dir` resolves to a path inside `root`, so archive entries cannot escape `root`
+/// through symlinks.
+fn ensure_inside(root: &Path, dir: &Path) -> Result<()> {
+    eyre::ensure!(
+        dir.canonicalize()?.starts_with(root.canonicalize()?),
+        "Archive entry would unpack outside of {}",
+        root.display()
+    );
     Ok(())
 }
 
@@ -458,6 +630,10 @@ fn unpack_entry<R: Read>(
         let Some(relative_path) = static_file_relative_path(&path)
     {
         unpack_static_file(entry, static_files_dir, relative_path)
+    } else if is_regular_file(entry) &&
+        let Some(dest) = entry_destination_path(entry, target_dir, static_files_dir)?
+    {
+        write_regular_file(entry, &dest, target_dir)
     } else {
         entry.unpack_in(target_dir)?;
         Ok(())
@@ -871,6 +1047,7 @@ pub(crate) async fn stream_and_extract(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn custom_static_root_cannot_be_redirected_by_archive_symlinks() {
@@ -985,6 +1162,7 @@ mod tests {
             None,
             HashSet::from([target.path().join("db/data")]),
             None,
+            || {},
         )
         .unwrap();
 
@@ -1031,6 +1209,7 @@ mod tests {
             Some(custom.path()),
             HashSet::from([custom.path().join("headers")]),
             None,
+            || {},
         )
         .unwrap();
         fs::write(custom.path().join("headers"), &corrupt).unwrap();
@@ -1060,6 +1239,7 @@ mod tests {
                 None,
                 HashSet::from([target.path().join("db/data")]),
                 None,
+                || {},
             )
             .unwrap();
             let replaced = fs::read(target.path().join("db/data")).unwrap() == corrupt;
@@ -1091,6 +1271,7 @@ mod tests {
                 None,
                 HashSet::from([target.path().join("db/data")]),
                 None,
+                || {},
             )
             .unwrap();
             let readable = fs::open(target.path().join("db/data")).is_ok();
@@ -1099,6 +1280,132 @@ mod tests {
                 verifier.verify_with_progress(&[checksum("db/data", &data)], None, Some(&hashes));
             assert_eq!(verified.is_ok(), readable);
         }
+    }
+
+    #[test]
+    fn hashed_extraction_writes_files_and_stops_on_either_side_failing() {
+        let data = (0..3 * DECODED_CHUNK_SIZE + 5).map(|i| (i % 251) as u8).collect::<Vec<_>>();
+        let mut archive = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(data.len() as u64);
+        header.set_mode(0o640);
+        header.set_mtime(1_700_000_000);
+        header.set_cksum();
+        archive.append_data(&mut header, "db/data", data.as_slice()).unwrap();
+        let tar = zstd::encode_all(archive.into_inner().unwrap().as_slice(), 0).unwrap();
+
+        let target = tempfile::tempdir().unwrap();
+        extract_archive_hashed(
+            tar.as_slice(),
+            CompressionFormat::Zstd,
+            target.path(),
+            None,
+            HashSet::from([target.path().join("db/data")]),
+            None,
+            || {},
+        )
+        .unwrap();
+        let path = target.path().join("db/data");
+        assert_eq!(fs::read(&path).unwrap(), data);
+        let metadata = std::fs::metadata(&path).unwrap();
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o640);
+        assert_eq!(metadata.modified().unwrap(), UNIX_EPOCH + Duration::from_secs(1_700_000_000));
+
+        // A decode error on the decoder thread fails extraction.
+        let target = tempfile::tempdir().unwrap();
+        let error = extract_archive_hashed(
+            &tar[..tar.len() - 4],
+            CompressionFormat::Zstd,
+            target.path(),
+            None,
+            HashSet::from([target.path().join("db/data")]),
+            None,
+            || {},
+        )
+        .unwrap_err();
+        assert_eq!(error.root_cause().to_string(), "incomplete frame");
+
+        // An unpack error stops the input before waiting for the decoder, which is blocked on
+        // input that would otherwise never end.
+        let mut archive = tar::Builder::new(Vec::new());
+        let mut link = tar::Header::new_gnu();
+        link.set_entry_type(tar::EntryType::Symlink);
+        link.set_size(0);
+        link.set_mode(0o777);
+        archive.append_link(&mut link, "static_files/link", "elsewhere").unwrap();
+        let mut encoder = zstd::Encoder::new(Vec::new(), 0).unwrap();
+        encoder.write_all(&archive.into_inner().unwrap()).unwrap();
+        encoder.flush().unwrap();
+        let (feed, input) = sync_channel(1);
+        let compressed = encoder.get_ref().clone();
+        feed.send(Ok(DecodedChunk { len: compressed.len(), buf: compressed })).unwrap();
+        let reader = DecodedChunks {
+            chunks: input,
+            recycled: sync_channel(0).0,
+            chunk: DecodedChunk::default(),
+            offset: 0,
+        };
+        let custom = tempfile::tempdir().unwrap();
+        let error = extract_archive_hashed(
+            reader,
+            CompressionFormat::Zstd,
+            target.path(),
+            Some(custom.path()),
+            HashSet::new(),
+            None,
+            move || drop(feed),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.root_cause().to_string(),
+            "Archive links are unsupported: `static_files/link`"
+        );
+    }
+
+    #[test]
+    fn hashed_extraction_reads_past_the_end_of_an_archive_without_end_marker() {
+        let mut archive = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(4);
+        header.set_cksum();
+        archive.append_data(&mut header, "db/data", b"data".as_slice()).unwrap();
+        let mut tar = archive.into_inner().unwrap();
+        // Drops the two zero blocks that mark the end of the archive, so tar stops at the end
+        // of the stream and the remaining stream is read after it.
+        tar.truncate(tar.len() - 1024);
+        let tar = zstd::encode_all(tar.as_slice(), 0).unwrap();
+
+        let target = tempfile::tempdir().unwrap();
+        extract_archive_hashed(
+            tar.as_slice(),
+            CompressionFormat::Zstd,
+            target.path(),
+            None,
+            HashSet::from([target.path().join("db/data")]),
+            None,
+            || {},
+        )
+        .unwrap();
+        assert_eq!(fs::read(target.path().join("db/data")).unwrap(), b"data");
+    }
+
+    #[test]
+    fn regular_file_with_unrepresentable_mtime_is_extracted() {
+        let mut archive = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(4);
+        header.set_mode(0o600);
+        header.set_mtime(u64::MAX);
+        header.set_cksum();
+        archive.append_data(&mut header, "db/data", b"data".as_slice()).unwrap();
+        let tar = zstd::encode_all(archive.into_inner().unwrap().as_slice(), 0).unwrap();
+
+        let target = tempfile::tempdir().unwrap();
+        extract_archive_raw(tar.as_slice(), CompressionFormat::Zstd, target.path(), None, None)
+            .unwrap();
+        let path = target.path().join("db/data");
+        assert_eq!(fs::read(&path).unwrap(), b"data");
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
     }
 
     #[test]
