@@ -9,6 +9,7 @@ use crate::{
 };
 use alloy_primitives::map::{hash_map::Entry, FbBuildHasher, HashMap, HashSet};
 use futures::StreamExt;
+use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 
 use rand::Rng;
 use reth_eth_wire::{
@@ -47,6 +48,10 @@ use tracing::{trace, warn};
 
 /// Bound admission-time throttling independently of long-lived security bans.
 const MAX_INCOMING_IP_THROTTLE_ENTRIES: u32 = 16_384;
+
+/// Maximum number of basic peers tracked per IPv4 /24 or IPv6 /48 subnet, so a single host cannot
+/// add any number of discovered peers.
+const MAX_DISCOVERED_PEERS_PER_SUBNET: usize = 10;
 
 /// Maintains the state of _all_ the peers known to the network.
 ///
@@ -168,6 +173,7 @@ impl PeersManager {
             }
         }
 
+        let mut persisted_basic_per_subnet = HashMap::<IpNet, usize>::default();
         for PersistedPeerInfo { record, kind, fork_id, reputation } in persisted_peers {
             // When enforce_enr_fork_id is enabled, skip persisted peers that don't have a
             // confirmed fork ID. These were likely accumulated from a different network during
@@ -183,6 +189,17 @@ impl PeersManager {
             if !ip_filter.is_allowed(&address) {
                 trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer from IP not in allowed ranges");
                 continue
+            }
+            if kind.is_basic() &&
+                !trusted_peer_ids.contains(&id) &&
+                let Some(subnet) = discovery_subnet(address)
+            {
+                let count = persisted_basic_per_subnet.entry(subnet).or_default();
+                if *count == MAX_DISCOVERED_PEERS_PER_SUBNET {
+                    trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer from full subnet");
+                    continue
+                }
+                *count += 1;
             }
             peers.entry(id).or_insert_with(|| {
                 let mut peer = Peer::with_kind(
@@ -947,8 +964,25 @@ impl PeersManager {
 
     /// Called for a newly discovered peer.
     ///
-    /// If the peer already exists, then the address, kind and `fork_id` will be updated.
+    /// If the peer already exists, then the address, kind and `fork_id` will be updated. A new
+    /// untrusted peer is skipped if its subnet already has [`MAX_DISCOVERED_PEERS_PER_SUBNET`]
+    /// basic peers.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId>) {
+        if !self.peers.contains_key(&peer_id) &&
+            !self.trusted_peer_ids.contains(&peer_id) &&
+            let Some(subnet) = discovery_subnet(addr.tcp().ip()) &&
+            self.peers
+                .values()
+                .filter(|peer| {
+                    peer.kind.is_basic() && discovery_subnet(peer.addr.tcp().ip()) == Some(subnet)
+                })
+                .take(MAX_DISCOVERED_PEERS_PER_SUBNET)
+                .count() ==
+                MAX_DISCOVERED_PEERS_PER_SUBNET
+        {
+            trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "Skipping discovered peer from full subnet");
+            return
+        }
         self.add_peer_kind(peer_id, None, addr, fork_id)
     }
 
@@ -1668,6 +1702,19 @@ fn jitter_rotation_interval(mean: Duration) -> Duration {
     let min_nanos = (mean * 3 / 5).as_nanos() as u64;
     let max_nanos = (mean * 7 / 5).as_nanos() as u64;
     Duration::from_nanos(rand::rng().random_range(min_nanos..=max_nanos))
+}
+
+/// Returns the IPv4 /24 or IPv6 /48 subnet that discovered peers are limited by, or `None` if the
+/// address is not globally routable so local networks and devnets are never limited.
+fn discovery_subnet(ip: IpAddr) -> Option<IpNet> {
+    let ip = ip.to_canonical();
+    if !is_global(&ip) {
+        return None
+    }
+    Some(match ip {
+        IpAddr::V4(ip) => Ipv4Net::new_assert(ip, 24).trunc().into(),
+        IpAddr::V6(ip) => Ipv6Net::new_assert(ip, 48).trunc().into(),
+    })
 }
 
 #[cfg(test)]
@@ -4740,6 +4787,76 @@ mod tests {
                 if peer_id == allowed.id && remote_addr == allowed.tcp_addr())
             );
             assert!(peers.queued_actions.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_discovered_peers_limited_per_subnet() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = |ip: &str| PeerAddr::from_tcp(SocketAddr::new(ip.parse().unwrap(), 30303));
+        let subnet_peers =
+            (0..MAX_DISCOVERED_PEERS_PER_SUBNET).map(|_| PeerId::random()).collect::<Vec<_>>();
+        for (i, peer_id) in subnet_peers.iter().enumerate() {
+            peers.add_peer(*peer_id, addr(&format!("1.2.3.{i}")), None);
+        }
+
+        // another host in the full /24 is skipped
+        let skipped = PeerId::random();
+        peers.add_peer(skipped, addr("1.2.3.200"), None);
+        assert!(!peers.peers.contains_key(&skipped));
+
+        // a known peer is still updated
+        peers.add_peer(subnet_peers[0], addr("1.2.3.100"), None);
+        assert_eq!(peers.peers[&subnet_peers[0]].addr, addr("1.2.3.100"));
+
+        // trusted ids and other subnets are still added
+        let trusted = PeerId::random();
+        peers.add_trusted_peer_id(trusted);
+        peers.add_peer(trusted, addr("1.2.3.201"), None);
+        let other = PeerId::random();
+        peers.add_peer(other, addr("1.2.4.1"), None);
+        assert!(peers.peers.contains_key(&trusted));
+        assert!(peers.peers.contains_key(&other));
+        assert_eq!(peers.peers.len(), MAX_DISCOVERED_PEERS_PER_SUBNET + 2);
+    }
+
+    #[tokio::test]
+    async fn test_persisted_peers_limited_per_subnet() {
+        let mut config = PeersConfig::test();
+        config.persisted_peers = (0..=MAX_DISCOVERED_PEERS_PER_SUBNET)
+            .map(|i| {
+                PersistedPeerInfo::from_node_record(NodeRecord::new(
+                    format!("1.2.3.{i}:30303").parse().unwrap(),
+                    PeerId::random(),
+                ))
+            })
+            .collect();
+        let trusted = PeerId::random();
+        config.persisted_peers.push(PersistedPeerInfo {
+            record: NodeRecord::new("1.2.3.250:30303".parse().unwrap(), trusted),
+            kind: PeerKind::Trusted,
+            fork_id: None,
+            reputation: 0,
+        });
+
+        let peers = PeersManager::new(config);
+        assert_eq!(
+            peers.peers.values().filter(|peer| peer.kind.is_basic()).count(),
+            MAX_DISCOVERED_PEERS_PER_SUBNET
+        );
+        assert!(peers.peers.contains_key(&trusted));
+    }
+
+    #[test]
+    fn test_discovery_subnet() {
+        let subnet = |ip: &str| discovery_subnet(ip.parse().unwrap());
+        let net = |net: &str| Some(net.parse::<IpNet>().unwrap());
+
+        assert_eq!(subnet("1.2.3.4"), net("1.2.3.0/24"));
+        assert_eq!(subnet("::ffff:1.2.3.4"), net("1.2.3.0/24"));
+        assert_eq!(subnet("2a01:4f8:1:ffff::1"), net("2a01:4f8:1::/48"));
+        for local in ["0.0.0.0", "127.0.0.1", "10.0.0.1", "192.168.1.1", "169.254.0.1", "::1"] {
+            assert_eq!(subnet(local), None);
         }
     }
 }

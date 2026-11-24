@@ -9481,6 +9481,7 @@ dependencies = [
  "discv5",
  "enr",
  "futures",
+ "ipnet",
  "itertools 0.14.0",
  "metrics",
  "parking_lot",
