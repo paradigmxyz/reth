@@ -173,6 +173,7 @@ jobs:
       # Every feature except `fuzz`: doc examples run on native primitives, outside a
       # simulated runtime.
       - name: Run doctests
+        shell: bash
         run: |
           features=$(cargo metadata --no-deps --format-version 1 --locked | jq -r \
             '[.packages[] | .name as $p | .features | keys[] | select(. != "fuzz" and . != "default") | "\($p)/\(.)"] | join(",")')
