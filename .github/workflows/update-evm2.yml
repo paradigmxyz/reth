@@ -149,7 +149,22 @@ jobs:
         env:
           NEW_REV: ${{ steps.update.outputs.new_rev }}
         run: |
-          # Re-resolve Cargo.lock for the new evm2 rev only.
+          # Re-resolve Cargo.lock for the new evm2 rev. When the new rev raises the minimum version
+          # of a dependency that Cargo.lock pins lower (such as alloy-eip7928 0.4.11 -> ^0.4.12),
+          # cargo refuses to move the pin: unlock just that crate and retry, so the rest of the
+          # lockfile stays as is.
+          for _ in $(seq 1 10); do
+            if out=$(CARGO_TERM_COLOR=never cargo metadata --format-version 1 2>&1 >/dev/null); then
+              break
+            fi
+            crate=$(sed -nE 's/.*failed to select a version for `([^`]+)`.*/\1/p' <<< "$out" | head -1)
+            if [ -z "$crate" ]; then
+              echo "$out"
+              exit 1
+            fi
+            echo "evm2 needs a newer $crate than Cargo.lock pins; unlocking it"
+            cargo update -p "$crate"
+          done
           cargo metadata --format-version 1 > /dev/null
           git add -A
           git commit -m "deps: bump evm2 to ${NEW_REV:0:7} ($(date -u +%Y-%m-%d))"
