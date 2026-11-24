@@ -14,7 +14,7 @@
 //!    transactions again
 
 use super::{
-    bal_prewarm_pool::BalPrewarmPool,
+    bal_prewarm_pool::{BalPrewarmPool, BuildProviderFn},
     reuse::{BalanceTracker, PoolTx, PrewarmResults, RecordingDb, RecordingHandle, SpeculativeTx},
     StateRootHintStream, StateRootUpdateStream,
 };
@@ -178,6 +178,17 @@ where
 
             let mut tx_count = 0usize;
             let state_root_hint_stream = state_root_hint_stream.as_ref();
+            // Loads the targets the EVM configuration reports for each transaction into the shared
+            // cache, in parallel with prewarm execution. The pool is only present in this mode if
+            // the configuration opts in with `ConfigureEvm::warms_tx_targets`.
+            let warm_pool = ctx.bal_prewarm_pool.as_deref().zip(ctx.saved_cache.as_ref());
+            if let Some((warm_pool, saved_cache)) = warm_pool {
+                warm_pool.begin_block(
+                    Self::warm_provider_builder(ctx),
+                    saved_cache.cache().clone(),
+                    ctx.env.txpool_snapshot.clone(),
+                );
+            }
             // Transactions to execute again when their results become stale.
             let mut refresh_txs = Vec::new();
             {
@@ -199,6 +210,15 @@ where
                         }
 
                         tx_count += 1;
+                        if let Some((warm_pool, _)) = warm_pool {
+                            ctx.evm_config.tx_warm_targets(
+                                tx.tx(),
+                                *tx.signer(),
+                                &mut |address, slots| {
+                                    warm_pool.warm_account(address, slots.iter().copied())
+                                },
+                            );
+                        }
                         if ctx.prewarm_results.is_some() {
                             refresh_txs.push((index, tx.clone()));
                         }
@@ -231,6 +251,12 @@ where
                                 state_root_hint_stream,
                             );
                         });
+                    }
+
+                    // Waits for the warm pool to load the dispatched targets, while the spawned
+                    // executions keep running.
+                    if let Some((warm_pool, _)) = warm_pool {
+                        warm_pool.end_block();
                     }
 
                     // Send withdrawal prefetch targets after all transactions dispatched
@@ -600,7 +626,7 @@ where
             let _ = stream_tx.send(());
         }
 
-        if let Some(saved_cache) = ctx.saved_cache &&
+        if let Some(saved_cache) = &ctx.saved_cache &&
             !ctx.disable_bal_batch_io &&
             let Some(pool) = ctx.bal_prewarm_pool.as_ref()
         {
@@ -616,14 +642,11 @@ where
             // This runs side-by-side with the parallel transaction execution reducing the time it
             // spends blocking on the data.
             let caches = saved_cache.cache().clone();
-            let state_provider_factory = ctx.provider.clone();
-            let build = Arc::new(move || {
-                state_provider_factory.database_provider_ro().map(|provider| {
-                    Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox
-                })
-            });
-
-            pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
+            pool.begin_block(
+                Self::warm_provider_builder(&ctx),
+                caches,
+                ctx.env.txpool_snapshot.clone(),
+            );
             let dispatch_start = Instant::now();
             for account in prefetch_bal.as_bal() {
                 pool.warm_account(account.address, account.storage_slots().map(Into::into));
@@ -637,6 +660,16 @@ where
             .expect("BAL hashed-state streaming task dropped without signaling completion");
 
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
+    }
+
+    /// Returns the function that warm pool workers use to build their state provider.
+    fn warm_provider_builder(ctx: &PrewarmContext<N, P, Evm>) -> Arc<BuildProviderFn> {
+        let state_provider_factory = ctx.provider.clone();
+        Arc::new(move || {
+            state_provider_factory
+                .database_provider_ro()
+                .map(|provider| Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox)
+        })
     }
 
     /// Executes the task.
@@ -731,8 +764,10 @@ where
     pub saved_cache: Option<SavedCache>,
     /// Provider to obtain the state
     pub provider: OverlayStateProviderFactory<P, N>,
-    /// Dedicated blocking pool for warming the BAL read-set. `Some` only on the BAL parallel
-    /// execution path; the pool is owned by the [`PayloadProcessor`](super::PayloadProcessor).
+    /// Dedicated blocking pool for warming the BAL read-set, or in transaction mode the targets of
+    /// [`ConfigureEvm::tx_warm_targets`]. `Some` only on the BAL parallel execution path, or
+    /// in transaction mode if [`ConfigureEvm::warms_tx_targets`] returns `true` and the execution
+    /// cache is enabled; the pool is owned by the [`PayloadProcessor`](super::PayloadProcessor).
     pub(crate) bal_prewarm_pool: Option<Arc<BalPrewarmPool>>,
     /// The metrics for the prewarm task.
     pub metrics: PrewarmMetrics,
