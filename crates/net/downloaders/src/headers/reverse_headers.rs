@@ -526,6 +526,10 @@ where
                     .into())
                 }
 
+                if missing_headers > 0 {
+                    self.metrics.partial_responses.increment(1);
+                }
+
                 // check if the response is the next expected
                 if highest.number() == self.next_chain_tip_block_number {
                     // is next response, validate it
@@ -648,7 +652,6 @@ where
         missing_headers: u64,
     ) {
         if missing_headers > 0 {
-            self.metrics.partial_responses.increment(1);
             self.submit_request(
                 HeadersRequest::falling(
                     (requested_block_number - received_headers).into(),
