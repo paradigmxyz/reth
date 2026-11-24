@@ -3370,7 +3370,7 @@ mod tests {
         changeset
     }
 
-    proptest! {
+    reth_concurrency::proptest! {
         #![proptest_config(ProptestConfig::with_cases(1000))]
         #[test]
         fn arena_trie_proptest(
@@ -3382,19 +3382,18 @@ mod tests {
             shuffle_seed in arb::<u64>(),
         ) {
             reth_tracing::init_test_tracing();
-            reth_concurrency::sync::Runtime::new().run(move || {
-                info!(target: TRACE_TARGET, ?shuffle_seed, "PROPTEST START");
+            info!(target: TRACE_TARGET, ?shuffle_seed, "PROPTEST START");
 
             // Filter out zero-valued entries from the initial dataset (zeros mean "absent").
             let initial: BTreeMap<B256, U256> = initial.into_iter()
-                .filter(|(_, v)| !v.is_zero())
-                .collect();
+            .filter(|(_, v)| !v.is_zero())
+            .collect();
 
             let mut rng = rand::rngs::StdRng::seed_from_u64(shuffle_seed);
 
             let changeset1 = build_changeset(&initial, changeset1_new_keys, overlap_pct, delete_pct, &mut rng);
             for (i, (k, v)) in changeset1.iter().enumerate() {
-                trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 1 entry");
+            trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 1 entry");
             }
 
             let mut harness = ArenaTrieTestHarness::new(initial);
@@ -3402,12 +3401,12 @@ mod tests {
             // Initialize the APST from the harness root node.
             let mut root_nodes = harness.root_nodes();
             let mut apst = ArenaParallelSparseTrie::default().with_parallelism_thresholds(
-                ArenaParallelismThresholds {
-                    min_dirty_leaves: 3,
-                    min_revealed_nodes: 3,
-                    min_updates: 3,
-                    min_leaves_for_prune: 3,
-                },
+            ArenaParallelismThresholds {
+                min_dirty_leaves: 3,
+                min_revealed_nodes: 3,
+                min_updates: 3,
+                min_leaves_for_prune: 3,
+            },
             );
             apst.set_root(&mut root_nodes, true).expect("set_root should succeed");
 
@@ -3422,11 +3421,10 @@ mod tests {
 
             let changeset2 = build_changeset(harness.storage(), changeset2_new_keys, overlap_pct, delete_pct, &mut rng);
             for (i, (k, v)) in changeset2.iter().enumerate() {
-                trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 2 entry");
+            trace!(target: TRACE_TARGET, ?i, ?k, ?v, "Changeset 2 entry");
             }
 
-                harness.assert_changes(&mut apst, changeset2);
-            });
+            harness.assert_changes(&mut apst, changeset2);
         }
     }
 }

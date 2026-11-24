@@ -2234,7 +2234,7 @@ mod tests {
             })
         }
 
-        proptest! {
+        reth_concurrency::proptest! {
             #![proptest_config(ProptestConfig::with_cases(4000))]
             #[test]
             /// Tests that `StorageProofCalculator` produces valid proofs for randomly generated
@@ -2249,12 +2249,9 @@ mod tests {
                     })
             ) {
                 reth_tracing::init_test_tracing();
-                reth_concurrency::sync::Runtime::new().run(move || {
-                    let harness = ProofTestHarness::new(storage);
+                let harness = ProofTestHarness::new(storage);
 
-                    harness.assert_proof(targets).expect("Proof generation failed");
-                    Ok::<(), proptest::test_runner::TestCaseError>(())
-                })?;
+                harness.assert_proof(targets).expect("Proof generation failed");
             }
 
             #[test]
@@ -2264,50 +2261,47 @@ mod tests {
                 retain_unchanged in any::<bool>(),
                 target_indices in prop::collection::vec((0usize..100, 0usize..9), 0..10),
             ) {
-                reth_concurrency::sync::Runtime::new().run(move || {
-                    let before = before.into_iter()
-                        .map(|(key, value)| (key, U256::from(value)))
-                        .collect::<BTreeMap<_, _>>();
-                    let mut after = if retain_unchanged { before.clone() } else { BTreeMap::new() };
-                    for (key, value) in changes {
-                        if value == 0 {
-                            after.remove(&key);
-                        } else {
-                            after.insert(key, U256::from(value));
-                        }
+                let before = before.into_iter()
+                    .map(|(key, value)| (key, U256::from(value)))
+                    .collect::<BTreeMap<_, _>>();
+                let mut after = if retain_unchanged { before.clone() } else { BTreeMap::new() };
+                for (key, value) in changes {
+                    if value == 0 {
+                        after.remove(&key);
+                    } else {
+                        after.insert(key, U256::from(value));
                     }
-                    let prefix_set = PrefixSetMut::from(
-                        before.keys().chain(after.keys())
-                            .filter(|key| before.get(*key) != after.get(*key))
-                            .map(Nibbles::unpack),
-                    ).freeze();
-                    let expected_root = crate::test_utils::storage_root_prehashed(
-                        after.iter().map(|(key, value)| (*key, *value)),
-                    );
-                    let mut targets = vec![ProofV2Target::new(B256::ZERO)];
-                    let keys = before.keys().chain(after.keys()).copied().collect::<Vec<_>>();
-                    if !keys.is_empty() {
-                        for (index, len) in target_indices {
-                            targets.push(ProofV2Target::new(keys[index % keys.len()])
-                                .with_parent(ProofV2TargetParent::new(len)));
-                        }
+                }
+                let prefix_set = PrefixSetMut::from(
+                    before.keys().chain(after.keys())
+                        .filter(|key| before.get(*key) != after.get(*key))
+                        .map(Nibbles::unpack),
+                ).freeze();
+                let expected_root = crate::test_utils::storage_root_prehashed(
+                    after.iter().map(|(key, value)| (*key, *value)),
+                );
+                let mut targets = vec![ProofV2Target::new(B256::ZERO)];
+                let keys = before.keys().chain(after.keys()).copied().collect::<Vec<_>>();
+                if !keys.is_empty() {
+                    for (index, len) in target_indices {
+                        targets.push(ProofV2Target::new(keys[index % keys.len()])
+                            .with_parent(ProofV2TargetParent::new(len)));
                     }
-                    let harness = TrieTestHarness::new(before);
-                    let hashed_factory = MockHashedCursorFactory::new(
-                        BTreeMap::new(),
-                        std::iter::once((harness.hashed_address(), after)).collect(),
-                    );
-                    let trie_cursor = harness.trie_cursor_factory()
-                        .storage_trie_cursor(harness.hashed_address()).unwrap();
-                    let hashed_cursor = hashed_factory
-                        .hashed_storage_cursor(harness.hashed_address()).unwrap();
-                    let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
-                        .with_prefix_set(prefix_set);
-                    let proof = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
+                }
+                let harness = TrieTestHarness::new(before);
+                let hashed_factory = MockHashedCursorFactory::new(
+                    BTreeMap::new(),
+                    std::iter::once((harness.hashed_address(), after)).collect(),
+                );
+                let trie_cursor = harness.trie_cursor_factory()
+                    .storage_trie_cursor(harness.hashed_address()).unwrap();
+                let hashed_cursor = hashed_factory
+                    .hashed_storage_cursor(harness.hashed_address()).unwrap();
+                let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
+                    .with_prefix_set(prefix_set);
+                let proof = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
 
-                    prop_assert_eq!(calculator.compute_root_hash(&proof).unwrap(), Some(expected_root));
-                    Ok::<(), proptest::test_runner::TestCaseError>(())
-                })?;
+                prop_assert_eq!(calculator.compute_root_hash(&proof).unwrap(), Some(expected_root));
             }
         }
     }
