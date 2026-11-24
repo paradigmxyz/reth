@@ -256,10 +256,6 @@ where
                         });
                     }
 
-                    // Waits for the warm pool to load the dispatched targets, while the spawned
-                    // executions keep running.
-                    drop(warm_block.take());
-
                     // Send withdrawal prefetch targets after all transactions dispatched
                     if let Some(state_root_hint_stream) = state_root_hint_stream &&
                         let Some(withdrawals) = &ctx.env.withdrawals &&
@@ -268,6 +264,10 @@ where
                         let targets = multiproof_targets_from_withdrawals(withdrawals);
                         state_root_hint_stream.on_access_hint(targets.into());
                     }
+
+                    // Waits for the warm pool to load the dispatched targets, while the spawned
+                    // executions keep running.
+                    drop(warm_block.take());
                 });
 
                 if let Some(results) = &ctx.prewarm_results {
