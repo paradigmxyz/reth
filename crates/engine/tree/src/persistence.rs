@@ -613,7 +613,7 @@ mod tests {
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
         let pruner =
             Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
-        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (_db_service_tx, db_service_rx) = mpsc::channel();
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         let mut service =
             PersistenceService::new(provider.clone(), db_service_rx, pruner, sync_metrics_tx);
@@ -639,7 +639,7 @@ mod tests {
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
         let pruner =
             Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
-        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (_db_service_tx, db_service_rx) = mpsc::channel();
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         let mut service =
             PersistenceService::new(provider.clone(), db_service_rx, pruner, sync_metrics_tx);
