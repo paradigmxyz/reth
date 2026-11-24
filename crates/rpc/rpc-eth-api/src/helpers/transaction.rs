@@ -673,7 +673,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     // included. This does not increase the effective price the sender pays:
                     // `max_fee_per_gas` is only an upper bound and the sender still pays
                     // `base_fee + min(tip, max_fee_per_gas - base_fee)`.
-                    request.as_mut().set_max_fee_per_gas(base_fee as u128 * 2 + tip);
+                    let max_fee = (u128::from(base_fee) * 2).checked_add(tip).ok_or_else(|| {
+                        EthApiError::InvalidParams("maxFeePerGas overflow".into())
+                    })?;
+                    request.as_mut().set_max_fee_per_gas(max_fee);
                 }
             }
 

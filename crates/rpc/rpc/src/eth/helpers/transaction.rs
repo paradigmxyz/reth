@@ -711,6 +711,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_fill_transaction_fee_cap_boundaries() {
+        for (base_fee, tip, max_fee, expected_fee) in [
+            (0, u128::MAX, None, Some(u128::MAX)),
+            (1, u128::MAX - 2, None, Some(u128::MAX)),
+            (1, u128::MAX - 1, None, None),
+            (1, u128::MAX, None, None),
+            (u64::MAX, u128::MAX - 2 * u128::from(u64::MAX), None, Some(u128::MAX)),
+            (u64::MAX, u128::MAX, None, None),
+            (1, u128::MAX, Some(u128::MAX), Some(u128::MAX)),
+        ] {
+            let eth_api = mock_eth_api(Default::default());
+            eth_api.provider().add_block(
+                B256::repeat_byte(1),
+                Block::new(
+                    Header { number: 1, base_fee_per_gas: Some(base_fee), ..Default::default() },
+                    Default::default(),
+                ),
+            );
+            let request = TransactionRequest {
+                to: Some(Address::random().into()),
+                nonce: Some(0),
+                gas: Some(21_000),
+                max_priority_fee_per_gas: Some(tip),
+                max_fee_per_gas: max_fee,
+                ..Default::default()
+            };
+            let result = eth_api.fill_transaction(request).await;
+            if let Some(expected_fee) = expected_fee {
+                let filled = result.unwrap();
+                assert_eq!(filled.tx.max_fee_per_gas(), expected_fee);
+                assert_eq!(filled.tx.max_priority_fee_per_gas(), Some(tip));
+                assert_eq!(filled.raw, Bytes::from(filled.tx.encoded_2718()));
+            } else {
+                let error = result.unwrap_err().into_rpc_err();
+                assert_eq!(error.code(), jsonrpsee::types::error::INVALID_PARAMS_CODE);
+                assert_eq!(error.message(), "maxFeePerGas overflow");
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn test_fill_transaction_eip4844_blob_fee() {
         let address = Address::random();
         let accounts = AddressMap::from_iter([(
