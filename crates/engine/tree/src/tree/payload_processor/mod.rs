@@ -157,7 +157,8 @@ where
     }
 
     /// Returns the dedicated BAL read-set prewarm pool, spawning its blocking worker threads on
-    /// first use (only the BAL parallel execution path calls this).
+    /// first use. Only the BAL parallel execution path, and transaction prewarming for an EVM
+    /// configuration whose `ConfigureEvm::warms_tx_targets` returns `true`, call this.
     fn bal_prewarm_pool(&self) -> Arc<bal_prewarm_pool::BalPrewarmPool> {
         self.bal_prewarm_pool
             .get_or_init(|| bal_prewarm_pool::BalPrewarmPool::new(self.bal_prewarm_threads))
@@ -460,6 +461,12 @@ where
             self.evm_config.reuses_prewarm_results())
         .then(|| Arc::new(PrewarmResults::new(env.transaction_count)));
 
+        // Transaction mode warms the targets the EVM configuration reports for each transaction
+        // into the execution cache, if it opts in and the cache is enabled.
+        let warms_tx_targets = matches!(mode, PrewarmMode::Transactions { .. }) &&
+            saved_cache.is_some() &&
+            self.evm_config.warms_tx_targets();
+
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
@@ -467,7 +474,8 @@ where
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
             provider: state_provider_factory,
-            bal_prewarm_pool: parallel_bal_execution.then(|| self.bal_prewarm_pool()),
+            bal_prewarm_pool: (parallel_bal_execution || warms_tx_targets)
+                .then(|| self.bal_prewarm_pool()),
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
             cache_state_metrics: self.cache_state_metrics.clone(),
