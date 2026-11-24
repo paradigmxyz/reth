@@ -307,8 +307,9 @@ impl MethodResponse {
 
     /// Create a response whose result is produced in parts by `stream`.
     ///
-    /// Waits for the first part, so a result that fails before it produced anything is answered
-    /// with a regular JSON-RPC error.
+    /// Buffers the parts until they reach [`STREAM_THRESHOLD`] bytes, so a result that finishes or
+    /// fails before that is answered as a whole response or a regular JSON-RPC error. Only a larger
+    /// result is streamed.
     pub(crate) async fn stream(
         id: Id<'static>,
         stream: ResponseStream,
@@ -337,19 +338,31 @@ impl MethodResponse {
             max_response_size,
             done: false,
         };
-        let first = match stream.next().await {
-            // A producer that finished without a part yields the closing brace and is done, but a
-            // result needs at least one part to be a JSON value.
-            Some(Ok(first)) if !stream.done => first,
-            Some(Err(err)) => return Self::bounded_error(stream.id, err, max_response_size),
-            _ => return Self::error(stream.id, ErrorCode::InternalError),
-        };
-        stream.head = Bytes::from([json.as_bytes(), &first].concat());
+        let mut head = json.clone().into_bytes();
+        while !stream.done && head.len() < STREAM_THRESHOLD {
+            match stream.next().await {
+                // A producer that finished without a part yields only the closing brace, but a
+                // result needs at least one part to be a JSON value.
+                Some(Ok(_)) if stream.done && head.len() == json.len() => {
+                    return Self::error(stream.id, ErrorCode::InternalError)
+                }
+                Some(Ok(part)) => head.extend_from_slice(&part),
+                Some(Err(err)) => return Self::bounded_error(stream.id, err, max_response_size),
+                None => break,
+            }
+        }
+        let done = stream.done;
+        stream.head = head.into();
 
-        Self {
+        let response = Self {
             json,
             success_or_error: MethodResponseResult::Success,
             kind: ResponseKind::Stream(Box::new(stream)),
+        };
+        if done {
+            response.buffer().await
+        } else {
+            response
         }
     }
 }
@@ -394,11 +407,12 @@ impl Stream for StreamedJson {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = &mut *self;
-        if this.done {
-            return Poll::Ready(None)
-        }
+        // The head can hold the whole response, see `MethodResponse::stream`.
         if !this.head.is_empty() {
             return Poll::Ready(Some(Ok(std::mem::take(&mut this.head))))
+        }
+        if this.done {
+            return Poll::Ready(None)
         }
 
         loop {
@@ -652,6 +666,9 @@ impl ResponseSizeHint {
 /// call of the method, from any connection, reserve as much.
 const MAX_RESPONSE_SIZE_HINT: usize = 8 * 1024 * 1024;
 
+/// A streamed result is buffered up to this many bytes, see [`MethodResponse::stream`].
+const STREAM_THRESHOLD: usize = 1024 * 1024;
+
 /// A response is shrunk only if more than half of its buffer, and more than this many bytes, is
 /// unused. Smaller buffers aren't worth reallocating.
 const RESPONSE_SHRINK_THRESHOLD: usize = 16 * 1024;
@@ -730,13 +747,14 @@ mod tests {
         let custom = ErrorObject::owned(1, "custom", None::<()>);
         let failed = r#"{"jsonrpc":"2.0","id":1,"error":{"code":1,"message":"custom"}}"#;
 
+        // A small result is answered as a whole, so `into_json` doesn't panic.
         let rp = stream(&["[1", ",2", "]"], Ok(()), usize::MAX).await;
-        assert_eq!(rp.buffer().await.into_json(), ok);
+        assert_eq!(rp.into_json(), ok);
         // Fails before the first part, after it, and without any part.
         let rp = stream(&[], Err(custom.clone()), usize::MAX).await;
         assert_eq!(rp.into_json(), failed);
         let rp = stream(&["[1"], Err(custom.clone()), usize::MAX).await;
-        assert_eq!(rp.buffer().await.into_json(), failed);
+        assert_eq!(rp.into_json(), failed);
         let rp = stream(&[], Ok(()), usize::MAX).await;
         assert_eq!(rp.as_error_code(), Some(ErrorCode::InternalError.code()));
         // More parts than tokio's cooperative budget lets a task receive in one poll.
@@ -744,10 +762,12 @@ mod tests {
         let json = stream(parts, Ok(()), usize::MAX).await.buffer().await.into_json();
         assert_eq!(json, format!(r#"{{"jsonrpc":"2.0","id":1,"result":[0{}]}}"#, ",0".repeat(300)));
 
-        // Sent in parts, a failure after the first part ends the stream with the error.
-        let rp = stream(&["[1"], Err(custom.clone()), usize::MAX).await;
+        // Past the buffered bytes, the result is streamed and a failure ends it with the error.
+        let big: &'static str = String::leak(format!("[{}", "1".repeat(STREAM_THRESHOLD)));
+        let rp = stream(Vec::leak(vec![big]), Err(custom.clone()), usize::MAX).await;
         let ResponseBody::Stream(mut body) = rp.into_body() else { panic!("not a stream") };
-        assert_eq!(body.next().await.unwrap().unwrap(), r#"{"jsonrpc":"2.0","id":1,"result":[1"#);
+        let head = body.next().await.unwrap().unwrap();
+        assert_eq!(head, format!(r#"{{"jsonrpc":"2.0","id":1,"result":{big}"#));
         assert_eq!(body.next().await.unwrap().unwrap_err(), custom);
         assert!(body.next().await.is_none());
 
@@ -773,8 +793,7 @@ mod tests {
             Ok::<_, ErrorObjectOwned>(())
         });
         let rp = MethodResponse::stream(Id::Number(1), stream, ok.len() - 2).await;
-        assert_eq!(rp.as_error_code(), None);
-        assert_eq!(rp.buffer().await.as_error_code(), Some(OVERSIZED_RESPONSE_CODE));
+        assert_eq!(rp.as_error_code(), Some(OVERSIZED_RESPONSE_CODE));
         assert_eq!(sent_rx.recv().unwrap(), [true, false, false]);
         // So is a part sent before the producer returns its future.
         let stream = ResponseStream::new(|tx| {
@@ -820,7 +839,7 @@ mod tests {
         let (closed_tx, closed_rx) = std::sync::mpsc::channel();
         let stream = ResponseStream::new(move |tx| {
             std::thread::spawn(move || {
-                while tx.send(Bytes::from_static(b"0")).is_ok() {
+                while tx.send(Bytes::from(vec![b'0'; STREAM_THRESHOLD])).is_ok() {
                     std::thread::sleep(std::time::Duration::from_millis(1));
                 }
                 closed_tx.send(()).unwrap();

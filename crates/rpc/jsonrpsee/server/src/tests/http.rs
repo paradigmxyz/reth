@@ -1038,8 +1038,13 @@ async fn rpc_middleware_is_built_once_per_connection() {
     handle.stopped().with_default_timeout().await.unwrap();
 }
 
-/// Starts a server with `stream_parts`, which sends `[1`, waits for `release`, and then sends
-/// `,2]`, and `stream_fails`, which sends `[1` and then fails.
+/// First part of the streaming methods, `[` and a number past the 1 MiB that the server buffers.
+fn first_part() -> String {
+    format!("[{}", "1".repeat(1024 * 1024))
+}
+
+/// Starts a server with `stream_parts`, which sends [`first_part`], waits for `release`, and then
+/// sends `,2]`, and `stream_fails`, which sends [`first_part`] and then fails.
 async fn streaming_server(release: Arc<Notify>) -> (SocketAddr, ServerHandle) {
     let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
     let addr = server.local_addr().unwrap();
@@ -1047,7 +1052,7 @@ async fn streaming_server(release: Arc<Notify>) -> (SocketAddr, ServerHandle) {
     module
         .register_streaming_method("stream_parts", |_, release| async move {
             RpcResult::Ok(ResponseStream::new(move |sink| async move {
-                sink.send("[1".into()).map_err(|_| ErrorCode::InternalError)?;
+                sink.send(first_part().into()).map_err(|_| ErrorCode::InternalError)?;
                 release.notified().await;
                 sink.send(",2]".into()).map_err(|_| ErrorCode::InternalError)
             }))
@@ -1056,7 +1061,7 @@ async fn streaming_server(release: Arc<Notify>) -> (SocketAddr, ServerHandle) {
     module
         .register_streaming_method("stream_fails", |_, _| async move {
             RpcResult::Ok(ResponseStream::new(move |sink| async move {
-                sink.send("[1".into()).map_err(|_| ErrorCode::InternalError)?;
+                sink.send(first_part().into()).map_err(|_| ErrorCode::InternalError)?;
                 Err(ErrorCode::InternalError)
             }))
         })
@@ -1108,7 +1113,7 @@ async fn http_streaming_method_sends_parts_as_produced() {
     let chunks: Vec<_> = body.split("\r\n").collect();
     // Chunks alternate between their size and their data, and the body ends with an empty chunk.
     let data: String = chunks.iter().skip(1).step_by(2).copied().collect();
-    assert_eq!(data, r#"{"jsonrpc":"2.0","id":1,"result":[1,2]}"#);
+    assert_eq!(data, format!(r#"{{"jsonrpc":"2.0","id":1,"result":{},2]}}"#, first_part()));
     assert!(body.ends_with("\r\n0\r\n\r\n"), "{body}");
 
     handle.stop().unwrap();

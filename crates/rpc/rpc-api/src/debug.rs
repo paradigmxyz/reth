@@ -80,8 +80,9 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// the block that is already present in the database. For the second parameter see
     /// [`GethDebugTracingOptions`].
     ///
-    /// The result is a list of [`TraceResult`]s, one per transaction. HTTP sends each one as soon
-    /// as its transaction is traced, so it aborts the response if a later transaction fails.
+    /// The result is a list of [`TraceResult`]s, one per transaction. If the list exceeds 1 MiB,
+    /// HTTP sends each one as soon as its transaction is traced, so it aborts the response if a
+    /// later transaction fails.
     #[method(name = "traceBlockByHash", streaming)]
     async fn debug_trace_block_by_hash(
         &self,
@@ -93,8 +94,9 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// [`BlockNumberOrTag`] and will replay the block that is already present in the database.
     /// For the second parameter see [`GethDebugTracingOptions`].
     ///
-    /// The result is a list of [`TraceResult`]s, one per transaction. HTTP sends each one as soon
-    /// as its transaction is traced, so it aborts the response if a later transaction fails.
+    /// The result is a list of [`TraceResult`]s, one per transaction. If the list exceeds 1 MiB,
+    /// HTTP sends each one as soon as its transaction is traced, so it aborts the response if a
+    /// later transaction fails.
     #[method(name = "traceBlockByNumber", streaming)]
     async fn debug_trace_block_by_number(
         &self,

@@ -506,11 +506,13 @@ impl<Context: Send + Sync + 'static> RpcModule<Context> {
     /// Register a new asynchronous RPC method whose result is sent in parts while it is produced.
     ///
     /// The callback returns a [`ResponseStream`] whose producer the transport polls while it sends
-    /// the response. HTTP sends each part as soon as it is produced. WebSocket, IPC, in-process
-    /// calls and batch entries wait for the whole result, see [`MethodResponse::buffer`].
+    /// the response. The first 1 MiB of the result is buffered, so a smaller result is answered as
+    /// a whole. After that, HTTP sends each part as soon as it is produced. WebSocket, IPC,
+    /// in-process calls and batch entries wait for the whole result, see
+    /// [`MethodResponse::buffer`].
     ///
     /// The response size limit applies to the whole result. A result that fails or exceeds the
-    /// limit before its first part is answered with a JSON-RPC error. Once HTTP has sent a part,
+    /// limit within its first 1 MiB is answered with a JSON-RPC error. Once HTTP has sent a part,
     /// it aborts the response instead.
     pub fn register_streaming_method<Fun, Fut>(
         &mut self,
