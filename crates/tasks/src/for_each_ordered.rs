@@ -6,6 +6,9 @@ use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use reth_concurrency::sync::channel;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+#[cfg(not(feature = "fuzz"))]
+use reth_concurrency::sync::parking_lot;
+
 /// Extension trait for [`IndexedParallelIterator`]
 /// that streams results to a sequential consumer in index order.
 pub trait ForEachOrdered: IndexedParallelIterator {

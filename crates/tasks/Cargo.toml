@@ -25,7 +25,6 @@ metrics.workspace = true
 
 # misc
 dashmap.workspace = true
-parking_lot.workspace = true
 shuttle = { workspace = true, optional = true }
 thread-priority.workspace = true
 tracing.workspace = true
