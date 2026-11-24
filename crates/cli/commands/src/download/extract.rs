@@ -20,6 +20,7 @@ use std::{
     mem,
     ops::Range,
     os::unix::fs::PermissionsExt,
+    panic::{self, AssertUnwindSafe},
     path::{Component, Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -148,8 +149,8 @@ pub(crate) fn extract_archive_raw<R: Read>(
 /// thread through a bounded queue of decoded buffers, so a large archive is not limited by one
 /// core doing both. The whole compressed stream is decoded, including bytes after the tar end
 /// marker, so the compression checksum is validated. `on_unpack_error` runs as soon as
-/// unpacking fails, before this waits for the decoder, so the caller can stop whatever feeds
-/// `reader`.
+/// unpacking fails or panics, before this waits for the decoder, so the caller can stop whatever
+/// feeds `reader`. A panic resumes once the decoder is joined.
 pub(crate) fn extract_archive_hashed<R: Read + Send>(
     reader: R,
     format: CompressionFormat,
@@ -163,24 +164,28 @@ pub(crate) fn extract_archive_hashed<R: Read + Send>(
     let (recycled, reusable) = sync_channel(DECODED_CHUNK_QUEUE_LEN);
     thread::scope(|scope| {
         let decoder = scope.spawn(move || decode_archive(reader, format, &sender, &reusable));
-        let hasher = RefCell::new(FileHasher::spawn(outputs));
         let mut chunks = DecodedChunks { chunks, recycled, chunk: Vec::new(), offset: 0 };
-        let unpacked = unpack_archive(
-            Archive::new(FileHashTee { inner: &mut chunks, position: 0, hasher: &hasher }),
-            target_dir,
-            static_files_dir,
-            progress,
-            Some(&hasher),
-        )
-        .and_then(|()| Ok(io::copy(&mut chunks, &mut io::sink()).map(drop)?));
-        if unpacked.is_err() {
+        // A panic is caught here, not only by the caller, so the input is stopped before the
+        // decoder, which may be waiting on it, is joined.
+        let unpacked = panic::catch_unwind(AssertUnwindSafe(|| -> Result<FileHasher> {
+            let hasher = RefCell::new(FileHasher::spawn(outputs));
+            unpack_archive(
+                Archive::new(FileHashTee { inner: &mut chunks, position: 0, hasher: &hasher }),
+                target_dir,
+                static_files_dir,
+                progress,
+                Some(&hasher),
+            )?;
+            io::copy(&mut chunks, &mut io::sink())?;
+            Ok(hasher.into_inner())
+        }));
+        if !matches!(unpacked, Ok(Ok(_))) {
             on_unpack_error();
         }
         // Stops a decoder that is still sending.
         drop(chunks);
         decoder.join().map_err(|_| eyre::eyre!("Archive decoder thread panicked"))?;
-        unpacked?;
-        hasher.into_inner().join()
+        unpacked.unwrap_or_else(|payload| panic::resume_unwind(payload))?.join()
     })
 }
 
@@ -537,9 +542,12 @@ fn unpack_static_file<R: Read>(
 }
 
 /// Returns whether `entry` holds its data as one sequential run of bytes.
+///
+/// Like `tar`, a non-USTAR entry whose path ends in `/` is a directory whatever its type flag.
 fn is_regular_file<R: Read>(entry: &tar::Entry<'_, R>) -> bool {
     let entry_type = entry.header().entry_type();
-    entry_type.is_file() || entry_type.is_contiguous()
+    (entry_type.is_file() || entry_type.is_contiguous()) &&
+        !(entry.header().as_ustar().is_none() && entry.path_bytes().ends_with(b"/"))
 }
 
 /// Writes a regular file entry to `dest` in large blocks.
@@ -1286,6 +1294,7 @@ mod tests {
         let tar = zstd::encode_all(archive.into_inner().unwrap().as_slice(), 0).unwrap();
 
         let target = tempfile::tempdir().unwrap();
+        let mut stopped_input = false;
         extract_archive_hashed(
             tar.as_slice(),
             CompressionFormat::Zstd,
@@ -1293,9 +1302,10 @@ mod tests {
             None,
             HashSet::from([target.path().join("db/data")]),
             None,
-            || {},
+            || stopped_input = true,
         )
         .unwrap();
+        assert!(!stopped_input);
         let path = target.path().join("db/data");
         assert_eq!(fs::read(&path).unwrap(), data);
         let metadata = std::fs::metadata(&path).unwrap();
@@ -1376,6 +1386,27 @@ mod tests {
             || {},
         )
         .unwrap();
+        assert_eq!(fs::read(target.path().join("db/data")).unwrap(), b"data");
+    }
+
+    #[test]
+    fn legacy_directory_entry_is_extracted_as_directory() {
+        let mut archive = tar::Builder::new(Vec::new());
+        for (path, data) in [("db/", b"".as_slice()), ("db/data", b"data".as_slice())] {
+            let mut header = tar::Header::new_old();
+            header.set_path(path).unwrap();
+            header.set_entry_type(tar::EntryType::Regular);
+            header.set_size(data.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            archive.append(&header, data).unwrap();
+        }
+        let tar = zstd::encode_all(archive.into_inner().unwrap().as_slice(), 0).unwrap();
+
+        let target = tempfile::tempdir().unwrap();
+        extract_archive_raw(tar.as_slice(), CompressionFormat::Zstd, target.path(), None, None)
+            .unwrap();
+        assert!(target.path().join("db").is_dir());
         assert_eq!(fs::read(target.path().join("db/data")).unwrap(), b"data");
     }
 
