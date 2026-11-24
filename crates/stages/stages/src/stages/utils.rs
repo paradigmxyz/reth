@@ -1,5 +1,5 @@
 //! Utils for `stages`.
-use alloy_primitives::{map::HashMap, Address, BlockNumber, Bytes, TxNumber, B256};
+use alloy_primitives::{map::HashMap, Address, BlockNumber, TxNumber, B256};
 use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -49,7 +49,7 @@ pub(crate) fn collect_history_indices<Provider, CS, H, P>(
     sharded_key_factory: impl Fn(P, BlockNumber) -> H::Key,
     partial_key_factory: impl Fn((CS::Key, CS::Value)) -> (u64, P),
     etl_config: &EtlConfig,
-) -> Result<Collector<H::Key, Bytes>, StageError>
+) -> Result<Collector<H::Key, H::Value>, StageError>
 where
     Provider: DBProvider,
     CS: Table,
@@ -81,7 +81,7 @@ pub(crate) fn collect_account_history_indices<Provider>(
     provider: &Provider,
     range: impl RangeBounds<BlockNumber>,
     etl_config: &EtlConfig,
-) -> Result<Collector<ShardedKey<Address>, Bytes>, StageError>
+) -> Result<Collector<ShardedKey<Address>, BlockNumberList>, StageError>
 where
     Provider: DBProvider + ChangeSetReader + StaticFileProviderFactory,
 {
@@ -116,7 +116,7 @@ pub(crate) fn collect_storage_history_indices<Provider>(
     provider: &Provider,
     range: impl RangeBounds<BlockNumber>,
     etl_config: &EtlConfig,
-) -> Result<Collector<StorageShardedKey, Bytes>, StageError>
+) -> Result<Collector<StorageShardedKey, BlockNumberList>, StageError>
 where
     Provider: DBProvider + StorageChangeSetReader + StaticFileProviderFactory,
 {
@@ -160,7 +160,7 @@ where
 /// Uses `Option<Address>` instead of `Address::default()` as the sentinel to avoid
 /// incorrectly treating `Address::ZERO` as "no previous address".
 pub(crate) fn load_account_history<N, CURSOR>(
-    mut collector: Collector<ShardedKey<Address>, Bytes>,
+    mut collector: Collector<ShardedKey<Address>, BlockNumberList>,
     append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
@@ -179,7 +179,7 @@ where
     for (index, element) in collector.iter()?.enumerate() {
         let (k, v) = element?;
         let sharded_key = ShardedKey::<Address>::decode_owned(k)?;
-        let new_list = Bytes::decompress_owned(v)?;
+        let new_list = BlockNumberList::decompress_owned(v)?;
 
         if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
             info!(target: "sync::stages::index_history", progress = %format_args!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
@@ -207,7 +207,7 @@ where
         }
 
         // Append new block numbers to the accumulator.
-        current_list.extend(decode_block_numbers(&new_list));
+        current_list.extend(new_list.iter());
 
         // Flush complete shards, keeping the last (partial) shard buffered.
         flush_account_history_shards_partial(address, &mut current_list, append_only, writer)?;
@@ -368,7 +368,7 @@ where
 /// Uses `Option<(Address, B256)>` instead of default values as the sentinel to avoid
 /// incorrectly treating `(Address::ZERO, B256::ZERO)` as "no previous key".
 pub(crate) fn load_storage_history<N, CURSOR>(
-    mut collector: Collector<StorageShardedKey, Bytes>,
+    mut collector: Collector<StorageShardedKey, BlockNumberList>,
     append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
@@ -387,7 +387,7 @@ where
     for (index, element) in collector.iter()?.enumerate() {
         let (k, v) = element?;
         let sharded_key = StorageShardedKey::decode_owned(k)?;
-        let new_list = Bytes::decompress_owned(v)?;
+        let new_list = BlockNumberList::decompress_owned(v)?;
 
         if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
             info!(target: "sync::stages::index_history", progress = %format_args!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
@@ -422,7 +422,7 @@ where
         }
 
         // Append new block numbers to the accumulator.
-        current_list.extend(decode_block_numbers(&new_list));
+        current_list.extend(new_list.iter());
 
         // Flush complete shards, keeping the last (partial) shard buffered.
         flush_storage_history_shards_partial(
@@ -551,12 +551,8 @@ where
 /// whichever comes first. The size bound keeps memory independent of the number of distinct keys
 /// in the block range. Entries move only at block boundaries, so two collector entries of one key
 /// never end at the same block.
-///
-/// Collector values hold the block numbers as little-endian `u64`s, see [`decode_block_numbers`].
-/// The ETL files are private and temporary, so the roaring bitmap of a shard is built only once,
-/// when the shard is written to the history table.
 struct HistoryIndexCache<P, K: Key, F> {
-    collector: Collector<K, Bytes>,
+    collector: Collector<K, BlockNumberList>,
     /// Creates the collector key from a partial key and its highest block number.
     sharded_key: F,
     indices: HashMap<P, Vec<u64>>,
@@ -619,8 +615,8 @@ where
     fn flush(&mut self) -> Result<(), StageError> {
         for (key, indices) in self.indices.drain() {
             let last = *indices.last().expect("indices is non-empty");
-            let value = indices.iter().flat_map(|block| block.to_le_bytes()).collect::<Vec<_>>();
-            self.collector.insert((self.sharded_key)(key, last), value.into())?;
+            self.collector
+                .insert((self.sharded_key)(key, last), BlockNumberList::new_pre_sorted(indices))?;
         }
         self.size_bytes = 0;
         self.blocks = 0;
@@ -628,15 +624,10 @@ where
     }
 
     /// Flushes the remaining indices and returns the collector.
-    fn finish(mut self) -> Result<Collector<K, Bytes>, StageError> {
+    fn finish(mut self) -> Result<Collector<K, BlockNumberList>, StageError> {
         self.flush()?;
         Ok(self.collector)
     }
-}
-
-/// Decodes the little-endian block numbers of a [`HistoryIndexCache`] collector value.
-fn decode_block_numbers(value: &[u8]) -> impl Iterator<Item = u64> + '_ {
-    value.as_chunks().0.iter().map(|chunk| u64::from_le_bytes(*chunk))
 }
 
 #[cfg(test)]
@@ -959,8 +950,8 @@ mod tests {
         for entry in collector.iter().unwrap() {
             let (key, value) = entry.unwrap();
             let key = ShardedKey::<Address>::decode_owned(key).unwrap();
-            let blocks = Bytes::decompress_owned(value).unwrap();
-            let blocks = decode_block_numbers(&blocks).collect::<Vec<_>>();
+            let blocks =
+                BlockNumberList::decompress_owned(value).unwrap().iter().collect::<Vec<_>>();
             assert_eq!(key.highest_block_number, *blocks.last().unwrap());
             collected.entry(key.key).or_default().extend(blocks);
         }
