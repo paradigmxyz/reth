@@ -11064,6 +11064,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "reth-chainspec",
+ "reth-concurrency",
  "reth-db",
  "reth-db-api",
  "reth-execution-errors",
