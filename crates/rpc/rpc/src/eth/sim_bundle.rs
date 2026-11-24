@@ -646,7 +646,8 @@ mod tests {
             Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
-        let provider = BlockchainProvider::new_without_writer(factory).unwrap();
+        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer().unwrap();
+        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
 
         let eth_api = EthApiBuilder::new(
             provider.clone(),
@@ -945,7 +946,8 @@ mod tests {
             Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
-        let provider = BlockchainProvider::new_without_writer(factory).unwrap();
+        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer().unwrap();
+        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
         let api = |gas_cap: u64| {
             let eth_api = EthApiBuilder::new(
                 provider.clone(),
@@ -1018,7 +1020,8 @@ mod tests {
             Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
-        let provider = BlockchainProvider::new_without_writer(factory).unwrap();
+        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer().unwrap();
+        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
         let eth_api = EthApiBuilder::new(
             provider.clone(),
             testing_pool(),

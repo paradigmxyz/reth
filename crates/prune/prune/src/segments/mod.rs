@@ -296,7 +296,8 @@ mod tests {
         provider_rw.commit().expect("failed to commit");
 
         // Create a new provider
-        let provider = BlockchainProvider::new_without_writer(factory).unwrap();
+        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer().unwrap();
+        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
 
         // Since there are no transactions, expected None
         let range = input.get_next_tx_num_range(&provider).expect("Expected range");
@@ -334,7 +335,8 @@ mod tests {
         provider_rw.commit().expect("failed to commit");
 
         // Create a new provider
-        let provider = BlockchainProvider::new_without_writer(factory).unwrap();
+        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer().unwrap();
+        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
 
         // Get the next tx number range
         let range = input.get_next_tx_num_range(&provider).expect("Expected range").unwrap();
@@ -380,7 +382,8 @@ mod tests {
         provider_rw.commit().expect("failed to commit");
 
         // Create a new provider
-        let provider = BlockchainProvider::new_without_writer(factory).unwrap();
+        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer().unwrap();
+        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
 
         // Fetch the range and check if it is correct
         let range = input.get_next_tx_num_range(&provider).expect("Expected range").unwrap();
@@ -416,7 +419,8 @@ mod tests {
         provider_rw.commit().expect("failed to commit");
 
         // Create a new provider
-        let provider = BlockchainProvider::new_without_writer(factory).unwrap();
+        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer().unwrap();
+        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
 
         // Get the last tx number
         // Calculate the total number of transactions

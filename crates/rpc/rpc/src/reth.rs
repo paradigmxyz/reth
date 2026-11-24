@@ -532,8 +532,9 @@ mod tests {
             )
             .unwrap();
         provider_rw.commit().unwrap();
+        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer().unwrap();
         let api = RethApi::new(
-            BlockchainProvider::new_without_writer(factory).unwrap(),
+            BlockchainProvider::new(factory, canonical_in_memory_state),
             (),
             BlockingTaskGuard::new(1),
             Runtime::test(),

@@ -603,7 +603,10 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider::new_without_writer(provider_factory.clone())?;
+        let provider = BlockchainProvider::new(
+            provider_factory.clone(),
+            provider_factory.canonical_in_memory_state_without_writer()?,
+        );
 
         let node_head_block = random_block(
             &mut rng,
@@ -775,7 +778,9 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider::new_without_writer(provider_factory)?;
+        let canonical_in_memory_state =
+            provider_factory.canonical_in_memory_state_without_writer()?;
+        let provider = BlockchainProvider::new(provider_factory, canonical_in_memory_state);
 
         let node_head = BlockNumHash { number: genesis_block.number, hash: genesis_hash };
         let exex_head = ExExHead { block: node_head };
@@ -829,7 +834,9 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider::new_without_writer(provider_factory)?;
+        let canonical_in_memory_state =
+            provider_factory.canonical_in_memory_state_without_writer()?;
+        let provider = BlockchainProvider::new(provider_factory, canonical_in_memory_state);
 
         let node_head_block = random_block(
             &mut rng,
@@ -920,7 +927,9 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider::new_without_writer(provider_factory)?;
+        let canonical_in_memory_state =
+            provider_factory.canonical_in_memory_state_without_writer()?;
+        let provider = BlockchainProvider::new(provider_factory, canonical_in_memory_state);
 
         let exex_head_block = random_block(
             &mut rng,
@@ -1005,7 +1014,10 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider::new_without_writer(provider_factory.clone())?;
+        let provider = BlockchainProvider::new(
+            provider_factory.clone(),
+            provider_factory.canonical_in_memory_state_without_writer()?,
+        );
 
         // Insert block 1 into the DB so there's something to backfill
         let node_head_block = random_block(
