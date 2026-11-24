@@ -657,9 +657,9 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         if source.is_pending() {
             return Ok(self
                 .canonical_in_memory_state
-                .pending_block()
-                .filter(|b| b.hash() == hash)
-                .map(|b| b.into_block()))
+                .pending_state()
+                .filter(|state| state.hash() == hash)
+                .map(|state| state.block_ref().recovered_block().clone_block()))
         }
 
         Ok(None)
