@@ -1,17 +1,17 @@
 //! Operations on the lower tries that can be dispatched to separate workers.
 
 use super::{
-    branch_data, branch_data_mut, branch_idx,
+    blinded_proof_parent, branch_data, branch_data_mut, branch_idx, split_needs_proof,
     trie::{prune_candidate, release_subtree},
     ArenaRequiredProof, ArenaSparseNode, ArenaSparseNodeState, ArenaTrieBuffers, BranchChild,
-    BranchChildIdx, NodeArena, NodeIndex, PersistentArenaParallelSparseTrie, RemoveLeafResult,
-    SeekResult, TRACE_TARGET,
+    BranchChildIdx, ExtensionChild, NodeArena, NodeIndex, PersistentArenaParallelSparseTrie,
+    RemoveLeafResult, SeekResult, TRACE_TARGET,
 };
 use crate::{arena::take_extension_child, LeafUpdate, SparseTrieUpdates, TrieNodeEpoch};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::B256;
 use alloy_trie::TrieMask;
-use reth_trie_common::{Nibbles, ProofTrieNode, ProofV2TargetParent, RlpNode};
+use reth_trie_common::{Nibbles, ProofTrieNode, RlpNode};
 use tracing::{instrument, trace};
 
 #[cfg(reth_sparse_trie_coverage)]
@@ -297,7 +297,17 @@ impl ArenaSparseSubtrie {
             let find_result = self.buffers.cursor.seek(&mut self.arena, full_path);
 
             // If the path hits a blinded node, request a proof regardless of update type.
-            if matches!(find_result, SeekResult::Blinded) {
+            if matches!(find_result, SeekResult::Blinded) ||
+                split_needs_proof(&self.arena, &self.buffers.cursor, &find_result, update)
+            {
+                let proof_key = if matches!(find_result, SeekResult::Diverged) {
+                    PersistentArenaParallelSparseTrie::nibbles_to_padded_b256(
+                        &self.buffers.cursor.head_logical_branch_path(&self.arena),
+                    )
+                } else {
+                    key
+                };
+                #[cfg(reth_sparse_trie_coverage)]
                 let logical_len = self.buffers.cursor.head_logical_branch_path_len(&self.arena);
                 #[cfg(reth_sparse_trie_coverage)]
                 observe_proof_target(
@@ -308,7 +318,10 @@ impl ArenaSparseSubtrie {
                 );
                 self.required_proofs.push((
                     idx,
-                    ArenaRequiredProof { key, parent: ProofV2TargetParent::new(logical_len) },
+                    ArenaRequiredProof {
+                        key: proof_key,
+                        parent: blinded_proof_parent(&self.arena, &self.buffers.cursor),
+                    },
                 ));
                 continue;
             }
@@ -377,10 +390,14 @@ impl ArenaSparseSubtrie {
 
         let mut node_idx = 0;
         while node_idx < nodes.len() {
-            let extension_child = take_extension_child(nodes, node_idx);
+            let find_result = self.buffers.cursor.seek(&mut self.arena, &nodes[node_idx].path);
+            let extension_child = if matches!(find_result, SeekResult::Blinded) {
+                take_extension_child(nodes, node_idx)
+            } else {
+                None
+            };
             let next_idx = node_idx + 1 + usize::from(extension_child.is_some());
             let node = &mut nodes[node_idx];
-            let find_result = self.buffers.cursor.seek(&mut self.arena, &node.path);
             if PersistentArenaParallelSparseTrie::reveal_node(
                 &mut self.arena,
                 &self.buffers.cursor,
@@ -441,7 +458,7 @@ fn move_node(dst: &mut NodeArena, src: &mut NodeArena, idx: NodeIndex) -> NodeIn
         let child = src.drain_node(child_idx);
         let new_child_idx = dst.insert(child);
         let ArenaSparseNode::Extension { child, .. } = &mut dst[new_idx] else { unreachable!() };
-        *child = new_child_idx;
+        *child = ExtensionChild::Revealed(new_child_idx);
     }
     new_idx
 }

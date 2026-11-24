@@ -7,11 +7,11 @@ use alloy_primitives::{map::B256Map, B256, U256};
 use alloy_rlp::encode_fixed_size;
 use alloy_trie::{nodes::TrieNode, EMPTY_ROOT_HASH};
 use reth_trie::test_utils::{storage_root_prehashed, TrieTestHarness};
-use reth_trie_common::{ExtensionNode, Nibbles, ProofTrieNode, ProofV2Target, RlpNode};
+use reth_trie_common::{Nibbles, ProofV2Target};
 use reth_trie_sparse::{
-    errors::SparseTrieErrorKind, ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafLookup,
-    LeafLookupError, LeafUpdate, PersistentArenaParallelSparseTrie,
-    PersistentArenaParallelismThresholds, SparseTrie, SparseTrieUpdates, TrieNodeEpoch,
+    ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafLookup, LeafLookupError, LeafUpdate,
+    PersistentArenaParallelSparseTrie, PersistentArenaParallelismThresholds, SparseTrie,
+    SparseTrieUpdates, TrieNodeEpoch,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -64,6 +64,7 @@ struct Evidence {
     operations: BTreeMap<&'static str, u64>,
     features: BTreeSet<&'static str>,
     checkpoints: Vec<(B256, SparseTrieUpdates)>,
+    raw_updates: Vec<SparseTrieUpdates>,
     transcript: Vec<String>,
 }
 
@@ -98,9 +99,9 @@ pub enum Action {
         /// At most four key/value changes, with zero values representing deletion.
         updates: Vec<Change>,
     },
-    /// Reveal a valid model-derived proof, including for an absent key.
+    /// Reveal an ancestor-closed prefix of a model-derived proof, including for an absent key.
     Reveal {
-        /// Prehashed key, not a database lookup or a proof supplied by the fuzzer.
+        /// Prehashed key; its final byte also selects a proof depth modulo 65.
         #[serde(with = "word")]
         key: [u8; 32],
     },
@@ -240,7 +241,7 @@ fn initialize<T: SparseTrie>(
     retain: bool,
     evidence: &mut Evidence,
 ) -> Result<(), DifferentialFailure> {
-    let mut nodes = harness.root_nodes();
+    let mut nodes = [harness.root_node()];
     succeeded(trie.set_root(&mut nodes, retain), "set-root")?;
     evidence.hit("set_root");
     equal(harness.original_root(), oracle(harness.storage()), "oracle-agreement")?;
@@ -414,6 +415,8 @@ fn retained<T: SparseTrie>(
     let mut updates = trie.take_updates();
     evidence.hit("take_updates");
     equal(updates.clone(), before, "updates-ref-take")?;
+    // Oracle minimization below ignores harmless re-emissions, but backend equivalence must not.
+    evidence.raw_updates.push(updates.clone());
     equal(trie.take_updates(), SparseTrieUpdates::default(), "take-drains")?;
     evidence.hit("take_updates");
     equal(
@@ -474,8 +477,25 @@ fn randomized_actions<T: SparseTrie + Clone>(
                 });
             }
             Action::Reveal { key } => {
-                reveal(trie, harness, &mut [ProofV2Target::new(B256::from(*key))], evidence)?;
+                let key = B256::from(*key);
+                let (mut nodes, _) = harness.proof_v2(&mut [ProofV2Target::new(key)]);
+                // Keep an ancestor-closed prefix; extension children may arrive in a later action
+                // or in the proof retry loop, rather than being forced into the same batch.
+                let depth = usize::from(key[31]) % 65;
+                if nodes.iter().any(|node| {
+                    node.path.len() <= depth &&
+                        matches!(&node.node, TrieNode::Extension(extension)
+                        if node.path.len() + extension.key.len() > depth)
+                }) {
+                    evidence.features.insert("schedule_extension_only_reveal");
+                }
+                nodes.retain(|node| node.path.len() <= depth);
+                nodes.reverse();
+                succeeded(trie.reveal_nodes(&mut nodes), "scheduled-prefix-reveal")?;
+                evidence.hit("reveal_nodes");
+                evidence.hit("proof_batches");
                 evidence.features.insert("schedule_reveal");
+                evidence.features.insert("schedule_prefix_reveal");
             }
             Action::Snapshot | Action::Clone => {
                 let snapshot = matches!(action, Action::Snapshot);
@@ -631,19 +651,6 @@ fn exercise<T: SparseTrie + Clone>(
         let mut nodes = Vec::new();
         for node in all_nodes.iter().filter(|node| node.path.len() <= depth) {
             nodes.push(node.clone());
-            // Extensions and their separate branch children form one revealable proof unit.
-            if let TrieNode::Extension(extension) = &node.node &&
-                node.path.len() + extension.key.len() > depth
-            {
-                let child_path = node.path.join(&extension.key);
-                nodes.push(
-                    all_nodes
-                        .iter()
-                        .find(|child| child.path == child_path)
-                        .expect("calculator proof includes extension branch child")
-                        .clone(),
-                );
-            }
         }
         nodes.reverse();
         succeeded(trie.reveal_nodes(&mut nodes), "depth-reveal")?;
@@ -943,39 +950,7 @@ fn root_and_fork_isolation<T: SparseTrie + Clone>(
     harness: &TrieTestHarness,
     evidence: &mut Evidence,
 ) -> Result<(), DifferentialFailure> {
-    let extension =
-        ExtensionNode::new(Nibbles::from_nibbles([1]), RlpNode::word_rlp(&harness.original_root()));
-    let mut rejected = factory();
-    evidence.hit("set_root");
-    let mut nodes = [ProofTrieNode {
-        path: Nibbles::new(),
-        node: TrieNode::Extension(extension.clone()),
-        masks: None,
-    }];
-    match rejected.set_root(&mut nodes, true) {
-        Err(error) => match error.into_kind() {
-            SparseTrieErrorKind::Reveal { path, node } => {
-                equal(path, Nibbles::new(), "extension-error-path")?;
-                equal(format!("{node:?}"), format!("{extension:?}"), "extension-error-node")?;
-            }
-            other => {
-                return Err(DifferentialFailure {
-                    signature: "sparse-trie/extension-error-kind".into(),
-                    details: format!("{other:?}"),
-                })
-            }
-        },
-        Ok(()) => {
-            return Err(DifferentialFailure {
-                signature: "sparse-trie/extension-accepted".into(),
-                details: "standalone Extension root must be rejected".into(),
-            })
-        }
-    }
-    root(&mut rejected, EMPTY_ROOT_HASH, 1, evidence)?;
-    initialize(&mut rejected, harness, true, evidence)?;
-    root(&mut rejected, harness.original_root(), 2, evidence)?;
-    evidence.features.insert("standalone_extension_rejection");
+    extension_only_forks(factory, evidence)?;
 
     // These keys are in distinct root branches, so one proof cannot reveal the other.
     let first = *harness.storage().keys().find(|key| key.0[0] == 0x10).expect("dense first branch");
@@ -1156,6 +1131,62 @@ fn root_and_fork_isolation<T: SparseTrie + Clone>(
     Ok(())
 }
 
+/// Fork an opaque extension, hydrate and mutate each side independently, then prune it.
+fn extension_only_forks<T: SparseTrie + Clone>(
+    factory: impl Fn() -> T + Copy,
+    evidence: &mut Evidence,
+) -> Result<(), DifferentialFailure> {
+    for depth in [0, 1, 2, 3, 4, 6, 62] {
+        let first = B256::ZERO;
+        let mut second = first;
+        second.0[31] = 1;
+        let mut storage = BTreeMap::from([(first, U256::ONE), (second, U256::from(2))]);
+        for ancestor in 0..depth {
+            let mut key = [0; 32];
+            key[ancestor / 2] = if ancestor % 2 == 0 { 0x90 } else { 0x09 };
+            storage.insert(B256::from(key), U256::from(3));
+        }
+        let harness = TrieTestHarness::new(storage);
+        let (full, _) = harness.proof_v2(&mut [ProofV2Target::new(first)]);
+        let mut partial =
+            full.iter().filter(|node| node.path.len() <= depth).cloned().collect::<Vec<_>>();
+        let mut source = factory();
+        succeeded(source.set_root(&mut partial, true), "opaque-set-root")?;
+        succeeded(source.reveal_nodes(&mut partial), "opaque-reveal")?;
+        evidence.hit("set_root");
+        evidence.hit("reveal_nodes");
+        root(&mut source, harness.original_root(), 1, evidence)?;
+        for snapshot in [true, false] {
+            let mut fork = if snapshot {
+                evidence.hit("snapshot");
+                source.snapshot()
+            } else {
+                evidence.hit("clone");
+                source.clone()
+            };
+            let mut hydrated = full.clone();
+            succeeded(fork.reveal_nodes(&mut hydrated), "opaque-fork-hydrate")?;
+            evidence.hit("reveal_nodes");
+            equal(source.get_leaf_value(&Nibbles::unpack(first)), None, "opaque-source-isolation")?;
+            evidence.hit("get_leaf_value");
+            let changes = BTreeMap::from([(first, U256::from(9)), (second, U256::ZERO)]);
+            apply(&mut fork, &harness, &mut leaf_updates(&changes), evidence)?;
+            root(&mut fork, harness.get_root_with_updates(&changes).0, 2, evidence)?;
+            retained(&mut fork, &harness, &changes, evidence)?;
+            prune(&mut fork, 3, evidence);
+            fork.clear();
+            evidence.hit("clear");
+            root(&mut source, harness.original_root(), 3, evidence)?;
+        }
+    }
+    evidence.features.extend([
+        "standalone_extension_reveal",
+        "opaque_extension_fork_isolation",
+        "opaque_extension_late_hydration",
+    ]);
+    Ok(())
+}
+
 /// Executes both implementations against independent triehash and in-memory proof/update oracles.
 ///
 /// Returns success JSON with instrumented operation counts and observed features. An intentional
@@ -1248,6 +1279,7 @@ pub fn run_input(input: &Input) -> Result<String, DifferentialFailure> {
 
 fn compare_evidence(actual: &Evidence, expected: &Evidence) -> Result<(), DifferentialFailure> {
     equal(&actual.checkpoints, &expected.checkpoints, "backend-checkpoints")?;
+    equal(&actual.raw_updates, &expected.raw_updates, "backend-raw-updates")?;
     equal(actual.transcript.len(), expected.transcript.len(), "backend-transcript-length")?;
     for (index, (actual, expected)) in
         actual.transcript.iter().zip(&expected.transcript).enumerate()

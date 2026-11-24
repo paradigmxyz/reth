@@ -1,6 +1,6 @@
 use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseNode, ArenaSparseNodeState, BranchChild, NodeArena, NodeIndex,
+    ArenaSparseNode, ArenaSparseNodeState, BranchChild, ExtensionChild, NodeArena, NodeIndex,
 };
 use alloc::vec::Vec;
 use reth_trie_common::Nibbles;
@@ -59,7 +59,7 @@ pub(super) enum NextResult {
 pub(super) fn branch_idx(arena: &NodeArena, idx: NodeIndex) -> Option<NodeIndex> {
     match &arena[idx] {
         ArenaSparseNode::Branch(_) => Some(idx),
-        ArenaSparseNode::Extension { child, .. } => Some(*child),
+        ArenaSparseNode::Extension { child, .. } => child.revealed_index(),
         _ => None,
     }
 }
@@ -193,21 +193,14 @@ impl ArenaCursor {
         }
 
         if let Some(parent) = self.stack.last() {
-            let child_is_dirty = match node {
-                ArenaSparseNode::Branch(b) => matches!(b.state, ArenaSparseNodeState::Dirty),
-                ArenaSparseNode::Extension { child, .. } => {
-                    matches!(arena[*child].state_ref(), Some(ArenaSparseNodeState::Dirty))
-                }
-                ArenaSparseNode::Leaf { state, .. } => matches!(state, ArenaSparseNodeState::Dirty),
-                ArenaSparseNode::Subtrie(_) => {
-                    matches!(node.state_ref(), Some(ArenaSparseNodeState::Dirty))
-                }
-                _ => false,
-            };
+            let child_is_dirty = matches!(node.state_ref(), Some(ArenaSparseNodeState::Dirty));
             if child_is_dirty {
                 let parent_branch_idx =
                     branch_idx(arena, parent.index).expect("parent must be a branch or extension");
-                *arena[parent_branch_idx].state_mut() = ArenaSparseNodeState::Dirty;
+                *arena[parent.index].state_mut() = ArenaSparseNodeState::Dirty;
+                if parent_branch_idx != parent.index {
+                    *arena[parent_branch_idx].state_mut() = ArenaSparseNodeState::Dirty;
+                }
             }
         }
 
@@ -315,13 +308,14 @@ impl ArenaCursor {
             // again for the same arena slot.
             let (branch, short_key) = match &arena[head_idx] {
                 ArenaSparseNode::Branch(branch) => (branch, Nibbles::default()),
-                ArenaSparseNode::Extension { key, child } => (arena[*child].branch_ref(), *key),
+                ArenaSparseNode::Extension {
+                    key, child: ExtensionChild::Revealed(child), ..
+                } => (arena[*child].branch_ref(), *key),
                 _ => {
                     self.needs_pop = true;
                     return NextResult::NonBranch;
                 }
             };
-
             let state_mask = branch.state_mask;
             let start = head.next_dense_idx as usize;
             let child_depth = self.stack.len();
@@ -389,6 +383,18 @@ impl ArenaCursor {
             let head_idx = head.index;
             let head_path_len = head.path_len as usize;
 
+            let short_key = arena[head_idx].extension_key().copied().unwrap_or_default();
+            let logical_len = head_path_len + short_key.len();
+
+            // Paths inside or diverging from the extension key prove exclusion. The exact
+            // logical path may instead name its blinded backing branch for revelation.
+            if full_path.len() < logical_len ||
+                (!short_key.is_empty() &&
+                    full_path.slice_unchecked(head_path_len, logical_len) != short_key)
+            {
+                return SeekResult::Diverged;
+            }
+
             let head_branch = match &arena[head_idx] {
                 ArenaSparseNode::EmptyRoot { .. } => {
                     return SeekResult::EmptyRoot;
@@ -401,22 +407,17 @@ impl ArenaCursor {
                     };
                 }
                 ArenaSparseNode::Branch(b) => b,
-                ArenaSparseNode::Extension { child, .. } => arena[*child].branch_ref(),
+                ArenaSparseNode::Extension { child, .. } => match child {
+                    ExtensionChild::Revealed(index) => arena[*index].branch_ref(),
+                    ExtensionChild::Blinded(_) => return SeekResult::Blinded,
+                },
                 ArenaSparseNode::Subtrie(_) => {
                     return SeekResult::RevealedSubtrie;
                 }
                 _ => unreachable!("unexpected node type on stack: {:?}", arena[head_idx]),
             };
 
-            let short_key = arena[head_idx].extension_key().copied().unwrap_or_default();
-            let logical_len = head_path_len + short_key.len();
-
-            // If full_path doesn't extend past the branch's logical path, the target is at or
-            // within the extension's key — treat as diverged.
-            if full_path.len() <= logical_len ||
-                (!short_key.is_empty() &&
-                    full_path.slice_unchecked(head_path_len, logical_len) != short_key)
-            {
+            if full_path.len() == logical_len {
                 return SeekResult::Diverged;
             }
 

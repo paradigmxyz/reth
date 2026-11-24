@@ -1,9 +1,10 @@
 //! Sparse trie trait implementation and persistent pruning.
 
 use super::{
-    branch_data_mut, branch_idx, node_state_ref, ArenaCursor, ArenaSparseNode,
-    ArenaSparseNodeState, ArenaSparseSubtrie, BranchChild, BranchChildIdx, NextResult, NodeArena,
-    NodeIndex, PersistentArenaParallelSparseTrie, RemoveLeafResult, SeekResult, UpsertLeafResult,
+    blinded_proof_parent, branch_data_mut, branch_idx, has_blinded_branch, node_state_ref,
+    split_needs_proof, ArenaCursor, ArenaSparseNode, ArenaSparseNodeState, ArenaSparseSubtrie,
+    BranchChild, BranchChildIdx, ExtensionChild, NextResult, NodeArena, NodeIndex,
+    PersistentArenaParallelSparseTrie, RemoveLeafResult, SeekResult, UpsertLeafResult,
     TRACE_TARGET,
 };
 use crate::{
@@ -288,8 +289,10 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
 
         loop {
             let result = self.buffers.cursor.next(&mut self.upper_arena, |_, child| match child {
-                ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_) => !child.is_cached(),
-                ArenaSparseNode::Extension { .. } | ArenaSparseNode::TakenSubtrie => true,
+                ArenaSparseNode::Branch(_) |
+                ArenaSparseNode::Extension { .. } |
+                ArenaSparseNode::Subtrie(_) => !child.is_cached(),
+                ArenaSparseNode::TakenSubtrie => true,
                 _ => false,
             });
 
@@ -301,6 +304,12 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
 
             // Head is a subtrie or taken-subtrie — process it.
             let head_idx = self.buffers.cursor.head().expect("cursor is non-empty").index;
+
+            if has_blinded_branch(&self.upper_arena, head_idx) &&
+                !matches!(self.upper_arena[head_idx], ArenaSparseNode::Subtrie(_))
+            {
+                continue;
+            }
 
             if matches!(&self.upper_arena[head_idx], ArenaSparseNode::TakenSubtrie) {
                 let (_, subtrie) = taken.pop().expect("taken subtries must not be exhausted");
@@ -540,11 +549,31 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
 
             let find_result = cursor.seek(&mut self.upper_arena, full_path);
 
+            if split_needs_proof(&self.upper_arena, &cursor, &find_result, update) {
+                #[cfg(reth_sparse_trie_coverage)]
+                observe_proof_target(
+                    &self.upper_arena,
+                    cursor.head().map(|entry| {
+                        (entry.index, cursor.head_logical_branch_path_len(&self.upper_arena))
+                    }),
+                    full_path,
+                    &taken,
+                );
+                let proof_key = Self::nibbles_to_padded_b256(
+                    &cursor.head_logical_branch_path(&self.upper_arena),
+                );
+                proof_required_fn(proof_key, blinded_proof_parent(&self.upper_arena, &cursor));
+                updates.insert(key, update.clone());
+                update_idx += 1;
+                continue;
+            }
+
             match find_result {
                 // Blinded — request a proof regardless of update type.
                 SeekResult::Blinded => {
+                    #[cfg(reth_sparse_trie_coverage)]
                     let logical_len = cursor.head_logical_branch_path_len(&self.upper_arena);
-                    let parent = ProofV2TargetParent::new(logical_len);
+                    let parent = blinded_proof_parent(&self.upper_arena, &cursor);
                     trace!(target: TRACE_TARGET, ?key, ?parent, "Update hit blinded node, requesting proof");
                     #[cfg(reth_sparse_trie_coverage)]
                     observe_proof_target(
@@ -605,8 +634,11 @@ impl SparseTrie for PersistentArenaParallelSparseTrie {
                     let might_empty_subtrie =
                         all_removals && num_subtrie_updates as u64 >= subtrie_num_leaves;
 
+                    // Keep an opaque root visible to later sibling-removal checks. A taken
+                    // placeholder would hide the backing-branch proof needed for collapse.
                     if (num_subtrie_updates >= threshold || parallelize_distributed_updates) &&
-                        !might_empty_subtrie
+                        !might_empty_subtrie &&
+                        !has_blinded_branch(&self.upper_arena, child_idx)
                     {
                         // Take subtrie for parallel update.
                         trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Taking subtrie for parallel update");
@@ -899,7 +931,9 @@ fn take_subtrie_for_pruning(arena: &mut NodeArena, idx: NodeIndex) -> Box<ArenaS
 /// Releases a node's descendants in this arena when a later compaction will not reclaim them.
 fn release_descendants(arena: &mut NodeArena, detached: &ArenaSparseNode) {
     match detached {
-        ArenaSparseNode::Extension { child, .. } => release_subtree(arena, *child),
+        ArenaSparseNode::Extension { child: ExtensionChild::Revealed(child), .. } => {
+            release_subtree(arena, *child)
+        }
         ArenaSparseNode::Branch(branch) => release_branch_children(arena, &branch.children),
         _ => {}
     }
@@ -908,7 +942,9 @@ fn release_descendants(arena: &mut NodeArena, detached: &ArenaSparseNode) {
 /// Releases the revealed nodes and blinded child slots of a detached subtree.
 pub(super) fn release_subtree(arena: &mut NodeArena, idx: NodeIndex) {
     match &arena[idx] {
-        ArenaSparseNode::Extension { child, .. } => release_subtree(arena, *child),
+        ArenaSparseNode::Extension { child: ExtensionChild::Revealed(child), .. } => {
+            release_subtree(arena, *child)
+        }
         ArenaSparseNode::Branch(branch) => {
             let children = branch.children.clone();
             release_branch_children(arena, &children);

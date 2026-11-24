@@ -210,13 +210,13 @@ impl NodeArena {
         while next < new_arena.len() {
             let new_idx = NodeIndex::from_slot(next);
             next += 1;
-            if let ArenaSparseNode::Extension { child, .. } = new_arena[new_idx] {
+            if let Some(child) = new_arena[new_idx].extension_child() {
                 let child_node = self.drain_node(child);
                 let new_child_idx = new_arena.insert(child_node);
                 let ArenaSparseNode::Extension { child, .. } = &mut new_arena[new_idx] else {
                     unreachable!()
                 };
-                *child = new_child_idx;
+                *child = super::ExtensionChild::Revealed(new_child_idx);
                 continue;
             }
 

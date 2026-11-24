@@ -1,8 +1,9 @@
 //! Leaf edits and the branch changes they require.
 
 use super::{
-    branch_data, branch_data_mut, branch_idx, ArenaCursor, ArenaRequiredProof, ArenaSparseNode,
-    ArenaSparseNodeBranch, ArenaSparseNodeState, BranchChild, NodeArena, NodeIndex,
+    branch_data, branch_data_mut, branch_idx, child_needs_collapse_proof,
+    extend_blinded_branch_path, node_state_mut, ArenaCursor, ArenaRequiredProof, ArenaSparseNode,
+    ArenaSparseNodeBranch, ArenaSparseNodeState, BranchChild, ExtensionChild, NodeArena, NodeIndex,
     PersistentArenaParallelSparseTrie, RemoveLeafResult, SeekResult, SubtrieCounterDeltas,
     UpsertLeafResult, TRACE_TARGET,
 };
@@ -61,14 +62,17 @@ impl PersistentArenaParallelSparseTrie {
                 };
                 was_clean
             }
-            ArenaSparseNode::Extension { child, .. } => {
+            ArenaSparseNode::Extension { child: ExtensionChild::Revealed(child), .. } => {
                 if old_child_suffix.is_empty() {
                     let branch = arena.remove(child).expect("extension child exists");
                     arena[old_child_idx] = branch;
                     *arena[old_child_idx].state_mut() = ArenaSparseNodeState::Dirty;
                 } else {
-                    arena[old_child_idx] =
-                        ArenaSparseNode::Extension { key: old_child_suffix, child };
+                    arena[old_child_idx] = ArenaSparseNode::Extension {
+                        key: old_child_suffix,
+                        child: ExtensionChild::Revealed(child),
+                        state: ArenaSparseNodeState::Dirty,
+                    };
                     *arena[child].state_mut() = ArenaSparseNodeState::Dirty;
                 }
                 // Branches don't contribute to num_dirty_leaves.
@@ -108,7 +112,11 @@ impl PersistentArenaParallelSparseTrie {
         let new_branch_idx = if short_key.is_empty() {
             branch_child_idx
         } else {
-            arena.insert(ArenaSparseNode::Extension { key: short_key, child: branch_child_idx })
+            arena.insert(ArenaSparseNode::Extension {
+                key: short_key,
+                child: ExtensionChild::Revealed(branch_child_idx),
+                state: ArenaSparseNodeState::Dirty,
+            })
         };
 
         cursor.replace_head_index(arena, root, new_branch_idx);
@@ -308,6 +316,7 @@ impl PersistentArenaParallelSparseTrie {
 
                 // Remove the leaf from the arena and from the parent's children.
                 arena.discard(head_idx);
+                *node_state_mut(arena, parent_idx) = ArenaSparseNodeState::Dirty;
                 let parent_branch = branch_data_mut(arena, parent_idx);
                 parent_branch.remove_child(child_nibble);
 
@@ -385,7 +394,7 @@ impl PersistentArenaParallelSparseTrie {
             return None;
         }
 
-        if !parent_branch.sibling_child(child_nibble).is_blinded() {
+        if !child_needs_collapse_proof(arena, parent_branch.sibling_child(child_nibble)) {
             return None;
         }
 
@@ -397,6 +406,11 @@ impl PersistentArenaParallelSparseTrie {
         let mut sibling_path = cursor.parent_logical_branch_path(arena);
         let parent_depth = sibling_path.len();
         sibling_path.push_unchecked(sibling_nibble);
+        extend_blinded_branch_path(
+            arena,
+            parent_branch.sibling_child(child_nibble),
+            &mut sibling_path,
+        );
         trace!(target: TRACE_TARGET, ?sibling_path, "Collapse onto blinded sibling requires a proof");
 
         #[cfg(reth_sparse_trie_coverage)]
@@ -483,18 +497,27 @@ impl PersistentArenaParallelSparseTrie {
                 };
                 (child_idx, was_clean)
             }
-            ArenaSparseNode::Extension { key, child } => {
+            ArenaSparseNode::Extension { key, child, .. } => {
                 let mut new_key = prefix;
                 new_key.extend(&key);
-                arena[child_idx] = ArenaSparseNode::Extension { key: new_key, child };
-                *arena[child].state_mut() = ArenaSparseNodeState::Dirty;
+                if let Some(index) = child.revealed_index() {
+                    *arena[index].state_mut() = ArenaSparseNodeState::Dirty;
+                }
+                arena[child_idx] = ArenaSparseNode::Extension {
+                    key: new_key,
+                    child,
+                    state: ArenaSparseNodeState::Dirty,
+                };
                 (child_idx, false)
             }
             ArenaSparseNode::Branch(branch) => {
                 let new_branch_idx = arena.insert(ArenaSparseNode::Branch(branch));
                 *arena[new_branch_idx].state_mut() = ArenaSparseNodeState::Dirty;
-                arena[child_idx] =
-                    ArenaSparseNode::Extension { key: prefix, child: new_branch_idx };
+                arena[child_idx] = ArenaSparseNode::Extension {
+                    key: prefix,
+                    child: ExtensionChild::Revealed(new_branch_idx),
+                    state: ArenaSparseNodeState::Dirty,
+                };
                 (child_idx, false)
             }
             ArenaSparseNode::Subtrie(mut subtrie) => {
@@ -505,14 +528,24 @@ impl PersistentArenaParallelSparseTrie {
                 match root_node {
                     ArenaSparseNode::Branch(branch) => {
                         let child = subtrie.arena.insert(ArenaSparseNode::Branch(branch));
-                        subtrie.arena[root] = ArenaSparseNode::Extension { key: prefix, child };
+                        subtrie.arena[root] = ArenaSparseNode::Extension {
+                            key: prefix,
+                            child: ExtensionChild::Revealed(child),
+                            state: ArenaSparseNodeState::Dirty,
+                        };
                         *subtrie.arena[child].state_mut() = ArenaSparseNodeState::Dirty;
                     }
-                    ArenaSparseNode::Extension { key, child } => {
+                    ArenaSparseNode::Extension { key, child, .. } => {
                         let mut new_key = prefix;
                         new_key.extend(&key);
-                        subtrie.arena[root] = ArenaSparseNode::Extension { key: new_key, child };
-                        *subtrie.arena[child].state_mut() = ArenaSparseNodeState::Dirty;
+                        if let Some(index) = child.revealed_index() {
+                            *subtrie.arena[index].state_mut() = ArenaSparseNodeState::Dirty;
+                        }
+                        subtrie.arena[root] = ArenaSparseNode::Extension {
+                            key: new_key,
+                            child,
+                            state: ArenaSparseNodeState::Dirty,
+                        };
                     }
                     ArenaSparseNode::Leaf { key, value, state } => {
                         let mut new_key = prefix;

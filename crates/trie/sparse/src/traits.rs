@@ -68,13 +68,11 @@ impl LeafUpdate {
 pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Reveals the root from a batch produced by the V2 proof calculator.
     ///
-    /// `nodes` must contain a node at the empty path. An extension root must be accompanied by
-    /// its branch child in the same batch, including that branch's persistence masks.
+    /// `nodes` must contain a node at the empty path.
     /// Root nodes may be consumed; remaining nodes can be passed to [`Self::reveal_nodes`].
     /// `retain_updates` controls whether trie updates should be tracked.
     ///
-    /// Returns an error if the root cannot be revealed. Standalone hashed extensions are not
-    /// supported.
+    /// Returns an error if the root cannot be revealed.
     ///
     /// # Panics
     ///
@@ -99,10 +97,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 
     /// Reveals one or more trie nodes if they have not been revealed before.
     ///
-    /// The batch must come from the V2 proof calculator, with every extension accompanied by
-    /// its branch child. Attaches nodes where their paths identify blinded nodes in the current
-    /// trie. Nodes already revealed, paths diverging from the trie, and paths naming absent
-    /// children may be skipped.
+    /// The batch must come from the V2 proof calculator. Attaches nodes where their paths
+    /// identify blinded nodes in the current trie. Nodes already revealed, paths diverging from
+    /// the trie, and paths naming absent children may be skipped.
     ///
     /// # Arguments
     ///

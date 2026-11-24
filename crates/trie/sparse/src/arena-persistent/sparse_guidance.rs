@@ -5,7 +5,8 @@
 //! sanitizer coverage. The bank contains 28,672 local-neighborhood and two control buckets.
 
 use super::{
-    branch_data, ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseSubtrie, NodeArena, NodeIndex,
+    branch_data, branch_idx, ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseSubtrie, NodeArena,
+    NodeIndex,
 };
 use alloc::boxed::Box;
 use core::hint::black_box;
@@ -167,7 +168,9 @@ pub(super) fn observe_proof_target(
     target_path: &Nibbles,
     taken: &[(NodeIndex, Box<ArenaSparseSubtrie>, core::ops::Range<usize>)],
 ) {
-    if let Some((parent_idx, depth)) = parent {
+    if let Some((parent_idx, depth)) = parent &&
+        branch_idx(arena, parent_idx).is_some()
+    {
         let branch = branch_data(arena, parent_idx);
         let (revealed, leaf) = coverage_branch_masks(arena, branch, taken);
         record_proof_target(
