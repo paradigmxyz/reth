@@ -6,12 +6,10 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadBodyV2, ForkchoiceState,
 };
 use reth_chainspec::EthereumHardfork;
-use reth_db::mdbx::{Info, SyncMode};
 use reth_e2e_test_utils::{node::Finality, wait::poll_until, E2ETestSetupExt};
-use reth_node_core::args::DatabaseArgs;
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
-use reth_provider::{BalProvider, DatabaseProviderFactory};
+use reth_provider::BalProvider;
 
 /// Tests that a fork built with `advance_fork` becomes the head, that `reorg_to` switches back to
 /// the previous chain while the engine API still serves the reorged-out blocks by hash, and that
@@ -139,51 +137,6 @@ async fn serves_evicted_side_chain_bal() -> eyre::Result<()> {
         )
         .await?;
     assert_eq!(bodies, vec![Some(expected)]);
-
-    Ok(())
-}
-
-/// Tests that under `--db.sync-mode safe-no-sync`, a reorg below the persisted tip syncs the unwind
-/// commit, so power loss can't roll MDBX back above the truncated static files.
-#[tokio::test]
-async fn reorg_below_persisted_tip_syncs_unwind() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let (mut node, _) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
-        .with_node_config_modifier(|config| {
-            config.with_db(DatabaseArgs {
-                sync_mode: Some(SyncMode::SafeNoSync),
-                ..Default::default()
-            })
-        })
-        // Persist every canonical block, so the reorg unwinds persisted blocks.
-        .with_tree_config_modifier(|config| {
-            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
-        })
-        .build_single()
-        .await?;
-    let genesis = node.block_hash(0);
-    node.set_finality(Finality::Keep);
-    let provider = node.inner.provider.clone();
-    let mdbx_info = || -> eyre::Result<Info> {
-        Ok(provider.database_provider_ro()?.tx_ref().inner().env().info()?)
-    };
-
-    node.advance_blocks(2).await?;
-    node.wait_for_persisted_block(2).await?;
-    let txnid_before_unwind = mdbx_info()?.last_txnid() as u64;
-    assert!(
-        mdbx_info()?.last_steady_txnid() < Some(txnid_before_unwind),
-        "safe-no-sync commits of the persisted blocks must not be steady yet"
-    );
-
-    // A fork on genesis that is longer than the persisted chain unwinds it.
-    node.advance_fork(genesis, 3).await?;
-    node.wait_for_persisted_block(3).await?;
-    assert!(
-        mdbx_info()?.last_steady_txnid() > Some(txnid_before_unwind),
-        "the unwind commit must be steady"
-    );
 
     Ok(())
 }

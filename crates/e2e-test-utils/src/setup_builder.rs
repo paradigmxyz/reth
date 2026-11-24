@@ -16,11 +16,7 @@ use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::{ensure, eyre, WrapErr};
 use futures_util::future::{BoxFuture, TryJoinAll};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardfork};
-use reth_db::{
-    init_db,
-    mdbx::{DatabaseArguments, SyncMode},
-    test_utils::TempDatabase,
-};
+use reth_db::{init_db, mdbx::DatabaseArguments, test_utils::TempDatabase};
 use reth_node_api::{PayloadAttrTy, TreeConfig};
 use reth_node_builder::{
     sync::{BackfillClientFor, BackfillSyncBuilder, PipelineBackfill},
@@ -724,7 +720,7 @@ fn launch_node<N: NodeBuilderHelper>(
     mines: bool,
 ) -> BoxFuture<'static, eyre::Result<NodeHelperType<N>>> {
     Box::pin(async move {
-        let database = open_test_database(&args.datadir, args.node_config.db.sync_mode)?;
+        let database = open_test_database(&args.datadir)?;
         let relaunch_args = restartable.then(|| args.clone());
         let mut node = launch(args, database.clone()).await?;
         if let Some(args) = relaunch_args {
@@ -793,17 +789,14 @@ async fn restate_forkchoice<N: NodeBuilderHelper>(node: &NodeHelperType<N>) -> e
 }
 
 /// Opens the database in `datadir` like [`create_test_rw_db_with_datadir`], creating it if it does
-/// not exist yet, with `sync_mode`.
+/// not exist yet.
 ///
 /// The datadir is removed when the returned database is dropped.
 ///
 /// [`create_test_rw_db_with_datadir`]: reth_db::test_utils::create_test_rw_db_with_datadir
-pub(crate) fn open_test_database(
-    datadir: &Path,
-    sync_mode: Option<SyncMode>,
-) -> eyre::Result<TmpDB> {
+pub(crate) fn open_test_database(datadir: &Path) -> eyre::Result<TmpDB> {
     let path = datadir.join("db");
-    let database = init_db(&path, DatabaseArguments::test().with_sync_mode(sync_mode))
+    let database = init_db(&path, DatabaseArguments::test())
         .wrap_err_with(|| format!("failed to open the database at {}", path.display()))?;
     Ok(Arc::new(TempDatabase::new(database, datadir.to_path_buf())))
 }
