@@ -342,9 +342,10 @@ impl ArchiveFetcher {
                 .and_then(|value| value.parse::<u64>().ok());
             if is_partial && range_start != Some(existing_size) {
                 // Resuming this `.part` file would likely fail the same way, so retry from scratch.
-                self.paths.cleanup_partial();
+                // A `.part` left behind would be resumed or promoted as if it were complete.
+                fs::remove_file_if_exists(self.paths.part_path())?;
                 // The deleted bytes' total no longer applies to the fresh download.
-                total_size = self.expected_size;
+                total_size = None;
                 last_error = Some(eyre::eyre!(
                     "Server resumed {} at byte {} instead of requested offset {existing_size}",
                     self.paths.file_name(),
@@ -1677,6 +1678,29 @@ mod tests {
         assert_eq!(
             format!("{error:#}"),
             "Server did not provide Content-Length or Content-Range header"
+        );
+        assert!(!dir.path().join("archive.tar.zst").exists());
+    }
+
+    #[test]
+    fn sequential_wrong_offset_restart_fails_when_part_cannot_be_removed() {
+        let response = b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-9/10\r\n\
+                         Content-Length: 10\r\nConnection: close\r\n\r\nXXXXXXXXXX";
+        let url = spawn_response_server(response.to_vec());
+        let dir = tempfile::tempdir().unwrap();
+        // A directory makes `remove_file` fail while still reporting a nonzero length.
+        let part = dir.path().join("archive.tar.zst.part");
+        std::fs::create_dir(&part).unwrap();
+        std::fs::write(part.join("keep"), b"x").unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new())
+            .with_retry_backoff(Some(Duration::ZERO));
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, None);
+
+        let error = fetcher.download(None, None).unwrap_err();
+
+        assert!(
+            format!("{error:#}").starts_with(&format!("failed to remove file {part:?}")),
+            "{error:#}"
         );
         assert!(!dir.path().join("archive.tar.zst").exists());
     }
