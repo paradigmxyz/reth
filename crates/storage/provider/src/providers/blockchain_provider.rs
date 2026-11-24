@@ -1327,10 +1327,17 @@ mod tests {
         writer.commit()?;
         let (provider, mut canonical_in_memory_state_writer) =
             BlockchainProvider::new_with_writer(factory)?;
-        canonical_in_memory_state_writer.insert_executed(blocks[2].clone());
+        canonical_in_memory_state_writer
+            .update_chain(NewCanonicalChain::Commit { new: vec![blocks[2].clone()] });
 
-        for number in [1, 2] {
-            let state = provider.history_by_block_hash(blocks[number].recovered_block().hash())?;
+        // Persistence can remove block 2, which masks Finish, from the live in-memory state after
+        // the historical providers opened their snapshots.
+        let states = [1, 2]
+            .map(|number| provider.history_by_block_hash(blocks[number].recovered_block().hash()));
+        canonical_in_memory_state_writer.clear_state();
+
+        for (number, state) in [1, 2].into_iter().zip(states) {
+            let state = state?;
             let root = blocks[number].recovered_block().state_root;
             state
                 .multiproof_v2(
