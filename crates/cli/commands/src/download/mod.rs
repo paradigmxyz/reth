@@ -1216,6 +1216,19 @@ mod tests {
         args: T,
     }
 
+    pub(super) fn empty_manifest() -> SnapshotManifest {
+        SnapshotManifest {
+            block: 0,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: None,
+            reth_version: None,
+            components: BTreeMap::new(),
+            extensions: Default::default(),
+        }
+    }
+
     fn single_archive(component: SnapshotComponentType) -> (String, ComponentManifest) {
         let key = component.key();
         let archive = SingleArchive {
@@ -1230,17 +1243,12 @@ mod tests {
 
     fn manifest_with_archive_only_components() -> SnapshotManifest {
         SnapshotManifest {
-            block: 0,
-            chain_id: 1,
-            storage_version: 2,
-            timestamp: 0,
             base_url: Some("https://example.com".to_string()),
-            reth_version: None,
             components: BTreeMap::from([
                 single_archive(SnapshotComponentType::TransactionSenders),
                 single_archive(SnapshotComponentType::RocksdbIndices),
             ]),
-            extensions: Default::default(),
+            ..empty_manifest()
         }
     }
 
@@ -1736,23 +1744,25 @@ mod tests {
 
     const SNAPSHOT_TIP: u64 = 10;
 
-    const SOURCE_HISTORY: PruneCheckpoint = PruneCheckpoint {
-        prune_mode: PruneMode::Distance(30_000),
-        ..PruneCheckpoint::pruned_through(3)
-    };
+    const INDEX_STAGES: [StageId; 3] =
+        [StageId::TransactionLookup, StageId::IndexAccountHistory, StageId::IndexStorageHistory];
+
+    const SOURCE_BOUNDARY: PruneCheckpoint = PruneCheckpoint::pruned_through(3);
+    const SOURCE_HISTORY: PruneCheckpoint =
+        PruneCheckpoint { prune_mode: PruneMode::Distance(30_000), ..SOURCE_BOUNDARY };
 
     fn snapshot_db(dir: &TempDir) -> Result<DatabaseEnv> {
         init_db(dir.path().join("db"), DatabaseArguments::test())
     }
 
-    fn history_checkpoints(tx: &impl DbTx) -> Result<[Option<PruneCheckpoint>; 2]> {
+    pub(super) fn history_checkpoints(tx: &impl DbTx) -> Result<[Option<PruneCheckpoint>; 2]> {
         Ok([
             tx.get::<tables::PruneCheckpoints>(PruneSegment::AccountHistory)?,
             tx.get::<tables::PruneCheckpoints>(PruneSegment::StorageHistory)?,
         ])
     }
 
-    fn set_history_checkpoints(
+    pub(super) fn set_history_checkpoints(
         tx: &impl DbTxMut,
         account: PruneCheckpoint,
         storage: PruneCheckpoint,
@@ -1792,12 +1802,7 @@ mod tests {
     #[tokio::test]
     async fn restore_bundled_v1_history() -> Result<()> {
         for (setting, flag, mode, expected_storage) in [
-            (
-                "receipts_in_static_files",
-                "--with-state-history",
-                None,
-                PruneCheckpoint::pruned_through(3),
-            ),
+            ("receipts_in_static_files", "--with-state-history", None, SOURCE_BOUNDARY),
             (
                 "transaction_senders_in_static_files",
                 "--minimal",
@@ -1806,18 +1811,13 @@ mod tests {
             ),
         ] {
             let source = tempdir()?;
-            let stages = [
-                StageId::TransactionLookup,
-                StageId::IndexAccountHistory,
-                StageId::IndexStorageHistory,
-            ];
             let indexed = StageCheckpoint::new(SNAPSHOT_TIP);
             {
                 let db = snapshot_db(&source)?;
                 let tx = db.tx_mut()?;
                 // v1.10 configured static-file receipts and senders independently of its history.
                 set_layout(&tx, serde_json::json!({(setting): true}));
-                for stage in stages {
+                for stage in INDEX_STAGES {
                     tx.put::<tables::StageCheckpoints>(stage.to_string(), indexed)?;
                     tx.put::<tables::StageCheckpointProgresses>(stage.to_string(), vec![1, 2, 3])?;
                 }
@@ -1834,7 +1834,7 @@ mod tests {
                 tx.get::<tables::PruneCheckpoints>(PruneSegment::TransactionLookup)?,
                 Some(SOURCE_HISTORY)
             );
-            for stage in stages {
+            for stage in INDEX_STAGES {
                 assert_eq!(tx.get::<tables::StageCheckpoints>(stage.to_string())?, Some(indexed));
                 assert_eq!(
                     tx.get::<tables::StageCheckpointProgresses>(stage.to_string())?,
@@ -1871,35 +1871,67 @@ mod tests {
         {
             manifest::tests::write_test_static_files(source.path(), segment, SNAPSHOT_TIP);
         }
-        for (flag, mode, boundary) in [
-            ("--with-state-history-since=20", Some(PruneMode::Before(20)), SNAPSHOT_TIP),
-            ("--with-state-history", None, 3),
+        let future = PruneMode::Before(20);
+        let tip = PruneCheckpoint::pruned_through(SNAPSHOT_TIP);
+        for (flag, mode, checkpoint, segment_count) in [
+            (
+                "--with-state-history-since=20",
+                Some(future),
+                PruneCheckpoint { prune_mode: future, ..tip },
+                0,
+            ),
+            ("--with-state-history", None, SOURCE_BOUNDARY, 2),
         ] {
             let target = restore_history(&source, flag, mode).await?;
-            let files = iter_static_files(&target.path().join("static_files"))?;
-            assert_eq!(files.is_empty(), boundary == SNAPSHOT_TIP);
+            assert_eq!(
+                iter_static_files(&target.path().join("static_files"))?.len(),
+                segment_count,
+                "{flag}"
+            );
             let db = snapshot_db(&target)?;
             let tx = db.tx()?;
-            let expected = PruneCheckpoint::pruned_through(boundary);
-            let checkpoint =
-                PruneCheckpoint { prune_mode: mode.unwrap_or(expected.prune_mode), ..expected };
             assert_eq!(history_checkpoints(&tx)?, [Some(checkpoint); 2]);
-            assert_eq!(
-                tx.get::<tables::StageCheckpoints>(StageId::TransactionLookup.to_string())?,
-                Some(StageCheckpoint::default())
-            );
         }
         Ok(())
     }
 
     #[tokio::test]
-    async fn missing_v2_history_with_archive_policy_keeps_snapshot_boundary() -> Result<()> {
+    async fn restore_v2_without_history_or_indices() -> Result<()> {
         let source = tempdir()?;
-        snapshot_db(&source)?.update(|tx| set_layout(tx, StorageSettings::v2()))?;
+        let indexed = StageCheckpoint::new(SNAPSHOT_TIP);
+        let tip = PruneCheckpoint::pruned_through(SNAPSHOT_TIP);
+        let source_prune = PruneCheckpoint { prune_mode: PruneMode::Full, ..tip };
+        {
+            let db = snapshot_db(&source)?;
+            let tx = db.tx_mut()?;
+            set_layout(&tx, StorageSettings::v2());
+            for stage in INDEX_STAGES.into_iter().chain([StageId::SenderRecovery]) {
+                tx.put::<tables::StageCheckpoints>(stage.to_string(), indexed)?;
+            }
+            for segment in [PruneSegment::TransactionLookup, PruneSegment::SenderRecovery] {
+                tx.put::<tables::PruneCheckpoints>(segment, source_prune)?;
+            }
+            tx.commit()?;
+        }
         let target = restore_history(&source, "--with-state-history", None).await?;
+        let db = snapshot_db(&target)?;
+        let tx = db.tx()?;
+        assert_eq!(history_checkpoints(&tx)?, [Some(tip); 2]);
+        for stage in INDEX_STAGES {
+            assert_eq!(
+                tx.get::<tables::StageCheckpoints>(stage.to_string())?,
+                Some(StageCheckpoint::default()),
+                "{stage}"
+            );
+        }
+        assert_eq!(tx.get::<tables::PruneCheckpoints>(PruneSegment::TransactionLookup)?, None);
         assert_eq!(
-            history_checkpoints(&snapshot_db(&target)?.tx()?)?,
-            [Some(PruneCheckpoint::pruned_through(SNAPSHOT_TIP)); 2],
+            tx.get::<tables::StageCheckpoints>(StageId::SenderRecovery.to_string())?,
+            Some(indexed)
+        );
+        assert_eq!(
+            tx.get::<tables::PruneCheckpoints>(PruneSegment::SenderRecovery)?,
+            Some(source_prune)
         );
         Ok(())
     }
@@ -1909,8 +1941,7 @@ mod tests {
         let mut manifest =
             SnapshotManifest { block: SNAPSHOT_TIP, ..manifest_with_archive_only_components() };
         // The v2 archive contains account history but omits storage history.
-        let (key, archive) = single_archive(SnapshotComponentType::AccountChangesets);
-        manifest.components.insert(key, archive);
+        manifest.components.extend([single_archive(SnapshotComponentType::AccountChangesets)]);
         let indexed = StageCheckpoint::new(SNAPSHOT_TIP);
         let stage = StageId::TransactionLookup.to_string();
         let mut config = Config::default();
@@ -1919,11 +1950,10 @@ mod tests {
         config.prune.segments.account_history = Some(history_mode);
         config.prune.segments.bodies_history = Some(bodies_mode);
         let tip = PruneCheckpoint::pruned_through(SNAPSHOT_TIP);
-        let boundary = PruneCheckpoint::pruned_through(3);
-        let configured = PruneCheckpoint { prune_mode: history_mode, ..boundary };
+        let configured = PruneCheckpoint { prune_mode: history_mode, ..SOURCE_BOUNDARY };
         for (layout, flag, expected) in [
             (StorageSettings::v2(), "--archive", [configured, tip]),
-            (StorageSettings::v1(), "--with-state-history-since=20", [configured, boundary]),
+            (StorageSettings::v1(), "--with-state-history-since=20", [configured, SOURCE_BOUNDARY]),
             (StorageSettings::v1(), "--minimal", [SOURCE_HISTORY; 2]),
         ] {
             let dir = tempdir()?;
