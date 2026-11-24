@@ -370,7 +370,7 @@ mod tests {
     use super::*;
     use reth_db::Database;
 
-    fn set_layout(tx: &impl DbTxMut, settings: StorageSettings) {
+    fn set_layout(tx: &impl DbTxMut, settings: impl serde::Serialize) {
         tx.put::<tables::Metadata>(
             keys::STORAGE_SETTINGS.to_owned(),
             serde_json::to_vec(&settings).unwrap(),
@@ -410,6 +410,16 @@ mod tests {
 
         {
             let tx = db.tx_mut().unwrap();
+            for invalid in [
+                serde_json::json!("unknown"),
+                serde_json::json!({"receipts_in_static_files": true}),
+                serde_json::json!({"receipts_in_static_files": false, "unknown": false}),
+            ] {
+                set_layout(&tx, invalid);
+                let err = write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block)
+                    .unwrap_err();
+                assert_eq!(err.to_string(), "Invalid storage settings in snapshot database");
+            }
             set_layout(&tx, StorageSettings::v2());
             write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap();
             tx.commit().unwrap();
@@ -489,8 +499,12 @@ mod tests {
 
         {
             let tx = db.tx_mut().unwrap();
-            set_layout(&tx, StorageSettings::v2());
             write_prune_checkpoints_tx(&tx, &config, &selections, 21_000_000).unwrap();
+            set_layout(&tx, "unknown");
+            assert_eq!(
+                write_prune_checkpoints_tx(&tx, &config, &selections, 21_000_000).unwrap(),
+                None
+            );
             tx.commit().unwrap();
         }
 
