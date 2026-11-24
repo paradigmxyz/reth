@@ -384,7 +384,7 @@ impl Engine {
         init_genesis_with_settings(&factory, storage_settings)
             .map_err(|err| Error::engine("failed to set up the engine", err))?;
         let (provider, canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(factory.clone(), in_memory_state_writer)
+            BlockchainProvider::new(factory.clone(), in_memory_state_writer)
                 .map_err(|err| Error::engine("failed to set up the engine", err))?;
 
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
