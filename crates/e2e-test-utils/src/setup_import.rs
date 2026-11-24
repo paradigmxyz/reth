@@ -109,7 +109,7 @@ pub async fn setup_engine_with_chain_import(
         // Now launch the node with the pre-populated datadir.
         debug!(target: "e2e::import", "Launching node with datadir: {:?}", datadir);
 
-        let database = open_test_database(&datadir, &node_config.db)?;
+        let database = open_test_database(&datadir, node_config.db.sync_mode)?;
         let node = launch_test_node(
             LaunchArgs {
                 idx,
