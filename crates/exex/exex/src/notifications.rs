@@ -573,6 +573,7 @@ mod tests {
     use alloy_eips::BlockNumHash;
     use eyre::OptionExt;
     use futures::StreamExt;
+    use reth_chain_state::CanonicalInMemoryStateWriter;
     use reth_chainspec::MAINNET;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Block;
@@ -678,8 +679,14 @@ mod tests {
         let genesis_block = provider_factory
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(provider_factory.clone(), in_memory_state_writer)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            provider_factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            provider_factory.clone(),
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         let exex_head =
             ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };

@@ -20,7 +20,7 @@ use jsonrpsee::{
     types::{Response, ResponsePayload},
     RpcModule,
 };
-use reth_chain_state::InMemoryState;
+use reth_chain_state::{CanonicalInMemoryStateWriter, InMemoryState};
 use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_db::{
     init_db,
@@ -384,9 +384,16 @@ impl Engine {
         .map_err(|err| Error::engine("failed to set up the engine", err))?;
         init_genesis_with_settings(&factory, storage_settings)
             .map_err(|err| Error::engine("failed to set up the engine", err))?;
-        let (provider, canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory.clone(), in_memory_state_writer)
-                .map_err(|err| Error::engine("failed to set up the engine", err))?;
+        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory
+                .chain_info_headers()
+                .map_err(|err| Error::engine("failed to set up the engine", err))?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory.clone(),
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
         let evm_config = EthEvmConfig::new(chain_spec.clone());

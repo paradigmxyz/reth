@@ -12,7 +12,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use futures::{stream::FusedStream, stream_select, FutureExt, StreamExt};
-use reth_chain_state::InMemoryState;
+use reth_chain_state::{CanonicalInMemoryStateWriter, InMemoryState};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_tree::{
@@ -159,10 +159,17 @@ impl<B> EngineNodeLauncher<B> {
             })
             .with_metrics_task();
 
-        // Create the blockchain provider with the writer of its canonical in-memory state. The
-        // provider and its clones read that state, and the engine changes it through the writer.
-        let (blockchain_db, canonical_in_memory_state_writer) =
-            BlockchainProvider::new(ctx.provider_factory().clone(), in_memory_state_writer)?;
+        // Create the writer of the canonical in-memory state, starting from the headers stored in
+        // the database, and the blockchain provider that reads that state. The engine changes it
+        // through the writer.
+        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            ctx.provider_factory().chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let blockchain_db = BlockchainProvider::new(
+            ctx.provider_factory().clone(),
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         let ctx = ctx
             // passing FullNodeTypes as type parameter here so that we can build

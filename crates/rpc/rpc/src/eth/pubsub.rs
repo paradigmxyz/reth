@@ -628,7 +628,15 @@ mod tests {
         let (factory, in_memory_state_writer) =
             create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         init_genesis(&factory).unwrap();
-        BlockchainProvider::new(factory, in_memory_state_writer).unwrap()
+        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers().unwrap(),
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
+        (provider, canonical_in_memory_state_writer)
     }
 
     fn test_pubsub(provider: TestProvider, pool: TestPool) -> EthPubSub<impl EthSubscriptions> {

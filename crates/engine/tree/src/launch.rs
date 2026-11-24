@@ -84,9 +84,8 @@ where
     pub provider: ProviderFactory<N>,
     /// Blockchain provider backing the engine tree.
     pub blockchain_db: BlockchainProvider<N>,
-    /// Writer of the canonical in-memory state of `blockchain_db`, as
-    /// [`BlockchainProvider::new`] returns it. The engine tree changes that state
-    /// through it.
+    /// Writer of the canonical in-memory state that `blockchain_db` reads. The engine tree
+    /// changes that state through it.
     pub canonical_in_memory_state_writer: CanonicalInMemoryStateWriter<N::Primitives>,
     /// Pruner run by the persistence service.
     pub pruner: PrunerWithFactory<ProviderFactory<N>>,

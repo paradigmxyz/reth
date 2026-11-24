@@ -1403,7 +1403,7 @@ mod tests {
     use rand::Rng;
     use reth_chain_state::{
         test_utils::{test_canonical_in_memory_state_writer, TestBlockBuilder},
-        ExecutedBlock, InMemoryState, NewCanonicalChain,
+        CanonicalInMemoryStateWriter, ExecutedBlock, InMemoryState, NewCanonicalChain,
     };
     use reth_chainspec::MAINNET;
     use reth_db_api::{
@@ -1494,8 +1494,14 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory, in_memory_state_writer)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
         let consistent_provider = provider.consistent_provider()?;
 
         // Useful blocks
@@ -1640,8 +1646,14 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory, in_memory_state_writer)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
         let consistent_provider = provider.consistent_provider()?;
 
         // First in memory block
@@ -1756,8 +1768,14 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory, in_memory_state_writer)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         let in_memory_changesets = in_memory_changesets.into_iter().next().unwrap();
         let chain = NewCanonicalChain::Commit {
@@ -1934,8 +1952,14 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory, in_memory_state_writer)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         let in_mem_block = in_memory_blocks.first().unwrap();
         let senders = in_mem_block.senders().expect("failed to recover senders");
@@ -2037,8 +2061,14 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory, in_memory_state_writer)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         let mut new = Vec::new();
         for (block, (previous, next)) in in_memory_blocks.into_iter().zip([(100, 200), (200, 300)])

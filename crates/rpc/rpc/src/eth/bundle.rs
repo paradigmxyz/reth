@@ -424,7 +424,7 @@ mod tests {
     use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip2718::Encodable2718, BlockNumberOrTag};
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{Address, TxKind};
-    use reth_chain_state::ExecutedBlock;
+    use reth_chain_state::{CanonicalInMemoryStateWriter, ExecutedBlock};
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Block as EthBlock;
@@ -476,8 +476,14 @@ mod tests {
         let (factory, in_memory_state_writer) =
             create_test_provider_factory_with_in_memory_state_writer(chain_spec);
         init_genesis(&factory).unwrap();
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory, in_memory_state_writer).unwrap();
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers().unwrap(),
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         let eth_api = EthApiBuilder::new(
             provider.clone(),

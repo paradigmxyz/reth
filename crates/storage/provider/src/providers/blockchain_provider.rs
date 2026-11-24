@@ -5,19 +5,18 @@ use crate::{
     },
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
-    CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HeaderProvider, MetadataProvider, ProviderError, ProviderFactory,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory,
-    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
+    HeaderProvider, MetadataProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
+    ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader,
+    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
+    TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256};
 use reth_chain_state::{
-    BlockState, CanonicalInMemoryState, CanonicalInMemoryStateWriter, ChainInfoHeaders,
-    ExecutedBlock, ForkChoiceNotifications, ForkChoiceSubscriptions, InMemoryStateWriter,
-    PersistedBlockNotifications, PersistedBlockSubscriptions,
+    BlockState, CanonicalInMemoryState, ExecutedBlock, ForkChoiceNotifications,
+    ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
@@ -84,51 +83,20 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockchainProvider<N> {
-    /// Creates a provider over `storage`, fetching the latest, safe and finalized headers from the
-    /// database to initialize the provider, and returns it with the writer of its canonical
-    /// in-memory state.
+    /// Creates a provider over `storage` that reads `canonical_in_memory_state`.
     ///
-    /// The provider and its clones read that state, and it only changes through the returned
-    /// writer. The chain info and the canonical state notifications belong to the returned
-    /// provider and its clones.
+    /// `canonical_in_memory_state` is the state of a [`CanonicalInMemoryStateWriter`], which is
+    /// the only way to change it. That writer has to be created from the
+    /// [`ProviderFactory::chain_info_headers`] of `storage` and from the writer that
+    /// [`InMemoryState::new`] returned with the in-memory state of `storage`. Otherwise the
+    /// canonical lookups of the provider and its state providers read different blocks.
     ///
-    /// `in_memory_state_writer` has to be the writer that [`InMemoryState::new`] returned with the
-    /// in-memory state of `storage`. Otherwise the canonical lookups of the provider and its state
-    /// providers read different blocks. The writer is consumed even if this returns an error.
+    /// The chain info and the canonical state notifications of the provider and its clones are
+    /// those of `canonical_in_memory_state`.
     ///
+    /// [`CanonicalInMemoryStateWriter`]: reth_chain_state::CanonicalInMemoryStateWriter
     /// [`InMemoryState::new`]: reth_chain_state::InMemoryState::new
     pub fn new(
-        storage: ProviderFactory<N>,
-        in_memory_state_writer: InMemoryStateWriter<N::Primitives>,
-    ) -> ProviderResult<(Self, CanonicalInMemoryStateWriter<N::Primitives>)> {
-        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
-            Self::chain_info_headers(&storage)?,
-            in_memory_state_writer,
-        );
-        let canonical_in_memory_state =
-            canonical_in_memory_state_writer.canonical_in_memory_state().clone();
-        Ok((
-            Self::with_canonical_in_memory_state(storage, canonical_in_memory_state),
-            canonical_in_memory_state_writer,
-        ))
-    }
-
-    /// Creates a provider like [`Self::new`], without a writer of its canonical in-memory state.
-    ///
-    /// Nothing can change the chain info of the returned provider or send its notifications: its
-    /// canonical head and its safe and finalized blocks stay the ones read from the database, and
-    /// it never has a persisted block. Its in-memory blocks are those of `storage`, and change
-    /// with them.
-    pub fn new_without_writer(storage: ProviderFactory<N>) -> ProviderResult<Self> {
-        let canonical_in_memory_state = CanonicalInMemoryState::without_writer(
-            Self::chain_info_headers(&storage)?,
-            storage.in_memory_state().clone(),
-        );
-        Ok(Self::with_canonical_in_memory_state(storage, canonical_in_memory_state))
-    }
-
-    /// Creates a provider over `storage` that reads `canonical_in_memory_state`.
-    fn with_canonical_in_memory_state(
         storage: ProviderFactory<N>,
         canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
     ) -> Self {
@@ -136,36 +104,20 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         Self { database: storage, canonical_in_memory_state, bal_store }
     }
 
-    /// Returns the latest, safe and finalized headers stored in the database of `storage`. The
-    /// safe header is the finalized one if no safe block is stored.
-    fn chain_info_headers(
-        storage: &ProviderFactory<N>,
-    ) -> ProviderResult<ChainInfoHeaders<HeaderTy<N>>> {
-        let provider = storage.provider()?;
-        let best = provider.chain_info()?;
-        let latest = provider
-            .header_by_number(best.best_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(best.best_number.into()))?;
-        let finalized_header = provider
-            .last_finalized_block_number()?
-            .map(|num| provider.sealed_header(num))
-            .transpose()?
-            .flatten();
-        let safe_header = provider
-            .last_safe_block_number()?
-            .or_else(|| {
-                // for the purpose of this we can also use the finalized block if we don't have the
-                // safe block
-                provider.last_finalized_block_number().ok().flatten()
-            })
-            .map(|num| provider.sealed_header(num))
-            .transpose()?
-            .flatten();
-        Ok(ChainInfoHeaders {
-            canonical_head: SealedHeader::new(latest, best.best_hash),
-            safe: safe_header,
-            finalized: finalized_header,
-        })
+    /// Creates a provider over `storage` without a writer of its canonical in-memory state,
+    /// fetching the latest, safe and finalized headers from the database to initialize the
+    /// provider.
+    ///
+    /// Nothing can change the chain info of the returned provider or send its notifications: its
+    /// canonical head and its safe and finalized blocks stay the ones read from the database, and
+    /// it never has a persisted block. Its in-memory blocks are those of `storage`, and change
+    /// with them.
+    pub fn new_without_writer(storage: ProviderFactory<N>) -> ProviderResult<Self> {
+        let canonical_in_memory_state = CanonicalInMemoryState::without_writer(
+            storage.chain_info_headers()?,
+            storage.in_memory_state().clone(),
+        );
+        Ok(Self::new(storage, canonical_in_memory_state))
     }
 
     /// Gets a clone of `canonical_in_memory_state`.
@@ -1181,7 +1133,8 @@ mod tests {
     use rand::Rng;
     use reth_chain_state::{
         test_utils::TestBlockBuilder, CanonStateNotification, CanonStateSubscriptions,
-        CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
+        CanonicalInMemoryState, CanonicalInMemoryStateWriter, ExecutedBlock, InMemoryStateWriter,
+        NewCanonicalChain,
     };
     use reth_chainspec::{ChainSpec, MAINNET};
     use reth_db_api::models::{AccountBeforeTx, SnapAttempt, StoredBlockBodyIndices};
@@ -1332,8 +1285,14 @@ mod tests {
         let writer = factory.provider_rw()?;
         writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 2, 1))?;
         writer.commit()?;
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory, in_memory_state_writer)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
         canonical_in_memory_state_writer.insert_executed(blocks[2].clone());
 
         for number in [1, 2] {
@@ -1457,8 +1416,14 @@ mod tests {
 
         provider_rw.commit()?;
 
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory, in_memory_state_writer)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         // Insert the rest of the blocks and receipts into the in-memory state
         let chain = NewCanonicalChain::Commit {
@@ -1603,8 +1568,14 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory, in_memory_state_writer)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         // Useful blocks
         let first_db_block = database_blocks.first().unwrap();
@@ -1703,8 +1674,14 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory, in_memory_state_writer)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         // First in memory block
         let first_in_mem_block = in_memory_blocks.first().unwrap();
@@ -1981,8 +1958,14 @@ mod tests {
         provider_rw.insert_block(&block_1)?;
         provider_rw.commit()?;
 
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory, in_memory_state_writer)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         // Subscribe twice for canonical state updates.
         let mut rx_1 = provider.subscribe_to_canonical_state();
@@ -2428,8 +2411,14 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory, in_memory_state_writer)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         let in_memory_changesets = in_memory_changesets.into_iter().next().unwrap();
         let chain = NewCanonicalChain::Commit {
@@ -3372,8 +3361,8 @@ mod tests {
         (Address::random(), Account { nonce, balance: U256::from(nonce), ..Default::default() })
     }
 
-    /// Creates a provider factory with a genesis header, which [`BlockchainProvider::new`] needs
-    /// to initialize its chain tracker, and the writer of its in-memory state.
+    /// Creates a provider factory with a genesis header, which
+    /// [`ProviderFactory::chain_info_headers`] needs, and the writer of its in-memory state.
     fn test_provider_factory_with_genesis(
     ) -> eyre::Result<(ProviderFactory<MockNodeTypesWithDB>, InMemoryStateWriter)> {
         let (factory, in_memory_state_writer) =
@@ -3684,8 +3673,14 @@ mod tests {
         provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2))?;
         provider_rw.commit()?;
 
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory, in_memory_state_writer)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         // An in-memory block on top of the head adds another account under a root of its own.
         let (memory_address, memory_account) = random_account(3);
@@ -3749,8 +3744,14 @@ mod tests {
 
         let mut rng = generators::rng();
         let (factory, in_memory_state_writer) = test_provider_factory_with_genesis()?;
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory, in_memory_state_writer)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
         let genesis = provider.canonical_in_memory_state.get_canonical_head();
 
         let (address, account) = random_account(1);
@@ -3826,8 +3827,14 @@ mod tests {
     fn state_range_provider_reverts_database_advancement_past_anchor() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (factory, in_memory_state_writer) = test_provider_factory_with_genesis()?;
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory, in_memory_state_writer)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
         let genesis = provider.canonical_in_memory_state.get_canonical_head();
 
         // In-memory target block anchored on genesis, with a known account.
@@ -4050,8 +4057,14 @@ mod tests {
     #[test]
     fn providers_of_one_factory_share_in_memory_blocks() -> eyre::Result<()> {
         let (factory, in_memory_state_writer) = test_provider_factory_with_genesis()?;
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new(factory.clone(), in_memory_state_writer)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::new(
+            factory.clone(),
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
         let other = BlockchainProvider::new_without_writer(factory)?;
         let genesis = provider.canonical_in_memory_state.get_canonical_head();
         let block = TestBlockBuilder::eth().get_executed_block_with_number(1, genesis.hash());
