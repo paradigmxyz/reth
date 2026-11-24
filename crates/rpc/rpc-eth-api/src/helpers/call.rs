@@ -161,14 +161,11 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                     if !validation {
                         // If not explicitly required, we disable nonce check <https://github.com/paradigmxyz/reth/issues/16108>
                         evm_env.version_mut().features.remove(evm2::EvmFeatures::NONCE_CHECK);
-                        // Blob calls default `maxFeePerBlobGas` to 0, below any blob base fee, so
-                        // skip the blob fee cap check. Unlike geth, this skips it for every cap,
-                        // not only 0. Like geth, the real blob fee is still charged.
-                        evm_env.version_mut().features.remove(
-                            evm2::EvmFeatures::BASE_FEE_CHECK |
-                                evm2::EvmFeatures::BLOB_BASE_FEE_CHECK,
-                        );
+                        evm_env.version_mut().features.remove(evm2::EvmFeatures::BASE_FEE_CHECK);
                         evm_env.block_env_mut().basefee = U256::ZERO;
+                        // The spec zeroes the blob base fee without validation, so a default
+                        // `maxFeePerBlobGas` of 0 passes the cap check and no blob fee is charged.
+                        evm_env.block_env_mut().blob_basefee = U256::ZERO;
                     }
 
                     // Set prevrandao to zero for simulated blocks by default,

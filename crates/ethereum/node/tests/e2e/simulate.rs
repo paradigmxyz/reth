@@ -531,16 +531,18 @@ async fn test_simulate_v1_blob_call_without_max_fee_per_blob_gas() -> eyre::Resu
     let provider = node.rpc_provider();
 
     let from = address!("0xc000000000000000000000000000000000000000");
+    let to = address!("0xc100000000000000000000000000000000000000");
     let tx = TransactionRequest {
         blob_versioned_hashes: Some(vec![b256!(
             "0x0100000000000000000000000000000000000000000000000000000000000001"
         )]),
-        ..TransactionRequest::default()
-            .from(from)
-            .to(address!("0xc100000000000000000000000000000000000000"))
+        ..TransactionRequest::default().from(from).to(to)
     };
-    let state_overrides =
-        StateOverridesBuilder::default().with_balance(from, U256::from(u64::MAX)).build();
+    let state_overrides = StateOverride::from_iter([
+        (from, AccountOverride::default().with_balance(U256::from(u64::MAX))),
+        // ORIGIN BALANCE PUSH0 MSTORE PUSH1 0x20 PUSH0 RETURN
+        (to, AccountOverride::default().with_code(bytes!("0x32315f5260205ff3"))),
+    ]);
     let payload = SimulatePayload::default()
         .with_full_transactions()
         .extend(SimBlock::default().with_state_overrides(state_overrides).call(tx));
@@ -552,6 +554,8 @@ async fn test_simulate_v1_blob_call_without_max_fee_per_blob_gas() -> eyre::Resu
     let tx = &result[0].inner.transactions.as_transactions().unwrap()[0];
     assert!(tx.inner.is_eip4844());
     assert_eq!(tx.max_fee_per_blob_gas(), Some(0));
+    // No blob fee is charged.
+    assert_eq!(U256::from_be_slice(&result[0].calls[0].return_data), U256::from(u64::MAX));
 
     Ok(())
 }
