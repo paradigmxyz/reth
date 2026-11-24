@@ -162,13 +162,20 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     ///
     /// This is the post-state of `state.hash()`. Because the caller already holds the in-memory
     /// chain, the overlay manager does not have to look it up again.
+    ///
+    /// The canonical head is captured before the database snapshot opens. Its chain then holds
+    /// the blocks above `state` that mask Finish, even after persistence removes them.
     fn state_provider_for_state(
         &self,
         state: Arc<BlockState<N::Primitives>>,
     ) -> ProviderResult<StateProviderBox> {
+        let head_state = self.canonical_in_memory_state.head_state();
         let state_provider_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
-            self.database.overlay_manager().overlay_builder_for_state(state),
+            self.database
+                .overlay_manager()
+                .overlay_builder_for_state(state)
+                .with_snapshot_state(head_state),
         );
         Ok(Box::new(state_provider_factory.database_provider_ro()?))
     }
@@ -191,22 +198,18 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         ))
     }
 
-    /// Returns the canonical in-memory block with `state_root`.
-    fn block_state_by_root(&self, state_root: B256) -> Option<Arc<BlockState<N::Primitives>>> {
-        self.canonical_in_memory_state
-            .canonical_chain()
-            .find(|state| state.state_root() == state_root)
-    }
-
-    /// Resolves `state_root` into a range view over `provider`'s snapshot, preferring
-    /// `block_state` over the persisted-history fallback.
+    /// Resolves `state_root` into a range view over `provider`'s snapshot, preferring a block on
+    /// the chain of `head_state` over the persisted-history fallback.
+    ///
+    /// `head_state` is the canonical head captured before `provider` was opened. Its chain holds
+    /// the blocks that mask Finish, even after persistence removes them.
     ///
     /// The snap attempt is read from `provider` too, so a bootstrap committing after the snapshot
     /// was taken can't slip its downloads past the check.
     fn state_range_view(
         &self,
         provider: StateRangeDbProvider<N>,
-        block_state: Option<Arc<BlockState<N::Primitives>>>,
+        head_state: Option<Arc<BlockState<N::Primitives>>>,
         state_root: B256,
     ) -> ProviderResult<Option<StateRangeView>> {
         if provider.snap_attempt()?.is_some_and(|attempt| !attempt.is_verified()) {
@@ -224,6 +227,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         }
 
         let overlay_manager = self.database.overlay_manager();
+        let block_state = head_state
+            .clone()
+            .and_then(|head| head.iter().find(|state| state.state_root() == state_root));
         let overlay_builder = match block_state {
             Some(state) => overlay_manager.overlay_builder_for_state(state),
             None => {
@@ -240,7 +246,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         Ok(Some(Box::new(HistoricalStateRangeView {
             provider: OverlayStateProvider::new(
                 provider,
-                overlay_builder.without_trie_revert_caching(),
+                overlay_builder.with_snapshot_state(head_state).without_trie_revert_caching(),
             ),
         })))
     }
@@ -299,10 +305,10 @@ impl<N: ProviderNodeTypes> StateRangeProviderFactory for BlockchainProvider<N> {
     /// is unverified, since no root describes its partially downloaded state, or while the
     /// `Execution` checkpoint is ahead of `Finish`.
     fn state_range_provider(&self, state_root: B256) -> ProviderResult<Option<StateRangeView>> {
-        // Persisted blocks leave memory only after their commit, so a canonical root missed here is
-        // already visible to a snapshot opened afterwards.
-        let block_state = self.block_state_by_root(state_root);
-        self.state_range_view(self.database.provider()?, block_state, state_root)
+        // Persisted blocks leave memory only after their commit, so a canonical root missed in the
+        // head chain is already visible to a snapshot opened afterwards.
+        let head_state = self.canonical_in_memory_state.head_state();
+        self.state_range_view(self.database.provider()?, head_state, state_root)
     }
 }
 
@@ -1237,7 +1243,7 @@ mod tests {
         );
         let mut blocks = Vec::<ExecutedBlock>::new();
         let mut storage_roots = Vec::new();
-        for number in 0..=2 {
+        for number in 0..=3 {
             let mut output = (*ExecutedBlock::<reth_ethereum_primitives::EthPrimitives>::default()
                 .execution_output)
                 .clone();
@@ -1323,20 +1329,36 @@ mod tests {
             .append_storage_changeset(vec![], 0)?;
         static_files.commit()?;
         let writer = factory.provider_rw()?;
-        writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 2, 1))?;
+        writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 3, 1))?;
         writer.commit()?;
         let (provider, mut canonical_in_memory_state_writer) =
             BlockchainProvider::new_with_writer(factory)?;
         canonical_in_memory_state_writer
-            .update_chain(NewCanonicalChain::Commit { new: vec![blocks[2].clone()] });
+            .update_chain(NewCanonicalChain::Commit { new: blocks[2..].to_vec() });
 
-        // Persistence can remove block 2, which masks Finish, from the live in-memory state after
-        // the historical providers opened their snapshots.
-        let states = [1, 2]
-            .map(|number| provider.history_by_block_hash(blocks[number].recovered_block().hash()));
+        // Persistence can remove blocks 2 and 3, which mask Finish, from the live in-memory state
+        // after the providers opened their snapshots. Block 2 is below Finish, so its by-number
+        // provider also needs block 3.
+        let states = [1, 2, 3]
+            .map(|number| {
+                (number, provider.history_by_block_hash(blocks[number].recovered_block().hash()))
+            })
+            .into_iter()
+            .chain([2, 3].map(|number| {
+                let number_or_tag = BlockNumberOrTag::Number(number as u64);
+                (number, provider.state_by_block_number_or_tag(number_or_tag))
+            }))
+            .collect::<Vec<_>>();
+        let range_view = provider
+            .state_range_provider(blocks[2].recovered_block().state_root)?
+            .expect("in-memory root must resolve");
         canonical_in_memory_state_writer.clear_state();
 
-        for (number, state) in [1, 2].into_iter().zip(states) {
+        // The first node of a boundary proof is the trie root.
+        let proof = range_view.account_range_proof(&[keccak256(other_address)])?;
+        assert_eq!(keccak256(&proof[0]), blocks[2].recovered_block().state_root);
+
+        for (number, state) in states {
             let state = state?;
             let root = blocks[number].recovered_block().state_root;
             state
