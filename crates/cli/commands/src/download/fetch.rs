@@ -7,7 +7,11 @@ use super::{
     RETRY_BACKOFF_SECS,
 };
 use eyre::Result;
-use reqwest::{blocking::Client as BlockingClient, header::RANGE, StatusCode};
+use reqwest::{
+    blocking::Client as BlockingClient,
+    header::{HeaderMap, CONTENT_RANGE, RANGE},
+    StatusCode,
+};
 use reth_cli_util::cancellation::CancellationToken;
 use reth_fs_util as fs;
 use std::{
@@ -213,12 +217,7 @@ impl ArchiveFetcher {
 
         let (supports_ranges, total_size) = match probe {
             Ok(response) if response.status() == StatusCode::PARTIAL_CONTENT => {
-                let total = response
-                    .headers()
-                    .get("Content-Range")
-                    .and_then(|value| value.to_str().ok())
-                    .and_then(|value| value.split('/').next_back())
-                    .and_then(|value| value.parse::<u64>().ok());
+                let total = content_range(response.headers()).and_then(|range| range.total);
                 (true, total)
             }
             _ => {
@@ -318,17 +317,9 @@ impl ArchiveFetcher {
             };
 
             let is_partial = response.status() == StatusCode::PARTIAL_CONTENT;
-            let content_range = response
-                .headers()
-                .get("Content-Range")
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.trim().split_once(' '))
-                .filter(|(unit, _)| unit.eq_ignore_ascii_case("bytes"))
-                .map(|(_, range)| range.trim());
+            let range = content_range(response.headers());
             let size = if is_partial {
-                content_range
-                    .and_then(|value| value.split('/').next_back())
-                    .and_then(|value| value.parse().ok())
+                range.and_then(|range| range.total)
             } else {
                 response.content_length()
             };
@@ -337,9 +328,7 @@ impl ArchiveFetcher {
             }
 
             // Appending a range that starts elsewhere would silently corrupt the `.part` file.
-            let range_start = content_range
-                .and_then(|value| value.split('-').next())
-                .and_then(|value| value.parse::<u64>().ok());
+            let range_start = range.map(|range| range.start);
             if is_partial && range_start != Some(existing_size) {
                 // Resuming this `.part` file would likely fail the same way, so retry from scratch.
                 // A `.part` left behind would be resumed or promoted as if it were complete.
@@ -529,6 +518,29 @@ impl ArchiveFetcher {
     fn quiet(&self) -> bool {
         self.session.progress().is_some()
     }
+}
+
+/// The parsed `Content-Range` header of a byte-range response.
+#[derive(Debug, Clone, Copy)]
+struct ContentRange {
+    /// First byte of the range in the archive.
+    start: u64,
+    /// Total archive size, or `None` when the server sends `*`.
+    total: Option<u64>,
+}
+
+/// Parses a `bytes <start>-<end>/<total>` `Content-Range` header, with a case-insensitive unit.
+///
+/// Returns `None` when the header is missing or malformed.
+fn content_range(headers: &HeaderMap) -> Option<ContentRange> {
+    let value = headers.get(CONTENT_RANGE)?.to_str().ok()?.trim();
+    let (unit, range) = value.split_once(' ')?;
+    if !unit.eq_ignore_ascii_case("bytes") {
+        return None
+    }
+    let (range, total) = range.trim().split_once('/')?;
+    let start = range.split_once('-')?.0.trim().parse().ok()?;
+    Some(ContentRange { start, total: total.trim().parse().ok() })
 }
 
 /// Resolves a `file://` archive URL to its local path.
@@ -1597,7 +1609,7 @@ mod tests {
     fn sequential_download_rejects_size_other_than_expected() {
         let response = b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\nConnection: close\r\n\r\n\
                          01234567890123456789";
-        let url = spawn_response_server(response.to_vec());
+        let url = spawn_response_server(vec![response]);
         let dir = tempfile::tempdir().unwrap();
         let session = DownloadSession::new(None, None, CancellationToken::new());
         let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(10));
@@ -1613,7 +1625,7 @@ mod tests {
 
     #[test]
     fn sequential_resume_restarts_after_wrong_offset() {
-        let url = spawn_response_sequence_server(vec![
+        let url = spawn_response_server(vec![
             b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-9/10\r\n\
               Content-Length: 10\r\nConnection: close\r\n\r\nXXXXXXXXXX",
             b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n0123456789",
@@ -1633,7 +1645,7 @@ mod tests {
         let response = b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-9/10\r\n\
                          Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n\
                          14\r\n01234567890123456789\r\n0\r\n\r\n";
-        let url = spawn_response_server(response.to_vec());
+        let url = spawn_response_server(vec![response]);
         let dir = tempfile::tempdir().unwrap();
         let session = DownloadSession::new(None, None, CancellationToken::new());
         let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(10));
@@ -1646,7 +1658,7 @@ mod tests {
 
     #[test]
     fn sequential_full_response_replaces_earlier_total() {
-        let url = spawn_response_sequence_server(vec![
+        let url = spawn_response_server(vec![
             b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\nConnection: close\r\n\r\n0123",
             b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n0123456789",
         ]);
@@ -1663,7 +1675,7 @@ mod tests {
 
     #[test]
     fn sequential_full_restart_without_length_drops_earlier_total() {
-        let url = spawn_response_sequence_server(vec![
+        let url = spawn_response_server(vec![
             b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n0123",
             b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n\
               14\r\n01234567890123456789\r\n0\r\n\r\n",
@@ -1686,7 +1698,7 @@ mod tests {
     fn sequential_wrong_offset_restart_fails_when_part_cannot_be_removed() {
         let response = b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-9/10\r\n\
                          Content-Length: 10\r\nConnection: close\r\n\r\nXXXXXXXXXX";
-        let url = spawn_response_server(response.to_vec());
+        let url = spawn_response_server(vec![response]);
         let dir = tempfile::tempdir().unwrap();
         // A directory makes `remove_file` fail while still reporting a nonzero length.
         let part = dir.path().join("archive.tar.zst.part");
@@ -1707,7 +1719,7 @@ mod tests {
 
     #[test]
     fn sequential_wrong_offset_restart_drops_earlier_total() {
-        let url = spawn_response_sequence_server(vec![
+        let url = spawn_response_server(vec![
             b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 2-3/10\r\n\
               Content-Length: 10\r\nConnection: close\r\n\r\n23",
             b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-9/10\r\n\
@@ -1732,7 +1744,7 @@ mod tests {
 
     #[test]
     fn sequential_resume_rejects_changed_total() {
-        let url = spawn_response_sequence_server(vec![
+        let url = spawn_response_server(vec![
             b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\nConnection: close\r\n\r\n0123",
             b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 4-9/10\r\n\
                   Content-Length: 6\r\nConnection: close\r\n\r\n456789",
@@ -1755,7 +1767,7 @@ mod tests {
     fn sequential_resume_accepts_mixed_case_range_unit() {
         let response = b"HTTP/1.1 206 Partial Content\r\nContent-Range: Bytes 5-9/10\r\n\
                          Content-Length: 5\r\nConnection: close\r\n\r\n56789";
-        let url = spawn_response_server(response.to_vec());
+        let url = spawn_response_server(vec![response]);
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("archive.tar.zst.part"), b"01234").unwrap();
         let session = DownloadSession::new(None, None, CancellationToken::new());
@@ -1770,7 +1782,7 @@ mod tests {
     fn download_without_range_support_accepts_expected_size() {
         let response =
             b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n0123456789";
-        let url = spawn_response_server(response.to_vec());
+        let url = spawn_response_server(vec![response]);
         let dir = tempfile::tempdir().unwrap();
         let fetcher = ArchiveFetcher::new(url, dir.path(), test_session(), Some(10));
 
@@ -1783,7 +1795,7 @@ mod tests {
     fn probe_rejects_size_other_than_expected() {
         let response = b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-0/20\r\n\
                          Content-Length: 1\r\nConnection: close\r\n\r\n0";
-        let url = spawn_response_server(response.to_vec());
+        let url = spawn_response_server(vec![response]);
         let dir = tempfile::tempdir().unwrap();
         let fetcher = ArchiveFetcher::new(url, dir.path(), test_session(), Some(10));
 
@@ -1882,31 +1894,14 @@ mod tests {
         (url, requests)
     }
 
-    /// Answers every HTTP request on localhost with the raw `response` bytes and returns the URL.
-    fn spawn_response_server(response: Vec<u8>) -> String {
+    /// Answers successive HTTP requests on localhost with `responses` in order, repeating the last
+    /// one for any later request, and returns the URL.
+    fn spawn_response_server(responses: Vec<&'static [u8]>) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/archive.tar.zst", listener.local_addr().unwrap());
         std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                let mut stream = stream.unwrap();
-                let mut request = io::BufReader::new(stream.try_clone().unwrap());
-                loop {
-                    let mut line = String::new();
-                    if request.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
-                        break
-                    }
-                }
-                stream.write_all(&response).unwrap();
-            }
-        });
-        url
-    }
-
-    /// Answers successive HTTP requests on localhost with each of `responses` once, in order.
-    fn spawn_response_sequence_server(responses: Vec<&'static [u8]>) -> String {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}/archive.tar.zst", listener.local_addr().unwrap());
-        std::thread::spawn(move || {
+            let last = *responses.last().unwrap();
+            let responses = responses.into_iter().chain(std::iter::repeat(last));
             for (stream, response) in listener.incoming().zip(responses) {
                 let mut stream = stream.unwrap();
                 let mut request = io::BufReader::new(stream.try_clone().unwrap());
