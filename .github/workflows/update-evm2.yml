@@ -157,7 +157,7 @@ jobs:
             if out=$(CARGO_TERM_COLOR=never cargo metadata --format-version 1 2>&1 >/dev/null); then
               break
             fi
-            crate=$(sed -nE 's/.*failed to select a version for `([^`]+)`.*/\1/p' <<< "$out" | head -1)
+            crate=$(grep -m1 'failed to select a version for' <<< "$out" | cut -d "\`" -f2 || true)
             if [ -z "$crate" ]; then
               echo "$out"
               exit 1
