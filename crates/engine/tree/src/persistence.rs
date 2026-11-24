@@ -181,6 +181,11 @@ where
             .iter()
             .map(|block| block.recovered_block().num_hash())
             .collect::<Vec<_>>();
+        // BALs live outside the main database and have no startup recovery. Flush them before the
+        // main commit, so that a crash or a flush error never leaves a persisted block without
+        // its BAL. A BAL for a block that is not persisted afterwards is harmless.
+        self.provider.bal_store().flush(&canonical_blocks)?;
+
         let provider_rw = self.provider.database_provider_rw()?;
         let last_state_trie_block = if let Some(block) = input.state_trie_blocks().last() {
             // Newly written static-file headers are not readable until commit finalizes their
@@ -211,10 +216,6 @@ where
         }
 
         provider_rw.commit()?;
-        // BALs live outside the main database and are intentionally flushed last.
-        let _ = self.provider.bal_store().flush(&canonical_blocks).inspect_err(|err| {
-            warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
-        });
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
         let elapsed = start_time.elapsed();
@@ -421,8 +422,8 @@ mod tests {
     use reth_provider::{
         providers::{BlockchainProvider, ProviderFactoryBuilder, ReadOnlyConfig},
         test_utils::{create_test_provider_factory, MockNodeTypes},
-        AccountReader, BalConfig, BalStore, BalStoreHandle, ChainSpecProvider, HeaderProvider,
-        InMemoryBalStore, ProviderError, ProviderResult, RawBal, RocksDBBalStore,
+        AccountReader, BalConfig, BalStore, BalStoreHandle, BlockNumReader, ChainSpecProvider,
+        HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal, RocksDBBalStore,
         RocksDBProviderFactory, StateProviderFactory, StorageSettingsCache,
     };
     use reth_prune::Pruner;
@@ -596,6 +597,53 @@ mod tests {
         assert_eq!(result.last_block, num_hash);
         let persisted_store = RocksDBBalStore::new(provider.rocksdb_provider());
         assert_eq!(persisted_store.get_by_hash(num_hash.hash).unwrap(), Some(raw_bal));
+    }
+
+    #[reth_concurrency::test]
+    fn test_save_blocks_does_not_commit_on_bal_flush_error() {
+        reth_tracing::init_test_tracing();
+        let provider = create_test_provider_factory()
+            .with_bal_store(BalStoreHandle::new(FailingFlushBalStore));
+        init_genesis(&provider).unwrap();
+
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let mut service =
+            PersistenceService::new(provider.clone(), db_service_rx, pruner, sync_metrics_tx);
+
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let executed = test_block_builder.get_executed_block_with_number(1, B256::random());
+
+        assert!(matches!(
+            service.on_save_blocks(full_save_input(vec![executed])),
+            Err(PersistenceError::ProviderError(_))
+        ));
+        assert_eq!(provider.last_block_number().unwrap(), 0);
+    }
+
+    #[derive(Debug)]
+    struct FailingFlushBalStore;
+
+    impl BalStore for FailingFlushBalStore {
+        fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
+            Ok(())
+        }
+
+        fn flush(&self, _blocks: &[NumHash]) -> ProviderResult<()> {
+            Err(ProviderError::other(std::io::Error::other("BAL store flush failed")))
+        }
+
+        fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
+            Ok(0)
+        }
+
+        fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+            Ok(vec![None; block_hashes.len()])
+        }
     }
 
     #[reth_concurrency::test]

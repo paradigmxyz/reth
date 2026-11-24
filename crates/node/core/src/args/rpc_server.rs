@@ -99,6 +99,7 @@ pub struct DefaultRpcServerArgs {
     rpc_max_trace_filter_blocks: u64,
     rpc_max_blocks_per_filter: ZeroAsNoneU64,
     rpc_max_logs_per_response: ZeroAsNoneU64,
+    rpc_max_active_filters: ZeroAsNoneU64,
     rpc_gas_cap: u64,
     rpc_evm_memory_limit: u64,
     rpc_tx_fee_cap: u128,
@@ -324,6 +325,12 @@ impl DefaultRpcServerArgs {
         self
     }
 
+    /// Set the default max active filters
+    pub const fn with_rpc_max_active_filters(mut self, v: ZeroAsNoneU64) -> Self {
+        self.rpc_max_active_filters = v;
+        self
+    }
+
     /// Set the default gas cap
     pub const fn with_rpc_gas_cap(mut self, v: u64) -> Self {
         self.rpc_gas_cap = v;
@@ -445,6 +452,7 @@ impl Default for DefaultRpcServerArgs {
             rpc_max_trace_filter_blocks: constants::DEFAULT_MAX_TRACE_FILTER_BLOCKS,
             rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
+            rpc_max_active_filters: (constants::DEFAULT_MAX_ACTIVE_FILTERS as u64).into(),
             rpc_gas_cap: constants::gas_oracle::RPC_DEFAULT_GAS_CAP,
             rpc_evm_memory_limit: (1 << 32) - 1,
             rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
@@ -515,7 +523,15 @@ pub struct RpcServerArgs {
     pub http_decompression_algorithms: Option<Vec<String>>,
 
     /// Rpc Modules to be configured for the HTTP server
-    #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_api.as_ref().map(|v| v.to_string().into())))]
+    #[arg(
+        long = "http.api",
+        value_parser = DefaultValueParser {
+            inner: RpcModuleSelectionValueParser::default(),
+            default: &DefaultRpcServerArgs::get_global().http_api,
+            to_default: RpcModuleSelection::to_string,
+        },
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_api.as_ref().map(|v| v.to_string().into())),
+    )]
     pub http_api: Option<RpcModuleSelection>,
 
     /// Http Corsdomain to allow request from
@@ -539,7 +555,15 @@ pub struct RpcServerArgs {
     pub ws_allowed_origins: Option<String>,
 
     /// Rpc Modules to be configured for the WS server
-    #[arg(long = "ws.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_api.as_ref().map(|v| v.to_string().into())))]
+    #[arg(
+        long = "ws.api",
+        value_parser = DefaultValueParser {
+            inner: RpcModuleSelectionValueParser::default(),
+            default: &DefaultRpcServerArgs::get_global().ws_api,
+            to_default: RpcModuleSelection::to_string,
+        },
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_api.as_ref().map(|v| v.to_string().into())),
+    )]
     pub ws_api: Option<RpcModuleSelection>,
 
     /// Disable the IPC-RPC server
@@ -622,8 +646,9 @@ pub struct RpcServerArgs {
         value_parser = DefaultValueParser {
             inner: |value: &str| JwtSecret::from_hex(value),
             default: &DefaultRpcServerArgs::get_global().rpc_jwtsecret,
+            to_default: configured_default,
         },
-        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_jwtsecret.as_ref().map(|_| "configured".into())),
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_jwtsecret.as_ref().map(|v| configured_default(v).into())),
         hide_default_value = true,
     )]
     pub rpc_jwtsecret: Option<JwtSecret>,
@@ -679,6 +704,12 @@ pub struct RpcServerArgs {
     /// Maximum number of logs that can be returned in a single response. (0 = no limit)
     #[arg(long = "rpc.max-logs-per-response", alias = "rpc-max-logs-per-response", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_logs_per_response)]
     pub rpc_max_logs_per_response: ZeroAsNoneU64,
+
+    /// Maximum number of filters that can be installed at the same time, across all
+    /// `eth_newFilter`, `eth_newBlockFilter` and `eth_newPendingTransactionFilter` filters. (0 =
+    /// no limit)
+    #[arg(long = "rpc.max-active-filters", alias = "rpc-max-active-filters", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_active_filters)]
+    pub rpc_max_active_filters: ZeroAsNoneU64,
 
     /// Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
     ///
@@ -773,8 +804,9 @@ pub struct RpcServerArgs {
         value_parser = DefaultValueParser {
             inner: Url::parse,
             default: &DefaultRpcServerArgs::get_global().rpc_forwarder,
+            to_default: configured_default,
         },
-        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_forwarder.as_ref().map(|_| "configured".into())),
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_forwarder.as_ref().map(|v| configured_default(v).into())),
         hide_default_value = true,
     )]
     pub rpc_forwarder: Option<Url>,
@@ -787,8 +819,9 @@ pub struct RpcServerArgs {
         value_parser = DefaultValueParser {
             inner: reth_cli_util::parsers::read_json_from_file::<AddressSet>,
             default: &DefaultRpcServerArgs::get_global().builder_disallow,
+            to_default: configured_default,
         },
-        default_value = Resettable::from(DefaultRpcServerArgs::get_global().builder_disallow.as_ref().map(|_| "configured".into())),
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().builder_disallow.as_ref().map(|v| configured_default(v).into())),
         hide_default_value = true,
     )]
     pub builder_disallow: Option<AddressSet>,
@@ -1040,6 +1073,7 @@ impl Default for RpcServerArgs {
             rpc_max_trace_filter_blocks,
             rpc_max_blocks_per_filter,
             rpc_max_logs_per_response,
+            rpc_max_active_filters,
             rpc_gas_cap,
             rpc_evm_memory_limit,
             rpc_tx_fee_cap,
@@ -1090,6 +1124,7 @@ impl Default for RpcServerArgs {
             rpc_max_trace_filter_blocks,
             rpc_max_blocks_per_filter,
             rpc_max_logs_per_response,
+            rpc_max_active_filters,
             rpc_gas_cap,
             rpc_evm_memory_limit,
             rpc_tx_fee_cap,
@@ -1145,6 +1180,11 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
     }
 }
 
+/// Default value string for args whose typed default must not be serialized.
+fn configured_default<T>(_: &T) -> String {
+    "configured".to_string()
+}
+
 /// Uses a typed default without serializing secrets or treating address sets as file paths.
 #[derive(Clone)]
 struct DefaultValueParser<P: TypedValueParser>
@@ -1153,6 +1193,9 @@ where
 {
     inner: P,
     default: &'static Option<P::Value>,
+    /// Formats `default` as the arg's `default_value`, so a different default set by an embedding
+    /// command, such as through `Command::mut_arg`, is parsed instead of replaced.
+    to_default: fn(&P::Value) -> String,
 }
 
 impl<P: TypedValueParser> TypedValueParser for DefaultValueParser<P>
@@ -1178,12 +1221,17 @@ where
         source: ValueSource,
     ) -> Result<Self::Value, clap::Error> {
         if source == ValueSource::DefaultValue &&
-            let Some(default) = self.default
+            let Some(default) = self.default &&
+            value == (self.to_default)(default).as_str()
         {
             Ok(default.clone())
         } else {
             self.inner.parse_ref_(cmd, arg, value, source)
         }
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        self.inner.possible_values()
     }
 }
 
@@ -1424,6 +1472,7 @@ mod tests {
             rpc_max_trace_filter_blocks: 4000,
             rpc_max_blocks_per_filter: 1000u64.into(),
             rpc_max_logs_per_response: 10000u64.into(),
+            rpc_max_active_filters: 500u64.into(),
             rpc_gas_cap: 50_000_000,
             rpc_evm_memory_limit: 256,
             rpc_tx_fee_cap: 2_000_000_000_000_000_000u128,
@@ -1510,6 +1559,8 @@ mod tests {
             "1000",
             "--rpc.max-logs-per-response",
             "10000",
+            "--rpc.max-active-filters",
+            "500",
             "--rpc.gascap",
             "50000000",
             "--rpc.evm-memory-limit",

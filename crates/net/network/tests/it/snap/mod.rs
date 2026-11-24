@@ -229,7 +229,7 @@ async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
         // and they decode back to their defaults.
         assert_eq!(decoded.storage_root, EMPTY_ROOT_HASH);
         assert_eq!(decoded.code_hash, KECCAK_EMPTY);
-        assert_eq!(account, &AccountData::from_trie_account(*expected_hash, &decoded));
+        assert_eq!(account, &AccountData::from_trie_account(*expected_hash, decoded));
     }
 
     assert!(!proof.is_empty());

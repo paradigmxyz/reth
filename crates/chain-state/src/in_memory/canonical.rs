@@ -426,6 +426,12 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         }
         None
     }
+
+    /// Returns the in-memory state this reads its blocks from, which also tracks the executed
+    /// blocks that are not canonical.
+    pub fn in_memory_state(&self) -> &InMemoryState<N> {
+        &self.inner.in_memory_state
+    }
 }
 
 /// Creates a [`CanonicalInMemoryState`] and changes it: the blocks it tracks, its chain info, and

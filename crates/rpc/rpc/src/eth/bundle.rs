@@ -19,7 +19,7 @@ use reth_rpc_eth_types::{
 use reth_storage_api::BlockReaderIdExt;
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{
-    EthBlobTransactionSidecar, EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
+    EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionPool,
 };
 use std::{
     sync::Arc,
@@ -101,8 +101,7 @@ where
             .map(Duration::from_millis)
             .map_or(DEFAULT_SIM_TIMEOUT, |timeout| timeout.min(MAX_SIM_TIMEOUT));
 
-        let transactions =
-            self.eth_api().recover_raw_transactions::<PoolPooledTx<Eth::Pool>>(txs)?;
+        let transactions = self.eth_api().recover_raw_pooled_transactions(txs)?;
 
         let block_id: alloy_rpc_types_eth::BlockId = state_block_number.into();
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
