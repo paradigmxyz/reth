@@ -19,9 +19,9 @@ use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BalProvider, BlockReader, ChangeSetReader, DatabaseProviderFactory, PruneCheckpointReader,
-    StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
-    StorageSettingsCache,
+    BalProvider, BlockReader, ChangeSetReader, DatabaseProviderFactory, HeaderProvider,
+    PruneCheckpointReader, StageCheckpointReader, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_stages_api::ControlFlow;
 use tracing::{debug, instrument, trace, warn};
@@ -96,8 +96,9 @@ where
     ///
     /// In case backfill resulted in an unwind, this will remove all in-memory blocks.
     ///
-    /// Nothing is changed if the header of the backfill block is not found, and an error reading
-    /// it is returned.
+    /// If the header of the backfill block is not found in the database, the in-memory blocks, the
+    /// canonical head and the persisted block stay as they are. An error reading it is returned
+    /// at the same point.
     pub(super) fn on_backfill_sync_finished(
         &mut self,
         ctrl: ControlFlow,
@@ -123,7 +124,12 @@ where
 
         // state house keeping after backfill sync
         // remove all executed blocks below the backfill height
-        let Some(backfill_head) = self.provider.sealed_header(backfill_height)? else {
+        //
+        // The header is read from the database, because the provider prefers the canonical
+        // in-memory blocks, which can still hold a block that backfill replaced at this height.
+        let Some(backfill_head) =
+            self.provider.database_provider_ro()?.sealed_header(backfill_height)?
+        else {
             debug!(target: "engine::tree", ?ctrl, "Backfill block not found");
             return Ok(())
         };
