@@ -548,13 +548,25 @@ where
                         .transpose()?;
                 } else if highest.number() > self.existing_local_block_number() {
                     self.metrics.buffered_responses.increment(1.);
-                    // can't validate yet, the missing headers are requested once this response is
-                    // validated so partial responses can't grow the buffer past
-                    // `max_buffered_responses`
+                    // can't validate yet. The missing headers are requested right away unless this
+                    // response fills the buffer, otherwise only once it is validated, so partial
+                    // responses can't keep growing the buffer past `max_buffered_responses`
+                    let deferred_missing_headers =
+                        if self.buffered_responses.len() + 1 < self.max_buffered_responses {
+                            self.requeue_missing_headers(
+                                requested_block_number,
+                                received_headers,
+                                missing_headers,
+                            );
+                            0
+                        } else {
+                            missing_headers
+                        };
                     self.buffered_responses.push(OrderedHeadersResponse {
                         headers,
                         request,
                         peer_id,
+                        deferred_missing_headers,
                     });
                 }
 
@@ -603,21 +615,22 @@ where
             match next_block_number.cmp(&self.next_chain_tip_block_number) {
                 Ordering::Less => return None,
                 Ordering::Equal => {
-                    let OrderedHeadersResponse { headers, request, peer_id } =
-                        PeekMut::pop(next_response);
+                    let OrderedHeadersResponse {
+                        headers,
+                        request,
+                        peer_id,
+                        deferred_missing_headers,
+                    } = PeekMut::pop(next_response);
                     self.metrics.buffered_responses.decrement(1.);
 
-                    // `on_headers_outcome` only buffers non-empty responses no longer than the
-                    // request
                     let received_headers = headers.len() as u64;
-                    let missing_headers = request.limit - received_headers;
                     if let Err(err) = self.process_next_headers(request, headers, peer_id) {
                         return Some(err)
                     }
                     self.requeue_missing_headers(
                         next_block_number,
                         received_headers,
-                        missing_headers,
+                        deferred_missing_headers,
                     );
                 }
                 Ordering::Greater => {
@@ -1018,6 +1031,9 @@ struct OrderedHeadersResponse<H> {
     headers: Vec<H>,
     request: HeadersRequest,
     peer_id: PeerId,
+    /// Number of missing headers below a partial response that were not requested yet because
+    /// the response filled the buffer. They are requested once the response is validated.
+    deferred_missing_headers: u64,
 }
 
 // === impl OrderedHeadersResponse ===
@@ -1554,6 +1570,7 @@ mod tests {
             headers: vec![],
             request: HeadersRequest { start: hi.into(), limit: 0, direction: Default::default() },
             peer_id: Default::default(),
+            deferred_missing_headers: 0,
         });
 
         let lo = 0u64;
@@ -1561,6 +1578,7 @@ mod tests {
             headers: vec![],
             request: HeadersRequest { start: lo.into(), limit: 0, direction: Default::default() },
             peer_id: Default::default(),
+            deferred_missing_headers: 0,
         });
 
         assert_eq!(heap.pop().unwrap().block_number(), hi);
@@ -1743,7 +1761,7 @@ mod tests {
     }
 
     #[test]
-    fn requeues_missing_headers_once_buffered_partial_response_is_validated() {
+    fn requeues_missing_headers_for_buffered_partial_response() {
         let client = CappedHeadersClient::new(Vec::new(), 0);
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .build(client.clone(), Arc::new(TestConsensus::default()));
@@ -1751,8 +1769,33 @@ mod tests {
         downloader.sync_target = Some(SyncTargetBlock::from_number(10));
         downloader.next_chain_tip_block_number = 10;
 
-        // a partial response that can't be validated yet is buffered without requesting the
-        // missing suffix
+        // a partial response that can't be validated yet is buffered, but the missing suffix must
+        // be requested immediately
+        let request = HeadersRequest::falling(5u64.into(), 3);
+        let response = vec![Header { number: 5, ..Default::default() }];
+        let outcome = downloader.on_headers_outcome(HeadersRequestOutcome {
+            request,
+            outcome: Ok(WithPeerId::new(PeerId::default(), response)),
+        });
+
+        assert!(outcome.is_ok());
+        assert_eq!(downloader.buffered_responses.len(), 1);
+        assert_eq!(client.numeric_requests(), vec![(4, 2)]);
+        assert_eq!(client.bad_message_count(), 0);
+    }
+
+    #[test]
+    fn defers_missing_headers_of_partial_response_that_fills_buffer() {
+        let client = CappedHeadersClient::new(Vec::new(), 0);
+        let mut downloader = ReverseHeadersDownloaderBuilder::default()
+            .max_buffered_responses(1)
+            .build(client.clone(), Arc::new(TestConsensus::default()));
+        downloader.local_head = Some(SealedHeader::default());
+        downloader.sync_target = Some(SyncTargetBlock::from_number(10));
+        downloader.next_chain_tip_block_number = 10;
+
+        // a partial response that fills the buffer is buffered without requesting the missing
+        // suffix
         let request = HeadersRequest::falling(5u64.into(), 3);
         let response = vec![Header { number: 5, ..Default::default() }];
         let outcome = downloader.on_headers_outcome(HeadersRequestOutcome {
