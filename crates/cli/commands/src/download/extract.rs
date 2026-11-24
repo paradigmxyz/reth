@@ -583,7 +583,10 @@ fn write_regular_file<R: Read>(
         .create_new(true)
         .open(dest)
         .map_err(|error| FsPathError::create_file(error, dest))?;
-    let mut writer = BufWriter::with_capacity(EXTRACTED_FILE_WRITE_SIZE, file);
+    // Copying zero-fills the whole buffer before the first read, so a small file gets a buffer
+    // of its own size.
+    let capacity = entry.size().min(EXTRACTED_FILE_WRITE_SIZE as u64) as usize;
+    let mut writer = BufWriter::with_capacity(capacity, file);
     let written = io::copy(entry, &mut writer)?;
     let file = writer.into_inner().map_err(|error| error.into_error())?;
     eyre::ensure!(written == entry.size(), "Archive entry ended early: {}", dest.display());
@@ -591,11 +594,16 @@ fn write_regular_file<R: Read>(
     if let Ok(mode) = entry.header().mode() {
         file.set_permissions(std::fs::Permissions::from_mode(mode & 0o777))?;
     }
-    // Like `tar`, avoid zero modification times. Times `SystemTime` cannot represent are skipped.
-    if let Ok(mtime) = entry.header().mtime() &&
-        let Some(modified) = UNIX_EPOCH.checked_add(Duration::from_secs(mtime.max(1)))
-    {
-        file.set_modified(modified)?;
+    // Like `tar`, read the time as signed seconds, so times before the epoch are kept, and avoid
+    // zero modification times. Times `SystemTime` cannot represent are skipped.
+    if let Ok(mtime) = entry.header().mtime() {
+        let secs = mtime.max(1).cast_signed();
+        let offset = Duration::from_secs(secs.unsigned_abs());
+        let modified =
+            if secs < 0 { UNIX_EPOCH.checked_sub(offset) } else { UNIX_EPOCH.checked_add(offset) };
+        if let Some(modified) = modified {
+            file.set_modified(modified)?;
+        }
     }
     Ok(())
 }
@@ -1411,12 +1419,13 @@ mod tests {
     }
 
     #[test]
-    fn regular_file_with_unrepresentable_mtime_is_extracted() {
+    fn regular_file_keeps_pre_epoch_mtime() {
         let mut archive = tar::Builder::new(Vec::new());
         let mut header = tar::Header::new_gnu();
         header.set_size(4);
         header.set_mode(0o600);
-        header.set_mtime(u64::MAX);
+        // Tar stores times before the epoch as the two's complement of the seconds.
+        header.set_mtime((-86_400_i64).cast_unsigned());
         header.set_cksum();
         archive.append_data(&mut header, "db/data", b"data".as_slice()).unwrap();
         let tar = zstd::encode_all(archive.into_inner().unwrap().as_slice(), 0).unwrap();
@@ -1426,7 +1435,9 @@ mod tests {
             .unwrap();
         let path = target.path().join("db/data");
         assert_eq!(fs::read(&path).unwrap(), b"data");
-        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        let metadata = std::fs::metadata(&path).unwrap();
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+        assert_eq!(metadata.modified().unwrap(), UNIX_EPOCH - Duration::from_secs(86_400));
     }
 
     #[test]
