@@ -177,6 +177,7 @@ impl PeersManager {
             }
         }
 
+        let mut persisted_basic_peers = 0;
         let mut persisted_basic_per_subnet = HashMap::<IpNet, usize>::default();
         for PersistedPeerInfo { record, kind, fork_id, reputation } in persisted_peers {
             // When enforce_enr_fork_id is enabled, skip persisted peers that don't have a
@@ -194,16 +195,20 @@ impl PeersManager {
                 trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer from IP not in allowed ranges");
                 continue
             }
-            if kind.is_basic() &&
-                !trusted_peer_ids.contains(&id) &&
-                let Some(subnet) = discovery_subnet(address)
-            {
-                let count = persisted_basic_per_subnet.entry(subnet).or_default();
-                if *count == MAX_DISCOVERED_PEERS_PER_SUBNET {
-                    trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer from full subnet");
+            if kind.is_basic() && !trusted_peer_ids.contains(&id) {
+                if persisted_basic_peers == MAX_DISCOVERED_PEERS {
+                    trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer over the discovered peer limit");
                     continue
                 }
-                *count += 1;
+                if let Some(subnet) = discovery_subnet(address) {
+                    let count = persisted_basic_per_subnet.entry(subnet).or_default();
+                    if *count == MAX_DISCOVERED_PEERS_PER_SUBNET {
+                        trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer from full subnet");
+                        continue
+                    }
+                    *count += 1;
+                }
+                persisted_basic_peers += 1;
             }
             peers.entry(id).or_insert_with(|| {
                 let mut peer = Peer::with_kind(
@@ -4901,6 +4906,24 @@ mod tests {
         peers.add_peer(discovered, addr(MAX_DISCOVERED_PEERS), None);
         assert!(peers.peers.contains_key(&discovered));
         assert!(!peers.peers.contains_key(&backed_off));
+        assert_eq!(peers.peers.len(), MAX_DISCOVERED_PEERS);
+    }
+
+    #[tokio::test]
+    async fn test_persisted_peers_limited_in_total() {
+        let mut config = PeersConfig::test();
+        // One peer per /24, so only the total limit applies.
+        config.persisted_peers = (0..=MAX_DISCOVERED_PEERS)
+            .map(|i| {
+                let ip = Ipv4Addr::from_bits(0x0100_0000 + ((i as u32) << 8));
+                PersistedPeerInfo::from_node_record(NodeRecord::new(
+                    SocketAddr::new(ip.into(), 30303),
+                    PeerId::random(),
+                ))
+            })
+            .collect();
+
+        let peers = PeersManager::new(config);
         assert_eq!(peers.peers.len(), MAX_DISCOVERED_PEERS);
     }
 
