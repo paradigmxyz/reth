@@ -974,47 +974,45 @@ impl PeersManager {
     /// Called for a newly discovered peer.
     ///
     /// If the peer already exists, then the address, kind and `fork_id` will be updated. A new
-    /// untrusted peer replaces an idle basic peer once its subnet has
-    /// [`MAX_DISCOVERED_PEERS_PER_SUBNET`] or the set has [`MAX_DISCOVERED_PEERS`] basic peers, and
-    /// is skipped if there is none.
+    /// untrusted peer is skipped if [`Self::make_room_for_discovered_peer`] finds no room.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId>) {
-        let ip = addr.tcp().ip();
-        if !self.peers.contains_key(&peer_id) && !self.trusted_peer_ids.contains(&peer_id) {
-            let subnet = discovery_subnet(ip);
-            let in_subnet =
-                |peer: &Peer| subnet.is_some() && discovery_subnet(peer.addr.tcp().ip()) == subnet;
-            let (mut basic_peers, mut subnet_peers) = (0, 0);
-            for peer in self.peers.values().filter(|peer| peer.kind.is_basic()) {
-                basic_peers += 1;
-                subnet_peers += usize::from(in_subnet(peer));
-            }
-            let subnet_full = subnet_peers >= MAX_DISCOVERED_PEERS_PER_SUBNET;
-            if subnet_full || basic_peers >= MAX_DISCOVERED_PEERS {
-                // A rejected peer must not cost an existing one.
-                if !self.ip_filter.is_allowed(&ip) || self.ban_list.is_banned(&peer_id, &ip) {
-                    return
-                }
-                // A full subnet replaces one of its own peers, so the first peers seen there cannot
-                // hold it. Backed off peers go first, since unreachable identities fill the set.
-                let Some(evicted) = self
-                    .peers
-                    .iter()
-                    .filter(|(_, peer)| {
-                        peer.kind.is_basic() &&
-                            peer.state.is_idle() &&
-                            (!subnet_full || in_subnet(peer))
-                    })
-                    .min_by_key(|(_, peer)| (!peer.backed_off, peer.reputation))
-                    .map(|(peer_id, _)| *peer_id)
-                else {
-                    trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "Skipping discovered peer, no idle peer to replace");
-                    return
-                };
-                trace!(target: "net::peers", ?evicted, ?peer_id, "Evicting idle peer for a discovered peer");
-                self.remove_peer(evicted);
-            }
+        let is_new =
+            !self.peers.contains_key(&peer_id) && !self.trusted_peer_ids.contains(&peer_id);
+        if is_new && !self.make_room_for_discovered_peer(peer_id, addr.tcp().ip()) {
+            trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "Skipping discovered peer, no room for it");
+            return
         }
         self.add_peer_kind(peer_id, None, addr, fork_id)
+    }
+
+    /// Returns whether a new basic peer at `ip` fits within the subnet and total limits, removing
+    /// an idle basic peer to make room, from the same subnet when that one is full. Banned or
+    /// filtered peers never cause a removal.
+    fn make_room_for_discovered_peer(&mut self, peer_id: PeerId, ip: IpAddr) -> bool {
+        let subnet = discovery_subnet(ip);
+        let in_subnet =
+            |peer: &Peer| subnet.is_some() && discovery_subnet(peer.addr.tcp().ip()) == subnet;
+        let basic_peers = || self.peers.iter().filter(|(_, peer)| peer.kind.is_basic());
+
+        let subnet_full = basic_peers().filter(|(_, peer)| in_subnet(peer)).count() >=
+            MAX_DISCOVERED_PEERS_PER_SUBNET;
+        if !subnet_full && basic_peers().count() < MAX_DISCOVERED_PEERS {
+            return true
+        }
+        if !self.ip_filter.is_allowed(&ip) || self.ban_list.is_banned(&peer_id, &ip) {
+            return false
+        }
+        // Backed off peers go first, since unreachable identities are what fills the set.
+        let Some(evicted) = basic_peers()
+            .filter(|(_, peer)| peer.state.is_idle() && (!subnet_full || in_subnet(peer)))
+            .min_by_key(|(_, peer)| (!peer.backed_off, peer.reputation))
+            .map(|(peer_id, _)| *peer_id)
+        else {
+            return false
+        };
+        trace!(target: "net::peers", ?evicted, ?peer_id, "Evicting idle peer for a discovered peer");
+        self.remove_peer(evicted);
+        true
     }
 
     /// Marks the given peer as trusted.
