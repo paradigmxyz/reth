@@ -90,7 +90,10 @@ impl ModularDownloadJob {
         let progress_handle = spawn_progress_display(Arc::clone(&shared));
         for reused in &planned_downloads.reused {
             info!(target: "reth::cli", file = %reused.archive.file_name, component = %reused.component, "Skipping already verified plain files");
-            shared.record_reused_archive(reused.archive.size, reused.archive.output_size());
+            shared.record_reused_archive(
+                reused.archive.size.unwrap_or_default(),
+                reused.archive.output_size(),
+            );
         }
         let ctx = self.ctx.clone();
         let results: Vec<Result<()>> = stream::iter(planned_downloads.pending)
@@ -267,8 +270,7 @@ impl ArchiveProcessor {
             self.archive().url.clone(),
             cache_dir,
             self.ctx.session().clone(),
-            // Older chunked manifests omit chunk sizes, which resolve to 0, meaning unknown.
-            Some(self.archive().size).filter(|size| *size > 0),
+            self.archive().size,
         );
 
         if self.archive.ty == super::manifest::SnapshotComponentType::State {

@@ -189,7 +189,8 @@ impl OutputFileChecksum {
 pub struct SnapshotArchive {
     pub url: String,
     pub file_name: String,
-    pub size: u64,
+    /// Compressed archive size, or `None` when an older chunked manifest omits chunk sizes.
+    pub size: Option<u64>,
     pub blake3: Option<String>,
     pub output_files: Vec<OutputFileChecksum>,
 }
@@ -416,7 +417,7 @@ impl SnapshotManifest {
                 (start_chunk..num_chunks)
                     .map(|i| {
                         let file_name = chunked.chunk_relative_path(key, i);
-                        let size = chunked.chunk_sizes.get(i as usize).copied().unwrap_or_default();
+                        let size = chunked.chunk_sizes.get(i as usize).copied();
                         let output_files =
                             chunked.chunk_output_files.get(i as usize).cloned().unwrap_or_default();
 
@@ -675,7 +676,7 @@ impl SingleArchive {
         SnapshotArchive {
             url: resolve_archive_url(base_url, &self.file),
             file_name: self.file.clone(),
-            size: self.size,
+            size: Some(self.size),
             blake3: self.blake3.clone(),
             output_files: self.output_files.clone(),
         }
@@ -1790,6 +1791,23 @@ mod tests {
         assert_eq!(m.size_for_distance(SnapshotComponentType::State, Some(100)), 100);
         // Missing component
         assert_eq!(m.size_for_distance(SnapshotComponentType::Receipts, None), 0);
+    }
+
+    #[test]
+    fn snapshot_archive_size_is_none_only_when_chunk_size_is_missing() {
+        let mut m = test_manifest();
+        if let Some(ComponentManifest::Single(single)) = m.components.get_mut("state") {
+            single.size = 0;
+        }
+        if let Some(ComponentManifest::Chunked(chunked)) = m.components.get_mut("headers") {
+            chunked.chunk_sizes.clear();
+        }
+
+        let state = m.snapshot_archives_for_distance(SnapshotComponentType::State, None);
+        let headers = m.snapshot_archives_for_distance(SnapshotComponentType::Headers, None);
+
+        assert_eq!(state[0].size, Some(0));
+        assert!(headers.iter().all(|archive| archive.size.is_none()));
     }
 
     #[test]

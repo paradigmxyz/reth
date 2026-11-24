@@ -122,7 +122,7 @@ mod tests {
             archive: SnapshotArchive {
                 url: "https://example.com/state.tar.zst".to_string(),
                 file_name: "state.tar.zst".to_string(),
-                size: 1,
+                size: Some(1),
                 blake3: None,
                 output_files: paths
                     .iter()
