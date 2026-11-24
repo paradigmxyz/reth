@@ -110,11 +110,11 @@ mod tests {
     /// Creates a tree state without blocks, the canonical state that shares its blocks and the
     /// writer of that state. Its canonical head is the default header.
     fn tree_state() -> (TreeState, CanonicalInMemoryState, CanonicalInMemoryStateWriter) {
-        let overlay_manager = OverlayManager::default();
+        let (in_memory_state, in_memory_state_writer) = InMemoryState::new();
         let canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(overlay_manager.in_memory_state().clone());
+            test_canonical_in_memory_state_writer(in_memory_state_writer);
         (
-            TreeState::new(BlockNumHash::default(), overlay_manager),
+            TreeState::new(BlockNumHash::default(), OverlayManager::new(in_memory_state)),
             canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
             canonical_in_memory_state_writer,
         )

@@ -4208,7 +4208,10 @@ impl<TX: Send, N: NodeTypes> StoragePath for DatabaseProvider<TX, N> {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
+        test_utils::{
+            blocks::BlockchainTestData, create_test_provider_factory,
+            create_test_provider_factory_with_in_memory_state_writer,
+        },
         BlockWriter,
     };
     use alloy_consensus::Header;
@@ -4218,10 +4221,8 @@ mod tests {
         U256,
     };
     use evm2::evm::AccountInfo;
-    use reth_chain_state::{
-        test_utils::{test_canonical_in_memory_state_writer, TestBlockBuilder},
-        ExecutedBlock,
-    };
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_chainspec::MAINNET;
     use reth_db_api::models::{SnapAttempt, StorageSettings};
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
@@ -5139,16 +5140,15 @@ mod tests {
 
     #[test]
     fn unwind_restores_trie_nodes_masked_above_the_frontier() {
-        let factory = create_test_provider_factory();
+        let (factory, mut in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let blocks = TestBlockBuilder::eth().get_executed_blocks(0..11).collect::<Vec<_>>();
         let provider = factory.provider_rw().unwrap();
         for block in &blocks {
             provider.insert_block(block.recovered_block()).unwrap();
         }
-        let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(factory.in_memory_state().clone());
         for block in &blocks[6..] {
-            canonical_in_memory_state_writer.insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
         provider
             .save_stage_checkpoint(
@@ -5185,7 +5185,8 @@ mod tests {
 
     #[test]
     fn remove_block_and_execution_above_returns_persistence_frontiers() {
-        let factory = create_test_provider_factory();
+        let (factory, mut in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let mut test_block_builder = TestBlockBuilder::eth().with_state();
 
         let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
@@ -5195,10 +5196,8 @@ mod tests {
         save_genesis(&provider_rw, &genesis).unwrap();
         provider_rw.commit().unwrap();
 
-        let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(factory.in_memory_state().clone());
         for block in &blocks[2..] {
-            canonical_in_memory_state_writer.insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
 
         let provider_rw = factory.provider_rw().unwrap();
