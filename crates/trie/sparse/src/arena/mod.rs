@@ -1,5 +1,7 @@
 mod branch_child_idx;
 mod cursor;
+mod keccak_batch;
+mod level;
 mod node_arena;
 mod nodes;
 
@@ -11,6 +13,7 @@ mod sparse_guidance;
 
 use branch_child_idx::{BranchChildIdx, BranchChildIter};
 use cursor::{branch_idx, ArenaCursor, NextResult, SeekResult};
+pub use keccak_batch::keccak256_batch;
 use node_arena::{BranchChild, Index, NodeArena};
 use nodes::{ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeState};
 
@@ -21,7 +24,10 @@ use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
-use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::{
+    iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNode,
@@ -278,7 +284,24 @@ struct ArenaTrieBuffers {
     rlp_buf: Vec<u8>,
     /// Reusable buffer for child `RlpNode`s during hashing.
     rlp_node_buf: Vec<RlpNode>,
+    /// Reusable buffers for [`HashingStrategy::LevelBatched`].
+    level: level::LevelBuffers,
 }
+
+/// Strategy used to compute the RLP encodings and hashes of dirty nodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HashingStrategy {
+    /// Walk dirty branches depth-first, encoding and hashing one node at a time.
+    DepthFirst,
+    /// Collect dirty nodes per depth, then encode and hash each depth as one batch, deepest
+    /// first. Dirty subtries are hashed in groups, so that a level of a whole group is one
+    /// batch for [`keccak256_batch`].
+    #[default]
+    LevelBatched,
+}
+
+/// Target number of subtrie groups per rayon thread for level-batched hashing.
+const LEVEL_GROUPS_PER_THREAD: usize = 2;
 
 impl ArenaTrieBuffers {
     fn clear(&mut self) {
@@ -287,6 +310,7 @@ impl ArenaTrieBuffers {
         }
         self.rlp_buf.clear();
         self.rlp_node_buf.clear();
+        self.level = Default::default();
     }
 }
 
@@ -646,13 +670,14 @@ impl ArenaSparseSubtrie {
     /// After this call every node reachable from `self.root` will be in `Cached` state.
     ///
     /// Trie updates are written directly to `self.buffers.updates` (if `Some`).
-    fn update_cached_rlp(&mut self, new_epoch: TrieNodeEpoch) {
+    fn update_cached_rlp(&mut self, new_epoch: TrieNodeEpoch, strategy: HashingStrategy) {
         ArenaParallelSparseTrie::update_cached_rlp(
             &mut self.arena,
             self.root,
             self.path,
             &mut self.buffers,
             new_epoch,
+            strategy,
         );
         self.num_dirty_leaves = 0;
         #[cfg(all(debug_assertions, not(feature = "fuzz")))]
@@ -805,6 +830,8 @@ pub struct ArenaParallelSparseTrie {
     buffers: ArenaTrieBuffers,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
+    /// How dirty nodes are encoded and hashed.
+    hashing_strategy: HashingStrategy,
 }
 
 impl ArenaParallelSparseTrie {
@@ -815,6 +842,22 @@ impl ArenaParallelSparseTrie {
     ) -> Self {
         self.parallelism_thresholds = thresholds;
         self
+    }
+
+    /// Sets the strategy used to encode and hash dirty nodes.
+    pub const fn with_hashing_strategy(mut self, strategy: HashingStrategy) -> Self {
+        self.hashing_strategy = strategy;
+        self
+    }
+
+    /// Sets the strategy used to encode and hash dirty nodes.
+    pub const fn set_hashing_strategy(&mut self, strategy: HashingStrategy) {
+        self.hashing_strategy = strategy;
+    }
+
+    /// Returns the strategy used to encode and hash dirty nodes.
+    pub const fn hashing_strategy(&self) -> HashingStrategy {
+        self.hashing_strategy
     }
 
     /// Returns `true` if a node at the given path length should be placed in a subtrie rather
@@ -1157,8 +1200,31 @@ impl ArenaParallelSparseTrie {
     /// the child's nibble. Once all children of a branch are processed, the branch is encoded
     /// via `BranchNodeRef` using the last N entries on `rlp_node_buf`, then replaced with a
     /// single result `RlpNode`.
-    #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(base_path = ?base_path), ret)]
     fn update_cached_rlp(
+        arena: &mut NodeArena,
+        root: Index,
+        base_path: Nibbles,
+        buffers: &mut ArenaTrieBuffers,
+        new_epoch: TrieNodeEpoch,
+        strategy: HashingStrategy,
+    ) -> RlpNode {
+        if strategy == HashingStrategy::LevelBatched && level::root_needs_level_hashing(arena, root)
+        {
+            return Self::update_cached_rlp_level_batched(
+                arena,
+                root,
+                base_path,
+                &mut buffers.level,
+                &mut buffers.updates,
+                new_epoch,
+            );
+        }
+        Self::update_cached_rlp_depth_first(arena, root, base_path, buffers, new_epoch)
+    }
+
+    /// Depth-first implementation of [`Self::update_cached_rlp`].
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(base_path = ?base_path), ret)]
+    fn update_cached_rlp_depth_first(
         arena: &mut NodeArena,
         root: Index,
         base_path: Nibbles,
@@ -1185,7 +1251,7 @@ impl ArenaParallelSparseTrie {
                 let rlp_node = RlpNode::word_rlp(&EMPTY_ROOT_HASH);
                 *arena[root].state_mut() =
                     ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), epoch: node_epoch };
-                return rlp_node
+                return rlp_node;
             }
             ArenaSparseNode::Leaf { .. } => {
                 Self::encode_leaf(arena, root, rlp_buf, rlp_node_buf, new_epoch);
@@ -2366,6 +2432,7 @@ impl Default for ArenaParallelSparseTrie {
             root,
             buffers: ArenaTrieBuffers::default(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
+            hashing_strategy: HashingStrategy::default(),
         }
     }
 }
@@ -2373,6 +2440,7 @@ impl Default for ArenaParallelSparseTrie {
 impl ArenaParallelSparseTrie {
     /// Hashes a subtrie at `head_idx` and collects its update actions.
     fn update_upper_subtrie(&mut self, head_idx: Index, new_epoch: TrieNodeEpoch) {
+        let strategy = self.hashing_strategy;
         let ArenaSparseNode::Subtrie(subtrie) = &mut self.upper_arena[head_idx] else {
             unreachable!()
         };
@@ -2380,7 +2448,7 @@ impl ArenaParallelSparseTrie {
         if !node_state_ref(&subtrie.arena, subtrie.root)
             .is_some_and(|state| matches!(state, ArenaSparseNodeState::Cached { .. }))
         {
-            subtrie.update_cached_rlp(new_epoch);
+            subtrie.update_cached_rlp(new_epoch, strategy);
         }
 
         Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
@@ -2573,6 +2641,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             Nibbles::default(),
             &mut self.buffers,
             new_epoch,
+            self.hashing_strategy,
         );
 
         rlp_node.as_hash().expect("root RlpNode must be a hash")
@@ -2602,6 +2671,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return;
         }
 
+        let strategy = self.hashing_strategy;
+
         // Count total dirty leaves across all subtries to make one global parallelism decision.
         let mut total_dirty_leaves: u64 = 0;
         let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>)> = Vec::new();
@@ -2620,11 +2691,24 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
 
         // Hash taken subtries in parallel if total dirty leaves meet the threshold.
-        if !taken.is_empty() {
+        if !taken.is_empty() && strategy == HashingStrategy::LevelBatched {
+            // Hash groups of subtries level by level, one group per task.
+            if taken.len() == 1 || total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
+            {
+                Self::hash_subtries_level_batched(&mut taken, new_epoch);
+            } else {
+                let groups =
+                    (rayon::current_num_threads() * LEVEL_GROUPS_PER_THREAD).min(taken.len());
+                let group_len = taken.len().div_ceil(groups);
+                taken.par_chunks_mut(group_len).for_each(|group| {
+                    Self::hash_subtries_level_batched(group, new_epoch);
+                });
+            }
+        } else if !taken.is_empty() {
             if taken.len() == 1 || total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
             {
                 for (_, subtrie) in &mut taken {
-                    subtrie.update_cached_rlp(new_epoch);
+                    subtrie.update_cached_rlp(new_epoch, strategy);
                 }
             } else {
                 let parent_span = tracing::Span::current();
@@ -2632,7 +2716,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     .into_par_iter()
                     .map(|(idx, mut subtrie)| {
                         let _guard = parent_span.enter();
-                        subtrie.update_cached_rlp(new_epoch);
+                        subtrie.update_cached_rlp(new_epoch, strategy);
                         (idx, subtrie)
                     })
                     .collect();
@@ -2759,7 +2843,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             });
 
             if matches!(result, NextResult::Done) {
-                break
+                break;
             }
 
             let head_idx = cursor.head().expect("cursor is non-empty").index;
