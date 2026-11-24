@@ -254,6 +254,21 @@ impl<N: ProviderNodeTypes> BalProvider for BlockchainProvider<N> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
     }
+
+    /// Falls back to the blocks the engine tree holds in memory, because the store can evict the
+    /// BAL of a non-canonical block before the tree drops that block.
+    fn get_bals_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+        let mut bals = self.bal_store.get_by_hashes(block_hashes)?;
+        let in_memory_state = self.canonical_in_memory_state.in_memory_state();
+        for (hash, bal) in block_hashes.iter().zip(&mut bals) {
+            if bal.is_none() &&
+                let Some(block_state) = in_memory_state.state_by_hash(*hash)
+            {
+                *bal = block_state.block_ref().bal().map(|bal| bal.as_raw_bal().as_raw().clone());
+            }
+        }
+        Ok(bals)
+    }
 }
 
 /// State range view backed by one resolved historical overlay.
@@ -1749,6 +1764,65 @@ mod tests {
         let pending = provider.pending_block_and_receipts()?.unwrap();
         assert!(Arc::ptr_eq(&pending_block, pending.block()));
         assert!(pending.execution_output().receipts.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_block_reader_find_side_chain_block_by_hash() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, in_memory_blocks, _, mut canonical_in_memory_state_writer) =
+            provider_with_random_blocks(
+                &mut rng,
+                TEST_BLOCKS_COUNT,
+                TEST_BLOCKS_COUNT,
+                BlockRangeParams::default(),
+            )?;
+
+        // A fork of the first in-memory block that the engine tree holds but is not canonical.
+        let canonical = in_memory_blocks.first().unwrap();
+        let fork = random_block(
+            &mut rng,
+            canonical.number,
+            BlockParams { parent: Some(canonical.parent_hash), ..Default::default() },
+        );
+        let fork_hash = fork.hash();
+        let recovered = Arc::new(RecoveredBlock::new_sealed(fork.clone(), fork.senders().unwrap()));
+        canonical_in_memory_state_writer.insert_executed(ExecutedBlock {
+            recovered_block: Arc::clone(&recovered),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            provider.find_block_by_hash(fork_hash, BlockSource::Any)?,
+            Some(fork.into_block())
+        );
+        let block = provider
+            .find_sealed_or_recovered_block(fork_hash, BlockSource::Any)?
+            .expect("side chain block should be found");
+        assert_eq!(block, SealedOrRecoveredBlock::recovered_arc(Arc::clone(&recovered)));
+        for source in [BlockSource::Pending, BlockSource::Canonical] {
+            assert_eq!(provider.find_block_by_hash(fork_hash, source)?, None);
+            assert!(provider.find_sealed_or_recovered_block(fork_hash, source)?.is_none());
+        }
+
+        // The other lookups by hash only see the canonical chain.
+        assert_eq!(provider.block(fork_hash.into())?, None);
+        assert_eq!(provider.recovered_block(fork_hash.into(), TransactionVariant::WithHash)?, None);
+        assert_eq!(
+            provider.sealed_block_with_senders(fork_hash.into(), TransactionVariant::WithHash)?,
+            None
+        );
+        assert_eq!(provider.block_number(fork_hash)?, None);
+
+        // Once the canonical block at its height is persisted and finalized, the fork is dropped
+        // and its hash is unknown again.
+        canonical_in_memory_state_writer.on_blocks_persisted(
+            canonical.num_hash(),
+            canonical.num_hash(),
+            Some(canonical.num_hash()),
+        );
+        assert_eq!(provider.find_block_by_hash(fork_hash, BlockSource::Any)?, None);
 
         Ok(())
     }

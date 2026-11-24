@@ -16,14 +16,14 @@ use reth_storage_errors::provider::ProviderResult;
 /// fetched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum BlockSource {
-    /// Check all available sources.
+    /// Check the canonical chain first, then the blocks the engine tree holds in memory, such as
+    /// side chain blocks, reorged-out blocks and the pending block.
     ///
-    /// Note: it's expected that looking up pending blocks is faster than looking up blocks in the
-    /// database so this prioritizes Pending > Database.
+    /// A block that is not canonical is only found until the tree drops it, for example once it
+    /// conflicts with the finalized block.
     #[default]
     Any,
-    /// The block was fetched from the pending block source, the blockchain tree that buffers
-    /// blocks that are not yet part of the canonical chain.
+    /// The pending block, which extends the canonical head but has no forkchoice update yet.
     Pending,
     /// The block must be part of the canonical chain.
     Canonical,
@@ -38,6 +38,11 @@ impl BlockSource {
     /// Returns `true` if the block source is `Canonical` or `Any`.
     pub const fn is_canonical(&self) -> bool {
         matches!(self, Self::Canonical | Self::Any)
+    }
+
+    /// Returns `true` if the block source is `Any`.
+    pub const fn is_any(&self) -> bool {
+        matches!(self, Self::Any)
     }
 }
 
