@@ -241,7 +241,7 @@ mod tests {
     use reth_provider::ProviderError;
     use std::time::{Duration, Instant};
 
-    #[test]
+    #[reth_concurrency::test]
     fn drop_waits_for_the_workers_to_exit() {
         let num_threads = 4;
         let started = Arc::new(AtomicUsize::new(0));
@@ -251,7 +251,7 @@ mod tests {
             let (started, finished) = (started.clone(), finished.clone());
             Arc::new(move || {
                 started.fetch_add(1, Ordering::SeqCst);
-                std::thread::sleep(Duration::from_millis(50));
+                thread::sleep(Duration::from_millis(50));
                 finished.fetch_add(1, Ordering::SeqCst);
                 Err(ProviderError::UnsupportedProvider)
             })
@@ -260,7 +260,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         while started.load(Ordering::SeqCst) < num_threads {
             assert!(Instant::now() < deadline, "BAL prewarm workers did not start");
-            std::thread::yield_now();
+            thread::yield_now();
         }
 
         drop(pool);
