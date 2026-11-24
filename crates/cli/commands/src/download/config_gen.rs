@@ -1,6 +1,6 @@
 use crate::download::{
     manifest::{ComponentManifest, ComponentSelection, SnapshotComponentType, SnapshotManifest},
-    rocksdb_indices_missing, SelectionPreset,
+    SelectionPreset,
 };
 use eyre::WrapErr;
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
@@ -41,70 +41,43 @@ pub fn write_config(config: &Config, data_dir: &Path) -> eyre::Result<bool> {
     Ok(true)
 }
 
-/// Writes prune checkpoints and returns whether missing RocksDB indices require resetting the
-/// index stages in the same transaction.
-pub(crate) fn write_prune_checkpoints_tx<Tx>(
+/// Writes prune checkpoints for the restored data with the configured retention modes.
+pub(super) fn write_prune_checkpoints_tx<Tx>(
     tx: &Tx,
     config: &Config,
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
     snapshot_block: u64,
-) -> eyre::Result<bool>
+    is_v2: bool,
+) -> eyre::Result<()>
 where
     Tx: DbTx + DbTxMut,
 {
     let segments = &config.prune.segments;
 
-    // Collect (segment, mode) pairs for all configured prune segments
-    let checkpoints: Vec<(PruneSegment, PruneMode)> = [
+    // Look up the last transaction number for the snapshot block.
+    let tx_number =
+        tx.get::<tables::BlockBodyIndices>(snapshot_block)?.map(|indices| indices.last_tx_num());
+
+    for (segment, mode) in [
         (PruneSegment::SenderRecovery, segments.sender_recovery),
         (PruneSegment::TransactionLookup, segments.transaction_lookup),
         (PruneSegment::Receipts, segments.receipts),
         (PruneSegment::AccountHistory, segments.account_history),
         (PruneSegment::StorageHistory, segments.storage_history),
         (PruneSegment::Bodies, segments.bodies_history),
-    ]
-    .into_iter()
-    .filter_map(|(segment, mode)| mode.map(|m| (segment, m)))
-    .collect();
-
-    let indices_missing = rocksdb_indices_missing(selections);
-    if checkpoints.is_empty() && !indices_missing {
-        return Ok(false)
-    }
-
-    let settings = match tx.get::<tables::Metadata>(keys::STORAGE_SETTINGS.to_owned())? {
-        None => StorageSettings::v1(),
-        Some(bytes) => match serde_json::from_slice(&bytes) {
-            Ok(settings) => settings,
-            Err(_) if is_legacy_v1_layout(&bytes) => StorageSettings::v1(),
-            Err(error) => {
-                return Err(error).wrap_err("Invalid storage settings in snapshot database")
-            }
-        },
-    };
-    let reset_indices = settings.is_v2() && indices_missing;
-    if checkpoints.is_empty() {
-        return Ok(reset_indices);
-    }
-
-    // Look up the last tx number for the snapshot block from BlockBodyIndices
-    let tx_number =
-        tx.get::<tables::BlockBodyIndices>(snapshot_block)?.map(|indices| indices.last_tx_num());
-
-    for (segment, prune_mode) in &checkpoints {
-        let (block_number, tx_number) = match segment {
+    ] {
+        let checkpoint = match segment {
             // V1 bundles both history tables and the transaction index with their checkpoints.
             PruneSegment::AccountHistory |
             PruneSegment::StorageHistory |
             PruneSegment::TransactionLookup
-                if !settings.is_v2() =>
+                if !is_v2 =>
             {
                 continue
             }
-            // Record the history actually selected, not the future pruning policy, which may
-            // retain a minimum distance even when no changesets were downloaded.
+            // The selected changesets determine how far back a reader can go.
             PruneSegment::AccountHistory | PruneSegment::StorageHistory => {
-                let component = if *segment == PruneSegment::AccountHistory {
+                let component = if segment == PruneSegment::AccountHistory {
                     SnapshotComponentType::AccountChangesets
                 } else {
                     SnapshotComponentType::StorageChangesets
@@ -122,50 +95,80 @@ where
                 let Some(target) = target else { continue };
                 // Downloading a wider range cannot restore history already pruned by the source.
                 let existing = tx
-                    .get::<tables::PruneCheckpoints>(*segment)?
+                    .get::<tables::PruneCheckpoints>(segment)?
                     .and_then(|checkpoint| checkpoint.block_number);
-                (existing.map_or(target, |existing| existing.max(target)), None)
+                let block = existing.map_or(target, |existing| existing.max(target));
+                // An archive policy can retain future history even when the snapshot omitted it.
+                PruneCheckpoint {
+                    block_number: Some(block),
+                    tx_number: None,
+                    prune_mode: mode.unwrap_or_else(|| PruneMode::before_inclusive(block)),
+                }
             }
-            _ => (snapshot_block, tx_number),
-        };
-        let checkpoint = PruneCheckpoint {
-            block_number: Some(block_number),
-            tx_number,
-            prune_mode: *prune_mode,
+            _ => {
+                let Some(prune_mode) = mode else { continue };
+                PruneCheckpoint { block_number: Some(snapshot_block), tx_number, prune_mode }
+            }
         };
 
-        tx.put::<tables::PruneCheckpoints>(*segment, checkpoint)?;
+        tx.put::<tables::PruneCheckpoints>(segment, checkpoint)?;
 
         info!(target: "reth::cli",
             segment = %segment,
-            block = block_number,
-            tx = ?tx_number,
-            mode = ?prune_mode,
+            block = ?checkpoint.block_number,
+            tx = ?checkpoint.tx_number,
+            mode = ?checkpoint.prune_mode,
             "Set prune checkpoint"
         );
     }
 
-    Ok(reset_indices)
+    Ok(())
 }
 
-/// Legacy nodes could use static files for receipts while keeping state, changesets and indices
-/// in MDBX. Later per-backend flags defaulted to false when absent.
-fn is_legacy_v1_layout(bytes: &[u8]) -> bool {
-    let Ok(mut flags) = serde_json::from_slice::<BTreeMap<&str, bool>>(bytes) else { return false };
-    flags.remove("receipts_in_static_files").is_some() &&
-        flags.into_iter().all(|(name, enabled)| {
-            !enabled &&
-                matches!(
-                    name,
-                    "transaction_senders_in_static_files" |
-                        "storages_history_in_rocksdb" |
-                        "transaction_hash_numbers_in_rocksdb" |
-                        "account_history_in_rocksdb" |
-                        "account_changesets_in_static_files" |
-                        "storage_changesets_in_static_files" |
-                        "use_hashed_state"
-                )
-        })
+/// Reads the snapshot layout before updating the checkpoints that depend on it.
+pub(super) fn snapshot_uses_v2(
+    tx: &impl DbTx,
+    selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
+) -> eyre::Result<bool> {
+    let Some(bytes) = tx.get::<tables::Metadata>(keys::STORAGE_SETTINGS.to_owned())? else {
+        return Ok(false)
+    };
+    if let Ok(settings) = serde_json::from_slice::<StorageSettings>(&bytes) {
+        return Ok(settings.is_v2())
+    }
+
+    // Older releases stored independent backend flags. Only accept placements the v1 reader
+    // can serve for this download.
+    let flags = serde_json::from_slice::<BTreeMap<&str, bool>>(&bytes)
+        .wrap_err("Invalid storage settings in snapshot database")?;
+    eyre::ensure!(
+        flags.contains_key("receipts_in_static_files"),
+        "Unrecognized snapshot storage settings"
+    );
+    for (name, enabled) in flags {
+        let supported = match name {
+            "receipts_in_static_files" => true,
+            "transaction_senders_in_static_files" => {
+                !enabled ||
+                    matches!(
+                        selections.get(&SnapshotComponentType::TransactionSenders),
+                        None | Some(ComponentSelection::None)
+                    )
+            }
+            "storages_history_in_rocksdb" |
+            "transaction_hash_numbers_in_rocksdb" |
+            "account_history_in_rocksdb" |
+            "account_changesets_in_static_files" |
+            "storage_changesets_in_static_files" |
+            "use_hashed_state" => !enabled,
+            _ => false,
+        };
+        eyre::ensure!(
+            supported,
+            "Unsupported legacy snapshot setting for this download: {name}={enabled}"
+        );
+    }
+    Ok(false)
 }
 
 /// Stages backed by the optional RocksDB index component in a v2 snapshot.
@@ -372,8 +375,10 @@ fn format_mode(mode: &PruneMode) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::download::tests::set_layout;
+    use crate::download::{tests::set_layout, DownloadCommand};
+    use clap::Parser;
     use reth_db::Database;
+    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 
     /// Empty manifest for tests that only care about prune config.
     fn empty_manifest() -> SnapshotManifest {
@@ -408,17 +413,7 @@ mod tests {
 
         {
             let tx = db.tx_mut().unwrap();
-            for invalid in [
-                serde_json::json!({"receipts_in_static_files": false, "account_changesets_in_static_files": true}),
-                serde_json::json!({"receipts_in_static_files": false, "unknown": false}),
-            ] {
-                set_layout(&tx, invalid);
-                let err = write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block)
-                    .unwrap_err();
-                assert_eq!(err.to_string(), "Invalid storage settings in snapshot database");
-            }
-            set_layout(&tx, StorageSettings::v2());
-            assert!(!write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap());
+            write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block, true).unwrap();
             tx.commit().unwrap();
         }
 
@@ -458,8 +453,7 @@ mod tests {
         );
 
         let tx = db.tx_mut().unwrap();
-        set_layout(&tx, StorageSettings::v2());
-        write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap();
+        write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block, true).unwrap();
         tx.commit().unwrap();
 
         db.tx().unwrap().get::<tables::PruneCheckpoints>(PruneSegment::AccountHistory).unwrap()
@@ -478,43 +472,45 @@ mod tests {
     }
 
     #[test]
-    fn write_prune_checkpoints_archive_no_checkpoints() {
-        let dir = tempfile::tempdir().unwrap();
-        let db = reth_db::init_db(dir.path(), reth_db::mdbx::DatabaseArguments::default()).unwrap();
-
-        // Archive node — no pruning configured, so no checkpoints written
-        let selections =
+    fn write_prune_checkpoints_archive_no_checkpoints() -> eyre::Result<()> {
+        let command = DownloadCommand::<EthereumChainSpecParser>::parse_from(["reth", "--archive"]);
+        let included =
             BTreeMap::from([(SnapshotComponentType::RocksdbIndices, ComponentSelection::All)]);
-        let config = config_for_selections(
-            &selections,
-            &empty_manifest(),
-            Some(SelectionPreset::Archive),
-            None::<&reth_chainspec::ChainSpec>,
-        );
-
-        {
-            let tx = db.tx_mut().unwrap();
-            let reset = |selected| write_prune_checkpoints_tx(&tx, &config, selected, 21_000_000);
-            let omitted = BTreeMap::new();
-            assert!(!reset(&omitted).unwrap());
-            set_layout(&tx, StorageSettings::v2());
-            assert!(reset(&omitted).unwrap());
-            set_layout(&tx, "unknown");
-            assert!(!reset(&selections).unwrap());
-            assert_eq!(
-                reset(&omitted).unwrap_err().to_string(),
-                "Invalid storage settings in snapshot database"
-            );
-            tx.commit().unwrap();
+        let omitted = BTreeMap::new();
+        let indexed = StageCheckpoint::new(10);
+        let stage = INDEX_STAGE_IDS[0].to_owned();
+        for (layout, selections, expected) in [
+            (None, &omitted, indexed),
+            (Some(serde_json::json!(StorageSettings::v2())), &omitted, StageCheckpoint::default()),
+            (Some(serde_json::json!(StorageSettings::v2())), &included, indexed),
+            (Some(serde_json::json!("unknown")), &included, indexed),
+        ] {
+            let dir = tempfile::tempdir()?;
+            let path = dir.path().join("db");
+            {
+                let db = reth_db::init_db(&path, reth_db::mdbx::DatabaseArguments::test())?;
+                let tx = db.tx_mut()?;
+                if let Some(settings) = layout {
+                    set_layout(&tx, settings);
+                }
+                tx.put::<tables::StageCheckpoints>(stage.clone(), indexed)?;
+                tx.commit()?;
+            }
+            command.finalize_modular_download(
+                selections,
+                &empty_manifest(),
+                Some(SelectionPreset::Archive),
+                dir.path(),
+                &path,
+            )?;
+            let db = reth_db::init_db(&path, reth_db::mdbx::DatabaseArguments::test())?;
+            let tx = db.tx()?;
+            assert_eq!(tx.get::<tables::StageCheckpoints>(stage.clone())?, Some(expected));
+            for segment in [PruneSegment::SenderRecovery, PruneSegment::TransactionLookup] {
+                assert_eq!(tx.get::<tables::PruneCheckpoints>(segment)?, None);
+            }
         }
-
-        let tx = db.tx().unwrap();
-        for segment in [PruneSegment::SenderRecovery, PruneSegment::TransactionLookup] {
-            assert!(
-                tx.get::<tables::PruneCheckpoints>(segment).unwrap().is_none(),
-                "expected no checkpoint for {segment} on archive node"
-            );
-        }
+        Ok(())
     }
 
     #[test]
@@ -827,8 +823,7 @@ mod tests {
         );
         // Same order as the download finalization.
         let tx = db.tx_mut().unwrap();
-        set_layout(&tx, StorageSettings::v2());
-        assert!(write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap());
+        write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block, true).unwrap();
         reset_index_stage_checkpoints_tx(&tx).unwrap();
 
         for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
@@ -871,8 +866,7 @@ mod tests {
                 None::<&reth_chainspec::ChainSpec>,
             );
             let tx = db.tx_mut().unwrap();
-            set_layout(&tx, StorageSettings::v2());
-            write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap();
+            write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block, true).unwrap();
             let mut checkpoints = Vec::new();
             for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
                 let checkpoint = tx.get::<tables::PruneCheckpoints>(segment).unwrap();
@@ -932,8 +926,8 @@ mod tests {
                     .unwrap();
                 }
 
-                set_layout(&tx, StorageSettings::v2());
-                write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block).unwrap();
+                write_prune_checkpoints_tx(&tx, &config, &selections, snapshot_block, true)
+                    .unwrap();
 
                 let expected = existing_boundary.unwrap_or_default().max(selected_boundary);
                 for (segment, mode) in [
@@ -951,5 +945,30 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn rejects_unsupported_snapshot_layouts() -> eyre::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let db = reth_db::init_db(dir.path(), reth_db::mdbx::DatabaseArguments::test())?;
+        let tx = db.tx_mut()?;
+        let selections =
+            BTreeMap::from([(SnapshotComponentType::TransactionSenders, ComponentSelection::All)]);
+        for (settings, expected) in [
+            (serde_json::json!("unknown"), "Invalid storage settings in snapshot database"),
+            (serde_json::json!({}), "Unrecognized snapshot storage settings"),
+            (serde_json::json!({"receipts_in_static_files": false, "unknown": false}),
+                "Unsupported legacy snapshot setting for this download: unknown=false"),
+            (serde_json::json!({"receipts_in_static_files": false, "account_changesets_in_static_files": true}),
+                "Unsupported legacy snapshot setting for this download: account_changesets_in_static_files=true"),
+            (serde_json::json!({"receipts_in_static_files": false, "account_history_in_rocksdb": true}),
+                "Unsupported legacy snapshot setting for this download: account_history_in_rocksdb=true"),
+            (serde_json::json!({"receipts_in_static_files": false, "transaction_senders_in_static_files": true}),
+                "Unsupported legacy snapshot setting for this download: transaction_senders_in_static_files=true"),
+        ] {
+            set_layout(&tx, settings);
+            assert_eq!(snapshot_uses_v2(&tx, &selections).unwrap_err().to_string(), expected);
+        }
+        Ok(())
     }
 }

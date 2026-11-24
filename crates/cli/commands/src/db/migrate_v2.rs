@@ -146,7 +146,8 @@ impl Command {
         let mut cursor = provider.tx_ref().cursor_read::<tables::AccountChangeSets>()?;
 
         let genesis_block = sf_provider.genesis_block_number();
-        // Older restores can leave changesets below their history checkpoint.
+        // Preserve rows from older restores. The first surviving block may be incomplete,
+        // so its rows cannot establish a new prune checkpoint.
         let first_row = cursor.first()?.map_or(tip, |(block, _)| block);
         let first_block =
             Self::history_start(&provider, PruneSegment::AccountHistory, genesis_block)?
@@ -205,7 +206,7 @@ impl Command {
         let mut cursor = provider.tx_ref().cursor_read::<tables::StorageChangeSets>()?;
 
         let genesis_block = sf_provider.genesis_block_number();
-        // Older restores can leave changesets below their history checkpoint.
+        // Preserve surviving storage rows under the original read boundary, as for accounts.
         let first_row = cursor.first()?.map_or(tip, |(key, _)| key.block_number());
         let first_block =
             Self::history_start(&provider, PruneSegment::StorageHistory, genesis_block)?
@@ -498,10 +499,12 @@ mod tests {
     use super::*;
     use alloy_primitives::{B256, U256};
     use reth_db::models::{AccountBeforeTx, BlockNumberAddress};
+    use reth_db_common::init::insert_genesis_header;
     use reth_primitives_traits::StorageEntry;
     use reth_provider::{
-        test_utils::create_test_provider_factory_with_genesis_block_number, ChangeSetReader,
-        StorageChangeSetReader, StorageSettingsCache,
+        providers::BlockchainProvider,
+        test_utils::create_test_provider_factory_with_genesis_block_number, ChainSpecProvider,
+        ChangeSetReader, ProviderError, StorageChangeSetReader, StorageSettingsCache,
     };
     use reth_prune_types::PruneCheckpoint;
     use reth_storage_api::PruneCheckpointWriter;
@@ -529,11 +532,18 @@ mod tests {
 
         // v1 history in MDBX: one account and one storage change per block, from genesis on.
         {
-            let provider_rw = factory.provider_rw().unwrap();
-            // Older v1 snapshot restores could set a checkpoint above surviving MDBX rows.
-            let checkpoint = PruneCheckpoint::pruned_through(tip);
-            for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
-                provider_rw.save_prune_checkpoint(segment, checkpoint).unwrap();
+            let provider_rw = factory.database_provider_rw().unwrap();
+            insert_genesis_header(&provider_rw, factory.chain_spec().as_ref()).unwrap();
+            provider_rw
+                .save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(genesis))
+                .unwrap();
+            // Each segment can have a different checkpoint above surviving MDBX rows.
+            for (segment, boundary) in
+                [(PruneSegment::AccountHistory, tip), (PruneSegment::StorageHistory, tip - 1)]
+            {
+                provider_rw
+                    .save_prune_checkpoint(segment, PruneCheckpoint::pruned_through(boundary))
+                    .unwrap();
             }
             for block in genesis..=tip {
                 provider_rw
@@ -565,23 +575,36 @@ mod tests {
             assert_eq!(static_files.get_lowest_range_start(segment), Some(genesis), "{segment}");
             assert_eq!(static_files.get_highest_static_file_block(segment), Some(tip), "{segment}");
         }
-        // Changesets are read from static files only with v2 settings.
         factory.set_storage_settings_cache(StorageSettings::v2());
-        let provider = factory.provider().unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
         for block in genesis..=tip {
             assert_eq!(
-                provider.account_block_changeset(block).unwrap(),
+                static_files.account_block_changeset(block).unwrap(),
                 vec![AccountBeforeTx { address, info: None }],
                 "block {block}"
             );
             assert_eq!(
-                provider.storage_changeset(block).unwrap(),
+                static_files.storage_changeset(block).unwrap(),
                 vec![(
                     BlockNumberAddress((block, address)),
                     StorageEntry { key, value: U256::from(block) }
                 )],
                 "block {block}"
             );
+            assert!(matches!(
+                provider.account_block_changeset(block),
+                Err(ProviderError::StateAtBlockPruned(pruned)) if pruned == block
+            ));
+            if block < tip {
+                assert!(matches!(
+                    provider.storage_changeset(block),
+                    Err(ProviderError::StateAtBlockPruned(pruned)) if pruned == block
+                ));
+            }
         }
+        assert_eq!(
+            provider.storage_changeset(tip).unwrap(),
+            static_files.storage_changeset(tip).unwrap()
+        );
     }
 }

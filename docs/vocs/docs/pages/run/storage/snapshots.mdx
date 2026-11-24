@@ -65,7 +65,14 @@ reth download \
 `--with-state-history-since N` configures the node to retain state history
 from block `N` onward. If `N` is above the snapshot height, the download skips
 changeset archives and writes that future boundary to the generated `reth.toml`.
-Legacy v1 snapshots carry their changesets and history indices in the state database.
+
+Legacy snapshots with changesets and history indices in MDBX carry that history
+in the state archive. This includes v1.10 snapshots with static-file receipts,
+and snapshots with static-file senders when the download omits senders.
+
+When `reth db migrate-v2` moves history from an older restore, it copies surviving
+changesets even below the recorded prune checkpoint. A block can be partially
+pruned, so historical queries keep the original read boundary.
 
 ## Further reading
 
