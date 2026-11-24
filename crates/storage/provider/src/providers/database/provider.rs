@@ -4005,18 +4005,17 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
         &self,
         segment: PruneSegment,
     ) -> ProviderResult<Option<PruneCheckpoint>> {
-        Ok(self.tx.get::<tables::PruneCheckpoints>(segment)?)
+        Ok(tables::PruneCheckpoints::read(&self.tx, segment, self.cached_storage_settings())?)
     }
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        Ok(PruneSegment::variants()
+        PruneSegment::variants()
             .filter_map(|segment| {
-                self.tx
-                    .get::<tables::PruneCheckpoints>(segment)
+                self.get_prune_checkpoint(segment)
                     .transpose()
                     .map(|chk| chk.map(|chk| (segment, chk)))
             })
-            .collect::<Result<_, _>>()?)
+            .collect()
     }
 
     fn get_prune_checkpoints_for_availability(
@@ -4099,7 +4098,12 @@ impl<TX: DbTxMut, N: NodeTypes> PruneCheckpointWriter for DatabaseProvider<TX, N
         segment: PruneSegment,
         checkpoint: PruneCheckpoint,
     ) -> ProviderResult<()> {
-        Ok(self.tx.put::<tables::PruneCheckpoints>(segment, checkpoint)?)
+        Ok(tables::PruneCheckpoints::write(
+            &self.tx,
+            segment,
+            checkpoint,
+            self.cached_storage_settings(),
+        )?)
     }
 }
 
@@ -6301,5 +6305,36 @@ mod tests {
         assert_eq!(outcome.first_block(), 2);
         assert_eq!(outcome.len(), 1);
         assert_eq!(tx.get::<tables::PlainAccountState>(Address::ZERO).unwrap(), None);
+    }
+
+    #[test]
+    fn legacy_mdbx_history_checkpoint_excludes_the_interrupted_block() -> eyre::Result<()> {
+        let account = PruneSegment::AccountHistory;
+        let storage = PruneSegment::StorageHistory;
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        let capped = PruneCheckpoint::pruned_through(4);
+        let legacy = PruneCheckpoint { prune_mode: PruneMode::Distance(100), ..capped };
+        let provider = factory.provider_rw()?;
+        provider.save_prune_checkpoint(account, legacy)?;
+        provider.tx_ref().put::<tables::PruneCheckpoints>(storage, capped)?;
+        provider.commit()?;
+        let provider = factory.provider_rw()?;
+        assert_eq!(provider.get_prune_checkpoints()?, [(account, legacy), (storage, capped)]);
+
+        // An old writer reads a marked checkpoint and clears the exact-boundary bit on rewrite.
+        let raw = provider.tx_ref().get::<tables::PruneCheckpoints>(account)?.unwrap();
+        assert_eq!(raw, legacy);
+        for segment in [account, storage] {
+            provider.tx_ref().put::<tables::PruneCheckpoints>(segment, raw)?;
+        }
+        let interrupted = PruneCheckpoint { block_number: Some(5), ..legacy };
+        assert_eq!(
+            provider.get_prune_checkpoints()?,
+            [(account, interrupted), (storage, interrupted)]
+        );
+        provider.set_storage_settings_cache(StorageSettings::v2());
+        assert_eq!(provider.get_prune_checkpoints()?, [(account, legacy), (storage, legacy)]);
+        Ok(())
     }
 }

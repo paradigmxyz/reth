@@ -10,7 +10,10 @@ use alloy_primitives::{BlockNumber, TxNumber};
 #[cfg_attr(any(test, feature = "test-utils"), derive(Default, arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 pub struct PruneCheckpoint {
-    /// Highest pruned block number. If it's [None], the pruning for block `0` is not finished yet.
+    /// For account and storage history, the highest block whose changesets may be incomplete.
+    /// The MDBX pruner resumes from the remaining rows, including any in this block.
+    /// For other segments this is the highest pruned block number. `None` means pruning block
+    /// zero is unfinished.
     pub block_number: Option<BlockNumber>,
     /// Highest pruned transaction number, if applicable.
     pub tx_number: Option<TxNumber>,

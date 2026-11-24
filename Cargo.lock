@@ -8418,6 +8418,7 @@ dependencies = [
  "reth-node-types",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-prune-types",
  "reth-stages-types",
  "reth-static-file-types",
  "reth-storage-overlay",

@@ -156,31 +156,24 @@ impl PruneModes {
                 checkpoints.iter().find(|(segment, _)| segment.is_storage_history()),
             ),
         ] {
-            if let Some(PruneMode::Distance(limit)) = prune_mode {
-                // check if distance exceeds the configured limit
-                if distance > *limit {
-                    // but only if we haven't pruned the target yet, if we don't have a checkpoint
-                    // yet, it's fully unpruned yet
-                    let pruned_height = checkpoint
-                        .and_then(|checkpoint| checkpoint.1.block_number)
-                        .unwrap_or(latest_block);
-                    if pruned_height >= target_block {
-                        // we've pruned the target block already and can't unwind past it
-                        return Err(UnwindTargetPrunedError::TargetBeyondHistoryLimit {
-                            latest_block,
-                            target_block,
-                            history_type: history_type.clone(),
-                            limit: *limit,
-                        })
-                    }
-                }
+            // A checkpoint without a completed block still permits an unwind to genesis.
+            let pruned_height =
+                checkpoint.map(|(_, checkpoint)| checkpoint.block_number.unwrap_or_default());
+            if let Some(PruneMode::Distance(limit)) = prune_mode &&
+                distance > *limit &&
+                pruned_height.unwrap_or(latest_block) > target_block
+            {
+                return Err(UnwindTargetPrunedError::TargetBeyondHistoryLimit {
+                    latest_block,
+                    target_block,
+                    history_type: history_type.clone(),
+                    limit: *limit,
+                })
             }
 
             // History pruned through a block can't be reverted below it, whatever the mode.
-            // Unwinding to the checkpoint itself only needs the changesets above it. The database
-            // pruner can stop inside a block and then records the block before it, so the block
-            // right above the checkpoint may be partly pruned.
-            if let Some(pruned_block) = checkpoint.and_then(|checkpoint| checkpoint.1.block_number) &&
+            // Unwinding to the checkpoint itself only needs the changesets above it.
+            if let Some(pruned_block) = pruned_height &&
                 target_block < pruned_block
             {
                 return Err(UnwindTargetPrunedError::TargetBelowPrunedHistory {
@@ -371,7 +364,7 @@ mod tests {
         // Test case 6: Distance exceeds limit but target block not pruned yet - should succeed
         let prune_modes =
             PruneModes { account_history: Some(PruneMode::Distance(100)), ..Default::default() };
-        let checkpoints = vec![(
+        let mut checkpoints = vec![(
             PruneSegment::AccountHistory,
             PruneCheckpoint {
                 block_number: Some(700),
@@ -382,6 +375,10 @@ mod tests {
         // Distance is 200 > 100, but checkpoint shows we've only pruned up to block 700 < target
         // 800
         assert!(prune_modes.ensure_unwind_target_unpruned(1000, 800, &checkpoints).is_ok());
+
+        // An interrupted genesis prune leaves every later block available for unwind.
+        checkpoints[0].1.block_number = None;
+        assert!(prune_modes.ensure_unwind_target_unpruned(1000, 0, &checkpoints).is_ok());
 
         // Test case 7: Both account and storage history configured, only one fails
         let prune_modes = PruneModes {
@@ -433,6 +430,8 @@ mod tests {
         )];
         // Distance is exactly 100, checkpoint at exactly the target block
         assert!(prune_modes.ensure_unwind_target_unpruned(1000, 900, &checkpoints).is_ok());
+        // Unwinding to the checkpoint is also valid beyond the configured distance.
+        assert!(prune_modes.ensure_unwind_target_unpruned(1001, 900, &checkpoints).is_ok());
 
         // Test case 9: Full pruning mode - should succeed (no distance check)
         let prune_modes = PruneModes {
