@@ -132,13 +132,121 @@ impl<N: NodePrimitives> InMemoryState<N> {
 ///
 /// At most one writer exists per in-memory state: [`InMemoryState::new`] returns it with the
 /// state, and nothing else creates or clones one. Whoever holds it is therefore the only one
-/// that changes the blocks, which it does by creating a [`CanonicalInMemoryStateWriter`] from it.
+/// that changes the blocks: with the methods of this writer, or with the
+/// [`CanonicalInMemoryStateWriter`] created from it, which also tracks the chain info.
 #[derive(Debug)]
 pub struct InMemoryStateWriter<N: NodePrimitives = EthPrimitives> {
     in_memory_state: InMemoryState<N>,
 }
 
 impl<N: NodePrimitives> InMemoryStateWriter<N> {
+    /// Removes all blocks, canonical or not, and clears the pending block.
+    ///
+    /// The blocks are removed for every handle of the [`InMemoryState`] this writes.
+    pub fn clear_state(&mut self) {
+        self.update(InMemoryBlocks::clear);
+    }
+
+    /// Tracks an executed block that is not canonical, unless it is already tracked.
+    ///
+    /// The block is connected to its parent block, canonical or not. It is not returned by the
+    /// canonical lookups until [`Self::update_chain`] makes it canonical. Does not change the
+    /// pending block.
+    pub fn insert_executed(&mut self, block: ExecutedBlock<N>) {
+        self.update(|blocks| blocks.insert_executed(block));
+    }
+
+    /// Updates the pending block with the given block, and tracks it like
+    /// [`Self::insert_executed`].
+    ///
+    /// Note: This assumes that the parent block of the pending block is canonical.
+    pub fn set_pending_block(&mut self, pending: ExecutedBlock<N>) {
+        self.update(|blocks| blocks.insert_pending(pending));
+    }
+
+    /// Update the in memory state with the given chain update.
+    ///
+    /// This appends the new blocks to the tracked chain and connects them to their parent blocks.
+    /// The blocks a reorg replaced stay tracked as executed blocks that are not canonical, and so
+    /// does the pending block, which is no longer pending.
+    pub fn update_chain(&mut self, new_chain: NewCanonicalChain<N>) {
+        self.update(|blocks| blocks.update_chain(new_chain));
+    }
+
+    /// Applies a backfill sync that finished at `backfill_block` without unwinding, in one
+    /// update.
+    ///
+    /// Removes the canonical blocks up to and including its height if `last_persisted_hash` is a
+    /// canonical in-memory block or the block the in-memory canonical chain builds on. Then makes
+    /// every remaining canonical block an executed block that is not canonical, and removes the
+    /// executed blocks that conflict with `backfill_block`: the ones below its height, the other
+    /// ones at its height, and every block built on such a block at its height. Afterwards there
+    /// is no pending block.
+    ///
+    /// If the canonical block at the height of `backfill_block` is another block, the canonical
+    /// blocks are only removed as conflicting blocks, together with the blocks built on that
+    /// block.
+    pub fn on_backfill_finished(
+        &mut self,
+        last_persisted_hash: B256,
+        backfill_block: BlockNumHash,
+    ) {
+        self.update(|blocks| {
+            let removed = if blocks
+                .canonical()
+                .hash_by_number(backfill_block.number)
+                .is_none_or(|hash| hash == backfill_block.hash)
+            {
+                blocks.remove_canonical_until(last_persisted_hash, backfill_block.number)
+            } else {
+                Vec::new()
+            };
+            blocks.demote_canonical_chain();
+            (removed, blocks.prune_conflicting_with_finalized(backfill_block))
+        });
+    }
+
+    /// Applies the persistence of blocks up to `last_persisted_block`, removing blocks in one
+    /// update:
+    ///
+    /// - The canonical blocks up to and including `state_trie_persisted_block`, if
+    ///   `last_persisted_block` is a canonical in-memory block or the block the in-memory canonical
+    ///   chain builds on. Otherwise the canonical blocks in memory are not the ones that were
+    ///   persisted, and none of them is removed. Blocks above `last_persisted_block` are never
+    ///   removed.
+    /// - The executed blocks that are not canonical and whose chain builds on a block above
+    ///   `last_persisted_block`: that block was removed from disk and is not tracked, so they are
+    ///   not connected to the persisted chain anymore.
+    /// - If there is a `finalized` block, the executed blocks that are not canonical and can no
+    ///   longer become canonical once it is final: the ones below its height, the other ones at its
+    ///   height, and every block built on such a block at its height. A finalized block above
+    ///   `state_trie_persisted_block` is replaced by that block, so that only the blocks that
+    ///   conflict with the persisted chain are removed.
+    pub fn on_blocks_persisted(
+        &mut self,
+        last_persisted_block: BlockNumHash,
+        state_trie_persisted_block: BlockNumHash,
+        finalized: Option<BlockNumHash>,
+    ) {
+        self.update(|blocks| {
+            let removed = blocks.remove_canonical_until(
+                last_persisted_block.hash,
+                state_trie_persisted_block.number.min(last_persisted_block.number),
+            );
+            let disconnected = blocks.prune_built_above(last_persisted_block.number);
+            let pruned = finalized.map(|finalized| {
+                blocks.prune_conflicting_with_finalized(
+                    if state_trie_persisted_block.number < finalized.number {
+                        state_trie_persisted_block
+                    } else {
+                        finalized
+                    },
+                )
+            });
+            (removed, disconnected, pruned)
+        });
+    }
+
     /// Applies `f` to the blocks under the write lock, bumps the removal generation if `f`
     /// removed blocks, and updates the metrics from the stats read under the same lock.
     ///
@@ -476,90 +584,50 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
         &self.canonical_in_memory_state
     }
 
-    /// Removes all blocks, canonical or not, and clears the pending block.
+    /// Removes all blocks, canonical or not, and clears the pending block, see
+    /// [`InMemoryStateWriter::clear_state`].
     ///
-    /// The blocks are removed for every handle of the [`InMemoryState`] this state was created
-    /// over. The chain info is unchanged and no notification is sent.
+    /// The chain info is unchanged and no notification is sent.
     pub fn clear_state(&mut self) {
-        self.in_memory_state_writer.update(InMemoryBlocks::clear);
+        self.in_memory_state_writer.clear_state();
     }
 
-    /// Tracks an executed block that is not canonical, unless it is already tracked.
-    ///
-    /// The block is connected to its parent block, canonical or not. It is not returned by the
-    /// canonical lookups until [`Self::update_chain`] makes it canonical. Does not change the
-    /// pending block.
+    /// Tracks an executed block that is not canonical, see
+    /// [`InMemoryStateWriter::insert_executed`].
     pub fn insert_executed(&mut self, block: ExecutedBlock<N>) {
-        self.in_memory_state_writer.update(|blocks| blocks.insert_executed(block));
+        self.in_memory_state_writer.insert_executed(block);
     }
 
-    /// Updates the pending block with the given block, and tracks it like
-    /// [`Self::insert_executed`].
-    ///
-    /// Note: This assumes that the parent block of the pending block is canonical.
+    /// Updates the pending block with the given block, see
+    /// [`InMemoryStateWriter::set_pending_block`].
     pub fn set_pending_block(&mut self, pending: ExecutedBlock<N>) {
-        self.in_memory_state_writer.update(|blocks| blocks.insert_pending(pending));
+        self.in_memory_state_writer.set_pending_block(pending);
     }
 
-    /// Update the in memory state with the given chain update.
+    /// Update the in memory state with the given chain update, see
+    /// [`InMemoryStateWriter::update_chain`].
     ///
-    /// This appends the new blocks to the tracked chain and connects them to their parent blocks.
-    /// The blocks a reorg replaced stay tracked as executed blocks that are not canonical, and so
-    /// does the pending block, which is no longer pending.
+    /// The chain info is unchanged and no notification is sent.
     pub fn update_chain(&mut self, new_chain: NewCanonicalChain<N>) {
-        self.in_memory_state_writer.update(|blocks| blocks.update_chain(new_chain));
+        self.in_memory_state_writer.update_chain(new_chain);
     }
 
-    /// Applies a backfill sync that finished at `backfill_block` without unwinding, in one
-    /// update.
+    /// Applies a backfill sync that finished at `backfill_block` without unwinding, see
+    /// [`InMemoryStateWriter::on_backfill_finished`].
     ///
-    /// Removes the canonical blocks up to and including its height if `last_persisted_hash` is a
-    /// canonical in-memory block or the block the in-memory canonical chain builds on. Then makes
-    /// every remaining canonical block an executed block that is not canonical, and removes the
-    /// executed blocks that conflict with `backfill_block`: the ones below its height, the other
-    /// ones at its height, and every block built on such a block at its height. Afterwards there
-    /// is no pending block.
-    ///
-    /// If the canonical block at the height of `backfill_block` is another block, the canonical
-    /// blocks are only removed as conflicting blocks, together with the blocks built on that
-    /// block.
+    /// The chain info is unchanged and no notification is sent.
     pub fn on_backfill_finished(
         &mut self,
         last_persisted_hash: B256,
         backfill_block: BlockNumHash,
     ) {
-        self.in_memory_state_writer.update(|blocks| {
-            let removed = if blocks
-                .canonical()
-                .hash_by_number(backfill_block.number)
-                .is_none_or(|hash| hash == backfill_block.hash)
-            {
-                blocks.remove_canonical_until(last_persisted_hash, backfill_block.number)
-            } else {
-                Vec::new()
-            };
-            blocks.demote_canonical_chain();
-            (removed, blocks.prune_conflicting_with_finalized(backfill_block))
-        });
+        self.in_memory_state_writer.on_backfill_finished(last_persisted_hash, backfill_block);
     }
 
     /// Applies the persistence of blocks.
     ///
-    /// Reports `last_persisted_block` as the persisted tip, and then removes blocks in one update:
-    ///
-    /// - The canonical blocks up to and including `state_trie_persisted_block`, if
-    ///   `last_persisted_block` is a canonical in-memory block or the block the in-memory canonical
-    ///   chain builds on. Otherwise the canonical blocks in memory are not the ones that were
-    ///   persisted, and none of them is removed. Blocks above `last_persisted_block` are never
-    ///   removed.
-    /// - The executed blocks that are not canonical and whose chain builds on a block above
-    ///   `last_persisted_block`: that block was removed from disk and is not tracked, so they are
-    ///   not connected to the persisted chain anymore.
-    /// - If there is a `finalized` block, the executed blocks that are not canonical and can no
-    ///   longer become canonical once it is final: the ones below its height, the other ones at its
-    ///   height, and every block built on such a block at its height. A finalized block above
-    ///   `state_trie_persisted_block` is replaced by that block, so that only the blocks that
-    ///   conflict with the persisted chain are removed.
+    /// Reports `last_persisted_block` as the persisted tip, and then removes blocks like
+    /// [`InMemoryStateWriter::on_blocks_persisted`].
     pub fn on_blocks_persisted(
         &mut self,
         last_persisted_block: BlockNumHash,
@@ -567,23 +635,11 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
         finalized: Option<BlockNumHash>,
     ) {
         self.inner().chain_info_tracker.set_persisted(last_persisted_block);
-        self.in_memory_state_writer.update(|blocks| {
-            let removed = blocks.remove_canonical_until(
-                last_persisted_block.hash,
-                state_trie_persisted_block.number.min(last_persisted_block.number),
-            );
-            let disconnected = blocks.prune_built_above(last_persisted_block.number);
-            let pruned = finalized.map(|finalized| {
-                blocks.prune_conflicting_with_finalized(
-                    if state_trie_persisted_block.number < finalized.number {
-                        state_trie_persisted_block
-                    } else {
-                        finalized
-                    },
-                )
-            });
-            (removed, disconnected, pruned)
-        });
+        self.in_memory_state_writer.on_blocks_persisted(
+            last_persisted_block,
+            state_trie_persisted_block,
+            finalized,
+        );
     }
 
     /// Records now as the time the last fork choice update was received.

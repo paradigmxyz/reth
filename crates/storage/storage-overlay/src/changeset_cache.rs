@@ -927,13 +927,13 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
-        let (manager, mut canonical_in_memory_state_writer) = overlay_manager_with_writer();
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
         for (block, updates) in [
             (&blocks[1], Arc::new(storage_updates(vec![(removed, Some(node))]))),
             (&blocks[2], Arc::clone(&finish_updates)),
             (&blocks[3], Arc::default()),
         ] {
-            canonical_in_memory_state_writer.insert_executed(ExecutedBlock::new(
+            in_memory_state_writer.insert_executed(ExecutedBlock::new(
                 Arc::clone(&block.recovered_block),
                 Arc::clone(&block.execution_output),
                 SortedTrieData::new(Arc::default(), updates),
