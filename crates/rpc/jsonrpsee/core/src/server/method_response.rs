@@ -339,7 +339,8 @@ impl MethodResponse {
             done: false,
         };
         let mut head = json.clone().into_bytes();
-        while !stream.done && head.len() < STREAM_THRESHOLD {
+        // Only result bytes count, so a large id can't skip the first part.
+        while !stream.done && head.len() - json.len() < STREAM_THRESHOLD {
             match stream.next().await {
                 // A producer that finished without a part yields only the closing brace, but a
                 // result needs at least one part to be a JSON value.
@@ -750,6 +751,14 @@ mod tests {
         // A small result is answered as a whole, so `into_json` doesn't panic.
         let rp = stream(&["[1", ",2", "]"], Ok(()), usize::MAX).await;
         assert_eq!(rp.into_json(), ok);
+        // So is one with an id past the threshold.
+        let id = "1".repeat(STREAM_THRESHOLD);
+        let stream_ok = ResponseStream::new(|tx| async move {
+            let _ = tx.send(Bytes::from_static(b"[1,2]"));
+            Ok::<_, ErrorObjectOwned>(())
+        });
+        let rp = MethodResponse::stream(Id::Str(id.clone().into()), stream_ok, usize::MAX).await;
+        assert_eq!(rp.into_json(), format!(r#"{{"jsonrpc":"2.0","id":"{id}","result":[1,2]}}"#));
         // Fails before the first part, after it, and without any part.
         let rp = stream(&[], Err(custom.clone()), usize::MAX).await;
         assert_eq!(rp.into_json(), failed);
