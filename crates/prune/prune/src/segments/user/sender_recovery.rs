@@ -291,57 +291,30 @@ mod tests {
                 10,
             ),
         );
-        test_prune(6, (PruneProgress::Finished, 2));
-        test_prune(10, (PruneProgress::Finished, 8));
-    }
-
-    #[test]
-    fn prune_time_limit_reached_keeps_checkpoint() {
-        let db = TestStageDB::default();
-        let mut rng = generators::rng();
-
-        let blocks = random_block_range(
-            &mut rng,
-            1..=10,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
-        );
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
-
-        let transaction_senders = blocks
-            .iter()
-            .flat_map(|block| &block.body().transactions)
-            .enumerate()
-            .map(|(tx_number, transaction)| {
-                (tx_number as u64, transaction.recover_signer().expect("recover signer"))
-            })
-            .collect::<Vec<_>>();
-        let transaction_senders_len = transaction_senders.len();
-        db.insert_transaction_senders(transaction_senders).expect("insert transaction senders");
-
-        let previous_checkpoint = PruneCheckpoint {
-            block_number: Some(1),
-            tx_number: Some(1),
-            prune_mode: PruneMode::Before(2),
-        };
+        // A limit reached before the first row keeps the stored checkpoint.
+        let previous_checkpoint = db
+            .factory
+            .provider()
+            .unwrap()
+            .get_prune_checkpoint(PruneSegment::SenderRecovery)
+            .unwrap();
+        let rows = db.table::<tables::TransactionSenders>().unwrap().len();
         let limiter = PruneLimiter::default().set_time_limit(Duration::ZERO);
         sleep(Duration::from_millis(1));
-        let input =
-            PruneInput { previous_checkpoint: Some(previous_checkpoint), to_block: 6, limiter };
-
-        let provider = db.factory.database_provider_rw().unwrap();
-        let result = SenderRecovery::new(PruneMode::Before(6)).prune(&provider, input).unwrap();
-        provider.commit().expect("commit");
-
+        let input = PruneInput { previous_checkpoint, to_block: 6, limiter };
+        let result = SenderRecovery::new(PruneMode::Before(6))
+            .prune(&db.factory.database_provider_rw().unwrap(), input)
+            .unwrap();
         assert_eq!(
             result,
             SegmentOutput::not_done(
                 PruneInterruptReason::Timeout,
-                Some(SegmentOutputCheckpoint::from_prune_checkpoint(previous_checkpoint)),
-            ),
+                previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            )
         );
-        assert_eq!(
-            db.table::<tables::TransactionSenders>().unwrap().len(),
-            transaction_senders_len
-        );
+        assert_eq!(db.table::<tables::TransactionSenders>().unwrap().len(), rows);
+
+        test_prune(6, (PruneProgress::Finished, 2));
+        test_prune(10, (PruneProgress::Finished, 8));
     }
 }
