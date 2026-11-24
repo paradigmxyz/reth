@@ -546,9 +546,9 @@ struct ContentRange {
 }
 
 impl ContentRange {
-    /// Returns the number of bytes the range covers.
+    /// Returns the number of bytes the range covers, saturating for `0-u64::MAX`.
     const fn len(&self) -> u64 {
-        self.end - self.start + 1
+        (self.end - self.start).saturating_add(1)
     }
 }
 
@@ -1862,6 +1862,21 @@ mod tests {
         for bad in ["bytes 5-2/10", "bytes 2-10/10", "bytes 2-5/ten", "bytes 2-/10", "bytes */10"] {
             assert_eq!(parse(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn sequential_download_accepts_maximal_range_with_unknown_total() {
+        let url = spawn_response_server(vec![
+            b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-18446744073709551615/*\r\n\
+              Content-Length: 4\r\nConnection: close\r\n\r\n0123",
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new());
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(4));
+
+        let downloaded = fetcher.download(None, None).unwrap();
+
+        assert_eq!(std::fs::read(downloaded.path).unwrap(), b"0123");
     }
 
     #[test]
