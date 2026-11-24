@@ -1870,6 +1870,7 @@ mod tests {
         let ready = ready_rx.recv_timeout(Duration::from_secs(10));
         if ready != Ok(true) {
             let _ = child.kill();
+            let _ = child.wait();
             panic!("child did not open a read transaction: {ready:?}");
         }
 
