@@ -15,7 +15,7 @@ use alloy_dyn_abi::TypedData;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::{TransactionBuilder, TransactionBuilder4844};
-use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
+use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, TransactionInfo, TransactionRequest};
 use evm2::evm::Bal as EvmBal;
 use futures::{Future, StreamExt};
@@ -677,6 +677,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 }
             }
 
+            // An absent RPC destination denotes contract creation, but builders require a kind.
+            request.as_mut().to.get_or_insert(TxKind::Create);
             let tx = self.converter().build_simulate_v1_transaction(request)?;
 
             let raw = tx.encoded_2718().into();
