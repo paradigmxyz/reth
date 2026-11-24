@@ -553,14 +553,17 @@ mod tests {
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthChainSpec};
-    use reth_db_api::{tables, transaction::DbTxMut};
+    use reth_db_api::{
+        models::storage_sharded_key::StorageShardedKey, tables, transaction::DbTxMut,
+        BlockNumberList,
+    };
     use reth_db_common::init::{init_genesis, init_genesis_with_settings};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{ConfigureEvm, EvmEnvFor, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::{
-        crypto::secp256k1::sign_message, SealedHeader, SignerRecoverable,
+        crypto::secp256k1::sign_message, Account, SealedHeader, SignerRecoverable, StorageEntry,
     };
     use reth_provider::{
         providers::BlockchainProvider,
@@ -568,9 +571,12 @@ mod tests {
             create_test_provider_factory_with_chain_spec, ExtendedAccount, MockEthProvider,
             NoopProvider,
         },
-        BlockWriter, ExecutionOutcome, PruneCheckpointReader, StageCheckpointReader,
-        StageCheckpointWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+        BlockWriter, ExecutionOutcome, ProviderFactory, PruneCheckpointReader,
+        RocksDBProviderFactory, StageCheckpointReader, StageCheckpointWriter,
+        StaticFileProviderBuilder, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+        StorageSettingsCache,
     };
+    use reth_prune::{PruneMode, PruneModes, PruneSegment, PrunerBuilder};
     use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
     use reth_rpc_eth_api::{
         helpers::{Call, EthBlocks, EthCall, EthTransactions, LoadPendingBlock, SpawnBlocking},
@@ -579,6 +585,7 @@ mod tests {
     };
     use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, RpcInvalidTransactionError};
     use reth_rpc_server_types::constants::DEFAULT_MAX_CALL_MANY_CALLS;
+    use reth_stages::{test_utils::TestStageDB, StageCheckpoint, StageId};
     use reth_storage_api::{
         BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
         StorageSettings, TransactionsProvider,
@@ -744,6 +751,101 @@ mod tests {
         assert_eq!(transaction.block_number, Some(1));
         assert_eq!(transaction.transaction_index, Some(0));
         assert_eq!(transaction.inner.signer(), sender);
+    }
+
+    #[tokio::test]
+    async fn state_availability_starts_at_chain_genesis() {
+        let genesis = 5;
+        let chain = Arc::new(
+            ChainSpecBuilder::mainnet()
+                .genesis(Genesis { number: Some(genesis), ..Default::default() })
+                .build(),
+        );
+        for settings in [StorageSettings::v1(), StorageSettings::v2()] {
+            let factory = create_test_provider_factory_with_chain_spec(chain.clone());
+            init_genesis_with_settings(&factory, settings).unwrap();
+            let api = build_test_eth_api(BlockchainProvider::new(factory).unwrap());
+            assert_eq!(
+                EthApiServer::capabilities(&api).unwrap().state.oldest_block,
+                Some(U64::from(genesis))
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn advertised_state_remains_readable_after_pruning_a_changeset_file() {
+        let mut db = TestStageDB::default();
+        db.factory = ProviderFactory::new(
+            db.factory.db_ref().clone(),
+            db.factory.chain_spec(),
+            StaticFileProviderBuilder::read_write(db.temp_static_files_dir.path())
+                .with_blocks_per_file_for_segment(StaticFileSegment::StorageChangeSets, 3)
+                .build()
+                .unwrap(),
+            db.factory.rocksdb_provider(),
+            Default::default(),
+            reth_tasks::Runtime::test(),
+        )
+        .unwrap();
+        db.factory.set_storage_settings_cache(StorageSettings::v2());
+        let headers = generators::random_header_range(&mut generators::rng(), 0..5, B256::ZERO);
+        db.insert_headers(&headers).unwrap();
+        let rows = (0u64..5).map(|block| {
+            vec![(
+                Address::ZERO,
+                Account::default(),
+                vec![StorageEntry::new(B256::ZERO, U256::from(block))],
+            )]
+        });
+        db.insert_changesets_to_static_files(rows, None).unwrap();
+        let rocks = db.factory.rocksdb_provider();
+        let mut idx = rocks.batch();
+        idx.put::<tables::StoragesHistory>(
+            StorageShardedKey::last(Address::ZERO, B256::ZERO),
+            &BlockNumberList::new_pre_sorted(0..5),
+        )
+        .unwrap();
+        idx.commit().unwrap();
+        let rw = db.factory.provider_rw().unwrap();
+        rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(4)).unwrap();
+        rw.commit().unwrap();
+        let mut pruner = PrunerBuilder::default()
+            .segments(PruneModes {
+                storage_history: Some(PruneMode::Before(3)),
+                ..Default::default()
+            })
+            .build_with_provider_factory(db.factory.clone())
+            .with_minimum_pruning_distance(0);
+        pruner.run(4).unwrap();
+        assert_eq!(
+            db.factory
+                .static_file_provider()
+                .get_lowest_range_start(StaticFileSegment::StorageChangeSets),
+            Some(3)
+        );
+        // A restored node can have the same file boundary without a saved prune checkpoint.
+        for has_checkpoint in [true, false] {
+            if !has_checkpoint {
+                db.commit(|tx| {
+                    tx.delete::<tables::PruneCheckpoints>(PruneSegment::StorageHistory, None)?;
+                    Ok(())
+                })
+                .unwrap();
+            }
+            let api = build_test_eth_api(BlockchainProvider::new(db.factory.clone()).unwrap());
+            let oldest =
+                EthApiServer::capabilities(&api).unwrap().state.oldest_block.unwrap().to::<u64>();
+            assert_eq!(oldest, 3);
+            let value = EthApiServer::storage_at(
+                &api,
+                Address::ZERO,
+                B256::ZERO.into(),
+                Some(BlockId::number(oldest)),
+            )
+            .await
+            .unwrap();
+            assert_eq!(value, B256::from(U256::from(4)));
+        }
     }
 
     #[tokio::test]

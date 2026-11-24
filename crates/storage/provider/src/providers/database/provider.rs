@@ -3997,6 +3997,32 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
         &self,
     ) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
         let mut checkpoints = self.get_prune_checkpoints()?;
+        // A restored database can start above genesis without any history prune checkpoints.
+        let chain_floor = self
+            .static_file_provider
+            .earliest_history_height()
+            .max(self.static_file_provider.genesis_block_number());
+        for (segment, file_start) in [
+            (PruneSegment::AccountHistory, self.lowest_account_changeset_block()?),
+            (PruneSegment::StorageHistory, self.lowest_storage_changeset_block()?),
+        ] {
+            let floor = chain_floor.max(file_start.unwrap_or_default());
+            if floor == 0 {
+                continue;
+            }
+            if let Some((_, checkpoint)) = checkpoints.iter_mut().find(|(key, _)| *key == segment) {
+                checkpoint.block_number = checkpoint.block_number.max(Some(floor));
+            } else {
+                checkpoints.push((
+                    segment,
+                    PruneCheckpoint {
+                        block_number: Some(floor),
+                        tx_number: None,
+                        prune_mode: PruneMode::Before(floor),
+                    },
+                ));
+            }
+        }
         if !EitherWriter::receipts_destination(self).is_static_file() ||
             !checkpoints.iter().any(|(segment, checkpoint)| {
                 matches!(segment, PruneSegment::Receipts | PruneSegment::ContractLogs) &&

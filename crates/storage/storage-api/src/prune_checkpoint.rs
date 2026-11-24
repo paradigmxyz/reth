@@ -17,8 +17,10 @@ pub trait PruneCheckpointReader: Send {
     /// Fetch checkpoints for reporting data availability, accounting for data still retained in
     /// other storage backends. This does not modify the stored checkpoints.
     ///
-    /// The default returns the stored checkpoints. Implementations may lower their block and
-    /// transaction numbers when continuous coverage can be verified, preserving the prune mode.
+    /// The default returns the stored checkpoints. Implementations may reflect retained receipts
+    /// or the first available state block from genesis, history expiry and changeset files on a
+    /// snapshot without a stored checkpoint. History bounds describe the earliest post-block
+    /// state covered by each segment. Stored prune modes describe their retention policy.
     /// Use [`Self::get_prune_checkpoints`] for pruning progress instead.
     fn get_prune_checkpoints_for_availability(
         &self,

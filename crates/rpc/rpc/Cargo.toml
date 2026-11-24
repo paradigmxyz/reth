@@ -96,6 +96,8 @@ reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-db-api.workspace = true
 reth-db-common.workspace = true
+reth-prune.workspace = true
+reth-stages = { workspace = true, features = ["test-utils"] }
 
 rand.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

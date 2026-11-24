@@ -131,7 +131,7 @@ pub trait EthApiSpec: RpcNodeCore + EthApiTypes {
 /// [`PruneCheckpointReader::get_prune_checkpoints_for_availability`].
 ///
 /// A resource is only available where every required segment is available, so the oldest available
-/// block is the maximum pruned checkpoint across the segments. If any segment is configured with a
+/// block is the maximum of their availability bounds. If any segment is configured with a
 /// distance-based prune mode, or with full pruning that still keeps the segment minimum, expose the
 /// smallest retention window because that is the tightest limit callers can rely on. If full
 /// pruning leaves no reliable window for any required segment, the resource is disabled.
@@ -151,7 +151,12 @@ fn effective_resource(
         };
 
         if let Some(block_number) = checkpoint.block_number {
-            oldest_block = oldest_block.max(block_number.saturating_add(1));
+            // Post-block state needs only changesets after the requested block.
+            let first_available = match segment {
+                PruneSegment::AccountHistory | PruneSegment::StorageHistory => block_number,
+                _ => block_number.saturating_add(1),
+            };
+            oldest_block = oldest_block.max(first_available);
         }
 
         match checkpoint.prune_mode {
@@ -228,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn retained_receipts_preserve_resource_limits() {
+    fn effective_resource_respects_segment_boundaries() {
         let checkpoints = [
             (
                 PruneSegment::Receipts,
@@ -247,6 +252,8 @@ mod tests {
             ),
             (PruneSegment::TransactionLookup, PruneCheckpoint::pruned_through(39)),
             (PruneSegment::Bodies, PruneCheckpoint::pruned_through(29)),
+            (PruneSegment::AccountHistory, PruneCheckpoint::pruned_through(1)),
+            (PruneSegment::StorageHistory, PruneCheckpoint::pruned_through(2)),
         ];
         for (segments, expected) in [
             (vec![PruneSegment::Receipts], EthCapabilitiesResource::window(0, 100)),
@@ -259,7 +266,9 @@ mod tests {
                 EthCapabilitiesResource::window(40, 100),
             ),
             (vec![PruneSegment::Bodies], EthCapabilitiesResource::available_from(30)),
-            (vec![PruneSegment::AccountHistory], EthCapabilitiesResource::available_from(0)),
+            (vec![PruneSegment::SenderRecovery], EthCapabilitiesResource::available_from(0)),
+            (vec![PruneSegment::AccountHistory], EthCapabilitiesResource::available_from(1)),
+            (vec![PruneSegment::StorageHistory], EthCapabilitiesResource::available_from(2)),
         ] {
             assert_eq!(effective_resource(&checkpoints, &segments), expected, "{segments:?}");
         }
