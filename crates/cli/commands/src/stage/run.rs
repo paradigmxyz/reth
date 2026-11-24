@@ -4,7 +4,7 @@
 
 use crate::common::{AccessRights, CliNodeComponents, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::Sealable;
+use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -17,10 +17,10 @@ use reth_downloaders::{
 };
 use reth_exex::ExExManagerHandle;
 use reth_network::BlockDownloaderProvider;
-use reth_network_p2p::HeadersClient;
 use reth_node_builder::common::metrics_hooks;
 use reth_node_core::{
     args::{NetworkArgs, StageEnum},
+    utils::get_single_header,
     version::version_metadata,
 };
 use reth_node_metrics::{
@@ -41,9 +41,14 @@ use reth_stages::{
     },
     ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
 };
-use std::{any::Any, net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::watch;
 use tracing::*;
+
+/// Number of times fetching the tip header is retried before giving up.
+const HEADER_FETCH_RETRIES: usize = 5;
+
+const HASHING_UNSUPPORTED: &str = "The `hashing` stage cannot be run directly, run `account-hashing` and `storage-hashing` instead.";
 
 /// `reth stage` command
 #[derive(Debug, Parser)]
@@ -70,7 +75,7 @@ pub struct Command<C: ChainSpecParser> {
     to: u64,
 
     /// Batch size for stage execution and unwind
-    #[arg(long)]
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     batch_size: Option<u64>,
 
     /// Normally, running the stage requires unwinding for stages that already
@@ -108,6 +113,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         Comp: CliNodeComponents<N>,
         F: FnOnce(Arc<C::ChainSpec>) -> Comp,
     {
+        self.validate()?;
+
         // Quit early if the stage requires a commit and `--commit` is not provided.
         if self.requires_commit() && !self.commit {
             return Err(eyre::eyre!(
@@ -147,7 +154,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             MetricServer::new(config).serve().await?;
         }
 
-        let batch_size = self.batch_size.unwrap_or(self.to.saturating_sub(self.from) + 1);
+        let batch_size = self.batch_size.unwrap_or(self.to - self.from + 1);
 
         let etl_config = config.stages.etl.clone();
         let prune_modes = config.prune.segments.clone();
@@ -181,20 +188,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     let fetch_client = Arc::new(network.fetch_client().await?);
 
                     // Use `to` as the tip for the stage
-                    let tip = loop {
-                        match fetch_client.get_header(BlockHashOrNumber::Number(self.to)).await {
-                            Ok(header) => {
-                                if let Some(header) = header.into_data() {
-                                    break header
-                                }
-                            }
-                            Err(error) if error.is_retryable() => {
-                                warn!(target: "reth::cli", "Error requesting header: {error}. Retrying...")
-                            }
-                            Err(error) => return Err(error.into()),
-                        }
-                    };
-                    let (_, rx) = watch::channel(tip.hash_slow());
+                    let tip = (|| {
+                        get_single_header(fetch_client.clone(), BlockHashOrNumber::Number(self.to))
+                    })
+                    .retry(ConstantBuilder::default().with_max_times(HEADER_FETCH_RETRIES))
+                    .notify(|err, _| {
+                        warn!(target: "reth::cli", error = %err, "Error requesting header. Retrying...")
+                    })
+                    .await?;
+                    let (_, rx) = watch::channel(tip.hash());
                     (
                         Box::new(HeaderStage::new(
                             provider_factory.clone(),
@@ -326,12 +328,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     )),
                     None,
                 ),
-                _ => return Ok(()),
+                StageEnum::Hashing => eyre::bail!(HASHING_UNSUPPORTED),
             };
-        if let Some(unwind_stage) = &unwind_stage {
-            assert_eq!((*exec_stage).type_id(), (**unwind_stage).type_id());
-        }
-
         let checkpoint = provider_rw.get_stage_checkpoint(exec_stage.id())?.unwrap_or_default();
 
         let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
@@ -393,6 +391,20 @@ impl<C: ChainSpecParser> Command<C> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)
+    }
+
+    /// Validates the arguments that do not require opening the database.
+    fn validate(&self) -> eyre::Result<()> {
+        if self.stage == StageEnum::Hashing {
+            eyre::bail!(HASHING_UNSUPPORTED);
+        }
+        eyre::ensure!(
+            self.from <= self.to,
+            "`--from` ({}) must not be greater than `--to` ({})",
+            self.from,
+            self.to
+        );
+        Ok(())
     }
 
     /// Returns whether or not the configured stage requires committing.

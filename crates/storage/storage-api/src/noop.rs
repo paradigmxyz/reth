@@ -5,11 +5,11 @@ pub use crate::bal::NoopBalStore;
 use crate::{
     AccountReader, BalProvider, BalStoreHandle, BlockBodyIndicesProvider, BlockHashReader,
     BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
-    ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
-    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory,
-    StateRangeProviderFactory, StateRangeView, StateReader, StateRootProvider, StorageRootProvider,
-    TransactionVariant, TransactionsProvider,
+    ChangeSetReader, DurableBlockReader, HashedPostStateProvider, HeaderProvider,
+    NodePrimitivesProvider, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    StageCheckpointReader, StateProofProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRangeProviderFactory, StateRangeView, StateReader,
+    StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -28,12 +28,17 @@ use core::{
     marker::PhantomData,
     ops::{RangeBounds, RangeInclusive},
 };
+#[cfg(feature = "chain-state")]
+use reth_chain_state::{
+    CanonStateNotifications, CanonStateSubscriptions, ExecutedBlock, ForkChoiceNotifications,
+    ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
+};
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 #[cfg(feature = "db-api")]
 use reth_db_api::mock::{DatabaseMock, TxMock};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{ExecutionOutcome, RecoveredBlockAndExecutionOutput};
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader};
 #[cfg(feature = "db-api")]
 use reth_prune_types::PruneModes;
@@ -217,13 +222,13 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
         Ok(None)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         Ok(None)
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         Ok(None)
     }
 
@@ -551,8 +556,8 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
 
     fn multiproof_v2(
         &self,
-        _input: TrieInput,
         _targets: MultiProofTargetsV2,
+        _requires_masks: bool,
     ) -> ProviderResult<DecodedMultiProofV2> {
         Ok(DecodedMultiProofV2::default())
     }
@@ -570,7 +575,7 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
 impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider<C, N> {
     fn hashed_post_state(
         &self,
-        _bundle_state: &revm::database::BundleState,
+        _bundle_state: &reth_trie_common::bundle_state::BundleState,
     ) -> ProviderResult<HashedPostState> {
         Ok(HashedPostState::default())
     }
@@ -604,7 +609,18 @@ impl<C: Send + Sync, N: NodePrimitives> BytecodeReader for NoopProvider<C, N> {
 }
 
 impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopProvider<C, N> {
+    type Primitives = N;
+
     fn latest(&self) -> ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
+    }
+
+    #[cfg(feature = "chain-state")]
+    fn state_with_block_appended(
+        &self,
+        _parent_hash: BlockHash,
+        _block: ExecutedBlock<N>,
+    ) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }
 
@@ -660,6 +676,40 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopP
         Ok(Some(Box::new(self.clone())))
     }
 }
+
+#[cfg(feature = "chain-state")]
+impl<C: Send + Sync, N: NodePrimitives> CanonStateSubscriptions for NoopProvider<C, N> {
+    type Primitives = N;
+
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<N> {
+        tokio::sync::broadcast::channel(1).1
+    }
+}
+
+#[cfg(feature = "chain-state")]
+impl<C: Send + Sync, N: NodePrimitives> ForkChoiceSubscriptions for NoopProvider<C, N> {
+    type Header = N::BlockHeader;
+
+    fn subscribe_safe_block(&self) -> ForkChoiceNotifications<N::BlockHeader> {
+        let (_, rx) = tokio::sync::watch::channel(None);
+        ForkChoiceNotifications(rx)
+    }
+
+    fn subscribe_finalized_block(&self) -> ForkChoiceNotifications<N::BlockHeader> {
+        let (_, rx) = tokio::sync::watch::channel(None);
+        ForkChoiceNotifications(rx)
+    }
+}
+
+#[cfg(feature = "chain-state")]
+impl<C: Send + Sync, N: NodePrimitives> PersistedBlockSubscriptions for NoopProvider<C, N> {
+    fn subscribe_persisted_block(&self) -> PersistedBlockNotifications {
+        let (_, rx) = tokio::sync::watch::channel(None);
+        PersistedBlockNotifications(rx)
+    }
+}
+
+impl<C: Send + Sync, N: NodePrimitives> DurableBlockReader for NoopProvider<C, N> {}
 
 impl<C: Send + Sync, N: NodePrimitives> StageCheckpointReader for NoopProvider<C, N> {
     fn get_stage_checkpoint(&self, _id: StageId) -> ProviderResult<Option<StageCheckpoint>> {

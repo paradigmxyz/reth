@@ -6,6 +6,8 @@ use crate::common::CliNodeTypes;
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
+use eyre::WrapErr;
+use futures::FutureExt;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::hash_or_num_value_parser;
@@ -16,6 +18,7 @@ use reth_node_core::{
     args::{DatadirArgs, NetworkArgs},
     utils::get_single_header,
 };
+use reth_primitives_traits::BlockBody;
 use reth_tasks::Runtime;
 
 pub mod bootnode;
@@ -79,7 +82,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     );
                 }
                 let body = result.into_iter().next().unwrap();
-                tracing::info!(target: "reth::cli", ?body, "Successfully downloaded body")
+                tracing::info!(target: "reth::cli", %hash, txs = body.transaction_count(), "Successfully downloaded body")
             }
             Subcommands::Rlpx(command) => {
                 command.execute().await?;
@@ -171,14 +174,15 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
         &self,
     ) -> eyre::Result<reth_network::NetworkHandle<N::NetworkPrimitives>>
     where
-        C::ChainSpec: EthChainSpec + Hardforks + EthereumHardforks + Send + Sync + 'static,
+        C::ChainSpec: EthChainSpec + Hardforks + EthereumHardforks + 'static,
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
     {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
         // Load configuration
-        let mut config = Config::from_path(&config_path).unwrap_or_default();
+        let mut config = Config::from_path(&config_path)
+            .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
 
         config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
 
@@ -212,7 +216,7 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
                 .manager()
                 .await?;
         let handle = net.handle().clone();
-        tokio::task::spawn(net);
+        tokio::task::spawn(net.boxed());
 
         Ok(handle)
     }

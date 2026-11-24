@@ -496,43 +496,6 @@ impl<N: NetworkPrimitives> EthMessage<N> {
                 Self::Cells(_)
         )
     }
-
-    /// Converts the message types where applicable.
-    ///
-    /// This handles up/downcasting where appropriate, for example for different receipt request
-    /// types.
-    pub fn map_versioned(self, version: EthVersion) -> Self {
-        // For eth/70 peers we send `GetReceipts` using the new eth/70
-        // encoding with `firstBlockReceiptIndex = 0`, while keeping the
-        // user-facing `PeerRequest` API unchanged.
-        if version >= EthVersion::Eth70 {
-            return match self {
-                Self::PooledTransactions(pair) if version >= EthVersion::Eth72 => {
-                    // The request/response API remains version-neutral. Only the final wire
-                    // representation changes for an eth/72 peer.
-                    let RequestPair { request_id, message } = pair;
-                    Self::PooledTransactionsEth72(RequestPair {
-                        request_id,
-                        message: PooledTransactionsEth72::from_transactions(message),
-                    })
-                }
-                Self::GetReceipts(pair) => {
-                    let RequestPair { request_id, message } = pair;
-                    let req = RequestPair {
-                        request_id,
-                        message: GetReceipts70 {
-                            first_block_receipt_index: 0,
-                            block_hashes: message.0,
-                        },
-                    };
-                    Self::GetReceipts70(req)
-                }
-                other => other,
-            }
-        }
-
-        self
-    }
 }
 
 impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
@@ -632,7 +595,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
                     cells.message.cell_mask.length();
                 length + length_of_length(length)
             }
-            Self::Other(unknown) => unknown.length(),
+            Self::Other(unknown) => unknown.payload.len(),
         }
     }
 }
@@ -901,6 +864,9 @@ impl<T> RequestPair<T> {
         F: FnOnce(&mut &[u8]) -> alloy_rlp::Result<T>,
     {
         let header = Header::decode(buf)?;
+        if !header.list {
+            return Err(alloy_rlp::Error::UnexpectedString)
+        }
 
         let initial_length = buf.len();
         let request_id = u64::decode(buf)?;
@@ -930,11 +896,8 @@ where
     }
 
     fn length(&self) -> usize {
-        let mut length = 0;
-        length += self.request_id.length();
-        length += self.message.length();
-        length += length_of_length(length);
-        length
+        let payload_length = self.request_id.length() + self.message.length();
+        Header { list: true, payload_length }.length_with_payload()
     }
 }
 
@@ -945,6 +908,9 @@ where
 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let header = Header::decode(buf)?;
+        if !header.list {
+            return Err(alloy_rlp::Error::UnexpectedString)
+        }
 
         let initial_length = buf.len();
         let request_id = u64::decode(buf)?;
@@ -967,9 +933,10 @@ mod tests {
     use crate::{
         message::RequestPair, BlockAccessLists, EthMessage, EthMessageID, EthNetworkPrimitives,
         EthVersion, GetBlockAccessLists, GetNodeData, NodeData, ProtocolMessage,
-        RawCapabilityMessage,
+        RawCapabilityMessage, Status, StatusMessage,
     };
-    use alloy_primitives::hex;
+    use alloy_hardforks::{ForkHash, ForkId};
+    use alloy_primitives::{hex, B256, U256};
     use alloy_rlp::{Decodable, Encodable, Error};
     use reth_ethereum_primitives::BlockBody;
 
@@ -1177,6 +1144,22 @@ mod tests {
     }
 
     #[test]
+    fn request_pair_decode_rejects_string_header() {
+        // A request pair wrapped in a string header instead of a list header
+        //
+        // 82: start of string (80) + len(payload)
+        // 2d: 45 (request_id)
+        // c0: empty list (message)
+        let raw_pair = &hex!("822dc0")[..];
+
+        let result = RequestPair::<Vec<u8>>::decode(&mut &*raw_pair);
+        assert_eq!(result, Err(Error::UnexpectedString));
+
+        let result = RequestPair::decode_with(&mut &*raw_pair, Vec::<u8>::decode);
+        assert_eq!(result, Err(Error::UnexpectedString));
+    }
+
+    #[test]
     fn empty_block_bodies_protocol() {
         let empty_block_bodies =
             ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
@@ -1230,6 +1213,7 @@ mod tests {
         };
 
         let encoded = encode(protocol_message.clone());
+        assert_eq!(protocol_message.length(), encoded.len());
         let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
             EthVersion::Eth68,
             &mut &encoded[..],
@@ -1259,10 +1243,6 @@ mod tests {
 
     #[test]
     fn decode_status_success() {
-        use crate::{Status, StatusMessage};
-        use alloy_hardforks::{ForkHash, ForkId};
-        use alloy_primitives::{B256, U256};
-
         let status = Status {
             version: EthVersion::Eth68,
             chain: alloy_chains::Chain::mainnet(),

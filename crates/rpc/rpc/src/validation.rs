@@ -1,3 +1,4 @@
+use self::blob_cache::BlobValidationCache;
 use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
@@ -13,36 +14,43 @@ use alloy_rpc_types_engine::{
     BlobsBundleV1, BlobsBundleV2, CancunPayloadFields, ExecutionData, ExecutionPayload,
     ExecutionPayloadSidecar, PraguePayloadFields,
 };
-use async_trait::async_trait;
 use core::fmt;
+use evm2::interpreter::gas::COLD_ACCOUNT_ACCESS_COST;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::error::ErrorObject;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_consensus::{Consensus, FullConsensus};
+use reth_consensus::FullConsensus;
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{
+    cached::CachedReads, database::StateProviderDatabase, execute::Executor, ConfigureEvm,
+    SenderRecoveryCache,
+};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{
     metrics,
-    metrics::{gauge, Gauge},
+    metrics::{gauge, Counter, Gauge},
     Metrics,
 };
-use reth_node_api::{NewPayloadError, PayloadTypes};
+use reth_payload_primitives::{NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
-    BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeaderFor,
+    block::error::SealedBlockRecoveryError, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
+    SealedBlock, SealedHeaderFor,
 };
-use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
-use reth_storage_api::{BlockReaderIdExt, HashedPostStateProvider, StateProviderFactory};
+use reth_storage_api::{
+    BlockReaderIdExt, HashedPostStateProvider, StateProvider, StateProviderFactory,
+};
 use reth_tasks::Runtime;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tokio::sync::{oneshot, RwLock};
 use tracing::warn;
+
+mod blob_cache;
 
 /// The type that implements the `validation` rpc namespace trait
 #[derive(Clone, Debug, derive_more::Deref)]
@@ -57,6 +65,9 @@ where
     T: PayloadTypes,
 {
     /// Create a new instance of the [`ValidationApi`]
+    ///
+    /// If a `sender_recovery_cache` is given, the senders of submitted blocks are recovered
+    /// through it, reusing senders that other node components have already recovered.
     pub fn new(
         provider: Provider,
         consensus: Arc<dyn FullConsensus<E::Primitives>>,
@@ -66,6 +77,7 @@ where
         payload_validator: Arc<
             dyn PayloadValidator<T, Block = <E::Primitives as NodePrimitives>::Block>,
         >,
+        sender_recovery_cache: Option<SenderRecoveryCache>,
     ) -> Self {
         let ValidationApiConfig { disallow, validation_window } = config;
 
@@ -77,7 +89,9 @@ where
             disallow,
             validation_window,
             cached_state: Default::default(),
+            validated_blobs: Default::default(),
             task_spawner,
+            sender_recovery_cache,
             metrics: Default::default(),
         });
 
@@ -90,24 +104,63 @@ where
         Self { inner }
     }
 
-    /// Returns the cached reads for the given head hash.
-    async fn cached_reads(&self, head: B256) -> CachedReads {
+    /// Returns a copy of the cached state for the given head hash.
+    async fn cached_reads(&self, head: B256) -> CachedState {
         let cache = self.inner.cached_state.read().await;
-        if cache.0 == head {
-            cache.1.clone()
+        if cache.head == head {
+            cache.clone()
         } else {
-            Default::default()
+            CachedState { head, ..Default::default() }
         }
     }
 
-    /// Updates the cached state for the given head hash.
-    async fn update_cached_reads(&self, head: B256, cached_state: CachedReads) {
+    /// Merges a copy returned by [`Self::cached_reads`] back into the cached state.
+    ///
+    /// `gas` is the gas spent on the reads added to the copy. The cache only ever holds reads
+    /// that cost at most `max_gas`, so the cache, and every copy of it, stays bounded.
+    async fn update_cached_reads(&self, update: CachedState, gas: u64, max_gas: u64) {
         let mut cache = self.inner.cached_state.write().await;
-        if cache.0 == head {
-            cache.1.extend(cached_state);
+        if cache.head == update.head {
+            // A copy of a replaced cache is never merged, because the gas spent on its reads is
+            // not part of `cache.gas`. A copy of an uncached head has generation 0 and holds only
+            // its own reads.
+            let gas = cache.gas.saturating_add(gas);
+            if (update.generation == cache.generation || update.generation == 0) && gas <= max_gas {
+                cache.reads.extend(update.reads);
+                cache.gas = gas;
+                return
+            }
         } else {
-            *cache = (head, cached_state)
+            let gas = update.gas.saturating_add(gas);
+            if gas <= max_gas {
+                let generation = cache.generation + 1;
+                *cache = CachedState { generation, gas, ..update };
+                return
+            }
         }
+        self.metrics.cached_reads_skipped.increment(1);
+    }
+
+    /// Runs the validation on a blocking task.
+    ///
+    /// The validation is skipped if the request is dropped before it starts and stopped if the
+    /// request is dropped while the validation waits for the cached reads.
+    async fn spawn_validation<F>(&self, validation: F) -> RpcResult<()>
+    where
+        F: Future<Output = Result<(), ValidationApiError>> + Send + 'static,
+    {
+        let (mut tx, rx) = oneshot::channel();
+
+        self.task_spawner.spawn_blocking_task(async move {
+            let result = tokio::select! {
+                biased;
+                _ = tx.closed() => return,
+                result = validation => result.map_err(ErrorObject::from),
+            };
+            let _ = tx.send(result);
+        });
+
+        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
     }
 }
 
@@ -196,7 +249,9 @@ where
         let mut request_cache = self.cached_reads(parent_header_hash).await;
 
         let (output, block_access_list_hash) = {
-            let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
+            let cached_db = request_cache
+                .reads
+                .as_db_mut(StateProviderDatabase::new((&state_provider).into_evm_state_provider()));
             let mut executor = self.evm_config.batch_executor(cached_db);
 
             let result = executor.execute_one(&block)?;
@@ -208,23 +263,33 @@ where
             let block_access_list_hash =
                 executor.take_bal().map(|bal| compute_block_access_list_hash(&bal));
 
-            let mut state = executor.into_state();
+            let state = executor.into_state();
             if !self.disallow.is_empty() {
                 // Check whether the submission interacted with any blacklisted account by
-                // scanning the `State`'s cache that records everything read from database
-                // during execution.
-                for account in state.cache.accounts.keys() {
+                // scanning the cached reads and the accounts changed during execution.
+                for account in request_cache.reads.accounts.keys().chain(state.state.keys()) {
                     if self.disallow.contains(account) {
                         return Err(ValidationApiError::Blacklist(*account))
                     }
                 }
             }
 
-            (BlockExecutionOutput { state: state.take_bundle(), result }, block_access_list_hash)
+            (BlockExecutionOutput { state, result }, block_access_list_hash)
         };
 
-        // update the cached reads
-        self.update_cached_reads(parent_header_hash, request_cache).await;
+        // Withdrawals read their recipients without spending gas, so each is charged as a cold
+        // account access.
+        let withdrawals = block.body().withdrawals().map_or(0, |w| w.len() as u64);
+        let read_gas = output
+            .result
+            .gas_used
+            .saturating_add(withdrawals.saturating_mul(u64::from(COLD_ACCOUNT_ACCESS_COST)));
+        self.update_cached_reads(
+            request_cache,
+            read_gas,
+            block.gas_limit().saturating_mul(MAX_CACHED_READS_BLOCKS),
+        )
+        .await;
 
         self.consensus.validate_block_post_execution(
             &block,
@@ -289,8 +354,13 @@ where
         output: &BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
+        // A zero-value bid promises the proposer nothing, so the payload owes nothing.
+        if message.value.is_zero() {
+            return Ok(())
+        }
+
         let (mut balance_before, balance_after) = if let Some(acc) =
-            output.state.state.get(&message.proposer_fee_recipient)
+            output.account_state(&message.proposer_fee_recipient)
         {
             let balance_before = acc.original_info.as_ref().map(|i| i.balance).unwrap_or_default();
             let balance_after = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();
@@ -359,16 +429,42 @@ where
     }
 
     /// Validates the given [`BlobsBundleV2`] and returns versioned hashes for blobs.
+    ///
+    /// Exact blob, commitment, and cell-proof matches from recent submissions reuse KZG
+    /// validation. The resulting hashes are still checked against the block's EIP-4844
+    /// transactions during payload validation.
     pub fn validate_blobs_bundle_v2(
         &self,
         blobs_bundle: BlobsBundleV2,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        let versioned_hashes = blobs_bundle.versioned_hashes();
-        let sidecar =
-            blobs_bundle.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
+        self.validated_blobs.validate(blobs_bundle)
+    }
 
-        sidecar.validate(&versioned_hashes, EnvKzgSettings::default().get())?;
-        Ok(versioned_hashes)
+    /// Converts the payload into a block and recovers the transaction senders.
+    ///
+    /// Like the engine's `newPayload` handling, this leaves payload validation and conversion to
+    /// the payload validator and recovers senders through the shared [`SenderRecoveryCache`] if
+    /// one is configured, so senders already recovered on transaction ingress or payload
+    /// execution are reused. Without a cache, this calls
+    /// [`PayloadValidator::ensure_well_formed_payload`] so validator overrides are preserved.
+    ///
+    /// Senders recovered here are cached before the block is validated. Competing submissions for
+    /// the same slot share most of their transactions, so the senders are likely to be needed again
+    /// even if this submission is rejected, and only successfully recovered senders can be cached.
+    fn recover_payload(
+        &self,
+        payload: ExecutionData,
+    ) -> Result<RecoveredBlock<<E::Primitives as NodePrimitives>::Block>, ValidationApiError> {
+        let Some(cache) = &self.sender_recovery_cache else {
+            return self.payload_validator.ensure_well_formed_payload(payload).map_err(Into::into)
+        };
+
+        let block = self.payload_validator.convert_payload_to_block(payload)?;
+        let recovered = match cache.recover_signers(block.body().transactions()) {
+            Ok(senders) => Ok(RecoveredBlock::new_sealed(block, senders)),
+            Err(_) => Err(SealedBlockRecoveryError::new(block)),
+        };
+        recovered.map_err(|err| NewPayloadError::Other(err.into()).into())
     }
 
     /// Core logic for validating the builder submission v3
@@ -376,7 +472,7 @@ where
         &self,
         request: BuilderBlockValidationRequestV3,
     ) -> Result<(), ValidationApiError> {
-        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+        let block = self.recover_payload(ExecutionData {
             payload: ExecutionPayload::V3(request.request.execution_payload),
             sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
                 parent_beacon_block_root: request.parent_beacon_block_root,
@@ -398,7 +494,7 @@ where
         &self,
         request: BuilderBlockValidationRequestV4,
     ) -> Result<(), ValidationApiError> {
-        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+        let block = self.recover_payload(ExecutionData {
             payload: ExecutionPayload::V3(request.request.execution_payload),
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
@@ -427,8 +523,11 @@ where
         &self,
         request: BuilderBlockValidationRequestV5,
     ) -> Result<(), ValidationApiError> {
-        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
-            payload: ExecutionPayload::V3(request.request.execution_payload),
+        let payload = ExecutionPayload::V3(request.request.execution_payload);
+        validate_message_against_payload(&request.request.message, &payload)?;
+
+        let block = self.recover_payload(ExecutionData {
+            payload,
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
@@ -469,12 +568,15 @@ where
         &self,
         request: BuilderBlockValidationRequestV6,
     ) -> Result<(), ValidationApiError> {
+        let payload = ExecutionPayload::V4(request.request.execution_payload);
+        validate_message_against_payload(&request.request.message, &payload)?;
+
         let decoded_bal =
-            DecodedBal::from_rlp_bytes(request.request.execution_payload.block_access_list.clone())
+            DecodedBal::from_rlp_bytes(payload.as_v4().unwrap().block_access_list.clone())
                 .map_err(ValidationApiError::InvalidBlockAccessList)?;
 
-        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
-            payload: ExecutionPayload::V4(request.request.execution_payload),
+        let block = self.recover_payload(ExecutionData {
+            payload,
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
@@ -510,7 +612,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Provider, E, T> BlockSubmissionValidationApiServer for ValidationApi<Provider, E, T>
 where
     Provider: BlockReaderIdExt<Header = <E::Primitives as NodePrimitives>::BlockHeader>
@@ -543,16 +644,8 @@ where
         request: BuilderBlockValidationRequestV3,
     ) -> RpcResult<()> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v3(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let validation = async move { Self::validate_builder_submission_v3(&this, request).await };
+        self.spawn_validation(validation).await
     }
 
     /// Validates a block submitted to the relay
@@ -561,16 +654,8 @@ where
         request: BuilderBlockValidationRequestV4,
     ) -> RpcResult<()> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v4(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let validation = async move { Self::validate_builder_submission_v4(&this, request).await };
+        self.spawn_validation(validation).await
     }
 
     /// Validates a block submitted to the relay
@@ -579,16 +664,8 @@ where
         request: BuilderBlockValidationRequestV5,
     ) -> RpcResult<()> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v5(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let validation = async move { Self::validate_builder_submission_v5(&this, request).await };
+        self.spawn_validation(validation).await
     }
 
     /// Validates a block submitted to the relay
@@ -597,16 +674,8 @@ where
         request: BuilderBlockValidationRequestV6,
     ) -> RpcResult<()> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v6(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let validation = async move { Self::validate_builder_submission_v6(&this, request).await };
+        self.spawn_validation(validation).await
     }
 }
 
@@ -625,14 +694,66 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     /// The maximum block distance - parent to latest - allowed for validation
     validation_window: u64,
     /// Cached state reads to avoid redundant disk I/O across multiple validation attempts
-    /// targeting the same state. Stores a tuple of (`block_hash`, `cached_reads`) for the
-    /// latest head block state. Uses async `RwLock` to safely handle concurrent validation
+    /// targeting the same state. Uses async `RwLock` to safely handle concurrent validation
     /// requests.
-    cached_state: RwLock<(B256, CachedReads)>,
+    cached_state: RwLock<CachedState>,
+    /// Recently validated blob, commitment, and cell-proof tuples shared by V2 submissions.
+    validated_blobs: BlobValidationCache,
     /// Task spawner for blocking operations
     task_spawner: Runtime,
+    /// Cache of recovered transaction senders shared with transaction ingress and payload
+    /// execution, if enabled.
+    sender_recovery_cache: Option<SenderRecoveryCache>,
     /// Validation metrics
     metrics: ValidationMetrics,
+}
+
+/// The gas spent on the cached reads for one head is capped at this many times the block gas limit.
+const MAX_CACHED_READS_BLOCKS: u64 = 16;
+
+/// State reads cached across validations against the same parent block.
+#[derive(Debug, Clone, Default)]
+struct CachedState {
+    /// Hash of the parent block the reads were made against.
+    head: B256,
+    /// Incremented whenever the cache is replaced, starting at 1 for the first cached head.
+    generation: u64,
+    /// The cached reads.
+    reads: CachedReads,
+    /// The gas spent on the cached reads, which bounds how many reads the cache holds.
+    gas: u64,
+}
+
+/// Ensures that the raw execution payload fields match the corresponding [`BidTrace`] fields.
+fn validate_message_against_payload(
+    message: &BidTrace,
+    payload: &ExecutionPayload,
+) -> Result<(), ValidationApiError> {
+    let payload = payload.as_v1();
+
+    if payload.block_hash != message.block_hash {
+        Err(ValidationApiError::BlockHashMismatch(GotExpected {
+            got: message.block_hash,
+            expected: payload.block_hash,
+        }))
+    } else if payload.parent_hash != message.parent_hash {
+        Err(ValidationApiError::ParentHashMismatch(GotExpected {
+            got: message.parent_hash,
+            expected: payload.parent_hash,
+        }))
+    } else if payload.gas_limit != message.gas_limit {
+        Err(ValidationApiError::GasLimitMismatch(GotExpected {
+            got: message.gas_limit,
+            expected: payload.gas_limit,
+        }))
+    } else if payload.gas_used != message.gas_used {
+        Err(ValidationApiError::GasUsedMismatch(GotExpected {
+            got: message.gas_used,
+            expected: payload.gas_used,
+        }))
+    } else {
+        Ok(())
+    }
 }
 
 /// Calculates a deterministic hash of the blocklist for change detection.
@@ -725,16 +846,12 @@ impl From<ValidationApiError> for ErrorObject<'static> {
             ValidationApiError::ProposerPayment |
             ValidationApiError::InvalidBlobsBundle |
             ValidationApiError::InvalidBlockAccessList(_) |
-            ValidationApiError::Blob(_) => invalid_params_rpc_err(error.to_string()),
+            ValidationApiError::Blob(_) |
+            ValidationApiError::Consensus(_) => invalid_params_rpc_err(error.to_string()),
 
-            ValidationApiError::Consensus(
-                error @ (ConsensusError::BlockAccessListCostMoreThanGasLimit(_) |
-                ConsensusError::BlockAccessListHashMismatch(_)),
-            ) => invalid_params_rpc_err(error.to_string()),
             ValidationApiError::MissingLatestBlock |
             ValidationApiError::MissingParentBlock |
             ValidationApiError::BlockTooOld |
-            ValidationApiError::Consensus(_) |
             ValidationApiError::Provider(_) => internal_rpc_err(error.to_string()),
             ValidationApiError::Execution(err) => match err {
                 error @ BlockExecutionError::Validation(_) => {
@@ -756,18 +873,126 @@ impl From<ValidationApiError> for ErrorObject<'static> {
 pub(crate) struct ValidationMetrics {
     /// The number of entries configured in the builder validation disallow list.
     pub(crate) disallow_size: Gauge,
+    /// The number of validations whose reads were not merged into the cached reads.
+    pub(crate) cached_reads_skipped: Counter,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{hash_disallow_list, AddressSet};
-    use alloy_primitives::Address;
+    use super::{
+        hash_disallow_list, validate_message_against_payload, AddressSet, CachedState,
+        ValidationApi, ValidationApiConfig, ValidationApiError,
+    };
+    use alloy_consensus::{BlockHeader, Header};
+    use alloy_primitives::{Address, B256, U256};
+    use alloy_rpc_types_beacon::relay::BidTrace;
+    use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload, ExecutionPayloadV1};
+    use evm2::evm::AccountInfo;
+    use reth_consensus::noop::NoopConsensus;
+    use reth_engine_primitives::PayloadValidator;
+    use reth_errors::ConsensusError;
+    use reth_ethereum_engine_primitives::EthPayloadTypes;
+    use reth_ethereum_primitives::Block;
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::BlockExecutionOutput;
+    use reth_payload_primitives::NewPayloadError;
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_tasks::Runtime;
+    use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
+    use std::sync::Arc;
+
+    fn test_execution_payload() -> ExecutionPayload {
+        ExecutionPayload::V1(ExecutionPayloadV1 {
+            parent_hash: B256::repeat_byte(0x11),
+            fee_recipient: Address::ZERO,
+            state_root: B256::ZERO,
+            receipts_root: B256::ZERO,
+            logs_bloom: Default::default(),
+            prev_randao: B256::ZERO,
+            block_number: 1,
+            gas_limit: 30_000_000,
+            gas_used: 15_000_000,
+            timestamp: 1,
+            extra_data: Default::default(),
+            base_fee_per_gas: Default::default(),
+            block_hash: B256::repeat_byte(0x22),
+            transactions: Default::default(),
+        })
+    }
+
+    fn matching_bid_trace(payload: &ExecutionPayload) -> BidTrace {
+        let payload = payload.as_v1();
+        BidTrace {
+            parent_hash: payload.parent_hash,
+            block_hash: payload.block_hash,
+            gas_limit: payload.gas_limit,
+            gas_used: payload.gas_used,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_validate_message_against_payload_block_hash_mismatch() {
+        let payload = test_execution_payload();
+        let mut message = matching_bid_trace(&payload);
+        message.block_hash = B256::repeat_byte(0x33);
+
+        let err = validate_message_against_payload(&message, &payload).unwrap_err();
+        let ValidationApiError::BlockHashMismatch(mismatch) = err else {
+            panic!("unexpected error: {err}")
+        };
+        assert_eq!(mismatch.got, message.block_hash);
+        assert_eq!(mismatch.expected, payload.block_hash());
+    }
+
+    #[test]
+    fn test_validate_message_against_payload_parent_hash_mismatch() {
+        let payload = test_execution_payload();
+        let mut message = matching_bid_trace(&payload);
+        message.parent_hash = B256::repeat_byte(0x33);
+
+        let err = validate_message_against_payload(&message, &payload).unwrap_err();
+        let ValidationApiError::ParentHashMismatch(mismatch) = err else {
+            panic!("unexpected error: {err}")
+        };
+        assert_eq!(mismatch.got, message.parent_hash);
+        assert_eq!(mismatch.expected, payload.parent_hash());
+    }
+
+    #[test]
+    fn test_validate_message_against_payload_gas_limit_mismatch() {
+        let payload = test_execution_payload();
+        let mut message = matching_bid_trace(&payload);
+        message.gas_limit += 1;
+
+        let err = validate_message_against_payload(&message, &payload).unwrap_err();
+        let ValidationApiError::GasLimitMismatch(mismatch) = err else {
+            panic!("unexpected error: {err}")
+        };
+        assert_eq!(mismatch.got, message.gas_limit);
+        assert_eq!(mismatch.expected, payload.gas_limit());
+    }
+
+    #[test]
+    fn test_validate_message_against_payload_gas_used_mismatch() {
+        let payload = test_execution_payload();
+        let mut message = matching_bid_trace(&payload);
+        message.gas_used += 1;
+
+        let err = validate_message_against_payload(&message, &payload).unwrap_err();
+        let ValidationApiError::GasUsedMismatch(mismatch) = err else {
+            panic!("unexpected error: {err}")
+        };
+        assert_eq!(mismatch.got, message.gas_used);
+        assert_eq!(mismatch.expected, payload.as_v1().gas_used);
+    }
 
     #[test]
     fn test_hash_disallow_list_deterministic() {
         let mut addresses = AddressSet::default();
-        addresses.insert(Address::from([1u8; 20]));
-        addresses.insert(Address::from([2u8; 20]));
+        addresses.insert(Address::repeat_byte(1u8));
+        addresses.insert(Address::repeat_byte(2u8));
 
         let hash1 = hash_disallow_list(&addresses);
         let hash2 = hash_disallow_list(&addresses);
@@ -778,10 +1003,10 @@ mod tests {
     #[test]
     fn test_hash_disallow_list_different_content() {
         let mut addresses1 = AddressSet::default();
-        addresses1.insert(Address::from([1u8; 20]));
+        addresses1.insert(Address::repeat_byte(1u8));
 
         let mut addresses2 = AddressSet::default();
-        addresses2.insert(Address::from([2u8; 20]));
+        addresses2.insert(Address::repeat_byte(2u8));
 
         let hash1 = hash_disallow_list(&addresses1);
         let hash2 = hash_disallow_list(&addresses2);
@@ -792,12 +1017,12 @@ mod tests {
     #[test]
     fn test_hash_disallow_list_order_independent() {
         let mut addresses1 = AddressSet::default();
-        addresses1.insert(Address::from([1u8; 20]));
-        addresses1.insert(Address::from([2u8; 20]));
+        addresses1.insert(Address::repeat_byte(1u8));
+        addresses1.insert(Address::repeat_byte(2u8));
 
         let mut addresses2 = AddressSet::default();
-        addresses2.insert(Address::from([2u8; 20])); // Different insertion order
-        addresses2.insert(Address::from([1u8; 20]));
+        addresses2.insert(Address::repeat_byte(2u8)); // Different insertion order
+        addresses2.insert(Address::repeat_byte(1u8));
 
         let hash1 = hash_disallow_list(&addresses1);
         let hash2 = hash_disallow_list(&addresses2);
@@ -814,5 +1039,351 @@ mod tests {
         let expected_hash = "ee14e9d115e182f61871a5a385ab2f32ecf434f3b17bdbacc71044810d89e608";
         let hash = hash_disallow_list(&blocklist);
         assert_eq!(expected_hash, hash);
+    }
+
+    /// Only [`ValidationApi::validate_message_against_block`] is exercised below, which never
+    /// converts a payload.
+    #[derive(Debug)]
+    struct UnusedPayloadValidator;
+
+    impl PayloadValidator<EthPayloadTypes> for UnusedPayloadValidator {
+        type Block = Block;
+
+        fn convert_payload_to_block(
+            &self,
+            _payload: ExecutionData,
+        ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+            unimplemented!()
+        }
+    }
+
+    #[derive(Debug)]
+    struct SpecializedPayloadValidator;
+
+    impl PayloadValidator<EthPayloadTypes> for SpecializedPayloadValidator {
+        type Block = Block;
+
+        fn convert_payload_to_block(
+            &self,
+            _payload: ExecutionData,
+        ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+            panic!("the specialized recovery method must be used without a cache")
+        }
+
+        fn ensure_well_formed_payload(
+            &self,
+            _payload: ExecutionData,
+        ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
+            Ok(SealedBlock::seal_slow(Block::default()).try_recover().unwrap())
+        }
+    }
+
+    #[test]
+    fn recover_payload_without_cache_uses_validator_override() {
+        let api = ValidationApi::new(
+            MockEthProvider::default(),
+            NoopConsensus::arc(),
+            EthEvmConfig::mainnet(),
+            ValidationApiConfig::default(),
+            Runtime::test(),
+            Arc::new(SpecializedPayloadValidator),
+            None,
+        );
+
+        api.recover_payload(ExecutionData {
+            payload: test_execution_payload(),
+            sidecar: Default::default(),
+        })
+        .unwrap();
+    }
+
+    fn test_validation_api(
+        provider: MockEthProvider,
+    ) -> ValidationApi<MockEthProvider, EthEvmConfig, EthPayloadTypes> {
+        ValidationApi::new(
+            provider,
+            NoopConsensus::arc(),
+            EthEvmConfig::mainnet(),
+            ValidationApiConfig::default(),
+            Runtime::test(),
+            Arc::new(UnusedPayloadValidator),
+            None,
+        )
+    }
+
+    /// A submission whose payload pays the proposer nothing, like a trustless ePBS bid: there the
+    /// payment settles from the builder's stake on the consensus layer.
+    fn payment_free_submission() -> (MockEthProvider, RecoveredBlock<Block>, BidTrace) {
+        let provider = MockEthProvider::default();
+
+        let parent = Header { gas_limit: 30_000_000, ..Default::default() };
+        let parent = SealedHeader::seal_slow(parent);
+        provider.add_block(
+            parent.hash(),
+            Block { header: parent.clone_header(), body: Default::default() },
+        );
+
+        let header = Header {
+            parent_hash: parent.hash(),
+            number: parent.number() + 1,
+            gas_limit: parent.gas_limit(),
+            timestamp: parent.timestamp() + 12,
+            ..Default::default()
+        };
+        let block = SealedBlock::seal_slow(Block { header, body: Default::default() })
+            .try_recover()
+            .unwrap();
+        provider.state_roots.lock().push(block.state_root());
+
+        let message = BidTrace {
+            parent_hash: block.parent_hash(),
+            block_hash: block.hash(),
+            gas_limit: block.gas_limit(),
+            gas_used: block.gas_used(),
+            proposer_fee_recipient: Address::repeat_byte(0x42),
+            value: U256::from(1_000_000_000_000_000_000u64),
+            ..Default::default()
+        };
+
+        (provider, block, message)
+    }
+
+    #[tokio::test]
+    async fn execution_invalid_submission_is_invalid_params() {
+        let (provider, parent_block, mut message) = payment_free_submission();
+        let transaction = reth_ethereum_primitives::TransactionSigned::new_unhashed(
+            reth_ethereum_primitives::Transaction::Legacy(alloy_consensus::TxLegacy {
+                gas_limit: 20_999,
+                to: alloy_primitives::TxKind::Call(Address::with_last_byte(1)),
+                ..Default::default()
+            }),
+            alloy_primitives::Signature::test_signature(),
+        );
+        let block = RecoveredBlock::new_unhashed(
+            Block {
+                header: parent_block.clone_header(),
+                body: alloy_consensus::BlockBody {
+                    transactions: vec![transaction],
+                    ..Default::default()
+                },
+            },
+            vec![Address::ZERO],
+        );
+        message.block_hash = block.hash();
+        let error = test_validation_api(provider)
+            .validate_message_against_block(block, message, parent_block.gas_limit(), None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                ValidationApiError::Execution(reth_errors::BlockExecutionError::Validation(_))
+            ),
+            "{error}"
+        );
+        let error = jsonrpsee::types::ErrorObjectOwned::from(error);
+        assert_eq!(error.code(), jsonrpsee::types::error::INVALID_PARAMS_CODE);
+    }
+
+    #[tokio::test]
+    async fn consensus_invalid_submission_is_invalid_params() {
+        let (provider, block, mut message) = payment_free_submission();
+        // The mock provider hands out the recomputed state root from this list, so the block's
+        // header no longer matches it.
+        *provider.state_roots.lock() = vec![B256::repeat_byte(0xab)];
+        // A zero-value bid skips the payment check, leaving the state root comparison as the
+        // first failing check.
+        message.value = U256::ZERO;
+        let registered_gas_limit = block.gas_limit();
+
+        let error = test_validation_api(provider)
+            .validate_message_against_block(block, message, registered_gas_limit, None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, ValidationApiError::Consensus(ConsensusError::BodyStateRootDiff(_))),
+            "{error}"
+        );
+        let error = jsonrpsee::types::ErrorObjectOwned::from(error);
+        assert_eq!(error.code(), jsonrpsee::types::error::INVALID_PARAMS_CODE);
+    }
+
+    #[test]
+    fn node_fault_is_internal_error() {
+        let error =
+            jsonrpsee::types::ErrorObjectOwned::from(ValidationApiError::MissingParentBlock);
+        assert_eq!(error.code(), jsonrpsee::types::error::INTERNAL_ERROR_CODE);
+    }
+
+    #[tokio::test]
+    async fn test_payment_check_runs_for_a_nonzero_bid() {
+        let (provider, block, message) = payment_free_submission();
+        let registered_gas_limit = block.gas_limit();
+
+        let err = test_validation_api(provider)
+            .validate_message_against_block(block, message, registered_gas_limit, None)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ValidationApiError::ProposerPayment), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn test_zero_value_bid_skips_the_payment_check() {
+        let (provider, block, mut message) = payment_free_submission();
+        let registered_gas_limit = block.gas_limit();
+        message.value = U256::ZERO;
+
+        test_validation_api(provider)
+            .validate_message_against_block(block, message, registered_gas_limit, None)
+            .await
+            .unwrap();
+    }
+
+    /// A zero-value bid promises the proposer nothing, so there is nothing to verify. The
+    /// balance-delta branch already lets one through whenever the fee recipient's balance does
+    /// not fall -- but a fee recipient that merely sends a transaction of its own in the same
+    /// block ends it poorer, drops through to the last-transaction fallback and is rejected.
+    #[test]
+    fn test_zero_value_bid_is_accepted_when_the_fee_recipient_spends() {
+        let (provider, block, mut message) = payment_free_submission();
+        message.value = U256::ZERO;
+
+        let output = BlockExecutionOutput {
+            result: Default::default(),
+            state: fee_recipient_spent(message.proposer_fee_recipient),
+        };
+
+        test_validation_api(provider)
+            .ensure_payment(block.sealed_block(), &output, &message)
+            .unwrap();
+    }
+
+    /// Execution state for a block in which `address` ended up poorer than it started.
+    fn fee_recipient_spent(address: Address) -> BundleState {
+        let balance =
+            |wei: u64| Some(AccountInfo { balance: U256::from(wei), ..Default::default() });
+
+        let mut state = BundleState::default();
+        state.state.insert(
+            address,
+            BundleAccount {
+                original_info: balance(1_000),
+                info: balance(999),
+                storage: Default::default(),
+                status: AccountStatus::Changed,
+            },
+        );
+        state
+    }
+
+    /// Returns a copy of the cached state for `head` with a read of `address` added.
+    async fn cached_reads_with(
+        api: &ValidationApi<MockEthProvider, EthEvmConfig, EthPayloadTypes>,
+        head: B256,
+        address: Address,
+    ) -> CachedState {
+        let mut update = api.cached_reads(head).await;
+        update.reads.insert_account(address, AccountInfo::default(), Default::default());
+        update
+    }
+
+    #[tokio::test]
+    async fn test_cached_reads_stop_growing_at_the_gas_budget() {
+        let api = test_validation_api(MockEthProvider::default());
+        let head = B256::repeat_byte(0x11);
+
+        let first = cached_reads_with(&api, head, Address::repeat_byte(1)).await;
+        api.update_cached_reads(first, 60, 100).await;
+        let second = cached_reads_with(&api, head, Address::repeat_byte(2)).await;
+        api.update_cached_reads(second, 40, 100).await;
+        let third = cached_reads_with(&api, head, Address::repeat_byte(3)).await;
+        api.update_cached_reads(third, 1, 100).await;
+
+        let cache = api.cached_reads(head).await;
+        assert_eq!(cache.gas, 100);
+        assert_eq!(cache.reads.accounts.len(), 2);
+        assert!(!cache.reads.accounts.contains_key(&Address::repeat_byte(3)));
+    }
+
+    #[tokio::test]
+    async fn test_cached_reads_of_a_replaced_cache_are_not_merged() {
+        let api = test_validation_api(MockEthProvider::default());
+        let (head, other) = (B256::repeat_byte(0x11), B256::repeat_byte(0x22));
+
+        let first = cached_reads_with(&api, head, Address::repeat_byte(1)).await;
+        api.update_cached_reads(first, 10, 100).await;
+        let stale = cached_reads_with(&api, head, Address::repeat_byte(2)).await;
+
+        // Another head replaces the cache, then `head` replaces it again.
+        let replacement = cached_reads_with(&api, other, Address::repeat_byte(3)).await;
+        api.update_cached_reads(replacement, 10, 100).await;
+        let replacement = cached_reads_with(&api, head, Address::repeat_byte(4)).await;
+        api.update_cached_reads(replacement, 10, 100).await;
+
+        api.update_cached_reads(stale, 10, 100).await;
+
+        let cache = api.cached_reads(head).await;
+        assert_eq!(cache.gas, 10);
+        assert_eq!(cache.reads.accounts.len(), 1);
+        assert!(cache.reads.accounts.contains_key(&Address::repeat_byte(4)));
+    }
+
+    #[tokio::test]
+    async fn test_replacing_cached_reads_keeps_the_gas_of_the_copy() {
+        let api = test_validation_api(MockEthProvider::default());
+        let (head, other) = (B256::repeat_byte(0x11), B256::repeat_byte(0x22));
+
+        let first = cached_reads_with(&api, head, Address::repeat_byte(1)).await;
+        api.update_cached_reads(first, 60, 100).await;
+        let copy = cached_reads_with(&api, head, Address::repeat_byte(2)).await;
+
+        let replacement = cached_reads_with(&api, other, Address::repeat_byte(3)).await;
+        api.update_cached_reads(replacement, 10, 100).await;
+
+        // The copy holds the reads of both validations for `head`.
+        api.update_cached_reads(copy, 30, 100).await;
+        let cache = api.cached_reads(head).await;
+        assert_eq!(cache.gas, 90);
+        assert_eq!(cache.reads.accounts.len(), 2);
+
+        let next = cached_reads_with(&api, head, Address::repeat_byte(4)).await;
+        api.update_cached_reads(next, 20, 100).await;
+        assert_eq!(api.cached_reads(head).await.gas, 90);
+    }
+
+    #[tokio::test]
+    async fn test_cached_reads_replacement_respects_the_gas_budget() {
+        let api = test_validation_api(MockEthProvider::default());
+        let (head, other) = (B256::repeat_byte(0x11), B256::repeat_byte(0x22));
+
+        let first = cached_reads_with(&api, head, Address::repeat_byte(1)).await;
+        api.update_cached_reads(first, 60, 100).await;
+        let copy = cached_reads_with(&api, head, Address::repeat_byte(2)).await;
+
+        let replacement = cached_reads_with(&api, other, Address::repeat_byte(3)).await;
+        api.update_cached_reads(replacement, 10, 100).await;
+
+        // The copy holds reads that cost 60 + 50 gas, so it does not replace the cache.
+        api.update_cached_reads(copy, 50, 100).await;
+        let cache = api.cached_reads(other).await;
+        assert_eq!(cache.gas, 10);
+        assert_eq!(cache.reads.accounts.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_cached_reads_of_an_uncached_head_are_merged() {
+        let api = test_validation_api(MockEthProvider::default());
+        let head = B256::repeat_byte(0x11);
+
+        // Both validations start before any reads for `head` are cached.
+        let first = cached_reads_with(&api, head, Address::repeat_byte(1)).await;
+        let second = cached_reads_with(&api, head, Address::repeat_byte(2)).await;
+        api.update_cached_reads(first, 10, 100).await;
+        api.update_cached_reads(second, 10, 100).await;
+
+        let cache = api.cached_reads(head).await;
+        assert_eq!(cache.gas, 20);
+        assert_eq!(cache.reads.accounts.len(), 2);
     }
 }

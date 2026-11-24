@@ -454,7 +454,7 @@ mod tests {
         let peers = HashMap::from_iter([(first, p1)]);
         let custody = CellCustody::default();
         let bits: u128 = 1 | (1 << 8) | (1 << 127);
-        custody.set(B128::from(bits));
+        custody.set(B128::from(bits.to_le_bytes()));
         let mut fetcher = BlobFetcher::<EthPooledTransaction>::new(custody, 15);
         fetcher.probability = 0;
         let hash = B256::random();

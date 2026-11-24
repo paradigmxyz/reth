@@ -16,8 +16,8 @@ use alloy_primitives::{
 };
 use rand::seq::SliceRandom;
 use reth_eth_wire::{
-    BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, GetReceipts70,
-    NetworkPrimitives, NewBlockHashes, NewBlockPayload, UnifiedStatus,
+    BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, EthVersion,
+    GetReceipts70, NetworkPrimitives, NewBlockHashes, NewBlockPayload, UnifiedStatus,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
@@ -151,6 +151,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         let SessionActivation {
             peer,
             capabilities,
+            version,
             status,
             request_tx,
             timeout,
@@ -179,7 +180,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             peer,
             ActivePeer {
                 best_hash: status.blockhash,
-                capabilities,
+                version,
                 request_tx,
                 pending_response: None,
                 blocks: LruCache::new(PEER_BLOCK_CACHE_LIMIT),
@@ -318,14 +319,15 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         self.peers_manager.add_trusted_peer_node(trusted)
     }
 
-    /// Adds a peer and its address with the given kind to the peerset.
+    /// Adds a peer and its address with the given kind to the peerset and dials it if there's an
+    /// outbound slot.
     pub(crate) fn add_peer_kind(
         &mut self,
         peer_id: PeerId,
         kind: Option<PeerKind>,
         addr: PeerAddr,
     ) {
-        self.peers_manager.add_peer_kind(peer_id, kind, addr, None)
+        self.peers_manager.add_requested_peer(peer_id, kind, addr)
     }
 
     /// Connects a peer and its address with the given kind
@@ -423,7 +425,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                     (request, response)
                 }
                 BlockRequest::GetReceipts(request) => {
-                    if peer.capabilities.supports_eth_v70() {
+                    if peer.version >= EthVersion::Eth70 {
                         let (response, rx) = oneshot::channel();
                         let request = PeerRequest::GetReceipts70 {
                             request: GetReceipts70 {
@@ -434,7 +436,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                         };
                         let response = PeerResponse::Receipts70 { response: rx };
                         (request, response)
-                    } else if peer.capabilities.supports_eth_v69() {
+                    } else if peer.version == EthVersion::Eth69 {
                         let (response, rx) = oneshot::channel();
                         let request = PeerRequest::GetReceipts69 { request, response };
                         let response = PeerResponse::Receipts69 { response: rx };
@@ -604,8 +606,8 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 pub(crate) struct ActivePeer<N: NetworkPrimitives> {
     /// Best block of the peer.
     pub(crate) best_hash: B256,
-    /// The capabilities of the remote peer.
-    pub(crate) capabilities: Arc<Capabilities>,
+    /// The negotiated eth protocol version of the session.
+    pub(crate) version: EthVersion,
     /// A communication channel directly to the session task.
     pub(crate) request_tx: PeerRequestSender<PeerRequest<N>>,
     /// The response receiver for a currently active request to that peer.
@@ -621,6 +623,8 @@ pub(crate) struct SessionActivation<N: NetworkPrimitives> {
     pub(crate) peer: PeerId,
     /// The capabilities the peer announced.
     pub(crate) capabilities: Arc<Capabilities>,
+    /// The negotiated eth protocol version of the session.
+    pub(crate) version: EthVersion,
     /// The `Status` message the peer sent during the `eth` handshake.
     pub(crate) status: Arc<UnifiedStatus>,
     /// A communication channel directly to the session task.
@@ -729,6 +733,7 @@ mod tests {
         state.on_session_activated(SessionActivation {
             peer: peer_id,
             capabilities: capabilities(),
+            version: EthVersion::Eth67,
             status: Arc::default(),
             request_tx: peer_tx,
             timeout: Arc::new(AtomicU64::new(1)),

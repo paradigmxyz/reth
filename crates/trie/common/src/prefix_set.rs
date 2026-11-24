@@ -424,15 +424,6 @@ mod tests {
     }
 
     #[test]
-    fn test_from_sorted_b256_iterator() {
-        let first = B256::with_last_byte(1);
-        let second = B256::with_last_byte(2);
-        let prefix_set = PrefixSet::from([first, second].into_iter());
-
-        assert_eq!(prefix_set.slice(), &[Nibbles::unpack(first), Nibbles::unpack(second)]);
-    }
-
-    #[test]
     fn test_from_sorted_b256_iterator_with_duplicates() {
         let first = B256::with_last_byte(1);
         let second = B256::with_last_byte(2);
@@ -500,19 +491,6 @@ mod tests {
         let mut prefix_set_mut = PrefixSetMut::default();
         prefix_set_mut.extend(PrefixSetMut::all());
         assert!(prefix_set_mut.all);
-    }
-
-    #[test]
-    fn test_prefix_set_slice_returns_frozen_keys() {
-        let path_a = Nibbles::from_nibbles([1, 2, 3]);
-        let path_b = Nibbles::from_nibbles([4, 5, 6]);
-        let mut prefix_set_mut = PrefixSetMut::default();
-        prefix_set_mut.insert(path_b);
-        prefix_set_mut.insert(path_a);
-        prefix_set_mut.insert(path_b);
-
-        let prefix_set = prefix_set_mut.freeze();
-        assert_eq!(prefix_set.slice(), &[path_a, path_b]);
     }
 
     #[test]

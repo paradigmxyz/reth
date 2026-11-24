@@ -1,6 +1,9 @@
 use crate::{
-    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut, proof::Proof, proof_v2,
-    trie_cursor::TrieCursorFactory, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    hashed_cursor::HashedCursorFactory,
+    prefix_set::TriePrefixSetsMut,
+    proof_v2::{self, MultiProofCalculator},
+    trie_cursor::TrieCursorFactory,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use alloy_primitives::{
     keccak256,
@@ -8,11 +11,11 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::{Encodable, EMPTY_STRING_CODE};
-use alloy_trie::{nodes::BranchNodeRef, EMPTY_ROOT_HASH};
+use alloy_trie::EMPTY_ROOT_HASH;
 use reth_execution_errors::{SparseStateTrieErrorKind, StateProofError, TrieWitnessError};
 use reth_trie_common::{
     DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState, MultiProofTargetsV2, ProofV2Target,
-    TrieNodeV2,
+    TrieNode,
 };
 use reth_trie_sparse::{LeafUpdate, SparseStateTrie, SparseTrie as _, TrieNodeEpoch};
 
@@ -49,30 +52,6 @@ impl<T, H> TrieWitness<T, H> {
         }
     }
 
-    /// Set the trie cursor factory.
-    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> TrieWitness<TF, H> {
-        TrieWitness {
-            trie_cursor_factory,
-            hashed_cursor_factory: self.hashed_cursor_factory,
-            prefix_sets: self.prefix_sets,
-            always_include_root_node: self.always_include_root_node,
-            mode: self.mode,
-            witness: self.witness,
-        }
-    }
-
-    /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> TrieWitness<T, HF> {
-        TrieWitness {
-            trie_cursor_factory: self.trie_cursor_factory,
-            hashed_cursor_factory,
-            prefix_sets: self.prefix_sets,
-            always_include_root_node: self.always_include_root_node,
-            mode: self.mode,
-            witness: self.witness,
-        }
-    }
-
     /// Set the prefix sets. They have to be mutable in order to allow extension with proof target.
     pub fn with_prefix_sets_mut(mut self, prefix_sets: TriePrefixSetsMut) -> Self {
         self.prefix_sets = prefix_sets;
@@ -105,6 +84,7 @@ where
     /// # Arguments
     ///
     /// `state` - state transition containing both modified and touched accounts and storage slots.
+    #[allow(clippy::clone_on_copy)]
     pub fn compute(mut self, state: HashedPostState) -> Result<B256Map<Bytes>, TrieWitnessError> {
         let is_state_empty = state.is_empty();
         if is_state_empty && !self.always_include_root_node {
@@ -119,10 +99,13 @@ where
         } else {
             Self::get_proof_targets(&state)
         };
-        let multiproof =
-            Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
-                .with_prefix_sets_mut(self.prefix_sets.clone())
-                .multiproof_v2(proof_targets)?;
+        let mut calculator = MultiProofCalculator::new(
+            self.trie_cursor_factory.clone(),
+            self.hashed_cursor_factory.clone(),
+            self.prefix_sets.clone().freeze(),
+            Default::default(),
+        );
+        let multiproof = calculator.multiproof(proof_targets)?;
 
         // No need to reconstruct the rest of the trie, we just need to include
         // the root node and return.
@@ -130,9 +113,7 @@ where
             let (root_hash, root_node) = if let Some(root_node) =
                 multiproof.account_proofs.into_iter().find(|n| n.path.is_empty())
             {
-                let mut encoded = Vec::new();
-                root_node.node.encode(&mut encoded);
-                let bytes = Bytes::from(encoded);
+                let bytes = Bytes::from(alloy_rlp::encode(&root_node.node));
                 (keccak256(&bytes), bytes)
             } else {
                 (EMPTY_ROOT_HASH, Bytes::from([EMPTY_STRING_CODE]))
@@ -208,12 +189,7 @@ where
                     break;
                 }
 
-                let multiproof = Proof::new(
-                    self.trie_cursor_factory.clone(),
-                    self.hashed_cursor_factory.clone(),
-                )
-                .with_prefix_sets_mut(self.prefix_sets.clone())
-                .multiproof_v2(targets)?;
+                let multiproof = calculator.multiproof(targets)?;
                 self.record_multiproof_nodes(&multiproof);
                 sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
             }
@@ -236,6 +212,7 @@ where
                 .accounts
                 .get(&hashed_address)
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?
+                .clone()
                 .unwrap_or_default();
 
             let storage_root =
@@ -281,12 +258,7 @@ where
                     break;
                 }
 
-                let multiproof = Proof::new(
-                    self.trie_cursor_factory.clone(),
-                    self.hashed_cursor_factory.clone(),
-                )
-                .with_prefix_sets_mut(self.prefix_sets.clone())
-                .multiproof_v2(targets)?;
+                let multiproof = calculator.multiproof(targets)?;
                 self.record_multiproof_nodes(&multiproof);
                 sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
             }
@@ -314,21 +286,12 @@ where
         }
     }
 
-    /// Record a single [`TrieNodeV2`] in the witness.
-    fn record_witness_node(&mut self, node: &TrieNodeV2, encoded: &mut Vec<u8>) {
+    /// Record a single [`TrieNode`] in the witness.
+    fn record_witness_node(&mut self, node: &TrieNode, encoded: &mut Vec<u8>) {
         encoded.clear();
         node.encode(encoded);
         let hash = keccak256(encoded.as_slice());
         self.witness.entry(hash).or_insert_with(|| Bytes::copy_from_slice(encoded));
-
-        if let TrieNodeV2::Branch(branch) = node &&
-            !branch.key.is_empty()
-        {
-            encoded.clear();
-            BranchNodeRef::new(&branch.stack, branch.state_mask).encode(encoded);
-            let hash = keccak256(encoded.as_slice());
-            self.witness.entry(hash).or_insert_with(|| Bytes::copy_from_slice(encoded));
-        }
     }
 
     /// Compute the storage root for an account by walking the storage trie using the cursor
@@ -353,14 +316,14 @@ where
         if let Some(prefix_set) = self.prefix_sets.storage_prefix_sets.get(&hashed_address) {
             calculator = calculator.with_prefix_set(prefix_set.clone().freeze());
         }
-        let root_node = calculator.storage_root_node(hashed_address)?;
-        let root_hash = calculator
-            .compute_root_hash(core::slice::from_ref(&root_node))?
-            .unwrap_or(EMPTY_ROOT_HASH);
+        let root_nodes = calculator.storage_root_nodes(hashed_address)?;
+        let root_hash = calculator.compute_root_hash(&root_nodes)?.unwrap_or(EMPTY_ROOT_HASH);
         drop(calculator);
         if record_root_node {
             let mut encoded = Vec::new();
-            self.record_witness_node(&root_node.node, &mut encoded);
+            for root_node in root_nodes {
+                self.record_witness_node(&root_node.node, &mut encoded);
+            }
         }
         Ok(root_hash)
     }
@@ -376,8 +339,7 @@ where
             if !state.accounts.contains_key(&hashed_address) {
                 targets.account_targets.push(ProofV2Target::new(hashed_address));
             }
-            // Skip accounts with no storage slot changes — an empty target set would produce
-            // an empty proof vec which cannot be revealed (no root node).
+            // Accounts without storage slot changes need only an account proof.
             if storage.storage.is_empty() {
                 continue;
             }

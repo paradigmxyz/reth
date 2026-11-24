@@ -27,6 +27,7 @@
 
 mod admin;
 mod aliases;
+mod chain_config;
 mod debug;
 mod engine;
 pub mod eth;

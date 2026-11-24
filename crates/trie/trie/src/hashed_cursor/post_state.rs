@@ -57,11 +57,11 @@ where
 /// This design allows us to use `U256::ZERO`, rather than an Option, to indicate deletion for
 /// storage (which maps cleanly to how changesets are stored in the DB) while not requiring two
 /// different cursor implementations.
-pub trait HashedPostStateCursorValue: Copy {
+pub trait HashedPostStateCursorValue: Clone {
     /// The non-zero type returned by `into_option`.
     /// For `Option<Account>`, this is `Account`.
     /// For `U256`, this is `U256`.
-    type NonZero: Copy + std::fmt::Debug;
+    type NonZero: Clone + std::fmt::Debug;
 
     /// Returns `Some(&NonZero)` if the value is present, `None` if deleted.
     fn into_option(self) -> Option<Self::NonZero>;
@@ -248,7 +248,7 @@ where
     fn choose_next_entry(&mut self) -> Result<Option<(B256, V::NonZero)>, DatabaseError> {
         loop {
             let post_state_current =
-                self.post_state_cursor.current().copied().map(|(k, v)| (k, v.into_option()));
+                self.post_state_cursor.current().cloned().map(|(k, v)| (k, v.into_option()));
             let db_entry = self.db_cursor_state.entry();
 
             match (post_state_current, db_entry) {
@@ -277,7 +277,7 @@ where
                 // - mem_key > db_key
                 // - overlay is exhausted
                 // Return the db_entry. If DB is also exhausted then this returns None.
-                _ => return Ok(db_entry.copied()),
+                _ => return Ok(db_entry.cloned()),
             }
         }
     }
@@ -299,8 +299,12 @@ where
     /// The returned account key is memoized and the cursor remains positioned at that key until
     /// [`HashedCursor::seek`] or [`HashedCursor::next`] are called.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        // Forward scans can reuse cursor positions; backward seeks and exhausted cursors cannot.
+        if self.last_key.is_none_or(|last| key < last) {
+            self.reset();
+        }
         let post_state_entry =
-            self.post_state_cursor.seek(&key).copied().map(|(k, v)| (k, v.into_option()));
+            self.post_state_cursor.seek(&key).cloned().map(|(k, v)| (k, v.into_option()));
 
         if let Some((mem_key, Some(value))) = post_state_entry &&
             mem_key == key
@@ -421,6 +425,7 @@ mod tests {
     use crate::hashed_cursor::mock::MockHashedCursor;
     use parking_lot::Mutex;
     use std::{collections::BTreeMap, sync::Arc};
+    use tracing::debug;
 
     fn key(byte: u8) -> B256 {
         B256::repeat_byte(byte)
@@ -433,7 +438,7 @@ mod tests {
         HashedPostStateSorted::new(Vec::new(), storages)
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_overlay_exact_hit_does_not_touch_db_until_next() {
         let db_nodes = vec![(key(0x02), U256::from(2)), (key(0x03), U256::from(3))];
         let post_state_nodes = vec![(key(0x02), U256::from(42))];
@@ -455,9 +460,9 @@ mod tests {
         assert!(!visited_keys.lock().is_empty(), "next should lazily position the DB cursor");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_overlay_exact_hit_repositions_stale_db_on_next() {
-        let db_nodes = vec![(key(0x01), U256::from(1)), (key(0x03), U256::from(3))];
+        let db_nodes = vec![(key(0x01), U256::ONE), (key(0x03), U256::from(3))];
         let post_state_nodes = vec![(key(0x02), U256::from(2))];
 
         let db_nodes_map: BTreeMap<B256, U256> = db_nodes.into_iter().collect();
@@ -469,7 +474,7 @@ mod tests {
         let mut cursor = HashedPostStateCursor::new_storage(mock_cursor, &post_state, B256::ZERO);
 
         let result = cursor.seek(key(0x01)).unwrap();
-        assert_eq!(result, Some((key(0x01), U256::from(1))));
+        assert_eq!(result, Some((key(0x01), U256::ONE)));
         assert_eq!(visited_keys.lock().len(), 1);
 
         let result = cursor.seek(key(0x02)).unwrap();
@@ -480,7 +485,7 @@ mod tests {
         assert_eq!(result, Some((key(0x03), U256::from(3))));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_overlay_exact_deletion_still_seeks_db() {
         let db_nodes = vec![(key(0x02), U256::from(2)), (key(0x03), U256::from(3))];
         let post_state_nodes = vec![(key(0x02), U256::ZERO)];
@@ -511,7 +516,7 @@ mod tests {
         ) -> Vec<(B256, V::NonZero)>
         where
             V: HashedPostStateCursorValue,
-            V::NonZero: Copy,
+            V::NonZero: Clone,
         {
             db_nodes
                 .into_iter()
@@ -586,117 +591,118 @@ mod tests {
                 op_choices in prop::collection::vec(any::<u8>(), 10..500),
             ) {
                 reth_tracing::init_test_tracing();
-                use tracing::debug;
+                reth_concurrency::sync::Runtime::new().run(move || {
+                    debug!("Starting proptest!");
 
-                debug!("Starting proptest!");
+                    // Create the expected results by merging the two sorted vectors,
+                    // properly handling deletions (ZERO values in post_state_nodes)
+                    let expected_combined = merge_with_overlay(db_nodes.clone(), post_state_nodes.clone());
 
-                // Create the expected results by merging the two sorted vectors,
-                // properly handling deletions (ZERO values in post_state_nodes)
-                let expected_combined = merge_with_overlay(db_nodes.clone(), post_state_nodes.clone());
+                    // Collect all keys for operation generation
+                    let all_keys: Vec<B256> = expected_combined.iter().map(|(k, _)| *k).collect();
 
-                // Collect all keys for operation generation
-                let all_keys: Vec<B256> = expected_combined.iter().map(|(k, _)| *k).collect();
+                    // Create a control cursor using the combined result with a mock cursor
+                    let control_db_map: BTreeMap<B256, U256> = expected_combined.into_iter().collect();
+                    let control_db_arc = Arc::new(control_db_map);
+                    let control_visited_keys = Arc::new(Mutex::new(Vec::new()));
+                    let mut control_cursor = MockHashedCursor::new(control_db_arc, control_visited_keys);
 
-                // Create a control cursor using the combined result with a mock cursor
-                let control_db_map: BTreeMap<B256, U256> = expected_combined.into_iter().collect();
-                let control_db_arc = Arc::new(control_db_map);
-                let control_visited_keys = Arc::new(Mutex::new(Vec::new()));
-                let mut control_cursor = MockHashedCursor::new(control_db_arc, control_visited_keys);
+                    // Create the HashedPostStateCursor being tested
+                    let db_nodes_map: BTreeMap<B256, U256> = db_nodes.into_iter().collect();
+                    let db_nodes_arc = Arc::new(db_nodes_map);
+                    let visited_keys = Arc::new(Mutex::new(Vec::new()));
+                    let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys);
 
-                // Create the HashedPostStateCursor being tested
-                let db_nodes_map: BTreeMap<B256, U256> = db_nodes.into_iter().collect();
-                let db_nodes_arc = Arc::new(db_nodes_map);
-                let visited_keys = Arc::new(Mutex::new(Vec::new()));
-                let mock_cursor = MockHashedCursor::new(db_nodes_arc, visited_keys);
+                    // Create a HashedPostStateSorted with the storage data
+                    let hashed_address = B256::ZERO;
+                    let storage_sorted = reth_trie_common::HashedStorageSorted {
+                        storage_slots: post_state_nodes,
+                    };
+                    let mut storages = alloy_primitives::map::B256Map::default();
+                    storages.insert(hashed_address, storage_sorted);
+                    let post_state = HashedPostStateSorted::new(Vec::new(), storages);
 
-                // Create a HashedPostStateSorted with the storage data
-                let hashed_address = B256::ZERO;
-                let storage_sorted = reth_trie_common::HashedStorageSorted {
-                    storage_slots: post_state_nodes,
-                };
-                let mut storages = alloy_primitives::map::B256Map::default();
-                storages.insert(hashed_address, storage_sorted);
-                let post_state = HashedPostStateSorted::new(Vec::new(), storages);
+                    let mut test_cursor = HashedPostStateCursor::new_storage(mock_cursor, &post_state, hashed_address);
 
-                let mut test_cursor = HashedPostStateCursor::new_storage(mock_cursor, &post_state, hashed_address);
+                    // Test: seek to the beginning first
+                    let control_first = control_cursor.seek(B256::ZERO).unwrap();
+                    let test_first = test_cursor.seek(B256::ZERO).unwrap();
+                    debug!(
+                        control=?control_first.as_ref().map(|(k, _)| k),
+                        test=?test_first.as_ref().map(|(k, _)| k),
+                        "Initial seek returned",
+                    );
+                    assert_eq!(control_first, test_first, "Initial seek mismatch");
 
-                // Test: seek to the beginning first
-                let control_first = control_cursor.seek(B256::ZERO).unwrap();
-                let test_first = test_cursor.seek(B256::ZERO).unwrap();
-                debug!(
-                    control=?control_first.as_ref().map(|(k, _)| k),
-                    test=?test_first.as_ref().map(|(k, _)| k),
-                    "Initial seek returned",
-                );
-                assert_eq!(control_first, test_first, "Initial seek mismatch");
+                    // If both cursors returned None, nothing to test
+                    if control_first.is_none() && test_first.is_none() {
+                        return Ok(());
+                    }
 
-                // If both cursors returned None, nothing to test
-                if control_first.is_none() && test_first.is_none() {
-                    return Ok(());
-                }
+                    // Track the last key returned from the cursor
+                    let mut last_returned_key = control_first.as_ref().map(|(k, _)| *k);
 
-                // Track the last key returned from the cursor
-                let mut last_returned_key = control_first.as_ref().map(|(k, _)| *k);
+                    // Execute a sequence of random operations
+                    for choice in op_choices {
+                        let op_type = choice % 2; // Only 2 operation types: next and seek
 
-                // Execute a sequence of random operations
-                for choice in op_choices {
-                    let op_type = choice % 2; // Only 2 operation types: next and seek
+                        match op_type {
+                            0 => {
+                                // Next operation
+                                let control_result = control_cursor.next().unwrap();
+                                let test_result = test_cursor.next().unwrap();
+                                debug!(
+                                    control=?control_result.as_ref().map(|(k, _)| k),
+                                    test=?test_result.as_ref().map(|(k, _)| k),
+                                    "Next returned",
+                                );
+                                assert_eq!(control_result, test_result, "Next operation mismatch");
 
-                    match op_type {
-                        0 => {
-                            // Next operation
-                            let control_result = control_cursor.next().unwrap();
-                            let test_result = test_cursor.next().unwrap();
-                            debug!(
-                                control=?control_result.as_ref().map(|(k, _)| k),
-                                test=?test_result.as_ref().map(|(k, _)| k),
-                                "Next returned",
-                            );
-                            assert_eq!(control_result, test_result, "Next operation mismatch");
+                                last_returned_key = control_result.as_ref().map(|(k, _)| *k);
 
-                            last_returned_key = control_result.as_ref().map(|(k, _)| *k);
-
-                            // Stop if both cursors are exhausted
-                            if control_result.is_none() && test_result.is_none() {
-                                break;
+                                // Stop if both cursors are exhausted
+                                if control_result.is_none() && test_result.is_none() {
+                                    break;
+                                }
                             }
-                        }
-                        _ => {
-                            // Seek operation - choose a key >= last_returned_key
-                            if all_keys.is_empty() {
-                                continue;
-                            }
+                            _ => {
+                                // Seek operation - choose a key >= last_returned_key
+                                if all_keys.is_empty() {
+                                    continue;
+                                }
 
-                            let valid_keys: Vec<_> = all_keys
-                                .iter()
-                                .filter(|k| last_returned_key.is_none_or(|last| **k >= last))
-                                .collect();
+                                let valid_keys: Vec<_> = all_keys
+                                    .iter()
+                                    .filter(|k| last_returned_key.is_none_or(|last| **k >= last))
+                                    .collect();
 
-                            if valid_keys.is_empty() {
-                                continue;
-                            }
+                                if valid_keys.is_empty() {
+                                    continue;
+                                }
 
-                            let key = *valid_keys[(choice as usize / 2) % valid_keys.len()];
+                                let key = *valid_keys[(choice as usize / 2) % valid_keys.len()];
 
-                            let control_result = control_cursor.seek(key).unwrap();
-                            let test_result = test_cursor.seek(key).unwrap();
-                            debug!(
-                                control=?control_result.as_ref().map(|(k, _)| k),
-                                test=?test_result.as_ref().map(|(k, _)| k),
-                                ?key,
-                                "Seek returned",
-                            );
-                            assert_eq!(control_result, test_result, "Seek operation mismatch for key {:?}", key);
+                                let control_result = control_cursor.seek(key).unwrap();
+                                let test_result = test_cursor.seek(key).unwrap();
+                                debug!(
+                                    control=?control_result.as_ref().map(|(k, _)| k),
+                                    test=?test_result.as_ref().map(|(k, _)| k),
+                                    ?key,
+                                    "Seek returned",
+                                );
+                                assert_eq!(control_result, test_result, "Seek operation mismatch for key {:?}", key);
 
-                            last_returned_key = control_result.as_ref().map(|(k, _)| *k);
+                                last_returned_key = control_result.as_ref().map(|(k, _)| *k);
 
-                            // Stop if both cursors are exhausted
-                            if control_result.is_none() && test_result.is_none() {
-                                break;
+                                // Stop if both cursors are exhausted
+                                if control_result.is_none() && test_result.is_none() {
+                                    break;
+                                }
                             }
                         }
                     }
-                }
+                    Ok::<(), proptest::test_runner::TestCaseError>(())
+                })?;
             }
         }
     }

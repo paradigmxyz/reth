@@ -2,31 +2,36 @@ use super::job::BackfillJobResult;
 use crate::{BackfillJob, SingleBlockBackfillJob};
 use alloy_primitives::BlockNumber;
 use futures::{
+    future::{BoxFuture, Either},
     stream::{FuturesOrdered, Stream},
     StreamExt,
 };
-use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     execute::{BlockExecutionError, BlockExecutionOutput},
     ConfigureEvm,
 };
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::RecoveredBlock;
-use reth_provider::{BlockReader, Chain, StateProviderFactory};
+use reth_provider::{BlockReader, Chain, ProviderError, StateProviderFactory};
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
-use reth_tracing::tracing::debug;
 use std::{
     ops::RangeInclusive,
     pin::Pin,
     task::{ready, Context, Poll},
+    time::Duration,
 };
-use tokio::task::JoinHandle;
+use tokio::task::{JoinError, JoinHandle};
+use tracing::debug;
 
 /// The default parallelism for active tasks in [`StreamBackfillJob`].
 pub(crate) const DEFAULT_PARALLELISM: usize = 4;
 /// The default batch size for active tasks in [`StreamBackfillJob`].
 const DEFAULT_BATCH_SIZE: usize = 100;
+/// Delay before retrying a batch whose historical state is not yet available.
+const BACKFILL_RETRY_DELAY: Duration = Duration::from_secs(1);
+/// Limit the extra time that backfill consumers can spend buffering live notifications.
+const MAX_BACKFILL_RETRIES: u16 = 300;
 
 /// Boxed thread-safe iterator that yields [`BackfillJobResult`]s.
 type BackfillTaskIterator<T> =
@@ -38,26 +43,32 @@ struct BackfillTaskOutput<T> {
     result: Option<BackfillJobResult<T>>,
 }
 
-/// Ordered queue of [`JoinHandle`]s that yield [`BackfillTaskOutput`]s.
-type BackfillTasks<T> = FuturesOrdered<JoinHandle<BackfillTaskOutput<T>>>;
+/// A running blocking task, or a retry waiting on the stream's async timer.
+type BackfillTask<T> = Either<
+    JoinHandle<BackfillTaskOutput<T>>,
+    BoxFuture<'static, Result<BackfillTaskOutput<T>, JoinError>>,
+>;
 
-type SingleBlockStreamItem<N = EthPrimitives> = (
+pub(super) type SingleBlockStreamItem<N> = (
     RecoveredBlock<<N as NodePrimitives>::Block>,
     BlockExecutionOutput<<N as NodePrimitives>::Receipt>,
 );
-type BatchBlockStreamItem<N = EthPrimitives> = Chain<N>;
+type BatchBlockStreamItem<N> = Chain<N>;
 
 /// Stream for processing backfill jobs asynchronously.
 ///
 /// This struct manages the execution of [`SingleBlockBackfillJob`] tasks, allowing blocks to be
-/// processed asynchronously but in order within a specified range.
+/// processed asynchronously but in order within a specified range. Batched backfill retries
+/// temporary historical state errors during sync at one-second intervals, up to five minutes of
+/// retry delays before yielding the error.
 #[derive(Debug)]
 pub struct StreamBackfillJob<E, P, T> {
     evm_config: E,
     provider: P,
     prune_modes: PruneModes,
     range: RangeInclusive<BlockNumber>,
-    tasks: BackfillTasks<T>,
+    tasks: FuturesOrdered<BackfillTask<T>>,
+    retries: u16,
     parallelism: usize,
     batch_size: usize,
     thresholds: ExecutionStageThresholds,
@@ -79,36 +90,47 @@ where
         self
     }
 
-    /// Spawns a new task calling the [`BackfillTaskIterator::next`] method and pushes it to the end
-    /// of the [`BackfillTasks`] queue.
-    fn push_back(&mut self, mut job: BackfillTaskIterator<T>) {
-        self.tasks.push_back(tokio::task::spawn_blocking(move || BackfillTaskOutput {
-            result: job.next(),
-            job,
-        }));
+    fn backfill_task(mut job: BackfillTaskIterator<T>, retry: bool) -> BackfillTask<T> {
+        let next = move || BackfillTaskOutput { result: job.next(), job };
+        if retry {
+            Either::Right(Box::pin(async move {
+                tokio::time::sleep(BACKFILL_RETRY_DELAY).await;
+                tokio::task::spawn_blocking(next).await
+            }))
+        } else {
+            Either::Left(tokio::task::spawn_blocking(next))
+        }
     }
 
-    /// Spawns a new task calling the [`BackfillTaskIterator::next`] method and pushes it to the
-    /// front of the  [`BackfillTasks`] queue.
-    fn push_front(&mut self, mut job: BackfillTaskIterator<T>) {
-        self.tasks.push_front(tokio::task::spawn_blocking(move || BackfillTaskOutput {
-            result: job.next(),
-            job,
-        }));
-    }
-
-    /// Polls the next task in the [`BackfillTasks`] queue until it returns a non-empty result.
-    fn poll_next_task(&mut self, cx: &mut Context<'_>) -> Poll<Option<BackfillJobResult<T>>> {
+    /// Polls tasks in order, retrying temporary state errors within a per-item budget.
+    fn poll_next_task(
+        &mut self,
+        cx: &mut Context<'_>,
+        max_retries: u16,
+    ) -> Poll<Option<BackfillJobResult<T>>> {
         while let Some(res) = ready!(self.tasks.poll_next_unpin(cx)) {
             let task_result = res.map_err(BlockExecutionError::other)?;
 
             if let BackfillTaskOutput { result: Some(job_result), job } = task_result {
-                // If the task returned a non-empty result, a new task advancing the job is created
-                // and pushed to the __front__ of the queue, so that the next item of this returned
-                // next.
-                self.push_front(job);
+                // Batch iterators retain their range if the historical state read fails.
+                let retry = max_retries != 0 &&
+                    matches!(
+                        job_result
+                            .as_ref()
+                            .err()
+                            .and_then(BlockExecutionError::as_internal)
+                            .and_then(|error| error.downcast_other::<ProviderError>()),
+                        Some(ProviderError::StateUnavailableDuringSync)
+                    );
+                // Keep the remaining range at the front so later results cannot overtake it.
+                self.tasks.push_front(Self::backfill_task(job, retry));
 
-                return Poll::Ready(Some(job_result))
+                if retry && self.retries < max_retries {
+                    self.retries += 1;
+                } else {
+                    self.retries = 0;
+                    return Poll::Ready(Some(job_result))
+                }
             };
         }
 
@@ -142,10 +164,10 @@ where
                 range: block_number..=block_number,
                 stream_parallelism: this.parallelism,
             }) as BackfillTaskIterator<_>;
-            this.push_back(job);
+            this.tasks.push_back(Self::backfill_task(job, false));
         }
 
-        this.poll_next_task(cx)
+        this.poll_next_task(cx, 0)
     }
 }
 
@@ -183,10 +205,10 @@ where
                     range,
                     stream_parallelism: this.parallelism,
                 }) as BackfillTaskIterator<_>;
-                this.push_back(job);
+                this.tasks.push_back(Self::backfill_task(job, false));
             }
 
-            let res = ready!(this.poll_next_task(cx));
+            let res = ready!(this.poll_next_task(cx, MAX_BACKFILL_RETRIES));
 
             if res.is_some() {
                 return Poll::Ready(res);
@@ -200,7 +222,11 @@ where
     }
 }
 
-impl<E, P> From<SingleBlockBackfillJob<E, P>> for StreamBackfillJob<E, P, SingleBlockStreamItem> {
+impl<E, P> From<SingleBlockBackfillJob<E, P>>
+    for StreamBackfillJob<E, P, SingleBlockStreamItem<E::Primitives>>
+where
+    E: ConfigureEvm,
+{
     fn from(job: SingleBlockBackfillJob<E, P>) -> Self {
         Self {
             evm_config: job.evm_config,
@@ -208,6 +234,7 @@ impl<E, P> From<SingleBlockBackfillJob<E, P>> for StreamBackfillJob<E, P, Single
             prune_modes: PruneModes::default(),
             range: job.range,
             tasks: FuturesOrdered::new(),
+            retries: 0,
             parallelism: job.stream_parallelism,
             batch_size: 1,
             thresholds: ExecutionStageThresholds { max_blocks: Some(1), ..Default::default() },
@@ -227,6 +254,7 @@ where
             prune_modes: job.prune_modes,
             range: job.range,
             tasks: FuturesOrdered::new(),
+            retries: 0,
             parallelism: job.stream_parallelism,
             batch_size,
             thresholds: ExecutionStageThresholds {
@@ -255,9 +283,7 @@ mod tests {
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::{Block, BlockBody, Transaction};
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::{
-        crypto::secp256k1::public_key_to_address, Block as _, NodePrimitives,
-    };
+    use reth_primitives_traits::{Block as _, NodePrimitives};
     use reth_provider::{
         providers::{BlockchainProvider, ProviderNodeTypes},
         test_utils::create_test_provider_factory_with_chain_spec,
@@ -266,7 +292,7 @@ mod tests {
     use reth_stages_api::ExecutionStageThresholds;
     use reth_testing_utils::{generators, generators::sign_tx_with_key_pair};
     use secp256k1::Keypair;
-    use std::sync::Arc;
+    use std::{future, iter, sync::Arc};
 
     #[tokio::test]
     async fn test_single_blocks() -> eyre::Result<()> {
@@ -274,7 +300,8 @@ mod tests {
 
         // Create a key pair for the sender
         let key_pair = generators::generate_key(&mut generators::rng());
-        let address = public_key_to_address(key_pair.public_key());
+        let address =
+            Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
 
         let chain_spec = chain_spec(address);
 
@@ -292,8 +319,7 @@ mod tests {
         let mut backfill_stream = factory.backfill(1..=1).into_single_blocks().into_stream();
 
         // execute first block
-        let (block, mut execution_output) = backfill_stream.next().await.unwrap().unwrap();
-        execution_output.state.reverts.sort();
+        let (block, execution_output) = backfill_stream.next().await.unwrap().unwrap();
         let expected_block = blocks_and_execution_outcomes[0].0.clone();
         let expected_output = &blocks_and_execution_outcomes[0].1;
         assert_eq!(block, expected_block);
@@ -311,7 +337,8 @@ mod tests {
 
         // Create a key pair for the sender
         let key_pair = generators::generate_key(&mut generators::rng());
-        let address = public_key_to_address(key_pair.public_key());
+        let address =
+            Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
 
         let chain_spec = chain_spec(address);
 
@@ -329,14 +356,64 @@ mod tests {
             .with_thresholds(ExecutionStageThresholds { max_blocks: Some(2), ..Default::default() })
             .with_stream_parallelism(1);
         let mut backfill_stream = factory.backfill(1..=2).into_stream();
-        let mut chain = backfill_stream.next().await.unwrap().unwrap();
-        chain.execution_outcome_mut().state_mut().reverts.sort();
+        let chain = backfill_stream.next().await.unwrap().unwrap();
 
         assert!(chain.blocks_iter().map(|block| block.as_ref()).eq(&blocks));
         assert_eq!(chain.execution_outcome(), &execution_outcome);
 
         // expect no more blocks
         assert!(backfill_stream.next().await.is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn backfill_retries_temporary_state_errors_in_order() -> eyre::Result<()> {
+        let mut backfill = StreamBackfillJob::<(), (), u64> {
+            evm_config: (),
+            provider: (),
+            prune_modes: PruneModes::default(),
+            range: 1..=2,
+            tasks: FuturesOrdered::new(),
+            retries: 0,
+            parallelism: 2,
+            batch_size: 1,
+            thresholds: ExecutionStageThresholds::default(),
+        };
+        let temporary_error =
+            || Err(BlockExecutionError::other(ProviderError::StateUnavailableDuringSync));
+        backfill.tasks.push_back(Either::Right(Box::pin(future::ready(Ok(BackfillTaskOutput {
+            result: Some(temporary_error()),
+            job: Box::new(iter::once(Ok(1))),
+        })))));
+        backfill.tasks.push_back(Either::Right(Box::pin(future::ready(Ok(BackfillTaskOutput {
+            result: Some(Ok(2)),
+            job: Box::new(
+                iter::once(Err(BlockExecutionError::other(ProviderError::HeaderNotFound(
+                    3.into(),
+                ))))
+                .chain(iter::repeat_with(temporary_error).take(2)),
+            ),
+        })))));
+
+        let mut stream = futures::stream::poll_fn(|cx| backfill.poll_next_task(cx, 1));
+        assert!(futures::poll!(stream.next()).is_pending());
+        tokio::time::advance(BACKFILL_RETRY_DELAY).await;
+        assert_eq!(stream.next().await.transpose()?, Some(1));
+        assert_eq!(stream.next().await.transpose()?, Some(2));
+
+        let error = stream.next().await.unwrap().unwrap_err();
+        assert!(matches!(
+            error.as_internal().and_then(|error| error.downcast_other::<ProviderError>()),
+            Some(ProviderError::HeaderNotFound(block)) if *block == 3.into()
+        ));
+        let retry_start = tokio::time::Instant::now();
+        let error = stream.next().await.unwrap().unwrap_err();
+        assert!(matches!(
+            error.as_internal().and_then(|error| error.downcast_other::<ProviderError>()),
+            Some(ProviderError::StateUnavailableDuringSync)
+        ));
+        assert!(retry_start.elapsed() >= BACKFILL_RETRY_DELAY);
 
         Ok(())
     }
@@ -414,7 +491,8 @@ mod tests {
 
         // Create a key pair for the sender
         let key_pair = generators::generate_key(&mut generators::rng());
-        let address = public_key_to_address(key_pair.public_key());
+        let address =
+            Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
 
         let chain_spec = chain_spec(address);
 
@@ -436,13 +514,9 @@ mod tests {
         let mut backfill_stream = factory.backfill(1..=4).into_stream();
 
         // Collect the two expected chains from the stream
-        let mut chain1 = backfill_stream.next().await.unwrap()?;
-        let mut chain2 = backfill_stream.next().await.unwrap()?;
+        let chain1 = backfill_stream.next().await.unwrap()?;
+        let chain2 = backfill_stream.next().await.unwrap()?;
         assert!(backfill_stream.next().await.is_none());
-
-        // Sort reverts for comparison
-        chain1.execution_outcome_mut().state_mut().reverts.sort();
-        chain2.execution_outcome_mut().state_mut().reverts.sort();
 
         // Compute expected chains using non-stream BackfillJob (sequential)
         let factory_seq =
@@ -450,14 +524,10 @@ mod tests {
                 ExecutionStageThresholds { max_blocks: Some(2), ..Default::default() },
             );
 
-        let mut expected_chain1 =
+        let expected_chain1 =
             factory_seq.backfill(1..=2).collect::<Result<Vec<_>, _>>()?.into_iter().next().unwrap();
-        let mut expected_chain2 =
+        let expected_chain2 =
             factory_seq.backfill(3..=4).collect::<Result<Vec<_>, _>>()?.into_iter().next().unwrap();
-
-        // Sort reverts for expected
-        expected_chain1.execution_outcome_mut().state_mut().reverts.sort();
-        expected_chain2.execution_outcome_mut().state_mut().reverts.sort();
 
         // Assert the streamed chains match the expected sequential ones
         assert_eq!(chain1.blocks(), expected_chain1.blocks());

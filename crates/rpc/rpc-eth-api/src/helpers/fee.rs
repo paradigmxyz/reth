@@ -3,7 +3,7 @@
 use super::LoadBlock;
 use crate::FromEthApiError;
 use alloy_consensus::BlockHeader;
-use alloy_eips::eip7840::BlobParams;
+use alloy_eips::{eip7840::BlobParams, BlockId};
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockNumberOrTag, FeeHistory};
 use futures::{Future, StreamExt};
@@ -132,10 +132,9 @@ pub trait EthFees:
 
             // need to add 1 to the end block to get the correct (inclusive) range
             let end_block_plus = end_block + 1;
-            // Ensure that we would not be querying outside of genesis
-            if end_block_plus < block_count {
-                block_count = end_block_plus;
-            }
+            // Ensure that we would not be querying below genesis, which is not always block 0
+            let genesis_block = self.provider().chain_spec().genesis_header().number();
+            block_count = block_count.min(end_block.saturating_sub(genesis_block) + 1);
 
             // Fetch the headers and ensure we got all of them
             //
@@ -346,7 +345,7 @@ where
                         .provider()
                         .latest_header()
                         .map_err(Self::Error::from_eth_err)?
-                        .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+                        .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
                     let pending_base_fee = self
                         .provider()
                         .chain_spec()
@@ -414,7 +413,7 @@ where
                 .provider()
                 .latest_header()
                 .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+                .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
             Ok(self
                 .provider()
                 .chain_spec()

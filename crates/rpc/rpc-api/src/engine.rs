@@ -6,6 +6,7 @@
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7685::RequestsOrHash,
+    eip7928::BlockAccessList,
     BlockId, BlockNumberOrTag,
 };
 use alloy_json_rpc::RpcObject;
@@ -21,7 +22,6 @@ use alloy_rpc_types_eth::{
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
 use reth_engine_primitives::EngineTypes;
-use serde_json::Value;
 
 /// Helper trait for the engine api server.
 ///
@@ -40,8 +40,7 @@ pub trait IntoEngineApiRpcModule {
 // trait methods. Instead, we have to add the bounds manually. This would be disastrous if we had
 // more than one associated type used in the trait methods.
 
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "engine", client_bounds(Engine::PayloadAttributes: jsonrpsee::core::Serialize + Clone), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned)))]
+#[rpc(server, namespace = "engine")]
 pub trait EngineApi<Engine: EngineTypes> {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
@@ -389,8 +388,7 @@ pub trait EngineApi<Engine: EngineTypes> {
 /// This also includes additional eth functions required by optimism.
 ///
 /// Specifically for the engine auth server: <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#underlying-protocol>
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
+#[rpc(server, namespace = "eth")]
 pub trait EngineEthApi<TxReq: RpcObject, B: RpcObject, R: RpcObject, L: RpcObject> {
     /// Returns an object with data about the sync status or false.
     #[method(name = "syncing")]
@@ -478,18 +476,21 @@ pub trait EngineEthApi<TxReq: RpcObject, B: RpcObject, R: RpcObject, L: RpcObjec
 
     /// Returns the EIP-7928 block access list for a block by hash.
     #[method(name = "getBlockAccessListByBlockHash")]
-    async fn block_access_list_by_block_hash(&self, hash: B256) -> RpcResult<Option<Value>>;
+    async fn block_access_list_by_block_hash(
+        &self,
+        hash: B256,
+    ) -> RpcResult<Option<BlockAccessList>>;
 
     /// Returns the EIP-7928 block access list for a block by number.
     #[method(name = "getBlockAccessListByBlockNumber")]
     async fn block_access_list_by_block_number(
         &self,
         number: BlockNumberOrTag,
-    ) -> RpcResult<Option<Value>>;
+    ) -> RpcResult<Option<BlockAccessList>>;
 
     /// Returns the EIP-7928 block access list for a block by block id.
     #[method(name = "getBlockAccessList")]
-    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>>;
+    async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<BlockAccessList>>;
 
     /// Returns the EIP-7928 block access list bytes for a block by number.
     #[method(name = "getBlockAccessListRaw")]

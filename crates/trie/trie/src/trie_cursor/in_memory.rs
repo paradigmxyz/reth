@@ -238,6 +238,10 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        // Forward scans can reuse cursor positions; backward seeks and exhausted cursors cannot.
+        if self.last_key.is_none_or(|last| key < last) {
+            self.reset();
+        }
         let mem_entry = self.in_memory_cursor.seek(&key);
 
         if let Some((mem_key, entry_inner)) = mem_entry &&
@@ -281,6 +285,10 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        // Forward scans can reuse cursor positions; backward seeks and exhausted cursors cannot.
+        if self.last_key.is_none_or(|last| key < last) {
+            self.reset();
+        }
         let mem_entry = self.in_memory_cursor.seek(&key);
 
         if let Some((mem_key, Some(node))) = mem_entry &&
@@ -385,6 +393,7 @@ mod tests {
     use crate::trie_cursor::mock::MockTrieCursor;
     use parking_lot::Mutex;
     use std::{collections::BTreeMap, sync::Arc};
+    use tracing::debug;
 
     #[derive(Debug)]
     struct InMemoryTrieCursorTestCase {
@@ -424,7 +433,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_empty_db_and_memory() {
         let test_case = InMemoryTrieCursorTestCase {
             db_nodes: vec![],
@@ -434,7 +443,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_only_db_nodes() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
@@ -450,7 +459,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_only_in_memory_nodes() {
         let in_memory_nodes = vec![
             (
@@ -477,7 +486,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_in_memory_overwrites_db() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
@@ -505,7 +514,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_in_memory_deletes_db_nodes() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
@@ -524,7 +533,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_complex_interleaving() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
@@ -567,7 +576,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_exact() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
@@ -610,7 +619,7 @@ mod tests {
         assert_eq!(result, None);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_overlay_exact_hit_does_not_touch_db_until_next() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
@@ -651,7 +660,7 @@ mod tests {
         assert!(!visited_keys.lock().is_empty(), "next should lazily position the DB cursor");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_overlay_exact_hit_repositions_stale_db_on_next() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
@@ -701,7 +710,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_multiple_consecutive_deletes() {
         let db_nodes: Vec<(Nibbles, BranchNodeCompact)> = (1..=10)
             .map(|i| {
@@ -732,7 +741,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_empty_db_with_in_memory_deletes() {
         let in_memory_nodes = vec![
             (Nibbles::from_nibbles([0x1]), None),
@@ -753,7 +762,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_current_key_tracking() {
         let db_nodes = vec![(
             Nibbles::from_nibbles([0x2]),
@@ -791,9 +800,8 @@ mod tests {
         assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x3])));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_all_storage_nodes_deleted_exact_keys() {
-        use tracing::debug;
         reth_tracing::init_test_tracing();
 
         // This test reproduces an edge case where:
@@ -963,145 +971,146 @@ mod tests {
                 op_choices in prop::collection::vec(any::<u8>(), 10..500),
             ) {
                 reth_tracing::init_test_tracing();
-                use tracing::debug;
+                reth_concurrency::sync::Runtime::new().run(move || {
+                    debug!(
+                        db_paths=?db_nodes.iter().map(|(k, _)| k).collect::<Vec<_>>(),
+                        in_mem_nodes=?in_memory_nodes.iter().map(|(k, v)| (k, v.is_some())).collect::<Vec<_>>(),
+                        num_op_choices=?op_choices.len(),
+                        "Starting proptest!",
+                    );
 
-                debug!(
-                    db_paths=?db_nodes.iter().map(|(k, _)| k).collect::<Vec<_>>(),
-                    in_mem_nodes=?in_memory_nodes.iter().map(|(k, v)| (k, v.is_some())).collect::<Vec<_>>(),
-                    num_op_choices=?op_choices.len(),
-                    "Starting proptest!",
-                );
+                    // Create the expected results by merging the two sorted vectors,
+                    // properly handling deletions (None values in in_memory_nodes)
+                    let expected_combined = merge_with_overlay(db_nodes.clone(), in_memory_nodes.clone());
 
-                // Create the expected results by merging the two sorted vectors,
-                // properly handling deletions (None values in in_memory_nodes)
-                let expected_combined = merge_with_overlay(db_nodes.clone(), in_memory_nodes.clone());
+                    // Collect all keys for operation generation
+                    let all_keys: Vec<Nibbles> = expected_combined.iter().map(|(k, _)| *k).collect();
 
-                // Collect all keys for operation generation
-                let all_keys: Vec<Nibbles> = expected_combined.iter().map(|(k, _)| *k).collect();
+                    // Create a control cursor using the combined result with a mock cursor
+                    let control_db_map: BTreeMap<Nibbles, BranchNodeCompact> =
+                        expected_combined.into_iter().collect();
+                    let control_db_arc = Arc::new(control_db_map);
+                    let control_visited_keys = Arc::new(Mutex::new(Vec::new()));
+                    let mut control_cursor = MockTrieCursor::new(control_db_arc, control_visited_keys);
 
-                // Create a control cursor using the combined result with a mock cursor
-                let control_db_map: BTreeMap<Nibbles, BranchNodeCompact> =
-                    expected_combined.into_iter().collect();
-                let control_db_arc = Arc::new(control_db_map);
-                let control_visited_keys = Arc::new(Mutex::new(Vec::new()));
-                let mut control_cursor = MockTrieCursor::new(control_db_arc, control_visited_keys);
+                    // Create the InMemoryTrieCursor being tested
+                    let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> =
+                        db_nodes.into_iter().collect();
+                    let db_nodes_arc = Arc::new(db_nodes_map);
+                    let visited_keys = Arc::new(Mutex::new(Vec::new()));
+                    let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
+                    let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+                    let mut test_cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
 
-                // Create the InMemoryTrieCursor being tested
-                let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> =
-                    db_nodes.into_iter().collect();
-                let db_nodes_arc = Arc::new(db_nodes_map);
-                let visited_keys = Arc::new(Mutex::new(Vec::new()));
-                let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
-                let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
-                let mut test_cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
+                    // Test: seek to the beginning first
+                    let control_first = control_cursor.seek(Nibbles::default()).unwrap();
+                    let test_first = test_cursor.seek(Nibbles::default()).unwrap();
+                    debug!(
+                        control=?control_first.as_ref().map(|(k, _)| k),
+                        test=?test_first.as_ref().map(|(k, _)| k),
+                        "Initial seek returned",
+                    );
+                    assert_eq!(control_first, test_first, "Initial seek mismatch");
 
-                // Test: seek to the beginning first
-                let control_first = control_cursor.seek(Nibbles::default()).unwrap();
-                let test_first = test_cursor.seek(Nibbles::default()).unwrap();
-                debug!(
-                    control=?control_first.as_ref().map(|(k, _)| k),
-                    test=?test_first.as_ref().map(|(k, _)| k),
-                    "Initial seek returned",
-                );
-                assert_eq!(control_first, test_first, "Initial seek mismatch");
+                    // If both cursors returned None, nothing to test
+                    if control_first.is_none() && test_first.is_none() {
+                        return Ok(());
+                    }
 
-                // If both cursors returned None, nothing to test
-                if control_first.is_none() && test_first.is_none() {
-                    return Ok(());
-                }
+                    // Track the last key returned from the cursor
+                    let mut last_returned_key = control_first.as_ref().map(|(k, _)| *k);
 
-                // Track the last key returned from the cursor
-                let mut last_returned_key = control_first.as_ref().map(|(k, _)| *k);
+                    // Execute a sequence of random operations
+                    for choice in op_choices {
+                        let op_type = choice % 3;
 
-                // Execute a sequence of random operations
-                for choice in op_choices {
-                    let op_type = choice % 3;
+                        match op_type {
+                            0 => {
+                                // Next operation
+                                let control_result = control_cursor.next().unwrap();
+                                let test_result = test_cursor.next().unwrap();
+                                debug!(
+                                    control=?control_result.as_ref().map(|(k, _)| k),
+                                    test=?test_result.as_ref().map(|(k, _)| k),
+                                    "Next returned",
+                                );
+                                assert_eq!(control_result, test_result, "Next operation mismatch");
 
-                    match op_type {
-                        0 => {
-                            // Next operation
-                            let control_result = control_cursor.next().unwrap();
-                            let test_result = test_cursor.next().unwrap();
-                            debug!(
-                                control=?control_result.as_ref().map(|(k, _)| k),
-                                test=?test_result.as_ref().map(|(k, _)| k),
-                                "Next returned",
-                            );
-                            assert_eq!(control_result, test_result, "Next operation mismatch");
+                                last_returned_key = control_result.as_ref().map(|(k, _)| *k);
 
-                            last_returned_key = control_result.as_ref().map(|(k, _)| *k);
-
-                            // Stop if both cursors are exhausted
-                            if control_result.is_none() && test_result.is_none() {
-                                break;
+                                // Stop if both cursors are exhausted
+                                if control_result.is_none() && test_result.is_none() {
+                                    break;
+                                }
                             }
-                        }
-                        1 => {
-                            // Seek operation - choose a key >= last_returned_key
-                            if all_keys.is_empty() {
-                                continue;
+                            1 => {
+                                // Seek operation - choose a key >= last_returned_key
+                                if all_keys.is_empty() {
+                                    continue;
+                                }
+
+                                let valid_keys: Vec<_> = all_keys
+                                    .iter()
+                                    .filter(|k| last_returned_key.is_none_or(|last| **k >= last))
+                                    .collect();
+
+                                if valid_keys.is_empty() {
+                                    continue;
+                                }
+
+                                let key = *valid_keys[choice as usize % valid_keys.len()];
+
+                                let control_result = control_cursor.seek(key).unwrap();
+                                let test_result = test_cursor.seek(key).unwrap();
+                                debug!(
+                                    control=?control_result.as_ref().map(|(k, _)| k),
+                                    test=?test_result.as_ref().map(|(k, _)| k),
+                                    ?key,
+                                    "Seek returned",
+                                );
+                                assert_eq!(control_result, test_result, "Seek operation mismatch for key {:?}", key);
+
+                                last_returned_key = control_result.as_ref().map(|(k, _)| *k);
+
+                                // Stop if both cursors are exhausted
+                                if control_result.is_none() && test_result.is_none() {
+                                    break;
+                                }
                             }
+                            _ => {
+                                // SeekExact operation - choose a key >= last_returned_key
+                                if all_keys.is_empty() {
+                                    continue;
+                                }
 
-                            let valid_keys: Vec<_> = all_keys
-                                .iter()
-                                .filter(|k| last_returned_key.is_none_or(|last| **k >= last))
-                                .collect();
+                                let valid_keys: Vec<_> = all_keys
+                                    .iter()
+                                    .filter(|k| last_returned_key.is_none_or(|last| **k >= last))
+                                    .collect();
 
-                            if valid_keys.is_empty() {
-                                continue;
+                                if valid_keys.is_empty() {
+                                    continue;
+                                }
+
+                                let key = *valid_keys[choice as usize  % valid_keys.len()];
+
+                                let control_result = control_cursor.seek_exact(key).unwrap();
+                                let test_result = test_cursor.seek_exact(key).unwrap();
+                                debug!(
+                                    control=?control_result.as_ref().map(|(k, _)| k),
+                                    test=?test_result.as_ref().map(|(k, _)| k),
+                                    ?key,
+                                    "SeekExact returned",
+                                );
+                                assert_eq!(control_result, test_result, "SeekExact operation mismatch for key {:?}", key);
+
+                                // seek_exact updates the last_key internally but only if it found something
+                                last_returned_key = control_result.as_ref().map(|(k, _)| *k);
                             }
-
-                            let key = *valid_keys[choice as usize % valid_keys.len()];
-
-                            let control_result = control_cursor.seek(key).unwrap();
-                            let test_result = test_cursor.seek(key).unwrap();
-                            debug!(
-                                control=?control_result.as_ref().map(|(k, _)| k),
-                                test=?test_result.as_ref().map(|(k, _)| k),
-                                ?key,
-                                "Seek returned",
-                            );
-                            assert_eq!(control_result, test_result, "Seek operation mismatch for key {:?}", key);
-
-                            last_returned_key = control_result.as_ref().map(|(k, _)| *k);
-
-                            // Stop if both cursors are exhausted
-                            if control_result.is_none() && test_result.is_none() {
-                                break;
-                            }
-                        }
-                        _ => {
-                            // SeekExact operation - choose a key >= last_returned_key
-                            if all_keys.is_empty() {
-                                continue;
-                            }
-
-                            let valid_keys: Vec<_> = all_keys
-                                .iter()
-                                .filter(|k| last_returned_key.is_none_or(|last| **k >= last))
-                                .collect();
-
-                            if valid_keys.is_empty() {
-                                continue;
-                            }
-
-                            let key = *valid_keys[choice as usize  % valid_keys.len()];
-
-                            let control_result = control_cursor.seek_exact(key).unwrap();
-                            let test_result = test_cursor.seek_exact(key).unwrap();
-                            debug!(
-                                control=?control_result.as_ref().map(|(k, _)| k),
-                                test=?test_result.as_ref().map(|(k, _)| k),
-                                ?key,
-                                "SeekExact returned",
-                            );
-                            assert_eq!(control_result, test_result, "SeekExact operation mismatch for key {:?}", key);
-
-                            // seek_exact updates the last_key internally but only if it found something
-                            last_returned_key = control_result.as_ref().map(|(k, _)| *k);
                         }
                     }
-                }
+                    Ok::<(), proptest::test_runner::TestCaseError>(())
+                })?;
             }
         }
     }

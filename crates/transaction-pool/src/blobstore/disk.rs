@@ -475,6 +475,75 @@ pub enum OpenDiskFileBlobStore {
     ReIndex,
 }
 
+/// Charges the worst-case reconstructed representation up front, including heap allocations.
+#[derive(Debug)]
+struct SidecarCacheLimit {
+    max_entries: u32,
+    bytes: usize,
+}
+
+impl SidecarCacheLimit {
+    const MAX_BYTES: usize = 16 * 1024 * 1024;
+
+    fn cost(sidecar: &PooledBlobSidecar) -> usize {
+        let blobs = sidecar.versioned_hashes().count();
+        sidecar.size() +
+            sidecar.sidecar().size() +
+            blobs * (alloy_eips::eip4844::BYTES_PER_BLOB + 129 * 48)
+    }
+}
+
+impl Limiter<TxHash, Arc<PooledBlobSidecar>> for SidecarCacheLimit {
+    type KeyToInsert<'a> = TxHash;
+    type LinkType = u32;
+
+    fn is_over_the_limit(&self, length: usize) -> bool {
+        length > self.max_entries as usize || self.bytes > Self::MAX_BYTES
+    }
+
+    fn on_insert(
+        &mut self,
+        _: usize,
+        key: TxHash,
+        value: Arc<PooledBlobSidecar>,
+    ) -> Option<(TxHash, Arc<PooledBlobSidecar>)> {
+        let bytes = Self::cost(&value);
+        if self.max_entries == 0 || bytes > Self::MAX_BYTES {
+            return None
+        }
+        self.bytes += bytes;
+        Some((key, value))
+    }
+
+    fn on_replace(
+        &mut self,
+        _: usize,
+        _: &mut TxHash,
+        _: TxHash,
+        old: &mut Arc<PooledBlobSidecar>,
+        new: &mut Arc<PooledBlobSidecar>,
+    ) -> bool {
+        let bytes = Self::cost(new);
+        if bytes > Self::MAX_BYTES {
+            return false
+        }
+        self.bytes = self.bytes - Self::cost(old) + bytes;
+        true
+    }
+
+    fn on_removed(&mut self, _: &mut TxHash, value: &mut Arc<PooledBlobSidecar>) {
+        self.bytes -= Self::cost(value);
+    }
+
+    fn on_cleared(&mut self) {
+        self.bytes = 0;
+    }
+
+    fn on_grow(&mut self, _: usize) -> bool {
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloy_consensus::BlobTransactionSidecar;
@@ -565,6 +634,29 @@ mod tests {
 
         assert_eq!(store.data_size_hint(), Some(0));
         assert_eq!(store.inner.size_tracker.num_blobs.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn disk_queued_deletions_count_until_cleanup() {
+        let (store, _dir) = tmp_store();
+        assert_eq!(store.blobs_len(), 0);
+
+        let blobs = rng_blobs(2);
+        let hashes = blobs.iter().map(|(tx, _)| *tx).collect::<Vec<_>>();
+        store.insert_all(wrapped_blobs(blobs)).unwrap();
+
+        // queued deletions keep the blobs counted, so the store isn't reported empty before
+        // cleanup ran
+        store.delete_all(vec![hashes[0]]).unwrap();
+        assert_eq!(store.blobs_len(), 2);
+
+        store.cleanup();
+        assert_eq!(store.blobs_len(), 1);
+
+        // the removed blob is still cached, so it can be queued again
+        store.delete(hashes[0]).unwrap();
+        store.cleanup();
+        assert_eq!(store.blobs_len(), 1);
     }
 
     #[test]
@@ -837,65 +929,5 @@ mod tests {
         let stat2 = store.cleanup();
         assert_eq!(stat2.delete_succeed, 5);
         assert_eq!(stat2.delete_failed, 0);
-    }
-}
-
-/// Charges the worst-case reconstructed representation up front, including heap allocations.
-#[derive(Debug)]
-struct SidecarCacheLimit {
-    max_entries: u32,
-    bytes: usize,
-}
-impl SidecarCacheLimit {
-    const MAX_BYTES: usize = 16 * 1024 * 1024;
-    fn cost(sidecar: &PooledBlobSidecar) -> usize {
-        let blobs = sidecar.versioned_hashes().count();
-        sidecar.size() +
-            sidecar.sidecar().size() +
-            blobs * (alloy_eips::eip4844::BYTES_PER_BLOB + 129 * 48)
-    }
-}
-impl Limiter<TxHash, Arc<PooledBlobSidecar>> for SidecarCacheLimit {
-    type KeyToInsert<'a> = TxHash;
-    type LinkType = u32;
-    fn is_over_the_limit(&self, length: usize) -> bool {
-        length > self.max_entries as usize || self.bytes > Self::MAX_BYTES
-    }
-    fn on_insert(
-        &mut self,
-        _: usize,
-        key: TxHash,
-        value: Arc<PooledBlobSidecar>,
-    ) -> Option<(TxHash, Arc<PooledBlobSidecar>)> {
-        let bytes = Self::cost(&value);
-        if self.max_entries == 0 || bytes > Self::MAX_BYTES {
-            return None
-        }
-        self.bytes += bytes;
-        Some((key, value))
-    }
-    fn on_replace(
-        &mut self,
-        _: usize,
-        _: &mut TxHash,
-        _: TxHash,
-        old: &mut Arc<PooledBlobSidecar>,
-        new: &mut Arc<PooledBlobSidecar>,
-    ) -> bool {
-        let bytes = Self::cost(new);
-        if bytes > Self::MAX_BYTES {
-            return false
-        }
-        self.bytes = self.bytes - Self::cost(old) + bytes;
-        true
-    }
-    fn on_removed(&mut self, _: &mut TxHash, value: &mut Arc<PooledBlobSidecar>) {
-        self.bytes -= Self::cost(value);
-    }
-    fn on_cleared(&mut self) {
-        self.bytes = 0;
-    }
-    fn on_grow(&mut self, _: usize) -> bool {
-        true
     }
 }

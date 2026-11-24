@@ -13,7 +13,7 @@ pub(super) fn test_prune_retains_recent_leaves<T: SparseTrie>(new_trie: fn() -> 
     key_e.0[0] = 0x50;
 
     let storage: BTreeMap<B256, U256> = BTreeMap::from([
-        (key_a, U256::from(1)),
+        (key_a, U256::ONE),
         (key_b, U256::from(2)),
         (key_c, U256::from(3)),
         (key_d, U256::from(4)),
@@ -63,7 +63,7 @@ pub(super) fn test_prune_retains_structurally_modified_branch<T: SparseTrie>(new
     let old_keys = [key(0x00, 0x00), key(0x00, 0x10), key(0x00, 0x20)];
     let sibling = key(0x01, 0x00);
     let mut storage = BTreeMap::from([
-        (old_keys[0], U256::from(1)),
+        (old_keys[0], U256::ONE),
         (old_keys[1], U256::from(2)),
         (old_keys[2], U256::from(3)),
         (sibling, U256::from(4)),
@@ -232,7 +232,7 @@ pub(super) fn test_prune_mixed_embedded_and_hashed_nodes<T: SparseTrie>(new_trie
     for i in 4..8u8 {
         let mut key = B256::ZERO;
         key.0[0] = i;
-        storage.insert(key, U256::from(1));
+        storage.insert(key, U256::ONE);
     }
 
     let mut trie = (new_trie)();
@@ -291,8 +291,7 @@ pub(super) fn test_prune_then_update_no_panic<T: SparseTrie>(new_trie: fn() -> T
 /// leaf or empty root), `prune` should immediately return 0 without walking.
 pub(super) fn test_prune_only_descends_into_branch_root<T: SparseTrie>(new_trie: fn() -> T) {
     // Single-leaf trie: root is a leaf node, not a branch.
-    let storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(B256::with_last_byte(0x10), U256::from(1))]);
+    let storage: BTreeMap<B256, U256> = BTreeMap::from([(B256::with_last_byte(0x10), U256::ONE)]);
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
@@ -327,7 +326,7 @@ pub(super) fn test_prune_handles_small_subtrie_root_nodes<T: SparseTrie>(new_tri
     // Small subtrie: single small leaf
     let mut small_key = B256::ZERO;
     small_key.0[0] = 0x20;
-    storage.insert(small_key, U256::from(1));
+    storage.insert(small_key, U256::ONE);
 
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
@@ -351,4 +350,100 @@ pub(super) fn test_prune_handles_small_subtrie_root_nodes<T: SparseTrie>(new_tri
         trie.get_leaf_value(&Nibbles::unpack(large_key)).is_none(),
         "old large subtrie should be blinded"
     );
+}
+
+pub(super) fn test_prune_extension_roots_and_upper_children<T: SparseTrie>(new_trie: fn() -> T) {
+    for extension_root in [true, false] {
+        for retain_extension in [true, false] {
+            let mut trie = (new_trie)();
+            let first = B256::with_last_byte(1);
+            let second = B256::with_last_byte(2);
+            let sibling = B256::repeat_byte(0x10);
+            let mut storage = BTreeMap::from([
+                (first, U256::from_be_bytes([1; 32])),
+                (second, U256::from_be_bytes([2; 32])),
+            ]);
+            if !extension_root {
+                storage.insert(sibling, U256::from_be_bytes([3; 32]));
+            }
+            let mut updates = SuiteTestHarness::leaf_updates(&storage);
+            trie.update_leaves(&mut updates, |_, _| panic!("empty trie must not request proofs"))
+                .expect("update_leaves should succeed");
+            assert!(updates.is_empty());
+            trie.root(epoch(0));
+
+            if retain_extension {
+                let value = U256::from_be_bytes([4; 32]);
+                storage.insert(first, value);
+                updates = SuiteTestHarness::leaf_updates(&BTreeMap::from([(first, value)]));
+                trie.update_leaves(&mut updates, |_, _| {
+                    panic!("fully revealed trie must not request proofs")
+                })
+                .expect("update_leaves should succeed");
+                assert!(updates.is_empty());
+                trie.root(epoch(2));
+            }
+            let root = trie.root(epoch(2));
+            assert_eq!(root, SuiteTestHarness::new(storage).original_root());
+            let expected_pruned = match (extension_root, retain_extension) {
+                (true, true) => 1,
+                (true, false) | (false, true) => 2,
+                (false, false) => 5,
+            };
+            assert_eq!(trie.prune(epoch(1)), expected_pruned);
+            assert_eq!(trie.root(epoch(2)), root);
+            assert_eq!(trie.get_leaf_value(&Nibbles::unpack(first)).is_some(), retain_extension);
+            assert!(trie.get_leaf_value(&Nibbles::unpack(second)).is_none());
+            assert!(trie.get_leaf_value(&Nibbles::unpack(sibling)).is_none());
+            assert_eq!(trie.prune(epoch(1)), 0);
+        }
+    }
+}
+
+pub(super) fn test_prune_rehash_preserves_cached_extension_epoch<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
+    let mut trie = (new_trie)();
+    let first = B256::with_last_byte(1);
+    let second = B256::with_last_byte(2);
+    let third = B256::with_last_byte(3);
+    let sibling = B256::repeat_byte(0x10);
+    let mut storage = [first, second, third, sibling]
+        .into_iter()
+        .map(|key| (key, U256::from_be_bytes([1; 32])))
+        .collect::<BTreeMap<_, _>>();
+    let mut updates = SuiteTestHarness::leaf_updates(&storage);
+    trie.update_leaves(&mut updates, |_, _| panic!("empty trie must not request proofs"))
+        .expect("update_leaves should succeed");
+    assert!(updates.is_empty());
+    trie.root(epoch(0));
+
+    updates = SuiteTestHarness::leaf_updates(&BTreeMap::from([(third, U256::ZERO)]));
+    trie.update_leaves(&mut updates, |_, _| panic!("fully revealed trie must not request proofs"))
+        .expect("update_leaves should succeed");
+    assert!(updates.is_empty());
+    storage.remove(&third);
+    trie.root(epoch(2));
+
+    let value = U256::from_be_bytes([2; 32]);
+    updates = SuiteTestHarness::leaf_updates(&BTreeMap::from([(sibling, value)]));
+    trie.update_leaves(&mut updates, |_, _| panic!("fully revealed trie must not request proofs"))
+        .expect("update_leaves should succeed");
+    assert!(updates.is_empty());
+    storage.insert(sibling, value);
+    let root = trie.root(epoch(3));
+    assert_eq!(root, SuiteTestHarness::new(storage.clone()).original_root());
+    assert_eq!(trie.prune(epoch(2)), 2);
+    assert_eq!(trie.root(epoch(3)), root);
+
+    // The removed child's epoch must survive rehashing an unrelated sibling, so the
+    // extension remains revealed and insertion needs no proof after pruning.
+    updates = SuiteTestHarness::leaf_updates(&BTreeMap::from([(third, value)]));
+    trie.update_leaves(&mut updates, |_, _| {
+        panic!("structurally modified extension at the cutoff epoch must remain revealed")
+    })
+    .expect("update_leaves should succeed");
+    assert!(updates.is_empty());
+    storage.insert(third, value);
+    assert_eq!(trie.root(epoch(4)), SuiteTestHarness::new(storage).original_root());
 }

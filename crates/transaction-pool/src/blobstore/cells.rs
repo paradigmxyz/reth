@@ -29,12 +29,13 @@ pub struct BlobTxCellSidecar {
 
 impl BlobTxCellSidecar {
     /// Returns the locally stored cell indices.
-    pub fn mask(&self) -> BlobCellMask {
-        BlobCellMask::new(self.cell_mask)
+    pub const fn mask(&self) -> BlobCellMask {
+        // Stored masks use numeric byte order, unlike the Engine API bitarray.
+        BlobCellMask::from_bits(u128::from_be_bytes(self.cell_mask.0))
     }
 
     /// Returns whether every blob can be recovered without network access.
-    pub fn is_recoverable(&self) -> bool {
+    pub const fn is_recoverable(&self) -> bool {
         self.mask().count() >= CELLS_PER_EXT_BLOB / 2
     }
 

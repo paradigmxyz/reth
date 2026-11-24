@@ -3,7 +3,7 @@
 use crate::Nibbles;
 use alloc::vec::Vec;
 use alloy_primitives::{keccak256, map::B256Map, B256};
-use revm::state::EvmState;
+use evm2::evm::AccountChanges;
 
 /// Target describes a proof target. For every proof target given, a proof calculator will calculate
 /// and return all nodes whose path is a prefix of the target's `key_nibbles`.
@@ -112,48 +112,48 @@ impl MultiProofTargetsV2 {
     }
 
     /// Returns an iterator that yields chunks of the specified size.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the chunk size is zero.
     pub fn chunks(self, chunk_size: usize) -> impl Iterator<Item = Self> {
         ChunkedMultiProofTargetsV2::new(self, chunk_size)
     }
 
     /// Returns a set of [`MultiProofTargetsV2`] and the total amount of storage targets, based on
-    /// the given state.
-    pub fn from_state(state: EvmState) -> (Self, usize) {
+    /// the given account changes.
+    ///
+    /// Accounts that were not changed, or that were selfdestructed, get no targets. Since
+    /// selfdestruct can only happen in the creating transaction, proofs for those accounts are not
+    /// worth prefetching.
+    ///
+    /// See: <https://eips.ethereum.org/EIPS/eip-6780>
+    pub fn from_account_changes<'a>(
+        changes: impl IntoIterator<Item = AccountChanges<'a>>,
+    ) -> (Self, usize) {
         let mut targets = Self::default();
-        targets.account_targets.reserve(state.len());
-        targets.storage_targets.reserve(state.len());
         let mut storage_target_count = 0;
-        for (addr, account) in state {
-            // if the account was not touched, or if the account was selfdestructed, do not
-            // fetch proofs for it
-            //
-            // Since selfdestruct can only happen in the same transaction, we can skip
-            // prefetching proofs for selfdestructed accounts
-            //
-            // See: https://eips.ethereum.org/EIPS/eip-6780
-            if !account.is_touched() || account.is_selfdestructed() {
+        for changes in changes {
+            if changes.selfdestructed {
                 continue
             }
 
-            let hashed_address = keccak256(addr);
-
-            if account.info != account.original_info() {
-                targets.account_targets.push(hashed_address.into());
+            let storage_slots = changes
+                .storage
+                .changed_slots()
+                .map(|(key, _)| ProofV2Target::new(keccak256(B256::from(*key))))
+                .collect::<Vec<_>>();
+            let info_changed = changes.original != changes.current;
+            if !info_changed && storage_slots.is_empty() {
+                continue
             }
 
-            let mut storage_slots = Vec::with_capacity(account.storage.len());
-            for (key, slot) in account.storage {
-                // do nothing if unchanged
-                if !slot.is_changed() {
-                    continue
-                }
-
-                let hashed_slot = keccak256(B256::new(key.to_be_bytes()));
-                storage_slots.push(ProofV2Target::from(hashed_slot));
+            let hashed_address = keccak256(changes.address);
+            if info_changed {
+                targets.account_targets.push(ProofV2Target::new(hashed_address));
             }
-
-            storage_target_count += storage_slots.len();
             if !storage_slots.is_empty() {
+                storage_target_count += storage_slots.len();
                 targets.storage_targets.insert(hashed_address, storage_slots);
             }
         }
@@ -183,7 +183,12 @@ pub struct ChunkedMultiProofTargetsV2 {
 
 impl ChunkedMultiProofTargetsV2 {
     /// Creates a new chunked iterator for the given targets.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `size` is zero.
     pub fn new(targets: MultiProofTargetsV2, size: usize) -> Self {
+        assert!(size > 0, "chunk size must be non-zero");
         Self {
             account_targets: targets.account_targets.into_iter(),
             storage_targets: targets.storage_targets,
@@ -286,5 +291,101 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
         } else {
             Some(chunk)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, U256};
+    use evm2::evm::{AccountInfo, StorageOverlay, StorageSlot, Tracked};
+
+    fn overlay(slots: &[(u64, u64, u64)]) -> StorageOverlay {
+        let mut storage = StorageOverlay::default();
+        for &(key, original, current) in slots {
+            storage.slots.insert(
+                U256::from(key),
+                StorageSlot {
+                    value: Tracked::from_parts(U256::from(original), U256::from(current)),
+                    ..Default::default()
+                },
+            );
+        }
+        storage
+    }
+
+    fn changes<'a>(
+        address: Address,
+        original: &'a AccountInfo,
+        current: Option<&'a AccountInfo>,
+        selfdestructed: bool,
+        storage: &'a StorageOverlay,
+    ) -> AccountChanges<'a> {
+        AccountChanges {
+            address,
+            original: Some(original),
+            current,
+            created: true,
+            selfdestructed,
+            touched: false,
+            code: None,
+            storage,
+        }
+    }
+
+    #[test]
+    fn from_account_changes_ignores_unchanged_reads() {
+        let info = AccountInfo::default();
+        let storage = overlay(&[(7, 8, 8)]);
+        let (targets, count) = MultiProofTargetsV2::from_account_changes([AccountChanges {
+            created: false,
+            ..changes(Address::repeat_byte(1), &info, Some(&info), false, &storage)
+        }]);
+        assert!(targets.is_empty());
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn from_account_changes_includes_changes() {
+        let address = Address::repeat_byte(1);
+        let original = AccountInfo::default();
+        let current = AccountInfo { nonce: 1, ..original.clone() };
+        let storage = overlay(&[(7, 0, 8)]);
+        let (targets, count) = MultiProofTargetsV2::from_account_changes([changes(
+            address,
+            &original,
+            Some(&current),
+            false,
+            &storage,
+        )]);
+        assert_eq!(
+            targets.account_targets.iter().map(ProofV2Target::key).collect::<Vec<_>>(),
+            vec![keccak256(address)]
+        );
+        assert_eq!(
+            targets.storage_targets[&keccak256(address)]
+                .iter()
+                .map(ProofV2Target::key)
+                .collect::<Vec<_>>(),
+            vec![keccak256(B256::from(U256::from(7)))]
+        );
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn from_account_changes_skips_selfdestructed() {
+        let address = Address::repeat_byte(1);
+        let retained = Address::repeat_byte(2);
+        let info = AccountInfo::default();
+        let storage = overlay(&[(7, 0, 8)]);
+        let (targets, count) = MultiProofTargetsV2::from_account_changes([
+            changes(address, &info, None, true, &storage),
+            // Lifecycle flags alone do not imply an account trie update.
+            changes(retained, &info, Some(&info), false, &storage),
+        ]);
+        assert!(targets.account_targets.is_empty());
+        assert_eq!(targets.storage_targets.len(), 1);
+        assert!(targets.storage_targets.contains_key(&keccak256(retained)));
+        assert_eq!(count, 1);
     }
 }

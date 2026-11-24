@@ -4,6 +4,7 @@
 //! announcement cell mask in both directions as well as a blob-elided `PooledTransactions`
 //! response per [EIP-8070](https://eips.ethereum.org/EIPS/eip-8070).
 
+use crate::utils::funded_transaction;
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID, transaction::TxEip4844WithSidecar, Header, SignableTransaction,
     TxEip4844,
@@ -26,18 +27,15 @@ use reth_eth_wire_types::{
 use reth_ethereum_forks::EthereumHardfork;
 use reth_ethereum_primitives::{Block, PooledTransactionVariant};
 use reth_network::{
-    test_utils::{NetworkEventStream, PeerConfig, Testnet},
+    config::rng_secret_key,
+    test_utils::{PeerConfig, Testnet},
     transactions::config::{TransactionPropagationMode, TransactionsManagerConfig},
-    NetworkEventListenerProvider, PeersInfo,
+    PeersInfo,
 };
 use reth_network_peers::pk2id;
 use reth_primitives_traits::{crypto::secp256k1::sign_message, SignerRecoverable};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-use reth_transaction_pool::{
-    blobstore::BlobTxCellSidecar, test_utils::TransactionGenerator, AddedTransactionOutcome,
-    PoolTransaction, TransactionPool,
-};
-use secp256k1::{SecretKey, SECP256K1};
+use reth_transaction_pool::{blobstore::BlobTxCellSidecar, TransactionPool};
 use std::time::Duration;
 use tokio::net::TcpStream;
 
@@ -117,31 +115,26 @@ async fn run_eth72_blob_receive(cells_first: bool) {
     };
     provider.add_block(tip.hash_slow(), Block { header: tip, body: Default::default() });
 
-    let mut net = Testnet::create_with(0, provider.clone()).await;
-    net.add_peer_with_config(PeerConfig::with_protocols(
-        provider.clone(),
-        Some(EthVersion::Eth72.into()),
-    ))
-    .await
-    .unwrap();
-
     // Announce hashes to every peer instead of broadcasting transactions in full, so the raw
     // peer receives `NewPooledTransactionHashes` for non-blob transactions as well.
     let tx_manager_config = TransactionsManagerConfig {
         propagation_mode: TransactionPropagationMode::Max(0),
         ..Default::default()
     };
-    let net = net.with_eth_pool_config(tx_manager_config);
-    let handle = net.spawn();
-
-    let node = &handle.peers()[0];
+    let net = Testnet::from_configs([
+        PeerConfig::new(provider.clone()).with_protocols([EthVersion::Eth72])
+    ])
+    .await
+    .with_eth_pool_config(tx_manager_config)
+    .spawn();
+    let [node] = net.peers_array();
     let node_id = *node.peer_id();
     let node_pool = node.pool().unwrap();
-    let mut events = NetworkEventStream::new(node.network().event_listener());
+    let mut events = node.event_stream();
 
     // connect a raw eth/72 peer
-    let raw_key = SecretKey::new(&mut rand_08::thread_rng());
-    let raw_id = pk2id(&raw_key.public_key(SECP256K1));
+    let raw_key = rng_secret_key();
+    let raw_id = pk2id(&raw_key.public_key());
 
     let tcp = TcpStream::connect(node.local_addr()).await.unwrap();
     let ecies = ECIESStream::connect(tcp, raw_key, node_id).await.unwrap();
@@ -164,11 +157,8 @@ async fn run_eth72_blob_receive(cells_first: bool) {
     let baseline_reputation = node.peer_handle().peer_by_id(raw_id).await.unwrap().reputation();
 
     // 1) node -> raw peer: a plain pending transaction is announced with the eth/72 message
-    let mut tx_gen = TransactionGenerator::new(rand::rng());
-    let tx = tx_gen.gen_eip1559_pooled();
-    provider.add_account(tx.sender(), ExtendedAccount::new(0, U256::from(100_000_000u64)));
-    let AddedTransactionOutcome { hash: pending_hash, .. } =
-        node_pool.add_external_transaction(tx).await.unwrap();
+    let pending_hash =
+        node_pool.add_external_transaction(funded_transaction(&provider)).await.unwrap().hash;
 
     let announcement = match next_message(&mut eth_stream).await {
         EthMessage::NewPooledTransactionHashes72(announcement) => announcement,
@@ -192,13 +182,18 @@ async fn run_eth72_blob_receive(cells_first: bool) {
     };
     eth_stream.send(EthMessage::NewPooledTransactionHashes72(announcement)).await.unwrap();
 
-    // the node must fetch the announced blob transaction
-    let request = match next_message(&mut eth_stream).await {
-        EthMessage::GetPooledTransactions(request) => request,
-        message => panic!("unexpected message {message:?}"),
-    };
+    // Body fetching may wait for more announcements while cell fetching starts immediately.
+    let mut body_request = None;
+    let mut cell_request = None;
+    for _ in 0..2 {
+        match next_message(&mut eth_stream).await {
+            EthMessage::GetPooledTransactions(request) => body_request = Some(request),
+            EthMessage::GetCells(request) => cell_request = Some(request),
+            message => panic!("unexpected message {message:?}"),
+        }
+    }
+    let request = body_request.expect("node must request the body");
     assert_eq!(request.message.0, vec![blob_tx_hash]);
-
     let body = EthMessage::PooledTransactionsEth72(RequestPair {
         request_id: request.request_id,
         message: PooledTransactionsEth72(vec![pooled]),
@@ -206,10 +201,7 @@ async fn run_eth72_blob_receive(cells_first: bool) {
     if !cells_first {
         eth_stream.send(body.clone()).await.unwrap();
     }
-    let request = match next_message(&mut eth_stream).await {
-        EthMessage::GetCells(request) => request,
-        message => panic!("unexpected message {message:?}"),
-    };
+    let request = cell_request.expect("node must request the cells");
     assert_eq!(request.message.hashes, vec![blob_tx_hash]);
     let mask = alloy_eips::eip7594::BlobCellMask::from_bits(u128::from_le_bytes(
         request.message.cell_mask.into(),

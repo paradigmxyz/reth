@@ -2,9 +2,7 @@
 
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
-use reth_provider::{
-    AccountReader, BytecodeReader, ProviderResult, StateProvider, StateProviderBox,
-};
+use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -13,14 +11,14 @@ use std::{
     thread::JoinHandle,
 };
 use tokio::sync::oneshot;
-use tracing::trace;
+use tracing::{error, trace};
 
-/// Builds a fresh `StateProviderBox` over the block's parent state. Type-erased so the pool is not
+/// Builds a fresh EVM provider over the block's parent state. Type-erased so the pool is not
 /// generic over the provider factory; each worker builds its own per block.
-pub type BuildProviderFn = dyn Fn() -> ProviderResult<StateProviderBox> + Send + Sync;
+pub type BuildProviderFn = dyn Fn() -> ProviderResult<EvmStateProviderBox> + Send + Sync;
 
-/// A single warm request: a whole account (basic account + its bytecode) followed by a batch of
-/// its storage slots, or a batch of storage slots on their own.
+/// A single warm request: an account and a batch of its storage slots, or a batch of storage slots
+/// on their own.
 enum PrewarmTarget {
     Account(Address, Box<[StorageKey]>),
     Storage(Address, Box<[StorageKey]>),
@@ -48,12 +46,13 @@ pub struct BalPrewarmPool {
     workers: Vec<crossbeam_channel::Sender<PrewarmMsg>>,
     /// Round-robin cursor for distributing warm requests across workers.
     next: AtomicUsize,
-    _handles: Vec<JoinHandle<()>>,
+    handles: Vec<JoinHandle<()>>,
 }
 
 impl BalPrewarmPool {
     /// Spawns `num_threads` long-lived blocking worker threads. Owned by the
-    /// [`PayloadProcessor`](super::PayloadProcessor); the threads exit when the pool is dropped.
+    /// [`PayloadProcessor`](super::PayloadProcessor); dropping the pool stops and joins the
+    /// threads.
     pub fn new(num_threads: usize) -> Arc<Self> {
         let mut workers = Vec::with_capacity(num_threads);
         let mut handles = Vec::with_capacity(num_threads);
@@ -68,7 +67,7 @@ impl BalPrewarmPool {
             );
         }
         trace!(target: "engine::tree::bal_prewarm_pool", num_threads, "BalPrewarmPool spawned");
-        Arc::new(Self { workers, next: AtomicUsize::new(0), _handles: handles })
+        Arc::new(Self { workers, next: AtomicUsize::new(0), handles })
     }
 
     /// Begins a block: hands every worker the provider builder and shared cache so each opens its
@@ -88,7 +87,7 @@ impl BalPrewarmPool {
         }
     }
 
-    /// Fire-and-forget: warm an account (basic account + bytecode) and its storage slots.
+    /// Fire-and-forget: warm an account and its storage slots.
     ///
     /// The slots are dispatched in `WARM_BATCH_SIZE` chunks that are distributed independently,
     /// so a single account with a large read-set does not serialize onto one worker;
@@ -129,6 +128,27 @@ impl BalPrewarmPool {
     }
 }
 
+impl Drop for BalPrewarmPool {
+    /// Disconnects every worker's queue and joins the workers. Detaching them instead, by dropping
+    /// their handles, races with their exit in glibc before 2.43 and can crash the process.
+    ///
+    /// A worker drains the requests queued ahead of the disconnect before it exits, so the join is
+    /// only as long as the queues are: [`end_block`](Self::end_block) empties them before the last
+    /// handle to the pool goes away. A handle for the current thread is skipped because joining it
+    /// would deadlock.
+    fn drop(&mut self) {
+        self.workers.clear();
+        let current = std::thread::current().id();
+        for handle in self.handles.drain(..) {
+            if handle.thread().id() != current &&
+                let Err(err) = handle.join()
+            {
+                error!(target: "engine::tree::bal_prewarm_pool", ?err, "BAL prewarm worker panicked");
+            }
+        }
+    }
+}
+
 /// Number of warming threads.
 ///
 /// The work performed on those threads boils down mostly to MDBX reads. An MDBX read consists of
@@ -161,7 +181,7 @@ const WARM_BATCH_SIZE: usize = 8;
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
     // `EndBlock`. `None` while idle, so no read txn is pinned across the inter-block gap.
-    let mut provider: Option<CachedStateProvider<StateProviderBox>> = None;
+    let mut provider: Option<CachedStateProvider<EvmStateProviderBox>> = None;
 
     // Blocks when idle; the channel disconnects (and the loop ends) when the pool is dropped.
     while let Ok(msg) = rx.recv() {
@@ -182,12 +202,7 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                 let Some(provider) = provider.as_ref() else { continue };
                 match target {
                     PrewarmTarget::Account(addr, slots) => {
-                        if let Ok(Some(account)) = provider.basic_account(&addr) &&
-                            let Some(code_hash) = account.bytecode_hash &&
-                            code_hash != alloy_consensus::constants::KECCAK_EMPTY
-                        {
-                            let _ = provider.bytecode_by_hash(&code_hash);
-                        }
+                        let _ = provider.basic_account(&addr);
                         for &slot in &slots {
                             let _ = provider.storage(addr, slot);
                         }
@@ -206,6 +221,7 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
         }
     }
 }
+
 struct SendOnDrop {
     sender: Option<oneshot::Sender<()>>,
 }
@@ -215,5 +231,38 @@ impl Drop for SendOnDrop {
         if let Some(sender) = self.sender.take() {
             let _ = sender.send(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_provider::ProviderError;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn drop_waits_for_the_workers_to_exit() {
+        let num_threads = 4;
+        let started = Arc::new(AtomicUsize::new(0));
+        let finished = Arc::new(AtomicUsize::new(0));
+        let pool = BalPrewarmPool::new(num_threads);
+        let build: Arc<BuildProviderFn> = {
+            let (started, finished) = (started.clone(), finished.clone());
+            Arc::new(move || {
+                started.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(50));
+                finished.fetch_add(1, Ordering::SeqCst);
+                Err(ProviderError::UnsupportedProvider)
+            })
+        };
+        pool.begin_block(build, ExecutionCache::new(1_000), None);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while started.load(Ordering::SeqCst) < num_threads {
+            assert!(Instant::now() < deadline, "BAL prewarm workers did not start");
+            std::thread::yield_now();
+        }
+
+        drop(pool);
+        assert_eq!(finished.load(Ordering::SeqCst), num_threads);
     }
 }

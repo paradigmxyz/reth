@@ -71,6 +71,11 @@ def main():
     b_gas_per_second = b_stats["mean_mgas_s"] * 1_000_000
     f_gas_per_second = f_stats["mean_mgas_s"] * 1_000_000
 
+    # Keep these legacy columns as summed processing latency, alongside the
+    # execution-only gas/s columns. wall_clock_s now means measured elapsed time.
+    b_processing_ms = b_stats.get("processing_time_s", b_stats.get("wall_clock_s", 0)) * 1000
+    f_processing_ms = f_stats.get("processing_time_s", f_stats.get("wall_clock_s", 0)) * 1000
+
     mean_change = changes.get("mean", {}).get("pct", 0.0)
     gas_change = changes.get("mgas_s", {}).get("pct", 0.0)
     latency_improved = 1 if mean_change < 0 else 0
@@ -107,10 +112,10 @@ def main():
         '{esc(baseline["ref"])}', '{esc(baseline["ref"])}',
         '{esc(feature["ref"])}', '{esc(feature["ref"])}',
         {blocks},
-        {b_stats.get("wall_clock_s", 0) * 1000}, {b_gas_per_second},
+        {b_processing_ms}, {b_gas_per_second},
         {b_stats["mean_ms"]}, {b_stats["p50_ms"]},
         {b_stats["p90_ms"]}, {b_stats["p99_ms"]},
-        {f_stats.get("wall_clock_s", 0) * 1000}, {f_gas_per_second},
+        {f_processing_ms}, {f_gas_per_second},
         {f_stats["mean_ms"]}, {f_stats["p50_ms"]},
         {f_stats["p90_ms"]}, {f_stats["p99_ms"]},
         {mean_change}, {gas_change},

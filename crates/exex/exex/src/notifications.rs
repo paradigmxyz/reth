@@ -6,9 +6,8 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::ConfigureEvm;
 use reth_exex_types::ExExHead;
 use reth_node_api::NodePrimitives;
-use reth_provider::{BlockNumReader, BlockReader, Chain, HeaderProvider, StateProviderFactory};
+use reth_provider::{BlockNumReader, BlockReader, Chain, StateProviderFactory};
 use reth_stages_api::ExecutionStageThresholds;
-use reth_tracing::tracing::debug;
 use std::{
     collections::VecDeque,
     fmt::Debug,
@@ -17,6 +16,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc::Receiver;
+use tracing::debug;
 
 /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks. If the
 /// stream is configured with a head via [`ExExNotifications::set_with_head`] or
@@ -164,8 +164,8 @@ where
 
 impl<P, E> ExExNotificationsStream<E::Primitives> for ExExNotifications<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
+    P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
 {
     fn set_without_head(&mut self) {
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
@@ -221,7 +221,7 @@ where
 
 impl<P, E> Stream for ExExNotifications<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
     E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
 {
     type Item = eyre::Result<ExExNotification<E::Primitives>>;
@@ -254,7 +254,7 @@ where
 
 impl<P: Debug, E> Debug for ExExNotificationsWithoutHead<P, E>
 where
-    E: ConfigureEvm + Debug,
+    E: ConfigureEvm,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExExNotifications")
@@ -385,8 +385,8 @@ where
 
 impl<P, E> ExExNotificationsWithHead<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
+    P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
 {
     /// Checks if the ExEx head is on the canonical chain.
     ///
@@ -475,8 +475,8 @@ where
 
 impl<P, E> Stream for ExExNotificationsWithHead<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
+    P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
 {
     type Item = eyre::Result<ExExNotification<E::Primitives>>;
 
@@ -573,13 +573,18 @@ mod tests {
     use alloy_eips::BlockNumHash;
     use eyre::OptionExt;
     use futures::StreamExt;
+    use reth_chain_state::CanonicalInMemoryStateWriter;
+    use reth_chainspec::MAINNET;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Block;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::Block as _;
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockWriter,
-        Chain, DBProvider, DatabaseProviderFactory,
+        providers::BlockchainProvider,
+        test_utils::{
+            create_test_provider_factory, create_test_provider_factory_with_in_memory_state_writer,
+        },
+        BlockWriter, Chain, DBProvider, DatabaseProviderFactory,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use std::collections::BTreeMap;
@@ -668,12 +673,20 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
 
-        let provider_factory = create_test_provider_factory();
+        let (provider_factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let genesis_hash = init_genesis(&provider_factory)?;
         let genesis_block = provider_factory
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
-        let provider = BlockchainProvider::new(provider_factory.clone())?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            provider_factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            provider_factory.clone(),
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         let exex_head =
             ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };
@@ -713,9 +726,7 @@ mod tests {
         let provider_rw = provider_factory.provider_rw()?;
         provider_rw.insert_block(&node_head_block)?;
         provider_rw.commit()?;
-        provider
-            .canonical_in_memory_state()
-            .set_canonical_head(node_head_block.clone_sealed_header());
+        canonical_in_memory_state_writer.set_canonical_head(node_head_block.clone_sealed_header());
 
         // The ExEx recovers still at genesis and catches up, it needs block 1 again, but that
         // notification is long gone from the channel.

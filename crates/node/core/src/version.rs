@@ -99,35 +99,78 @@ pub fn default_client_version() -> ClientVersion {
     }
 }
 
-/// Get a reference to the global version metadata
+/// Get a reference to the global version metadata.
+///
+/// Returns [`unknown_version_metadata`] when no binary set it with
+/// [`try_init_version_metadata`].
 pub fn version_metadata() -> &'static RethCliVersionConsts {
-    VERSION_METADATA.get_or_init(default_reth_version_metadata)
+    VERSION_METADATA.get_or_init(unknown_version_metadata)
 }
 
-/// default reth version metadata using compile-time env! macros.
-pub fn default_reth_version_metadata() -> RethCliVersionConsts {
+/// Version metadata without anything a build script stamps: the package version and `unknown`
+/// for the rest.
+pub fn unknown_version_metadata() -> RethCliVersionConsts {
+    let version = env!("CARGO_PKG_VERSION");
+    let unknown = || Cow::Borrowed("unknown");
     RethCliVersionConsts {
         name_client: Cow::Borrowed("Reth"),
-        cargo_pkg_version: Cow::Borrowed(env!("CARGO_PKG_VERSION")),
-        vergen_git_sha_long: Cow::Borrowed(env!("VERGEN_GIT_SHA")),
-        vergen_git_sha: Cow::Borrowed(env!("VERGEN_GIT_SHA_SHORT")),
-        vergen_build_timestamp: Cow::Borrowed(env!("VERGEN_BUILD_TIMESTAMP")),
-        vergen_cargo_target_triple: Cow::Borrowed(env!("VERGEN_CARGO_TARGET_TRIPLE")),
-        vergen_cargo_features: Cow::Borrowed(env!("VERGEN_CARGO_FEATURES")),
-        short_version: Cow::Borrowed(env!("RETH_SHORT_VERSION")),
-        long_version: Cow::Owned(format!(
-            "{}\n{}\n{}\n{}\n{}",
-            env!("RETH_LONG_VERSION_0"),
-            env!("RETH_LONG_VERSION_1"),
-            env!("RETH_LONG_VERSION_2"),
-            env!("RETH_LONG_VERSION_3"),
-            env!("RETH_LONG_VERSION_4"),
-        )),
-
-        build_profile_name: Cow::Borrowed(env!("RETH_BUILD_PROFILE")),
-        p2p_client_version: Cow::Borrowed(env!("RETH_P2P_CLIENT_VERSION")),
+        cargo_pkg_version: Cow::Borrowed(version),
+        vergen_git_sha_long: unknown(),
+        vergen_git_sha: unknown(),
+        vergen_build_timestamp: unknown(),
+        vergen_cargo_target_triple: unknown(),
+        vergen_cargo_features: unknown(),
+        short_version: Cow::Borrowed(version),
+        long_version: Cow::Owned(format!("Version: {version}")),
+        build_profile_name: unknown(),
+        p2p_client_version: Cow::Owned(format!("reth/v{version}/{}", std::env::consts::OS)),
         extra_data: Cow::Owned(default_extra_data()),
     }
+}
+
+/// Reth's version metadata, stamped by the calling binary's build script.
+///
+/// Version metadata changes with every commit, and the build timestamp with every build. Stamped
+/// in this crate, it would rebuild every crate that depends on this one. Instead, a binary calls
+/// `reth_node_version_build::emit_version_metadata` from its build script, and sets the result
+/// with [`try_init_version_metadata`]:
+///
+/// ```ignore
+/// reth_node_core::version::try_init_version_metadata(reth_node_core::reth_version_metadata!())
+///     .expect("version metadata is set once, before anything reads it");
+/// ```
+///
+/// [`try_init_version_metadata`]: crate::version::try_init_version_metadata
+#[macro_export]
+macro_rules! reth_version_metadata {
+    () => {
+        $crate::version::RethCliVersionConsts {
+            name_client: ::std::borrow::Cow::Borrowed("Reth"),
+            cargo_pkg_version: ::std::borrow::Cow::Borrowed(env!("CARGO_PKG_VERSION")),
+            vergen_git_sha_long: ::std::borrow::Cow::Borrowed(env!("VERGEN_GIT_SHA")),
+            vergen_git_sha: ::std::borrow::Cow::Borrowed(env!("VERGEN_GIT_SHA_SHORT")),
+            vergen_build_timestamp: ::std::borrow::Cow::Borrowed(env!("VERGEN_BUILD_TIMESTAMP")),
+            vergen_cargo_target_triple: ::std::borrow::Cow::Borrowed(env!(
+                "VERGEN_CARGO_TARGET_TRIPLE"
+            )),
+            vergen_cargo_features: ::std::borrow::Cow::Borrowed(env!("VERGEN_CARGO_FEATURES")),
+            short_version: ::std::borrow::Cow::Borrowed(env!("RETH_SHORT_VERSION")),
+            long_version: ::std::borrow::Cow::Borrowed(concat!(
+                env!("RETH_LONG_VERSION_0"),
+                "\n",
+                env!("RETH_LONG_VERSION_1"),
+                "\n",
+                env!("RETH_LONG_VERSION_2"),
+                "\n",
+                env!("RETH_LONG_VERSION_3"),
+                "\n",
+                env!("RETH_LONG_VERSION_4"),
+            )),
+            build_profile_name: ::std::borrow::Cow::Borrowed(env!("RETH_BUILD_PROFILE")),
+            p2p_client_version: ::std::borrow::Cow::Borrowed(env!("RETH_P2P_CLIENT_VERSION")),
+            extra_data: ::std::borrow::Cow::Owned($crate::version::default_extra_data()),
+        }
+    };
 }
 
 #[cfg(test)]

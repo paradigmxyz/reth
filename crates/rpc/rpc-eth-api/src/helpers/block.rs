@@ -1,6 +1,6 @@
 //! Database access for `eth_` block RPC methods. Loads block and receipt data w.r.t. network.
 
-use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
+use super::{LoadPendingBlock, SpawnBlocking};
 use crate::{
     node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcNodeCore,
     RpcReceipt,
@@ -10,13 +10,17 @@ use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::BlockId;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Index};
+use evm2::evm::Bal as EvmBal;
 use futures::Future;
-use reth_node_api::BlockBody;
-use reth_primitives_traits::{AlloyBlockHeader, RecoveredBlock, SealedHeader, TransactionMeta};
+use reth_primitives_traits::{
+    AlloyBlockHeader, BlockBody, RecoveredBlock, SealedHeader, TransactionMeta,
+};
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
-use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
+use reth_rpc_eth_types::block::SharedReceipts;
+use reth_storage_api::{
+    BlockIdReader, BlockReader, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
+};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use revm::state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
 /// Result type of the fetched block receipts.
@@ -25,7 +29,7 @@ pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
 pub type BlockAndReceiptsResult<Eth> = Result<
     Option<(
         Arc<RecoveredBlock<<<Eth as RpcNodeCore>::Provider as BlockReader>::Block>>,
-        Arc<Vec<ProviderReceipt<<Eth as RpcNodeCore>::Provider>>>,
+        SharedReceipts<ProviderReceipt<<Eth as RpcNodeCore>::Provider>>,
     )>,
     <Eth as EthApiTypes>::Error,
 >;
@@ -43,8 +47,8 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     {
         async move {
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
-            let header =
-                self.converter().convert_header(block.clone_sealed_header(), block.rlp_length())?;
+            // Header responses omit the block size: https://github.com/ethereum/execution-apis/pull/877
+            let header = self.converter().convert_header(block.clone_sealed_header(), None)?;
             Ok(Some(header))
         }
     }
@@ -64,13 +68,22 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
         async move {
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
 
-            let block = block.clone_into_rpc_block(
-                full.into(),
-                |tx, tx_info| self.converter().fill(tx, tx_info),
-                |header, size| self.converter().convert_header(header, size),
-            )?;
-            Ok(Some(block))
+            self.convert_block(&block, full).map(Some)
         }
+    }
+
+    /// Builds an RPC block with full transactions or only their hashes, propagating conversion
+    /// errors from the network's header and transaction converters.
+    fn convert_block(
+        &self,
+        block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
+        full: bool,
+    ) -> Result<RpcBlock<Self::NetworkTypes>, Self::Error> {
+        Ok(block.clone_into_rpc_block(
+            full.into(),
+            |tx, tx_info| self.converter().fill(tx, tx_info),
+            |header, block_size| self.converter().convert_header(header, Some(block_size)),
+        )?)
     }
 
     /// Returns the number transactions in the given block.
@@ -89,61 +102,64 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     fn block_receipts(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = BlockReceiptsResult<Self::NetworkTypes, Self::Error>> + Send
-    where
-        Self: LoadReceipt,
-    {
+    ) -> impl Future<Output = BlockReceiptsResult<Self::NetworkTypes, Self::Error>> + Send {
         async move {
-            if let Some((block, receipts)) = self.load_block_and_receipts(block_id).await? {
-                let block_number = block.number();
-                let base_fee = block.base_fee_per_gas();
-                let block_hash = block.hash();
-                let excess_blob_gas = block.excess_blob_gas();
-                let timestamp = block.timestamp();
-                let mut gas_used = 0;
-                let mut next_log_index = 0;
-
-                let inputs = block
-                    .transactions_recovered()
-                    .zip(Arc::unwrap_or_clone(receipts))
-                    .enumerate()
-                    .map(|(idx, (tx, receipt))| {
-                        let meta = TransactionMeta {
-                            tx_hash: *tx.tx_hash(),
-                            index: idx as u64,
-                            block_hash,
-                            block_number,
-                            base_fee,
-                            excess_blob_gas,
-                            timestamp,
-                        };
-
-                        let cumulative_gas_used = receipt.cumulative_gas_used();
-                        let logs_len = receipt.logs().len();
-
-                        let input = ConvertReceiptInput {
-                            tx,
-                            gas_used: cumulative_gas_used - gas_used,
-                            next_log_index,
-                            meta,
-                            receipt,
-                        };
-
-                        gas_used = cumulative_gas_used;
-                        next_log_index += logs_len;
-
-                        input
-                    })
-                    .collect::<Vec<_>>();
-
-                return Ok(self
-                    .converter()
-                    .convert_receipts_with_block(inputs, block.sealed_block())
-                    .map(Some)?)
-            }
-
-            Ok(None)
+            self.load_block_and_receipts(block_id)
+                .await?
+                .map(|(block, receipts)| self.convert_block_receipts(&block, receipts))
+                .transpose()
         }
+    }
+
+    /// Converts receipts in transaction order using their recovered block's execution metadata.
+    /// Returns the network converter's error if it cannot build the RPC receipts.
+    fn convert_block_receipts(
+        &self,
+        block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
+        receipts: SharedReceipts<ProviderReceipt<Self::Provider>>,
+    ) -> Result<Vec<RpcReceipt<Self::NetworkTypes>>, Self::Error> {
+        let block_number = block.number();
+        let base_fee = block.base_fee_per_gas();
+        let block_hash = block.hash();
+        let excess_blob_gas = block.excess_blob_gas();
+        let timestamp = block.timestamp();
+        let mut gas_used = 0;
+        let mut next_log_index = 0;
+
+        let inputs = block
+            .transactions_recovered()
+            .zip(receipts.into_vec())
+            .enumerate()
+            .map(|(idx, (tx, receipt))| {
+                let meta = TransactionMeta {
+                    tx_hash: *tx.tx_hash(),
+                    index: idx as u64,
+                    block_hash,
+                    block_number,
+                    base_fee,
+                    excess_blob_gas,
+                    timestamp,
+                };
+
+                let cumulative_gas_used = receipt.cumulative_gas_used();
+                let logs_len = receipt.logs().len();
+
+                let input = ConvertReceiptInput {
+                    tx,
+                    gas_used: cumulative_gas_used - gas_used,
+                    next_log_index,
+                    meta,
+                    receipt,
+                };
+
+                gas_used = cumulative_gas_used;
+                next_log_index += logs_len;
+
+                input
+            })
+            .collect::<Vec<_>>();
+
+        Ok(self.converter().convert_receipts_with_block(inputs, block.sealed_block())?)
     }
 
     /// Helper method that loads a block and all its receipts.
@@ -152,7 +168,6 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
         block_id: BlockId,
     ) -> impl Future<Output = BlockAndReceiptsResult<Self>> + Send
     where
-        Self: LoadReceipt,
         Self::Pool:
             TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
     {
@@ -164,12 +179,13 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
 
                 // First, try to get the pending block from the provider, in case we already
                 // received the actual pending block from the CL.
-                if let Some((block, receipts)) = self
+                if let Some(pending) = self
                     .provider()
                     .pending_block_and_receipts()
                     .map_err(Self::Error::from_eth_err)?
                 {
-                    return Ok(Some((Arc::new(block), Arc::new(receipts))));
+                    let (block, output) = pending.into_parts();
+                    return Ok(Some((block, output.into())));
                 }
 
                 // If no pending block from provider, build the pending block locally.
@@ -186,7 +202,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
                     .await
                     .map_err(Self::Error::from_eth_err)?
             {
-                return Ok(Some((block, receipts)));
+                return Ok(Some((block, receipts.into())));
             }
 
             Ok(None)
@@ -236,7 +252,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
                     let size = block.length();
                     let header = self
                         .converter()
-                        .convert_header(SealedHeader::new_unhashed(block.header), size)?;
+                        .convert_header(SealedHeader::new_unhashed(block.header), Some(size))?;
                     Ok(Block {
                         uncles: vec![],
                         header,
@@ -274,7 +290,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
                 if let Some(pending_block) =
                     self.provider().pending_block().map_err(Self::Error::from_eth_err)?
                 {
-                    return Ok(Some(Arc::new(pending_block)));
+                    return Ok(Some(pending_block));
                 }
 
                 // If no pending block from provider, try to get local pending block
@@ -310,7 +326,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
         Output = Result<
             Option<(
                 Arc<RecoveredBlock<<Self::Provider as BlockReader>::Block>>,
-                Option<Arc<DecodedBal<Arc<RevmBal>>>>,
+                Option<Arc<DecodedBal<Arc<EvmBal>>>>,
             )>,
             Self::Error,
         >,

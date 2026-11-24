@@ -52,7 +52,7 @@ pub trait RethRpcServerConfig {
     fn http_ws_server_builder(&self) -> ServerConfigBuilder;
 
     /// Returns the default ipc server builder
-    fn ipc_server_builder(&self) -> IpcServerBuilder<Identity, Identity>;
+    fn ipc_server_builder(&self) -> IpcServerBuilder<Identity>;
 
     /// Creates the [`RpcServerConfig`] from cli args.
     fn rpc_server_config(&self) -> RpcServerConfig;
@@ -101,9 +101,13 @@ impl RethRpcServerConfig for RpcServerArgs {
             .max_trace_filter_blocks(self.rpc_max_trace_filter_blocks)
             .max_blocks_per_filter(self.rpc_max_blocks_per_filter.unwrap_or_max())
             .max_logs_per_response(self.rpc_max_logs_per_response.unwrap_or_max() as usize)
+            .max_active_filters(
+                self.rpc_max_active_filters.0.map(|max| usize::try_from(max).unwrap_or(usize::MAX)),
+            )
             .eth_proof_window(self.rpc_eth_proof_window)
             .rpc_gas_cap(self.rpc_gas_cap)
             .rpc_max_simulate_blocks(self.rpc_max_simulate_blocks)
+            .rpc_max_trace_bytes(self.max_trace_bytes())
             .compute_state_root_for_eth_simulate(self.rpc_compute_state_root_for_eth_simulate)
             .state_cache(self.state_cache_config())
             .gpo_config(self.gas_price_oracle_config())
@@ -112,12 +116,17 @@ impl RethRpcServerConfig for RpcServerArgs {
             .raw_tx_forwarder(self.rpc_forwarder.clone())
             .rpc_evm_memory_limit(self.rpc_evm_memory_limit)
             .force_blob_sidecar_upcasting(self.rpc_force_blob_sidecar_upcasting)
+            .max_response_size(self.rpc_max_response_size_bytes() as usize)
     }
 
     fn flashbots_config(&self) -> ValidationApiConfig {
         ValidationApiConfig {
             disallow: self.builder_disallow.clone().unwrap_or_default(),
-            validation_window: self.rpc_eth_proof_window,
+            // the proof window defaults to 0, which would reject any submission whose parent is
+            // behind the tip, so it can only widen the default window
+            validation_window: self
+                .rpc_eth_proof_window
+                .max(ValidationApiConfig::DEFAULT_VALIDATION_WINDOW),
         }
     }
 
@@ -126,6 +135,12 @@ impl RethRpcServerConfig for RpcServerArgs {
             max_blocks: self.rpc_state_cache.max_blocks,
             max_receipts: self.rpc_state_cache.max_receipts,
             max_bals: self.rpc_state_cache.max_bals,
+            max_blocks_bytes: self.rpc_state_cache.max_blocks_bytes,
+            max_receipts_bytes: self.rpc_state_cache.max_receipts_bytes,
+            max_bals_bytes: self.rpc_state_cache.max_bals_bytes,
+            idle_timeout: self.rpc_state_cache.idle_timeout,
+            cache_computed_bals: self.rpc_state_cache.cache_computed_bals,
+            prewarm_bals: self.rpc_state_cache.prewarm_bals,
             max_concurrent_db_requests: self.rpc_state_cache.max_concurrent_db_requests,
             max_cached_tx_hashes: self.rpc_state_cache.max_cached_tx_hashes,
         }
@@ -178,7 +193,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection.get())
     }
 
-    fn ipc_server_builder(&self) -> IpcServerBuilder<Identity, Identity> {
+    fn ipc_server_builder(&self) -> IpcServerBuilder<Identity> {
         IpcServerBuilder::default()
             .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection.get())
             .max_request_body_size(self.rpc_max_request_size_bytes())
@@ -247,7 +262,7 @@ impl RethRpcServerConfig for RpcServerArgs {
         let mut builder = AuthServerConfig::builder(jwt_secret).socket_addr(address);
         if self.auth_ipc {
             builder = builder
-                .ipc_endpoint(self.auth_ipc_path.clone())
+                .ipc_endpoint(self.auth_ipc_path().to_string())
                 .with_ipc_config(self.ipc_server_builder());
         }
         Ok(builder.build())
@@ -277,10 +292,14 @@ impl RethRpcServerConfig for RpcServerArgs {
 mod tests {
     use clap::{Args, Parser};
     use reth_node_core::args::RpcServerArgs;
-    use reth_rpc_eth_types::RPC_DEFAULT_GAS_CAP;
+    use reth_rpc::ValidationApiConfig;
+    use reth_rpc_eth_types::{EthStateCacheConfig, RPC_DEFAULT_GAS_CAP};
     use reth_rpc_layer::JwtSecret;
     use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
-    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+    use std::{
+        net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+        time::Duration,
+    };
 
     use crate::config::RethRpcServerConfig;
 
@@ -289,6 +308,70 @@ mod tests {
     struct CommandParser<T: Args> {
         #[command(flatten)]
         args: T,
+    }
+
+    #[test]
+    fn rpc_cache_limits_reach_eth_config() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.eth_config().cache, EthStateCacheConfig::default());
+
+        for (timeout, expected_timeout) in
+            [("0s", Duration::ZERO), ("2500ms", Duration::from_millis(2500))]
+        {
+            let args = CommandParser::<RpcServerArgs>::parse_from([
+                "reth",
+                "--rpc-cache.max-blocks",
+                "10",
+                "--rpc-cache.max-receipts",
+                "20",
+                "--rpc-cache.max-bals",
+                "30",
+                "--rpc-cache.max-blocks-bytes",
+                "1024",
+                "--rpc-cache.max-receipts-bytes",
+                "0",
+                "--rpc-cache.max-bals-bytes",
+                "4096",
+                "--rpc-cache.idle-timeout",
+                timeout,
+            ])
+            .args;
+            assert_eq!(
+                args.eth_config().cache,
+                EthStateCacheConfig {
+                    max_blocks: 10,
+                    max_receipts: 20,
+                    max_bals: 30,
+                    max_blocks_bytes: 1024,
+                    max_receipts_bytes: 0,
+                    max_bals_bytes: 4096,
+                    idle_timeout: expected_timeout,
+                    ..Default::default()
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn flashbots_validation_window() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(
+            args.flashbots_config().validation_window,
+            ValidationApiConfig::DEFAULT_VALIDATION_WINDOW
+        );
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.eth-proof-window", "1"])
+                .args;
+        assert_eq!(
+            args.flashbots_config().validation_window,
+            ValidationApiConfig::DEFAULT_VALIDATION_WINDOW
+        );
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.eth-proof-window", "100"])
+                .args;
+        assert_eq!(args.flashbots_config().validation_window, 100);
     }
 
     #[test]
@@ -323,6 +406,38 @@ mod tests {
             config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
         );
+    }
+
+    #[test]
+    fn test_testing_namespace_requires_explicit_selection() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http",
+            "--http.api",
+            "all",
+            "--ws",
+            "--ws.api",
+            "all",
+        ])
+        .args;
+        let config = args.transport_rpc_module_config();
+        assert!(!config.contains_http(&RethRpcModule::Testing));
+        assert!(!config.contains_ws(&RethRpcModule::Testing));
+        assert!(!config.contains_ipc(&RethRpcModule::Testing));
+
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http",
+            "--http.api",
+            "eth,testing",
+            "--ws",
+            "--ws.api",
+            "eth,testing",
+        ])
+        .args;
+        let config = args.transport_rpc_module_config();
+        assert!(config.contains_http(&RethRpcModule::Testing));
+        assert!(config.contains_ws(&RethRpcModule::Testing));
     }
 
     #[test]
@@ -409,12 +524,15 @@ mod tests {
             "0",
             "--rpc-max-logs-per-response",
             "0",
+            "--rpc-max-active-filters",
+            "0",
         ])
         .args;
 
         let config = args.eth_config().filter_config();
         assert_eq!(config.max_blocks_per_filter, Some(u64::MAX));
         assert_eq!(config.max_logs_per_response, Some(usize::MAX));
+        assert_eq!(config.max_active_filters, None);
     }
 
     #[test]
@@ -425,12 +543,18 @@ mod tests {
             "100",
             "--rpc-max-logs-per-response",
             "200",
+            "--rpc-max-active-filters",
+            "300",
+            "--rpc.max-response-size",
+            "5",
         ])
         .args;
 
         let config = args.eth_config().filter_config();
         assert_eq!(config.max_blocks_per_filter, Some(100));
         assert_eq!(config.max_logs_per_response, Some(200));
+        assert_eq!(config.max_active_filters, Some(300));
+        assert_eq!(config.max_response_size, Some(5 * 1024 * 1024));
     }
 
     #[test]

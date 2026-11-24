@@ -11,7 +11,12 @@
 //! Entrypoint for running commands.
 
 use reth_tasks::{PanickedTaskError, TaskExecutor};
-use std::{future::Future, pin::pin, sync::mpsc, time::Duration};
+use std::{
+    future::Future,
+    pin::{pin, Pin},
+    sync::mpsc,
+    time::Duration,
+};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
@@ -57,11 +62,12 @@ impl CliRunner {
     where
         F: Future<Output = T>,
     {
-        self.runtime.handle().block_on(fut)
+        self.runtime.handle().block_on(Box::pin(fut) as Pin<Box<dyn Future<Output = T> + '_>>)
     }
 
-    /// Executes the given _async_ command on the tokio runtime until the command future resolves or
-    /// until the process receives a `SIGINT` or `SIGTERM` signal.
+    /// Executes the given _async_ command on the tokio runtime until the command future resolves
+    /// or, unless [`CliRunnerConfig::handle_signals`] is disabled, until the process receives a
+    /// `SIGINT` or `SIGTERM` signal.
     ///
     /// Tasks spawned by the command via the [`TaskExecutor`] are shut down and an attempt is made
     /// to drive their shutdown to completion after the command has finished.
@@ -79,11 +85,27 @@ impl CliRunner {
             + 'static,
     {
         let (context, task_manager_handle) = cli_context(&self.runtime);
+        self.run_until_exit(task_manager_handle, Box::pin(command(context)))
+    }
 
+    /// Runs the type-erased command until it finished or ctrl-c was fired, then shuts down.
+    fn run_until_exit<E>(
+        self,
+        task_manager_handle: JoinHandle<Result<(), PanickedTaskError>>,
+        command: Pin<Box<dyn Future<Output = Result<(), E>> + '_>>,
+    ) -> Result<(), E>
+    where
+        E: Send
+            + Sync
+            + std::fmt::Display
+            + From<std::io::Error>
+            + From<reth_tasks::PanickedTaskError>
+            + 'static,
+    {
         // Executes the command until it finished or ctrl-c was fired
         let command_res = self.runtime.handle().block_on(run_to_completion_or_panic(
             task_manager_handle,
-            run_until_ctrl_c(command(context)),
+            run_until_ctrl_c_if(self.config.handle_signals, command),
         ));
 
         if let Err(err) = &command_res {
@@ -117,19 +139,35 @@ impl CliRunner {
             + From<reth_tasks::PanickedTaskError>
             + 'static,
     {
+        self.run_blocking_until_exit(Box::new(move |context| Box::pin(command(context))))
+    }
+
+    /// Runs the type-erased command on the blocking thread pool until it finished or ctrl-c was
+    /// fired, then shuts down.
+    fn run_blocking_until_exit<E>(
+        self,
+        command: Box<dyn FnOnce(CliContext) -> BoxedCommand<E> + Send>,
+    ) -> Result<(), E>
+    where
+        E: Send
+            + Sync
+            + std::fmt::Display
+            + From<std::io::Error>
+            + From<reth_tasks::PanickedTaskError>
+            + 'static,
+    {
         let (context, task_manager_handle) = cli_context(&self.runtime);
 
         // Spawn the command on the blocking thread pool
         let handle = self.runtime.handle().clone();
-        let handle2 = handle.clone();
-        let command_handle = handle.spawn_blocking(move || handle2.block_on(command(context)));
+        let command_handle = self.runtime.spawn_blocking(move || handle.block_on(command(context)));
 
         // Wait for the command to complete or ctrl-c
         let command_res = self.runtime.handle().block_on(run_to_completion_or_panic(
             task_manager_handle,
-            run_until_ctrl_c(
-                async move { command_handle.await.expect("Failed to join blocking task") },
-            ),
+            run_until_ctrl_c_if(self.config.handle_signals, async move {
+                command_handle.await.expect("Failed to join blocking task")
+            }),
         ));
 
         if let Err(err) = &command_res {
@@ -150,7 +188,9 @@ impl CliRunner {
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
-        self.runtime.handle().block_on(run_until_ctrl_c(fut))?;
+        self.runtime.handle().block_on(run_until_ctrl_c(
+            Box::pin(fut) as Pin<Box<dyn Future<Output = Result<(), E>> + '_>>
+        ))?;
         Ok(())
     }
 
@@ -163,9 +203,15 @@ impl CliRunner {
         F: Future<Output = Result<(), E>> + Send + 'static,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
+        self.run_blocking_until_ctrl_c_boxed(Box::pin(fut))
+    }
+
+    fn run_blocking_until_ctrl_c_boxed<E>(self, fut: BoxedCommand<E>) -> Result<(), E>
+    where
+        E: Send + Sync + From<std::io::Error> + 'static,
+    {
         let handle = self.runtime.handle().clone();
-        let handle2 = handle.clone();
-        let fut = handle.spawn_blocking(move || handle2.block_on(fut));
+        let fut = self.runtime.spawn_blocking(move || handle.block_on(fut));
         self.runtime
             .handle()
             .block_on(run_until_ctrl_c(async move { fut.await.expect("Failed to join task") }))?;
@@ -175,6 +221,9 @@ impl CliRunner {
         Ok(())
     }
 }
+
+/// A type-erased command future, so that code driving it is not instantiated per command.
+type BoxedCommand<E> = Pin<Box<dyn Future<Output = Result<(), E>> + Send>>;
 
 /// Extracts the task manager handle from the runtime and creates the [`CliContext`].
 fn cli_context(
@@ -204,6 +253,13 @@ pub struct CliRunnerConfig {
     /// After the command completes, this is the maximum time to wait for spawned tasks
     /// to finish before forcefully terminating them.
     pub graceful_shutdown_timeout: Duration,
+    /// Whether the runner stops a command when the process receives `SIGINT` or `SIGTERM`.
+    ///
+    /// Enabled by default. When disabled, [`CliRunner::run_command_until_exit`] and
+    /// [`CliRunner::run_blocking_command_until_exit`] only stop once the command resolves, so the
+    /// command must handle these signals itself, for example to stop components that depend on
+    /// the spawned tasks before their graceful shutdown starts.
+    pub handle_signals: bool,
 }
 
 impl Default for CliRunnerConfig {
@@ -215,12 +271,20 @@ impl Default for CliRunnerConfig {
 impl CliRunnerConfig {
     /// Creates a new config with default values.
     pub const fn new() -> Self {
-        Self { graceful_shutdown_timeout: DEFAULT_GRACEFUL_SHUTDOWN_TIMEOUT }
+        Self { graceful_shutdown_timeout: DEFAULT_GRACEFUL_SHUTDOWN_TIMEOUT, handle_signals: true }
     }
 
     /// Sets the graceful shutdown timeout.
     pub const fn with_graceful_shutdown_timeout(mut self, timeout: Duration) -> Self {
         self.graceful_shutdown_timeout = timeout;
+        self
+    }
+
+    /// Sets whether the runner stops a command on `SIGINT` or `SIGTERM`.
+    ///
+    /// See [`CliRunnerConfig::handle_signals`].
+    pub const fn with_signal_handling(mut self, handle_signals: bool) -> Self {
+        self.handle_signals = handle_signals;
         self
     }
 }
@@ -246,6 +310,20 @@ where
         res = fut => res?,
     }
     Ok(())
+}
+
+/// Runs the future to completion, and with `handle_signals` stops early on the signals
+/// [`run_until_ctrl_c`] handles.
+async fn run_until_ctrl_c_if<F, E>(handle_signals: bool, fut: F) -> Result<(), E>
+where
+    F: Future<Output = Result<(), E>>,
+    E: Send + Sync + 'static + From<std::io::Error>,
+{
+    if handle_signals {
+        run_until_ctrl_c(fut).await
+    } else {
+        fut.await
+    }
 }
 
 /// Runs the future to completion or until:
@@ -298,14 +376,14 @@ const DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Shut down the given [`Runtime`](reth_tasks::Runtime), and wait for it if `wait` is set.
 ///
-/// Dropping the runtime on the current thread could block due to tokio pool teardown.
-/// Instead, we drop it on a separate thread and optionally wait for completion.
+/// Shuts down the owned tokio runtime even if tasks retain clones of the shared handle.
+/// Pool teardown can block, so it runs on a separate thread.
 fn runtime_shutdown(rt: reth_tasks::Runtime, wait: bool) {
     let (tx, rx) = mpsc::channel();
     std::thread::Builder::new()
         .name("rt-shutdown".to_string())
         .spawn(move || {
-            drop(rt);
+            rt.shutdown_timeout(DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT);
             let _ = tx.send(());
         })
         .unwrap();
@@ -314,5 +392,52 @@ fn runtime_shutdown(rt: reth_tasks::Runtime, wait: bool) {
         let _ = rx.recv_timeout(DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT).inspect_err(|err| {
             tracing::warn!(target: "reth::cli", %err, "runtime shutdown timed out");
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_shutdown_stops_tasks_with_live_runtime_clones() {
+        let runtime = reth_tasks::Runtime::test();
+        let retained = runtime.clone();
+        let task_runtime = runtime.clone();
+        let (started, ready) = mpsc::channel();
+        let task = runtime.handle().spawn(async move {
+            let _runtime = task_runtime;
+            started.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        ready.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        runtime_shutdown(runtime, true);
+
+        assert!(task.is_finished(), "shutdown returned while a task still owned the runtime");
+        assert!(retained.handle().block_on(task).unwrap_err().is_cancelled());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_outlives_signal_without_signal_handling() {
+        let runner = CliRunner::try_default_runtime()
+            .unwrap()
+            .with_config(CliRunnerConfig::new().with_signal_handling(false));
+        let mut ran_after_signal = false;
+        let res: Result<(), Box<dyn std::error::Error + Send + Sync>> = runner
+            .run_command_until_exit(|_| async {
+                let mut sigterm =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+                // SAFETY: the process-wide SIGTERM handler is installed above.
+                assert_eq!(unsafe { libc::raise(libc::SIGTERM) }, 0);
+                sigterm.recv().await;
+                // Give a runner that handles SIGTERM the chance to drop this command.
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                ran_after_signal = true;
+                Ok(())
+            });
+        res.unwrap();
+        assert!(ran_after_signal, "runner stopped the command on SIGTERM");
     }
 }

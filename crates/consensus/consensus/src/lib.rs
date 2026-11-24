@@ -358,6 +358,10 @@ pub enum ConsensusError {
     #[error("missing withdrawals")]
     BodyWithdrawalsMissing,
 
+    /// Error when withdrawals are present in a block body before Shanghai.
+    #[error("unexpected withdrawals")]
+    BodyWithdrawalsUnexpected,
+
     /// Error when requests are missing.
     #[error("missing requests")]
     BodyRequestsMissing,
@@ -539,7 +543,7 @@ impl ConsensusError {
 
     /// Returns `true` if this type is a [`ConsensusError::Other`] of that error type.
     pub fn is_other<T: Error + 'static>(&self) -> bool {
-        self.as_other().map(|err| err.is::<T>()).unwrap_or(false)
+        self.as_other().is_some_and(|err| err.is::<T>())
     }
 }
 

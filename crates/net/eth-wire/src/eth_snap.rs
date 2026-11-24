@@ -8,19 +8,25 @@
 use crate::{
     capability::SharedCapabilities,
     errors::{EthStreamError, P2PStreamError},
+    ethstream::list_exceeds_items,
     handshake::EthRlpxHandshake,
     message::EthBroadcastMessage,
     Capability, EthMessage, EthNetworkPrimitives, EthStreamInner, EthVersion, NetworkPrimitives,
     P2PStream, UnifiedStatus, HANDSHAKE_TIMEOUT,
 };
-use alloy_primitives::bytes::{Bytes, BytesMut};
+use alloy_primitives::{
+    bytes::{Bytes, BytesMut},
+    B256,
+};
+use alloy_rlp::{Decodable, Header};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use reth_eth_wire_types::{
-    snap::{SnapProtocolMessage, SnapVersion},
+    snap::{SnapMessageId, SnapProtocolError, SnapProtocolMessage, SnapVersion},
     RawCapabilityMessage,
 };
 use reth_ethereum_forks::ForkFilter;
 use std::{
+    collections::BTreeMap,
     io,
     pin::Pin,
     sync::Arc,
@@ -43,6 +49,12 @@ pub struct EthSnapStream<St, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// or above it are snap, rebased to snap-relative and validated by
     /// [`SnapProtocolMessage::decode_versioned`].
     snap_offset: u8,
+    /// Responses the remote owes for `snap/2` requests sent on this stream, keyed by request id.
+    ///
+    /// Like the `eth` codec's pending requests, a snap response is only decoded if it answers one
+    /// of these, and the entry is removed when it does, so the map is bounded by the snap requests
+    /// the owner keeps in flight.
+    pending_snap_responses: BTreeMap<u64, PendingSnapResponse>,
 }
 
 impl<St, N> EthSnapStream<St, N>
@@ -70,7 +82,7 @@ where
             handshake.handshake(&mut conn, status, fork_filter, HANDSHAKE_TIMEOUT).await?;
 
         let eth = EthStreamInner::with_max_message_size(eth_version, eth_max_message_size);
-        Ok((Self { conn, eth, snap_offset }, their_status))
+        Ok((Self { conn, eth, snap_offset, pending_snap_responses: BTreeMap::new() }, their_status))
     }
 }
 
@@ -104,6 +116,51 @@ impl<St, N: NetworkPrimitives> EthSnapStream<St, N> {
     pub fn into_inner(self) -> P2PStream<St> {
         self.conn
     }
+
+    /// Consumes the pending request a framed `snap/2` response answers, without decoding the
+    /// response's lists.
+    ///
+    /// Like the `eth` codec, this rejects a response before decoding allocates per list entry if
+    /// nobody asked for it, if it holds more entries than requested, or if its range proof holds
+    /// more than [`MAX_RANGE_PROOF_NODES`] nodes. Messages that are not responses pass through.
+    fn take_pending_snap_response(&mut self, bytes: &[u8]) -> Result<(), SnapProtocolError> {
+        let Some((&id, mut buf)) = bytes.split_first() else { return Ok(()) };
+        let Some(message_id) = [
+            SnapMessageId::AccountRange,
+            SnapMessageId::StorageRanges,
+            SnapMessageId::ByteCodes,
+            SnapMessageId::BlockAccessLists,
+        ]
+        .into_iter()
+        .find(|response| *response as u8 == id) else {
+            return Ok(())
+        };
+
+        // Every response is a list that starts with the request id.
+        let mut payload = Header::decode_bytes(&mut buf, true)?;
+        let request_id = u64::decode(&mut payload)?;
+
+        let Some(pending) = self
+            .pending_snap_responses
+            .remove(&request_id)
+            .filter(|pending| pending.message_id == message_id)
+        else {
+            return Err(SnapProtocolError::UnsolicitedResponse { message_id, request_id })
+        };
+
+        // The request sizes the list right after the request id; range responses follow it with
+        // their proof.
+        let max_items = if list_exceeds_items(&mut payload, pending.max_items)? {
+            pending.max_items
+        } else if matches!(message_id, SnapMessageId::AccountRange | SnapMessageId::StorageRanges) &&
+            list_exceeds_items(&mut payload, MAX_RANGE_PROOF_NODES)?
+        {
+            MAX_RANGE_PROOF_NODES
+        } else {
+            return Ok(())
+        };
+        Err(SnapProtocolError::ResponseExceedsRequest { message_id, request_id, max_items })
+    }
 }
 
 impl<St, N> EthSnapStream<St, N>
@@ -120,6 +177,9 @@ where
     }
 
     /// Sends a raw capability message over the connection.
+    ///
+    /// Raw messages are not recorded as requests, so the response to an `eth` or `snap/2` request
+    /// sent this way is rejected as unsolicited. Send requests as [`EthSnapMessage`]s instead.
     pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
         self.conn.start_send_unpin(msg.encoded()).map_err(Into::into)
     }
@@ -160,6 +220,9 @@ where
             return Poll::Ready(Some(this.eth.decode_message(bytes).map(EthSnapMessage::Eth)))
         };
         bytes[0] = snap_id;
+        if let Err(err) = this.take_pending_snap_response(&bytes) {
+            return Poll::Ready(Some(Err(err.into())))
+        }
         Poll::Ready(Some(
             SnapProtocolMessage::decode_versioned(SnapVersion::V2, &bytes)
                 .map(EthSnapMessage::Snap)
@@ -184,6 +247,9 @@ where
         let bytes = match item {
             EthSnapMessage::Eth(msg) => this.eth.encode_message(msg)?,
             EthSnapMessage::Snap(msg) => {
+                if let Some((request_id, response)) = PendingSnapResponse::for_request(&msg) {
+                    this.pending_snap_responses.insert(request_id, response);
+                }
                 // Reclaim the freshly-encoded buffer as mutable without copying the payload, then
                 // rebase the snap-relative id into the combined message space.
                 let mut buf =
@@ -203,6 +269,45 @@ where
         self.get_mut().conn.poll_close_unpin(cx).map_err(Into::into)
     }
 }
+
+/// The response the remote owes for a `snap/2` request sent on an [`EthSnapStream`].
+#[derive(Clone, Copy, Debug)]
+struct PendingSnapResponse {
+    /// Message id the response must carry.
+    message_id: SnapMessageId,
+    /// Number of entries the request sized the response's leading list to.
+    max_items: usize,
+}
+
+impl PendingSnapResponse {
+    /// Returns the request id and the response owed for `msg`, or `None` if it is a response.
+    const fn for_request(msg: &SnapProtocolMessage) -> Option<(u64, Self)> {
+        let (message_id, max_items) = match msg {
+            // Accounts are bounded by the requested response bytes, not by a count.
+            SnapProtocolMessage::GetAccountRange(_) => (SnapMessageId::AccountRange, usize::MAX),
+            // One slot list per requested account.
+            SnapProtocolMessage::GetStorageRanges(req) => {
+                (SnapMessageId::StorageRanges, req.account_hashes.len())
+            }
+            SnapProtocolMessage::GetByteCodes(req) => (SnapMessageId::ByteCodes, req.hashes.len()),
+            SnapProtocolMessage::GetBlockAccessLists(req) => {
+                (SnapMessageId::BlockAccessLists, req.block_hashes.len())
+            }
+            SnapProtocolMessage::AccountRange(_) |
+            SnapProtocolMessage::StorageRanges(_) |
+            SnapProtocolMessage::ByteCodes(_) |
+            SnapProtocolMessage::BlockAccessLists(_) => return None,
+        };
+        Some((msg.request_id(), Self { message_id, max_items }))
+    }
+}
+
+/// Maximum number of nodes in a `snap/2` range proof.
+///
+/// The proof covers two boundary paths, each holding at most one hashed node per nibble of a
+/// 32-byte key plus its leaf, since inline nodes are never separate proof entries. The range proof
+/// verifier in `reth-trie-common` rejects longer proofs as well.
+const MAX_RANGE_PROOF_NODES: usize = 2 * (2 * B256::len_bytes() + 1);
 
 /// Resolves the `snap/2` message-id offset from the negotiated capabilities, accepting only a
 /// connection that shares exactly `eth` at relative offset 0 immediately followed by `snap/2`.
@@ -247,11 +352,83 @@ mod tests {
         UnauthedP2PStream,
     };
     use reth_eth_wire_types::{
-        snap::{BlockAccessListsMessage, GetBlockAccessListsMessage},
-        EthVersion,
+        snap::{
+            AccountRangeMessage, BlockAccessListsMessage, ByteCodesMessage, GetAccountRangeMessage,
+            GetBlockAccessListsMessage, GetByteCodesMessage, GetStorageRangesMessage,
+            StorageRangesMessage,
+        },
+        BlockAccessLists, EthVersion,
     };
-    use tokio::net::TcpListener;
-    use tokio_util::codec::Decoder;
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio_util::codec::{Decoder, Framed};
+
+    type TestEthSnapStream =
+        EthSnapStream<Framed<TcpStream, crate::PassthroughCodec>, EthNetworkPrimitives>;
+
+    /// Connects two peers that negotiate `eth` + `snap/2` and returns their streams.
+    async fn eth_snap_pair() -> (TestEthSnapStream, TestEthSnapStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let (status, fork_filter) = eth_handshake();
+        let server_fork_filter = fork_filter.clone();
+
+        let server = tokio::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = crate::PassthroughCodec::default().framed(incoming);
+            let (conn, _) =
+                UnauthedP2PStream::new(stream).handshake(eth_snap_hello()).await.unwrap();
+            EthSnapStream::handshake(
+                conn,
+                status,
+                server_fork_filter,
+                Arc::new(EthHandshake::default()),
+                MAX_MESSAGE_SIZE,
+            )
+            .await
+            .unwrap()
+            .0
+        });
+
+        let conn = connect_passthrough(local_addr, eth_snap_hello()).await;
+        let (client, _) = EthSnapStream::handshake(
+            conn,
+            status,
+            fork_filter,
+            Arc::new(EthHandshake::default()),
+            MAX_MESSAGE_SIZE,
+        )
+        .await
+        .unwrap();
+        (client, server.await.unwrap())
+    }
+
+    /// Sends `msg` from `from` and returns the error `to` reports for it.
+    async fn send_and_expect_error(
+        from: &mut TestEthSnapStream,
+        to: &mut TestEthSnapStream,
+        msg: SnapProtocolMessage,
+    ) -> SnapProtocolError {
+        from.send(EthSnapMessage::Snap(msg)).await.unwrap();
+        match to.next().await.unwrap() {
+            Err(EthStreamError::InvalidSnapMessage(err)) => err,
+            other => panic!("expected a snap error, got {other:?}"),
+        }
+    }
+
+    fn get_byte_codes(request_id: u64, hashes: usize) -> SnapProtocolMessage {
+        SnapProtocolMessage::GetByteCodes(GetByteCodesMessage {
+            request_id,
+            hashes: vec![B256::ZERO; hashes],
+            response_bytes: u64::MAX,
+        })
+    }
+
+    fn byte_codes(request_id: u64, codes: usize) -> SnapProtocolMessage {
+        SnapProtocolMessage::ByteCodes(ByteCodesMessage {
+            request_id,
+            codes: vec![Bytes::new().into(); codes],
+        })
+    }
 
     /// Builds shared capabilities from matching local protocols and peer capabilities.
     fn shared_caps(local: Vec<Protocol>, peer: Vec<Capability>) -> SharedCapabilities {
@@ -379,7 +556,7 @@ mod tests {
             .send(EthSnapMessage::Snap(SnapProtocolMessage::GetBlockAccessLists(
                 GetBlockAccessListsMessage {
                     request_id: 7,
-                    block_hashes: Vec::new(),
+                    block_hashes: vec![B256::ZERO],
                     response_bytes: u64::MAX,
                 },
             )))
@@ -455,5 +632,158 @@ mod tests {
                 "unexpected error for removed snap id {removed_snap_id:#x}: {error}"
             );
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unsolicited_snap_response_is_rejected() {
+        let (mut client, mut server) = eth_snap_pair().await;
+
+        let err = send_and_expect_error(&mut client, &mut server, byte_codes(7, 1)).await;
+        assert!(matches!(
+            err,
+            SnapProtocolError::UnsolicitedResponse {
+                message_id: SnapMessageId::ByteCodes,
+                request_id: 7
+            }
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn snap_response_to_sent_request_is_decoded_once() {
+        let (mut client, mut server) = eth_snap_pair().await;
+        server.send(EthSnapMessage::Snap(get_byte_codes(7, 2))).await.unwrap();
+        assert!(matches!(
+            client.next().await.unwrap().unwrap(),
+            EthSnapMessage::Snap(SnapProtocolMessage::GetByteCodes(_))
+        ));
+
+        client.send(EthSnapMessage::Snap(byte_codes(7, 2))).await.unwrap();
+        assert!(matches!(
+            server.next().await.unwrap().unwrap(),
+            EthSnapMessage::Snap(SnapProtocolMessage::ByteCodes(_))
+        ));
+
+        let err = send_and_expect_error(&mut client, &mut server, byte_codes(7, 2)).await;
+        assert!(matches!(
+            err,
+            SnapProtocolError::UnsolicitedResponse {
+                message_id: SnapMessageId::ByteCodes,
+                request_id: 7
+            }
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn snap_response_of_other_type_is_rejected() {
+        let (mut client, mut server) = eth_snap_pair().await;
+        server.send(EthSnapMessage::Snap(get_byte_codes(7, 1))).await.unwrap();
+        client.next().await.unwrap().unwrap();
+
+        let response = SnapProtocolMessage::BlockAccessLists(BlockAccessListsMessage {
+            request_id: 7,
+            block_access_lists: BlockAccessLists(Vec::new()),
+        });
+        let err = send_and_expect_error(&mut client, &mut server, response).await;
+        assert!(matches!(
+            err,
+            SnapProtocolError::UnsolicitedResponse {
+                message_id: SnapMessageId::BlockAccessLists,
+                request_id: 7
+            }
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn snap_response_with_more_entries_than_requested_is_rejected() {
+        let (mut client, mut server) = eth_snap_pair().await;
+        server.send(EthSnapMessage::Snap(get_byte_codes(7, 2))).await.unwrap();
+        client.next().await.unwrap().unwrap();
+
+        let err = send_and_expect_error(&mut client, &mut server, byte_codes(7, 3)).await;
+        assert!(matches!(
+            err,
+            SnapProtocolError::ResponseExceedsRequest {
+                message_id: SnapMessageId::ByteCodes,
+                request_id: 7,
+                max_items: 2
+            }
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn snap_range_proof_is_bounded() {
+        let (mut client, mut server) = eth_snap_pair().await;
+        let request = |request_id| {
+            SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+                request_id,
+                root_hash: B256::ZERO,
+                starting_hash: B256::ZERO,
+                limit_hash: B256::repeat_byte(0xff),
+                response_bytes: u64::MAX,
+            })
+        };
+        let response = |request_id, proof_nodes| {
+            SnapProtocolMessage::AccountRange(AccountRangeMessage {
+                request_id,
+                accounts: Vec::new(),
+                proof: vec![Bytes::new().into(); proof_nodes],
+            })
+        };
+
+        server.send(EthSnapMessage::Snap(request(1))).await.unwrap();
+        client.next().await.unwrap().unwrap();
+        client.send(EthSnapMessage::Snap(response(1, MAX_RANGE_PROOF_NODES))).await.unwrap();
+        assert!(matches!(
+            server.next().await.unwrap().unwrap(),
+            EthSnapMessage::Snap(SnapProtocolMessage::AccountRange(_))
+        ));
+
+        server.send(EthSnapMessage::Snap(request(2))).await.unwrap();
+        client.next().await.unwrap().unwrap();
+        let err =
+            send_and_expect_error(&mut client, &mut server, response(2, MAX_RANGE_PROOF_NODES + 1))
+                .await;
+        assert!(matches!(
+            err,
+            SnapProtocolError::ResponseExceedsRequest {
+                message_id: SnapMessageId::AccountRange,
+                request_id: 2,
+                max_items: MAX_RANGE_PROOF_NODES
+            }
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn snap_storage_ranges_hold_one_slot_list_per_account() {
+        let (mut client, mut server) = eth_snap_pair().await;
+        server
+            .send(EthSnapMessage::Snap(SnapProtocolMessage::GetStorageRanges(
+                GetStorageRangesMessage {
+                    request_id: 7,
+                    root_hash: B256::ZERO,
+                    account_hashes: vec![B256::ZERO],
+                    starting_hash: B256::ZERO.into(),
+                    limit_hash: B256::repeat_byte(0xff).into(),
+                    response_bytes: u64::MAX,
+                },
+            )))
+            .await
+            .unwrap();
+        client.next().await.unwrap().unwrap();
+
+        let response = SnapProtocolMessage::StorageRanges(StorageRangesMessage {
+            request_id: 7,
+            slots: vec![Vec::new(); 2],
+            proof: Vec::new(),
+        });
+        let err = send_and_expect_error(&mut client, &mut server, response).await;
+        assert!(matches!(
+            err,
+            SnapProtocolError::ResponseExceedsRequest {
+                message_id: SnapMessageId::StorageRanges,
+                request_id: 7,
+                max_items: 1
+            }
+        ));
     }
 }

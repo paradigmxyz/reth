@@ -1,27 +1,23 @@
-//! Helper trait for interfacing with [`FullNodeComponents`].
+//! Helper trait for interfacing with node components.
 
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{FullNodeComponents, NodePrimitives, PrimitivesTy};
-use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, TxTy};
+use reth_primitives_traits::{BlockTy, HeaderTy, NodePrimitives, ReceiptTy, TxTy};
 use reth_rpc_eth_types::EthStateCache;
 use reth_storage_api::{
-    BalProvider, BlockReader, BlockReaderIdExt, PruneCheckpointReader, StageCheckpointReader,
-    StateProviderFactory,
+    BalProvider, BlockReader, BlockReaderIdExt, NodePrimitivesProvider, PruneCheckpointReader,
+    StageCheckpointReader, StateProviderFactory,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
-/// Helper trait that provides the same interface as [`FullNodeComponents`] but without requiring
-/// implementation of trait bounds.
+/// Helper trait that exposes the node components needed by RPC types: the provider, pool, network
+/// and EVM config.
 ///
-/// This trait is structurally equivalent to [`FullNodeComponents`], exposing the same associated
-/// types and methods. However, it doesn't enforce the trait bounds required by
-/// [`FullNodeComponents`]. This makes it useful for RPC types that need access to node components
-/// where the full trait bounds of the components are not necessary.
-///
-/// Every type that is a [`FullNodeComponents`] also implements this trait.
+/// Unlike a full node components trait, it doesn't enforce the bounds required to run a node. This
+/// makes it useful for RPC types that only need these components. Use [`RpcNodeCoreAdapter`] to
+/// construct an implementation from the components.
 pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
     /// Blockchain data primitives.
     type Primitives: NodePrimitives;
@@ -35,20 +31,19 @@ pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
             ChainSpec: EthChainSpec<Header = HeaderTy<Self::Primitives>>
                            + Hardforks
                            + EthereumHardforks,
-        > + StateProviderFactory
+        > + StateProviderFactory<Primitives = Self::Primitives>
+        + NodePrimitivesProvider<Primitives = Self::Primitives>
         + CanonStateSubscriptions<Primitives = Self::Primitives>
         + StageCheckpointReader
         + PruneCheckpointReader
         + BalProvider
-        + Send
-        + Sync
         + Clone
         + Unpin
         + 'static;
     /// The transaction pool of the node.
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Primitives>>>;
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvm<Primitives = Self::Primitives> + Send + Sync + 'static;
+    type Evm: ConfigureEvm<Primitives = Self::Primitives> + 'static;
     /// Network API.
     type Network: NetworkInfo + Clone;
 
@@ -63,37 +58,6 @@ pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
 
     /// Returns the provider of the node.
     fn provider(&self) -> &Self::Provider;
-}
-
-impl<T> RpcNodeCore for T
-where
-    T: FullNodeComponents<Provider: ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>>,
-{
-    type Primitives = PrimitivesTy<T::Types>;
-    type Provider = T::Provider;
-    type Pool = T::Pool;
-    type Evm = T::Evm;
-    type Network = T::Network;
-
-    #[inline]
-    fn pool(&self) -> &Self::Pool {
-        FullNodeComponents::pool(self)
-    }
-
-    #[inline]
-    fn evm_config(&self) -> &Self::Evm {
-        FullNodeComponents::evm_config(self)
-    }
-
-    #[inline]
-    fn network(&self) -> &Self::Network {
-        FullNodeComponents::network(self)
-    }
-
-    #[inline]
-    fn provider(&self) -> &Self::Provider {
-        FullNodeComponents::provider(self)
-    }
 }
 
 /// Additional components, asides the core node components, needed to run `eth_` namespace API
@@ -130,17 +94,16 @@ where
             ChainSpec: EthChainSpec<Header = HeaderTy<Evm::Primitives>>
                            + Hardforks
                            + EthereumHardforks,
-        > + StateProviderFactory
+        > + StateProviderFactory<Primitives = Evm::Primitives>
+        + NodePrimitivesProvider<Primitives = Evm::Primitives>
         + CanonStateSubscriptions<Primitives = Evm::Primitives>
         + StageCheckpointReader
         + PruneCheckpointReader
         + BalProvider
-        + Send
-        + Sync
         + Unpin
         + Clone
         + 'static,
-    Evm: ConfigureEvm + Clone + 'static,
+    Evm: ConfigureEvm + 'static,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Evm::Primitives>>>
         + Unpin
         + 'static,

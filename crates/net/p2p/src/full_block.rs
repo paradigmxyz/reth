@@ -14,9 +14,7 @@ use alloy_primitives::{Bytes, Sealable, B256};
 use core::marker::PhantomData;
 use futures::FutureExt;
 use reth_consensus::Consensus;
-use reth_eth_wire_types::{
-    BlockAccessLists, EthNetworkPrimitives, HeadersDirection, NetworkPrimitives,
-};
+use reth_eth_wire_types::{BlockAccessLists, EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{Block, SealedBlock, SealedBlockWith, SealedHeader};
 use std::{
@@ -79,8 +77,8 @@ where
     /// Note: this future is cancel safe.
     ///
     /// Caution: This does no validation of body (transactions) responses but guarantees that
-    /// the starting [`SealedHeader`] matches the requested hash, and that the number of headers and
-    /// bodies received matches the requested limit.
+    /// the headers form a valid range starting at the requested hash, and that the number of
+    /// headers and bodies received matches the requested limit.
     ///
     /// The returned future yields bodies in falling order, i.e. with descending block numbers.
     pub fn get_full_block_range(
@@ -831,6 +829,7 @@ where
                 if let Err(err) = self.consensus.validate_header_range(&headers_rising) {
                     debug!(target: "downloaders", %err, ?self.start_hash, "Received bad header response");
                     self.client.report_bad_message(peer);
+                    return
                 }
 
                 // get the bodies request so it can be polled later
@@ -902,11 +901,9 @@ where
 
                     if this.headers.is_none() {
                         // did not receive a correct response yet, retry
-                        this.request.headers = Some(this.client.get_headers(HeadersRequest {
-                            start: this.start_hash.into(),
-                            limit: this.count,
-                            direction: HeadersDirection::Falling,
-                        }));
+                        this.request.headers = Some(this.client.get_headers(
+                            HeadersRequest::falling(this.start_hash.into(), this.count),
+                        ));
                     }
                 }
                 // This branch handles block body responses from peers - it first inserts the
@@ -2025,22 +2022,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn download_full_block_range_with_invalid_header() {
+    async fn download_full_block_range_rejects_invalid_headers() {
         let client = TestFullBlockClient::default();
-        let range_length: usize = 3;
-        let (header, _) = insert_headers_into_client(&client, 0..range_length);
+        let (header, _) = insert_headers_into_client(&client, 0..3);
+        let consensus = reth_consensus::test_utils::TestConsensus::default();
+        consensus.set_fail_validation(true);
+        let client = FullBlockClient::new(client, Arc::new(consensus));
+        let mut request = client.get_full_block_range(header.hash(), 3);
+        let headers = client
+            .client
+            .get_headers(HeadersRequest::falling(header.hash().into(), 3))
+            .await
+            .unwrap();
 
-        let test_consensus = reth_consensus::test_utils::TestConsensus::default();
-        test_consensus.set_fail_validation(true);
-        test_consensus.set_fail_body_against_header(false);
-        let client = FullBlockClient::new(client, Arc::new(test_consensus));
+        request.on_headers_response(headers);
 
-        let received = client.get_full_block_range(header.hash(), range_length as u64).await;
-
-        assert_eq!(received.len(), range_length);
-        for (i, block) in received.iter().enumerate() {
-            let expected_number = header.number - i as u64;
-            assert_eq!(block.number, expected_number);
-        }
+        assert!(request.headers.is_none());
+        assert!(request.pending_headers.is_empty());
+        assert!(request.request.bodies.is_none());
     }
 }

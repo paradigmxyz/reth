@@ -33,7 +33,10 @@ mod validation;
 mod web3;
 
 pub use reth::RethJitAction;
-pub use testing::{TestingBuildBlockRequestV1, TESTING_BUILD_BLOCK_V1, TESTING_COMMIT_BLOCK_V1};
+pub use testing::{
+    TestingBuildBlockRequestV1, TestingBuildBlockResponseV1, TESTING_BUILD_BLOCK_V1,
+    TESTING_COMMIT_BLOCK_V1,
+};
 
 /// re-export of all server traits
 pub use servers::*;
@@ -62,37 +65,5 @@ pub mod servers {
     pub use reth_rpc_eth_api::{
         self as eth, EthApiServer, EthBundleApiServer, EthCallBundleApiServer, EthConfigApiServer,
         EthFilterApiServer, EthPubSubApiServer, L2EthApiExtServer,
-    };
-}
-
-/// re-export of all client traits
-#[cfg(feature = "client")]
-pub use clients::*;
-
-/// Aggregates all client traits.
-#[cfg(feature = "client")]
-pub mod clients {
-    pub use crate::{
-        admin::AdminApiClient,
-        anvil::AnvilApiClient,
-        debug::DebugApiClient,
-        engine::{EngineApiClient, EngineEthApiClient},
-        hardhat::HardhatApiClient,
-        mev::{MevFullApiClient, MevSimApiClient},
-        miner::MinerApiClient,
-        net::NetApiClient,
-        otterscan::OtterscanClient,
-        reth::RethApiClient,
-        reth_engine::RethEngineApiClient,
-        rpc::RpcApiClient,
-        testing::TestingApiClient,
-        trace::TraceApiClient,
-        txpool::TxPoolApiClient,
-        validation::BlockSubmissionValidationApiClient,
-        web3::Web3ApiClient,
-    };
-    pub use reth_rpc_eth_api::{
-        EthApiClient, EthBundleApiClient, EthCallBundleApiClient, EthConfigApiClient,
-        EthFilterApiClient, L2EthApiExtClient,
     };
 }

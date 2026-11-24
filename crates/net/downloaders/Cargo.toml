@@ -25,7 +25,6 @@ reth-trie-common.workspace = true
 
 # optional deps for the test-utils feature
 reth-ethereum-primitives = { workspace = true, optional = true }
-reth-provider = { workspace = true, optional = true }
 reth-testing-utils = { workspace = true, optional = true }
 
 # ethereum

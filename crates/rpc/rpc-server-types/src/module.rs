@@ -15,7 +15,7 @@ use strum::{ParseError, VariantNames};
 /// ```
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub enum RpcModuleSelection {
-    /// Use _all_ available modules.
+    /// Use all modules except `testing`, which requires an explicit selection.
     All,
     /// The default modules `eth`, `net`, `web3`
     #[default]
@@ -31,9 +31,9 @@ impl RpcModuleSelection {
     pub const STANDARD_MODULES: [RethRpcModule; 3] =
         [RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3];
 
-    /// Returns a selection of [`RethRpcModule`] with all [`RethRpcModule::all_variants`].
+    /// Returns all modules that do not require an explicit selection.
     pub fn all_modules() -> HashSet<RethRpcModule> {
-        RethRpcModule::modules().into_iter().collect()
+        Self::all_modules_iter().collect()
     }
 
     /// Returns the [`RpcModuleSelection::STANDARD_MODULES`] as a selection.
@@ -41,9 +41,7 @@ impl RpcModuleSelection {
         HashSet::from(Self::STANDARD_MODULES)
     }
 
-    /// All modules that are available by default on IPC.
-    ///
-    /// By default all modules are available on IPC.
+    /// All modules that are available by default on IPC, excluding `testing`.
     pub fn default_ipc_modules() -> HashSet<RethRpcModule> {
         Self::all_modules()
     }
@@ -84,7 +82,7 @@ impl RpcModuleSelection {
     /// Returns the number of modules in the selection
     pub fn len(&self) -> usize {
         match self {
-            Self::All => RethRpcModule::variant_count(),
+            Self::All => Self::all_modules_iter().count(),
             Self::Standard => Self::STANDARD_MODULES.len(),
             Self::Selection(s) => s.len(),
         }
@@ -106,7 +104,7 @@ impl RpcModuleSelection {
     /// Returns an iterator over all configured [`RethRpcModule`]
     pub fn iter_selection(&self) -> Box<dyn Iterator<Item = RethRpcModule> + '_> {
         match self {
-            Self::All => Box::new(RethRpcModule::modules().into_iter()),
+            Self::All => Box::new(Self::all_modules_iter()),
             Self::Standard => Box::new(Self::STANDARD_MODULES.iter().cloned()),
             Self::Selection(s) => Box::new(s.iter().cloned()),
         }
@@ -133,11 +131,6 @@ impl RpcModuleSelection {
     /// Returns true if both selections are identical.
     pub fn are_identical(http: Option<&Self>, ws: Option<&Self>) -> bool {
         match (http, ws) {
-            // Shortcut for common case to avoid iterating later
-            (Some(Self::All), Some(other)) | (Some(other), Some(Self::All)) => {
-                other.len() == RethRpcModule::variant_count()
-            }
-
             // If either side is disabled, then the other must be empty
             (Some(some), None) | (None, Some(some)) => some.is_empty(),
 
@@ -149,7 +142,7 @@ impl RpcModuleSelection {
     /// Returns true if the selection contains the given module.
     pub fn contains(&self, module: &RethRpcModule) -> bool {
         match self {
-            Self::All => true,
+            Self::All => !matches!(module, RethRpcModule::Testing),
             Self::Standard => Self::STANDARD_MODULES.contains(module),
             Self::Selection(s) => s.contains(module),
         }
@@ -212,6 +205,10 @@ impl RpcModuleSelection {
             Self::Selection(modules)
         }
     }
+
+    fn all_modules_iter() -> impl Iterator<Item = RethRpcModule> {
+        RethRpcModule::modules().into_iter().filter(|module| *module != RethRpcModule::Testing)
+    }
 }
 
 impl From<&HashSet<RethRpcModule>> for RpcModuleSelection {
@@ -269,15 +266,24 @@ impl FromStr for RpcModuleSelection {
         if s.is_empty() {
             return Ok(Self::Selection(Default::default()))
         }
-        let mut modules = s.split(',').map(str::trim).peekable();
-        let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
-        // We convert to lowercase to make the comparison case-insensitive
+        // Empty items, such as from a trailing comma in "eth,", are ignored.
+        let modules = s.split(',').map(str::trim).filter(|m| !m.is_empty());
+        // The keywords are matched case-insensitively, so "all", "ALL", "aLl" etc. are accepted.
         //
-        // This is a way to allow typing "all" and "ALL" and "All" and "aLl" etc.
-        match first.to_lowercase().as_str() {
-            "all" => Ok(Self::All),
-            "none" => Ok(Self::Selection(Default::default())),
-            _ => Self::try_from_selection(modules),
+        // They select the whole set and are only valid on their own: mixing them with module
+        // names, such as "all,testing" or "eth,none", is rejected instead of silently dropping
+        // or misinterpreting some of the names.
+        let is_keyword = |m: &str| m.eq_ignore_ascii_case("all") || m.eq_ignore_ascii_case("none");
+        if modules.clone().count() > 1 && modules.clone().any(is_keyword) {
+            return Err(ParseError::VariantNotFound)
+        }
+        let single = modules.clone().next().unwrap_or_default();
+        if single.eq_ignore_ascii_case("all") {
+            Ok(Self::All)
+        } else if single.eq_ignore_ascii_case("none") {
+            Ok(Self::Selection(Default::default()))
+        } else {
+            Self::try_from_selection(modules)
         }
     }
 }
@@ -489,9 +495,15 @@ pub trait RpcModuleValidator: Clone + Send + Sync + 'static {
             };
 
             // Try to parse and validate using the configured validator
-            // This will check for typos and other validation rules
-            Self::parse_selection(name)
+            // This will check for typos and other validation rules. A name must parse back to
+            // exactly this module: keywords like `all`, lists like "eth,eth", and padded names
+            // like " eth " parse to something else, which would not be served.
+            let selection = Self::parse_selection(name)
                 .map_err(|e| format!("Invalid RPC module '{name}' in {arg_name}: {e}"))?;
+            if !matches!(&selection, RpcModuleSelection::Selection(s) if s.len() == 1 && s.contains(module))
+            {
+                return Err(format!("Invalid RPC module '{name}' in {arg_name}: not a module name"))
+            }
         }
 
         Ok(())
@@ -542,7 +554,20 @@ mod test {
     #[test]
     fn test_all_modules() {
         let all_modules = RpcModuleSelection::all_modules();
-        assert_eq!(all_modules.len(), RethRpcModule::variant_count());
+        assert_eq!(all_modules.len(), RethRpcModule::variant_count() - 1);
+        assert!(!all_modules.contains(&RethRpcModule::Testing));
+    }
+
+    #[test]
+    fn test_testing_requires_explicit_selection() {
+        let all = RpcModuleSelection::All;
+        let explicit = RpcModuleSelection::from([RethRpcModule::Testing]);
+
+        assert!(!all.contains(&RethRpcModule::Testing));
+        assert!(!all.to_selection().contains(&RethRpcModule::Testing));
+        assert!(!all.into_selection().contains(&RethRpcModule::Testing));
+        assert!(explicit.contains(&RethRpcModule::Testing));
+        assert!(explicit.iter_selection().any(|module| module == RethRpcModule::Testing));
     }
 
     #[test]
@@ -557,6 +582,7 @@ mod test {
     fn test_default_ipc_modules() {
         let default_ipc_modules = RpcModuleSelection::default_ipc_modules();
         assert_eq!(default_ipc_modules, RpcModuleSelection::all_modules());
+        assert!(!default_ipc_modules.contains(&RethRpcModule::Testing));
     }
 
     #[test]
@@ -572,7 +598,7 @@ mod test {
         let standard = RpcModuleSelection::Standard;
         let selection = RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin]);
 
-        assert_eq!(all_modules.len(), RethRpcModule::variant_count());
+        assert_eq!(all_modules.len(), RethRpcModule::variant_count() - 1);
         assert_eq!(standard.len(), 3);
         assert_eq!(selection.len(), 2);
     }
@@ -592,7 +618,8 @@ mod test {
         let standard = RpcModuleSelection::Standard;
         let selection = RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin]);
 
-        assert_eq!(all_modules.iter_selection().count(), RethRpcModule::variant_count());
+        assert_eq!(all_modules.iter_selection().count(), RethRpcModule::variant_count() - 1);
+        assert!(!all_modules.iter_selection().any(|module| module == RethRpcModule::Testing));
         assert_eq!(standard.iter_selection().count(), 3);
         assert_eq!(selection.iter_selection().count(), 2);
     }
@@ -615,8 +642,7 @@ mod test {
     fn test_rpc_module_selection_are_identical() {
         // Test scenario: both selections are `All`
         //
-        // Since both selections include all possible RPC modules, they should be considered
-        // identical.
+        // Both selections include the same modules, excluding `testing`.
         let all_modules = RpcModuleSelection::All;
         assert!(RpcModuleSelection::are_identical(Some(&all_modules), Some(&all_modules)));
 
@@ -668,11 +694,15 @@ mod test {
 
         // Test scenario: full selection vs `All`
         //
-        // If the other selection explicitly selects all available modules, it should be identical
-        // to `All`.
-        let full_selection =
-            RpcModuleSelection::from(RethRpcModule::modules().into_iter().collect::<HashSet<_>>());
+        // An explicit selection of the same modules is identical to `All`.
+        let full_selection = RpcModuleSelection::from(RpcModuleSelection::all_modules());
         assert!(RpcModuleSelection::are_identical(Some(&all_modules), Some(&full_selection)));
+
+        // Explicitly including `testing` makes the selections different.
+        let mut testing_selection = RpcModuleSelection::all_modules();
+        testing_selection.insert(RethRpcModule::Testing);
+        let testing_selection = RpcModuleSelection::from(testing_selection);
+        assert!(!RpcModuleSelection::are_identical(Some(&all_modules), Some(&testing_selection),));
 
         // Test scenario: different non-empty selections
         //
@@ -777,6 +807,32 @@ mod test {
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), RpcModuleSelection::Selection(Default::default()));
 
+        // Keywords mixed with module names are rejected in any position.
+        for s in ["all,testing", "none,eth", "eth,all", "eth, NONE", "all,all", "eth,all,admin"] {
+            assert!(RpcModuleSelection::from_str(s).is_err(), "{s}");
+            assert!(DefaultRpcModuleValidator::parse_selection(s).is_err(), "{s}");
+        }
+        // Empty items are ignored rather than mixed with keywords or rejected as modules.
+        assert_eq!(RpcModuleSelection::from_str("all,").unwrap(), RpcModuleSelection::All);
+        assert!(RpcModuleSelection::from_str(",none").unwrap().is_empty());
+        for s in ["eth,", "eth,,admin"] {
+            let selection = DefaultRpcModuleValidator::parse_selection(s).unwrap();
+            assert!(DefaultRpcModuleValidator::validate_selection(&selection, "http.api").is_ok());
+        }
+
+        // Lenient accepts unknown names such as "[eth" as custom modules, the default does not.
+        let bracketed = RpcModuleSelection::from([RethRpcModule::Other("[eth".to_string())]);
+        assert!(DefaultRpcModuleValidator::validate_selection(&bracketed, "http.api").is_err());
+
+        for name in ["all", "NONE", "eth,eth", " eth ", "eth\t"] {
+            let selection = RpcModuleSelection::from([
+                RethRpcModule::Eth,
+                RethRpcModule::Other(name.to_string()),
+            ]);
+            assert!(DefaultRpcModuleValidator::validate_selection(&selection, "http.api").is_err());
+            assert!(LenientRpcModuleValidator::validate_selection(&selection, "http.api").is_err());
+        }
+
         // Test valid selections: "eth,admin"
         let result = RpcModuleSelection::from_str("eth,admin");
         assert!(result.is_ok());
@@ -850,7 +906,7 @@ mod test {
 
         // But All doesn't explicitly contain custom modules
         // (though contains() returns true for all modules when selection is All)
-        assert_eq!(all_selection.len(), RethRpcModule::variant_count());
+        assert_eq!(all_selection.len(), RethRpcModule::variant_count() - 1);
     }
 
     #[test]

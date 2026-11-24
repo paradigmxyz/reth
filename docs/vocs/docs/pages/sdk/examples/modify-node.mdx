@@ -26,10 +26,12 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.0", features = ["derive"] }
-jsonrpsee = { version = "0.22", features = ["macros", "server", "http-server", "ws-server"] }
+jsonrpsee = { path = "../../crates/rpc/jsonrpsee/jsonrpsee", features = ["macros", "server"] }
 reth-ethereum = { path = "../../crates/ethereum" }
 tokio = { version = "1.0", features = ["full"] }
 ```
+
+Reth vendors its own copy of `jsonrpsee` in `crates/rpc/jsonrpsee`, and the dependency has to point at that copy: by path inside the repository, or outside of it by a git dependency on the reth repository at the same revision as `reth-ethereum`. The `jsonrpsee` crate from crates.io is a different crate, and reth does not accept its `RpcModule`.
 
 #### Implementation
 

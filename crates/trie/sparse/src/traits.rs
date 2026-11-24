@@ -9,9 +9,7 @@ use alloy_primitives::{
 };
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{
-    BranchNodeMasks, Nibbles, ProofTrieNodeV2, ProofV2TargetParent, TrieNodeV2,
-};
+use reth_trie_common::{Nibbles, ProofTrieNode, ProofV2TargetParent};
 
 /// Modification epoch assigned to cached sparse trie nodes.
 ///
@@ -68,25 +66,23 @@ impl LeafUpdate {
 /// This trait provides a unified interface for the core trie operations needed by
 /// `RevealableSparseTrie`.
 pub trait SparseTrie: Sized + Debug + Send + Sync {
-    /// Configures the trie to have the given root node revealed.
+    /// Reveals the root from a batch produced by the V2 proof calculator.
     ///
-    /// # Arguments
+    /// `nodes` must contain a node at the empty path. An extension root must be accompanied by
+    /// its branch child in the same batch, including that branch's persistence masks.
+    /// Root nodes may be consumed; remaining nodes can be passed to [`Self::reveal_nodes`].
+    /// `retain_updates` controls whether trie updates should be tracked.
     ///
-    /// * `root` - The root node to reveal
-    /// * `masks` - Trie masks for root branch node
-    /// * `retain_updates` - Whether to track updates
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` if successful, or an error if revealing fails.
+    /// Returns an error if the root cannot be revealed. Standalone hashed extensions are not
+    /// supported.
     ///
     /// # Panics
     ///
-    /// May panic if the trie is not new/cleared, and has already revealed nodes.
+    /// May panic if the trie is not new/cleared, and has already revealed nodes, or if the batch
+    /// does not contain a root at the empty path.
     fn set_root(
         &mut self,
-        root: TrieNodeV2,
-        masks: Option<BranchNodeMasks>,
+        nodes: &mut [ProofTrieNode],
         retain_updates: bool,
     ) -> SparseTrieResult<()>;
 
@@ -103,9 +99,10 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 
     /// Reveals one or more trie nodes if they have not been revealed before.
     ///
-    /// This function decodes trie nodes and inserts them into the trie structure. It handles
-    /// different node types (leaf, extension, branch) by appropriately adding them to the trie and
-    /// recursively revealing their children.
+    /// The batch must come from the V2 proof calculator, with every extension accompanied by
+    /// its branch child. Attaches nodes where their paths identify blinded nodes in the current
+    /// trie. Nodes already revealed, paths diverging from the trie, and paths naming absent
+    /// children may be skipped.
     ///
     /// # Arguments
     ///
@@ -114,13 +111,14 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// # Returns
     ///
-    /// `Ok(())` if successful, or an error if any of the nodes was not revealed.
+    /// `Ok(())` if processing succeeds, including when nodes are skipped, or an error if
+    /// revelation fails. Success does not guarantee that every supplied node was incorporated.
     ///
     /// # Note
     ///
     /// The implementation may modify the input nodes. A common thing to do is [`std::mem::replace`]
-    /// each node with [`TrieNodeV2::EmptyRoot`] to avoid cloning.
-    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNodeV2]) -> SparseTrieResult<()>;
+    /// each node with [`reth_trie_common::TrieNode::EmptyRoot`] to avoid cloning.
+    fn reveal_nodes(&mut self, nodes: &mut [ProofTrieNode]) -> SparseTrieResult<()>;
 
     /// Calculates and returns the root hash of the trie at the provided epoch.
     ///

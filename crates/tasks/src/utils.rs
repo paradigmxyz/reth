@@ -34,9 +34,9 @@ pub fn increase_thread_priority() {
     }
 }
 
-/// Deprioritizes known background threads spawned by third-party libraries (`OpenTelemetry`,
-/// `tracing-appender`, `reqwest`) by scanning `/proc/<pid>/task/` for matching thread names and
-/// setting `SCHED_IDLE` scheduling policy + maximum niceness on them.
+/// Deprioritizes known background threads spawned by third-party libraries (`tracing-appender`,
+/// `reqwest`) by scanning `/proc/<pid>/task/` for matching thread names and setting `SCHED_IDLE`
+/// scheduling policy on them.
 ///
 /// This is a hack: these threads are spawned by libraries that do not expose a way to hook into
 /// thread initialization or expose the TIDs, so we have to discover them after the fact by
@@ -52,9 +52,11 @@ pub fn deprioritize_background_threads() {
 }
 
 /// Thread name prefixes to deprioritize.
+///
+/// Do not re-add the OTLP span exporter (`OpenTelemetry.T`) to avoid CPU spinning.
+/// See <https://github.com/paradigmxyz/reth/pull/27370>.
 #[cfg(target_os = "linux")]
-const DEPRIORITIZE_THREAD_PREFIXES: &[&str] =
-    &["OpenTelemetry.T", "tracing-appende", "reqwest-interna"];
+const DEPRIORITIZE_THREAD_PREFIXES: &[&str] = &["tracing-appende", "reqwest-interna"];
 
 #[cfg(target_os = "linux")]
 fn _deprioritize_background_threads() {

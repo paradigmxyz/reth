@@ -4,8 +4,8 @@ use alloy_primitives::{Bytes, B256};
 use alloy_rlp::{Encodable, Header};
 use parking_lot::Mutex;
 use reth_eth_wire_types::{EncodableEth72PooledTransaction, EthMessageID, RawCapabilityMessage};
+use reth_lru::LruMap;
 use reth_primitives_traits::SignedTransaction;
-use schnellru::{LruMap, Unlimited};
 use std::sync::Arc;
 
 /// Shared by sessions, so repeated requests from different peers reuse the same encoding.
@@ -55,15 +55,16 @@ impl PooledRlpCache {
 
 #[derive(Debug)]
 struct Cache {
-    entries: LruMap<(B256, bool, usize), Bytes, Unlimited>,
+    entries: LruMap<(B256, bool, usize), Bytes>,
     bytes: usize,
 }
 impl Default for Cache {
     fn default() -> Self {
-        Self { entries: LruMap::new(Unlimited), bytes: 0 }
+        Self { entries: LruMap::new(Self::MAX_ENTRIES), bytes: 0 }
     }
 }
 impl Cache {
+    const MAX_ENTRIES: u32 = 4096;
     const MAX_BYTES: usize = 16 * 1024 * 1024;
     fn insert(&mut self, key: (B256, bool, usize), value: Bytes) {
         if value.len() > Self::MAX_BYTES {
@@ -73,8 +74,10 @@ impl Cache {
             self.bytes -= old.len();
         }
         self.bytes += value.len();
-        self.entries.insert(key, value);
-        while self.bytes > Self::MAX_BYTES || self.entries.len() > 4096 {
+        if let Some((_, evicted)) = self.entries.insert(key, value) {
+            self.bytes -= evicted.len();
+        }
+        while self.bytes > Self::MAX_BYTES {
             if let Some((_, oldest)) = self.entries.pop_oldest() {
                 self.bytes -= oldest.len();
             }
@@ -90,7 +93,7 @@ mod tests {
         eip4844::{Blob, Bytes48},
         eip7594::BlobTransactionSidecarEip7594,
     };
-    use alloy_primitives::Signature;
+    use alloy_primitives::{Signature, U256};
     use reth_eth_wire_types::{message::RequestPair, PooledTransactions, PooledTransactionsEth72};
     use reth_ethereum_primitives::PooledTransactionVariant;
 
@@ -142,5 +145,16 @@ mod tests {
         assert_eq!(cache.bytes, second.2);
         assert!(cache.entries.peek(&first).is_none());
         assert_eq!(cache.entries.len(), 1);
+    }
+
+    #[test]
+    fn encoded_cache_accounts_for_entry_limit_eviction() {
+        let mut cache = Cache::default();
+        for index in 0..=Cache::MAX_ENTRIES {
+            cache.insert((B256::from(U256::from(index)), false, 1), Bytes::from_static(&[0]));
+        }
+        assert_eq!(cache.entries.len(), Cache::MAX_ENTRIES as usize);
+        assert_eq!(cache.bytes, Cache::MAX_ENTRIES as usize);
+        assert!(cache.entries.peek(&(B256::ZERO, false, 1)).is_none());
     }
 }

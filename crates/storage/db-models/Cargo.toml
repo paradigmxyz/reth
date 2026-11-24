@@ -33,10 +33,11 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 [dev-dependencies]
 # reth
 reth-primitives-traits = { workspace = true, features = ["arbitrary", "reth-codec"] }
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, features = ["alloy"] }
 
 bytes.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
+modular-bitfield.workspace = true
 
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
@@ -74,6 +75,7 @@ arbitrary = [
 ]
 reth-codec = [
     "dep:reth-codecs",
+    "reth-codecs/alloy",
     "dep:modular-bitfield",
     "dep:bytes",
     "reth-primitives-traits/reth-codec",

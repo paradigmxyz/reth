@@ -3,10 +3,9 @@ use alloy_consensus::transaction::Either;
 use alloy_primitives::BlockNumber;
 use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie_common::HashedPostStateSorted;
-use revm::database::{
-    states::{PlainStateReverts, StateChangeset},
-    BundleState, OriginalValuesKnown,
+use reth_trie_common::{
+    bundle_state::{BundleState, OriginalValuesKnown, PlainStateReverts, StateChangeset},
+    HashedPostStateSorted,
 };
 
 /// A helper type used as input to [`StateWriter`] for writing execution outcome for one or many
@@ -120,10 +119,13 @@ pub trait StateWriter {
     fn remove_state_above(&self, block: BlockNumber) -> ProviderResult<()>;
 
     /// Take the block range of state, recreating the [`ExecutionOutcome`]. The state of the passed
-    /// block is not removed.
+    /// block is not removed. `end` is the current execution tip, which can be below the header
+    /// tip after an unwind batch. It bounds the returned outcome: all state above `block` is
+    /// reverted.
     fn take_state_above(
         &self,
         block: BlockNumber,
+        end: BlockNumber,
     ) -> ProviderResult<ExecutionOutcome<Self::Receipt>>;
 }
 

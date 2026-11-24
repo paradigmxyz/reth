@@ -12,10 +12,7 @@ use reth_trie::{
     updates::TrieUpdates, HashedPostStateSorted, HashedStorageSorted, StateRoot, StateRootProgress,
     TrieInputSorted,
 };
-use std::{
-    collections::HashSet,
-    ops::{Bound, RangeBounds, RangeInclusive},
-};
+use std::{collections::HashSet, ops::RangeInclusive};
 use tracing::{debug, instrument};
 
 /// Extends [`StateRoot`] with operations specific for working with a database transaction.
@@ -102,7 +99,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// let mut hashed_state = HashedPostState::default();
     /// hashed_state.accounts.insert(
     ///     [0x11; 32].into(),
-    ///     Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
+    ///     Some(Account { nonce: 1, balance: U256::from(10), ..Default::default() }),
     /// );
     ///
     /// // Calculate the state root
@@ -145,7 +142,7 @@ pub trait DatabaseHashedPostState: Sized {
     /// specified range and aggregates them into sorted hashed state.
     fn from_reverts(
         provider: &(impl ChangeSetReader + StorageChangeSetReader),
-        range: impl RangeBounds<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<HashedPostStateSorted, ProviderError>;
 }
 
@@ -264,55 +261,38 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
 impl DatabaseHashedPostState for HashedPostStateSorted {
     /// Builds a sorted hashed post-state from reverts.
     ///
-    /// Reads MDBX data directly into Vecs, using `HashSet`s only to track seen keys.
-    /// This avoids intermediate `HashMap` allocations since MDBX data is already sorted.
+    /// Reads changesets one block at a time, so memory grows with the number of distinct changed
+    /// keys rather than with the number of changeset rows in the range. `HashSet`s track seen
+    /// keys; changeset rows are already sorted, so no intermediate `HashMap` is needed.
     ///
     /// - Reads the first occurrence of each changed account/storage slot in the range.
     /// - Addresses are always keccak256-hashed.
     /// - Storage keys are always plain and are hashed via `keccak256`.
     /// - Returns keys already ordered for trie iteration.
-    #[instrument(target = "trie::db", skip(provider), fields(range))]
+    #[instrument(target = "trie::db", skip(provider))]
     fn from_reverts(
         provider: &(impl ChangeSetReader + StorageChangeSetReader),
-        range: impl RangeBounds<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, ProviderError> {
-        // Extract concrete start/end values to use for both account and storage changesets.
-        let start = match range.start_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => n + 1,
-            Bound::Unbounded => 0,
-        };
-
-        let end = match range.end_bound() {
-            Bound::Included(&n) => n + 1,
-            Bound::Excluded(&n) => n,
-            Bound::Unbounded => BlockNumber::MAX,
-        };
-
-        // Iterate over account changesets and record value before first occurring account change
         let mut accounts = Vec::new();
         let mut seen_accounts = HashSet::new();
-        for entry in provider.account_changesets_range(start..end)? {
-            let (_, AccountBeforeTx { address, info }) = entry;
-            if seen_accounts.insert(address) {
-                accounts.push((keccak256(address), info));
-            }
-        }
-        accounts.sort_unstable_by_key(|(hash, _)| *hash);
-
-        // Read storages into B256Map<Vec<_>> with HashSet to track seen keys.
         // Only keep the first (oldest) occurrence of each (address, slot) pair.
         let mut storages = B256Map::<Vec<_>>::default();
         let mut seen_storage_keys = HashSet::new();
+        // Rows of a block are ordered by address, so all slots of one account arrive
+        // consecutively and the address hash can be reused across them.
+        let mut last_address: Option<(Address, B256)> = None;
 
-        if start < end {
-            let end_inclusive = end.saturating_sub(1);
-            // Rows are ordered by `BlockNumberAddress`, so all slots of one account arrive
-            // consecutively and the address hash can be reused across them.
-            let mut last_address: Option<(Address, B256)> = None;
-            for (BlockNumberAddress((_, address)), storage) in
-                provider.storage_changesets_range(start..=end_inclusive)?
-            {
+        // Blocks are visited oldest first, so the first occurrence of a key holds its value
+        // before the range.
+        for block in range {
+            for AccountBeforeTx { address, info } in provider.account_block_changeset(block)? {
+                if seen_accounts.insert(address) {
+                    accounts.push((keccak256(address), info));
+                }
+            }
+
+            for (BlockNumberAddress((_, address)), storage) in provider.storage_changeset(block)? {
                 if seen_storage_keys.insert((address, storage.key)) {
                     let hashed_address = match last_address {
                         Some((last, hashed)) if last == address => hashed,
@@ -329,6 +309,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
                 }
             }
         }
+        accounts.sort_unstable_by_key(|(hash, _)| *hash);
 
         // Sort storage slots and convert to HashedStorageSorted
         let hashed_storages = storages
@@ -347,19 +328,23 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
 mod tests {
     use super::*;
     use alloy_primitives::{hex, keccak256, map::HashMap, Address, B256, U256};
+    use evm2::evm::AccountInfo;
     use reth_db_api::{
-        models::{AccountBeforeTx, BlockNumberAddress},
+        models::{AccountBeforeTx, BlockNumberAddress, StorageBeforeTx, StorageSettings},
         tables,
         transaction::DbTxMut,
     };
     use reth_execution_errors::StateRootError;
     use reth_primitives_traits::{Account, StorageEntry};
-    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_provider::{
+        test_utils::create_test_provider_factory, StaticFileProviderFactory, StaticFileSegment,
+        StaticFileWriter,
+    };
     use reth_storage_api::StorageSettingsCache;
     use reth_trie::{
         HashedPostState, HashedPostStateSorted, HashedStorage, KeccakKeyHasher, StateRoot,
     };
-    use revm::{database::BundleState, state::AccountInfo};
+    use reth_trie_common::bundle_state::BundleState;
 
     fn overlay_root_for_provider<TX: reth_db_api::transaction::DbTx>(
         provider: &impl StorageSettingsCache,
@@ -383,13 +368,13 @@ mod tests {
 
         let mut hashed_state = HashedPostState::default();
         hashed_state.accounts.insert(
-            B256::from(U256::from(1)),
-            Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
+            B256::with_last_byte(1),
+            Some(Account { nonce: 1, balance: U256::from(10), ..Default::default() }),
         );
-        hashed_state.accounts.insert(B256::from(U256::from(2)), None);
+        hashed_state.accounts.insert(B256::with_last_byte(2), None);
         hashed_state.storages.insert(
-            B256::from(U256::from(1)),
-            HashedStorage::from_iter([(B256::from(U256::from(3)), U256::from(30))]),
+            B256::with_last_byte(1),
+            HashedStorage::from_iter([(B256::with_last_byte(3), U256::from(30))]),
         );
 
         let sorted = hashed_state.into_sorted();
@@ -440,8 +425,8 @@ mod tests {
 
         let address1 = Address::with_last_byte(1);
         let address2 = Address::with_last_byte(2);
-        let slot1 = B256::from(U256::from(11));
-        let slot2 = B256::from(U256::from(22));
+        let slot1 = B256::with_last_byte(11);
+        let slot2 = B256::with_last_byte(22);
 
         // Account changesets: only first occurrence per address should be kept.
         provider
@@ -498,7 +483,7 @@ mod tests {
         assert_eq!(sorted.accounts.len(), 2);
         let hashed_addr1 = keccak256(address1);
         let account1 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr1).unwrap();
-        assert_eq!(account1.1.unwrap().nonce, 1);
+        assert_eq!(account1.1.as_ref().unwrap().nonce, 1);
 
         // Ordering guarantees - accounts sorted by hashed address
         assert!(sorted.accounts.windows(2).all(|w| w[0].0 <= w[1].0));
@@ -535,9 +520,6 @@ mod tests {
 
     #[test]
     fn from_reverts_with_hashed_state() {
-        use reth_db_api::models::{StorageBeforeTx, StorageSettings};
-        use reth_provider::{StaticFileProviderFactory, StaticFileSegment, StaticFileWriter};
-
         let factory = create_test_provider_factory();
 
         factory.set_storage_settings_cache(StorageSettings::v2());
@@ -547,8 +529,8 @@ mod tests {
         let address1 = Address::with_last_byte(1);
         let address2 = Address::with_last_byte(2);
 
-        let plain_slot1 = B256::from(U256::from(11));
-        let plain_slot2 = B256::from(U256::from(22));
+        let plain_slot1 = B256::with_last_byte(11);
+        let plain_slot2 = B256::with_last_byte(22);
         let hashed_slot1 = keccak256(plain_slot1);
         let hashed_slot2 = keccak256(plain_slot2);
 
@@ -621,7 +603,7 @@ mod tests {
         let hashed_addr2 = keccak256(address2);
 
         let account1 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr1).unwrap();
-        assert_eq!(account1.1.unwrap().nonce, 1);
+        assert_eq!(account1.1.as_ref().unwrap().nonce, 1);
 
         let account2 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr2).unwrap();
         assert!(account2.1.is_none());
@@ -650,8 +632,8 @@ mod tests {
 
         let address1 = Address::with_last_byte(1);
         let address2 = Address::with_last_byte(2);
-        let plain_slot1 = B256::from(U256::from(11));
-        let plain_slot2 = B256::from(U256::from(22));
+        let plain_slot1 = B256::with_last_byte(11);
+        let plain_slot2 = B256::with_last_byte(22);
 
         provider
             .tx_ref()
@@ -714,11 +696,11 @@ mod tests {
 
         let account1 =
             sorted.accounts.iter().find(|(addr, _)| *addr == expected_hashed_addr1).unwrap();
-        assert_eq!(account1.1.unwrap().nonce, 10);
+        assert_eq!(account1.1.as_ref().unwrap().nonce, 10);
 
         let account2 =
             sorted.accounts.iter().find(|(addr, _)| *addr == expected_hashed_addr2).unwrap();
-        assert_eq!(account2.1.unwrap().nonce, 20);
+        assert_eq!(account2.1.as_ref().unwrap().nonce, 20);
 
         assert!(sorted.accounts.windows(2).all(|w| w[0].0 <= w[1].0));
 

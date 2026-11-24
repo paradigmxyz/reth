@@ -4,6 +4,7 @@ use crate::{eth::core::EthApiInner, EthApi};
 use alloy_network::Ethereum;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
+use reth_evm::SenderRecoveryCache;
 use reth_primitives_traits::HeaderTy;
 use reth_rpc_convert::{RpcConvert, RpcConverter};
 use reth_rpc_eth_api::{
@@ -11,8 +12,9 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{
     builder::config::PendingBlockKind, fee_history::fee_history_cache_new_blocks_task,
-    receipt::EthReceiptConverter, EthStateCache, EthStateCacheConfig, FeeHistoryCache,
-    FeeHistoryCacheConfig, ForwardConfig, GasCap, GasPriceOracle, GasPriceOracleConfig,
+    receipt::EthReceiptConverter, EthApiSettings, EthStateCache, EthStateCacheConfig,
+    FeeHistoryCache, FeeHistoryCacheConfig, ForwardConfig, GasCap, GasPriceOracle,
+    GasPriceOracleConfig,
 };
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKING_IO_REQUEST, DEFAULT_MAX_SIMULATE_BLOCKS,
@@ -31,6 +33,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     rpc_converter: Rpc,
     gas_cap: GasCap,
     max_simulate_blocks: u64,
+    max_trace_bytes: Option<usize>,
     compute_state_root_for_eth_simulate: bool,
     eth_proof_window: u64,
     fee_history_cache_config: FeeHistoryCacheConfig,
@@ -40,12 +43,14 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     gas_oracle_config: GasPriceOracleConfig,
     gas_oracle: Option<GasPriceOracle<N::Provider>>,
     blocking_task_pool: Option<BlockingTaskPool>,
-    task_spawner: Runtime,
+    /// Runtime used to spawn tasks. Defaults to [`Runtime::test`] when not configured.
+    task_spawner: Option<Runtime>,
     next_env: NextEnv,
     max_batch_size: usize,
     max_blocking_io_requests: usize,
     pending_block_kind: PendingBlockKind,
     raw_tx_forwarder: ForwardConfig,
+    sender_recovery_cache: Option<SenderRecoveryCache>,
     send_raw_transaction_sync_timeout: Duration,
     evm_memory_limit: u64,
     force_blob_sidecar_upcasting: bool,
@@ -85,6 +90,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             rpc_converter,
             gas_cap,
             max_simulate_blocks,
+            max_trace_bytes,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -100,6 +106,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -109,6 +116,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             rpc_converter: f(rpc_converter),
             gas_cap,
             max_simulate_blocks,
+            max_trace_bytes,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -124,6 +132,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -146,12 +155,13 @@ where
             gas_oracle: None,
             gas_cap: GasCap::default(),
             max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
+            max_trace_bytes: None,
             compute_state_root_for_eth_simulate: false,
             eth_proof_window: DEFAULT_ETH_PROOF_WINDOW,
             blocking_task_pool: None,
             fee_history_cache_config: FeeHistoryCacheConfig::default(),
             proof_permits: DEFAULT_PROOF_PERMITS,
-            task_spawner: Runtime::test(),
+            task_spawner: None,
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
             next_env: Default::default(),
@@ -159,6 +169,7 @@ where
             max_blocking_io_requests: DEFAULT_MAX_BLOCKING_IO_REQUEST,
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
+            sender_recovery_cache: None,
             send_raw_transaction_sync_timeout: Duration::from_secs(30),
             evm_memory_limit: (1 << 32) - 1,
             force_blob_sidecar_upcasting: false,
@@ -172,7 +183,7 @@ where
 {
     /// Configures the task spawner used to spawn additional tasks.
     pub fn task_spawner(mut self, spawner: Runtime) -> Self {
-        self.task_spawner = spawner;
+        self.task_spawner = Some(spawner);
         self
     }
 
@@ -186,6 +197,7 @@ where
             rpc_converter: _,
             gas_cap,
             max_simulate_blocks,
+            max_trace_bytes,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -201,6 +213,7 @@ where
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -210,6 +223,7 @@ where
             rpc_converter,
             gas_cap,
             max_simulate_blocks,
+            max_trace_bytes,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -225,6 +239,7 @@ where
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -241,6 +256,7 @@ where
             rpc_converter,
             gas_cap,
             max_simulate_blocks,
+            max_trace_bytes,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -256,6 +272,7 @@ where
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -265,6 +282,7 @@ where
             rpc_converter,
             gas_cap,
             max_simulate_blocks,
+            max_trace_bytes,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -280,6 +298,7 @@ where
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -324,6 +343,12 @@ where
     /// Sets the maximum number of blocks for `eth_simulateV1`.
     pub const fn max_simulate_blocks(mut self, max_simulate_blocks: u64) -> Self {
         self.max_simulate_blocks = max_simulate_blocks;
+        self
+    }
+
+    /// Sets the maximum bytes a single traced transaction may record. `None` is unlimited.
+    pub const fn max_trace_bytes(mut self, max_trace_bytes: Option<usize>) -> Self {
+        self.max_trace_bytes = max_trace_bytes;
         self
     }
 
@@ -375,6 +400,12 @@ where
     /// Sets the pending block kind
     pub const fn pending_block_kind(mut self, pending_block_kind: PendingBlockKind) -> Self {
         self.pending_block_kind = pending_block_kind;
+        self
+    }
+
+    /// Sets the sender recovery cache shared with transaction ingress and execution.
+    pub fn sender_recovery_cache(mut self, cache: Option<SenderRecoveryCache>) -> Self {
+        self.sender_recovery_cache = cache;
         self
     }
 
@@ -517,6 +548,7 @@ where
             gas_oracle,
             gas_cap,
             max_simulate_blocks,
+            max_trace_bytes,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             blocking_task_pool,
@@ -528,12 +560,14 @@ where
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
         } = self;
 
         let provider = components.provider().clone();
+        let task_spawner = task_spawner.unwrap_or_else(Runtime::test);
 
         let eth_cache = eth_cache.unwrap_or_else(|| {
             EthStateCache::spawn_with(
@@ -557,14 +591,29 @@ where
             },
         );
 
+        let settings = EthApiSettings {
+            sender_recovery_cache,
+            proof_permits,
+            max_batch_size,
+            max_blocking_io_requests,
+            cache_computed_bals: eth_state_cache_config.cache_computed_bals ||
+                eth_state_cache_config.prewarm_bals.is_some(),
+            gas_cap: gas_cap.into(),
+            max_simulate_blocks,
+            max_trace_bytes,
+            compute_state_root_for_eth_simulate,
+            eth_proof_window,
+            pending_block_kind,
+            send_raw_transaction_sync_timeout,
+            evm_memory_limit,
+            force_blob_sidecar_upcasting,
+        };
+
         EthApiInner::new(
             components,
             eth_cache,
             gas_oracle,
-            gas_cap,
-            max_simulate_blocks,
-            compute_state_root_for_eth_simulate,
-            eth_proof_window,
+            settings,
             blocking_task_pool.unwrap_or_else(|| {
                 BlockingTaskPool::builder()
                     .thread_name(|i| format!("blocking-{i:02}"))
@@ -574,16 +623,9 @@ where
             }),
             fee_history_cache,
             task_spawner,
-            proof_permits,
             rpc_converter,
             next_env,
-            max_batch_size,
-            max_blocking_io_requests,
-            pending_block_kind,
             raw_tx_forwarder.forwarder_client(),
-            send_raw_transaction_sync_timeout,
-            evm_memory_limit,
-            force_blob_sidecar_upcasting,
         )
     }
 

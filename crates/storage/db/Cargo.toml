@@ -17,7 +17,6 @@ reth-db-api.workspace = true
 reth-fs-util.workspace = true
 reth-storage-errors.workspace = true
 reth-nippy-jar.workspace = true
-reth-tracing.workspace = true
 tracing.workspace = true
 reth-static-file-types.workspace = true
 reth-primitives-traits = { workspace = true, optional = true, features = ["quanta"] }
@@ -68,6 +67,7 @@ proptest.workspace = true
 assert_matches.workspace = true
 
 [features]
+fuzz = ["reth-libmdbx?/fuzz"]
 default = ["mdbx"]
 mdbx = [
     "dep:reth-libmdbx",
