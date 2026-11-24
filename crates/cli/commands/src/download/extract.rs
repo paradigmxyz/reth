@@ -16,6 +16,7 @@ use reth_fs_util::{self as fs, FsPathError};
 use std::{
     cell::RefCell,
     collections::HashSet,
+    fs::FileTimes,
     io::{self, BufWriter, Read},
     mem,
     ops::Range,
@@ -54,6 +55,10 @@ const DECODED_CHUNK_QUEUE_LEN: usize = 16;
 
 /// Bytes written to an extracted regular file per write.
 const EXTRACTED_FILE_WRITE_SIZE: usize = 8 << 20;
+
+/// Decoded bytes read after the tar end marker. Covers the padding `tar` writes, so the
+/// compression checksum of a normal archive is checked, without decoding an unbounded suffix.
+const MAX_TRAILING_DECODED_BYTES: u64 = 1 << 20;
 
 /// Supported compression formats for snapshots
 #[derive(Debug, Clone, Copy)]
@@ -147,10 +152,10 @@ pub(crate) fn extract_archive_raw<R: Read>(
 ///
 /// Decompression runs on its own thread, feeding the tar unpack and file writes on the calling
 /// thread through a bounded queue of decoded buffers, so a large archive is not limited by one
-/// core doing both. The whole compressed stream is decoded, including bytes after the tar end
-/// marker, so the compression checksum is validated. `on_unpack_error` runs as soon as
-/// unpacking fails or panics, before this waits for the decoder, so the caller can stop whatever
-/// feeds `reader`. A panic resumes once the decoder is joined.
+/// core doing both. Up to [`MAX_TRAILING_DECODED_BYTES`] after the tar end marker are decoded
+/// too, so the compression checksum of a normal archive is validated. `on_unpack_error` runs as
+/// soon as unpacking fails or panics, before this waits for the decoder, so the caller can stop
+/// whatever feeds `reader`. A panic resumes once the decoder is joined.
 pub(crate) fn extract_archive_hashed<R: Read + Send>(
     reader: R,
     format: CompressionFormat,
@@ -176,7 +181,7 @@ pub(crate) fn extract_archive_hashed<R: Read + Send>(
                 progress,
                 Some(&hasher),
             )?;
-            io::copy(&mut chunks, &mut io::sink())?;
+            io::copy(&mut Read::take(&mut chunks, MAX_TRAILING_DECODED_BYTES), &mut io::sink())?;
             Ok(hasher.into_inner())
         }));
         if !matches!(unpacked, Ok(Ok(_))) {
@@ -594,15 +599,15 @@ fn write_regular_file<R: Read>(
     if let Ok(mode) = entry.header().mode() {
         file.set_permissions(std::fs::Permissions::from_mode(mode & 0o777))?;
     }
-    // Like `tar`, read the time as signed seconds, so times before the epoch are kept, and avoid
-    // zero modification times. Times `SystemTime` cannot represent are skipped.
+    // Like `tar`, read the time as signed seconds, so times before the epoch are kept, avoid zero
+    // times, and set the access time too. Times `SystemTime` cannot represent are skipped.
     if let Ok(mtime) = entry.header().mtime() {
         let secs = mtime.max(1).cast_signed();
         let offset = Duration::from_secs(secs.unsigned_abs());
         let modified =
             if secs < 0 { UNIX_EPOCH.checked_sub(offset) } else { UNIX_EPOCH.checked_add(offset) };
         if let Some(modified) = modified {
-            file.set_modified(modified)?;
+            file.set_times(FileTimes::new().set_accessed(modified).set_modified(modified))?;
         }
     }
     Ok(())
@@ -1398,6 +1403,33 @@ mod tests {
     }
 
     #[test]
+    fn hashed_extraction_stops_decoding_a_long_suffix_after_the_end_marker() {
+        let mut archive = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(4);
+        header.set_cksum();
+        archive.append_data(&mut header, "db/data", b"data".as_slice()).unwrap();
+        let mut tar = archive.into_inner().unwrap();
+        tar.resize(tar.len() + 2 * MAX_TRAILING_DECODED_BYTES as usize, 0);
+        let mut compressed = zstd::encode_all(tar.as_slice(), 0).unwrap();
+        // Bytes that are not a zstd frame, past the limit, so they are never decoded.
+        compressed.extend_from_slice(b"not a zstd frame");
+
+        let target = tempfile::tempdir().unwrap();
+        extract_archive_hashed(
+            compressed.as_slice(),
+            CompressionFormat::Zstd,
+            target.path(),
+            None,
+            HashSet::from([target.path().join("db/data")]),
+            None,
+            || {},
+        )
+        .unwrap();
+        assert_eq!(fs::read(target.path().join("db/data")).unwrap(), b"data");
+    }
+
+    #[test]
     fn legacy_directory_entry_is_extracted_as_directory() {
         let mut archive = tar::Builder::new(Vec::new());
         for (path, data) in [("db/", b"".as_slice()), ("db/data", b"data".as_slice())] {
@@ -1434,10 +1466,13 @@ mod tests {
         extract_archive_raw(tar.as_slice(), CompressionFormat::Zstd, target.path(), None, None)
             .unwrap();
         let path = target.path().join("db/data");
-        assert_eq!(fs::read(&path).unwrap(), b"data");
+        // Checked before reading the file, which may update its access time.
         let metadata = std::fs::metadata(&path).unwrap();
+        let time = UNIX_EPOCH - Duration::from_secs(86_400);
+        assert_eq!(metadata.modified().unwrap(), time);
+        assert_eq!(metadata.accessed().unwrap(), time);
         assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
-        assert_eq!(metadata.modified().unwrap(), UNIX_EPOCH - Duration::from_secs(86_400));
+        assert_eq!(fs::read(&path).unwrap(), b"data");
     }
 
     #[test]
