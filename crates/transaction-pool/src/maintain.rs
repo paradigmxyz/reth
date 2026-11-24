@@ -176,6 +176,10 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
     // the future that reloads accounts from state
     let mut reload_accounts_fut = Fuse::terminated();
 
+    // set when a reload failed because historical state is unavailable during pipeline sync,
+    // retrying is pointless until the next canonical state event
+    let mut wait_for_next_event = false;
+
     // eviction interval for stale non local txs
     let mut stale_eviction_interval = time::interval(config.max_tx_lifetime);
 
@@ -202,7 +206,10 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
         }
 
         // if we have accounts that are out of sync with the pool, we reload them in chunks
-        if !dirty_addresses.is_empty() && reload_accounts_fut.is_terminated() {
+        if !dirty_addresses.is_empty() &&
+            reload_accounts_fut.is_terminated() &&
+            !wait_for_next_event
+        {
             let (tx, rx) = oneshot::channel();
             let c = client.clone();
             let at = pool_info.last_seen_block_hash;
@@ -270,6 +277,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                     break;
                 }
                 event = ev;
+                // state may have advanced, so allow reloading dirty accounts again
+                wait_for_next_event = false;
                 // on receiving the first event on start up, mark the pool as drifted to explicitly
                 // trigger revalidation and clear out outdated txs.
                 if first_event {
@@ -313,6 +322,9 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 // Failed to load accounts from state
                 let (accs, err) = *res;
                 debug!(target: "txpool", %err, "failed to load accounts");
+                if matches!(err, ProviderError::StateUnavailableDuringSync) {
+                    wait_for_next_event = true;
+                }
                 dirty_addresses.extend(accs);
             }
             Some(Err(_)) => {
