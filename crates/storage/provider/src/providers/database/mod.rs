@@ -17,7 +17,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use core::fmt;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
-use reth_chain_state::{CanonicalInMemoryState, ChainInfoHeaders, InMemoryState};
+use reth_chain_state::{ChainInfoHeaders, InMemoryState};
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
@@ -624,25 +624,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             safe: safe_header,
             finalized: finalized_header,
         })
-    }
-
-    /// Creates a canonical in-memory state without a writer over the in-memory state of this
-    /// factory, starting from [`Self::chain_info_headers`].
-    ///
-    /// Nothing can change its chain info or send its notifications: its canonical head and its
-    /// safe and finalized blocks stay the ones read from the database, and it never has a
-    /// persisted block. Its in-memory blocks are those of [`Self::in_memory_state`], and change
-    /// with them.
-    ///
-    /// This is the state for a provider that only reads, where no engine tracks the chain. Every
-    /// call creates a state of its own.
-    pub fn canonical_in_memory_state_without_writer(
-        &self,
-    ) -> ProviderResult<CanonicalInMemoryState<N::Primitives>> {
-        Ok(CanonicalInMemoryState::without_writer(
-            self.chain_info_headers()?,
-            self.in_memory_state().clone(),
-        ))
     }
 }
 

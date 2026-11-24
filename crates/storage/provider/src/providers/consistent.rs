@@ -1498,7 +1498,7 @@ mod tests {
             factory.chain_info_headers()?,
             in_memory_state_writer,
         );
-        let provider = BlockchainProvider::new(
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
             factory,
             canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
         );
@@ -1650,7 +1650,7 @@ mod tests {
             factory.chain_info_headers()?,
             in_memory_state_writer,
         );
-        let provider = BlockchainProvider::new(
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
             factory,
             canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
         );
@@ -1772,7 +1772,7 @@ mod tests {
             factory.chain_info_headers()?,
             in_memory_state_writer,
         );
-        let provider = BlockchainProvider::new(
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
             factory,
             canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
         );
@@ -1894,8 +1894,7 @@ mod tests {
 
         provider_rw.commit()?;
 
-        let canonical_in_memory_state = factory.canonical_in_memory_state_without_writer()?;
-        let provider = BlockchainProvider::new(factory, canonical_in_memory_state);
+        let provider = BlockchainProvider::new(factory)?;
         let outcome = provider.get_state(1)?.expect("should return execution outcome");
 
         let state = &outcome.bundle.state;
@@ -1957,7 +1956,7 @@ mod tests {
             factory.chain_info_headers()?,
             in_memory_state_writer,
         );
-        let provider = BlockchainProvider::new(
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
             factory,
             canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
         );
@@ -2066,7 +2065,7 @@ mod tests {
             factory.chain_info_headers()?,
             in_memory_state_writer,
         );
-        let provider = BlockchainProvider::new(
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
             factory,
             canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
         );

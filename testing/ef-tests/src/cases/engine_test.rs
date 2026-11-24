@@ -390,7 +390,7 @@ impl Engine {
                 .map_err(|err| Error::engine("failed to set up the engine", err))?,
             in_memory_state_writer,
         );
-        let provider = BlockchainProvider::new(
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
             factory.clone(),
             canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
         );
