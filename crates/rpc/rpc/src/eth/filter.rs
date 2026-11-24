@@ -391,6 +391,13 @@ where
                             .await?;
                         (logs, to_block)
                     }
+                    Err(err @ EthFilterError::ReceiptsUnavailable(_)) => {
+                        // Pruned receipts do not come back, so a retry would fail the same way on
+                        // every later poll. The error reports the gap and the next poll continues
+                        // after this poll's range.
+                        self.advance_filter_cursor(&id, to_block_number + 1).await;
+                        return Err(err)
+                    }
                     Err(err) => return Err(err),
                 };
                 self.advance_filter_cursor(&id, delivered_to + 1).await;
@@ -406,9 +413,10 @@ where
     /// A poll therefore delivers its range at least once: two polls of the same filter that run
     /// concurrently both cover the range neither of them has acknowledged yet.
     ///
-    /// The exception is a single block whose logs alone exceed the response size limit: the scan
-    /// returns them, as `eth_getLogs` does for one block, so the cursor moves past them although
-    /// the transport may reject the response.
+    /// There are two exceptions. A single block whose logs alone exceed the response size limit is
+    /// returned whole, as `eth_getLogs` does for one block, so the cursor moves past it although
+    /// the transport may reject the response. A poll that fails because receipts in its range were
+    /// pruned moves the cursor past that range, since every retry would fail the same way.
     async fn advance_filter_cursor(&self, id: &FilterId, next: u64) {
         let mut filters = self.inner.active_filters.inner.lock().await;
         if let Some(filter) = filters.get_mut(id) {
@@ -3351,6 +3359,33 @@ mod tests {
     async fn test_failed_filter_poll_is_retried() {
         let provider = MockEthProvider::default();
         add_blocks_with_log(&provider, 0..=0);
+        let eth_api = build_test_eth_api(provider.clone());
+        let eth_filter =
+            EthFilter::new(eth_api.clone(), EthFilterConfig::default(), Runtime::test());
+        let id = eth_filter.new_filter(Filter::default()).await.unwrap();
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![0]);
+
+        // a poll whose request is dropped before its scan completes does not consume the new
+        // block.
+        add_blocks_with_log(&provider, 1..=1);
+        let guard = eth_api.blocking_io_task_guard().clone();
+        let permits =
+            guard.clone().acquire_many_owned(guard.available_permits() as u32).await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), eth_filter.filter_changes(id.clone()))
+                .await
+                .is_err(),
+            "the scan must wait for a blocking IO permit"
+        );
+        drop(permits);
+
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn test_filter_poll_skips_pruned_receipts() {
+        let provider = MockEthProvider::default();
+        add_blocks_with_log(&provider, 0..=0);
         let eth_filter = EthFilter::new(
             build_test_eth_api(provider.clone()),
             EthFilterConfig::default(),
@@ -3359,14 +3394,15 @@ mod tests {
         let id = eth_filter.new_filter(Filter::default()).await.unwrap();
         assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![0]);
 
-        // a poll that cannot read the receipts of a new block fails without consuming it.
-        add_blocks_with_log(&provider, 1..=1);
+        // the receipts of block 1 were pruned before the filter got to them.
+        add_blocks_with_log(&provider, 1..=2);
         provider.receipts.lock().remove(&1);
         let err = eth_filter.filter_changes(id.clone()).await.unwrap_err();
         assert!(matches!(err, EthFilterError::ReceiptsUnavailable(1)), "{err:?}");
 
-        add_blocks_with_log(&provider, 1..=1);
-        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![1]);
+        // the failed poll's range is skipped instead of failing every later poll.
+        add_blocks_with_log(&provider, 3..=3);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![3]);
     }
 
     #[tokio::test]
