@@ -164,7 +164,8 @@ pub(crate) fn extract_archive_hashed<R: Read + Send>(
     thread::scope(|scope| {
         let decoder = scope.spawn(move || decode_archive(reader, format, &sender, &reusable));
         let hasher = RefCell::new(FileHasher::spawn(outputs));
-        let mut chunks = DecodedChunks { chunks, recycled, chunk: Vec::new(), offset: 0 };
+        let mut chunks =
+            DecodedChunks { chunks, recycled, chunk: DecodedChunk::default(), offset: 0 };
         let unpacked = unpack_archive(
             Archive::new(FileHashTee { inner: &mut chunks, position: 0, hasher: &hasher }),
             target_dir,
@@ -190,7 +191,7 @@ pub(crate) fn extract_archive_hashed<R: Read + Send>(
 fn decode_archive<R: Read>(
     reader: R,
     format: CompressionFormat,
-    sender: &SyncSender<io::Result<Vec<u8>>>,
+    sender: &SyncSender<io::Result<DecodedChunk>>,
     reusable: &Receiver<Vec<u8>>,
 ) {
     let decode = || -> io::Result<()> {
@@ -199,19 +200,19 @@ fn decode_archive<R: Read>(
             CompressionFormat::Zstd => Box::new(ZstdDecoder::new(reader)?),
         };
         loop {
-            let mut chunk = reusable.try_recv().unwrap_or_default();
-            chunk.resize(DECODED_CHUNK_SIZE, 0);
-            let read = loop {
-                match decoder.read(&mut chunk) {
+            let mut buf = reusable.try_recv().unwrap_or_default();
+            // Only zeroes new buffers, since recycled ones keep their full length.
+            buf.resize(DECODED_CHUNK_SIZE, 0);
+            let len = loop {
+                match decoder.read(&mut buf) {
                     Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
                     result => break result?,
                 }
             };
-            if read == 0 {
+            if len == 0 {
                 return Ok(())
             }
-            chunk.truncate(read);
-            if sender.send(Ok(chunk)).is_err() {
+            if sender.send(Ok(DecodedChunk { buf, len })).is_err() {
                 return Ok(())
             }
         }
@@ -228,11 +229,11 @@ fn decode_archive<R: Read>(
 /// buffer to the decoder for reuse.
 struct DecodedChunks {
     /// Decoded buffers, or the decode error that ended the stream.
-    chunks: Receiver<io::Result<Vec<u8>>>,
+    chunks: Receiver<io::Result<DecodedChunk>>,
     /// Consumed buffers returned to the decoder.
     recycled: SyncSender<Vec<u8>>,
     /// Buffer being read.
-    chunk: Vec<u8>,
+    chunk: DecodedChunk,
     /// Bytes of `chunk` already read.
     offset: usize,
 }
@@ -242,10 +243,10 @@ impl Read for DecodedChunks {
         if buf.is_empty() {
             return Ok(0)
         }
-        if self.offset == self.chunk.len() {
+        if self.offset == self.chunk.len {
             // Recycle before blocking so the decoder can reuse this buffer for the chunk being
             // waited on. A full queue or a finished decoder just drops it.
-            match self.recycled.try_send(mem::take(&mut self.chunk)) {
+            match self.recycled.try_send(mem::take(&mut self.chunk).buf) {
                 Ok(()) | Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {}
             }
             // Reset with the take, so reads after the end of the stream or an error find an
@@ -256,11 +257,19 @@ impl Read for DecodedChunks {
                 Err(_) => return Ok(0),
             }
         }
-        let len = buf.len().min(self.chunk.len() - self.offset);
-        buf[..len].copy_from_slice(&self.chunk[self.offset..self.offset + len]);
+        let len = buf.len().min(self.chunk.len - self.offset);
+        buf[..len].copy_from_slice(&self.chunk.buf[self.offset..self.offset + len]);
         self.offset += len;
         Ok(len)
     }
+}
+
+/// A buffer from [`decode_archive`] whose first `len` bytes are decoded. The buffer keeps its
+/// full length so the decoder can refill it without zeroing it again.
+#[derive(Default)]
+struct DecodedChunk {
+    buf: Vec<u8>,
+    len: usize,
 }
 
 fn unpack_archive<R: Read>(
@@ -1328,11 +1337,12 @@ mod tests {
         encoder.write_all(&archive.into_inner().unwrap()).unwrap();
         encoder.flush().unwrap();
         let (feed, input) = sync_channel(1);
-        feed.send(Ok(encoder.get_ref().clone())).unwrap();
+        let compressed = encoder.get_ref().clone();
+        feed.send(Ok(DecodedChunk { len: compressed.len(), buf: compressed })).unwrap();
         let reader = DecodedChunks {
             chunks: input,
             recycled: sync_channel(0).0,
-            chunk: Vec::new(),
+            chunk: DecodedChunk::default(),
             offset: 0,
         };
         let custom = tempfile::tempdir().unwrap();
