@@ -98,6 +98,7 @@ reth-db-api.workspace = true
 reth-db-common.workspace = true
 
 rand.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 jsonrpsee = { workspace = true, features = ["server"] }
 

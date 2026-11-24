@@ -230,8 +230,9 @@ impl TestHarness {
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
         let runtime = reth_tasks::Runtime::test();
+        let (in_memory_state, in_memory_state_writer) = InMemoryState::new();
         let overlay_manager = OverlayManager::with_worker_pool(
-            InMemoryState::default(),
+            in_memory_state,
             runtime.state_trie_overlay_worker_pool(),
         );
 
@@ -246,7 +247,7 @@ impl TestHarness {
         );
         let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
             ChainInfoHeaders { canonical_head: header, safe: None, finalized: None },
-            overlay_manager.in_memory_state().clone(),
+            in_memory_state_writer,
         );
 
         let (to_payload_service, payload_command_rx) = unbounded_channel();
@@ -298,21 +299,14 @@ impl TestHarness {
     }
 
     fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
-        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
-            ChainInfoHeaders {
-                canonical_head: blocks.last().unwrap().recovered_block().clone_sealed_header(),
-                safe: None,
-                finalized: None,
-            },
-            self.tree.state.tree_state.overlay_manager.in_memory_state().clone(),
-        );
-
         self.tree
             .state
             .tree_state
             .set_canonical_head(blocks.last().unwrap().recovered_block().num_hash());
 
-        self.tree.canonical_in_memory_state_writer = canonical_in_memory_state_writer;
+        self.tree
+            .canonical_in_memory_state_writer
+            .set_canonical_head(blocks.last().unwrap().recovered_block().clone_sealed_header());
         self.tree
             .canonical_in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
@@ -1701,14 +1695,11 @@ fn threshold_persistence_uses_canonical_in_memory_chain_length() {
         .with_persistence_threshold(3)
         .with_memory_block_buffer_target(0)
         .with_num_state_masking_blocks(2);
-    test_harness.tree.persistence_state.last_persisted_block =
-        blocks[7].recovered_block().num_hash();
-    test_harness.tree.persistence_state.last_state_trie_persisted_block =
-        blocks[5].recovered_block().num_hash();
-    test_harness.tree.canonical_in_memory_state().remove_persisted_blocks_until(
-        blocks[7].recovered_block().num_hash(),
-        blocks[5].recovered_block().number(),
-    );
+    test_harness
+        .tree
+        .persistence_state
+        .finish(blocks[7].recovered_block().num_hash(), blocks[5].recovered_block().num_hash());
+    test_harness.tree.on_new_persisted_block().unwrap();
 
     assert_eq!(test_harness.tree.canonical_in_memory_state().canonical_chain().count(), 4);
     assert!(test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).is_some());

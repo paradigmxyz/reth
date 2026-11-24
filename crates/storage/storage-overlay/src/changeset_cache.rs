@@ -640,7 +640,7 @@ impl ChangesetCacheInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::canonical_state_for, StateTrieOverlay};
+    use crate::{test_utils::overlay_manager_with_writer, StateTrieOverlay};
     use alloy_consensus::Header;
     use alloy_primitives::{
         keccak256,
@@ -763,8 +763,11 @@ mod tests {
     {
         let individual_state_revert =
             HashedPostStateSorted::from_reverts(provider, block_number..=block_number).unwrap();
-        let cumulative_state_revert =
-            HashedPostStateSorted::from_reverts(provider, (block_number + 1)..).unwrap();
+        let cumulative_state_revert = HashedPostStateSorted::from_reverts(
+            provider,
+            (block_number + 1)..=provider.last_block_number().unwrap(),
+        )
+        .unwrap();
 
         let mut cumulative_state_revert_prev = cumulative_state_revert.clone();
         cumulative_state_revert_prev.extend_ref_and_sort(&individual_state_revert);
@@ -927,14 +930,13 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
-        let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
-        let canonical_state = canonical_state_for(&manager);
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
         for (block, updates) in [
             (&blocks[1], Arc::new(storage_updates(vec![(removed, Some(node))]))),
             (&blocks[2], Arc::clone(&finish_updates)),
             (&blocks[3], Arc::default()),
         ] {
-            canonical_state.insert_executed(ExecutedBlock::new(
+            in_memory_state_writer.insert_executed(ExecutedBlock::new(
                 Arc::clone(&block.recovered_block),
                 Arc::clone(&block.execution_output),
                 SortedTrieData::new(Arc::default(), updates),

@@ -270,11 +270,6 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
         self.reader_txn_tracker = Some(Arc::new(reader_txn_tracker));
         self
     }
-
-    /// Returns the manager of the in-memory blocks the engine tree holds.
-    pub(crate) const fn overlay_manager(&self) -> &OverlayManager<N::Primitives> {
-        &self.overlay_manager
-    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -284,7 +279,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// truncating static files from checkpoints on the next startup.
     ///
     /// This waits after the MDBX commit so readers holding older MDBX-visible views cannot overlap
-    /// later cross-store unwind steps.
+    /// later cross-store unwind steps. If the wait fails because MDBX stopped answering queries,
+    /// the later steps are skipped and the same startup recovery applies.
     ///
     /// Historical `storage_v2` reads ignore `RocksDB` history entries above their MDBX-visible tip,
     /// so no additional post-`RocksDB` wait is needed before static-file commit.
@@ -294,7 +290,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         self.tx.commit()?;
 
         if let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
-            reader_txn_tracker.wait_for_pre_commit_readers();
+            reader_txn_tracker.wait_for_pre_commit_readers()?;
         }
 
         if storage_v2 {
@@ -4213,9 +4209,10 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{
-            blocks::BlockchainTestData, create_test_provider_factory, MockNodeTypesWithDB,
+            blocks::BlockchainTestData, create_test_provider_factory,
+            create_test_provider_factory_with_in_memory_state_writer,
         },
-        BlockWriter, ProviderFactory,
+        BlockWriter,
     };
     use alloy_consensus::Header;
     use alloy_eips::BlockNumHash;
@@ -4224,9 +4221,8 @@ mod tests {
         U256,
     };
     use evm2::evm::AccountInfo;
-    use reth_chain_state::{
-        test_utils::TestBlockBuilder, CanonicalInMemoryState, ChainInfoHeaders, ExecutedBlock,
-    };
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_chainspec::MAINNET;
     use reth_db_api::models::{SnapAttempt, StorageSettings};
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
@@ -4256,20 +4252,6 @@ mod tests {
             &[],
             None,
             SaveBlocksMode::Full,
-        )
-    }
-
-    /// Creates the canonical state that updates the in-memory blocks of `factory`.
-    fn canonical_state_for(
-        factory: &ProviderFactory<MockNodeTypesWithDB>,
-    ) -> CanonicalInMemoryState {
-        CanonicalInMemoryState::with_head(
-            ChainInfoHeaders {
-                canonical_head: SealedHeader::default(),
-                safe: None,
-                finalized: None,
-            },
-            factory.in_memory_state().clone(),
         )
     }
 
@@ -5158,15 +5140,15 @@ mod tests {
 
     #[test]
     fn unwind_restores_trie_nodes_masked_above_the_frontier() {
-        let factory = create_test_provider_factory();
+        let (factory, mut in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let blocks = TestBlockBuilder::eth().get_executed_blocks(0..11).collect::<Vec<_>>();
         let provider = factory.provider_rw().unwrap();
         for block in &blocks {
             provider.insert_block(block.recovered_block()).unwrap();
         }
-        let canonical_state = canonical_state_for(&factory);
         for block in &blocks[6..] {
-            canonical_state.insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
         provider
             .save_stage_checkpoint(
@@ -5203,7 +5185,8 @@ mod tests {
 
     #[test]
     fn remove_block_and_execution_above_returns_persistence_frontiers() {
-        let factory = create_test_provider_factory();
+        let (factory, mut in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let mut test_block_builder = TestBlockBuilder::eth().with_state();
 
         let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
@@ -5213,9 +5196,8 @@ mod tests {
         save_genesis(&provider_rw, &genesis).unwrap();
         provider_rw.commit().unwrap();
 
-        let canonical_state = canonical_state_for(&factory);
         for block in &blocks[2..] {
-            canonical_state.insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
 
         let provider_rw = factory.provider_rw().unwrap();
