@@ -254,6 +254,21 @@ impl<N: ProviderNodeTypes> BalProvider for BlockchainProvider<N> {
     fn bal_store(&self) -> &BalStoreHandle {
         &self.bal_store
     }
+
+    /// Falls back to the blocks the engine tree holds in memory, because the store can evict the
+    /// BAL of a non-canonical block before the tree drops that block.
+    fn get_bals_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+        let mut bals = self.bal_store.get_by_hashes(block_hashes)?;
+        let in_memory_state = self.canonical_in_memory_state.in_memory_state();
+        for (hash, bal) in block_hashes.iter().zip(&mut bals) {
+            if bal.is_none() &&
+                let Some(block_state) = in_memory_state.state_by_hash(*hash)
+            {
+                *bal = block_state.block_ref().bal().map(|bal| bal.as_raw_bal().as_raw().clone());
+            }
+        }
+        Ok(bals)
+    }
 }
 
 /// State range view backed by one resolved historical overlay.
