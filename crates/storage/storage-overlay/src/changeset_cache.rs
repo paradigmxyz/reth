@@ -763,8 +763,11 @@ mod tests {
     {
         let individual_state_revert =
             HashedPostStateSorted::from_reverts(provider, block_number..=block_number).unwrap();
-        let cumulative_state_revert =
-            HashedPostStateSorted::from_reverts(provider, (block_number + 1)..).unwrap();
+        let cumulative_state_revert = HashedPostStateSorted::from_reverts(
+            provider,
+            (block_number + 1)..=provider.last_block_number().unwrap(),
+        )
+        .unwrap();
 
         let mut cumulative_state_revert_prev = cumulative_state_revert.clone();
         cumulative_state_revert_prev.extend_ref_and_sort(&individual_state_revert);
