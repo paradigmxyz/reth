@@ -155,11 +155,13 @@ jobs:
           # retry, so the rest of the lockfile stays as is. Stop on any other error, or when a crate
           # comes up again after being unlocked.
           crates=()
+          resolved=false
           resolve=(cargo metadata --format-version 1)
           # One metadata pass, then up to 10 targeted updates.
           for _ in $(seq 0 10); do
             if out=$(CARGO_TERM_COLOR=never "${resolve[@]}" 2>&1 >/dev/null); then
               echo "$out"
+              resolved=true
               break
             fi
             # Unlock the exact locked version cargo names (name@version), since the lockfile can
@@ -174,7 +176,11 @@ jobs:
             resolve=(cargo update)
             for c in "${crates[@]}"; do resolve+=(-p "$c"); done
           done
-          cargo metadata --format-version 1 > /dev/null
+          if [ "$resolved" != true ]; then
+            echo "$out"
+            echo "::error::Cargo.lock still doesn't resolve after unlocking: ${crates[*]}"
+            exit 1
+          fi
           git add -A
           git commit -m "deps: bump evm2 to ${NEW_REV:0:7} ($(date -u +%Y-%m-%d))"
 
