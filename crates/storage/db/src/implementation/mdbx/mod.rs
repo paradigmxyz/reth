@@ -784,7 +784,7 @@ mod tests {
     use reth_db_api::database::ReaderTxnTracker;
     #[cfg(unix)]
     use std::{
-        io::{BufRead, BufReader},
+        io::{BufRead, BufReader, Read},
         process::{Command, Stdio},
         sync::mpsc,
     };
@@ -1833,8 +1833,8 @@ mod tests {
     fn wait_for_pre_commit_readers_clears_dead_process_reader() {
         const CHILD_DB_PATH_ENV: &str = "RETH_TEST_STALE_READER_DB_PATH";
 
-        // Child process: hold a read transaction until killed.
-        if let Ok(path) = std::env::var(CHILD_DB_PATH_ENV) {
+        // Child process: hold a read transaction until killed or until the parent closes stdin.
+        if let Some(path) = std::env::var_os(CHILD_DB_PATH_ENV) {
             let env = DatabaseEnv::open(
                 Path::new(&path),
                 DatabaseEnvKind::RO,
@@ -1843,9 +1843,8 @@ mod tests {
             .unwrap();
             let _tx = env.tx().unwrap();
             println!("ready");
-            loop {
-                std::thread::sleep(Duration::from_secs(1));
-            }
+            let _ = std::io::stdin().read_to_end(&mut Vec::new());
+            std::process::exit(0);
         }
 
         let (dir, env) = create_test_db(DatabaseEnvKind::RW);
@@ -1856,19 +1855,22 @@ mod tests {
                 "--nocapture",
             ])
             .env(CHILD_DB_PATH_ENV, dir.path())
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
             .unwrap();
-        let mut stdout = BufReader::new(child.stdout.take().unwrap());
-        let mut line = String::new();
-        // With one test thread, libtest prints `test <name> ... ` on the same line first.
-        while !line.trim_end().ends_with("ready") {
-            line.clear();
-            assert_ne!(
-                stdout.read_line(&mut line).unwrap(),
-                0,
-                "child exited before opening a read transaction"
-            );
+        let stdout = BufReader::new(child.stdout.take().unwrap());
+        let (ready_tx, ready_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            // With one test thread, libtest prints `test <name> ... ` on the same line first.
+            let ready =
+                stdout.lines().any(|line| line.is_ok_and(|l| l.trim_end().ends_with("ready")));
+            let _ = ready_tx.send(ready);
+        });
+        let ready = ready_rx.recv_timeout(Duration::from_secs(10));
+        if ready != Ok(true) {
+            let _ = child.kill();
+            panic!("child did not open a read transaction: {ready:?}");
         }
 
         // `Child::kill` sends `SIGKILL`, so the child's reader slot is never released.

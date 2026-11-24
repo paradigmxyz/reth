@@ -49,6 +49,9 @@ pub trait Database: Send + Sync + Debug {
     /// Clears reader slots left behind by processes that no longer exist, so they stop counting
     /// towards [`Self::oldest_reader_txnid`].
     ///
+    /// MDBX skips slots carrying this process's own PID, so a stale slot left by a dead process
+    /// whose PID was reused by this one is not cleared.
+    ///
     /// Does nothing by default, for backends without such slots.
     fn reader_check(&self) -> Result<(), DatabaseError> {
         Ok(())
@@ -171,6 +174,8 @@ impl<DB: Database> ReaderTxnTracker for DB {
                     error!(target: "storage::db", %err, "Failed to clear stale database readers");
                 }
                 last_reader_check = Instant::now();
+                // Re-sample before warning, since the check may have cleared the oldest reader.
+                continue
             }
             if last_warn.elapsed() >= SLOW_READERS_WARN_INTERVAL {
                 warn!(
