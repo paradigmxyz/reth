@@ -4826,6 +4826,8 @@ mod tests {
     async fn test_discovered_peers_limited_per_subnet() {
         let mut peers = PeersManager::new(PeersConfig::test());
         let addr = |ip: &str| PeerAddr::from_tcp(SocketAddr::new(ip.parse().unwrap(), 30303));
+        // a static peer does not take one of the subnet's slots
+        peers.add_peer_kind(PeerId::random(), Some(PeerKind::Static), addr("1.2.3.250"), None);
         let subnet_peers =
             (0..MAX_DISCOVERED_PEERS_PER_SUBNET).map(|_| PeerId::random()).collect::<Vec<_>>();
         for (i, peer_id) in subnet_peers.iter().enumerate() {
@@ -4850,34 +4852,28 @@ mod tests {
         peers.add_peer(other, addr("1.2.4.1"), None);
         assert!(peers.peers.contains_key(&trusted));
         assert!(peers.peers.contains_key(&other));
-        assert_eq!(peers.peers.len(), MAX_DISCOVERED_PEERS_PER_SUBNET + 2);
+        assert_eq!(peers.peers.len(), MAX_DISCOVERED_PEERS_PER_SUBNET + 3);
     }
 
     #[tokio::test]
     async fn test_persisted_peers_limited_per_subnet() {
+        let trusted = NodeRecord::new("1.2.3.250:30303".parse().unwrap(), PeerId::random());
         let mut config = PeersConfig::test();
-        config.persisted_peers = (0..=MAX_DISCOVERED_PEERS_PER_SUBNET)
-            .map(|i| {
-                PersistedPeerInfo::from_node_record(NodeRecord::new(
-                    format!("1.2.3.{i}:30303").parse().unwrap(),
-                    PeerId::random(),
-                ))
-            })
+        config.trusted_nodes = vec![trusted.into()];
+        // The trusted id's basic record comes first, so counting it would fill the subnet early.
+        config.persisted_peers = std::iter::once(trusted)
+            .chain((0..=MAX_DISCOVERED_PEERS_PER_SUBNET).map(|i| {
+                NodeRecord::new(format!("1.2.3.{i}:30303").parse().unwrap(), PeerId::random())
+            }))
+            .map(PersistedPeerInfo::from_node_record)
             .collect();
-        let trusted = PeerId::random();
-        config.persisted_peers.push(PersistedPeerInfo {
-            record: NodeRecord::new("1.2.3.250:30303".parse().unwrap(), trusted),
-            kind: PeerKind::Trusted,
-            fork_id: None,
-            reputation: 0,
-        });
 
         let peers = PeersManager::new(config);
         assert_eq!(
             peers.peers.values().filter(|peer| peer.kind.is_basic()).count(),
             MAX_DISCOVERED_PEERS_PER_SUBNET
         );
-        assert!(peers.peers.contains_key(&trusted));
+        assert!(peers.peers[&trusted.id].kind.is_trusted());
     }
 
     #[tokio::test]
@@ -4950,45 +4946,6 @@ mod tests {
         assert!(!peers.peers.contains_key(&backed_off));
         assert!(peers.peers.contains_key(&elsewhere));
         assert_eq!(peers.peers.len(), MAX_DISCOVERED_PEERS_PER_SUBNET + 1);
-    }
-
-    #[tokio::test]
-    async fn test_subnet_limit_ignores_non_basic_peers() {
-        let mut peers = PeersManager::new(PeersConfig::test());
-        let addr = |ip: &str| PeerAddr::from_tcp(SocketAddr::new(ip.parse().unwrap(), 30303));
-        for i in 0..MAX_DISCOVERED_PEERS_PER_SUBNET {
-            peers.add_peer_kind(
-                PeerId::random(),
-                Some(PeerKind::Static),
-                addr(&format!("1.2.3.{i}")),
-                None,
-            );
-        }
-
-        let discovered = PeerId::random();
-        peers.add_peer(discovered, addr("1.2.3.200"), None);
-        assert!(peers.peers.contains_key(&discovered));
-    }
-
-    #[tokio::test]
-    async fn test_persisted_subnet_limit_ignores_trusted_ids() {
-        let trusted = NodeRecord::new("1.2.3.250:30303".parse().unwrap(), PeerId::random());
-        let mut config = PeersConfig::test();
-        config.trusted_nodes = vec![trusted.into()];
-        // The trusted id's basic record comes first, so counting it would fill the subnet early.
-        config.persisted_peers = std::iter::once(trusted)
-            .chain((0..MAX_DISCOVERED_PEERS_PER_SUBNET).map(|i| {
-                NodeRecord::new(format!("1.2.3.{i}:30303").parse().unwrap(), PeerId::random())
-            }))
-            .map(PersistedPeerInfo::from_node_record)
-            .collect();
-
-        let peers = PeersManager::new(config);
-        assert_eq!(
-            peers.peers.values().filter(|peer| peer.kind.is_basic()).count(),
-            MAX_DISCOVERED_PEERS_PER_SUBNET
-        );
-        assert!(peers.peers[&trusted.id].kind.is_trusted());
     }
 
     #[test]
