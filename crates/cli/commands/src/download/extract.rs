@@ -248,11 +248,13 @@ impl Read for DecodedChunks {
             match self.recycled.try_send(mem::take(&mut self.chunk)) {
                 Ok(()) | Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {}
             }
+            // Reset with the take, so reads after the end of the stream or an error find an
+            // empty chunk again.
+            self.offset = 0;
             match self.chunks.recv() {
                 Ok(chunk) => self.chunk = chunk?,
                 Err(_) => return Ok(0),
             }
-            self.offset = 0;
         }
         let len = buf.len().min(self.chunk.len() - self.offset);
         buf[..len].copy_from_slice(&self.chunk[self.offset..self.offset + len]);
@@ -1348,6 +1350,33 @@ mod tests {
             error.root_cause().to_string(),
             "Archive links are unsupported: `static_files/link`"
         );
+    }
+
+    #[test]
+    fn hashed_extraction_reads_past_the_end_of_an_archive_without_end_marker() {
+        let mut archive = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(4);
+        header.set_cksum();
+        archive.append_data(&mut header, "db/data", b"data".as_slice()).unwrap();
+        let mut tar = archive.into_inner().unwrap();
+        // Drops the two zero blocks that mark the end of the archive, so tar stops at the end
+        // of the stream and the remaining stream is read after it.
+        tar.truncate(tar.len() - 1024);
+        let tar = zstd::encode_all(tar.as_slice(), 0).unwrap();
+
+        let target = tempfile::tempdir().unwrap();
+        extract_archive_hashed(
+            tar.as_slice(),
+            CompressionFormat::Zstd,
+            target.path(),
+            None,
+            HashSet::from([target.path().join("db/data")]),
+            None,
+            || {},
+        )
+        .unwrap();
+        assert_eq!(fs::read(target.path().join("db/data")).unwrap(), b"data");
     }
 
     #[test]
