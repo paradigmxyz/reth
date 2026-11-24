@@ -533,7 +533,7 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
         let api = RethApi::new(
-            BlockchainProvider::new(factory).unwrap(),
+            BlockchainProvider::new_without_writer(factory).unwrap(),
             (),
             BlockingTaskGuard::new(1),
             Runtime::test(),

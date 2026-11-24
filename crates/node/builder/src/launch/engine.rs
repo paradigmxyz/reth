@@ -162,10 +162,7 @@ impl<B> EngineNodeLauncher<B> {
         // Create the blockchain provider with the writer of its canonical in-memory state. The
         // provider and its clones read that state, and the engine changes it through the writer.
         let (blockchain_db, canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(
-                ctx.provider_factory().clone(),
-                in_memory_state_writer,
-            )?;
+            BlockchainProvider::new(ctx.provider_factory().clone(), in_memory_state_writer)?;
 
         let ctx = ctx
             // passing FullNodeTypes as type parameter here so that we can build

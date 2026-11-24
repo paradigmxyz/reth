@@ -478,7 +478,7 @@ mod tests {
             create_test_provider_factory_with_in_memory_state_writer(chain_spec);
         init_genesis(&factory).unwrap();
         let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(factory, in_memory_state_writer).unwrap();
+            BlockchainProvider::new(factory, in_memory_state_writer).unwrap();
 
         let eth_api = EthApiBuilder::new(
             provider.clone(),
@@ -587,7 +587,7 @@ mod tests {
             Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
-        let provider = BlockchainProvider::new(factory).unwrap();
+        let provider = BlockchainProvider::new_without_writer(factory).unwrap();
 
         let eth_api = EthApiBuilder::new(
             provider.clone(),
@@ -669,7 +669,7 @@ mod tests {
             Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().genesis(genesis).build());
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
-        let provider = BlockchainProvider::new(factory).unwrap();
+        let provider = BlockchainProvider::new_without_writer(factory).unwrap();
 
         let eth_api = EthApiBuilder::new(
             provider.clone(),
@@ -723,7 +723,7 @@ mod tests {
             Arc::new(ChainSpecBuilder::mainnet().berlin_activated().genesis(genesis).build());
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
-        let provider = BlockchainProvider::new(factory).unwrap();
+        let provider = BlockchainProvider::new_without_writer(factory).unwrap();
 
         let eth_api = EthApiBuilder::new(
             provider.clone(),
@@ -796,7 +796,7 @@ mod tests {
             Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().genesis(genesis).build());
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
-        let provider = BlockchainProvider::new(factory).unwrap();
+        let provider = BlockchainProvider::new_without_writer(factory).unwrap();
 
         let eth_api = EthApiBuilder::new(
             provider.clone(),
@@ -860,7 +860,7 @@ mod tests {
             Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
-        let provider = BlockchainProvider::new(factory).unwrap();
+        let provider = BlockchainProvider::new_without_writer(factory).unwrap();
 
         let eth_api = EthApiBuilder::new(
             provider.clone(),

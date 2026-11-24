@@ -144,7 +144,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 let evm_config = evm_config.with_jit_support();
                 let executor_lifetime = Duration::from_secs(600);
                 let provider = provider_factory.database_provider_ro()?.disable_long_read_transaction_safety();
-                let state_provider_factory = BlockchainProvider::new(provider_factory.clone())?;
+                let state_provider_factory = BlockchainProvider::new_without_writer(provider_factory.clone())?;
                 // Reused across blocks for BAL hash encoding.
                 let mut bal_buf = Vec::new();
 

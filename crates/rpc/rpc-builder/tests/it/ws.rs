@@ -42,7 +42,7 @@ async fn launch_ws_eth() -> RpcServerHandle {
 async fn launch_ws_eth_with_canon_state(max_subscriptions_per_connection: u32) -> RpcServerHandle {
     let factory = create_test_provider_factory();
     init_genesis(&factory).unwrap();
-    let provider = BlockchainProvider::new(factory).unwrap();
+    let provider = BlockchainProvider::new_without_writer(factory).unwrap();
     let pool: TestPool = TestPoolBuilder::default().into();
     let builder = RpcModuleBuilder::default()
         .with_provider(provider)

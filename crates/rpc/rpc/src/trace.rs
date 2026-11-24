@@ -1255,7 +1255,7 @@ mod tests {
         provider_rw.update_pipeline_stages(1, false).unwrap();
         provider_rw.commit().unwrap();
 
-        let provider = BlockchainProvider::new(factory).unwrap();
+        let provider = BlockchainProvider::new_without_writer(factory).unwrap();
         let eth_api = EthApiBuilder::new(
             provider.clone(),
             testing_pool(),
