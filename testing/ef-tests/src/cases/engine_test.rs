@@ -281,7 +281,8 @@ fn run_fixture(
         &mut outcome,
         &mut remains,
     ));
-    runtime.shutdown_timeout(Duration::ZERO);
+    // Join Tokio workers before the next fixture starts, even while `remains` retains a clone.
+    runtime.shutdown_timeout(ENGINE_SHUTDOWN_TIMEOUT);
     let mut result = FixtureResult::new(name, fork, result).with_rejections(outcome.rejections);
     result.last_block_hash = outcome.last_block_hash;
     result.last_payload_status = outcome.last_payload_status;
@@ -764,7 +765,7 @@ mod tests {
                 shutdown.unwrap();
                 databases
             });
-            runtime.clone().shutdown_timeout(Duration::ZERO);
+            runtime.clone().shutdown_timeout(ENGINE_SHUTDOWN_TIMEOUT);
             let mut cleanup = Cleanup::default();
             cleanup.remains.push(Remains {
                 runtime,
