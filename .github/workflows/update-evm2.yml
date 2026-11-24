@@ -162,12 +162,14 @@ jobs:
               echo "$out"
               break
             fi
-            crate=$(grep -m1 'failed to select a version for' <<< "$out" | cut -d "\`" -f2 || true)
+            # Unlock the exact locked version cargo names (name@version), since the lockfile can
+            # hold several versions of one crate and a bare name is then ambiguous.
+            crate=$(grep -m1 "previously selected package \`" <<< "$out" | cut -d "\`" -f2 | sed 's/ v/@/' || true)
             if [ -z "$crate" ] || [[ " ${crates[*]} " == *" $crate "* ]]; then
               echo "$out"
               exit 1
             fi
-            echo "evm2 needs a newer $crate than Cargo.lock pins; unlocking it"
+            echo "evm2 needs a newer version than Cargo.lock's $crate; unlocking it"
             crates+=("$crate")
             resolve=(cargo update)
             for c in "${crates[@]}"; do resolve+=(-p "$c"); done
