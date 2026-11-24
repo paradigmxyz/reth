@@ -69,10 +69,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{
-        map::{B256Map, HashSet},
-        Address, B256, U256,
-    };
+    use alloy_primitives::{Address, B256, U256};
     use proptest::{collection::btree_set, prelude::*};
     use reth_db_api::{
         models::{StorageBeforeTx, StorageSettings},
@@ -92,60 +89,6 @@ mod tests {
     /// Changed `(address, slot)` pairs of each block, as indices.
     type StorageBlocks = Vec<BTreeSet<(u8, u8)>>;
 
-    /// The implementation before changesets were streamed and deduplicated, kept as the reference.
-    fn load_prefix_sets_reference<Provider>(
-        provider: &Provider,
-        range: RangeInclusive<BlockNumber>,
-    ) -> Result<TriePrefixSets, ProviderError>
-    where
-        Provider: ChangeSetReader + StorageChangeSetReader + DBProvider,
-    {
-        let tx = provider.tx_ref();
-
-        let mut account_prefix_set = PrefixSetMut::default();
-        let mut storage_prefix_sets = B256Map::<PrefixSetMut>::default();
-        let mut destroyed_accounts = HashSet::default();
-
-        let account_changesets =
-            provider.account_changesets_range(*range.start()..*range.end() + 1)?;
-        let mut account_hashed_state_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
-        for (_, AccountBeforeTx { address, .. }) in account_changesets {
-            let hashed_address = keccak256(address);
-            account_prefix_set.insert(Nibbles::unpack(hashed_address));
-
-            if account_hashed_state_cursor.seek_exact(hashed_address)?.is_none() {
-                destroyed_accounts.insert(hashed_address);
-            }
-        }
-
-        let storage_changesets = provider.storage_changesets_range(range)?;
-        let mut last_address: Option<(Address, B256)> = None;
-        for (BlockNumberAddress((_, address)), storage_entry) in storage_changesets {
-            let hashed_address = match last_address {
-                Some((last, hashed)) if last == address => hashed,
-                _ => {
-                    let hashed = keccak256(address);
-                    account_prefix_set.insert(Nibbles::unpack(hashed));
-                    last_address = Some((address, hashed));
-                    hashed
-                }
-            };
-            storage_prefix_sets
-                .entry(hashed_address)
-                .or_default()
-                .insert(Nibbles::unpack(keccak256(storage_entry.key)));
-        }
-
-        Ok(TriePrefixSets {
-            account_prefix_set: account_prefix_set.freeze(),
-            storage_prefix_sets: storage_prefix_sets
-                .into_iter()
-                .map(|(k, v)| (k, v.freeze()))
-                .collect(),
-            destroyed_accounts,
-        })
-    }
-
     fn assert_prefix_sets_eq(actual: &TriePrefixSets, expected: &TriePrefixSets) {
         assert_eq!(actual.account_prefix_set.slice(), expected.account_prefix_set.slice());
         assert_eq!(actual.destroyed_accounts, expected.destroyed_accounts);
@@ -156,10 +99,10 @@ mod tests {
     }
 
     /// Writes the blocks as v1 or v2 changesets plus `HashedAccounts` rows for `existing`, then
-    /// compares both implementations over the full range, over a range without the first block,
-    /// and over a range that ends past both tips. The two tables can end at different blocks, so
-    /// on v2 the segments have different tips.
-    fn check_against_reference(
+    /// compares the loaded prefix sets with sets built straight from the fixture over the full
+    /// range, over a range without the first block, and over a range that ends past both tips.
+    /// The two tables can end at different blocks, so on v2 the segments have different tips.
+    fn check_against_fixture(
         account_blocks: &AccountBlocks,
         storage_blocks: &StorageBlocks,
         existing: &BTreeSet<u8>,
@@ -245,9 +188,31 @@ mod tests {
         let provider = factory.provider().unwrap();
         let last_block = account_blocks.len().max(storage_blocks.len()) as BlockNumber - 1;
         for range in [0..=last_block, 1.min(last_block)..=last_block, 0..=last_block + 2] {
-            let actual = load_prefix_sets_with_provider(&provider, range.clone()).unwrap();
-            let expected = load_prefix_sets_reference(&provider, range).unwrap();
-            assert_prefix_sets_eq(&actual, &expected);
+            let in_range = |block_number: usize| range.contains(&(block_number as BlockNumber));
+            let mut expected = TriePrefixSetsMut::default();
+            for (_, accounts) in account_blocks.iter().enumerate().filter(|(n, _)| in_range(*n)) {
+                for &a in accounts {
+                    let hashed_address = keccak256(address(a));
+                    expected.account_prefix_set.insert(Nibbles::unpack(hashed_address));
+                    if !existing.contains(&a) {
+                        expected.destroyed_accounts.insert(hashed_address);
+                    }
+                }
+            }
+            for (_, slots) in storage_blocks.iter().enumerate().filter(|(n, _)| in_range(*n)) {
+                for &(a, s) in slots {
+                    let hashed_address = keccak256(address(a));
+                    expected.account_prefix_set.insert(Nibbles::unpack(hashed_address));
+                    expected
+                        .storage_prefix_sets
+                        .entry(hashed_address)
+                        .or_default()
+                        .insert(Nibbles::unpack(keccak256(slot(s))));
+                }
+            }
+
+            let actual = load_prefix_sets_with_provider(&provider, range).unwrap();
+            assert_prefix_sets_eq(&actual, &expected.freeze());
         }
     }
 
@@ -264,21 +229,21 @@ mod tests {
         #![proptest_config(ProptestConfig::with_cases(32))]
 
         #[test]
-        fn matches_reference_v1(
+        fn matches_fixture_v1(
             account_blocks in account_blocks_strategy(),
             storage_blocks in storage_blocks_strategy(),
             existing in btree_set(0u8..12, 0..12),
         ) {
-            check_against_reference(&account_blocks, &storage_blocks, &existing, false);
+            check_against_fixture(&account_blocks, &storage_blocks, &existing, false);
         }
 
         #[test]
-        fn matches_reference_v2(
+        fn matches_fixture_v2(
             account_blocks in account_blocks_strategy(),
             storage_blocks in storage_blocks_strategy(),
             existing in btree_set(0u8..12, 0..12),
         ) {
-            check_against_reference(&account_blocks, &storage_blocks, &existing, true);
+            check_against_fixture(&account_blocks, &storage_blocks, &existing, true);
         }
     }
 }
