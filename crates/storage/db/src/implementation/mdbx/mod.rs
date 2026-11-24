@@ -364,6 +364,10 @@ impl Database for DatabaseEnv {
             Some(txnid as u64)
         }
     }
+
+    fn reader_check(&self) -> Result<(), DatabaseError> {
+        self.inner.reader_check().map(|_| ()).map_err(|e| DatabaseError::Read(e.into()))
+    }
 }
 
 impl DatabaseMetrics for DatabaseEnv {
@@ -775,6 +779,15 @@ mod tests {
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
     use tempfile::TempDir;
+
+    #[cfg(unix)]
+    use reth_db_api::database::ReaderTxnTracker;
+    #[cfg(unix)]
+    use std::{
+        io::{BufRead, BufReader, Read},
+        process::{Command, Stdio},
+        sync::mpsc,
+    };
 
     /// Create database for testing. Returns the `TempDir` to prevent cleanup until test ends.
     fn create_test_db(kind: DatabaseEnvKind) -> (TempDir, DatabaseEnv) {
@@ -1811,6 +1824,82 @@ mod tests {
         assert_eq!(sync_period(SyncMode::Durable), Duration::ZERO);
         assert_eq!(sync_period(SyncMode::SafeNoSync), NON_DURABLE_SYNC_PERIOD);
         assert_eq!(sync_period(SyncMode::UtterlyNoSync), NON_DURABLE_SYNC_PERIOD);
+    }
+
+    /// A reader slot left behind by a `SIGKILL`ed process must not block
+    /// [`ReaderTxnTracker::wait_for_pre_commit_readers`] forever.
+    #[cfg(unix)]
+    #[test]
+    fn wait_for_pre_commit_readers_clears_dead_process_reader() {
+        const CHILD_DB_PATH_ENV: &str = "RETH_TEST_STALE_READER_DB_PATH";
+
+        // Child process: hold a read transaction until killed or until the parent closes stdin.
+        if let Some(path) = std::env::var_os(CHILD_DB_PATH_ENV) {
+            let env = DatabaseEnv::open(
+                Path::new(&path),
+                DatabaseEnvKind::RO,
+                DatabaseArguments::new(ClientVersion::default()),
+            )
+            .unwrap();
+            let _tx = env.tx().unwrap();
+            println!("ready");
+            let _ = std::io::stdin().read_to_end(&mut Vec::new());
+            std::process::exit(0);
+        }
+
+        let (dir, env) = create_test_db(DatabaseEnvKind::RW);
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "implementation::mdbx::tests::wait_for_pre_commit_readers_clears_dead_process_reader",
+                "--nocapture",
+            ])
+            .env(CHILD_DB_PATH_ENV, dir.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdout = BufReader::new(child.stdout.take().unwrap());
+        let (ready_tx, ready_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            // With one test thread, libtest prints `test <name> ... ` on the same line first.
+            let ready =
+                stdout.lines().any(|line| line.is_ok_and(|l| l.trim_end().ends_with("ready")));
+            let _ = ready_tx.send(ready);
+        });
+        let ready = ready_rx.recv_timeout(Duration::from_secs(10));
+        if ready != Ok(true) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("child did not open a read transaction: {ready:?}");
+        }
+
+        // `Child::kill` sends `SIGKILL`, so the child's reader slot is never released.
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        env.update(|tx| tx.put::<CanonicalHeaders>(1, B256::ZERO)).unwrap().unwrap();
+        assert!(
+            env.oldest_reader_txnid().unwrap() < env.last_txnid().unwrap(),
+            "dead reader slot must still be counted before the wait"
+        );
+
+        let env = Arc::new(env);
+        let (done_tx, done_rx) = mpsc::channel();
+        let waiter = Arc::clone(&env);
+        std::thread::spawn(move || {
+            waiter.wait_for_pre_commit_readers().unwrap();
+            let _ = done_tx.send(());
+        });
+        done_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("wait_for_pre_commit_readers hung on a dead process's reader slot");
+        // This process's own idle slot may remain, but no slot may predate the last commit.
+        let last_txnid = env.last_txnid().unwrap();
+        assert!(
+            env.oldest_reader_txnid().is_none_or(|oldest| oldest >= last_txnid),
+            "dead reader slot must be cleared"
+        );
     }
 
     #[test]

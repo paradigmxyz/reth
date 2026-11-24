@@ -280,7 +280,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// every sync mode, so power loss can't roll it back above the truncated static files.
     ///
     /// This waits after the MDBX commit so readers holding older MDBX-visible views cannot overlap
-    /// later cross-store unwind steps.
+    /// later cross-store unwind steps. If the wait fails because MDBX stopped answering queries,
+    /// the later steps are skipped and the same startup recovery applies.
     ///
     /// Historical `storage_v2` reads ignore `RocksDB` history entries above their MDBX-visible tip,
     /// so no additional post-`RocksDB` wait is needed before static-file commit.
@@ -290,7 +291,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         self.tx.commit_durable()?;
 
         if let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
-            reader_txn_tracker.wait_for_pre_commit_readers();
+            reader_txn_tracker.wait_for_pre_commit_readers()?;
         }
 
         if storage_v2 {

@@ -2,7 +2,7 @@ use blake3::Hasher;
 use eyre::{Result, WrapErr};
 use rayon::prelude::*;
 use reqwest::Client;
-use reth_db::static_file::iter_static_files;
+use reth_db::static_file::{iter_static_files, StaticFileEntry};
 use reth_static_file_types::StaticFileSegment;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -752,9 +752,11 @@ pub fn generate_manifest(
     ] {
         let key = ty.key();
         let segment = static_segment(*ty).expect("chunked components have a static file segment");
-        let Some((last_range, _)) = static_files.get(segment).and_then(|ranges| {
-            ranges.iter().rfind(|(_, header)| header.expected_block_range().start() <= block)
-        }) else {
+        let Some(StaticFileEntry { block_range: last_range, .. }) =
+            static_files.get(segment).and_then(|files| {
+                files.iter().rfind(|file| file.header.expected_block_range().start() <= block)
+            })
+        else {
             continue;
         };
 
