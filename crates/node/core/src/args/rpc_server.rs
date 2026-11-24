@@ -523,7 +523,15 @@ pub struct RpcServerArgs {
     pub http_decompression_algorithms: Option<Vec<String>>,
 
     /// Rpc Modules to be configured for the HTTP server
-    #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_api.as_ref().map(|v| v.to_string().into())))]
+    #[arg(
+        long = "http.api",
+        value_parser = DefaultValueParser {
+            inner: RpcModuleSelectionValueParser::default(),
+            default: &DefaultRpcServerArgs::get_global().http_api,
+            to_default: RpcModuleSelection::to_string,
+        },
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_api.as_ref().map(|v| v.to_string().into())),
+    )]
     pub http_api: Option<RpcModuleSelection>,
 
     /// Http Corsdomain to allow request from
@@ -547,7 +555,15 @@ pub struct RpcServerArgs {
     pub ws_allowed_origins: Option<String>,
 
     /// Rpc Modules to be configured for the WS server
-    #[arg(long = "ws.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_api.as_ref().map(|v| v.to_string().into())))]
+    #[arg(
+        long = "ws.api",
+        value_parser = DefaultValueParser {
+            inner: RpcModuleSelectionValueParser::default(),
+            default: &DefaultRpcServerArgs::get_global().ws_api,
+            to_default: RpcModuleSelection::to_string,
+        },
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_api.as_ref().map(|v| v.to_string().into())),
+    )]
     pub ws_api: Option<RpcModuleSelection>,
 
     /// Disable the IPC-RPC server
@@ -630,8 +646,9 @@ pub struct RpcServerArgs {
         value_parser = DefaultValueParser {
             inner: |value: &str| JwtSecret::from_hex(value),
             default: &DefaultRpcServerArgs::get_global().rpc_jwtsecret,
+            to_default: configured_default,
         },
-        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_jwtsecret.as_ref().map(|_| "configured".into())),
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_jwtsecret.as_ref().map(|v| configured_default(v).into())),
         hide_default_value = true,
     )]
     pub rpc_jwtsecret: Option<JwtSecret>,
@@ -787,8 +804,9 @@ pub struct RpcServerArgs {
         value_parser = DefaultValueParser {
             inner: Url::parse,
             default: &DefaultRpcServerArgs::get_global().rpc_forwarder,
+            to_default: configured_default,
         },
-        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_forwarder.as_ref().map(|_| "configured".into())),
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_forwarder.as_ref().map(|v| configured_default(v).into())),
         hide_default_value = true,
     )]
     pub rpc_forwarder: Option<Url>,
@@ -801,8 +819,9 @@ pub struct RpcServerArgs {
         value_parser = DefaultValueParser {
             inner: reth_cli_util::parsers::read_json_from_file::<AddressSet>,
             default: &DefaultRpcServerArgs::get_global().builder_disallow,
+            to_default: configured_default,
         },
-        default_value = Resettable::from(DefaultRpcServerArgs::get_global().builder_disallow.as_ref().map(|_| "configured".into())),
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().builder_disallow.as_ref().map(|v| configured_default(v).into())),
         hide_default_value = true,
     )]
     pub builder_disallow: Option<AddressSet>,
@@ -1161,6 +1180,11 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
     }
 }
 
+/// Default value string for args whose typed default must not be serialized.
+fn configured_default<T>(_: &T) -> String {
+    "configured".to_string()
+}
+
 /// Uses a typed default without serializing secrets or treating address sets as file paths.
 #[derive(Clone)]
 struct DefaultValueParser<P: TypedValueParser>
@@ -1169,6 +1193,9 @@ where
 {
     inner: P,
     default: &'static Option<P::Value>,
+    /// Formats `default` as the arg's `default_value`, so a different default set by an embedding
+    /// command, such as through `Command::mut_arg`, is parsed instead of replaced.
+    to_default: fn(&P::Value) -> String,
 }
 
 impl<P: TypedValueParser> TypedValueParser for DefaultValueParser<P>
@@ -1194,12 +1221,17 @@ where
         source: ValueSource,
     ) -> Result<Self::Value, clap::Error> {
         if source == ValueSource::DefaultValue &&
-            let Some(default) = self.default
+            let Some(default) = self.default &&
+            value == (self.to_default)(default).as_str()
         {
             Ok(default.clone())
         } else {
             self.inner.parse_ref_(cmd, arg, value, source)
         }
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        self.inner.possible_values()
     }
 }
 

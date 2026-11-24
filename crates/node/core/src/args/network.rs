@@ -435,8 +435,8 @@ pub struct NetworkArgs {
     /// Only peers with IP addresses within these ranges will be allowed to connect.
     ///
     /// Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
-    #[arg(long, value_name = "NETRESTRICT")]
-    pub netrestrict: Option<String>,
+    #[arg(long, value_name = "NETRESTRICT", value_parser = IpFilter::from_cidr_string)]
+    pub netrestrict: Option<IpFilter>,
 
     /// Enforce EIP-868 ENR fork ID validation for discovered peers.
     ///
@@ -585,7 +585,7 @@ impl NetworkArgs {
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
-        let ip_filter = self.ip_filter().unwrap_or_default();
+        let ip_filter = self.ip_filter();
         let peers_config = config
             .peers_config_with_basic_nodes_from_file(
                 self.persistent_peers_file(peers_file).as_deref(),
@@ -701,15 +701,9 @@ impl NetworkArgs {
         }
     }
 
-    /// Creates an IP filter from the netrestrict argument.
-    ///
-    /// Returns an error if the CIDR format is invalid.
-    pub fn ip_filter(&self) -> Result<IpFilter, ipnet::AddrParseError> {
-        if let Some(netrestrict) = &self.netrestrict {
-            IpFilter::from_cidr_string(netrestrict)
-        } else {
-            Ok(IpFilter::allow_all())
-        }
+    /// Returns the IP filter from the netrestrict argument, allowing all IPs if it is not set.
+    pub fn ip_filter(&self) -> IpFilter {
+        self.netrestrict.clone().unwrap_or_default()
     }
 }
 
@@ -1545,9 +1539,9 @@ mod tests {
             CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "192.168.0.0/16"])
                 .args;
 
-        assert_eq!(args.netrestrict, Some("192.168.0.0/16".to_string()));
+        assert_eq!(args.netrestrict, Some(IpFilter::from_cidr_string("192.168.0.0/16").unwrap()));
 
-        let ip_filter = args.ip_filter().unwrap();
+        let ip_filter = args.ip_filter();
         assert!(ip_filter.has_restrictions());
         assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
         assert!(!ip_filter.is_allowed(&"10.0.0.1".parse().unwrap()));
@@ -1562,9 +1556,12 @@ mod tests {
         ])
         .args;
 
-        assert_eq!(args.netrestrict, Some("192.168.0.0/16,10.0.0.0/8".to_string()));
+        assert_eq!(
+            args.netrestrict,
+            Some(IpFilter::from_cidr_string("192.168.0.0/16,10.0.0.0/8").unwrap())
+        );
 
-        let ip_filter = args.ip_filter().unwrap();
+        let ip_filter = args.ip_filter();
         assert!(ip_filter.has_restrictions());
         assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
         assert!(ip_filter.is_allowed(&"10.5.10.20".parse().unwrap()));
@@ -1577,7 +1574,7 @@ mod tests {
             CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "2001:db8::/32"])
                 .args;
 
-        let ip_filter = args.ip_filter().unwrap();
+        let ip_filter = args.ip_filter();
         assert!(ip_filter.has_restrictions());
         assert!(ip_filter.is_allowed(&"2001:db8::1".parse().unwrap()));
         assert!(!ip_filter.is_allowed(&"2001:db9::1".parse().unwrap()));
@@ -1588,7 +1585,7 @@ mod tests {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
         assert_eq!(args.netrestrict, None);
 
-        let ip_filter = args.ip_filter().unwrap();
+        let ip_filter = args.ip_filter();
         assert!(!ip_filter.has_restrictions());
         assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
         assert!(ip_filter.is_allowed(&"10.0.0.1".parse().unwrap()));
@@ -1596,11 +1593,14 @@ mod tests {
 
     #[test]
     fn netrestrict_invalid_cidr() {
-        let args =
-            CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "invalid-cidr"])
-                .args;
-
-        assert!(args.ip_filter().is_err());
+        for cidr in ["invalid-cidr", "10.0.0.0/33", "192.168.0.0/16,10.0.0.0/33"] {
+            let Err(err) =
+                CommandParser::<NetworkArgs>::try_parse_from(["reth", "--netrestrict", cidr])
+            else {
+                panic!("{cidr} should be rejected")
+            };
+            assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation, "{cidr}");
+        }
     }
 
     #[test]
