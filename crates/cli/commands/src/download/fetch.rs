@@ -341,13 +341,14 @@ impl ArchiveFetcher {
                 .and_then(|value| value.split('-').next())
                 .and_then(|value| value.parse::<u64>().ok());
             if is_partial && range_start != Some(existing_size) {
-                // Resuming this `.part` file would fail the same way on the next run.
+                // Resuming this `.part` file would likely fail the same way, so retry from scratch.
                 self.paths.cleanup_partial();
-                eyre::bail!(
+                last_error = Some(eyre::eyre!(
                     "Server resumed {} at byte {} instead of requested offset {existing_size}",
                     self.paths.file_name(),
                     range_start.map_or_else(|| "unknown".to_string(), |start| start.to_string())
-                )
+                ));
+                continue;
             }
             // A different total means the remote archive changed under the `.part` file.
             if is_partial &&
@@ -1608,22 +1609,20 @@ mod tests {
     }
 
     #[test]
-    fn sequential_resume_rejects_range_not_starting_at_offset() {
-        let response = b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-9/10\r\n\
-                         Content-Length: 10\r\nConnection: close\r\n\r\n0123456789";
-        let url = spawn_response_server(response.to_vec());
+    fn sequential_resume_restarts_after_wrong_offset() {
+        let url = spawn_response_sequence_server(vec![
+            b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-9/10\r\n\
+              Content-Length: 10\r\nConnection: close\r\n\r\nXXXXXXXXXX",
+            b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n0123456789",
+        ]);
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("archive.tar.zst.part"), b"01234").unwrap();
         let session = DownloadSession::new(None, None, CancellationToken::new());
         let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(10));
 
-        let error = fetcher.download(None, None).unwrap_err();
+        let downloaded = fetcher.download(None, None).unwrap();
 
-        assert_eq!(
-            format!("{error:#}"),
-            "Server resumed archive.tar.zst at byte 0 instead of requested offset 5"
-        );
-        assert!(!dir.path().join("archive.tar.zst").exists());
+        assert_eq!(std::fs::read(downloaded.path).unwrap(), b"0123456789");
     }
 
     #[test]
