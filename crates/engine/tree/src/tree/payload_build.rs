@@ -1,10 +1,10 @@
 //! Tracking of active payload build jobs.
 
-use reth_concurrency::sync::channel::{self, Receiver, Sender};
-use std::sync::{
+use reth_concurrency::sync::{
     atomic::{AtomicUsize, Ordering},
-    Arc,
+    channel::{self, Receiver, Sender},
 };
+use std::sync::Arc;
 
 /// Tracks payload jobs that may access the current in-memory overlay.
 #[derive(Clone, Debug)]

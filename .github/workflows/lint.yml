@@ -119,10 +119,7 @@ jobs:
           # Expanded thread_local! diagnostics ignore allowances on these host TLS declarations.
           tls = {
               "crates/tasks/src/pool.rs": "WORKERS",
-              "crates/tasks/src/cancel.rs": "CURRENT",
           }
-          with open(".config/fuzz-primitives/native-boundaries.json") as boundaries:
-              native_boundaries = json.load(boundaries)
           failed = False
           finished = False
           with open(sys.argv[1]) as report:
@@ -160,25 +157,12 @@ jobs:
                                                 "std::sync::OnceLock::new", "std::sync::OnceLock::get_or_init"})
                       exempt |= ("#[derive(arbitrary::Arbitrary)]" in macros
                                  and symbol in {"std::thread_local", "std::thread::LocalKey"})
-                      # Permit only the enumerated current operations, not new native uses
-                      # elsewhere in a boundary file (or new operations on the same line).
-                      boundary = native_boundaries.get(path, {})
-                      exempt |= ((symbol.startswith("core::sync::atomic::Atomic::")
-                                  or symbol in {"parking_lot::Once", "std::sync::atomic::AtomicU64",
-                                                "std::sync::atomic::AtomicUsize"})
-                                 and any(part["text"].strip() in boundary.get("source", [])
-                                         for part in span["text"]))
                       # Ingress latency uses the timestamp supplied by the native Engine API.
                       exempt |= (path == "crates/engine/tree/src/tree/mod.rs"
                                  and source == "elapsed"
                                  and any(part["text"].strip() == "let backpressure_wait = enqueued_at.elapsed();"
                                          for part in span["text"])
                                  and symbol == "std::time::Instant::elapsed")
-                      # Setting the OS priority is host setup, not a simulated once operation.
-                      exempt |= (path == "crates/engine/tree/src/tree/state_root_strategy/mod.rs"
-                                 and source == "reth_tasks::once!(increase_thread_priority)"
-                                 and symbol in {"std::sync::Once", "std::sync::Once::new",
-                                                "std::sync::Once::call_once"})
                   if exempt and lint in {"clippy::disallowed_types", "clippy::disallowed_methods",
                                          "clippy::disallowed_macros"}:
                       continue

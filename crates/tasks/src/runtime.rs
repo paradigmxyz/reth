@@ -17,17 +17,13 @@ use futures_util::{
     future::{select, BoxFuture},
     Future, FutureExt, TryFutureExt,
 };
-use reth_concurrency::sync::time::{Duration, Instant};
-use std::{
-    num::NonZeroUsize,
-    pin::pin,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
-    },
-    thread,
-    thread::Builder,
+use reth_concurrency::sync::{
+    atomic::{AtomicUsize, Ordering},
+    parking_lot, thread,
+    time::{Duration, Instant},
+    Mutex,
 };
+use std::{num::NonZeroUsize, pin::pin, sync::Arc};
 use tokio::{runtime::Handle, sync::mpsc::UnboundedSender, task::JoinHandle};
 use tracing::{debug, error, Span};
 use tracing_futures::Instrument;
@@ -293,13 +289,6 @@ pub enum RuntimeBuildError {
 
 struct RuntimeInner {
     /// Owned tokio runtime, taken during shutdown even while other handles remain alive.
-    #[cfg_attr(
-        feature = "fuzz",
-        allow(
-            clippy::disallowed_types,
-            reason = "Native lock owns Tokio runtime shutdown, not logical worker scheduling."
-        )
-    )]
     tokio_runtime: Mutex<Option<TokioRuntime>>,
     /// Handle to the tokio runtime.
     handle: Handle,
@@ -310,13 +299,6 @@ struct RuntimeInner {
     /// Task executor metrics.
     metrics: TaskExecutorMetrics,
     /// How many [`GracefulShutdown`] tasks are currently active.
-    #[cfg_attr(
-        feature = "fuzz",
-        allow(
-            clippy::disallowed_types,
-            reason = "Native counter tracks Tokio future lifetimes across OS threads outside synchronous simulation."
-        )
-    )]
     graceful_tasks: Arc<AtomicUsize>,
     /// General-purpose rayon CPU pool.
     #[cfg(feature = "rayon")]
@@ -357,24 +339,10 @@ struct RuntimeInner {
     /// Handle to the spawned [`TaskManager`] background task.
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
-    #[cfg_attr(
-        feature = "fuzz",
-        allow(
-            clippy::disallowed_types,
-            reason = "Native lock transfers ownership of a Tokio task handle, not logical worker work."
-        )
-    )]
     task_manager_handle: Mutex<Option<JoinHandle<Result<(), PanickedTaskError>>>>,
 }
 
 impl Drop for RuntimeInner {
-    #[cfg_attr(
-        feature = "fuzz",
-        allow(
-            clippy::disallowed_methods,
-            reason = "Native lock exclusively releases the owned Tokio runtime during teardown."
-        )
-    )]
     fn drop(&mut self) {
         // The last handle can belong to an async task, including one running on this runtime.
         // Without explicit shutdown, let blocking tasks finish in the background in that case.
@@ -411,13 +379,6 @@ impl Runtime {
     /// The handle resolves with `Err(PanickedTaskError)` if a critical task panicked,
     /// or `Ok(())` if shutdown was requested. If not taken, the background task still
     /// runs and logs panics at `debug!` level.
-    #[cfg_attr(
-        feature = "fuzz",
-        allow(
-            clippy::disallowed_methods,
-            reason = "Native lock transfers ownership of a Tokio task handle, not logical worker work."
-        )
-    )]
     pub fn take_task_manager_handle(&self) -> Option<JoinHandle<Result<(), PanickedTaskError>>> {
         self.0.task_manager_handle.lock().unwrap().take()
     }
@@ -702,15 +663,6 @@ impl Runtime {
     where
         F: FnOnce() + Send + 'static,
     {
-        // The caller may be native even in fuzz builds. Under fuzz, the lock only transfers
-        // ownership; logical accesses yield before locking and release it before user work.
-        #[cfg_attr(
-            feature = "fuzz",
-            allow(
-                clippy::disallowed_types,
-                reason = "Native handoff supports native callers; logical accesses explicitly yield before locking."
-            )
-        )]
         let func = Arc::new(parking_lot::Mutex::new(Some(func)));
         let named_func = func.clone();
 
@@ -820,18 +772,11 @@ impl Runtime {
         self.spawn_critical_as(name, fut.boxed(), TaskKind::Blocking)
     }
 
-    /// Spawns a critical task on a dedicated named OS thread.
+    /// Spawns a critical task on a dedicated named selected-backend thread.
     /// The given future resolves as soon as the [`Shutdown`] signal is received.
     ///
-    /// If this task panics, the [`TaskManager`] is notified. This Tokio-backed API always uses
-    /// a native OS thread, including under `fuzz`; its future is outside synchronous simulation.
-    #[cfg_attr(
-        feature = "fuzz",
-        allow(
-            clippy::disallowed_types,
-            reason = "This explicitly native API drives a Tokio future on an OS thread, outside synchronous simulation."
-        )
-    )]
+    /// If this task panics, the [`TaskManager`] is notified. The thread is native outside `fuzz`;
+    /// under `fuzz`, Tokio futures are not driven by the synchronous scheduler.
     pub fn spawn_critical_os_thread<F>(
         &self,
         thread_name: &'static str,
@@ -844,14 +789,6 @@ impl Runtime {
         self.spawn_critical_os_thread_boxed(thread_name, task_name, fut.boxed())
     }
 
-    #[cfg_attr(
-        feature = "fuzz",
-        allow(
-            clippy::disallowed_types,
-            clippy::disallowed_methods,
-            reason = "This explicitly native API drives a Tokio future on an OS thread, outside synchronous simulation."
-        )
-    )]
     fn spawn_critical_os_thread_boxed(
         &self,
         thread_name: &'static str,
@@ -880,7 +817,7 @@ impl Runtime {
             let _ = select(on_shutdown, task).await;
         };
 
-        Builder::new()
+        thread::Builder::new()
             .name(thread_name.to_string())
             .spawn(move || {
                 let _guard = handle.enter();
@@ -1012,13 +949,6 @@ impl Runtime {
     /// tasks. Externally supplied runtimes are left running.
     ///
     /// Panics if called from an async context while an owned runtime remains.
-    #[cfg_attr(
-        feature = "fuzz",
-        allow(
-            clippy::disallowed_methods,
-            reason = "Native lock exclusively takes the owned Tokio runtime for OS-thread shutdown."
-        )
-    )]
     pub fn shutdown_timeout(self, timeout: Duration) {
         let runtime = self.0.tokio_runtime.lock().unwrap().take();
         if let Some(runtime) = runtime {
@@ -1192,23 +1122,7 @@ impl RuntimeBuilder {
             result
         });
 
-        #[cfg_attr(
-            feature = "fuzz",
-            allow(
-                clippy::disallowed_types,
-                clippy::disallowed_methods,
-                reason = "Native lock owns Tokio runtime shutdown, not logical worker scheduling."
-            )
-        )]
         let tokio_runtime = Mutex::new(owned_runtime);
-        #[cfg_attr(
-            feature = "fuzz",
-            allow(
-                clippy::disallowed_types,
-                clippy::disallowed_methods,
-                reason = "Native lock transfers ownership of a Tokio task handle, not logical worker work."
-            )
-        )]
         let task_manager_handle = Mutex::new(Some(task_manager_handle));
         let inner = RuntimeInner {
             tokio_runtime,

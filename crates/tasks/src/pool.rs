@@ -14,7 +14,7 @@ use std::{
     ops::Deref,
     panic::{catch_unwind, AssertUnwindSafe},
     pin::Pin,
-    sync::{self, Arc, Weak},
+    sync::{Arc, Weak},
     task::{ready, Context, Poll},
 };
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
@@ -23,6 +23,9 @@ use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
 use reth_concurrency::sync::channel;
 #[cfg(feature = "fuzz")]
 use std::mem;
+
+#[cfg(not(feature = "fuzz"))]
+use std::sync;
 
 /// RPC Tracing call guard semaphore.
 ///
@@ -238,12 +241,7 @@ fn with_current_worker<R>(f: impl FnOnce(&RefCell<Worker>) -> R) -> R {
 /// The underlying rayon pool is created lazily on first access.
 #[derive(Debug)]
 pub struct WorkerPool {
-    // Pool configuration and thread counts can be accessed before entering the selected runtime.
-    #[allow(
-        clippy::disallowed_types,
-        reason = "Only immutable pool configuration is retained; logical occupancy and waiters are execution-local."
-    )]
-    pool: sync::OnceLock<rayon::ThreadPool>,
+    pool: OnceLock<rayon::ThreadPool>,
     metrics: OnceLock<WorkerPoolMetrics>,
     num_threads: usize,
     thread_name_prefix: &'static str,
@@ -254,25 +252,11 @@ impl WorkerPool {
     ///
     /// The underlying rayon pool is not created until the first method that requires it is called.
     /// Thread names follow the pattern `"{prefix}-{index:02}"`.
-    #[allow(
-        clippy::disallowed_types,
-        clippy::disallowed_methods,
-        reason = "Constructs empty native configuration storage without scheduling or waiting."
-    )]
     pub const fn new(num_threads: usize, thread_name_prefix: &'static str) -> Self {
-        Self {
-            pool: sync::OnceLock::new(),
-            metrics: OnceLock::new(),
-            num_threads,
-            thread_name_prefix,
-        }
+        Self { pool: OnceLock::new(), metrics: OnceLock::new(), num_threads, thread_name_prefix }
     }
 
     /// Returns a reference to the underlying rayon pool, creating it on first access.
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "Logical pool construction only records names and an identity; it cannot yield or wait on workload code."
-    )]
     fn pool(&self) -> &rayon::ThreadPool {
         self.pool.get_or_init(|| {
             let prefix = self.thread_name_prefix;

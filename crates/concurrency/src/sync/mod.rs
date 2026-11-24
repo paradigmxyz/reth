@@ -95,6 +95,9 @@ pub mod parking_lot {
     pub use ::parking_lot::*;
     #[cfg(feature = "fuzz")]
     pub use shuttle_parking_lot::*;
+
+    #[cfg(feature = "fuzz")]
+    pub use super::Once;
 }
 
 /// Whether these primitives require an active simulated runtime.

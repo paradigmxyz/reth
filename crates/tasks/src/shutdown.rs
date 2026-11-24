@@ -4,10 +4,11 @@ use futures_util::{
     future::{FusedFuture, Shared},
     FutureExt,
 };
+use reth_concurrency::sync::atomic::{AtomicUsize, Ordering};
 use std::{
     future::Future,
     pin::Pin,
-    sync::{atomic::AtomicUsize, Arc},
+    sync::Arc,
     task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
@@ -54,32 +55,18 @@ impl Clone for GracefulShutdown {
 /// [`GracefulShutdown`] has completed.
 #[derive(Debug)]
 #[must_use = "if unused the task will not be gracefully shutdown"]
-#[cfg_attr(
-    feature = "fuzz",
-    allow(
-        clippy::disallowed_types,
-        reason = "Native counter tracks Tokio future lifetimes across OS threads outside synchronous simulation."
-    )
-)]
 pub struct GracefulShutdownGuard(Arc<AtomicUsize>);
 
 impl GracefulShutdownGuard {
-    #[cfg_attr(
-        feature = "fuzz",
-        allow(
-            clippy::disallowed_types,
-            reason = "Native counter tracks Tokio future lifetimes across OS threads outside synchronous simulation."
-        )
-    )]
     pub(crate) fn new(counter: Arc<AtomicUsize>) -> Self {
-        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        counter.fetch_add(1, Ordering::SeqCst);
         Self(counter)
     }
 }
 
 impl Drop for GracefulShutdownGuard {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
