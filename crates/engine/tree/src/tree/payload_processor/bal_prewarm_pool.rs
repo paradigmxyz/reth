@@ -5,7 +5,7 @@ use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCac
 use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
 use std::{
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     thread::JoinHandle,
@@ -32,8 +32,10 @@ enum PrewarmMsg {
         build: Arc<BuildProviderFn>,
         caches: ExecutionCache,
         txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
+        stop: Option<Arc<AtomicBool>>,
     },
-    /// Warm one target into the held provider's cache. Ignored if no provider is held.
+    /// Warm one target into the held provider's cache. Ignored if no provider is held or the
+    /// block's stop flag is set.
     Warm(PrewarmTarget),
     /// Drop the held provider (and its read txn).
     EndBlock(Arc<SendOnDrop>),
@@ -78,11 +80,34 @@ impl BalPrewarmPool {
         caches: ExecutionCache,
         txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
     ) {
+        self.begin_block_inner(build, caches, txpool_snapshot, None);
+    }
+
+    /// Like [`begin_block`](Self::begin_block), but workers skip the block's queued warm
+    /// targets once `stop` is set, so [`end_block`](Self::end_block) returns without loading them.
+    pub fn begin_cancellable_block(
+        &self,
+        build: Arc<BuildProviderFn>,
+        caches: ExecutionCache,
+        txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
+        stop: Arc<AtomicBool>,
+    ) {
+        self.begin_block_inner(build, caches, txpool_snapshot, Some(stop));
+    }
+
+    fn begin_block_inner(
+        &self,
+        build: Arc<BuildProviderFn>,
+        caches: ExecutionCache,
+        txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
+        stop: Option<Arc<AtomicBool>>,
+    ) {
         for worker in &self.workers {
             let _ = worker.send(PrewarmMsg::BeginBlock {
                 build: build.clone(),
                 caches: caches.clone(),
                 txpool_snapshot: txpool_snapshot.clone(),
+                stop: stop.clone(),
             });
         }
     }
@@ -182,11 +207,14 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
     // `EndBlock`. `None` while idle, so no read txn is pinned across the inter-block gap.
     let mut provider: Option<CachedStateProvider<EvmStateProviderBox>> = None;
+    // The current block's stop flag, if it can be cancelled.
+    let mut stop: Option<Arc<AtomicBool>> = None;
 
     // Blocks when idle; the channel disconnects (and the loop ends) when the pool is dropped.
     while let Ok(msg) = rx.recv() {
         match msg {
-            PrewarmMsg::BeginBlock { build, caches, txpool_snapshot } => {
+            PrewarmMsg::BeginBlock { build, caches, txpool_snapshot, stop: block_stop } => {
+                stop = block_stop;
                 provider = match (build)() {
                     Ok(inner) => Some(
                         CachedStateProvider::new_prewarm(inner, caches)
@@ -200,6 +228,9 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
             }
             PrewarmMsg::Warm(target) => {
                 let Some(provider) = provider.as_ref() else { continue };
+                if stop.as_ref().is_some_and(|stop| stop.load(Ordering::Relaxed)) {
+                    continue
+                }
                 match target {
                     PrewarmTarget::Account(addr, slots) => {
                         let _ = provider.basic_account(&addr);
@@ -216,6 +247,7 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
             }
             PrewarmMsg::EndBlock(end_tx) => {
                 provider = None;
+                stop = None;
                 drop(end_tx);
             }
         }
