@@ -1,6 +1,6 @@
 //! `eth_` `PubSub` RPC handler implementation
 
-use std::{future::ready, pin::Pin, sync::Arc};
+use std::{future::ready, sync::Arc};
 
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
@@ -514,14 +514,9 @@ impl SharedFeed {
     async fn produce<T: Serialize>(
         &self,
         sender: broadcast::Sender<SharedResult>,
-        items: BoxStream<'_, T>,
+        mut items: BoxStream<'_, T>,
     ) {
-        let mut items = items.peekable();
-        // Release an already-ended source before a second subscriber can join its channel.
-        if matches!(Pin::new(&mut items).peek().now_or_never(), Some(None)) {
-            return
-        }
-        // Leave any buffered first item for the spawned task to serialize outside the feed lock.
+        // The listener is attached. Poll its items in the spawned task, outside the feed lock.
         tokio::task::yield_now().await;
         loop {
             tokio::select! {
@@ -1008,18 +1003,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn producer_reopens_after_eof_and_yields_during_bursts() {
+    async fn producer_yields_while_its_source_stays_ready() {
         // More than the feed holds, all ready at once.
         const ITEMS: usize = 4 * PER_BLOCK_FEED_CAPACITY;
 
         let pubsub = test_pubsub(test_provider().0, testing_pool());
-        let mut ended =
-            pubsub.subscribe_shared(|feeds| &feeds.new_heads, |_| stream::empty::<usize>().boxed());
-        // A source that ended on its first poll must be replaced before any spawned task runs.
         let mut results =
             pubsub.subscribe_shared(|feeds| &feeds.new_heads, |_| stream::iter(0..ITEMS).boxed());
-
-        assert!(matches!(ended.try_recv(), Err(broadcast::error::TryRecvError::Closed)));
 
         // The subscriber gets to read during the burst, so it skips nothing.
         for _ in 0..ITEMS {
