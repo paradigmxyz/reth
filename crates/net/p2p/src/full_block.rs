@@ -2141,4 +2141,33 @@ mod tests {
         assert!(request.pending_headers.is_empty());
         assert!(request.request.bodies.is_none());
     }
+
+    #[tokio::test]
+    async fn download_full_block_range_validates_partial_headers_boundary() {
+        let client = TestFullBlockClient::default();
+        let (header, _) = insert_headers_into_client(&client, 0..3);
+        let consensus = Arc::new(reth_consensus::test_utils::TestConsensus::default());
+        let client = FullBlockClient::new(client, consensus.clone());
+        let mut request = client.get_full_block_range(header.hash(), 3);
+
+        let first = client
+            .client
+            .get_headers(HeadersRequest::falling(header.hash().into(), 1))
+            .await
+            .unwrap();
+        request.on_headers_response(first);
+        assert_eq!(request.headers.len(), 1);
+
+        // a single-header continuation is only checked against its parent at the boundary.
+        let parent_request = HeadersRequest::falling(header.parent_hash.into(), 1);
+        consensus.set_fail_header_against_parent(true);
+        request
+            .on_headers_response(client.client.get_headers(parent_request.clone()).await.unwrap());
+        assert_eq!(request.headers.len(), 1);
+
+        consensus.set_fail_header_against_parent(false);
+        request.on_headers_response(client.client.get_headers(parent_request).await.unwrap());
+        assert_eq!(request.headers.len(), 2);
+        assert_eq!(request.headers[1].hash(), header.parent_hash);
+    }
 }
