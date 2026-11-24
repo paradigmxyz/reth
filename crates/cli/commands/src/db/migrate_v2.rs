@@ -145,15 +145,20 @@ impl Command {
 
         let mut cursor = provider.tx_ref().cursor_read::<tables::AccountChangeSets>()?;
 
-        let first_block = Self::history_start(
-            &provider,
-            PruneSegment::AccountHistory,
-            sf_provider.genesis_block_number(),
-        )?;
+        let genesis_block = sf_provider.genesis_block_number();
+        let first_block =
+            Self::history_start(&provider, PruneSegment::AccountHistory, genesis_block)?;
 
+        let mut writer = sf_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
+        // Start an empty genesis file at genesis, as `init_genesis` does, instead of padding
+        // empty blocks from the start of its fixed range.
+        if writer.user_header().block_range().is_none() &&
+            writer.user_header().expected_block_range().contains(genesis_block)
+        {
+            writer.user_header_mut().set_expected_block_start(genesis_block);
+        }
         // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
         // earlier than first_block (e.g. 2603897 from prune checkpoint).
-        let mut writer = sf_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
         if writer.next_block_number() < first_block {
             writer.ensure_at_block(first_block - 1)?;
         }
@@ -196,15 +201,20 @@ impl Command {
 
         let mut cursor = provider.tx_ref().cursor_read::<tables::StorageChangeSets>()?;
 
-        let first_block = Self::history_start(
-            &provider,
-            PruneSegment::StorageHistory,
-            sf_provider.genesis_block_number(),
-        )?;
+        let genesis_block = sf_provider.genesis_block_number();
+        let first_block =
+            Self::history_start(&provider, PruneSegment::StorageHistory, genesis_block)?;
 
+        let mut writer = sf_provider.latest_writer(StaticFileSegment::StorageChangeSets)?;
+        // Start an empty genesis file at genesis, as `init_genesis` does, instead of padding
+        // empty blocks from the start of its fixed range.
+        if writer.user_header().block_range().is_none() &&
+            writer.user_header().expected_block_range().contains(genesis_block)
+        {
+            writer.user_header_mut().set_expected_block_start(genesis_block);
+        }
         // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
         // earlier than first_block (e.g. 2603897 from prune checkpoint).
-        let mut writer = sf_provider.latest_writer(StaticFileSegment::StorageChangeSets)?;
         if writer.next_block_number() < first_block {
             writer.ensure_at_block(first_block - 1)?;
         }
@@ -538,6 +548,8 @@ mod tests {
         static_files.initialize_index().unwrap();
         for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
         {
+            // The segment starts at genesis, as after a fresh v2 `init_genesis`.
+            assert_eq!(static_files.get_lowest_range_start(segment), Some(genesis), "{segment}");
             assert_eq!(static_files.get_highest_static_file_block(segment), Some(tip), "{segment}");
         }
         // Changesets are read from static files only with v2 settings.
