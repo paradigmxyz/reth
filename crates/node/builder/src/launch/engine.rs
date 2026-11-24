@@ -205,6 +205,7 @@ impl<B> EngineNodeLauncher<B> {
             maybe_exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty),
             ctx.era_import_source(),
             disabled_stages,
+            node_config.db.max_read_transaction_duration(),
         )?;
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.

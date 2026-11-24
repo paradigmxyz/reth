@@ -7,7 +7,8 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_libmdbx::{
-    DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, SyncMode, WriteFlags, RO,
+    DatabaseFlags, Environment, EnvironmentFlags, Geometry, MaxReadTransactionDuration, Mode,
+    SyncMode, WriteFlags, RO,
 };
 use reth_provider::{DBProvider, ExecutionOutcome};
 use reth_stages_api::StageError;
@@ -35,7 +36,13 @@ impl SlotPreimages {
     ///
     /// Uses subdir mode (`no_sub_dir = false`), so MDBX creates `mdbx.dat` / `mdbx.lck`
     /// under the directory (e.g. `db/preimage/mdbx.dat`).
-    pub fn open(path: &Path) -> eyre::Result<Self> {
+    ///
+    /// `max_read_transaction_duration` is the maximum duration of a read transaction. If `None`,
+    /// the libmdbx default is used.
+    pub fn open(
+        path: &Path,
+        max_read_transaction_duration: Option<MaxReadTransactionDuration>,
+    ) -> eyre::Result<Self> {
         const GIGABYTE: usize = 1024 * 1024 * 1024;
         const TERABYTE: usize = GIGABYTE * 1024;
 
@@ -49,6 +56,9 @@ impl SlotPreimages {
             page_size: Some(reth_libmdbx::PageSize::Set(os_page_size)),
         });
         builder.write_map();
+        if let Some(max_read_transaction_duration) = max_read_transaction_duration {
+            builder.set_max_read_transaction_duration(max_read_transaction_duration);
+        }
         builder.set_flags(EnvironmentFlags {
             no_sub_dir: false,
             no_rdahead: true,
@@ -131,6 +141,7 @@ impl SlotPreimagesReader {
 /// storage wipes, keeping all changeset keys in plain format.
 pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     slot_preimages_path: &Path,
+    max_read_transaction_duration: Option<MaxReadTransactionDuration>,
     provider: &P,
     state: &mut ExecutionOutcome<R>,
 ) -> Result<(), StageError> {
@@ -163,7 +174,8 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     preimage_entries.par_sort_unstable_by_key(|(hash, _)| *hash);
 
     // Lazily open the preimage store and insert entries.
-    let preimages = SlotPreimages::open(slot_preimages_path).map_err(fatal)?;
+    let preimages =
+        SlotPreimages::open(slot_preimages_path, max_read_transaction_duration).map_err(fatal)?;
 
     if !preimage_entries.is_empty() {
         preimages.insert_preimages(&preimage_entries).map_err(fatal)?;
@@ -236,4 +248,38 @@ where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     StageError::Fatal(err.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_libmdbx::Error;
+    use std::{
+        thread::sleep,
+        time::{Duration, Instant},
+    };
+
+    #[test]
+    fn open_applies_max_read_transaction_duration() {
+        const MAX_DURATION: Duration = Duration::from_millis(10);
+
+        let dir = tempfile::tempdir().unwrap();
+        let preimages =
+            SlotPreimages::open(dir.path(), Some(MaxReadTransactionDuration::Set(MAX_DURATION)))
+                .unwrap();
+        let reader = preimages.reader().unwrap();
+
+        // With the libmdbx default of 5 minutes the read transaction would outlive the deadline.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let err = loop {
+            match reader.get(&B256::ZERO) {
+                Ok(_) => {
+                    assert!(Instant::now() < deadline, "read transaction did not time out");
+                    sleep(MAX_DURATION);
+                }
+                Err(err) => break err,
+            }
+        };
+        assert_eq!(err.downcast_ref::<Error>(), Some(&Error::ReadTransactionTimeout));
+    }
 }

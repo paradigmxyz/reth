@@ -12,6 +12,7 @@ use reth_evm::{
 };
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
+use reth_libmdbx::MaxReadTransactionDuration;
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
@@ -98,6 +99,8 @@ where
     exex_manager_handle: ExExManagerHandle<E::Primitives>,
     /// Executor metrics.
     metrics: ExecutorMetrics,
+    /// The maximum duration of a read transaction in the slot-preimage database.
+    slot_preimages_max_read_transaction_duration: Option<MaxReadTransactionDuration>,
 }
 
 impl<E> ExecutionStage<E>
@@ -121,7 +124,18 @@ where
             post_unwind_commit_input: None,
             exex_manager_handle,
             metrics: ExecutorMetrics::default(),
+            slot_preimages_max_read_transaction_duration: None,
         }
+    }
+
+    /// Sets the maximum duration of a read transaction in the slot-preimage database. If `None`,
+    /// the libmdbx default is used.
+    pub const fn with_slot_preimages_max_read_transaction_duration(
+        mut self,
+        max_read_transaction_duration: Option<MaxReadTransactionDuration>,
+    ) -> Self {
+        self.slot_preimages_max_read_transaction_duration = max_read_transaction_duration;
+        self
     }
 
     /// Create an execution stage with the provided executor.
@@ -485,7 +499,12 @@ where
                 if !blocks.is_empty() && exex_state.is_none() {
                     exex_state = Some(state.clone());
                 }
-                slot_preimages::inject_plain_wipe_slots(&path, provider, &mut state)?;
+                slot_preimages::inject_plain_wipe_slots(
+                    &path,
+                    self.slot_preimages_max_read_transaction_duration,
+                    provider,
+                    &mut state,
+                )?;
             } else if path.exists() {
                 // Post-Cancun: no more self-destructs, preimage db is no longer needed.
                 let _ = std::fs::remove_dir_all(&path);
