@@ -302,9 +302,9 @@ mod tests {
         let limiter = PruneLimiter::default().set_time_limit(Duration::ZERO);
         sleep(Duration::from_millis(1));
         let input = PruneInput { previous_checkpoint, to_block: 6, limiter };
-        let result = SenderRecovery::new(PruneMode::Before(6))
-            .prune(&db.factory.database_provider_rw().unwrap(), input)
-            .unwrap();
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = SenderRecovery::new(PruneMode::Before(6)).prune(&provider, input).unwrap();
+        provider.commit().expect("commit");
         assert_eq!(
             result,
             SegmentOutput::not_done(

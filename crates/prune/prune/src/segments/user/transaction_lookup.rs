@@ -166,16 +166,6 @@ where
 
         let mut limiter = input.limiter;
 
-        // Keep the previous checkpoint if the limit is reached before any key is visited, so the
-        // range is retried on the next run. A later interruption still advances the checkpoint,
-        // because keys missing from the table are visited without being deleted.
-        if limiter.is_limit_reached() {
-            return Ok(SegmentOutput::not_done(
-                limiter.interrupt_reason(),
-                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
-            ))
-        }
-
         let mut last_pruned_transaction = None;
         let (pruned, done) =
             provider.tx_ref().prune_table_with_iterator::<tables::TransactionHashNumbers>(
@@ -186,6 +176,16 @@ where
                         Some(last_pruned_transaction.unwrap_or(row.1).max(row.1))
                 },
             )?;
+
+        // The iterator stopped before deleting anything, so keep the previous checkpoint to retry
+        // the batch on the next run. This must use the iterator's own `done`, because a batch
+        // that was fully scanned without deletions (missing keys) can still advance.
+        if pruned == 0 && !done {
+            return Ok(SegmentOutput::not_done(
+                limiter.interrupt_reason(),
+                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            ))
+        }
 
         let done = done && tx_range_end == end;
         trace!(target: "pruner", %pruned, %done, "Pruned transaction lookup");
@@ -591,9 +591,9 @@ mod tests {
             PruneLimiter::default().set_deleted_entries_limit(10).set_time_limit(Duration::ZERO);
         sleep(Duration::from_millis(1));
         let input = PruneInput { previous_checkpoint, to_block: 6, limiter };
-        let result = TransactionLookup::new(PruneMode::Before(6))
-            .prune(&db.factory.database_provider_rw().unwrap(), input)
-            .unwrap();
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = TransactionLookup::new(PruneMode::Before(6)).prune(&provider, input).unwrap();
+        provider.commit().expect("commit");
         assert_eq!(
             result,
             SegmentOutput::not_done(
