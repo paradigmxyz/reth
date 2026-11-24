@@ -147,26 +147,33 @@ impl<DB: Database> Database for &DB {
 /// Object-safe adapter for reader-txn tracking during unwind.
 pub trait ReaderTxnTracker: Send + Sync {
     /// Waits until all readers older than the latest committed txnid have drained.
-    fn wait_for_pre_commit_readers(&self);
+    ///
+    /// Returns an error only if the environment stops answering queries, such as after a fatal
+    /// MDBX error, since then it can no longer tell whether old readers remain.
+    fn wait_for_pre_commit_readers(&self) -> Result<(), DatabaseError>;
 }
 
 impl<DB: Database> ReaderTxnTracker for DB {
     /// There is intentionally no deadline: proceeding while a reader still sees the pre-commit
     /// view would let it observe a mix of old MDBX state and later cross-store unwind steps.
     /// Instead, slots of dead processes are periodically cleared and a slow wait is logged.
-    fn wait_for_pre_commit_readers(&self) {
-        let Some(committed_txnid) = Database::last_txnid(self) else { return };
+    fn wait_for_pre_commit_readers(&self) -> Result<(), DatabaseError> {
+        // A committed txnid is never 0, so `None` here means the environment stopped answering.
+        let Some(committed_txnid) = Database::last_txnid(self) else {
+            return Database::reader_check(self)
+        };
         let start = Instant::now();
         let mut last_reader_check = start;
         let mut last_warn = start;
         loop {
             let oldest_reader_txnid = Database::oldest_reader_txnid(self);
             match oldest_reader_txnid {
-                Some(oldest) if oldest >= committed_txnid => break,
-                // `None` means no readers only while the environment still answers queries. A
-                // fatal MDBX error makes every query fail while open read transactions keep
-                // their snapshots, so keep waiting in that case.
-                None if Database::last_txnid(self).is_some() => break,
+                Some(oldest) if oldest >= committed_txnid => return Ok(()),
+                // `None` means no readers only while the environment still answers queries. If
+                // it stopped answering, as after a fatal MDBX error, surface the reader check's
+                // error instead of releasing readers that may still see the pre-commit view.
+                None if Database::last_txnid(self).is_some() => return Ok(()),
+                None => Database::reader_check(self)?,
                 _ => {}
             }
             if last_reader_check.elapsed() >= READER_CHECK_INTERVAL {
@@ -188,6 +195,72 @@ impl<DB: Database> ReaderTxnTracker for DB {
                 last_warn = Instant::now();
             }
             std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mock::TxMock;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    };
+
+    /// Mimics a fatal MDBX environment: after the commit, every environment query fails.
+    #[derive(Debug, Default)]
+    struct FatalAfterCommitDb {
+        /// Whether the first `last_txnid` query still succeeds.
+        answers_first_query: bool,
+        queried: AtomicBool,
+    }
+
+    impl Database for FatalAfterCommitDb {
+        type TX = TxMock;
+        type TXMut = TxMock;
+
+        fn tx(&self) -> Result<Self::TX, DatabaseError> {
+            Ok(TxMock::default())
+        }
+
+        fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
+            Ok(TxMock::default())
+        }
+
+        fn path(&self) -> PathBuf {
+            PathBuf::default()
+        }
+
+        fn oldest_reader_txnid(&self) -> Option<u64> {
+            None
+        }
+
+        fn last_txnid(&self) -> Option<u64> {
+            (self.answers_first_query && !self.queried.swap(true, Ordering::SeqCst)).then_some(2)
+        }
+
+        fn reader_check(&self) -> Result<(), DatabaseError> {
+            Err(DatabaseError::Other("fatal".into()))
+        }
+    }
+
+    #[test]
+    fn wait_for_pre_commit_readers_fails_on_fatal_env() {
+        // The environment turns fatal either during the wait or before it starts.
+        for answers_first_query in [true, false] {
+            let db = FatalAfterCommitDb { answers_first_query, ..Default::default() };
+            let (done_tx, done_rx) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = done_tx.send(db.wait_for_pre_commit_readers());
+            });
+            let result = done_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("wait_for_pre_commit_readers hung on a fatal environment");
+            assert!(
+                matches!(&result, Err(DatabaseError::Other(msg)) if msg == "fatal"),
+                "answers_first_query={answers_first_query}: {result:?}"
+            );
         }
     }
 }

@@ -1888,7 +1888,7 @@ mod tests {
         let (done_tx, done_rx) = mpsc::channel();
         let waiter = Arc::clone(&env);
         std::thread::spawn(move || {
-            waiter.wait_for_pre_commit_readers();
+            waiter.wait_for_pre_commit_readers().unwrap();
             let _ = done_tx.send(());
         });
         done_rx
