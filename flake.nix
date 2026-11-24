@@ -50,6 +50,7 @@
         llvm22 = llvm22Pkgs.llvmPackages_22;
 
         nativeBuildInputs = [
+          pkgs.cmake
           pkgs.pkg-config
           pkgs.libgit2
           pkgs.m4
