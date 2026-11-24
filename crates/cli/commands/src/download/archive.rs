@@ -273,9 +273,14 @@ impl ArchiveProcessor {
         let availability = ArchiveAvailability::default();
         let (download_result, extraction) = thread::scope(|scope| {
             let extraction = scope.spawn(|| {
+                // Stops the download, which no longer has a reader. An unpack failure stops it
+                // before extraction waits for the decoder, which may be waiting on the download.
+                let mut stopped_download = false;
                 // A panic must also stop the download instead of letting it run to completion.
                 let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                    self.extract_cached_archive(&availability, format)
+                    self.extract_cached_archive(&availability, format, || {
+                        stopped_download = availability.abort()
+                    })
                 }))
                 .unwrap_or_else(|payload| {
                     Err(eyre::eyre!(
@@ -283,8 +288,8 @@ impl ArchiveProcessor {
                         panic_payload_message(payload)
                     ))
                 });
-                // Stops the download, which no longer has a reader.
-                let stopped_download = result.is_err() && availability.abort();
+                let stopped_download =
+                    stopped_download || (result.is_err() && availability.abort());
                 (result, stopped_download)
             });
 
@@ -336,11 +341,13 @@ impl ArchiveProcessor {
     }
 
     /// Extracts the cached archive as its download publishes it, while updating shared extraction
-    /// activity, and returns the hashes of the regular files it wrote.
+    /// activity, and returns the hashes of the regular files it wrote. `on_unpack_error` runs as
+    /// described by [`extract_archive_hashed`].
     fn extract_cached_archive(
         &self,
         availability: &ArchiveAvailability,
         format: CompressionFormat,
+        on_unpack_error: impl FnOnce(),
     ) -> Result<ExtractedHashes> {
         let verifier = self.output_verifier();
         let outputs = self
@@ -361,6 +368,7 @@ impl ArchiveProcessor {
             self.ctx.static_files_dir(),
             outputs,
             Some(&mut extraction_progress),
+            on_unpack_error,
         );
         extraction_progress.finish();
         result
