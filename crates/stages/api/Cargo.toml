@@ -48,6 +48,7 @@ reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-db-api.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-storage-overlay.workspace = true
 reth-tasks.workspace = true
 tokio = { workspace = true, features = ["sync", "rt-multi-thread"] }
 tokio-stream.workspace = true

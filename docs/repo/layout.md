@@ -137,7 +137,7 @@ There is also a crate to easily configure an RPC server: [`rpc/rpc-builder`](../
 
 #### Transports
 
-The RPC component is based on the [`jsonrpsee`][jsonrpsee] crate which provides JSONRPC over WebSockets and HTTP.
+The RPC component is based on a vendored copy of the [`jsonrpsee`][jsonrpsee] crate in `crates/rpc/jsonrpsee`, which provides JSONRPC over WebSockets and HTTP.
 
 The IPC transport lives in [`rpc/ipc`](../../crates/rpc/ipc).
 

@@ -5,12 +5,10 @@ use crate::testsuite::{
     Action, BlockInfo, Environment,
 };
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
-use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
+use alloy_rpc_types_eth::Block;
 use eyre::Result;
 use futures_util::future::BoxFuture;
-use reth_ethereum_primitives::TransactionSigned;
 use reth_node_api::EngineTypes;
-use reth_rpc_api::clients::EthApiClient;
 use std::marker::PhantomData;
 use tracing::debug;
 
@@ -131,20 +129,13 @@ where
 
             // get the block at the fork base number to establish the fork point
             let rpc_client = &env.node_clients[0].rpc;
-            let fork_base_block = EthApiClient::<
-                TransactionRequest,
-                Transaction,
-                Block,
-                Receipt,
-                Header,
-                TransactionSigned,
-            >::block_by_number(
-                rpc_client,
-                alloy_eips::BlockNumberOrTag::Number(self.fork_base_block),
-                false,
-            )
-            .await?
-            .ok_or_else(|| eyre::eyre!("Fork base block {} not found", self.fork_base_block))?;
+            let fork_base_block = rpc_client
+                .request::<_, Option<Block>>(
+                    "eth_getBlockByNumber",
+                    (alloy_eips::BlockNumberOrTag::Number(self.fork_base_block), false),
+                )
+                .await?
+                .ok_or_else(|| eyre::eyre!("Fork base block {} not found", self.fork_base_block))?;
 
             // update active node state to point to the fork base block
             let active_node_state = env.active_node_state_mut()?;
@@ -244,18 +235,15 @@ where
 
             // walk backwards through the chain until we reach the fork base
             while current_number > self.fork_base_number {
-                let block = EthApiClient::<
-                    TransactionRequest,
-                    Transaction,
-                    Block,
-                    Receipt,
-                    Header,
-                    TransactionSigned,
-                >::block_by_hash(rpc_client, current_hash, false)
-                .await?
-                .ok_or_else(|| {
-                    eyre::eyre!("Block with hash {} not found during fork validation", current_hash)
-                })?;
+                let block = rpc_client
+                    .request::<_, Option<Block>>("eth_getBlockByHash", (current_hash, false))
+                    .await?
+                    .ok_or_else(|| {
+                        eyre::eyre!(
+                            "Block with hash {} not found during fork validation",
+                            current_hash
+                        )
+                    })?;
 
                 current_hash = block.header.parent_hash;
                 current_number = block.header.number.saturating_sub(1);

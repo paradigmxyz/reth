@@ -1,6 +1,5 @@
 //! Events related to Consensus Layer health.
 
-use alloy_consensus::Header;
 use futures::Stream;
 use reth_storage_api::CanonChainTracker;
 use std::{
@@ -19,27 +18,27 @@ const CHECK_INTERVAL: Duration = Duration::from_secs(300);
 const NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD: Duration = Duration::from_secs(120);
 
 /// A Stream of [`ConsensusLayerHealthEvent`].
-pub struct ConsensusLayerHealthEvents<H = Header> {
+pub struct ConsensusLayerHealthEvents {
     interval: Interval,
-    canon_chain: Box<dyn CanonChainTracker<Header = H>>,
+    canon_chain: Box<dyn CanonChainTracker>,
 }
 
-impl<H> fmt::Debug for ConsensusLayerHealthEvents<H> {
+impl fmt::Debug for ConsensusLayerHealthEvents {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ConsensusLayerHealthEvents").field("interval", &self.interval).finish()
     }
 }
 
-impl<H> ConsensusLayerHealthEvents<H> {
+impl ConsensusLayerHealthEvents {
     /// Creates a new [`ConsensusLayerHealthEvents`] with the given canonical chain tracker.
-    pub fn new(canon_chain: Box<dyn CanonChainTracker<Header = H>>) -> Self {
+    pub fn new(canon_chain: Box<dyn CanonChainTracker>) -> Self {
         // Skip the first tick to prevent the false `ConsensusLayerHealthEvent::NeverSeen` event.
         let interval = tokio::time::interval_at(Instant::now() + CHECK_INTERVAL, CHECK_INTERVAL);
         Self { interval, canon_chain }
     }
 }
 
-impl<H: Send + Sync> Stream for ConsensusLayerHealthEvents<H> {
+impl Stream for ConsensusLayerHealthEvents {
     type Item = ConsensusLayerHealthEvent;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

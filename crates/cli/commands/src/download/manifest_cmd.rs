@@ -1,4 +1,4 @@
-use crate::download::manifest::generate_manifest;
+use crate::download::manifest::{generate_manifest, SnapshotManifest};
 use clap::Parser;
 use eyre::{Result, WrapErr};
 use reth_db::{mdbx::DatabaseArguments, open_db_read_only, tables, Database};
@@ -42,6 +42,24 @@ pub struct SnapshotManifestCommand {
     /// If omitted, this is inferred from header static file ranges in the source datadir.
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     blocks_per_file: Option<u64>,
+
+    /// Path to the manifest of a previously published snapshot of the same chain.
+    ///
+    /// Chunks sealed in both snapshots are hashed against it instead of being packaged again,
+    /// and the new manifest references their published archives. Fails if any sealed chunk's
+    /// files differ from the previous manifest. With `--rocksdb-archive-per-file`, RocksDB SST and
+    /// blob files that match an archive in it are reused the same way; new or changed files are
+    /// packaged.
+    #[arg(long)]
+    previous_manifest: Option<PathBuf>,
+
+    /// Package each RocksDB SST and blob file into its own archive instead of one archive.
+    ///
+    /// Unchanged files keep their archive name between snapshots, so they can be uploaded once
+    /// and reused with `--previous-manifest`. Downloaders without support for per-file archives
+    /// fail to parse the manifest, so only enable this once they have updated.
+    #[arg(long)]
+    rocksdb_archive_per_file: bool,
 }
 
 impl SnapshotManifestCommand {
@@ -63,6 +81,16 @@ impl SnapshotManifestCommand {
             blocks_per_file,
             "Packaging modular snapshot archives"
         );
+        let previous = self
+            .previous_manifest
+            .as_ref()
+            .map(|path| -> Result<SnapshotManifest> {
+                let json = reth_fs_util::read_to_string(path)?;
+                serde_json::from_str(&json)
+                    .wrap_err_with(|| format!("Invalid previous manifest: {}", path.display()))
+            })
+            .transpose()?;
+
         let start = Instant::now();
         let manifest = generate_manifest(
             &self.source_datadir,
@@ -71,6 +99,8 @@ impl SnapshotManifestCommand {
             block,
             self.chain_id,
             blocks_per_file,
+            previous.as_ref(),
+            self.rocksdb_archive_per_file,
         )?;
 
         let num_components = manifest.components.len();

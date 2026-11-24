@@ -39,7 +39,6 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-async-trait.workspace = true
 jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
 serde.workspace = true

@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use http::HeaderMap;
-use jsonrpsee_http_client::HttpResponse;
+use jsonrpsee_server::HttpResponse;
 
 mod auth_client_layer;
 mod auth_layer;

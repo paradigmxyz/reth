@@ -1,0 +1,15 @@
+[package]
+name = "reth-node-version-build"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Build script helper that stamps reth's version metadata into a binary"
+
+[lints]
+workspace = true
+
+[dependencies]
+smolgen = { workspace = true, features = ["build", "cargo", "emit_and_set", "gitcl"] }
