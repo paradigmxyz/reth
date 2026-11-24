@@ -3389,7 +3389,7 @@ mod tests {
 
     #[test]
     fn historical_state_checks_pipeline_progress_on_its_snapshot() -> eyre::Result<()> {
-        let factory = test_provider_factory_with_genesis()?;
+        let (factory, _) = test_provider_factory_with_genesis()?;
         let provider = BlockchainProvider::new(factory.clone())?;
         let before_execution = factory.provider()?;
         let genesis_hash = before_execution.block_hash(0)?.expect("genesis exists");
