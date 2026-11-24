@@ -75,8 +75,9 @@ is incompatible with the selected download.
 
 A v1 restore preserves the original changeset and index checkpoints, including
 the mode needed to resume an interrupted prune. An explicit state-history
-selection sets future retention in `reth.toml`.
-On a retry, the downloader uses the pruning settings from the existing `reth.toml`.
+selection sets future retention when the downloader creates `reth.toml`.
+On a retry, the downloader preserves the existing `reth.toml` and uses the current
+download selection for any prune checkpoints it writes.
 
 When `reth db migrate-v2` moves history from an older restore, it copies surviving
 changesets even below the recorded prune checkpoint. A block can be partially

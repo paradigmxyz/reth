@@ -601,7 +601,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         .await?;
 
         let config = self.download_config(&selections, &prepared.manifest, preset);
-        self.finalize_modular_download(&selections, &prepared.manifest, config, target_dir)?;
+        self.finalize_modular_download(&selections, &prepared.manifest, &config, target_dir)?;
 
         Ok(Some(prepared))
     }
@@ -687,21 +687,18 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         &self,
         selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
         manifest: &SnapshotManifest,
-        generated: Config,
+        config: &Config,
         target_dir: &Path,
     ) -> Result<()> {
         let db = init_db(target_dir.join("db"), self.env.db.database_args())?;
         let tx = db.tx_mut()?;
         let is_v2 = config_gen::snapshot_uses_v2(&tx, selections)?;
-        let config_path = target_dir.join("reth.toml");
-        let config =
-            if config_path.try_exists()? { Config::from_path(config_path)? } else { generated };
-        config_gen::write_prune_checkpoints_tx(&tx, &config, selections, manifest, is_v2)?;
+        config_gen::write_prune_checkpoints_tx(&tx, config, selections, manifest, is_v2)?;
         if is_v2 && rocksdb_indices_missing(selections) {
             config_gen::reset_index_stage_checkpoints_tx(&tx)?;
         }
-        if write_config(&config, target_dir)? {
-            let desc = config_gen::describe_prune_config(&config);
+        if write_config(config, target_dir)? {
+            let desc = config_gen::describe_prune_config(config);
             info!(target: "reth::cli", "{}", desc.join(", "));
         }
         tx.commit()?;
@@ -1769,13 +1766,21 @@ mod tests {
         flag: &str,
         expected_mode: Option<PruneMode>,
     ) -> Result<TempDir> {
+        let target = tempdir()?;
+        restore_snapshot(source, &target, flag).await?;
+        let modes = Config::from_path(target.path().join("reth.toml"))?.prune.segments;
+        assert_eq!(modes.account_history, expected_mode);
+        assert_eq!(modes.storage_history, expected_mode);
+        Ok(target)
+    }
+
+    async fn restore_snapshot(source: &TempDir, target: &TempDir, flag: &str) -> Result<()> {
         let archives = tempdir()?;
         let output = archives.path();
         let manifest =
             generate_manifest(source.path(), output, None, SNAPSHOT_TIP, 1, 10, None, false)?;
         let path = output.join("manifest.json");
         fs::write(&path, serde_json::to_vec(&manifest)?)?;
-        let target = tempdir()?;
         DownloadCommand::<EthereumChainSpecParser>::parse_from([
             "reth",
             "--manifest-path",
@@ -1786,10 +1791,7 @@ mod tests {
         ])
         .execute::<()>()
         .await?;
-        let modes = Config::from_path(target.path().join("reth.toml"))?.prune.segments;
-        assert_eq!(modes.account_history, expected_mode);
-        assert_eq!(modes.storage_history, expected_mode);
-        Ok(target)
+        Ok(())
     }
 
     #[tokio::test]
@@ -1932,58 +1934,32 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn restore_retry_uses_existing_prune_config() -> Result<()> {
-        let mut manifest =
-            SnapshotManifest { block: SNAPSHOT_TIP, ..manifest_with_archive_only_components() };
-        // The v2 archive contains account history but omits storage history.
-        manifest.components.extend([single_archive(SnapshotComponentType::AccountChangesets)]);
-        let indexed = StageCheckpoint::new(SNAPSHOT_TIP);
-        let stage = StageId::TransactionLookup.to_string();
-        let mut config = Config::default();
-        let history_mode = PruneMode::Distance(20_000);
-        let bodies_mode = PruneMode::Distance(30_000);
-        config.prune.segments.account_history = Some(history_mode);
-        config.prune.segments.bodies_history = Some(bodies_mode);
-        let tip = PruneCheckpoint::pruned_through(SNAPSHOT_TIP);
-        let configured = PruneCheckpoint { prune_mode: history_mode, ..SOURCE_BOUNDARY };
-        for (layout, flag, expected) in [
-            (StorageSettings::v2(), "--archive", [configured, tip]),
-            (StorageSettings::v1(), "--with-state-history-since=20", [SOURCE_HISTORY; 2]),
-            (StorageSettings::v1(), "--minimal", [SOURCE_HISTORY; 2]),
+    #[tokio::test]
+    async fn minimal_restore_with_existing_archive_config() -> Result<()> {
+        let source = tempdir()?;
+        snapshot_db(&source)?.update(|tx| set_layout(tx, StorageSettings::v2()))?;
+        let target = tempdir()?;
+        let config_path = target.path().join("reth.toml");
+        let archive_config = "[prune.segments]\n";
+        fs::write(&config_path, archive_config)?;
+
+        restore_snapshot(&source, &target, "--minimal").await?;
+
+        assert_eq!(fs::read_to_string(config_path)?, archive_config);
+        let db = snapshot_db(&target)?;
+        let tx = db.tx()?;
+        for (segment, prune_mode) in [
+            (PruneSegment::SenderRecovery, PruneMode::Full),
+            (PruneSegment::Bodies, PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
         ] {
-            let dir = tempdir()?;
-            write_config(&config, dir.path())?;
-            snapshot_db(&dir)?.update(|tx| {
-                set_layout(tx, layout);
-                tx.put::<tables::PruneCheckpoints>(PruneSegment::Receipts, SOURCE_HISTORY).unwrap();
-                tx.put::<tables::StageCheckpoints>(stage.clone(), indexed).unwrap();
-                set_history_checkpoints(tx, SOURCE_HISTORY, SOURCE_HISTORY);
-            })?;
-            let command = DownloadCommand::<EthereumChainSpecParser>::parse_from(["reth", flag]);
-            let resolved = command.resolve_components(&manifest)?;
-            command.finalize_modular_download(
-                &resolved.selections,
-                &manifest,
-                command.download_config(&resolved.selections, &manifest, resolved.preset),
-                dir.path(),
-            )?;
-            let db = snapshot_db(&dir)?;
-            let tx = db.tx()?;
-            assert_eq!(history_checkpoints(&tx)?, expected.map(Some), "{flag}");
             assert_eq!(
-                tx.get::<tables::PruneCheckpoints>(PruneSegment::Bodies)?,
-                Some(PruneCheckpoint { prune_mode: bodies_mode, ..tip })
+                tx.get::<tables::PruneCheckpoints>(segment)?,
+                Some(PruneCheckpoint {
+                    prune_mode,
+                    ..PruneCheckpoint::pruned_through(SNAPSHOT_TIP)
+                }),
+                "{segment}"
             );
-            assert_eq!(
-                tx.get::<tables::PruneCheckpoints>(PruneSegment::Receipts)?,
-                Some(SOURCE_HISTORY)
-            );
-            assert_eq!(tx.get::<tables::StageCheckpoints>(stage.clone())?, Some(indexed));
-            assert_eq!(tx.get::<tables::PruneCheckpoints>(PruneSegment::TransactionLookup)?, None);
-            if layout.is_v2() {
-                assert_eq!(tx.get::<tables::PruneCheckpoints>(PruneSegment::SenderRecovery)?, None);
-            }
         }
         Ok(())
     }
