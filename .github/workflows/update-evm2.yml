@@ -156,7 +156,8 @@ jobs:
           # comes up again after being unlocked.
           crates=()
           resolve=(cargo metadata --format-version 1)
-          for _ in $(seq 1 10); do
+          # One metadata pass, then up to 10 targeted updates.
+          for _ in $(seq 0 10); do
             if out=$(CARGO_TERM_COLOR=never "${resolve[@]}" 2>&1 >/dev/null); then
               echo "$out"
               break
