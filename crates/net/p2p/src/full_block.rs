@@ -95,8 +95,7 @@ where
                 bodies: None,
             },
             client,
-            partial_headers: Vec::new(),
-            headers: None,
+            headers: Vec::new(),
             pending_headers: VecDeque::new(),
             bodies: HashMap::default(),
             consensus: Arc::clone(&self.consensus),
@@ -710,10 +709,9 @@ where
     count: u64,
     /// Requests for headers and bodies that are in progress.
     request: FullBlockRangeRequest<Client>,
-    /// Validated headers received so far, in falling order, until all `count` are fetched.
-    partial_headers: Vec<SealedHeader<Client::Header>>,
-    /// Fetched headers.
-    headers: Option<Vec<SealedHeader<Client::Header>>>,
+    /// Validated headers received so far, in falling order. Complete once it holds `count`
+    /// headers.
+    headers: Vec<SealedHeader<Client::Header>>,
     /// The next headers to request bodies for. This is drained as responses are received.
     pending_headers: VecDeque<SealedHeader<Client::Header>>,
     /// The bodies that have been received so far.
@@ -764,7 +762,7 @@ where
             return None
         }
 
-        let headers = self.headers.take()?;
+        let headers = core::mem::take(&mut self.headers);
         let mut needs_retry = false;
         let mut valid_responses = Vec::new();
 
@@ -805,7 +803,7 @@ where
             }
 
             // put headers back since they were `take`n before
-            self.headers = Some(headers);
+            self.headers = headers;
 
             // create response for failing bodies
             let hashes = self.remaining_bodies_hashes();
@@ -821,7 +819,7 @@ where
             headers.map(|h| h.into_iter().map(SealedHeader::seal_slow).collect::<Vec<_>>()).split();
 
         // ignore empty or oversized responses, short responses are accepted as partial progress
-        let remaining = self.count as usize - self.partial_headers.len();
+        let remaining = self.count as usize - self.headers.len();
         if headers_falling.is_empty() || headers_falling.len() > remaining {
             return
         }
@@ -838,44 +836,36 @@ where
 
         // validate the new headers together with the lowest already accepted header, so the
         // boundary between responses is validated too
-        let headers_rising = headers_falling
-            .iter()
-            .rev()
-            .chain(self.partial_headers.last())
-            .cloned()
-            .collect::<Vec<_>>();
+        let headers_rising =
+            headers_falling.iter().rev().chain(self.headers.last()).cloned().collect::<Vec<_>>();
         if let Err(err) = self.consensus.validate_header_range(&headers_rising) {
             debug!(target: "downloaders", %err, ?self.start_hash, "Received bad header response");
             self.client.report_bad_message(peer);
             return
         }
 
-        self.partial_headers.extend(headers_falling);
-        if self.partial_headers.len() < self.count as usize {
+        self.headers.extend(headers_falling);
+        if self.headers.len() < self.count as usize {
             return
         }
-        let headers_falling = core::mem::take(&mut self.partial_headers);
 
         // get the bodies request so it can be polled later
-        let hashes = headers_falling.iter().map(|h| h.hash()).collect::<Vec<_>>();
+        let hashes = self.headers.iter().map(|h| h.hash()).collect::<Vec<_>>();
 
         // populate the pending headers
-        self.pending_headers = headers_falling.clone().into();
+        self.pending_headers = self.headers.clone().into();
 
         // set the actual request if it hasn't been started yet
         if !self.has_bodies_request_started() {
             // request the bodies for the downloaded headers
             self.request.bodies = Some(self.client.get_block_bodies(hashes));
         }
-
-        // set the headers response
-        self.headers = Some(headers_falling);
     }
 
     /// Returns the hash of the next header to request: the parent of the lowest accepted header,
     /// or the start hash if no headers were accepted yet.
     fn next_header_hash(&self) -> B256 {
-        self.partial_headers.last().map_or(self.start_hash, |h| h.parent_hash())
+        self.headers.last().map_or(self.start_hash, |h| h.parent_hash())
     }
 
     /// Returns whether or not a bodies request has been started, returning false if there is no
@@ -926,12 +916,12 @@ where
                         }
                     }
 
-                    if this.headers.is_none() {
+                    if this.headers.len() < this.count as usize {
                         // not all headers received yet, request the remaining ones
                         this.request.headers =
                             Some(this.client.get_headers(HeadersRequest::falling(
                                 this.next_header_hash().into(),
-                                this.count - this.partial_headers.len() as u64,
+                                this.count - this.headers.len() as u64,
                             )));
                     }
                 }
@@ -2147,7 +2137,7 @@ mod tests {
 
         request.on_headers_response(headers);
 
-        assert!(request.headers.is_none());
+        assert!(request.headers.is_empty());
         assert!(request.pending_headers.is_empty());
         assert!(request.request.bodies.is_none());
     }
