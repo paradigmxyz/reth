@@ -17,7 +17,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use core::fmt;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
-use reth_chain_state::InMemoryState;
+use reth_chain_state::{ChainInfoHeaders, InMemoryState};
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
@@ -116,8 +116,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// Create new database provider factory.
     ///
     /// `overlay_manager` carries the in-memory state that [`Self::in_memory_state`] returns. A
-    /// default manager has an empty in-memory state of its own, which fits storage whose blocks
-    /// are all on disk.
+    /// default manager has a read-only in-memory state, which never has blocks: that fits storage
+    /// whose blocks are all on disk.
     ///
     /// The storage backends used by the produced factory MAY be inconsistent.
     /// It is recommended to call [`Self::check_consistency`] after
@@ -589,6 +589,41 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     ) -> ProviderResult<StaticFileProvider<N::Primitives>> {
         self.sync_providers_if_needed()?;
         Ok(self.static_file_provider.clone())
+    }
+
+    /// Returns the latest, safe and finalized headers stored in the database. The safe header is
+    /// the finalized one if no safe block is stored.
+    ///
+    /// These are the headers a canonical in-memory state over this factory starts from.
+    ///
+    /// Returns [`ProviderError::HeaderNotFound`] if the header of the latest block is not stored,
+    /// which is the case for a database without a genesis block.
+    pub fn chain_info_headers(&self) -> ProviderResult<ChainInfoHeaders<HeaderTy<N>>> {
+        let provider = self.provider()?;
+        let best = provider.chain_info()?;
+        let latest = provider
+            .header_by_number(best.best_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(best.best_number.into()))?;
+        let finalized_header = provider
+            .last_finalized_block_number()?
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
+        let safe_header = provider
+            .last_safe_block_number()?
+            .or_else(|| {
+                // for the purpose of this we can also use the finalized block if we don't have the
+                // safe block
+                provider.last_finalized_block_number().ok().flatten()
+            })
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
+        Ok(ChainInfoHeaders {
+            canonical_head: SealedHeader::new(latest, best.best_hash),
+            safe: safe_header,
+            finalized: finalized_header,
+        })
     }
 }
 

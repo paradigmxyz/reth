@@ -8,8 +8,8 @@ use syn::{parse_macro_input, spanned::Spanned, Error, ItemFn};
 ///
 /// Expands to a `#[test]` whose body moves into a `Runtime::run` closure, so the test runs
 /// inline by default and under simulation with the `fuzz` feature. Other attributes, such as
-/// `#[should_panic]`, are kept. Tests that must generate inputs before entering the runtime,
-/// such as property tests, call `Runtime::run` directly.
+/// `#[should_panic]`, are kept. Inside `proptest!`, it replaces `#[test]` and runs every case,
+/// including input generation, in one runtime.
 #[proc_macro_attribute]
 pub fn test(args: TokenStream, item: TokenStream) -> TokenStream {
     if !args.is_empty() {
