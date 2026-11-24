@@ -63,6 +63,20 @@ where
         ret(level = "trace")
     )]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
+        let storage_v2 = provider.cached_storage_settings().storage_v2;
+
+        // Delete the changeset jars of earlier runs here, not at the end of the run that pruned
+        // their history shards. The previous checkpoint comes from committed state, so those
+        // shards are pruned durably. A missing jar reads as empty blocks, so a jar deleted before
+        // the checkpoint commit would leave its shards unpruned. Each run also retries the jars
+        // that an interrupted deletion left.
+        if storage_v2 {
+            provider.static_file_provider().delete_segment_below_block(
+                StaticFileSegment::AccountChangeSets,
+                input.get_start_next_block_range(),
+            )?;
+        }
+
         let range = match input.get_next_block_range() {
             Some(range) => range,
             None => {
@@ -73,7 +87,7 @@ where
         let range_end = *range.end();
 
         // Check where account history indices are stored
-        if provider.cached_storage_settings().storage_v2 {
+        if storage_v2 {
             return self.prune_rocksdb(provider, input, range, range_end);
         }
 
@@ -145,13 +159,11 @@ impl AccountHistory {
             limiter.increment_deleted_entries_count();
         }
 
-        // Delete static file jars only when fully processed, and only after the provider commit
-        // makes the pruned indices and the checkpoint durable.
+        // Delete static file jars only when fully processed
         if done && let Some(last_block) = last_changeset_pruned_block {
-            provider.delete_static_files_below_block_on_commit(
-                StaticFileSegment::AccountChangeSets,
-                last_block + 1,
-            )?;
+            provider
+                .static_file_provider()
+                .delete_segment_below_block(StaticFileSegment::AccountChangeSets, last_block + 1)?;
         }
         trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned account history (changesets from static files)");
 
@@ -321,21 +333,6 @@ impl AccountHistory {
             Ok(((), Some(batch.into_inner())))
         })?;
         trace!(target: "pruner", deleted = deleted_shards, updated = updated_shards, %done, "Pruned account history (RocksDB indices)");
-
-        // Delete static file jars only when fully processed. During provider.commit(), RocksDB
-        // batch is committed before the MDBX checkpoint. If crash occurs after RocksDB commit
-        // but before MDBX commit, on restart the pruner checkpoint indicates data needs
-        // re-pruning, but the RocksDB shards are already pruned - this is safe because pruning
-        // is idempotent (re-pruning already-pruned shards is a no-op).
-        //
-        // The jars are deleted after that commit. A missing jar reads as empty blocks, so a jar
-        // deleted before the checkpoint is durable would leave its history shards unpruned.
-        if done {
-            provider.delete_static_files_below_block_on_commit(
-                StaticFileSegment::AccountChangeSets,
-                last_changeset_pruned_block + 1,
-            )?;
-        }
 
         let progress = limiter.progress(done);
 
@@ -636,10 +633,11 @@ mod tests {
         }
     }
 
-    /// The changeset jars must outlive a provider that is dropped without a commit. Otherwise the
-    /// old checkpoint and the unpruned history shards point at changesets that no longer exist.
+    /// A run deletes only the changeset jars below its previous checkpoint, which is committed.
+    /// Otherwise a dropped provider leaves the old checkpoint and the unpruned history shards
+    /// pointing at changesets that no longer exist.
     #[test]
-    fn prune_rocksdb_deletes_jars_on_commit() {
+    fn prune_rocksdb_deletes_jars_below_previous_checkpoint() {
         let db = TestStageDB::default();
         db.factory.set_storage_settings_cache(StorageSettings::v2());
 
@@ -673,9 +671,9 @@ mod tests {
         let to_block = first_jar_end;
         let prune_mode = PruneMode::Before(to_block);
         let segment = AccountHistory::new(prune_mode);
-        let input = || PruneInput {
+        let input = |checkpoint| PruneInput {
             previous_checkpoint: Some(PruneCheckpoint {
-                block_number: Some(first_jar_end - 1),
+                block_number: Some(checkpoint),
                 tx_number: None,
                 prune_mode,
             }),
@@ -686,28 +684,33 @@ mod tests {
             let shards = rocksdb.account_history_shards(address).unwrap();
             shards.iter().flat_map(|(_, blocks)| blocks.iter()).collect::<Vec<_>>()
         };
+        let lowest_jar_end =
+            || static_file_provider.get_lowest_range_end(StaticFileSegment::AccountChangeSets);
 
         let provider = db.factory.database_provider_rw().unwrap();
-        let result = segment.prune(&provider, input()).unwrap();
+        let result = segment.prune(&provider, input(first_jar_end - 1)).unwrap();
         assert!(result.progress.is_finished());
         drop(provider);
 
-        assert_eq!(
-            static_file_provider.get_lowest_range_end(StaticFileSegment::AccountChangeSets),
-            Some(first_jar_end)
-        );
+        assert_eq!(lowest_jar_end(), Some(first_jar_end));
         assert_eq!(static_file_provider.account_block_changeset(first_jar_end).unwrap(), [change]);
         assert_eq!(shard_blocks(), [first_jar_end, first_jar_end + 1]);
 
         let provider = db.factory.database_provider_rw().unwrap();
-        let result = segment.prune(&provider, input()).unwrap();
+        let result = segment.prune(&provider, input(first_jar_end - 1)).unwrap();
         assert!(result.progress.is_finished());
         provider.commit().expect("commit");
 
-        assert_eq!(
-            static_file_provider.get_lowest_range_end(StaticFileSegment::AccountChangeSets),
-            Some(first_jar_end + 1)
-        );
+        assert_eq!(lowest_jar_end(), Some(first_jar_end));
+        assert_eq!(shard_blocks(), [first_jar_end + 1]);
+
+        // The target stays at the new checkpoint, so this run has no range and only deletes.
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = segment.prune(&provider, input(first_jar_end)).unwrap();
+        assert!(result.progress.is_finished());
+        provider.commit().expect("commit");
+
+        assert_eq!(lowest_jar_end(), Some(first_jar_end + 1));
         assert_eq!(shard_blocks(), [first_jar_end + 1]);
     }
 

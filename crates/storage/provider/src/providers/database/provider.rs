@@ -36,7 +36,7 @@ use alloy_primitives::{
     Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber, B256,
 };
 use itertools::Itertools;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use rayon::slice::ParallelSliceMut;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
@@ -220,9 +220,6 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     db_path: PathBuf,
     /// Pending `RocksDB` batches to be committed at provider commit time.
     pending_rocksdb_batches: PendingRocksDBBatches,
-    /// Static file deletions to run after the provider commit is durable, as the segment and the
-    /// block below which its files are deleted.
-    pending_static_file_deletions: Mutex<Vec<(StaticFileSegment, BlockNumber)>>,
     /// Commit order for database operations.
     commit_order: CommitOrder,
     /// Minimum distance from tip required for pruning
@@ -308,11 +305,6 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         }
 
         self.static_file_provider.commit()?;
-
-        for (segment, block) in self.pending_static_file_deletions.into_inner() {
-            self.static_file_provider.delete_segment_below_block(segment, block)?;
-        }
-
         Ok(())
     }
 
@@ -345,15 +337,6 @@ impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
         segment: StaticFileSegment,
     ) -> ProviderResult<crate::providers::StaticFileProviderRWRefMut<'_, Self::Primitives>> {
         self.static_file_provider.get_writer(block, segment)
-    }
-
-    fn delete_static_files_below_block_on_commit(
-        &self,
-        segment: StaticFileSegment,
-        block: BlockNumber,
-    ) -> ProviderResult<()> {
-        self.pending_static_file_deletions.lock().push((segment, block));
-        Ok(())
     }
 }
 
@@ -416,7 +399,6 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             db_path,
             rocksdb_history_snapshot: OnceLock::new(),
             pending_rocksdb_batches: Default::default(),
-            pending_static_file_deletions: Default::default(),
             commit_order,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics,
@@ -1062,7 +1044,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             db_path,
             rocksdb_history_snapshot: OnceLock::new(),
             pending_rocksdb_batches: Default::default(),
-            pending_static_file_deletions: Default::default(),
             commit_order: CommitOrder::Normal,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics,
@@ -4188,12 +4169,6 @@ impl<TX: DbTx + 'static, N: NodeTypes> DBProvider for DatabaseProvider<TX, N> {
             timings.mdbx = start.elapsed();
 
             self.metrics.record_commit(&timings);
-
-            // The checkpoints and indexes that allow these deletions are durable now. A crash
-            // before this point leaves the files for the next prune run to delete.
-            for (segment, block) in self.pending_static_file_deletions.into_inner() {
-                self.static_file_provider.delete_segment_below_block(segment, block)?;
-            }
         }
 
         Ok(())
