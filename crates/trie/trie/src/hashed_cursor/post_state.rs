@@ -573,7 +573,7 @@ mod tests {
             )
         }
 
-        reth_concurrency::proptest! {
+        proptest! {
             #![proptest_config(ProptestConfig::with_cases(1000))]
         /// Tests `HashedPostStateCursor` produces identical results to a pre-merged cursor
         /// across 1000 random scenarios.
@@ -584,7 +584,7 @@ mod tests {
         ///
         /// Executes random sequences of `next()` and `seek()` operations, asserting
         /// both cursors return identical results.
-        #[test]
+        #[reth_concurrency::test]
         fn proptest_hashed_post_state_cursor(
                 db_nodes in sorted_db_nodes_strategy(),
                 post_state_nodes in sorted_post_state_nodes_strategy(),

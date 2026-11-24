@@ -2234,9 +2234,9 @@ mod tests {
             })
         }
 
-        reth_concurrency::proptest! {
+        proptest! {
             #![proptest_config(ProptestConfig::with_cases(4000))]
-            #[test]
+            #[reth_concurrency::test]
             /// Tests that `StorageProofCalculator` produces valid proofs for randomly generated
             /// storage datasets with proof targets.
             fn proptest_proof_with_targets(
@@ -2254,7 +2254,7 @@ mod tests {
                 harness.assert_proof(targets).expect("Proof generation failed");
             }
 
-            #[test]
+            #[reth_concurrency::test]
             fn proptest_proof_with_dirty_prefixes(
                 before in prop::collection::btree_map(dirty_key_strategy(), 1u64..100, 0..80),
                 changes in prop::collection::btree_map(dirty_key_strategy(), 0u64..100, 0..8),

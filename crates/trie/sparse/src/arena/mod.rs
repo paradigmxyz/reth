@@ -3370,9 +3370,9 @@ mod tests {
         changeset
     }
 
-    reth_concurrency::proptest! {
+    proptest! {
         #![proptest_config(ProptestConfig::with_cases(1000))]
-        #[test]
+        #[reth_concurrency::test]
         fn arena_trie_proptest(
             initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=100usize),
             changeset1_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),

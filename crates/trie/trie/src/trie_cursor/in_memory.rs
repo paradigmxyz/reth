@@ -961,10 +961,10 @@ mod tests {
             })
         }
 
-        reth_concurrency::proptest! {
+        proptest! {
             #![proptest_config(ProptestConfig::with_cases(10000))]
 
-            #[test]
+            #[reth_concurrency::test]
             fn proptest_in_memory_trie_cursor(
                 db_nodes in sorted_db_nodes_strategy(),
                 in_memory_nodes in sorted_in_memory_nodes_strategy(),
