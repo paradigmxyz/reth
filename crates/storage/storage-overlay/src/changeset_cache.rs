@@ -121,7 +121,7 @@ where
         (block_number + 1)..=finish.number,
         partial_state_trie,
         finish,
-        true,
+        TrieRevertCaching::Shared,
     )?;
 
     // Step 3: Create an InMemoryTrieCursorFactory with the reverts
@@ -249,7 +249,7 @@ impl ChangesetCache {
             block_number..=block_number,
             partial_state_trie,
             finish,
-            true,
+            TrieRevertCaching::Shared,
         )
     }
 
@@ -261,17 +261,13 @@ impl ChangesetCache {
     ///
     /// If any block is missing from cache, this falls back to one aggregate database computation
     /// for the whole range. The aggregate result restores the trie to the state before the range
-    /// and is inserted into the range cache when `write_reverts_to_cache` is set, or into the
-    /// bounded ranges otherwise.
+    /// and is retained as `caching` says.
     ///
     /// # Arguments
     ///
     /// * `provider` - Database provider for DB access and block lookups
     /// * `range` - Block range to accumulate reverts for (inclusive)
-    /// * `write_reverts_to_cache` - Whether to retain the accumulated reverts in the range cache.
-    ///   Callers serving anchors a peer or RPC caller chooses pass `false`, since entries there
-    ///   stay until their start block is evicted. Their reverts are retained in a bounded set
-    ///   instead.
+    /// * `caching` - Where to retain the accumulated reverts.
     ///
     /// # Returns
     ///
@@ -291,7 +287,7 @@ impl ChangesetCache {
         range: RangeInclusive<BlockNumber>,
         partial_state_trie: BlockNumHash,
         finish: BlockNumHash,
-        write_reverts_to_cache: bool,
+        caching: TrieRevertCaching,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         N: NodePrimitives,
@@ -356,7 +352,7 @@ impl ChangesetCache {
 
             return Ok(accumulated_reverts)
         }
-        if !write_reverts_to_cache &&
+        if caching == TrieRevertCaching::Bounded &&
             let Some(accumulated_reverts) = self.bounded_ranges.lock().get(&range_key)
         {
             return Ok(Arc::clone(accumulated_reverts))
@@ -415,15 +411,11 @@ impl ChangesetCache {
                 "Finished accumulating cached trie reverts for block range"
             );
 
-            if write_reverts_to_cache {
-                self.inner.write().insert(range_key, Arc::clone(&accumulated_reverts));
-            } else {
-                self.bounded_ranges.lock().insert(range_key, Arc::clone(&accumulated_reverts));
-            }
+            self.retain_range(caching, range_key, &accumulated_reverts);
             return Ok(accumulated_reverts)
         }
 
-        if !write_reverts_to_cache &&
+        if caching == TrieRevertCaching::Bounded &&
             let Some(accumulated_reverts) =
                 self.extend_bounded_range(provider, range_key, &cached_reverts)?
         {
@@ -485,13 +477,27 @@ impl ChangesetCache {
             "Finished accumulating trie reverts for block range"
         );
 
-        if write_reverts_to_cache {
-            self.inner.write().insert(range_key, Arc::clone(&accumulated_reverts));
-        } else {
-            self.bounded_ranges.lock().insert(range_key, Arc::clone(&accumulated_reverts));
-        }
+        self.retain_range(caching, range_key, &accumulated_reverts);
 
         Ok(accumulated_reverts)
+    }
+
+    /// Retains the accumulated reverts of `range_key` where `caching` says.
+    fn retain_range(
+        &self,
+        caching: TrieRevertCaching,
+        range_key: ChangesetRangeKey,
+        accumulated_reverts: &Arc<TrieUpdatesSorted>,
+    ) {
+        match caching {
+            TrieRevertCaching::Shared => {
+                self.inner.write().insert(range_key, Arc::clone(accumulated_reverts));
+            }
+            TrieRevertCaching::Bounded => {
+                self.bounded_ranges.lock().insert(range_key, Arc::clone(accumulated_reverts));
+            }
+            TrieRevertCaching::Disabled => {}
+        }
     }
 
     /// Extends the bounded range that starts like `range_key` but ended at an earlier `Finish`,
@@ -543,6 +549,17 @@ impl ChangesetCache {
         bounded_ranges.insert(range_key, Arc::clone(&accumulated_reverts));
         Ok(Some(accumulated_reverts))
     }
+}
+
+/// Where the trie reverts accumulated for a block range are retained.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TrieRevertCaching {
+    /// In the changeset cache the engine shares, until the range's start block is evicted.
+    Shared,
+    /// In a small LRU set of ranges, for anchors untrusted peers choose and request repeatedly.
+    Bounded,
+    /// Nowhere, for anchors callers choose that are rarely requested twice.
+    Disabled,
 }
 
 /// Cache key for one contiguous range of canonical trie changesets.
@@ -963,7 +980,7 @@ mod tests {
         let builder = manager.overlay_builder(blocks[4].recovered_block().hash());
         builder
             .clone()
-            .with_bounded_trie_revert_cache()
+            .with_bounded_trie_revert_caching()
             .build_state_trie_overlay_at_frontiers(&*provider, frontier, finish, true)
             .unwrap();
         assert_eq!(cached(), 6);
@@ -1025,8 +1042,16 @@ mod tests {
         let before = factory.provider().unwrap();
         let cache = manager.changeset_cache();
         let (frontier, finish) = database_state_frontiers(&before).unwrap();
-        let result =
-            cache.get_or_compute_range(&manager, &before, 1..=2, frontier, finish, true).unwrap();
+        let result = cache
+            .get_or_compute_range(
+                &manager,
+                &before,
+                1..=2,
+                frontier,
+                finish,
+                TrieRevertCaching::Shared,
+            )
+            .unwrap();
         assert_eq!(
             result.storage_tries_ref()[&hashed_address].storage_nodes_ref(),
             &[(removed, None), (replaced, None)],
@@ -1038,14 +1063,30 @@ mod tests {
         provider_rw.commit().unwrap();
         let after = factory.provider().unwrap();
         let (frontier, finish) = database_state_frontiers(&after).unwrap();
-        let advanced =
-            cache.get_or_compute_range(&manager, &after, 1..=2, frontier, finish, true).unwrap();
+        let advanced = cache
+            .get_or_compute_range(
+                &manager,
+                &after,
+                1..=2,
+                frontier,
+                finish,
+                TrieRevertCaching::Shared,
+            )
+            .unwrap();
         assert!(Arc::ptr_eq(&advanced, &result));
 
         // A cold calculation at the newer frontier must also serve the older reader.
         cache.evict(2);
-        let advanced =
-            cache.get_or_compute_range(&manager, &after, 1..=2, frontier, finish, true).unwrap();
+        let advanced = cache
+            .get_or_compute_range(
+                &manager,
+                &after,
+                1..=2,
+                frontier,
+                finish,
+                TrieRevertCaching::Shared,
+            )
+            .unwrap();
         assert_eq!(advanced, result);
 
         // An older reader must still receive the deletion after the frontier advances.
@@ -1252,7 +1293,7 @@ mod tests {
                 1..=2,
                 partial_state_trie,
                 finish,
-                true,
+                TrieRevertCaching::Shared,
             )
             .unwrap();
         assert_eq!(accumulated.account_nodes_ref(), &[(path, Some(older_node))]);
@@ -1290,7 +1331,14 @@ mod tests {
         let (cache, finish) = cache_with_block_reverts(6);
         let bounded = |start| {
             cache
-                .get_or_compute_range(&overlay_manager, &provider, start..=6, finish, finish, false)
+                .get_or_compute_range(
+                    &overlay_manager,
+                    &provider,
+                    start..=6,
+                    finish,
+                    finish,
+                    TrieRevertCaching::Bounded,
+                )
                 .unwrap()
         };
         let key = |start| ChangesetRangeKey::new(start, 6, finish.hash);
@@ -1318,19 +1366,40 @@ mod tests {
 
         let (fresh_cache, finish) = cache_with_block_reverts(3);
         let fresh = fresh_cache
-            .get_or_compute_range(&overlay_manager, &provider, 1..=3, finish, finish, true)
+            .get_or_compute_range(
+                &overlay_manager,
+                &provider,
+                1..=3,
+                finish,
+                finish,
+                TrieRevertCaching::Shared,
+            )
             .unwrap();
 
         // The range is built while `Finish` is block 2, whose reverts then leave the cache.
         let (cache, _) = cache_with_block_reverts(3);
         let old_finish = BlockNumHash::new(2, B256::with_last_byte(2));
         cache
-            .get_or_compute_range(&overlay_manager, &provider, 1..=2, old_finish, old_finish, false)
+            .get_or_compute_range(
+                &overlay_manager,
+                &provider,
+                1..=2,
+                old_finish,
+                old_finish,
+                TrieRevertCaching::Bounded,
+            )
             .unwrap();
         cache.evict(3);
 
         let extended = cache
-            .get_or_compute_range(&overlay_manager, &provider, 1..=3, finish, finish, false)
+            .get_or_compute_range(
+                &overlay_manager,
+                &provider,
+                1..=3,
+                finish,
+                finish,
+                TrieRevertCaching::Bounded,
+            )
             .unwrap();
         assert_eq!(extended, fresh);
 
@@ -1361,7 +1430,14 @@ mod tests {
         );
 
         let rebuilt = cache
-            .get_or_compute_range(&overlay_manager, &*provider, 1..=3, finish, finish, false)
+            .get_or_compute_range(
+                &overlay_manager,
+                &*provider,
+                1..=3,
+                finish,
+                finish,
+                TrieRevertCaching::Bounded,
+            )
             .unwrap();
         assert!(rebuilt.is_empty());
         assert!(cache.bounded_ranges.lock().peek(&reorged_key).is_some());
@@ -1463,13 +1539,25 @@ mod tests {
                 1..=3,
                 partial_state_trie,
                 finish,
-                false,
+                TrieRevertCaching::Disabled,
             )
             .unwrap();
         assert_eq!(*uncached, actual);
         assert!(cache.inner.read().entries.is_empty());
+        assert!(cache.bounded_ranges.lock().is_empty());
 
         // The range is rebuilt once and then served from the bounded set.
+        let bounded = cache
+            .get_or_compute_range(
+                &overlay_manager,
+                &*provider,
+                1..=3,
+                partial_state_trie,
+                finish,
+                TrieRevertCaching::Bounded,
+            )
+            .unwrap();
+        assert_eq!(*bounded, actual);
         let reused = cache
             .get_or_compute_range(
                 &overlay_manager,
@@ -1477,10 +1565,10 @@ mod tests {
                 1..=3,
                 partial_state_trie,
                 finish,
-                false,
+                TrieRevertCaching::Bounded,
             )
             .unwrap();
-        assert!(Arc::ptr_eq(&uncached, &reused));
+        assert!(Arc::ptr_eq(&bounded, &reused));
         assert!(cache.inner.read().entries.is_empty());
 
         let from_cache_api = cache
@@ -1490,7 +1578,7 @@ mod tests {
                 1..=3,
                 partial_state_trie,
                 finish,
-                true,
+                TrieRevertCaching::Shared,
             )
             .unwrap();
         assert_eq!(*from_cache_api, actual);

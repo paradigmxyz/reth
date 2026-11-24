@@ -1,4 +1,5 @@
 use crate::{
+    changeset_cache::TrieRevertCaching,
     manager::{OverlayCacheConfig, StateTrieOverlayError},
     OverlayManager,
 };
@@ -197,9 +198,8 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     no_reverts: bool,
     /// Cache behavior for the overlays this builder resolves.
     overlay_cache_config: OverlayCacheConfig,
-    /// Whether the trie reverts this builder accumulates are written to the changeset cache, or
-    /// to its bounded set of ranges otherwise.
-    write_reverts_to_cache: bool,
+    /// Where the trie reverts this builder accumulates are retained.
+    trie_revert_caching: TrieRevertCaching,
 }
 
 impl<N: NodePrimitives> OverlayBuilder<N> {
@@ -216,7 +216,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             reused_sparse_trie_anchor_hash: None,
             no_reverts: false,
             overlay_cache_config: OverlayCacheConfig::default(),
-            write_reverts_to_cache: true,
+            trie_revert_caching: TrieRevertCaching::Shared,
         }
     }
 
@@ -236,14 +236,23 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
-    /// Retains the trie reverts this builder accumulates in a small bounded set instead of the
-    /// changeset cache.
+    /// Stops this builder from retaining the trie reverts it accumulates in the changeset cache.
     ///
-    /// Use it for anchors a peer or RPC caller chooses: reverts in the changeset cache are keyed by
-    /// the anchor and stay until their start block is evicted, so they would otherwise pile up in
-    /// the cache the engine shares.
-    pub const fn with_bounded_trie_revert_cache(mut self) -> Self {
-        self.write_reverts_to_cache = false;
+    /// Use it for anchors a peer or RPC caller chooses: cached reverts are keyed by the anchor and
+    /// stay until their start block is evicted, so they would otherwise pile up in the cache the
+    /// engine shares.
+    pub const fn without_trie_revert_caching(mut self) -> Self {
+        self.trie_revert_caching = TrieRevertCaching::Disabled;
+        self
+    }
+
+    /// Retains the trie reverts this builder accumulates in a small LRU set of ranges instead of
+    /// the changeset cache.
+    ///
+    /// Use it for anchors untrusted peers choose and request repeatedly, such as snap range roots:
+    /// the set bounds what they can retain, and repeat requests reuse the reverts.
+    pub const fn with_bounded_trie_revert_caching(mut self) -> Self {
+        self.trie_revert_caching = TrieRevertCaching::Bounded;
         self
     }
 
@@ -479,7 +488,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                             revert_blocks.clone(),
                             state_trie_tip_block,
                             finish_tip_block,
-                            self.write_reverts_to_cache,
+                            self.trie_revert_caching,
                         )?;
                     retrieve_trie_reverts_duration = start.elapsed();
                     accumulated_reverts

@@ -187,7 +187,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             self.database
                 .overlay_manager()
                 .overlay_builder(block_hash)
-                .with_bounded_trie_revert_cache(),
+                .without_trie_revert_caching(),
         ))
     }
 
@@ -241,7 +241,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         Ok(Some(Box::new(HistoricalStateRangeView {
             provider: OverlayStateProvider::new(
                 provider,
-                overlay_builder.with_bounded_trie_revert_cache(),
+                overlay_builder.with_bounded_trie_revert_caching(),
             ),
         })))
     }

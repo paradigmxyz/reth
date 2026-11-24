@@ -6,7 +6,7 @@
 
 use crate::{
     builder::OverlayBuilderMetrics,
-    changeset_cache::compute_block_trie_updates,
+    changeset_cache::{compute_block_trie_updates, TrieRevertCaching},
     database_state_frontiers,
     manager_metrics::{ExecutionOverlayMetrics, OverlayCacheMetrics, StateTrieOverlayMetrics},
     provider::OverlayStateProviderFactoryMetrics,
@@ -179,7 +179,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             range,
             partial_state_trie,
             finish,
-            true,
+            TrieRevertCaching::Shared,
         )
     }
 
@@ -189,7 +189,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         range: RangeInclusive<BlockNumber>,
         partial_state_trie: BlockNumHash,
         finish: BlockNumHash,
-        write_reverts_to_cache: bool,
+        caching: TrieRevertCaching,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         P: DBProvider
@@ -206,7 +206,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             range,
             partial_state_trie,
             finish,
-            write_reverts_to_cache,
+            caching,
         )
     }
 
