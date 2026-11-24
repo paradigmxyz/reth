@@ -306,9 +306,6 @@ impl TestHarness {
 
         self.tree
             .canonical_in_memory_state_writer
-            .set_canonical_head(blocks.last().unwrap().recovered_block().clone_sealed_header());
-        self.tree
-            .canonical_in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
 
         self.blocks = blocks.clone();
