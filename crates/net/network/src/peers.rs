@@ -53,6 +53,10 @@ const MAX_INCOMING_IP_THROTTLE_ENTRIES: u32 = 16_384;
 /// add any number of discovered peers.
 const MAX_DISCOVERED_PEERS_PER_SUBNET: usize = 10;
 
+/// Maximum number of basic peers tracked in total, so hosts across many subnets cannot add any
+/// number of discovered peers either.
+const MAX_DISCOVERED_PEERS: usize = 10_000;
+
 /// Maintains the state of _all_ the peers known to the network.
 ///
 /// This is supposed to be owned by the network itself, but can be reached via the [`PeersHandle`].
@@ -966,24 +970,51 @@ impl PeersManager {
     ///
     /// If the peer already exists, then the address, kind and `fork_id` will be updated. A new
     /// untrusted peer is skipped if its subnet already has [`MAX_DISCOVERED_PEERS_PER_SUBNET`]
-    /// basic peers.
+    /// basic peers, and replaces an idle basic peer once [`MAX_DISCOVERED_PEERS`] are tracked.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId>) {
-        if !self.peers.contains_key(&peer_id) &&
-            !self.trusted_peer_ids.contains(&peer_id) &&
-            let Some(subnet) = discovery_subnet(addr.tcp().ip()) &&
-            self.peers
-                .values()
-                .filter(|peer| {
-                    peer.kind.is_basic() && discovery_subnet(peer.addr.tcp().ip()) == Some(subnet)
-                })
-                .take(MAX_DISCOVERED_PEERS_PER_SUBNET)
-                .count() ==
-                MAX_DISCOVERED_PEERS_PER_SUBNET
-        {
+        let is_new =
+            !self.peers.contains_key(&peer_id) && !self.trusted_peer_ids.contains(&peer_id);
+        if is_new && self.is_subnet_full(addr.tcp().ip()) {
             trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "Skipping discovered peer from full subnet");
             return
         }
-        self.add_peer_kind(peer_id, None, addr, fork_id)
+        self.add_peer_kind(peer_id, None, addr, fork_id);
+        if is_new {
+            self.evict_discovered_peer_over_limit(peer_id);
+        }
+    }
+
+    /// Returns whether the subnet of `ip` already has [`MAX_DISCOVERED_PEERS_PER_SUBNET`] basic
+    /// peers.
+    fn is_subnet_full(&self, ip: IpAddr) -> bool {
+        let Some(subnet) = discovery_subnet(ip) else { return false };
+        self.peers
+            .values()
+            .filter(|peer| {
+                peer.kind.is_basic() && discovery_subnet(peer.addr.tcp().ip()) == Some(subnet)
+            })
+            .take(MAX_DISCOVERED_PEERS_PER_SUBNET)
+            .count() ==
+            MAX_DISCOVERED_PEERS_PER_SUBNET
+    }
+
+    /// Removes an idle basic peer other than `added` when more than [`MAX_DISCOVERED_PEERS`] basic
+    /// peers are tracked, or `added` itself when no other peer is idle.
+    fn evict_discovered_peer_over_limit(&mut self, added: PeerId) {
+        if self.peers.values().filter(|peer| peer.kind.is_basic()).count() <= MAX_DISCOVERED_PEERS {
+            return
+        }
+        // Backed off peers go first, since unreachable identities are what fills the set.
+        let evicted = self
+            .peers
+            .iter()
+            .filter(|(peer_id, peer)| {
+                **peer_id != added && peer.kind.is_basic() && peer.state.is_idle()
+            })
+            .min_by_key(|(_, peer)| (!peer.backed_off, peer.reputation))
+            .map_or(added, |(peer_id, _)| *peer_id);
+        trace!(target: "net::peers", ?evicted, "Evicting idle peer over the discovered peer limit");
+        self.remove_peer(evicted);
     }
 
     /// Marks the given peer as trusted.
@@ -4848,6 +4879,29 @@ mod tests {
             MAX_DISCOVERED_PEERS_PER_SUBNET
         );
         assert!(peers.peers.contains_key(&trusted));
+    }
+
+    #[tokio::test]
+    async fn test_discovered_peers_limited_in_total() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        // One peer per /24, so only the total limit applies.
+        let addr = |i: usize| {
+            let ip = Ipv4Addr::from_bits(0x0100_0000 + ((i as u32) << 8));
+            PeerAddr::from_tcp(SocketAddr::new(ip.into(), 30303))
+        };
+        for i in 0..MAX_DISCOVERED_PEERS {
+            peers.add_peer(PeerId::random(), addr(i), None);
+        }
+        // Ties go to the first peer in iteration order, so back off the last one.
+        let backed_off = *peers.peers.keys().last().unwrap();
+        peers.peers.get_mut(&backed_off).unwrap().backed_off = true;
+
+        // The backed off peer makes room for the newly discovered one.
+        let discovered = PeerId::random();
+        peers.add_peer(discovered, addr(MAX_DISCOVERED_PEERS), None);
+        assert!(peers.peers.contains_key(&discovered));
+        assert!(!peers.peers.contains_key(&backed_off));
+        assert_eq!(peers.peers.len(), MAX_DISCOVERED_PEERS);
     }
 
     #[tokio::test]
