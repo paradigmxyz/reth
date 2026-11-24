@@ -300,7 +300,7 @@ mod tests {
     /// u64. The guard `if header.number() > 0` skips the dummy-chain step
     /// when there is no pre-genesis range to backfill, so `header_factory`
     /// is never invoked.
-    #[test]
+    #[reth_concurrency::test]
     fn test_setup_without_evm_skips_dummy_chain_for_genesis_header() {
         let header = Header { number: 0, ..Default::default() };
         let header_hash = header.hash_slow();

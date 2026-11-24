@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(cache.memory_usage, 0);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn payloads_are_only_measured_on_enabled_insertions() {
         for (count, bytes) in [(0, 10), (10, 0), (10, 3)] {
             let measurements = Arc::new(AtomicUsize::new(0));

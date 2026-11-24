@@ -455,7 +455,7 @@ mod tests {
         SaveBlocksInput::new(blocks, prev_tip, prev_tip, new_tip, new_tip)
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_pruner_prunes_bal_store() {
         reth_tracing::init_test_tracing();
 
@@ -489,7 +489,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_pruner_ignores_bal_store_prune_error() {
         reth_tracing::init_test_tracing();
 
@@ -506,7 +506,7 @@ mod tests {
         service.maybe_run_pruner(2).unwrap();
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_remove_blocks_above_requires_tip_header() {
         let provider = create_test_provider_factory();
         init_genesis(&provider).unwrap();
@@ -542,7 +542,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_save_blocks_single_block() {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
@@ -563,7 +563,7 @@ mod tests {
         assert_eq!(result.last_state_trie_block, result.last_block);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_save_blocks_flushes_bal_store() {
         reth_tracing::init_test_tracing();
         let provider = create_test_provider_factory();
@@ -598,7 +598,7 @@ mod tests {
         assert_eq!(persisted_store.get_by_hash(num_hash.hash).unwrap(), Some(raw_bal));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_save_blocks_multiple_blocks() {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
@@ -613,7 +613,7 @@ mod tests {
         assert_eq!(last_hash, result.last_block.hash);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_save_blocks_multiple_calls() {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
@@ -639,7 +639,7 @@ mod tests {
     /// a single commit. Both read committed state, so the pruner didn't see the
     /// new entries and its batch overwrote them. The fix commits `save_blocks`
     /// first, then runs the pruner against committed state in a separate provider.
-    #[test]
+    #[reth_concurrency::test]
     fn test_save_blocks_then_prune_preserves_new_history() {
         reth_tracing::init_test_tracing();
 

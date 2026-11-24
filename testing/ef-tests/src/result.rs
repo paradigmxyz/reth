@@ -1,7 +1,11 @@
 //! Test results and errors
 
+use crate::models::FixtureConfigError;
+use alloy_primitives::B256;
 use reth_db::DatabaseError;
+use reth_evm::{BlockExecutionError, InternalBlockExecutionError};
 use reth_provider::ProviderError;
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -45,9 +49,27 @@ pub enum Error {
         #[source]
         error: serde_json::Error,
     },
+    /// A fixture directory could not be traversed.
+    #[error(transparent)]
+    WalkDir(#[from] walkdir::Error),
+    /// An engine operation failed.
+    #[error("{context}: {error}")]
+    Engine {
+        /// The operation that failed.
+        context: String,
+        /// The original error.
+        #[source]
+        error: Box<dyn std::error::Error + Send + Sync>,
+    },
     /// A database error occurred.
     #[error(transparent)]
     Database(#[from] DatabaseError),
+    /// An internal execution failure, which must never count as an invalid block.
+    #[error(transparent)]
+    Execution(#[from] InternalBlockExecutionError),
+    /// The fixture requests a configuration the client cannot execute.
+    #[error(transparent)]
+    FixtureConfig(#[from] FixtureConfigError),
     /// A test assertion failed.
     #[error("test failed: {0}")]
     Assertion(String),
@@ -63,6 +85,22 @@ pub enum Error {
 }
 
 impl Error {
+    /// Preserves the source of an engine setup, request, or shutdown failure.
+    pub(crate) fn engine(
+        context: impl Into<String>,
+        error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Self {
+        Self::Engine { context: context.into(), error: error.into() }
+    }
+
+    /// Separates a consensus-invalid execution from a failure of the executor or its provider.
+    pub(crate) fn block_execution_failed(block_number: u64, error: BlockExecutionError) -> Self {
+        match error {
+            BlockExecutionError::Validation(error) => Self::block_failed(block_number, error),
+            BlockExecutionError::Internal(error) => Self::Execution(error),
+        }
+    }
+
     /// Create a new [`Error::BlockProcessingFailed`] error.
     pub fn block_failed(
         block_number: u64,
@@ -87,6 +125,71 @@ impl CaseResult {
     /// Create a new test result.
     pub fn new(path: &Path, desc: String, result: Result<(), Error>) -> Self {
         Self { desc, path: path.into(), result }
+    }
+}
+
+/// The result of one fixture, as printed by the runner's JSON output.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FixtureResult {
+    /// The fixture name.
+    pub name: String,
+    /// Whether the fixture passed.
+    pub pass: bool,
+    /// The fixture's network.
+    pub fork: String,
+    /// The hash of the client's head block once the fixture ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_block_hash: Option<B256>,
+    /// The status of the last `engine_newPayload` call, for engine tests.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_payload_status: Option<String>,
+    /// Why the fixture failed, empty if it passed.
+    pub error: String,
+    /// Every block or payload the client rejected, in fixture order, whether or not the fixture
+    /// expected it.
+    pub rejections: Vec<Rejection>,
+}
+
+/// A block or payload the client rejected, with the client's own error, so that a consumer can
+/// check the reason against the fixture's expected exception.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Rejection {
+    /// The block's position in the fixture's `blocks`, or the payload's in `engineNewPayloads`.
+    pub index: usize,
+    /// The rejected block's hash, when the client computed one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hash: Option<B256>,
+    /// The client's error, verbatim.
+    pub error: String,
+}
+
+impl FixtureResult {
+    /// Creates the result of a fixture that ran.
+    pub fn new(name: String, fork: String, result: Result<(), Error>) -> Self {
+        let pass = result.is_ok();
+        let error = result.err().map(|err| err.to_string()).unwrap_or_default();
+        Self {
+            name,
+            pass,
+            fork,
+            last_block_hash: None,
+            last_payload_status: None,
+            error,
+            rejections: Vec::new(),
+        }
+    }
+
+    /// Sets the hash of the client's head block.
+    pub const fn with_last_block_hash(mut self, hash: B256) -> Self {
+        self.last_block_hash = Some(hash);
+        self
+    }
+
+    /// Sets the blocks or payloads the client rejected.
+    pub fn with_rejections(mut self, rejections: Vec<Rejection>) -> Self {
+        self.rejections = rejections;
+        self
     }
 }
 
@@ -142,5 +245,28 @@ pub(crate) fn print_results(
     for case in failed {
         let error = case.result.as_ref().unwrap_err();
         println!("[!] Case {} failed (description: {}): {}", case.path.display(), case.desc, error);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_evm::BlockValidationError;
+
+    #[test]
+    fn only_validation_errors_can_count_as_expected_invalid_blocks() {
+        let invalid =
+            Error::block_execution_failed(1, BlockValidationError::msg("invalid block").into());
+        assert!(matches!(invalid, Error::BlockProcessingFailed { block_number: 1, .. }));
+        assert_eq!(invalid.to_string(), "block 1 failed to process: invalid block");
+
+        let source = ProviderError::UnsupportedProvider;
+        let expected = source.to_string();
+        let failure = Error::block_execution_failed(1, BlockExecutionError::other(source));
+        assert!(matches!(failure, Error::Execution(_)));
+        assert_eq!(failure.to_string(), expected);
+        let provider_error = Error::from(ProviderError::UnsupportedProvider);
+        assert!(matches!(provider_error, Error::Provider(_)));
+        assert_eq!(provider_error.to_string(), format!("test failed: {expected}"));
     }
 }

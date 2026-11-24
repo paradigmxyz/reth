@@ -389,7 +389,7 @@ mod tests {
         assert!(pipeline_sync.is_pipeline_idle());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn only_a_new_backfill_run_clears_downloads() {
         let head = B256::repeat_byte(1);
         let actions = VecDeque::from([
