@@ -4847,6 +4847,45 @@ mod tests {
         assert!(peers.peers.contains_key(&trusted));
     }
 
+    #[tokio::test]
+    async fn test_subnet_limit_ignores_non_basic_peers() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = |ip: &str| PeerAddr::from_tcp(SocketAddr::new(ip.parse().unwrap(), 30303));
+        for i in 0..MAX_DISCOVERED_PEERS_PER_SUBNET {
+            peers.add_peer_kind(
+                PeerId::random(),
+                Some(PeerKind::Static),
+                addr(&format!("1.2.3.{i}")),
+                None,
+            );
+        }
+
+        let discovered = PeerId::random();
+        peers.add_peer(discovered, addr("1.2.3.200"), None);
+        assert!(peers.peers.contains_key(&discovered));
+    }
+
+    #[tokio::test]
+    async fn test_persisted_subnet_limit_ignores_trusted_ids() {
+        let trusted = NodeRecord::new("1.2.3.250:30303".parse().unwrap(), PeerId::random());
+        let mut config = PeersConfig::test();
+        config.trusted_nodes = vec![trusted.into()];
+        // The trusted id's basic record comes first, so counting it would fill the subnet early.
+        config.persisted_peers = std::iter::once(trusted)
+            .chain((0..MAX_DISCOVERED_PEERS_PER_SUBNET).map(|i| {
+                NodeRecord::new(format!("1.2.3.{i}:30303").parse().unwrap(), PeerId::random())
+            }))
+            .map(PersistedPeerInfo::from_node_record)
+            .collect();
+
+        let peers = PeersManager::new(config);
+        assert_eq!(
+            peers.peers.values().filter(|peer| peer.kind.is_basic()).count(),
+            MAX_DISCOVERED_PEERS_PER_SUBNET
+        );
+        assert!(peers.peers[&trusted.id].kind.is_trusted());
+    }
+
     #[test]
     fn test_discovery_subnet() {
         let subnet = |ip: &str| discovery_subnet(ip.parse().unwrap());
