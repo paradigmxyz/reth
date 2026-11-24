@@ -1,6 +1,6 @@
 use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseNode, ArenaSparseNodeState, BranchChild, Index, NodeArena,
+    ArenaSparseNode, ArenaSparseNodeState, BranchChild, ExtensionChild, Index, NodeArena,
 };
 use alloc::vec::Vec;
 use reth_trie_common::Nibbles;
@@ -59,11 +59,7 @@ pub(super) enum NextResult {
 pub(super) fn branch_idx(arena: &NodeArena, idx: Index) -> Option<Index> {
     match &arena[idx] {
         ArenaSparseNode::Branch(_) => Some(idx),
-        ArenaSparseNode::Extension { child, .. }
-            if matches!(arena[*child], ArenaSparseNode::Branch(_)) =>
-        {
-            Some(*child)
-        }
+        ArenaSparseNode::Extension { child, .. } => child.revealed_index(),
         _ => None,
     }
 }
@@ -197,21 +193,14 @@ impl ArenaCursor {
         }
 
         if let Some(parent) = self.stack.last() {
-            let child_is_dirty = match node {
-                ArenaSparseNode::Branch(b) => matches!(b.state, ArenaSparseNodeState::Dirty),
-                ArenaSparseNode::Extension { child, .. } => {
-                    matches!(arena[*child].state_ref(), Some(ArenaSparseNodeState::Dirty))
-                }
-                ArenaSparseNode::Leaf { state, .. } => matches!(state, ArenaSparseNodeState::Dirty),
-                ArenaSparseNode::Subtrie(_) => {
-                    matches!(node.state_ref(), Some(ArenaSparseNodeState::Dirty))
-                }
-                _ => false,
-            };
+            let child_is_dirty = matches!(node.state_ref(), Some(ArenaSparseNodeState::Dirty));
             if child_is_dirty {
                 let parent_branch_idx =
                     branch_idx(arena, parent.index).expect("parent must be a branch or extension");
-                *arena[parent_branch_idx].state_mut() = ArenaSparseNodeState::Dirty;
+                *arena[parent.index].state_mut() = ArenaSparseNodeState::Dirty;
+                if parent_branch_idx != parent.index {
+                    *arena[parent_branch_idx].state_mut() = ArenaSparseNodeState::Dirty;
+                }
             }
         }
 
@@ -415,12 +404,10 @@ impl ArenaCursor {
                     };
                 }
                 ArenaSparseNode::Branch(b) => b,
-                ArenaSparseNode::Extension { child, .. } => {
-                    if matches!(arena[*child], ArenaSparseNode::BlindedBranch { .. }) {
-                        return SeekResult::Blinded;
-                    }
-                    arena[*child].branch_ref()
-                }
+                ArenaSparseNode::Extension { child, .. } => match child {
+                    ExtensionChild::Revealed(index) => arena[*index].branch_ref(),
+                    ExtensionChild::Blinded(_) => return SeekResult::Blinded,
+                },
                 ArenaSparseNode::Subtrie(_) => {
                     return SeekResult::RevealedSubtrie;
                 }

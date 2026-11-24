@@ -12,7 +12,7 @@ mod sparse_guidance;
 use branch_child_idx::{BranchChildIdx, BranchChildIter};
 use cursor::{branch_idx, ArenaCursor, NextResult, SeekResult};
 use node_arena::{BranchChild, Index, NodeArena};
-use nodes::{ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeState};
+use nodes::{ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeState, ExtensionChild};
 
 use crate::{
     LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, TrieNodeEpoch,
@@ -113,10 +113,9 @@ fn branch_data_mut(arena: &mut NodeArena, idx: Index) -> &mut ArenaSparseNodeBra
     arena[idx].branch_mut()
 }
 
-/// Returns the cached or dirty state for a node, following extension and subtrie roots.
+/// Returns the cached or dirty state for a node, following subtrie roots.
 fn node_state_ref(arena: &NodeArena, idx: Index) -> Option<&ArenaSparseNodeState> {
     match &arena[idx] {
-        ArenaSparseNode::Extension { child, .. } => node_state_ref(arena, *child),
         ArenaSparseNode::Subtrie(subtrie) => node_state_ref(&subtrie.arena, subtrie.root),
         node => node.state_ref(),
     }
@@ -124,7 +123,6 @@ fn node_state_ref(arena: &NodeArena, idx: Index) -> Option<&ArenaSparseNodeState
 
 /// Returns mutable cached or dirty state for a branch, extension, leaf, or empty root node.
 fn node_state_mut(arena: &mut NodeArena, idx: Index) -> &mut ArenaSparseNodeState {
-    let idx = arena[idx].extension_child().unwrap_or(idx);
     arena[idx].state_mut()
 }
 
@@ -132,7 +130,7 @@ fn node_state_mut(arena: &mut NodeArena, idx: Index) -> &mut ArenaSparseNodeStat
 fn node_tree_mask_bit(arena: &NodeArena, idx: Index) -> bool {
     match &arena[idx] {
         ArenaSparseNode::Branch(branch) => !branch.branch_masks.is_empty(),
-        ArenaSparseNode::Extension { child, .. } => {
+        ArenaSparseNode::Extension { child: ExtensionChild::Revealed(child), .. } => {
             !arena[*child].branch_ref().branch_masks.is_empty()
         }
         ArenaSparseNode::Subtrie(subtrie) => node_tree_mask_bit(&subtrie.arena, subtrie.root),
@@ -143,9 +141,7 @@ fn node_tree_mask_bit(arena: &NodeArena, idx: Index) -> bool {
 /// Returns whether an extension (possibly a subtrie root) has a blinded backing branch.
 fn has_blinded_branch(arena: &NodeArena, idx: Index) -> bool {
     match &arena[idx] {
-        ArenaSparseNode::Extension { child, .. } => {
-            matches!(arena[*child], ArenaSparseNode::BlindedBranch { .. })
-        }
+        ArenaSparseNode::Extension { child, .. } => matches!(child, ExtensionChild::Blinded(_)),
         ArenaSparseNode::Subtrie(s) => has_blinded_branch(&s.arena, s.root),
         _ => false,
     }
@@ -257,7 +253,7 @@ fn move_node(dst: &mut NodeArena, src: &mut NodeArena, idx: Index) -> Index {
         let child = src.drain_node(child_idx);
         let new_child_idx = dst.insert(child);
         let ArenaSparseNode::Extension { child, .. } = &mut dst[new_idx] else { unreachable!() };
-        *child = new_child_idx;
+        *child = ExtensionChild::Revealed(new_child_idx);
     }
     new_idx
 }
@@ -277,13 +273,13 @@ fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
     while next < new_arena.len() {
         let new_idx = Index::new(next);
         next += 1;
-        if let ArenaSparseNode::Extension { child, .. } = new_arena[new_idx] {
+        if let Some(child) = new_arena[new_idx].extension_child() {
             let child_node = arena.drain_node(child);
             let new_child_idx = new_arena.insert(child_node);
             let ArenaSparseNode::Extension { child, .. } = &mut new_arena[new_idx] else {
                 unreachable!()
             };
-            *child = new_child_idx;
+            *child = ExtensionChild::Revealed(new_child_idx);
             continue;
         }
 
@@ -1002,6 +998,7 @@ impl ArenaParallelSparseTrie {
         self.recycle_subtrie_from_idx(subtrie_idx);
 
         trace!(target: TRACE_TARGET, "Unwrapping empty subtrie, removing child slot");
+        *node_state_mut(&mut self.upper_arena, parent_idx) = ArenaSparseNodeState::Dirty;
         let parent_branch = branch_data_mut(&mut self.upper_arena, parent_idx);
         let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
             .expect("child nibble not found in parent state_mask");
@@ -1088,6 +1085,7 @@ impl ArenaParallelSparseTrie {
                     self.upper_arena.remove(branch_child_idx);
                 }
                 let parent_idx = cursor.head().expect("cursor is non-empty").index;
+                *node_state_mut(&mut self.upper_arena, parent_idx) = ArenaSparseNodeState::Dirty;
                 let parent_branch = branch_data_mut(&mut self.upper_arena, parent_idx);
                 let child_idx = BranchChildIdx::new(parent_branch.state_mask, branch_nibble)
                     .expect("child nibble not found in parent state_mask");
@@ -1123,6 +1121,8 @@ impl ArenaParallelSparseTrie {
 
             if is_empty_subtrie {
                 self.recycle_subtrie_from_idx(child_idx);
+                *node_state_mut(&mut self.upper_arena, branch_node_idx) =
+                    ArenaSparseNodeState::Dirty;
                 let branch = branch_data_mut(&mut self.upper_arena, branch_node_idx);
                 branch.children.remove(0);
                 branch.unset_child_bit(remaining_nibble);
@@ -1293,10 +1293,7 @@ impl ArenaParallelSparseTrie {
                     return rlp_node;
                 }
             }
-            ArenaSparseNode::BlindedBranch { .. } |
-            ArenaSparseNode::Subtrie(_) |
-            ArenaSparseNode::TakenSubtrie |
-            ArenaSparseNode::Free => {
+            ArenaSparseNode::Subtrie(_) | ArenaSparseNode::TakenSubtrie | ArenaSparseNode::Free => {
                 unreachable!("Subtrie/TakenSubtrie/Free cannot be a subtrie's root");
             }
         }
@@ -1308,8 +1305,8 @@ impl ArenaParallelSparseTrie {
         // are encoded when their parent branch is popped.
         loop {
             let result = cursor.next(&mut *arena, |_, node| {
-                matches!(node, ArenaSparseNode::Branch(b) if !matches!(b.state, ArenaSparseNodeState::Cached { .. })) ||
-                    matches!(node, ArenaSparseNode::Extension { .. })
+                matches!(node, ArenaSparseNode::Branch(_) | ArenaSparseNode::Extension { .. }) &&
+                    !node.is_cached()
             });
 
             match result {
@@ -1323,12 +1320,6 @@ impl ArenaParallelSparseTrie {
             };
 
             let head_idx = cursor.head().expect("cursor is non-empty").index;
-            // Extensions are visited even when their backing branch is already cached.
-            // Preserve its epoch, which may include changes to children that were removed.
-            if matches!(node_state_ref(arena, head_idx), Some(ArenaSparseNodeState::Cached { .. }))
-            {
-                continue;
-            }
             let head_path = cursor.head_path();
 
             // The branch at `head_idx` is exhausted. All its dirty child branches
@@ -1343,7 +1334,12 @@ impl ArenaParallelSparseTrie {
             );
 
             rlp_node_buf.clear();
-            let mut node_epoch = TrieNodeEpoch::UNMODIFIED;
+            // A changed extension key can wrap an unchanged branch whose epoch includes
+            // modifications to descendants that have since been removed or pruned.
+            let mut node_epoch = branch_data(arena, head_idx)
+                .state
+                .cached_epoch()
+                .unwrap_or(TrieNodeEpoch::UNMODIFIED);
             let state_mask = branch_data(arena, head_idx).state_mask;
             for (dense_idx, _nibble) in BranchChildIter::new(state_mask) {
                 let child = branch_data(arena, head_idx).children[dense_idx];
@@ -1370,11 +1366,9 @@ impl ArenaParallelSparseTrie {
                                 let rlp_node = rlp_node.clone();
                                 rlp_node_buf.push(rlp_node);
                             }
-                            ArenaSparseNode::Extension { child, .. } => {
-                                let Some(ArenaSparseNodeState::Cached { rlp_node, .. }) =
-                                    arena[*child].state_ref()
-                                else {
-                                    panic!("extension branch child must be cached after DFS");
+                            ArenaSparseNode::Extension { state, .. } => {
+                                let ArenaSparseNodeState::Cached { rlp_node, .. } = state else {
+                                    panic!("extension must be cached after DFS");
                                 };
                                 rlp_node_buf.push(rlp_node.clone());
                             }
@@ -1386,7 +1380,6 @@ impl ArenaParallelSparseTrie {
                                 };
                                 rlp_node_buf.push(rlp_node.clone());
                             }
-                            ArenaSparseNode::BlindedBranch { .. } |
                             ArenaSparseNode::TakenSubtrie |
                             ArenaSparseNode::EmptyRoot { .. } |
                             ArenaSparseNode::Free => {
@@ -1410,12 +1403,19 @@ impl ArenaParallelSparseTrie {
             let prev_branch_masks = b.branch_masks;
             let new_branch_masks = Self::get_branch_masks(arena, b);
             let was_dirty = matches!(b.state, ArenaSparseNodeState::Dirty);
-            if was_dirty {
+            if was_dirty ||
+                matches!(node_state_ref(arena, head_idx), Some(ArenaSparseNodeState::Dirty))
+            {
                 node_epoch = node_epoch.max(new_epoch);
             }
 
             rlp_buf.clear();
             let rlp_node = BranchNodeRef::new(rlp_node_buf, state_mask).rlp(rlp_buf);
+
+            let branch = branch_data_mut(arena, head_idx);
+            branch.state =
+                ArenaSparseNodeState::Cached { rlp_node: rlp_node.clone(), epoch: node_epoch };
+            branch.branch_masks = new_branch_masks;
 
             let rlp_node = if short_key.is_empty() {
                 rlp_node
@@ -1433,9 +1433,8 @@ impl ArenaParallelSparseTrie {
                 "Calculated branch RlpNode",
             );
 
-            let branch = branch_data_mut(arena, head_idx);
-            branch.state = ArenaSparseNodeState::Cached { rlp_node, epoch: node_epoch };
-            branch.branch_masks = new_branch_masks;
+            *node_state_mut(arena, head_idx) =
+                ArenaSparseNodeState::Cached { rlp_node, epoch: node_epoch };
 
             // Record trie updates for dirty branches only.
             // Skip the root node (empty logical path) as PST does.
@@ -1465,15 +1464,14 @@ impl ArenaParallelSparseTrie {
 
     /// Caches an unmodified extension without decoding its backing branch.
     fn encode_blinded_extension(arena: &mut NodeArena, idx: Index, rlp_buf: &mut Vec<u8>) {
-        let ArenaSparseNode::Extension { key, child } = arena[idx] else {
-            unreachable!("expected extension")
-        };
-        let ArenaSparseNode::BlindedBranch { state, rlp_node } = &mut arena[child] else {
-            unreachable!("expected blinded backing branch")
+        let ArenaSparseNode::Extension { key, child: ExtensionChild::Blinded(rlp_node), state } =
+            &mut arena[idx]
+        else {
+            unreachable!("expected extension with blinded branch")
         };
         if !matches!(state, ArenaSparseNodeState::Cached { .. }) {
             rlp_buf.clear();
-            let rlp_node = ExtensionNodeRef::new(&key, rlp_node).rlp(rlp_buf);
+            let rlp_node = ExtensionNodeRef::new(key, rlp_node).rlp(rlp_buf);
             *state = ArenaSparseNodeState::Cached { rlp_node, epoch: TrieNodeEpoch::UNMODIFIED };
         }
     }
@@ -1488,7 +1486,6 @@ impl ArenaParallelSparseTrie {
     ) -> Option<&'a Vec<u8>> {
         loop {
             match &arena[current] {
-                ArenaSparseNode::BlindedBranch { .. } |
                 ArenaSparseNode::EmptyRoot { .. } |
                 ArenaSparseNode::TakenSubtrie |
                 ArenaSparseNode::Free => return None,
@@ -1496,14 +1493,14 @@ impl ArenaParallelSparseTrie {
                     let remaining = full_path.slice_unchecked(path_offset, full_path.len());
                     return (remaining == *key).then_some(value);
                 }
-                ArenaSparseNode::Extension { key, child } => {
+                ArenaSparseNode::Extension { key, child, .. } => {
                     let logical_end = path_offset + key.len();
                     if full_path.len() <= logical_end ||
                         full_path.slice_unchecked(path_offset, logical_end) != *key
                     {
                         return None;
                     }
-                    current = *child;
+                    current = child.revealed_index()?;
                     path_offset = logical_end;
                 }
                 ArenaSparseNode::Branch(b) => {
@@ -1540,12 +1537,6 @@ impl ArenaParallelSparseTrie {
     ) -> Result<LeafLookup, LeafLookupError> {
         loop {
             match &arena[current] {
-                ArenaSparseNode::BlindedBranch { rlp_node, .. } => {
-                    return Err(LeafLookupError::BlindedNode {
-                        path: full_path.slice(..path_offset),
-                        hash: rlp_node.as_hash().unwrap_or_else(|| keccak256(rlp_node.as_slice())),
-                    });
-                }
                 ArenaSparseNode::EmptyRoot { .. } |
                 ArenaSparseNode::TakenSubtrie |
                 ArenaSparseNode::Free => {
@@ -1567,14 +1558,24 @@ impl ArenaParallelSparseTrie {
                     }
                     return Ok(LeafLookup::Exists);
                 }
-                ArenaSparseNode::Extension { key, child } => {
+                ArenaSparseNode::Extension { key, child, .. } => {
                     let logical_end = path_offset + key.len();
                     if full_path.len() <= logical_end ||
                         full_path.slice(path_offset..logical_end) != *key
                     {
                         return Ok(LeafLookup::NonExistent);
                     }
-                    current = *child;
+                    match child {
+                        ExtensionChild::Revealed(index) => current = *index,
+                        ExtensionChild::Blinded(rlp_node) => {
+                            return Err(LeafLookupError::BlindedNode {
+                                path: full_path.slice(..logical_end),
+                                hash: rlp_node
+                                    .as_hash()
+                                    .unwrap_or_else(|| keccak256(rlp_node.as_slice())),
+                            })
+                        }
+                    }
                     path_offset = logical_end;
                 }
                 ArenaSparseNode::Branch(b) => {
@@ -1698,14 +1699,17 @@ impl ArenaParallelSparseTrie {
                 };
                 was_clean
             }
-            ArenaSparseNode::Extension { child, .. } => {
+            ArenaSparseNode::Extension { child: ExtensionChild::Revealed(child), .. } => {
                 if old_child_suffix.is_empty() {
                     let branch = arena.remove(child).expect("extension child exists");
                     arena[old_child_idx] = branch;
                     *arena[old_child_idx].state_mut() = ArenaSparseNodeState::Dirty;
                 } else {
-                    arena[old_child_idx] =
-                        ArenaSparseNode::Extension { key: old_child_suffix, child };
+                    arena[old_child_idx] = ArenaSparseNode::Extension {
+                        key: old_child_suffix,
+                        child: ExtensionChild::Revealed(child),
+                        state: ArenaSparseNodeState::Dirty,
+                    };
                     *arena[child].state_mut() = ArenaSparseNodeState::Dirty;
                 }
                 // Branches don't contribute to num_dirty_leaves.
@@ -1745,7 +1749,11 @@ impl ArenaParallelSparseTrie {
         let new_branch_idx = if short_key.is_empty() {
             branch_child_idx
         } else {
-            arena.insert(ArenaSparseNode::Extension { key: short_key, child: branch_child_idx })
+            arena.insert(ArenaSparseNode::Extension {
+                key: short_key,
+                child: ExtensionChild::Revealed(branch_child_idx),
+                state: ArenaSparseNodeState::Dirty,
+            })
         };
 
         cursor.replace_head_index(arena, root, new_branch_idx);
@@ -1844,6 +1852,7 @@ impl ArenaParallelSparseTrie {
                     value: value.to_vec(),
                 });
 
+                *node_state_mut(arena, head_idx) = ArenaSparseNodeState::Dirty;
                 let branch = branch_data_mut(arena, head_idx);
                 branch.set_child(child_nibble, BranchChild::revealed(new_leaf));
 
@@ -1980,6 +1989,7 @@ impl ArenaParallelSparseTrie {
 
                 // Remove the leaf from the arena and from the parent's children.
                 arena.remove(head_idx);
+                *node_state_mut(arena, parent_idx) = ArenaSparseNodeState::Dirty;
                 let parent_branch = branch_data_mut(arena, parent_idx);
                 parent_branch.remove_child(child_nibble);
 
@@ -2155,18 +2165,27 @@ impl ArenaParallelSparseTrie {
                 };
                 (child_idx, was_clean)
             }
-            ArenaSparseNode::Extension { key, child } => {
+            ArenaSparseNode::Extension { key, child, .. } => {
                 let mut new_key = prefix;
                 new_key.extend(&key);
-                arena[child_idx] = ArenaSparseNode::Extension { key: new_key, child };
-                *arena[child].state_mut() = ArenaSparseNodeState::Dirty;
+                if let Some(index) = child.revealed_index() {
+                    *arena[index].state_mut() = ArenaSparseNodeState::Dirty;
+                }
+                arena[child_idx] = ArenaSparseNode::Extension {
+                    key: new_key,
+                    child,
+                    state: ArenaSparseNodeState::Dirty,
+                };
                 (child_idx, false)
             }
             ArenaSparseNode::Branch(branch) => {
                 let new_branch_idx = arena.insert(ArenaSparseNode::Branch(branch));
                 *arena[new_branch_idx].state_mut() = ArenaSparseNodeState::Dirty;
-                arena[child_idx] =
-                    ArenaSparseNode::Extension { key: prefix, child: new_branch_idx };
+                arena[child_idx] = ArenaSparseNode::Extension {
+                    key: prefix,
+                    child: ExtensionChild::Revealed(new_branch_idx),
+                    state: ArenaSparseNodeState::Dirty,
+                };
                 (child_idx, false)
             }
             ArenaSparseNode::Subtrie(mut subtrie) => {
@@ -2177,14 +2196,24 @@ impl ArenaParallelSparseTrie {
                 match root_node {
                     ArenaSparseNode::Branch(branch) => {
                         let child = subtrie.arena.insert(ArenaSparseNode::Branch(branch));
-                        subtrie.arena[root] = ArenaSparseNode::Extension { key: prefix, child };
+                        subtrie.arena[root] = ArenaSparseNode::Extension {
+                            key: prefix,
+                            child: ExtensionChild::Revealed(child),
+                            state: ArenaSparseNodeState::Dirty,
+                        };
                         *subtrie.arena[child].state_mut() = ArenaSparseNodeState::Dirty;
                     }
-                    ArenaSparseNode::Extension { key, child } => {
+                    ArenaSparseNode::Extension { key, child, .. } => {
                         let mut new_key = prefix;
                         new_key.extend(&key);
-                        subtrie.arena[root] = ArenaSparseNode::Extension { key: new_key, child };
-                        *subtrie.arena[child].state_mut() = ArenaSparseNodeState::Dirty;
+                        if let Some(index) = child.revealed_index() {
+                            *subtrie.arena[index].state_mut() = ArenaSparseNodeState::Dirty;
+                        }
+                        subtrie.arena[root] = ArenaSparseNode::Extension {
+                            key: new_key,
+                            child,
+                            state: ArenaSparseNodeState::Dirty,
+                        };
                     }
                     ArenaSparseNode::Leaf { key, value, state } => {
                         let mut new_key = prefix;
@@ -2239,7 +2268,9 @@ impl ArenaParallelSparseTrie {
                 }
                 (leaves, dirty)
             }
-            ArenaSparseNode::Extension { child, .. } => Self::count_leaves_and_dirty(arena, *child),
+            ArenaSparseNode::Extension { child: ExtensionChild::Revealed(child), .. } => {
+                Self::count_leaves_and_dirty(arena, *child)
+            }
             _ => (0, 0),
         }
     }
@@ -2315,7 +2346,7 @@ impl ArenaParallelSparseTrie {
     /// table. `node` must already be detached from `src`.
     fn migrate_children(dst: &mut NodeArena, src: &mut NodeArena, node: &mut ArenaSparseNode) {
         match node {
-            ArenaSparseNode::Extension { child, .. } => {
+            ArenaSparseNode::Extension { child: ExtensionChild::Revealed(child), .. } => {
                 *child = Self::migrate_nodes(dst, src, *child, None);
             }
             ArenaSparseNode::Branch(branch) => {
@@ -2389,19 +2420,27 @@ impl ArenaParallelSparseTrie {
 
         let head = cursor.head().expect("cursor is non-empty");
         let head_idx = head.index;
-        if let ArenaSparseNode::Extension { child, .. } = arena[head_idx] &&
-            matches!(arena[child], ArenaSparseNode::BlindedBranch { .. })
+        if let ArenaSparseNode::Extension { child: ExtensionChild::Blinded(rlp_node), .. } =
+            &arena[head_idx]
         {
             if node.path != cursor.head_logical_branch_path(arena) ||
                 !matches!(node.node, TrieNode::Branch(_))
             {
                 return None;
             }
-            let state = mem::replace(arena[child].state_mut(), ArenaSparseNodeState::Revealed);
+            let state = ArenaSparseNodeState::Cached {
+                rlp_node: rlp_node.clone(),
+                epoch: TrieNodeEpoch::UNMODIFIED,
+            };
             let proof = mem::replace(node, ProofTrieNode::empty());
-            arena[child] = ArenaSparseNode::from_proof_node(arena, proof, None);
-            *arena[child].state_mut() = state;
-            // The extension already occupies its correct arena/path; no new child was inserted.
+            let mut branch = ArenaSparseNode::from_proof_node(arena, proof, None);
+            *branch.state_mut() = state;
+            let child_idx = arena.insert(branch);
+            let ArenaSparseNode::Extension { child, .. } = &mut arena[head_idx] else {
+                unreachable!()
+            };
+            *child = ExtensionChild::Revealed(child_idx);
+            // Hydration does not change the extension's cached RLP or epoch.
             return None;
         }
         let head_branch_logical_path = cursor.head_logical_branch_path(arena);
@@ -2455,7 +2494,7 @@ impl ArenaParallelSparseTrie {
             return;
         }
         match &arena[idx] {
-            ArenaSparseNode::Extension { child, .. } => {
+            ArenaSparseNode::Extension { child: ExtensionChild::Revealed(child), .. } => {
                 Self::collect_reachable_nodes(arena, *child, reachable);
             }
             ArenaSparseNode::Branch(b) => {
@@ -2799,8 +2838,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         loop {
             let result = self.buffers.cursor.next(&mut self.upper_arena, |_, child| match child {
-                ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_) => !child.is_cached(),
-                ArenaSparseNode::Extension { .. } | ArenaSparseNode::TakenSubtrie => true,
+                ArenaSparseNode::Branch(_) |
+                ArenaSparseNode::Extension { .. } |
+                ArenaSparseNode::Subtrie(_) => !child.is_cached(),
+                ArenaSparseNode::TakenSubtrie => true,
                 _ => false,
             });
 

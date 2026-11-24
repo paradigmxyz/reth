@@ -153,16 +153,10 @@ pub(super) enum ArenaSparseNode {
     Extension {
         /// The extension key.
         key: Nibbles,
-        /// The extension's branch child in the arena.
-        child: Index,
-    },
-    /// An unrevealed branch backing an extension. Its state caches the whole extension,
-    /// just as a revealed backing branch does.
-    BlindedBranch {
-        /// Cached or dirty state of the parent extension.
+        /// The extension's revealed or blinded branch child.
+        child: ExtensionChild,
+        /// Cached or dirty state of the extension, independent of its branch child.
         state: ArenaSparseNodeState,
-        /// The branch reference from the proof's extension node.
-        rlp_node: RlpNode,
     },
     /// A leaf node containing a value.
     Leaf {
@@ -184,34 +178,29 @@ pub(super) enum ArenaSparseNode {
 }
 
 impl ArenaSparseNode {
-    /// Returns the state of an empty root, revealed or blinded branch, leaf, or subtrie root,
+    /// Returns the state of an empty root, branch, extension, leaf, or subtrie root,
     /// or `None` for other types.
     pub(super) fn state_ref(&self) -> Option<&ArenaSparseNodeState> {
         match self {
             Self::EmptyRoot { state } |
             Self::Leaf { state, .. } |
-            Self::BlindedBranch { state, .. } => Some(state),
+            Self::Extension { state, .. } => Some(state),
             Self::Branch(b) => Some(&b.state),
-            Self::Subtrie(s) => {
-                let root = &s.arena[s.root];
-                root.extension_child()
-                    .and_then(|child| s.arena[child].state_ref())
-                    .or_else(|| root.state_ref())
-            }
+            Self::Subtrie(s) => s.arena[s.root].state_ref(),
             _ => None,
         }
     }
 
-    /// Returns the mutable state of an empty root, revealed or blinded branch, or leaf.
+    /// Returns the mutable state of an empty root, branch, extension, or leaf.
     ///
     /// # Panics
     ///
-    /// Panics if called on an extension, subtrie, or vacant node.
+    /// Panics if called on a subtrie or vacant node.
     pub(super) fn state_mut(&mut self) -> &mut ArenaSparseNodeState {
         match self {
             Self::EmptyRoot { state } |
             Self::Leaf { state, .. } |
-            Self::BlindedBranch { state, .. } => state,
+            Self::Extension { state, .. } => state,
             Self::Branch(b) => &mut b.state,
             _ => panic!("state_mut called on a node without its own state"),
         }
@@ -238,10 +227,10 @@ impl ArenaSparseNode {
         }
     }
 
-    /// Returns the branch child of this extension node, if any.
+    /// Returns the revealed branch index of this extension, or `None` for a blinded child.
     pub(super) const fn extension_child(&self) -> Option<Index> {
         match self {
-            Self::Extension { child, .. } => Some(*child),
+            Self::Extension { child, .. } => child.revealed_index(),
             _ => None,
         }
     }
@@ -300,9 +289,11 @@ impl ArenaSparseNode {
     /// case where a branch's RLP is small enough to be embedded rather than hashed.
     pub(super) fn cached_hash(&self) -> B256 {
         let rlp_node = match self {
-            Self::Branch(ArenaSparseNodeBranch { state, .. }) | Self::Leaf { state, .. } => state
+            Self::Branch(ArenaSparseNodeBranch { state, .. }) |
+            Self::Extension { state, .. } |
+            Self::Leaf { state, .. } => state
                 .cached_rlp_node()
-                .expect("cached_hash called on non-Cached branch or leaf: {self:?}"),
+                .expect("cached_hash called on non-Cached branch, extension, or leaf: {self:?}"),
             Self::Subtrie(s) => return s.arena[s.root].cached_hash(),
             _ => panic!("cached_hash called on {self:?}"),
         };
@@ -339,16 +330,34 @@ impl ArenaSparseNode {
                 })
             }
             TrieNode::Extension(extension) => {
-                let branch = extension_child.map_or_else(
-                    || Self::BlindedBranch {
-                        state: ArenaSparseNodeState::Revealed,
-                        rlp_node: extension.child,
-                    },
-                    |branch| Self::from_proof_node(arena, branch, None),
-                );
-                let child = arena.insert(branch);
-                Self::Extension { key: extension.key, child }
+                let child = match extension_child {
+                    Some(branch) => {
+                        let branch = Self::from_proof_node(arena, branch, None);
+                        ExtensionChild::Revealed(arena.insert(branch))
+                    }
+                    None => ExtensionChild::Blinded(extension.child),
+                };
+                Self::Extension { key: extension.key, child, state: ArenaSparseNodeState::Revealed }
             }
+        }
+    }
+}
+
+/// The branch referenced by an extension, without allocating an arena slot until revealed.
+#[derive(Debug, Clone)]
+pub(super) enum ExtensionChild {
+    /// The index of a revealed branch in the same arena.
+    Revealed(Index),
+    /// The branch reference supplied by the extension proof.
+    Blinded(RlpNode),
+}
+
+impl ExtensionChild {
+    /// Returns the branch index, or `None` while the branch is blinded.
+    pub(super) const fn revealed_index(&self) -> Option<Index> {
+        match self {
+            Self::Revealed(index) => Some(*index),
+            Self::Blinded(_) => None,
         }
     }
 }

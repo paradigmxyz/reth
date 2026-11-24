@@ -198,7 +198,17 @@ pub(super) fn test_standalone_extensions<T: SparseTrie>(new_trie: fn() -> T) {
                 })
                 .cloned()
                 .collect::<Vec<_>>();
+            let root_epoch = trie.root_epoch();
+            let root_cached = trie.is_root_cached();
+            let mut overlapping = branch_pair.clone();
+            for node in &mut overlapping {
+                node.masks = None;
+            }
+            branch_pair.extend(overlapping);
             trie.reveal_nodes(&mut branch_pair).unwrap();
+            assert_eq!(trie.root_epoch(), root_epoch);
+            assert_eq!(trie.is_root_cached(), root_cached);
+            assert_eq!(trie.take_updates(), SparseTrieUpdates::default());
             let mut expected = BTreeMap::new();
             if depth > 0 {
                 expected.insert(B256::right_padding_from(&[0x90]), U256::from(99));
@@ -216,17 +226,33 @@ pub(super) fn test_standalone_extensions<T: SparseTrie>(new_trie: fn() -> T) {
             );
             let mut rest = full.clone();
             trie.reveal_nodes(&mut rest).unwrap();
+            assert_eq!(trie.root_epoch(), root_epoch);
+            assert_eq!(trie.is_root_cached(), root_cached);
             assert_eq!(trie.find_leaf(&Nibbles::unpack(first), None), Ok(LeafLookup::Exists));
             let changes = BTreeMap::from([(first, U256::from(11)), (second, U256::ZERO)]);
             let mut updates = SuiteTestHarness::leaf_updates(&changes);
             harness.reveal_and_update(&mut trie, &mut updates);
             assert!(updates.is_empty());
+            assert_eq!(trie.root_epoch(), None);
+            assert!(!trie.is_root_cached());
             // The unrelated sibling change above is part of the reference state too.
             let mut expected = changes;
             if depth > 0 {
                 expected.insert(B256::right_padding_from(&[0x90]), U256::from(99));
             }
             assert_eq!(trie.root(epoch(2)), harness.get_root_with_updates(&expected).0);
+            assert_eq!(trie.root_epoch(), Some(epoch(2)));
+            let updates = trie.take_updates();
+            // Stale overlapping proof records cannot replace modified extension state.
+            trie.reveal_nodes(&mut full.clone()).unwrap();
+            assert_eq!(trie.root_epoch(), Some(epoch(2)));
+            assert!(trie.is_root_cached());
+            assert_eq!(trie.root(epoch(3)), harness.get_root_with_updates(&expected).0);
+            assert_eq!(trie.root_epoch(), Some(epoch(2)));
+            assert_eq!(trie.take_updates(), SparseTrieUpdates::default());
+            if !retain_updates {
+                assert_eq!(updates, SparseTrieUpdates::default());
+            }
             trie.prune(epoch(3));
             assert_eq!(trie.root(epoch(3)), harness.get_root_with_updates(&expected).0);
         }
@@ -300,27 +326,35 @@ pub(super) fn test_standalone_extension_embedded_branch<T: SparseTrie>(new_trie:
     second.0[31] = 1;
     let harness =
         SuiteTestHarness::new(BTreeMap::from([(first, U256::ONE), (second, U256::from(2))]));
-    let mut trie = (new_trie)();
-    let root = harness.root_node();
-    let TrieNode::Extension(extension) = &root.node else { panic!("expected extension root") };
-    assert!(!extension.child.is_hash());
-    let child_path = extension.key;
-    let hash = keccak256(extension.child.as_slice());
-    trie.set_root(&mut [root], true).unwrap();
-    assert_eq!(
-        trie.find_leaf(&Nibbles::unpack(first), None),
-        Err(LeafLookupError::BlindedNode { path: child_path, hash })
-    );
-    assert_eq!(trie.root(epoch(0)), harness.original_root());
-    let (mut proof, _) =
-        harness.proof_v2(&mut [ProofV2Target::new(first), ProofV2Target::new(second)]);
-    proof.retain(|node| !node.path.is_empty());
-    trie.reveal_nodes(&mut proof).unwrap();
-    assert_eq!(trie.find_leaf(&Nibbles::unpack(first), None), Ok(LeafLookup::Exists));
-    assert_eq!(trie.root(epoch(1)), harness.original_root());
-    let changes = BTreeMap::from([(first, U256::ZERO)]);
-    harness.reveal_and_update(&mut trie, &mut SuiteTestHarness::leaf_updates(&changes));
-    assert_eq!(trie.root(epoch(2)), harness.get_root_with_updates(&changes).0);
+    for cache_before_hydration in [false, true] {
+        let mut trie = (new_trie)();
+        let root = harness.root_node();
+        let TrieNode::Extension(extension) = &root.node else { panic!("expected extension root") };
+        assert!(!extension.child.is_hash());
+        let child_path = extension.key;
+        let hash = keccak256(extension.child.as_slice());
+        trie.set_root(&mut [root], true).unwrap();
+        assert_eq!(
+            trie.find_leaf(&Nibbles::unpack(first), None),
+            Err(LeafLookupError::BlindedNode { path: child_path, hash })
+        );
+        if cache_before_hydration {
+            assert_eq!(trie.root(epoch(0)), harness.original_root());
+        }
+        assert_eq!(trie.is_root_cached(), cache_before_hydration);
+        let (mut proof, _) =
+            harness.proof_v2(&mut [ProofV2Target::new(first), ProofV2Target::new(second)]);
+        proof.retain(|node| !node.path.is_empty());
+        trie.reveal_nodes(&mut proof).unwrap();
+        assert_eq!(trie.root_epoch(), Some(TrieNodeEpoch::UNMODIFIED));
+        assert_eq!(trie.is_root_cached(), cache_before_hydration);
+        assert_eq!(trie.take_updates(), SparseTrieUpdates::default());
+        assert_eq!(trie.find_leaf(&Nibbles::unpack(first), None), Ok(LeafLookup::Exists));
+        assert_eq!(trie.root(epoch(1)), harness.original_root());
+        let changes = BTreeMap::from([(first, U256::ZERO)]);
+        harness.reveal_and_update(&mut trie, &mut SuiteTestHarness::leaf_updates(&changes));
+        assert_eq!(trie.root(epoch(2)), harness.get_root_with_updates(&changes).0);
+    }
 }
 
 /// Pruning opaque extensions permits subsequent targeted re-revelation.
