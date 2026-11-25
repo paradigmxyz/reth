@@ -483,7 +483,7 @@ fn response_exceeds_items(
         EthMessageID::Receipts if version >= EthVersion::Eth70 => {
             bool::decode(&mut payload)?;
         }
-        // ETH/72 places the hash and cell lists directly after the request id.
+        // eth/72 places the hash and cell lists directly after the request id.
         EthMessageID::Cells => {
             return Ok(list_exceeds_items(&mut payload, max_items)? ||
                 list_exceeds_items(&mut payload, max_items)?)

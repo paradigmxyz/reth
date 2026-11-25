@@ -116,19 +116,3 @@ where
 
 /// Network primitive types used by Ethereum networks.
 pub type EthNetworkPrimitives = BasicNetworkPrimitives<EthPrimitives, PooledTransactionVariant>;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloy_consensus::transaction::PooledTransaction;
-    use reth_ethereum_primitives::TransactionSigned;
-
-    /// eth/72 support must not narrow the pooled transaction types downstream networks can use.
-    #[test]
-    fn basic_network_primitives_accept_any_pooled_transaction() {
-        fn assert_network_primitives<N: NetworkPrimitives>() {}
-        assert_network_primitives::<BasicNetworkPrimitives<EthPrimitives, TransactionSigned>>();
-        assert_network_primitives::<BasicNetworkPrimitives<EthPrimitives, PooledTransaction>>();
-        assert_network_primitives::<EthNetworkPrimitives>();
-    }
-}

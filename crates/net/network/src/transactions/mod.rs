@@ -1022,10 +1022,9 @@ where
             };
 
             // Transactions are optimistically marked as seen by the peer when included in the
-            // message, see `PeerMetadata::seen_transactions`.
-            let eligible = to_propagate.iter().filter(|tx| {
-                !peer.version.is_eth72() || tx.propagation_size_without_blobs.is_some()
-            });
+            // message, see `PeerMetadata::seen_transactions`, so filter out those the peer's
+            // version can't carry before marking them.
+            let eligible = to_propagate.iter().filter(|tx| tx.can_announce_to(peer.version));
             if propagation_mode.is_forced() {
                 for tx in eligible {
                     peer.seen_transactions.insert(*tx.tx_hash());
@@ -1873,6 +1872,11 @@ impl PropagateTransaction {
 
     fn shared(&self) -> LazyEncodedTransaction {
         self.transaction.clone()
+    }
+
+    /// Returns whether the transaction can be announced to a peer on `version`.
+    const fn can_announce_to(&self, version: EthVersion) -> bool {
+        !version.is_eth72() || self.propagation_size_without_blobs.is_some()
     }
 }
 

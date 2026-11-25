@@ -62,7 +62,7 @@ use crate::{
 };
 use alloy_consensus::{
     error::ValueError,
-    transaction::{RlpEcdsaEncodableTx, TxEip4844WithSidecar, TxHashRef},
+    transaction::{RlpEcdsaEncodableTx, TxHashRef},
     BlockHeader, Signed, Typed2718,
 };
 use alloy_eips::{
@@ -1740,14 +1740,21 @@ impl PoolTransaction for EthPooledTransaction {
 
     fn from_pooled(tx: Recovered<Self::Pooled>) -> Self {
         let encoded_length = tx.encode_2718_len();
-        let blobless_encoded_length =
-            tx.as_eip4844().and_then(eip4844_length_without_blobs).and_then(NonZeroUsize::new);
         let (tx, signer) = tx.into_parts();
         match tx {
             PooledTransactionVariant::Eip4844(tx) => {
                 // include the blob sidecar
                 let (tx, sig, hash) = tx.into_parts();
                 let (tx, blob) = tx.into_parts();
+                // The size served to eth/72 peers. Legacy sidecars have no cell proofs, so eth/72
+                // can't carry them.
+                let blobless_encoded_length = blob.as_eip7594().and_then(|sidecar| {
+                    let payload_length = tx.rlp_encoded_length_with_signature(&sig) +
+                        sidecar.encode_7594_len_with(BlobSidecarEncoding::WithoutBlobs);
+                    NonZeroUsize::new(
+                        1 + Header { list: true, payload_length }.length_with_payload(),
+                    )
+                });
                 let tx = Signed::new_unchecked(tx, sig, hash);
                 let tx = TransactionSigned::from(tx);
                 let tx = Recovered::new_unchecked(tx, signer);
@@ -2110,25 +2117,13 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
     }
 }
 
-/// Returns the EIP-2718 length of a blob transaction without its blobs, as served to eth/72 peers.
-///
-/// Returns `None` for a legacy sidecar, which eth/72 can't carry since it has no cell proofs.
-fn eip4844_length_without_blobs(
-    tx: &Signed<TxEip4844WithSidecar<BlobTransactionSidecarVariant>>,
-) -> Option<usize> {
-    let sidecar = tx.tx().sidecar.as_eip7594()?;
-    let payload_length = tx.tx().tx.rlp_encoded_length_with_signature(tx.signature()) +
-        sidecar.encode_7594_len_with(BlobSidecarEncoding::WithoutBlobs);
-    Some(1 + Header { list: true, payload_length }.length_with_payload())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::blobstore::BlobCellAvailability;
     use alloy_consensus::{
-        EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
-        TxEnvelope, TxLegacy,
+        EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844,
+        TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy,
     };
     use alloy_eips::{
         eip4844::{Blob, BlobTransactionSidecar, Bytes48, DATA_GAS_PER_BLOB},
