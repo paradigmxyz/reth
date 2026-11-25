@@ -375,7 +375,7 @@ RPC:
           [default: 8546]
 
       --ws.origins <ws.origins>
-          Origins from which to accept `WebSocket` requests
+          Allowed `WebSocket` origins. Defaults to HTTP(S) origins on `localhost`, `127.0.0.1`, or `[::1]` at any port. Use `*` to allow any origin
 
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server

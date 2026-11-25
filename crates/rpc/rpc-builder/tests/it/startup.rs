@@ -194,10 +194,14 @@ async fn test_ws_upgrade_origin_allowlist() {
                 let addr = test_address();
                 let mut config = RpcServerConfig::ws(Default::default())
                     .with_ws_address(addr)
-                    .with_cors(domains.map(str::to_string))
                     .with_jwt_secret(secret);
                 if same_port {
-                    config = config.with_http(Default::default()).with_http_address(addr);
+                    config = config
+                        .with_http(Default::default())
+                        .with_http_address(addr)
+                        .with_http_cors(domains.map(str::to_string));
+                } else {
+                    config = config.with_ws_cors(domains.map(str::to_string));
                 }
                 let handle = config.start(&modules).await.unwrap();
                 let url = format!("http://{}", handle.ws_local_addr().unwrap());
@@ -211,12 +215,22 @@ async fn test_ws_upgrade_origin_allowlist() {
                         http::StatusCode::UNAUTHORIZED
                     );
                 }
-                for origins in [
-                    vec![],
-                    vec!["https://allowed.example"],
-                    vec!["https://denied.example"],
-                    vec!["null"],
-                    vec!["https://allowed.example", "https://denied.example"],
+                for (origins, allowed_by_default) in [
+                    (vec![], true),
+                    (vec!["http://localhost:3000"], true),
+                    (vec!["https://127.0.0.1"], true),
+                    (vec!["http://[::1]:8080"], true),
+                    (vec!["https://[::1]"], true),
+                    (vec!["https://allowed.example"], false),
+                    (vec!["https://denied.example"], false),
+                    (vec!["null"], false),
+                    (vec!["https://localhost.example"], false),
+                    (vec!["file://localhost"], false),
+                    (vec!["http://localhost:65536"], false),
+                    (vec!["http://localhost:+80"], false),
+                    (vec!["http://localhost/path"], false),
+                    (vec!["http://localhost", "http://localhost"], false),
+                    (vec!["https://allowed.example", "https://denied.example"], false),
                 ] {
                     let mut request = client
                         .get(&url)
@@ -231,9 +245,11 @@ async fn test_ws_upgrade_origin_allowlist() {
                         request = request.header("origin", *origin);
                     }
                     let response = request.send().await.unwrap();
-                    let allowed = domains != Some("https://allowed.example") ||
-                        origins.is_empty() ||
-                        origins == ["https://allowed.example"];
+                    let allowed = match domains {
+                        None => allowed_by_default,
+                        Some("*") => true,
+                        Some(domain) => origins.is_empty() || origins == [domain],
+                    };
                     assert_eq!(
                         response.status(),
                         if allowed {
