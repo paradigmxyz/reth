@@ -64,6 +64,20 @@ where
         ret(level = "trace")
     )]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
+        let storage_v2 = provider.cached_storage_settings().storage_v2;
+
+        // Delete the changeset jars of earlier runs here, not at the end of the run that pruned
+        // their history shards. The previous checkpoint comes from committed state, so those
+        // shards are pruned durably. A missing jar reads as empty blocks, so a jar deleted before
+        // the checkpoint commit would leave its shards unpruned. Each run also retries the jars
+        // that an interrupted deletion left.
+        if storage_v2 {
+            provider.static_file_provider().delete_segment_below_block(
+                StaticFileSegment::StorageChangeSets,
+                input.get_start_next_block_range(),
+            )?;
+        }
+
         let range = match input.get_next_block_range() {
             Some(range) => range,
             None => {
@@ -74,7 +88,7 @@ where
         let range_end = *range.end();
 
         // Check where storage history indices are stored
-        if provider.cached_storage_settings().storage_v2 {
+        if storage_v2 {
             return self.prune_rocksdb(provider, input, range, range_end);
         }
 
@@ -327,18 +341,6 @@ impl StorageHistory {
 
         trace!(target: "pruner", deleted = deleted_shards, updated = updated_shards, %done, "Pruned storage history (RocksDB indices)");
 
-        // Delete static file jars only when fully processed. During provider.commit(), RocksDB
-        // batch is committed before the MDBX checkpoint. If crash occurs after RocksDB commit
-        // but before MDBX commit, on restart the pruner checkpoint indicates data needs
-        // re-pruning, but the RocksDB shards are already pruned - this is safe because pruning
-        // is idempotent (re-pruning already-pruned shards is a no-op).
-        if done {
-            provider.static_file_provider().delete_segment_below_block(
-                StaticFileSegment::StorageChangeSets,
-                last_changeset_pruned_block + 1,
-            )?;
-        }
-
         let progress = limiter.progress(done);
 
         Ok(SegmentOutput {
@@ -359,17 +361,19 @@ mod tests {
     use alloy_primitives::{Address, BlockNumber, B256, U256};
     use assert_matches::assert_matches;
     use reth_db_api::{
-        models::{storage_sharded_key::StorageShardedKey, StorageSettings},
+        models::{storage_sharded_key::StorageShardedKey, StorageBeforeTx, StorageSettings},
         tables, BlockNumberList,
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
         DBProvider, DatabaseProviderFactory, PruneCheckpointReader, RocksDBProviderFactory,
+        StaticFileProviderFactory, StaticFileWriter,
     };
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use reth_static_file_types::{StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE};
     use reth_storage_api::StorageSettingsCache;
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
@@ -792,6 +796,87 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A run deletes only the changeset jars below its previous checkpoint, which is committed.
+    /// Otherwise a dropped provider leaves the old checkpoint and the unpruned history shards
+    /// pointing at changesets that no longer exist.
+    #[test]
+    fn prune_rocksdb_deletes_jars_below_previous_checkpoint() {
+        let db = TestStageDB::default();
+        db.factory.set_storage_settings_cache(StorageSettings::v2());
+
+        // One change in the last block of the first jar and one in the second jar, so that the
+        // first jar is not the highest one.
+        let address = Address::random();
+        let key = B256::random();
+        let first_jar_end = DEFAULT_BLOCKS_PER_STATIC_FILE - 1;
+        let change = StorageBeforeTx { address, key, value: U256::ZERO };
+        let static_file_provider = db.factory.static_file_provider();
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            for block in 0..first_jar_end {
+                writer.append_storage_changeset(Vec::new(), block).unwrap();
+            }
+            writer.append_storage_changeset(vec![change], first_jar_end).unwrap();
+            writer.append_storage_changeset(vec![change], first_jar_end + 1).unwrap();
+            writer.commit().unwrap();
+        }
+
+        let rocksdb = db.factory.rocksdb_provider();
+        let mut batch = rocksdb.batch();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::last(address, key),
+                &BlockNumberList::new_pre_sorted([first_jar_end, first_jar_end + 1]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        let to_block = first_jar_end;
+        let prune_mode = PruneMode::Before(to_block);
+        let segment = StorageHistory::new(prune_mode);
+        let input = |checkpoint| PruneInput {
+            previous_checkpoint: Some(PruneCheckpoint {
+                block_number: Some(checkpoint),
+                tx_number: None,
+                prune_mode,
+            }),
+            to_block,
+            limiter: PruneLimiter::default(),
+        };
+        let shard_blocks = || {
+            let shards = rocksdb.storage_history_shards(address, key).unwrap();
+            shards.iter().flat_map(|(_, blocks)| blocks.iter()).collect::<Vec<_>>()
+        };
+        let lowest_jar_end =
+            || static_file_provider.get_lowest_range_end(StaticFileSegment::StorageChangeSets);
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = segment.prune(&provider, input(first_jar_end - 1)).unwrap();
+        assert!(result.progress.is_finished());
+        drop(provider);
+
+        assert_eq!(lowest_jar_end(), Some(first_jar_end));
+        assert_eq!(shard_blocks(), [first_jar_end, first_jar_end + 1]);
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = segment.prune(&provider, input(first_jar_end - 1)).unwrap();
+        assert!(result.progress.is_finished());
+        provider.commit().expect("commit");
+
+        assert_eq!(lowest_jar_end(), Some(first_jar_end));
+        assert_eq!(shard_blocks(), [first_jar_end + 1]);
+
+        // The target stays at the new checkpoint, so this run has no range and only deletes.
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = segment.prune(&provider, input(first_jar_end)).unwrap();
+        assert!(result.progress.is_finished());
+        provider.commit().expect("commit");
+
+        assert_eq!(lowest_jar_end(), Some(first_jar_end + 1));
+        assert_eq!(shard_blocks(), [first_jar_end + 1]);
     }
 
     /// A block holding at least a whole run's budget of changesets must not stall pruning: the

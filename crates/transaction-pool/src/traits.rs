@@ -2027,6 +2027,11 @@ impl<Tx: PoolTransaction> NewSubpoolTransactionStream<Tx> {
             }
         }
     }
+
+    /// Returns the capacity of the channel behind this stream.
+    pub fn max_capacity(&self) -> usize {
+        self.st.max_capacity()
+    }
 }
 
 impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {

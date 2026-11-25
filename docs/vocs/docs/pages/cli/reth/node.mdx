@@ -492,6 +492,11 @@ RPC:
 
           [default: 20000]
 
+      --rpc.max-active-filters <COUNT>
+          Maximum number of filters that can be installed at the same time, across all `eth_newFilter`, `eth_newBlockFilter` and `eth_newPendingTransactionFilter` filters. (0 = no limit)
+
+          [default: 10000]
+
       --rpc.gascap <GAS_CAP>
           Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
 
@@ -500,9 +505,9 @@ RPC:
           [default: 50000000]
 
       --rpc.evm-memory-limit <MEMORY_LIMIT>
-          Maximum memory the EVM can allocate per RPC request
+          Maximum memory the EVM can allocate per call frame in an RPC request
 
-          [default: 4294967295]
+          [default: 104857600]
 
       --rpc.txfeecap <TX_FEE_CAP>
           Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
@@ -513,6 +518,9 @@ RPC:
           Maximum number of blocks for `eth_simulateV1` call
 
           [default: 256]
+
+      --rpc.max-trace-bytes <BYTES>
+          Max bytes a traced tx may record, defaults to 2x `--rpc.max-response-size`, 0 is unlimited
 
       --rpc.compute-state-root-for-eth-simulate
           Compute state roots for `eth_simulateV1` responses
@@ -952,7 +960,7 @@ Dev testnet:
       --dev.block-time <BLOCK_TIME>
           Interval between blocks.
 
-          Parses strings using [`humantime::parse_duration`]
+          Accepts a duration such as `12s`, `450ms` or `1m 30s`, e.g.
           --dev.block-time 12s
 
       --dev.finality-depth <FINALITY_DEPTH>
@@ -969,7 +977,7 @@ Dev testnet:
           local miner, giving the payload job time for multiple rebuild attempts with
           new transactions from the pool.
 
-          Parses strings using [`humantime::parse_duration`]
+          Accepts a duration such as `12s`, `450ms` or `1m 30s`, e.g.
           --dev.payload-wait-time 450ms
 
       --dev.mnemonic <MNEMONIC>

@@ -425,6 +425,7 @@ mod tests {
     use crate::hashed_cursor::mock::MockHashedCursor;
     use parking_lot::Mutex;
     use std::{collections::BTreeMap, sync::Arc};
+    use tracing::debug;
 
     fn key(byte: u8) -> B256 {
         B256::repeat_byte(byte)
@@ -437,7 +438,7 @@ mod tests {
         HashedPostStateSorted::new(Vec::new(), storages)
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_overlay_exact_hit_does_not_touch_db_until_next() {
         let db_nodes = vec![(key(0x02), U256::from(2)), (key(0x03), U256::from(3))];
         let post_state_nodes = vec![(key(0x02), U256::from(42))];
@@ -459,7 +460,7 @@ mod tests {
         assert!(!visited_keys.lock().is_empty(), "next should lazily position the DB cursor");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_overlay_exact_hit_repositions_stale_db_on_next() {
         let db_nodes = vec![(key(0x01), U256::ONE), (key(0x03), U256::from(3))];
         let post_state_nodes = vec![(key(0x02), U256::from(2))];
@@ -484,7 +485,7 @@ mod tests {
         assert_eq!(result, Some((key(0x03), U256::from(3))));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_overlay_exact_deletion_still_seeks_db() {
         let db_nodes = vec![(key(0x02), U256::from(2)), (key(0x03), U256::from(3))];
         let post_state_nodes = vec![(key(0x02), U256::ZERO)];
@@ -583,15 +584,13 @@ mod tests {
         ///
         /// Executes random sequences of `next()` and `seek()` operations, asserting
         /// both cursors return identical results.
-        #[test]
+        #[reth_concurrency::test]
         fn proptest_hashed_post_state_cursor(
                 db_nodes in sorted_db_nodes_strategy(),
                 post_state_nodes in sorted_post_state_nodes_strategy(),
                 op_choices in prop::collection::vec(any::<u8>(), 10..500),
             ) {
                 reth_tracing::init_test_tracing();
-                use tracing::debug;
-
                 debug!("Starting proptest!");
 
                 // Create the expected results by merging the two sorted vectors,

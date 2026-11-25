@@ -152,6 +152,10 @@ pub mod test_utils {
         fn last_txnid(&self) -> Option<u64> {
             self.db().last_txnid()
         }
+
+        fn reader_check(&self) -> Result<(), DatabaseError> {
+            self.db().reader_check()
+        }
     }
 
     impl<DB: DatabaseMetrics> DatabaseMetrics for TempDatabase<DB> {

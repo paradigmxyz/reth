@@ -15,7 +15,7 @@ use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
-use reth_primitives_traits::{AlloyBlockHeader, FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, PruneCheckpointReader, StageCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
@@ -415,9 +415,12 @@ impl ChangesetCache {
         // Forward updates are a best-effort optimization to speed up compute_range_trie_changesets,
         // missing blocks do not affect correctness.
         let mut forward_updates = overlay_manager
-            .parent_chain(finish.hash)
-            .take_while(|block| block.recovered_block().number() >= start_block)
-            .map(|block| (block.recovered_block().number(), block.trie_updates()))
+            .in_memory_state()
+            .state_by_hash(finish.hash)
+            .iter()
+            .flat_map(|state| state.chain())
+            .take_while(|state| state.number() >= start_block)
+            .map(|state| (state.number(), state.block_ref().trie_updates()))
             .collect::<Vec<_>>();
         forward_updates.reverse();
 
@@ -637,7 +640,7 @@ impl ChangesetCacheInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::StateTrieOverlay;
+    use crate::{test_utils::overlay_manager_with_writer, StateTrieOverlay};
     use alloy_consensus::Header;
     use alloy_primitives::{
         keccak256,
@@ -760,8 +763,11 @@ mod tests {
     {
         let individual_state_revert =
             HashedPostStateSorted::from_reverts(provider, block_number..=block_number).unwrap();
-        let cumulative_state_revert =
-            HashedPostStateSorted::from_reverts(provider, (block_number + 1)..).unwrap();
+        let cumulative_state_revert = HashedPostStateSorted::from_reverts(
+            provider,
+            (block_number + 1)..=provider.last_block_number().unwrap(),
+        )
+        .unwrap();
 
         let mut cumulative_state_revert_prev = cumulative_state_revert.clone();
         cumulative_state_revert_prev.extend_ref_and_sort(&individual_state_revert);
@@ -814,7 +820,7 @@ mod tests {
         provider.write_trie_updates(trie_updates).unwrap();
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn consumers_restore_trie_values_masked_by_deferred_blocks() {
         let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
         let factory = create_test_provider_factory();
@@ -886,7 +892,7 @@ mod tests {
         assert_eq!(cached(), 7);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn calculated_reverts_preserve_deletions_across_frontiers() {
         let factory = create_test_provider_factory();
         let blocks = TestBlockBuilder::eth().get_executed_blocks(0..4).collect::<Vec<_>>();
@@ -924,13 +930,13 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
-        let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
         for (block, updates) in [
             (&blocks[1], Arc::new(storage_updates(vec![(removed, Some(node))]))),
             (&blocks[2], Arc::clone(&finish_updates)),
             (&blocks[3], Arc::default()),
         ] {
-            manager.insert_block(ExecutedBlock::new(
+            in_memory_state_writer.insert_executed(ExecutedBlock::new(
                 Arc::clone(&block.recovered_block),
                 Arc::clone(&block.execution_output),
                 SortedTrieData::new(Arc::default(), updates),
@@ -967,7 +973,7 @@ mod tests {
         assert!(Arc::ptr_eq(&cached, &advanced));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn calculated_historical_range_excludes_tail_reverts() {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
@@ -1016,7 +1022,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn persisted_range_retains_transient_nodes_without_executed_blocks() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 2);
@@ -1122,7 +1128,7 @@ mod tests {
         assert_eq!(first, at_first);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn cached_range_merge_keeps_oldest_revert_values() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 2);
@@ -1172,7 +1178,7 @@ mod tests {
         assert_eq!(accumulated.account_nodes_ref(), &[(path, Some(older_node))]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn aggregate_range_reverts_to_pre_range_state() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 3);
@@ -1294,7 +1300,7 @@ mod tests {
         assert_eq!(cache.inner.read().entries.len(), 2);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn aggregate_range_matches_legacy_per_block_merge_with_storage_wipe() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 3);
