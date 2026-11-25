@@ -397,14 +397,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
     fn prune_unreachable_overlays(&self) {
         let overlays_before =
             self.inner.state_trie_overlays.len() + self.inner.execution_overlays.len();
-        let is_reachable = |key: &OverlayCacheKey| {
-            self.inner
-                .in_memory_state
-                .state_by_hash(key.tip_hash)
-                .is_some_and(|state| state.chain_hashes().any(|hash| hash == key.anchor_hash))
-        };
-        self.inner.state_trie_overlays.retain(|key, _| is_reachable(key));
-        self.inner.execution_overlays.retain(|key, _| is_reachable(key));
+        self.inner.state_trie_overlays.retain(|key, _| self.is_reachable(key));
+        self.inner.execution_overlays.retain(|key, _| self.is_reachable(key));
         let remaining_overlays =
             self.inner.state_trie_overlays.len() + self.inner.execution_overlays.len();
         let pruned_overlays = overlays_before.saturating_sub(remaining_overlays);
@@ -415,6 +409,15 @@ impl<N: NodePrimitives> OverlayManager<N> {
             remaining_overlays,
             "pruned overlays that can no longer be built from the in-memory state"
         );
+    }
+
+    /// Returns `true` if the live in-memory state still reaches `key`: its tip is tracked and
+    /// its anchor is on the tip's chain.
+    fn is_reachable(&self, key: &OverlayCacheKey) -> bool {
+        self.inner
+            .in_memory_state
+            .state_by_hash(key.tip_hash)
+            .is_some_and(|state| state.chain_hashes().any(|hash| hash == key.anchor_hash))
     }
 
     /// Returns the flattened overlay from `anchor_hash` to `parent_hash`.
@@ -572,7 +575,9 @@ impl<N: NodePrimitives> OverlayManager<N> {
         let mut blocks = Self::blocks_from_parent_state(parent_state, anchor_hash)?;
         span.record("block_count", blocks.len());
 
-        if !cache_config.write_to_cache {
+        // A parent state from an in-memory snapshot can reach blocks the live state no longer
+        // tracks. Its overlay could only be pruned at the next removal, so it is not cached.
+        if !cache_config.write_to_cache || !self.is_reachable(&key) {
             let parent_input = blocks.first().and_then(|block| {
                 let parent_hash = block.recovered_block().parent_hash();
                 (parent_hash != anchor_hash)
@@ -1145,6 +1150,29 @@ mod tests {
             .state_by_hash(parent_hash)
             .ok_or(StateTrieOverlayError { tip_hash: parent_hash, anchor_hash })?;
         manager.overlay_for_parent(&parent_state, anchor_hash, OverlayCacheConfig::default())
+    }
+
+    #[reth_concurrency::test]
+    fn does_not_cache_overlays_the_live_state_no_longer_reaches() {
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
+        let blocks = test_blocks();
+        in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        let anchor_hash = blocks[0].recovered_block().parent_hash();
+        let tip = manager
+            .in_memory_state()
+            .snapshot()
+            .state_by_hash(blocks[2].recovered_block().hash())
+            .unwrap();
+
+        // Persistence removes the oldest block, so the live chain of the tip no longer reaches
+        // the anchor the snapshot's chain still builds on.
+        let persisted = blocks[0].recovered_block().num_hash();
+        in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
+
+        let (_, state) =
+            manager.overlay_for_parent(&tip, anchor_hash, OverlayCacheConfig::default()).unwrap();
+        assert_eq!(state.accounts.len(), 3);
+        assert_eq!(manager.inner.state_trie_overlays.len(), 0);
     }
 
     #[reth_concurrency::test]
