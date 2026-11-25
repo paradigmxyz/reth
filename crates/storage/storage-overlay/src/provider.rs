@@ -1285,7 +1285,7 @@ mod tests {
         let provider = state_provider_factory.database_provider_ro().unwrap();
         factory.db_ref().set_pre_transaction_hook(Box::new(|| ()));
         let expected =
-            OverlayStateProviderFactory::new(factory.clone(), manager.overlay_builder(parent_hash))
+            OverlayStateProviderFactory::new(factory, manager.overlay_builder(parent_hash))
                 .database_provider_ro()
                 .unwrap()
                 .state_trie_overlay(false)
