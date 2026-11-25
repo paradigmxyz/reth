@@ -50,9 +50,10 @@ pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 160;
 
 /// Default trace byte limit per byte of the response limit.
 ///
-/// Struct logs and `vmTrace` record about 1.5-5x their JSON size, since a 32-byte stack word
-/// serializes as short hex. Twice the response limit passes every mainnet block whose traces fit
-/// in the response, while keeping a block trace's memory bounded.
+/// `vmTrace` records about 1.5-5x its JSON size, since a 32-byte stack word serializes as short
+/// hex. Twice the response limit passes every mainnet block whose traces fit in the response, while
+/// keeping a block trace's memory bounded. The default struct logger records its JSON, so the
+/// response limit itself bounds it.
 const RPC_TRACE_BYTES_PER_RESPONSE_BYTE: u64 = 2;
 
 /// Default number of incoming connections.
