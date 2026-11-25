@@ -6996,7 +6996,10 @@ mod tests {
             storages.append_storage_changeset(vec![], 0).unwrap();
             storages
                 .append_storage_changeset(
-                    vec![StorageBeforeTx { address, key: k2, value: U256::from(5) }],
+                    vec![
+                        StorageBeforeTx { address, key: k2, value: U256::from(5) },
+                        StorageBeforeTx { address, key: k3, value: U256::from(3) },
+                    ],
                     1,
                 )
                 .unwrap();
@@ -7022,9 +7025,12 @@ mod tests {
 
         let keys = provider_rw.unwind_storage_hashing_range(1..=1).unwrap();
 
-        assert_eq!(keys, B256Map::from_iter([(hashed_address, [k1, k2].map(keccak256).into())]));
+        assert_eq!(
+            keys,
+            B256Map::from_iter([(hashed_address, [k1, k2, k3].map(keccak256).into())])
+        );
         let storage = hashed_storage(&provider_rw.tx, hashed_address);
-        let mut expected = [(k1, 9u64), (k2, 5), (k3, 4)]
+        let mut expected = [(k1, 9u64), (k2, 5), (k3, 3)]
             .map(|(slot, value)| (keccak256(slot), U256::from(value)))
             .to_vec();
         expected.sort_unstable();
