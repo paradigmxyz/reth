@@ -4253,38 +4253,6 @@ mod tests {
     }
 
     #[test]
-    fn database_provider_snapshots_in_memory_blocks_before_its_transaction() -> eyre::Result<()> {
-        let (factory, in_memory_state_writer) = test_provider_factory_with_genesis()?;
-        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
-            factory.chain_info_headers()?,
-            in_memory_state_writer,
-        );
-        let genesis =
-            canonical_in_memory_state_writer.canonical_in_memory_state().get_canonical_head();
-        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, genesis.hash());
-        let persisted = block.recovered_block().num_hash();
-        canonical_in_memory_state_writer
-            .update_chain(NewCanonicalChain::Commit { new: vec![block] });
-
-        // The engine removes the block right after the provider opens its transaction, as it does
-        // once persistence commits it.
-        let hook_writer = Mutex::new(canonical_in_memory_state_writer);
-        factory.db_ref().set_post_transaction_hook(Box::new(move || {
-            hook_writer.lock().on_blocks_persisted(persisted, persisted, None);
-        }));
-        let provider = factory.provider()?;
-        factory.db_ref().set_post_transaction_hook(Box::new(|| ()));
-
-        assert!(factory
-            .overlay_manager()
-            .in_memory_state()
-            .state_by_hash(persisted.hash)
-            .is_none());
-        assert!(provider.in_memory_snapshot().state_by_hash(persisted.hash).is_some());
-        Ok(())
-    }
-
-    #[test]
     fn providers_of_one_factory_share_in_memory_blocks() -> eyre::Result<()> {
         let (factory, in_memory_state_writer) = test_provider_factory_with_genesis()?;
         let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(

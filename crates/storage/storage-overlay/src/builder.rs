@@ -513,13 +513,18 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                                 anchor_hash: state_trie_tip_block.hash,
                             })
                         })?;
+                    // An overlay for a Finish block the engine already removed could only be
+                    // pruned from the shared cache at the next removal, so don't cache it.
+                    let cache_config = OverlayCacheConfig {
+                        write_to_cache: self
+                            .overlay_manager
+                            .in_memory_state()
+                            .contains(&finish_tip_block.hash),
+                        ..Default::default()
+                    };
                     let (nodes, _) = self
                         .overlay_manager
-                        .overlay_for_parent(
-                            &finish_state,
-                            state_trie_tip_block.hash,
-                            OverlayCacheConfig::default(),
-                        )
+                        .overlay_for_parent(&finish_state, state_trie_tip_block.hash, cache_config)
                         .map_err(ProviderError::other)?;
                     retrieve_trie_reverts_duration = start.elapsed();
                     nodes
@@ -1127,7 +1132,11 @@ mod tests {
             .overlay_builder(parent_hash)
             .build_state_trie_overlay(&provider, false)
             .unwrap_err();
-        assert!(err.to_string().contains("cannot be anchored"), "unexpected error: {err}");
+        let finish_missing = format!(
+            "state trie overlay for tip {} cannot be anchored",
+            blocks[3].recovered_block().hash()
+        );
+        assert!(err.to_string().contains(&finish_missing), "unexpected error: {err}");
 
         let overlay = manager
             .overlay_builder_in(snapshot, parent_hash)

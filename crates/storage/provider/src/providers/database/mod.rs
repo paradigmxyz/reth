@@ -147,6 +147,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             Arc::new(RwLock::new(legacy_settings)),
             rocksdb_provider.clone(),
             overlay_manager.clone(),
+            overlay_manager.in_memory_state().live_view(),
             runtime.clone(),
             db.path(),
             database_provider_metrics.clone(),
@@ -390,7 +391,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N>> {
         // Snapshot the in-memory blocks before opening the transaction, so that the blocks its
         // durable frontiers need are still there when an overlay is built over it. See
-        // [`InMemoryState::snapshot`](reth_chain_state::InMemoryState::snapshot).
+        // `InMemoryState::snapshot`.
         let in_memory_snapshot = self.overlay_manager.in_memory_state().snapshot();
         let db_tx = self.db.tx()?;
 
@@ -410,11 +411,11 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
             self.overlay_manager.clone(),
+            in_memory_snapshot,
             self.runtime.clone(),
             self.db.path(),
             self.database_provider_metrics.clone(),
         )
-        .with_in_memory_snapshot(in_memory_snapshot)
         .with_minimum_pruning_distance(self.minimum_pruning_distance))
     }
 
@@ -434,6 +435,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
                 self.storage_settings.clone(),
                 self.rocksdb_provider.clone(),
                 self.overlay_manager.clone(),
+                self.overlay_manager.in_memory_state().live_view(),
                 self.runtime.clone(),
                 self.db.path(),
                 self.database_provider_metrics.clone(),
@@ -462,6 +464,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
             self.overlay_manager.clone(),
+            self.overlay_manager.in_memory_state().live_view(),
             self.runtime.clone(),
             self.db.path(),
             self.database_provider_metrics.clone(),
@@ -1081,7 +1084,8 @@ mod tests {
         providers::{StaticFileProvider, StaticFileProviderBuilder, StaticFileWriter},
         test_utils::{
             blocks::TEST_BLOCK, create_test_provider_factory,
-            create_test_provider_factory_with_genesis_block_number, MockNodeTypesWithDB,
+            create_test_provider_factory_with_genesis_block_number,
+            create_test_provider_factory_with_in_memory_state_writer, MockNodeTypesWithDB,
         },
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
         PruneCheckpointWriter, StageCheckpointWriter, TransactionsProvider,
@@ -1089,7 +1093,9 @@ mod tests {
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{TxNumber, B256};
     use assert_matches::assert_matches;
-    use reth_chainspec::ChainSpecBuilder;
+    use parking_lot::Mutex;
+    use reth_chain_state::{test_utils::TestBlockBuilder, NewCanonicalChain};
+    use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_db::{
         mdbx::DatabaseArguments,
         test_utils::{create_test_rocksdb_dir, create_test_static_files_dir, ERROR_TEMPDIR},
@@ -1102,6 +1108,27 @@ mod tests {
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
     use std::{ops::RangeInclusive, sync::Arc};
+
+    #[test]
+    fn provider_snapshots_in_memory_blocks_before_its_transaction() {
+        let (factory, mut in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::ZERO);
+        let persisted = block.recovered_block().num_hash();
+        in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new: vec![block] });
+
+        // The engine removes the block right after the provider opens its transaction, as it does
+        // once persistence commits it.
+        let in_memory_state_writer = Mutex::new(in_memory_state_writer);
+        factory.db_ref().set_post_transaction_hook(Box::new(move || {
+            in_memory_state_writer.lock().on_blocks_persisted(persisted, persisted, None);
+        }));
+        let provider = factory.provider().unwrap();
+        factory.db_ref().set_post_transaction_hook(Box::new(|| ()));
+
+        assert!(!factory.overlay_manager().in_memory_state().contains(&persisted.hash));
+        assert!(provider.in_memory_snapshot().state_by_hash(persisted.hash).is_some());
+    }
 
     #[test]
     fn common_history_provider() {

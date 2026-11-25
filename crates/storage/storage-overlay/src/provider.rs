@@ -138,7 +138,7 @@ where
 
         // Snapshot the in-memory blocks before the transaction opens, so that the blocks its
         // durable frontiers need are still there when the overlay is built. See
-        // [`InMemoryState::snapshot`](reth_chain_state::InMemoryState::snapshot).
+        // `InMemoryState::snapshot`.
         let in_memory = self.overlay_builder.overlay_manager().in_memory_state().snapshot();
 
         // Get a read-only provider
@@ -1138,6 +1138,7 @@ mod tests {
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{Address, U256};
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
+    use parking_lot::Mutex;
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, NewCanonicalChain};
     use reth_db_api::{
         models::{
@@ -1230,23 +1231,38 @@ mod tests {
     }
 
     #[reth_concurrency::test]
-    fn provider_snapshots_in_memory_blocks_when_it_opens() {
+    fn provider_snapshots_in_memory_blocks_before_its_transaction() {
         // The factory's builder exists before the engine inserts the chain from Finish down to
-        // the state trie tip, and the engine removes that chain again while the provider is open.
+        // the state trie tip, and the engine removes that chain right after the provider opens
+        // its transaction.
         let (factory, blocks) = setup_frontiers(1, 3);
         let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            factory,
-            manager.overlay_builder(blocks[1].recovered_block().hash()),
-        );
+        let parent_hash = blocks[1].recovered_block().hash();
+        let state_provider_factory =
+            OverlayStateProviderFactory::new(factory.clone(), manager.overlay_builder(parent_hash));
         in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: blocks[2..=4].to_vec() });
+        let expected =
+            OverlayStateProviderFactory::new(factory.clone(), manager.overlay_builder(parent_hash))
+                .database_provider_ro()
+                .unwrap()
+                .state_trie_overlay(false)
+                .unwrap()
+                .clone();
 
-        let provider = state_provider_factory.database_provider_ro().unwrap();
         let persisted = blocks[3].recovered_block().num_hash();
-        in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
+        let in_memory_state_writer = Mutex::new(in_memory_state_writer);
+        factory.db_ref().set_post_transaction_hook(Box::new(move || {
+            in_memory_state_writer.lock().on_blocks_persisted(persisted, persisted, None);
+        }));
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+        factory.db_ref().set_post_transaction_hook(Box::new(|| ()));
+        assert!(!manager.in_memory_state().contains(&persisted.hash));
 
-        provider.state_trie_overlay(false).unwrap();
+        let overlay = provider.state_trie_overlay(false).unwrap();
+        assert!(!account_node_paths(&expected).is_empty());
+        assert_eq!(account_keys(overlay), account_keys(&expected));
+        assert_eq!(account_node_paths(overlay), account_node_paths(&expected));
     }
 
     #[reth_concurrency::test]

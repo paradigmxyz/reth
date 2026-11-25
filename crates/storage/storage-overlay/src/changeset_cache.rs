@@ -103,7 +103,7 @@ where
 {
     let tx = provider.tx_ref();
     let cache = overlay_manager.changeset_cache();
-    let in_memory = overlay_manager.in_memory_state().snapshot();
+    let in_memory = overlay_manager.in_memory_state().live_view();
     let (partial_state_trie, finish) = database_state_frontiers(provider)?;
 
     // Step 1: Get the trie changesets for the target block from cache
@@ -656,7 +656,7 @@ mod tests {
         map::{B256Map, HashMap},
         Address, U256,
     };
-    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, NewCanonicalChain};
     use reth_db::{
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
@@ -1007,6 +1007,95 @@ mod tests {
         // An older reader must still receive the deletion after the frontier advances.
         let cached = manager.get_or_compute_cached_changesets_range(&before, 1..=2).unwrap();
         assert!(Arc::ptr_eq(&cached, &advanced));
+    }
+
+    #[reth_concurrency::test]
+    fn miss_fallback_resolves_finish_from_snapshot_after_persistence_removes_it() {
+        let factory = create_test_provider_factory();
+        let blocks = TestBlockBuilder::eth().get_executed_blocks(0..4).collect::<Vec<_>>();
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let removed = Nibbles::from_nibbles([1]);
+        let replaced = Nibbles::from_nibbles([2]);
+        let node = BranchNodeCompact::new(0b0001, 0, 0, vec![], None);
+        let storage_updates = |storage_nodes| {
+            TrieUpdatesSorted::new(
+                vec![],
+                B256Map::from_iter([(hashed_address, StorageTrieUpdatesSorted { storage_nodes })]),
+            )
+        };
+        let finish_updates =
+            Arc::new(storage_updates(vec![(removed, None), (replaced, Some(node.clone()))]));
+        let provider_rw = factory.provider_rw().unwrap();
+        for block in &blocks {
+            provider_rw.insert_block(block.recovered_block()).unwrap();
+        }
+        provider_rw
+            .write_trie_updates_sorted(&storage_updates(vec![(removed, Some(node.clone()))]))
+            .unwrap();
+        // Reverting the account's creation deletes every storage node visible at Finish.
+        provider_rw
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(1, AccountBeforeTx { address, info: None })
+            .unwrap();
+        provider_rw
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(2)
+                    .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(1) }),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
+        let executed = [
+            (&blocks[1], Arc::new(storage_updates(vec![(removed, Some(node))]))),
+            (&blocks[2], Arc::clone(&finish_updates)),
+            (&blocks[3], Arc::default()),
+        ]
+        .into_iter()
+        .map(|(block, updates)| {
+            ExecutedBlock::new(
+                Arc::clone(&block.recovered_block),
+                Arc::clone(&block.execution_output),
+                SortedTrieData::new(Arc::default(), updates),
+            )
+        })
+        .collect::<Vec<_>>();
+        in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new: executed });
+        let provider = factory.provider().unwrap();
+        let snapshot = manager.in_memory_state().snapshot();
+        let cache = manager.changeset_cache();
+        let (frontier, finish) = database_state_frontiers(&provider).unwrap();
+        // Nothing is cached, so this takes the fallback that builds the overlay at Finish.
+        let expected = cache
+            .get_or_compute_range(&manager, &snapshot, &provider, 1..=2, frontier, finish, false)
+            .unwrap();
+
+        // Persistence commits Finish and the engine removes it, while the provider still reads
+        // the frontiers it opened with.
+        let persisted = blocks[2].recovered_block().num_hash();
+        in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
+
+        let err = cache
+            .get_or_compute_range(
+                &manager,
+                &manager.in_memory_state().live_view(),
+                &provider,
+                1..=2,
+                frontier,
+                finish,
+                false,
+            )
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("after partial state trie frontier"),
+            "unexpected error: {err}"
+        );
+        let from_snapshot = cache
+            .get_or_compute_range(&manager, &snapshot, &provider, 1..=2, frontier, finish, false)
+            .unwrap();
+        assert_eq!(from_snapshot, expected);
     }
 
     #[reth_concurrency::test]

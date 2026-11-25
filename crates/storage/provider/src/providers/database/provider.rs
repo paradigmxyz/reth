@@ -264,16 +264,6 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
         self
     }
 
-    /// Resolves this provider's overlays against `in_memory_snapshot`, which must be taken before
-    /// its transaction was opened.
-    pub(crate) fn with_in_memory_snapshot(
-        mut self,
-        in_memory_snapshot: InMemoryStateSnapshot<N::Primitives>,
-    ) -> Self {
-        self.in_memory_snapshot = in_memory_snapshot;
-        self
-    }
-
     /// Returns the in-memory blocks this provider's overlays resolve their durable frontiers
     /// against.
     ///
@@ -400,6 +390,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
         overlay_manager: OverlayManager<N::Primitives>,
+        in_memory_snapshot: InMemoryStateSnapshot<N::Primitives>,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         commit_order: CommitOrder,
@@ -413,7 +404,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
-            in_memory_snapshot: overlay_manager.in_memory_state().snapshot(),
+            in_memory_snapshot,
             overlay_manager,
             runtime,
             db_path,
@@ -437,6 +428,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
         overlay_manager: OverlayManager<N::Primitives>,
+        in_memory_snapshot: InMemoryStateSnapshot<N::Primitives>,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         metrics: Arc<DatabaseProviderMetrics>,
@@ -450,6 +442,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage_settings,
             rocksdb_provider,
             overlay_manager,
+            in_memory_snapshot,
             runtime,
             db_path,
             CommitOrder::Normal,
@@ -468,6 +461,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
         overlay_manager: OverlayManager<N::Primitives>,
+        in_memory_snapshot: InMemoryStateSnapshot<N::Primitives>,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         metrics: Arc<DatabaseProviderMetrics>,
@@ -481,6 +475,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage_settings,
             rocksdb_provider,
             overlay_manager,
+            in_memory_snapshot,
             runtime,
             db_path,
             CommitOrder::Unwind,
@@ -1047,6 +1042,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
         overlay_manager: OverlayManager<N::Primitives>,
+        in_memory_snapshot: InMemoryStateSnapshot<N::Primitives>,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         metrics: Arc<DatabaseProviderMetrics>,
@@ -1059,7 +1055,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
-            in_memory_snapshot: overlay_manager.in_memory_state().snapshot(),
+            in_memory_snapshot,
             overlay_manager,
             runtime,
             db_path,

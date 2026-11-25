@@ -2,7 +2,7 @@ use super::{canonical::InMemoryStateBlockCounts, BlockState, ExecutedBlock, NewC
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
-    map::{B256Map, B256Set},
+    map::{B256Map, B256Set, FbBuildHasher},
     BlockNumber, B256,
 };
 use reth_primitives_traits::NodePrimitives;
@@ -11,7 +11,7 @@ use std::{cmp::Reverse, collections::BTreeMap, sync::Arc};
 
 /// Block states by hash, in a persistent map so that a snapshot of it is a reference count
 /// increment.
-pub(super) type BlockStates<N> = HashTrieMapSync<B256, Arc<BlockState<N>>>;
+pub(super) type BlockStates<N> = HashTrieMapSync<B256, Arc<BlockState<N>>, FbBuildHasher<32>>;
 
 /// All executed in-memory blocks, split into the canonical and the non-canonical section.
 ///
@@ -653,6 +653,11 @@ pub(super) struct InMemoryBlocksSnapshot<N: NodePrimitives> {
 }
 
 impl<N: NodePrimitives> InMemoryBlocksSnapshot<N> {
+    /// Returns a snapshot that holds no blocks.
+    pub(super) fn empty() -> Self {
+        Self { canonical: BlockStates::default(), non_canonical: BlockStates::default() }
+    }
+
     /// Returns the state of the block with the given hash, canonical or not.
     pub(super) fn get(&self, hash: &B256) -> Option<&Arc<BlockState<N>>> {
         self.canonical.get(hash).or_else(|| self.non_canonical.get(hash))
@@ -665,19 +670,6 @@ impl<N: NodePrimitives> Clone for InMemoryBlocksSnapshot<N> {
     }
 }
 
-impl<N: NodePrimitives> Default for InMemoryBlocksSnapshot<N> {
-    fn default() -> Self {
-        Self { canonical: BlockStates::new_sync(), non_canonical: BlockStates::new_sync() }
-    }
-}
-
-/// Removes `hash` from `blocks` and returns its state.
-fn take<N: NodePrimitives>(blocks: &mut BlockStates<N>, hash: &B256) -> Option<Arc<BlockState<N>>> {
-    let state = blocks.get(hash).cloned()?;
-    blocks.remove_mut(hash);
-    Some(state)
-}
-
 /// Removes `hash` from `hashes`, the set an index of the non-canonical section holds for a block,
 /// and returns `true` if the set is empty afterwards and has to be removed from the index.
 fn remove_indexed(hashes: Option<&mut B256Set>, hash: &B256) -> bool {
@@ -688,6 +680,13 @@ fn remove_indexed(hashes: Option<&mut B256Set>, hash: &B256) -> bool {
     let removed = hashes.remove(hash);
     debug_assert!(removed, "non-canonical block {hash} is not indexed");
     hashes.is_empty()
+}
+
+/// Removes `hash` from `blocks` and returns its state.
+fn take<N: NodePrimitives>(blocks: &mut BlockStates<N>, hash: &B256) -> Option<Arc<BlockState<N>>> {
+    let state = blocks.get(hash).cloned()?;
+    blocks.remove_mut(hash);
+    Some(state)
 }
 
 #[cfg(test)]

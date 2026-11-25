@@ -124,7 +124,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
     /// This looks up the in-memory chain ending at `parent_hash`, canonical or not. Prefer
     /// [`Self::overlay_builder_for_state`] whenever the caller already holds the chain.
     pub fn overlay_builder(&self, parent_hash: B256) -> OverlayBuilder<N> {
-        self.overlay_builder_in(self.inner.in_memory_state.snapshot(), parent_hash)
+        self.overlay_builder_in(self.inner.in_memory_state.live_view(), parent_hash)
     }
 
     /// Creates an overlay builder for `parent_hash` that resolves in-memory blocks from
@@ -155,7 +155,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         OverlayBuilder::new(
             state.hash(),
             Some(state),
-            self.inner.in_memory_state.snapshot(),
+            self.inner.in_memory_state.live_view(),
             self.clone(),
         )
     }
@@ -182,6 +182,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
     /// Gets complete trie before-values for an inclusive block range, oldest values taking
     /// precedence. No updates from outside the requested range are included.
+    ///
+    /// In-memory blocks are looked up in the live in-memory state, so call this only where no
+    /// persistence can commit while `provider` is open: on the engine thread or with a
+    /// read-write provider.
     pub fn get_or_compute_cached_changesets_range<P>(
         &self,
         provider: &P,
@@ -196,7 +200,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        let in_memory = self.inner.in_memory_state.snapshot();
+        let in_memory = self.inner.in_memory_state.live_view();
         let (partial_state_trie, finish) = database_state_frontiers(provider)?;
         self.get_or_compute_cached_changesets_range_at_frontiers(
             provider,
@@ -243,6 +247,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
     }
 
     /// Computes the trie updates produced by `block_number`.
+    ///
+    /// In-memory blocks are looked up in the live in-memory state, so call this only where no
+    /// persistence can commit while `provider` is open: on the engine thread or with a
+    /// read-write provider.
     pub fn compute_block_trie_updates<P>(
         &self,
         provider: &P,

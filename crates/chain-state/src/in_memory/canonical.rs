@@ -87,13 +87,23 @@ impl<N: NodePrimitives> InMemoryState<N> {
         self.inner.blocks.read().contains(hash)
     }
 
-    /// Returns a frozen copy of the tracked blocks, canonical or not.
+    /// Returns a frozen copy of the tracked blocks, canonical or not, that falls back to this
+    /// state for blocks inserted afterwards.
     ///
-    /// Taking it is a read lock and two reference count increments. The writer removes blocks
+    /// Taking it is a read lock and three reference count increments. The writer removes blocks
     /// only after persistence has committed them, so a snapshot taken before a database
-    /// transaction opens holds every in-memory block that transaction's durable frontiers need.
+    /// transaction opens still holds every block that transaction's durable frontiers need and
+    /// the writer removed since. A block inserted after the snapshot is looked up in this state.
     pub fn snapshot(&self) -> InMemoryStateSnapshot<N> {
-        InMemoryStateSnapshot { blocks: self.inner.blocks.read().snapshot() }
+        InMemoryStateSnapshot { blocks: self.inner.blocks.read().snapshot(), live: self.clone() }
+    }
+
+    /// Returns a snapshot that holds no blocks and looks every block up in this state.
+    ///
+    /// It pins no blocks, and suits callers that cannot race with the writer, such as the engine
+    /// itself or a read-write provider.
+    pub fn live_view(&self) -> InMemoryStateSnapshot<N> {
+        InMemoryStateSnapshot { blocks: InMemoryBlocksSnapshot::empty(), live: self.clone() }
     }
 
     /// Returns the numbers of tracked canonical blocks and of tracked blocks that are not
@@ -268,19 +278,23 @@ struct InMemoryStateInner<N: NodePrimitives> {
 }
 
 /// A frozen copy of the blocks an [`InMemoryState`] tracks, taken with
-/// [`InMemoryState::snapshot`].
+/// [`InMemoryState::snapshot`], over the live state it was taken from.
 ///
 /// Each state it holds keeps its whole in-memory chain, whatever the writer removes from the
-/// [`InMemoryState`] afterwards. Cloning it is two reference count increments.
-#[derive(Debug, Clone, Default)]
+/// [`InMemoryState`] afterwards. Cloning it is three reference count increments.
+#[derive(Debug, Clone)]
 pub struct InMemoryStateSnapshot<N: NodePrimitives = EthPrimitives> {
     blocks: InMemoryBlocksSnapshot<N>,
+    live: InMemoryState<N>,
 }
 
 impl<N: NodePrimitives> InMemoryStateSnapshot<N> {
-    /// Returns the state of the block with the given hash, canonical or not, as of the snapshot.
+    /// Returns the state of the block with the given hash, canonical or not: the one the
+    /// snapshot holds, or else the one the live state tracks now.
+    ///
+    /// Both lookups are safe to combine, because a hash names one block.
     pub fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
-        self.blocks.get(&hash).cloned()
+        self.blocks.get(&hash).cloned().or_else(|| self.live.state_by_hash(hash))
     }
 }
 
