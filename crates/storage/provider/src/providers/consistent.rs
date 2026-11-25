@@ -1323,14 +1323,14 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
-        // Wipe changesets are derived from the parent state when a block is persisted, so
-        // in-memory blocks have none yet.
-        self.changesets_range(
-            range,
-            PruneSegment::StorageHistory,
-            |db, range| db.storage_wipe_changesets_range(range),
-            |_, _| {},
-        )
+        let range = changeset_block_range(range, BlockNumber::MAX);
+        if range.is_empty() {
+            return Ok(Vec::new())
+        }
+        // Wipe changesets are only written to disk, when a block is persisted. Persisted blocks
+        // above the state/trie frontier stay in memory, so read the disk for the whole range.
+        self.ensure_changesets_available(PruneSegment::StorageHistory, *range.start())?;
+        self.storage_provider.storage_wipe_changesets_range(range)
     }
 }
 
@@ -2241,6 +2241,34 @@ mod tests {
             .account_changesets_range((Bound::Excluded(u64::MAX), Bound::Unbounded))?
             .is_empty());
         assert!(provider.account_changesets_range(..0)?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn storage_wipe_changesets_include_persisted_in_memory_blocks() -> eyre::Result<()> {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let row = StorageEntry::new(B256::with_last_byte(1), U256::from(7));
+        let provider_rw = factory.provider_rw()?;
+        provider_rw
+            .tx_ref()
+            .put::<tables::StorageWipeChangeSets>((1, Address::ZERO).into(), row)?;
+        provider_rw.commit()?;
+
+        // Block 1 is persisted but still in memory, as blocks above the state/trie frontier are.
+        let mut canonical_in_memory_state_writer =
+            test_canonical_in_memory_state_writer(InMemoryState::new().1);
+        canonical_in_memory_state_writer.update_chain(NewCanonicalChain::Commit {
+            new: vec![TestBlockBuilder::eth().get_executed_block_with_number(1, B256::ZERO)],
+        });
+        let provider = ConsistentProvider::new(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        )?;
+        assert_eq!(
+            provider.storage_wipe_changesets_range(1..=1)?,
+            [((1, Address::ZERO).into(), row)]
+        );
         Ok(())
     }
 
