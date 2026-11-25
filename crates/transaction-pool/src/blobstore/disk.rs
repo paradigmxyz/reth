@@ -665,10 +665,13 @@ impl DiskFileBlobStoreInner {
         data.encode(&mut buf);
 
         {
+            // Keep the index on a transaction that may hold the full blob.
             let mut map = self.versioned_hashes_to_txhash.lock();
-            data.versioned_hashes().for_each(|hash| {
-                map.insert(hash, tx);
-            });
+            for hash in data.versioned_hashes() {
+                if !map.contains(&hash) {
+                    map.insert(hash, tx);
+                }
+            }
         }
         self.cell_sidecars.write().insert(tx, data.is_recoverable());
 
@@ -1406,5 +1409,22 @@ mod tests {
             vec![Some(expected)]
         );
         assert!(!store.is_cached(&tx));
+    }
+
+    #[test]
+    fn disk_cells_keep_the_index_on_a_full_blob() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = DiskFileBlobStoreConfig::default().with_max_cached_entries(0);
+        let store = DiskFileBlobStore::open(dir.path(), config).unwrap();
+        let (sidecar, versioned_hash, expected) = eip7594_single_blob_sidecar();
+        store.insert(TxHash::random(), sidecar.into()).unwrap();
+        // Another transaction keeps one cell of the same blob.
+        store.insert_cells(TxHash::random(), single_cell_sidecar()).unwrap();
+
+        assert_eq!(store.has_versioned_hashes(&[versioned_hash]).unwrap(), vec![true]);
+        assert_eq!(
+            store.get_by_versioned_hashes_v3(&[versioned_hash]).unwrap(),
+            vec![Some(expected)]
+        );
     }
 }
