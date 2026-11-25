@@ -29,7 +29,9 @@ tracy-client = { workspace = true, optional = true }
 # misc
 clap = { workspace = true, features = ["derive"], optional = true }
 eyre = { workspace = true, optional = true }
-rolling-file = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [features]
 default = ["std"]
@@ -42,7 +44,6 @@ std = [
     "tracing-samply",
     "clap",
     "eyre",
-    "rolling-file",
     "tracing/std",
     "tracing-subscriber?/std",
 ]

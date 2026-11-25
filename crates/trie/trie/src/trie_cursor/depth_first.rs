@@ -278,7 +278,7 @@ mod tests {
         assert_eq!(paths[7], Nibbles::new()); // root (empty, parent of all)
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_empty_trie() {
         let factory = MockTrieCursorFactory::new(BTreeMap::new(), Default::default());
         let cursor = factory.account_trie_cursor().unwrap();
@@ -286,7 +286,7 @@ mod tests {
         assert!(iter.next().is_none());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_single_node() {
         let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
         let node = create_test_node(&[0x4], &[0x5]);
@@ -303,7 +303,7 @@ mod tests {
         assert!(iter.next().is_none());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_depth_first_order() {
         // Create a simple trie structure:
         // root
@@ -358,7 +358,7 @@ mod tests {
         assert_eq!(actual_order, expected_order);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_complex_tree() {
         // Create a more complex tree structure with multiple levels
         let nodes = vec![

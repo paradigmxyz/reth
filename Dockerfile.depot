@@ -44,6 +44,8 @@ ARG VERGEN_GIT_DIRTY="false"
 ENV VERGEN_GIT_SHA=$VERGEN_GIT_SHA
 ENV VERGEN_GIT_DESCRIBE=$VERGEN_GIT_DESCRIBE
 ENV VERGEN_GIT_DIRTY=$VERGEN_GIT_DIRTY
+# Stamp the real build time into the binary's version
+ENV VERGEN_IDEMPOTENT=0
 
 # Build application
 # Platform-specific RUSTFLAGS: amd64 uses x86-64-v3 (Haswell+) with pclmulqdq for rocksdb

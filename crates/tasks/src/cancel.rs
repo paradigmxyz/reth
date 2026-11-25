@@ -206,7 +206,7 @@ mod tests {
         assert!(!clone.is_finalization_requested());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_scope_is_cancelled() {
         assert!(!is_cancelled());
 
@@ -229,7 +229,7 @@ mod tests {
         assert!(!outer.is_cancelled());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_scope_restores_on_panic() {
         let cancel = CancelOnDrop::default();
         drop(cancel.clone());

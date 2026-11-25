@@ -91,6 +91,9 @@ use tracing::{instrument, Instrument};
 /// Default maximum connections allowed.
 const MAX_CONNECTIONS: u32 = 100;
 
+/// The shortest batch entry that is a valid request: a notification with an empty method name.
+const SHORTEST_BATCH_REQUEST: &str = r#"{"jsonrpc":"2.0","method":""}"#;
+
 /// JSON RPC server.
 pub struct Server<HttpMiddleware = Identity, RpcMiddleware = Identity> {
     listener: TcpListener,
@@ -246,7 +249,11 @@ pub enum BatchRequestConfig {
     /// Each batch request is limited to `len` and any batch request bigger than `len` will not be
     /// processed.
     Limit(u32),
-    /// The batch request is unlimited.
+    /// The batch request is limited only by the maximum request size.
+    ///
+    /// A batch may hold as many entries as the shortest valid requests that fit in that size, so
+    /// no batch of valid requests is rejected, but entries that aren't requests (`0` takes two
+    /// bytes) can't make a batch any longer.
     Unlimited,
 }
 
@@ -977,6 +984,9 @@ where
 /// Parses `body` as a single JSON-RPC message (`is_single`) or a batch, dispatches it to
 /// `rpc_service` and returns the serialized response.
 ///
+/// `max_request_size` is the request size limit the caller enforced on `body`, which bounds the
+/// entries of a [`BatchRequestConfig::Unlimited`] batch.
+///
 /// A panicking call is answered with an internal error. The caller sends the response only if it
 /// [is a method call](MethodResponse::is_method_call) or [a batch](MethodResponse::is_batch):
 /// notifications are not answered and subscription calls answer through the subscription sink.
@@ -984,6 +994,7 @@ pub async fn handle_rpc_call<S>(
     body: &[u8],
     is_single: bool,
     batch_config: BatchRequestConfig,
+    max_request_size: u32,
     rpc_service: &S,
 ) -> MethodResponse
 where
@@ -1015,7 +1026,12 @@ where
                 return rp;
             }
             BatchRequestConfig::Limit(limit) => limit as usize,
-            BatchRequestConfig::Unlimited => usize::MAX,
+            // Every entry is decoded and kept until the batch runs, and an entry that isn't a
+            // request can take two bytes. A valid request takes at least the shortest one and a
+            // separating comma, so this never rejects a batch of valid requests.
+            BatchRequestConfig::Unlimited => {
+                max_request_size as usize / (SHORTEST_BATCH_REQUEST.len() + 1)
+            }
         };
 
         match parse_batch(body, max_len) {
@@ -1288,5 +1304,38 @@ mod tests {
     #[test_case(b"[{\"jsonrpc\":\"2.0\",\"method\":\"m\"}]", 1; "notification")]
     fn batch_at_limit_is_accepted(body: &[u8], max_len: usize) {
         assert_eq!(parse_batch(body, max_len).unwrap().len(), max_len);
+    }
+
+    #[tokio::test]
+    async fn unlimited_batch_holds_what_fits_as_valid_requests() {
+        const MAX_REQUEST_SIZE: u32 = 1_000;
+        let max_len = MAX_REQUEST_SIZE as usize / (SHORTEST_BATCH_REQUEST.len() + 1);
+        let batch = |entry: &str, len: usize| format!("[{}]", vec![entry; len].join(","));
+        let service =
+            &RpcService::without_subscriptions(Methods::new(), usize::MAX, ConnectionId::default());
+        let call = |body: String| async move {
+            handle_rpc_call(
+                body.as_bytes(),
+                false,
+                BatchRequestConfig::Unlimited,
+                MAX_REQUEST_SIZE,
+                service,
+            )
+            .await
+        };
+
+        // The longest batch of valid requests within the request size limit is accepted.
+        let longest = batch(SHORTEST_BATCH_REQUEST, max_len);
+        assert!(longest.len() <= MAX_REQUEST_SIZE as usize);
+        assert!(batch(SHORTEST_BATCH_REQUEST, max_len + 1).len() > MAX_REQUEST_SIZE as usize);
+        assert!(call(longest).await.as_error_code().is_none());
+
+        // Shorter entries that aren't requests can't make the batch longer.
+        let invalid = batch("0", max_len + 1);
+        assert!(invalid.len() <= MAX_REQUEST_SIZE as usize);
+        assert_eq!(
+            call(invalid).await.into_json(),
+            MethodResponse::error(Id::Null, reject_too_big_batch_request(max_len)).into_json()
+        );
     }
 }

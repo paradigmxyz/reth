@@ -2,7 +2,7 @@ use alloy_consensus::BlockHeader as AlloyBlockHeader;
 use clap::{builder::RangedU64ValueParser, Parser};
 use metrics::{self, Counter};
 use reth_chainspec::EthChainSpec;
-use reth_cli_util::parse_socket_address;
+use reth_cli_util::{parse_socket_address, parsers::format_duration};
 use reth_db::DatabaseEnv;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -428,7 +428,7 @@ fn output_progress(last_account: Nibbles, start_time: Instant, inconsistent_node
 
     info!(
         progress_percent = progress_percent_str,
-        eta = %humantime::format_duration(eta_duration),
+        eta = %format_duration(eta_duration),
         inconsistent_nodes,
         "Repairing trie tables",
     );

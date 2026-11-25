@@ -464,7 +464,10 @@ where
         // as this indicates there's already a canonical block at that height.
         let is_fork = block_id.block.number <= self.state.tree_state.current_canonical_head.number;
 
-        let ctx = TreeCtx::new(&mut self.state, &self.canonical_in_memory_state);
+        let ctx = TreeCtx::new(
+            &mut self.state,
+            self.canonical_in_memory_state_writer.canonical_in_memory_state(),
+        );
 
         let start = Instant::now();
 
@@ -501,12 +504,17 @@ where
 
         let is_pending = self.state.tree_state.canonical_block_hash() ==
             executed.recovered_block().parent_hash();
-        self.state.tree_state.insert_executed(executed.clone());
 
         if is_pending {
             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
-            self.canonical_in_memory_state.set_pending_block(executed.clone());
+            self.canonical_in_memory_state_writer.set_pending_block(executed.clone());
+        } else {
+            self.canonical_in_memory_state_writer.insert_executed(executed.clone());
         }
+        self.state
+            .tree_state
+            .overlay_manager
+            .precompute_child_execution_overlays(executed.recovered_block().hash());
 
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
@@ -597,15 +605,18 @@ where
         error!(target: "engine::tree", payload=?payload_num_hash, %error, "Invalid payload");
         // we need to convert the error to a payload status (response to the CL)
 
-        let latest_valid_hash =
-            if error.is_block_hash_mismatch() || error.is_invalid_versioned_hashes() {
-                // Engine-API rules:
-                // > `latestValidHash: null` if the blockHash validation has failed (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/shanghai.md?plain=1#L113>)
-                // > `latestValidHash: null` if the expected and the actual arrays don't match (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md?plain=1#L103>)
-                None
-            } else {
-                self.latest_valid_hash_for_invalid_payload(parent_hash)?
-            };
+        let latest_valid_hash = if error.is_block_hash_mismatch() ||
+            error.is_invalid_versioned_hashes() ||
+            error.is_decode_error()
+        {
+            // Engine-API rules:
+            // > `latestValidHash: null` if the blockHash validation has failed (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/shanghai.md?plain=1#L113>)
+            // > `latestValidHash: null` if the expected and the actual arrays don't match (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md?plain=1#L103>)
+            // > `latestValidHash: null` if `transactions` contains zero length or invalid entries (<https://github.com/ethereum/execution-apis/blob/981aa66d79364be8322a9c358aaf0a571cca0873/src/engine/paris.md?plain=1#L175>)
+            None
+        } else {
+            self.latest_valid_hash_for_invalid_payload(parent_hash)?
+        };
 
         let status = PayloadStatusEnum::from(error);
         Ok(PayloadStatus::new(status, latest_valid_hash))

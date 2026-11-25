@@ -3,8 +3,13 @@
 mod block_state;
 pub use block_state::BlockState;
 
+mod blocks;
+
 mod canonical;
-pub use canonical::CanonicalInMemoryState;
+pub use canonical::{
+    CanonicalInMemoryState, CanonicalInMemoryStateWriter, InMemoryState, InMemoryStateBlockCounts,
+    InMemoryStateWriter,
+};
 
 mod executed_block;
 pub use executed_block::ExecutedBlock;

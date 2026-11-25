@@ -15,8 +15,8 @@ use reth_primitives_traits::{Block, BlockBody};
 use reth_storage_api::{BlockReader, BlockReaderIdExt};
 use reth_transaction_pool::TransactionPool;
 
-use chrono::Local;
 use futures_util::FutureExt;
+use jiff::Zoned;
 use serde_json::Value;
 use std::{
     str::FromStr,
@@ -233,7 +233,7 @@ where
         let ping_time = Instant::now();
         *self.last_ping.lock().await = Some(ping_time);
 
-        let client_time = Local::now().format("%Y-%m-%d %H:%M:%S%.f %:z %Z").to_string();
+        let client_time = Zoned::now().strftime("%Y-%m-%d %H:%M:%S%.f %:z %Z").to_string();
         let ping_msg = PingMsg { id: self.credentials.node_id.clone(), client_time };
 
         let message = ping_msg.generate_ping_message();
