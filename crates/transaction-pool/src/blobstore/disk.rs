@@ -17,7 +17,11 @@ use alloy_primitives::{
 use alloy_rlp::{Decodable, Encodable};
 use parking_lot::{Mutex, RwLock};
 use reth_lru::LruMap;
-use std::{fmt, fs, io, path::PathBuf, sync::Arc};
+use std::{
+    fmt, fs, io,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tracing::{debug, trace};
 
 /// How many [`BlobTransactionSidecarVariant`] to cache in memory.
@@ -585,7 +589,6 @@ impl DiskFileBlobStoreInner {
     ) -> Result<(), BlobStoreError> {
         let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
         data.rlp_encode_fields(&mut buf);
-        self.remove_cells(tx);
 
         {
             // cache the versioned hashes to tx hash
@@ -614,8 +617,7 @@ impl DiskFileBlobStoreInner {
             .map(|(tx, data)| {
                 let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
                 data.rlp_encode_fields(&mut buf);
-                self.remove_cells(*tx);
-                (self.blob_disk_file(*tx), buf)
+                (*tx, self.blob_disk_file(*tx), buf)
             })
             .collect::<Vec<_>>();
 
@@ -641,8 +643,18 @@ impl DiskFileBlobStoreInner {
         let mut num = 0;
         {
             let _lock = self.file_lock.write();
-            for (path, data) in raw {
-                if path.exists() {
+            for (tx, path, data) in raw {
+                let replaced = match self.replace_cells(tx, &path, &data) {
+                    Ok(replaced) => replaced,
+                    Err(err) => {
+                        debug!(target:"txpool::blob", %err, ?path, "Failed to replace cell file");
+                        continue
+                    }
+                };
+                if replaced {
+                    add += data.len();
+                    num += 1;
+                } else if path.exists() {
                     debug!(target:"txpool::blob", ?path, "Blob already exists");
                 } else if let Err(err) = fs::write(&path, &data) {
                     debug!(target:"txpool::blob", %err, ?path, "Failed to write blob file");
@@ -658,22 +670,21 @@ impl DiskFileBlobStoreInner {
         Ok(())
     }
 
-    // Deletes the cell sidecar file of `tx`, if any, so a full sidecar can replace it.
-    fn remove_cells(&self, tx: B256) {
-        if self.cell_sidecars.write().remove(&tx).is_none() {
-            return
+    // Replaces the cell file of `tx` at `path` with its full sidecar, returning `false` if there
+    // is none. The cell file is kept if this fails. Called with `file_lock` held for writing.
+    fn replace_cells(&self, tx: B256, path: &Path, data: &[u8]) -> io::Result<bool> {
+        if !self.cell_sidecars.read().contains_key(&tx) {
+            return Ok(false)
         }
+        let size = fs::metadata(path).map_or(0, |meta| meta.len());
+        let tmp = path.with_extension("tmp");
+        fs::write(&tmp, data)?;
+        fs::rename(&tmp, path)?;
+        self.cell_sidecars.write().remove(&tx);
         self.rebuilt.remove(&tx);
-        let path = self.blob_disk_file(tx);
-        let _lock = self.file_lock.write();
-        let size = fs::metadata(&path).map_or(0, |meta| meta.len());
-        match fs::remove_file(&path) {
-            Ok(()) => {
-                self.size_tracker.sub_size(size as usize);
-                self.size_tracker.sub_len(1);
-            }
-            Err(err) => debug!(target:"txpool::blob", %err, ?path, "Failed to remove cell file"),
-        }
+        self.size_tracker.sub_size(size as usize);
+        self.size_tracker.sub_len(1);
+        Ok(true)
     }
 
     // Writes a cell sidecar to disk, unless the transaction already has a sidecar.
@@ -689,13 +700,18 @@ impl DiskFileBlobStoreInner {
             recoverable: data.is_recoverable(),
             versioned_hashes: data.versioned_hashes().collect(),
         };
-        let size = self.write_one_encoded(tx, &buf)?;
-        // Nothing was written if a full sidecar landed first.
-        if size == 0 {
-            return Ok(())
+        let path = self.blob_disk_file(tx);
+        {
+            // Recorded under the lock, so a full sidecar written next replaces this file.
+            let _lock = self.file_lock.write();
+            // A full sidecar may have been written since.
+            if path.exists() {
+                return Ok(())
+            }
+            fs::write(&path, &buf).map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
+            self.cell_sidecars.write().insert(tx, file);
         }
-        self.cell_sidecars.write().insert(tx, file);
-        self.size_tracker.add_size(size);
+        self.size_tracker.add_size(buf.len());
         self.size_tracker.inc_len(1);
         Ok(())
     }
@@ -827,7 +843,7 @@ impl DiskFileBlobStoreInner {
         res
     }
 
-    /// Writes the blob data for the given transaction hash to the disk.
+    /// Writes the blob data for the given transaction hash to the disk, replacing its cell file.
     #[inline]
     fn write_one_encoded(&self, tx: B256, data: &[u8]) -> Result<usize, DiskFileBlobStoreError> {
         trace!(target:"txpool::blob", "[{:?}] writing blob file", tx);
@@ -835,7 +851,12 @@ impl DiskFileBlobStoreInner {
         let path = self.blob_disk_file(tx);
         {
             let _lock = self.file_lock.write();
-            if !path.exists() {
+            if self
+                .replace_cells(tx, &path, data)
+                .map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path.clone(), e))?
+            {
+                add = data.len();
+            } else if !path.exists() {
                 fs::write(&path, data)
                     .map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
                 add = data.len();
@@ -1033,6 +1054,9 @@ mod tests {
 
     use super::*;
     use std::sync::atomic::Ordering;
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     fn tmp_store() -> (DiskFileBlobStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -1494,5 +1518,31 @@ mod tests {
         ));
         assert!(store.inner.cell_sidecars.read().is_empty());
         assert_eq!(store.blobs_len(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn disk_failed_replacement_keeps_the_cell_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = DiskFileBlobStoreConfig::default().with_max_cached_entries(0);
+        let store = DiskFileBlobStore::open(dir.path(), config).unwrap();
+        let (sidecar, _, _) = eip7594_single_blob_sidecar();
+        let tx = TxHash::random();
+        let cells = single_cell_sidecar();
+        store.insert_cells(tx, cells.clone()).unwrap();
+        let cell_mask = BlobCellMask::from_bits(1);
+
+        let blob_dir = store.inner.blob_dir.clone();
+        let read_only = fs::Permissions::from_mode(0o555);
+        fs::set_permissions(&blob_dir, read_only).unwrap();
+        let result = store.insert(tx, sidecar.into());
+        fs::set_permissions(&blob_dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let Err(BlobStoreError::Other(err)) = result else { panic!("expected a write error") };
+        assert!(matches!(
+            err.downcast_ref::<DiskFileBlobStoreError>(),
+            Some(DiskFileBlobStoreError::WriteFile(failed, _, _)) if *failed == tx
+        ));
+        assert_eq!(store.get_cells(tx, cell_mask).unwrap(), cells.get_cells(cell_mask));
     }
 }
