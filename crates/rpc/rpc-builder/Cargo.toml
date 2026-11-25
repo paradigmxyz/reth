@@ -41,6 +41,7 @@ tower-http = { workspace = true, features = ["cors", "validate-request"] }
 tower.workspace = true
 http.workspace = true
 pin-project.workspace = true
+memchr.workspace = true
 
 # metrics
 reth-metrics = { workspace = true, features = ["common"] }

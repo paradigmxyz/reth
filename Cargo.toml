@@ -517,6 +517,7 @@ jiff = { version = "0.2.37", default-features = false, features = ["std"] }
 linked_hash_set = "0.1"
 libc = "0.2"
 lz4 = "1.28.1"
+memchr = "2.8"
 modular-bitfield = "0.13.1"
 notify = { version = "8.0.0", default-features = false, features = ["macos_fsevent"] }
 nybbles = { version = "0.4.8", default-features = false }

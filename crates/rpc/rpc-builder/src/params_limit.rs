@@ -9,6 +9,7 @@ use jsonrpsee::{
     },
     MethodResponse,
 };
+use memchr::{memchr2, memchr3};
 use std::future::{ready, Future};
 use tokio_util::either::Either;
 use tower::Layer;
@@ -97,31 +98,31 @@ where
 
 /// Returns whether the JSON in `params` holds more than `max` objects and arrays.
 ///
-/// `params` is valid JSON, so brackets only need to be told apart from string contents.
+/// `params` is valid JSON, so brackets only need to be told apart from string contents. The scan
+/// jumps between quotes, brackets and escapes with [`memchr`], so long strings cost little.
 fn exceeds_containers(params: &str, max: usize) -> bool {
+    let bytes = params.as_bytes();
     let mut containers = 0usize;
-    let mut in_string = false;
-    let mut escaped = false;
-    for &byte in params.as_bytes() {
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if byte == b'\\' {
-                escaped = true;
-            } else if byte == b'"' {
-                in_string = false;
+    let mut pos = 0;
+    while let Some(offset) = bytes.get(pos..).and_then(|rest| memchr3(b'"', b'{', b'[', rest)) {
+        pos += offset + 1;
+        if bytes[pos - 1] != b'"' {
+            containers += 1;
+            if containers > max {
+                return true
             }
             continue
         }
-        match byte {
-            b'"' => in_string = true,
-            b'{' | b'[' => {
-                containers += 1;
-                if containers > max {
-                    return true
-                }
+        // Skip to the string's closing quote, stepping over each escaped byte.
+        loop {
+            let Some(offset) = bytes.get(pos..).and_then(|rest| memchr2(b'"', b'\\', rest)) else {
+                return false
+            };
+            pos += offset + 1;
+            if bytes[pos - 1] == b'"' {
+                break
             }
-            _ => {}
+            pos += 1;
         }
     }
     false
@@ -136,6 +137,13 @@ mod tests {
         assert!(!exceeds_containers("[{},{}]", 3));
         assert!(exceeds_containers("[{},{},{}]", 3));
         assert!(!exceeds_containers("[1,\"0x00\",true,null]", 1));
+    }
+
+    #[test]
+    fn steps_over_escapes_at_string_end() {
+        assert!(!exceeds_containers(r#"["\\\\",{}]"#, 2));
+        assert!(!exceeds_containers(r#"["a\\\"[{"]"#, 1));
+        assert!(exceeds_containers(r#"["\\\\",{},[]]"#, 2));
     }
 
     #[test]
