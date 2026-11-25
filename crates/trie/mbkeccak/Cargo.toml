@@ -1,0 +1,14 @@
+[package]
+name = "mbkeccak"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+description = "Multi-buffer (SIMD-interleaved) Keccak-256 for many short messages such as trie nodes"
+publish = false
+
+[features]
+default = ["std"]
+std = []
+exp = []
+alloy = []

@@ -23,6 +23,9 @@ alloy-trie.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+mbkeccak = { path = "../mbkeccak", default-features = false, features = ["std"] }
+
 # misc
 either = { workspace = true, optional = true }
 rayon = { workspace = true, optional = true }
