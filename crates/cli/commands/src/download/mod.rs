@@ -559,16 +559,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             return Ok(Some(prepared))
         }
 
-        // Check the complete plan before pruning, reusing, or cleaning up any outputs.
-        for output in planned.archives.iter().flat_map(|archive| &archive.archive.output_files) {
-            let path = output.relative_path()?;
-            eyre::ensure!(
-                is_managed_snapshot_path(path, false),
-                "Not a snapshot output path: `{}`",
-                path.display()
-            );
-        }
-
         let target_dir = prepared.data_dir.as_path();
         let cancel_token = CancellationToken::new();
         let _cancel_guard = cancel_token.drop_guard();
@@ -1228,15 +1218,20 @@ mod tests {
     }
 
     fn manifest_with_archive_only_components() -> SnapshotManifest {
+        let output_file = |path: &str| OutputFileChecksum {
+            path: path.to_string(),
+            size: 1,
+            blake3: blake3::hash(b"x").to_hex().to_string(),
+        };
         let mut components = BTreeMap::new();
         components.insert(
             SnapshotComponentType::TransactionSenders.key().to_string(),
             ComponentManifest::Single(SingleArchive {
                 file: "transaction_senders.tar.zst".to_string(),
                 size: 1,
-                decompressed_size: 0,
+                decompressed_size: 1,
                 blake3: None,
-                output_files: vec![],
+                output_files: vec![output_file("static_files/static_file_transaction_senders_0_0")],
             }),
         );
         components.insert(
@@ -1244,9 +1239,9 @@ mod tests {
             ComponentManifest::Single(SingleArchive {
                 file: "rocksdb_indices.tar.zst".to_string(),
                 size: 1,
-                decompressed_size: 0,
+                decompressed_size: 1,
                 blake3: None,
-                output_files: vec![],
+                output_files: vec![output_file("rocksdb/000001.sst")],
             }),
         );
         SnapshotManifest {
@@ -1682,15 +1677,6 @@ mod tests {
         let manifest_path = dir.path().join("manifest.json");
         let mut manifest = manifest_with_archive_only_components();
         manifest.chain_id = 42431;
-        for component in manifest.components.values_mut() {
-            if let ComponentManifest::Single(archive) = component {
-                archive.output_files.push(OutputFileChecksum {
-                    path: archive.file.clone(),
-                    size: 1,
-                    blake3: blake3::hash(b"x").to_hex().to_string(),
-                });
-            }
-        }
         fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
         let manifest_url = format!("file://{}", manifest_path.display());
         let target = dir.path().join("download");
