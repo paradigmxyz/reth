@@ -171,7 +171,7 @@ where
             raw_tx_forwarder: ForwardConfig::default(),
             sender_recovery_cache: None,
             send_raw_transaction_sync_timeout: Duration::from_secs(30),
-            evm_memory_limit: (1 << 32) - 1,
+            evm_memory_limit: 100 * 1024 * 1024,
             force_blob_sidecar_upcasting: false,
         }
     }
@@ -651,7 +651,7 @@ where
         self
     }
 
-    /// Sets the maximum memory the EVM can allocate per RPC request.
+    /// Sets the maximum memory the EVM can allocate per call frame in an RPC request.
     pub const fn evm_memory_limit(mut self, memory_limit: u64) -> Self {
         self.evm_memory_limit = memory_limit;
         self
