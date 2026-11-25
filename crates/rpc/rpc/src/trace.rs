@@ -26,7 +26,7 @@ use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{LoadTransaction, Trace, TraceExt},
-    FromEthApiError, RpcNodeCore,
+    CallManyRequest, FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::EthApiError, utils::CallManyBudget, EthConfig};
 use reth_storage_api::{BlockNumReader, BlockReader};
@@ -741,10 +741,11 @@ where
     /// Handler for `trace_callMany`
     async fn trace_call_many(
         &self,
-        calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
+        calls: CallManyRequest<Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>>,
         block_id: Option<BlockId>,
     ) -> RpcResult<Vec<TraceResults>> {
         let _permit = self.acquire_trace_permit().await;
+        let calls = calls.into_inner()?;
         Self::trace_call_many(self, calls, block_id).await.map_err(Into::into)
     }
 
