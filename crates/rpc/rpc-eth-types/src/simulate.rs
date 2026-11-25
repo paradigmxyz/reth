@@ -438,7 +438,9 @@ where
         block_state_gas_used = block_state_gas_used.saturating_add(gas_output.state_gas_used());
     }
 
+    // The system calls that finish the block run under the block's limit.
     builder.evm_mut().set_memory_limit(block_memory_limit);
+
     let result = if let Some(simulation_state) = simulation_state {
         builder.finish_with_state_root(&state_provider, |output| {
             simulation_state

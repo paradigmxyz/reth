@@ -1309,6 +1309,7 @@ async fn rpc_evm_memory_limit_applies_to_all_call_methods() -> eyre::Result<()> 
     Ok(())
 }
 
+/// `eth_simulateV1` runs the block's system calls under the block's memory limit, not the RPC one.
 #[tokio::test]
 async fn simulate_system_calls_keep_block_evm_memory_limit() -> eyre::Result<()> {
     // Dequeuing a withdrawal request takes 76 bytes of memory, so a full queue needs more.

@@ -258,7 +258,7 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
     }
 
     fn set_memory_limit(&mut self, memory_limit: u64) {
-        let mut version = *evm2::Evm::version(self);
+        let mut version = *self.version();
         version.memory_limit = memory_limit;
         let config = Host::execution_config(self).clone().with_version(version);
         self.set_block_and_execution_config_within_spec(*self.block(), config);
