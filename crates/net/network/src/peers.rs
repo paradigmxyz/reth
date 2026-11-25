@@ -1002,6 +1002,9 @@ impl PeersManager {
         self.trusted_peer_ids.insert(peer_id);
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.kind = PeerKind::Trusted;
+        } else if let Some((addr, fork_id)) = self.candidates.remove(&peer_id) {
+            // trusted peers are not limited, so a queued endpoint can be tracked right away
+            self.add_peer_kind(peer_id, Some(PeerKind::Trusted), addr, fork_id);
         }
     }
 
@@ -1393,9 +1396,8 @@ impl PeersManager {
     /// Dials the oldest dial candidate, tracking it only until its session ends.
     fn dial_candidate(&mut self) {
         while let Some((peer_id, (addr, fork_id))) = self.candidates.pop_oldest() {
-            // it may have been added, trusted or banned since it was queued
+            // it may have been added or banned since it was queued
             if self.peers.contains_key(&peer_id) ||
-                self.trusted_peer_ids.contains(&peer_id) ||
                 self.ban_list.is_banned(&peer_id, &addr.tcp().ip())
             {
                 continue
@@ -4973,7 +4975,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_candidate_not_dialed_once_tracked_or_trusted() {
+    async fn test_candidate_dequeued_once_tracked_or_trusted() {
         let mut peers = PeersManager::new(PeersConfig::test());
         let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
         for _ in 0..MAX_TRACKED_PEERS {
@@ -4986,12 +4988,18 @@ mod tests {
         // connected since it was queued
         assert!(peers.on_incoming_pending_session(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8))).is_ok());
         peers.on_incoming_session_established(inbound, "5.6.7.8:40404".parse().unwrap());
-        // trusted since it was queued, so it is dialed as a trusted peer once known
+        // trusted since it was queued, so its endpoint is kept as a trusted peer
         peers.add_trusted_peer_id(trusted);
+        assert!(peers.peers[&trusted].is_trusted());
+        assert!(!peers.candidates.contains(&trusted));
 
+        peers.trusted_nodes_only = true;
+        peers.fill_outbound_slots();
+        assert!(peers.peers[&trusted].state.is_pending_out());
+
+        peers.trusted_nodes_only = false;
         peers.fill_outbound_slots();
         assert!(peers.peers[&inbound].state.is_incoming());
-        assert!(!peers.peers.contains_key(&trusted));
         assert!(peers.candidates.is_empty());
     }
 
