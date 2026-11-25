@@ -147,11 +147,10 @@ where
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let trace_limits = eth_api.trace_limits();
+                let inspector = new_debug_inspector(opts).map_err(Eth::Error::from_eth_err)?;
                 let mut response =
-                    ResponseBudget::new(&opts, eth_api.eth_api_settings().max_response_size);
-                let mut inspector = new_debug_inspector(opts)
-                    .map_err(Eth::Error::from_eth_err)?
-                    .with_limits(response.limit(trace_limits));
+                    ResponseBudget::new(&inspector, eth_api.eth_api_settings().max_response_size);
+                let mut inspector = inspector.with_limits(response.limit(trace_limits));
                 let mut executor = eth_api.block_executor(&block, &mut db, evm_env)?;
                 while let Some((index, tx)) = transactions.next() {
                     if is_cancelled() {
@@ -213,11 +212,8 @@ where
                 let block_env = *evm_env.block_env();
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let trace_limits = eth_api.trace_limits();
-                // Each block is its own subscription message.
-                let mut response =
-                    ResponseBudget::new(&opts, eth_api.eth_api_settings().max_response_size);
-                let mut inspector = match new_debug_inspector(opts) {
-                    Ok(inspector) => inspector.with_limits(response.limit(trace_limits)),
+                let inspector = match new_debug_inspector(opts) {
+                    Ok(inspector) => inspector,
                     Err(err) => {
                         if let Some((_, tx)) = transactions.peek() {
                             results.push(Some(TraceResult::Error {
@@ -229,6 +225,10 @@ where
                         return Ok(results)
                     }
                 };
+                // Each block is its own subscription message.
+                let mut response =
+                    ResponseBudget::new(&inspector, eth_api.eth_api_settings().max_response_size);
+                let mut inspector = inspector.with_limits(response.limit(trace_limits));
                 let mut executor = eth_api.block_executor(&block, &mut db, evm_env)?;
 
                 while let Some((index, tx)) = transactions.next() {
@@ -398,14 +398,11 @@ where
                     tx_info.index.expect("transaction_and_block only returns block transactions")
                         as usize;
 
+                let inspector = new_debug_inspector(opts).map_err(Eth::Error::from_eth_err)?;
                 let limits =
-                    ResponseBudget::new(&opts, eth_api.eth_api_settings().max_response_size)
+                    ResponseBudget::new(&inspector, eth_api.eth_api_settings().max_response_size)
                         .limit(eth_api.trace_limits());
-                let inspector = tracer_interrupt.attach(
-                    new_debug_inspector(opts)
-                        .map_err(Eth::Error::from_eth_err)?
-                        .with_limits(limits),
-                );
+                let inspector = tracer_interrupt.attach(inspector.with_limits(limits));
                 let tx_env = eth_api.evm_config().tx_env(tx);
                 let (mut inspector, res, evm_env) = eth_api.inspect_transaction_in_block(
                     &block,
@@ -470,16 +467,14 @@ where
         let this = self.clone();
         let trace =
             self.eth_api().spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
+                let inspector =
+                    new_debug_inspector(tracing_options).map_err(Eth::Error::from_eth_err)?;
                 let limits = ResponseBudget::new(
-                    &tracing_options,
+                    &inspector,
                     this.eth_api().eth_api_settings().max_response_size,
                 )
                 .limit(this.eth_api().trace_limits());
-                let inspector = tracer_interrupt.attach(
-                    new_debug_inspector(tracing_options)
-                        .map_err(Eth::Error::from_eth_err)?
-                        .with_limits(limits),
-                );
+                let inspector = tracer_interrupt.attach(inspector.with_limits(limits));
                 let (mut inspector, res) =
                     this.eth_api().inspect(&mut *db, evm_env.clone(), &tx_env, inspector)?;
                 let trace = inspector
@@ -542,16 +537,12 @@ where
                 let (evm_env, tx_env) =
                     eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 
-                let limits = ResponseBudget::new(
-                    &tracing_options,
-                    eth_api.eth_api_settings().max_response_size,
-                )
-                .limit(eth_api.trace_limits());
-                let inspector = tracer_interrupt.attach(
-                    new_debug_inspector(tracing_options)
-                        .map_err(Eth::Error::from_eth_err)?
-                        .with_limits(limits),
-                );
+                let inspector =
+                    new_debug_inspector(tracing_options).map_err(Eth::Error::from_eth_err)?;
+                let limits =
+                    ResponseBudget::new(&inspector, eth_api.eth_api_settings().max_response_size)
+                        .limit(eth_api.trace_limits());
+                let inspector = tracer_interrupt.attach(inspector.with_limits(limits));
                 let (mut inspector, res) =
                     eth_api.inspect(&mut db, evm_env.clone(), &tx_env, inspector)?;
                 let trace = inspector
@@ -627,13 +618,11 @@ where
                 let mut bundles = bundles.into_iter().peekable();
                 let trace_limits = eth_api.trace_limits();
                 // All bundles share one response.
-                let mut response = ResponseBudget::new(
-                    &tracing_options,
-                    eth_api.eth_api_settings().max_response_size,
-                );
-                let mut inspector = new_debug_inspector(tracing_options.clone())
-                    .map_err(Eth::Error::from_eth_err)?
-                    .with_limits(response.limit(trace_limits));
+                let inspector = new_debug_inspector(tracing_options.clone())
+                    .map_err(Eth::Error::from_eth_err)?;
+                let mut response =
+                    ResponseBudget::new(&inspector, eth_api.eth_api_settings().max_response_size);
+                let mut inspector = inspector.with_limits(response.limit(trace_limits));
                 while let Some(bundle) = bundles.next() {
                     let mut results = Vec::with_capacity(bundle.transactions.len());
                     let Bundle { transactions, block_override } = bundle;
@@ -970,10 +959,19 @@ struct ResponseBudget {
 }
 
 impl ResponseBudget {
-    /// Creates the budget of a response traced with `opts`, whose size is limited to
+    /// Creates the budget of a response traced by `inspector`, whose size is limited to
     /// `max_response_size` bytes.
-    const fn new(opts: &GethDebugTracingOptions, max_response_size: Option<usize>) -> Self {
-        Self { remaining: if opts.tracer.is_none() { max_response_size } else { None } }
+    ///
+    /// Decided by the inspector rather than the request's options, since the inspector also
+    /// treats an empty tracer name as the default struct logger.
+    const fn new(inspector: &DebugInspector, max_response_size: Option<usize>) -> Self {
+        Self {
+            remaining: if matches!(inspector, DebugInspector::RawDefault(_)) {
+                max_response_size
+            } else {
+                None
+            },
+        }
     }
 
     /// Returns `limits` with the byte limit lowered to the bytes left in the response.
@@ -1930,6 +1928,12 @@ mod tests {
 
         let api = debug_api(Some(logs_len / 2));
         let err = api.debug_trace_call(call.clone(), None, Default::default()).await.unwrap_err();
+        assert_eq!(err.to_string(), exceeded);
+
+        // An empty tracer name selects the default struct logger too.
+        let opts: GethDebugTracingCallOptions =
+            serde_json::from_value(serde_json::json!({ "tracer": "" })).unwrap();
+        let err = api.debug_trace_call(call.clone(), None, opts).await.unwrap_err();
         assert_eq!(err.to_string(), exceeded);
 
         // Other tracers record data of a different size than their JSON.
