@@ -48,11 +48,10 @@ pub enum EthVersion {
 }
 
 impl EthVersion {
-    /// The latest eth version enabled by default.
-    /// Sparse blobpool versions remain opt-in until automatic cell fetching is implemented.
+    /// The latest known eth version
     pub const LATEST: Self = Self::Eth71;
 
-    /// Eth versions enabled by default, ordered from newest to oldest.
+    /// All known eth versions
     pub const ALL_VERSIONS: &'static [Self] =
         &[Self::Eth71, Self::Eth70, Self::Eth69, Self::Eth68, Self::Eth67, Self::Eth66];
 

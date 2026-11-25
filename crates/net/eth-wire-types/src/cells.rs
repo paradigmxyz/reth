@@ -57,7 +57,7 @@ impl CellMasks {
             return Err(Error::Custom("invalid indexed cell counts"))
         }
         let mut next = 0;
-        for &id in mask_ids.iter() {
+        for &id in mask_ids {
             let id = usize::from(id);
             if id >= masks.len() || id > next {
                 return Err(Error::Custom("invalid cell mask identifier order"))
