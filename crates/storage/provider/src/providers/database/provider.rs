@@ -1663,18 +1663,11 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
-        if self.cached_storage_settings().storage_v2 {
-            self.static_file_provider.storage_changesets_range(range)
-        } else {
-            self.tx
-                .cursor_dup_read::<tables::StorageChangeSets>()?
-                .walk_range(BlockNumberAddressRange::from(range))?
-                .map(|r| {
-                    let (bna, entry) = r?;
-                    Ok((bna, entry))
-                })
-                .collect()
-        }
+        let mut changesets = Vec::new();
+        self.for_each_storage_changeset(range, |block_address, entry| {
+            changesets.push((block_address, entry))
+        })?;
+        Ok(changesets)
     }
 
     fn for_each_storage_changeset(
@@ -1749,15 +1742,11 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         &self,
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
-        if self.cached_storage_settings().storage_v2 {
-            self.static_file_provider.account_changesets_range(range)
-        } else {
-            self.tx
-                .cursor_read::<tables::AccountChangeSets>()?
-                .walk_range(to_range(range))?
-                .map(|r| r.map_err(Into::into))
-                .collect()
-        }
+        let mut changesets = Vec::new();
+        self.for_each_account_changeset(range, |block_number, changeset| {
+            changesets.push((block_number, changeset))
+        })?;
+        Ok(changesets)
     }
 
     fn for_each_account_changeset(
