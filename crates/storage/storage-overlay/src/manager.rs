@@ -561,6 +561,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 }
                 None => ComputeOverlayInput::MergeBlocks(blocks),
             };
+            metrics.record_cache_fill();
             let input = Arc::new(compute(compute_input, span));
             cache.set_unmanaged(key, Arc::clone(&input));
             return Ok(Some(input))
