@@ -277,7 +277,9 @@ impl ArchiveFetcher {
             let existing_size =
                 fs::metadata(self.paths.part_path()).map(|meta| meta.len()).unwrap_or(0);
 
+            // A missing `.part` reads as zero bytes; a zero-size archive still needs a request.
             if let Some(total) = total_size &&
+                existing_size > 0 &&
                 existing_size >= total
             {
                 return self.finalize_download(total)
@@ -1766,6 +1768,20 @@ mod tests {
             "Server sent more data for archive.tar.zst than the 10 bytes at offset 0"
         );
         assert!(!dir.path().join("archive.tar.zst.part").exists());
+    }
+
+    #[test]
+    fn sequential_download_accepts_declared_zero_size() {
+        let url = spawn_response_server(vec![
+            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new());
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(0));
+
+        let downloaded = fetcher.download(None, None).unwrap();
+
+        assert!(std::fs::read(downloaded.path).unwrap().is_empty());
     }
 
     #[test]
