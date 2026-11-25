@@ -77,6 +77,48 @@ pub struct PooledTransactions<T = PooledTransaction>(
     pub Vec<T>,
 );
 
+impl<T: Decodable + InMemorySize> PooledTransactions<T> {
+    /// Decodes the RLP list of transactions, stopping once the cumulative
+    /// [`InMemorySize`] of decoded transactions exceeds `memory_budget` bytes.
+    /// Any remaining transactions in the payload are skipped.
+    pub fn decode_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        decode_list_with_memory_budget(buf, memory_budget).map(Self)
+    }
+}
+
+impl<T: TxHashRef> PooledTransactions<T> {
+    /// Returns an iterator over the transaction hashes in this response.
+    pub fn hashes(&self) -> impl Iterator<Item = B256> + '_ {
+        self.iter().map(|tx| *tx.tx_hash())
+    }
+}
+
+impl<T, U> TryFrom<Vec<U>> for PooledTransactions<T>
+where
+    T: TryFrom<U>,
+{
+    type Error = T::Error;
+
+    fn try_from(txs: Vec<U>) -> Result<Self, Self::Error> {
+        txs.into_iter().map(T::try_from).collect()
+    }
+}
+
+impl<T> FromIterator<T> for PooledTransactions<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl<T> Default for PooledTransactions<T> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
 /// An eth/72 `PooledTransactions` response.
 ///
 /// eth/72 drops the blobs from type 3 transactions, which keep their commitments and proofs,
@@ -175,48 +217,6 @@ fn eip4844_without_blobs_headers(
     };
     let envelope = Header { list: false, payload_length: 1 + fields.length_with_payload() };
     (envelope, fields)
-}
-
-impl<T: Decodable + InMemorySize> PooledTransactions<T> {
-    /// Decodes the RLP list of transactions, stopping once the cumulative
-    /// [`InMemorySize`] of decoded transactions exceeds `memory_budget` bytes.
-    /// Any remaining transactions in the payload are skipped.
-    pub fn decode_with_memory_budget(
-        buf: &mut &[u8],
-        memory_budget: usize,
-    ) -> alloy_rlp::Result<Self> {
-        decode_list_with_memory_budget(buf, memory_budget).map(Self)
-    }
-}
-
-impl<T: TxHashRef> PooledTransactions<T> {
-    /// Returns an iterator over the transaction hashes in this response.
-    pub fn hashes(&self) -> impl Iterator<Item = B256> + '_ {
-        self.iter().map(|tx| *tx.tx_hash())
-    }
-}
-
-impl<T, U> TryFrom<Vec<U>> for PooledTransactions<T>
-where
-    T: TryFrom<U>,
-{
-    type Error = T::Error;
-
-    fn try_from(txs: Vec<U>) -> Result<Self, Self::Error> {
-        txs.into_iter().map(T::try_from).collect()
-    }
-}
-
-impl<T> FromIterator<T> for PooledTransactions<T> {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        Self(iter.into_iter().collect())
-    }
-}
-
-impl<T> Default for PooledTransactions<T> {
-    fn default() -> Self {
-        Self(Default::default())
-    }
 }
 
 /// A list of transaction hashes and the cell indices requested for each transaction.

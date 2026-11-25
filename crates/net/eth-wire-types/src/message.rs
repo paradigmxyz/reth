@@ -900,6 +900,89 @@ mod tests {
     }
 
     #[test]
+    fn test_removed_message_at_eth67() {
+        let get_node_data = EthMessage::<EthNetworkPrimitives>::GetNodeData(RequestPair {
+            request_id: 1337,
+            message: GetNodeData(vec![]),
+        });
+        let buf = encode(ProtocolMessage {
+            message_type: EthMessageID::GetNodeData,
+            message: get_node_data,
+        });
+        let msg = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            crate::EthVersion::Eth67,
+            &mut &buf[..],
+        );
+        assert!(matches!(msg, Err(MessageError::Invalid(..))));
+
+        let node_data = EthMessage::<EthNetworkPrimitives>::NodeData(RequestPair {
+            request_id: 1337,
+            message: NodeData(vec![]),
+        });
+        let buf =
+            encode(ProtocolMessage { message_type: EthMessageID::NodeData, message: node_data });
+        let msg = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            crate::EthVersion::Eth67,
+            &mut &buf[..],
+        );
+        assert!(matches!(msg, Err(MessageError::Invalid(..))));
+    }
+
+    #[test]
+    fn test_bal_message_version_gating() {
+        let get_block_access_lists =
+            EthMessage::<EthNetworkPrimitives>::GetBlockAccessLists(RequestPair {
+                request_id: 1337,
+                message: GetBlockAccessLists(vec![]),
+            });
+        let buf = encode(ProtocolMessage {
+            message_type: EthMessageID::GetBlockAccessLists,
+            message: get_block_access_lists,
+        });
+        let msg = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth70,
+            &mut &buf[..],
+        );
+        assert!(matches!(
+            msg,
+            Err(MessageError::Invalid(EthVersion::Eth70, EthMessageID::GetBlockAccessLists))
+        ));
+
+        let block_access_lists =
+            EthMessage::<EthNetworkPrimitives>::BlockAccessLists(RequestPair {
+                request_id: 1337,
+                message: BlockAccessLists(vec![]),
+            });
+        let buf = encode(ProtocolMessage {
+            message_type: EthMessageID::BlockAccessLists,
+            message: block_access_lists,
+        });
+        let msg = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth70,
+            &mut &buf[..],
+        );
+        assert!(matches!(
+            msg,
+            Err(MessageError::Invalid(EthVersion::Eth70, EthMessageID::BlockAccessLists))
+        ));
+    }
+
+    #[test]
+    fn test_bal_message_eth71_roundtrip() {
+        let msg = ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::GetBlockAccessLists(
+            RequestPair { request_id: 42, message: GetBlockAccessLists(vec![]) },
+        ));
+        let encoded = encode(msg.clone());
+        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth71,
+            &mut &encoded[..],
+        )
+        .unwrap();
+
+        assert_eq!(decoded, msg);
+    }
+
+    #[test]
     fn eth72_cell_packets_match_geth_vectors() {
         // Generated with Geth 24b38e763fdd7dee8b91007d5f1a94cd21c9a7f0.
         let mask = B128::from((1u128 | (1 << 8) | (1 << 127)).to_le_bytes());
@@ -996,89 +1079,6 @@ mod tests {
                 message: PooledTransactionsEth72(Vec::new()),
             })
         );
-    }
-
-    #[test]
-    fn test_removed_message_at_eth67() {
-        let get_node_data = EthMessage::<EthNetworkPrimitives>::GetNodeData(RequestPair {
-            request_id: 1337,
-            message: GetNodeData(vec![]),
-        });
-        let buf = encode(ProtocolMessage {
-            message_type: EthMessageID::GetNodeData,
-            message: get_node_data,
-        });
-        let msg = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
-            crate::EthVersion::Eth67,
-            &mut &buf[..],
-        );
-        assert!(matches!(msg, Err(MessageError::Invalid(..))));
-
-        let node_data = EthMessage::<EthNetworkPrimitives>::NodeData(RequestPair {
-            request_id: 1337,
-            message: NodeData(vec![]),
-        });
-        let buf =
-            encode(ProtocolMessage { message_type: EthMessageID::NodeData, message: node_data });
-        let msg = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
-            crate::EthVersion::Eth67,
-            &mut &buf[..],
-        );
-        assert!(matches!(msg, Err(MessageError::Invalid(..))));
-    }
-
-    #[test]
-    fn test_bal_message_version_gating() {
-        let get_block_access_lists =
-            EthMessage::<EthNetworkPrimitives>::GetBlockAccessLists(RequestPair {
-                request_id: 1337,
-                message: GetBlockAccessLists(vec![]),
-            });
-        let buf = encode(ProtocolMessage {
-            message_type: EthMessageID::GetBlockAccessLists,
-            message: get_block_access_lists,
-        });
-        let msg = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
-            EthVersion::Eth70,
-            &mut &buf[..],
-        );
-        assert!(matches!(
-            msg,
-            Err(MessageError::Invalid(EthVersion::Eth70, EthMessageID::GetBlockAccessLists))
-        ));
-
-        let block_access_lists =
-            EthMessage::<EthNetworkPrimitives>::BlockAccessLists(RequestPair {
-                request_id: 1337,
-                message: BlockAccessLists(vec![]),
-            });
-        let buf = encode(ProtocolMessage {
-            message_type: EthMessageID::BlockAccessLists,
-            message: block_access_lists,
-        });
-        let msg = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
-            EthVersion::Eth70,
-            &mut &buf[..],
-        );
-        assert!(matches!(
-            msg,
-            Err(MessageError::Invalid(EthVersion::Eth70, EthMessageID::BlockAccessLists))
-        ));
-    }
-
-    #[test]
-    fn test_bal_message_eth71_roundtrip() {
-        let msg = ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::GetBlockAccessLists(
-            RequestPair { request_id: 42, message: GetBlockAccessLists(vec![]) },
-        ));
-        let encoded = encode(msg.clone());
-        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
-            EthVersion::Eth71,
-            &mut &encoded[..],
-        )
-        .unwrap();
-
-        assert_eq!(decoded, msg);
     }
 
     #[test]
