@@ -33,10 +33,6 @@ where
     provider.for_each_account_changeset(range.clone(), |_, AccountBeforeTx { address, .. }| {
         account_addresses.insert(address);
     })?;
-    let mut storage_slots = AddressMap::<B256Set>::default();
-    provider.for_each_storage_changeset(range, |BlockNumberAddress((_, address)), entry| {
-        storage_slots.entry(address).or_default().insert(entry.key);
-    })?;
 
     let mut prefix_sets = TriePrefixSetsMut::default();
 
@@ -51,6 +47,12 @@ where
             prefix_sets.destroyed_accounts.insert(hashed_address);
         }
     }
+
+    // Storage is scanned after the account loop, so the hashed addresses are already dropped.
+    let mut storage_slots = AddressMap::<B256Set>::default();
+    provider.for_each_storage_changeset(range, |BlockNumberAddress((_, address)), entry| {
+        storage_slots.entry(address).or_default().insert(entry.key);
+    })?;
 
     // An address can also be in the account changesets. `PrefixSetMut::freeze` removes the
     // duplicate account prefix.
