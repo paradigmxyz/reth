@@ -780,12 +780,15 @@ impl PeersManager {
     /// Called when a _pending_ outbound connection is successful.
     pub(crate) fn on_active_outgoing_established(&mut self, peer_id: PeerId) {
         let at_capacity = self.connection_info.is_outbound_at_capacity();
-        let has_room = self.peers.len() <= MAX_TRACKED_PEERS;
+        // `Self::remove_peer` drops pending dials outright, so only a dialed candidate is
+        // temporary here. It is kept once its session succeeds if the peer set has room, not
+        // counting other temporary rows. Candidate dials are rare, so the scan is cheap.
+        let keep = self.peers.get(&peer_id).is_some_and(|peer| peer.remove_after_disconnect) &&
+            self.peers.values().filter(|peer| !peer.remove_after_disconnect).count() <
+                MAX_TRACKED_PEERS;
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             trace!(target: "net::peers", ?peer_id, "established active outgoing connection");
-            // `Self::remove_peer` drops pending dials outright, so only a dialed candidate is
-            // temporary here, and it is kept once its session succeeds if the peer set has room.
-            if has_room {
+            if keep {
                 peer.remove_after_disconnect = false;
             }
             self.connection_info.decr_state(peer.state);
@@ -5039,19 +5042,27 @@ mod tests {
     async fn test_candidate_kept_after_session_once_set_has_room() {
         let mut peers = PeersManager::new(PeersConfig::test());
         let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        // tracked peers are backed off, so every free slot goes to a candidate
         for _ in 0..MAX_TRACKED_PEERS {
-            peers.add_peer(PeerId::random(), addr, None);
+            let peer_id = PeerId::random();
+            peers.add_peer(peer_id, addr, None);
+            peers.peers.get_mut(&peer_id).unwrap().backed_off = true;
         }
-        let candidate = PeerId::random();
-        peers.add_peer(candidate, addr, None);
+        let [first, second] = [PeerId::random(), PeerId::random()];
+        peers.add_peer(first, addr, None);
+        peers.add_peer(second, addr, None);
         let tracked = *peers.peers.keys().next().unwrap();
         peers.remove_peer(tracked);
 
-        // kept only once its session succeeds
+        // both are dialed for the one free slot, and kept only once their session succeeds
         peers.fill_outbound_slots();
-        assert!(peers.peers[&candidate].remove_after_disconnect);
-        peers.on_active_outgoing_established(candidate);
-        assert!(!peers.peers[&candidate].remove_after_disconnect);
+        peers.fill_outbound_slots();
+        assert!(peers.peers[&first].remove_after_disconnect);
+        assert!(peers.peers[&second].remove_after_disconnect);
+        peers.on_active_outgoing_established(first);
+        peers.on_active_outgoing_established(second);
+        assert!(!peers.peers[&first].remove_after_disconnect);
+        assert!(peers.peers[&second].remove_after_disconnect);
     }
 
     #[tokio::test]
