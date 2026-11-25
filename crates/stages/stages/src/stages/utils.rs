@@ -1,5 +1,8 @@
 //! Utils for `stages`.
-use alloy_primitives::{map::HashMap, Address, BlockNumber, TxNumber, B256};
+use alloy_primitives::{
+    map::{AddressMap, HashMap},
+    Address, BlockNumber, TxNumber, B256,
+};
 use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -20,8 +23,12 @@ use reth_provider::{
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
-use std::{hash::Hash, mem::size_of, ops::RangeBounds};
-use tracing::info;
+use std::{
+    hash::{BuildHasher, Hash},
+    mem::size_of,
+    ops::RangeBounds,
+};
+use tracing::{debug, info};
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
@@ -58,7 +65,8 @@ where
 {
     let mut changeset_cursor = provider.tx_ref().cursor_read::<CS>()?;
 
-    let mut cache = HistoryIndexCache::new(etl_config, sharded_key_factory);
+    let mut cache =
+        HistoryIndexCache::new(etl_config, HashMap::<_, _>::default(), sharded_key_factory);
 
     // observability
     let total_changesets = provider.tx_ref().entries::<CS>()?;
@@ -85,7 +93,7 @@ pub(crate) fn collect_account_history_indices<Provider>(
 where
     Provider: DBProvider + ChangeSetReader + StaticFileProviderFactory,
 {
-    let mut cache = HistoryIndexCache::new(etl_config, ShardedKey::new);
+    let mut cache = HistoryIndexCache::new(etl_config, AddressMap::default(), ShardedKey::new);
 
     // Convert range bounds to concrete range
     let range = to_range(range);
@@ -122,6 +130,7 @@ where
 {
     let mut cache = HistoryIndexCache::new(
         etl_config,
+        HashMap::<_, _>::default(),
         |AddressStorageKey((address, storage_key)), highest_block_number| {
             StorageShardedKey::new(address, storage_key, highest_block_number)
         },
@@ -548,36 +557,36 @@ where
 ///
 /// The cache moves its entries to the collector at the first block boundary after
 /// [`DEFAULT_CACHE_THRESHOLD`] blocks, or after its estimated heap use reaches half the ETL file
-/// size, whichever comes first. The collector also buffers up to the ETL file size in memory
-/// before it spills to disk, so by estimate the two together stay under 1.5 times that size. The
-/// size bound keeps memory independent of the number of distinct keys in the block range. Entries
-/// move only at block boundaries, so two collector entries of one key never end at the same block.
-struct HistoryIndexCache<P, K: Key, F> {
+/// size, whichever comes first, so the cache does not grow with the number of distinct keys in the
+/// block range. Entries move only at block boundaries, so two collector entries of one key never
+/// end at the same block.
+struct HistoryIndexCache<P, K: Key, F, S> {
     collector: Collector<K, BlockNumberList>,
     /// Creates the collector key from a partial key and its highest block number.
     sharded_key: F,
-    indices: HashMap<P, Vec<u64>>,
+    indices: HashMap<P, Vec<u64>, S>,
     /// Estimated heap bytes held by `indices`.
     size_bytes: usize,
     /// Value of `size_bytes` at which the cache flushes on the next block boundary.
     max_size_bytes: usize,
-    /// Number of blocks inserted since the last flush.
+    /// Number of blocks inserted since the last [`DEFAULT_CACHE_THRESHOLD`] flush.
     blocks: u64,
     /// Block number of the last insert.
     current_block: Option<BlockNumber>,
 }
 
-impl<P, K, F> HistoryIndexCache<P, K, F>
+impl<P, K, F, S> HistoryIndexCache<P, K, F, S>
 where
     P: Eq + Hash,
     K: Key,
     F: Fn(P, BlockNumber) -> K,
+    S: BuildHasher,
 {
-    fn new(etl_config: &EtlConfig, sharded_key: F) -> Self {
+    fn new(etl_config: &EtlConfig, indices: HashMap<P, Vec<u64>, S>, sharded_key: F) -> Self {
         Self {
             collector: Collector::new(etl_config.file_size, etl_config.dir.clone()),
             sharded_key,
-            indices: HashMap::default(),
+            indices,
             size_bytes: 0,
             max_size_bytes: etl_config.file_size / 2,
             blocks: 0,
@@ -587,14 +596,25 @@ where
 
     /// Adds `block_number` to the indices of `key`.
     ///
-    /// Block numbers must not decrease between calls. Returns `true` if the cache flushed to the
-    /// collector before the insert.
+    /// Block numbers must not decrease between calls. Returns `true` if the cache reached
+    /// [`DEFAULT_CACHE_THRESHOLD`] blocks and flushed to the collector before the insert. A flush
+    /// at the size bound does not reset the block count, so the `true` results keep a fixed cadence
+    /// for progress logs.
     fn insert(&mut self, block_number: BlockNumber, key: P) -> Result<bool, StageError> {
         let mut flushed = false;
         if self.current_block != Some(block_number) {
-            if self.blocks >= DEFAULT_CACHE_THRESHOLD || self.size_bytes >= self.max_size_bytes {
+            if self.blocks >= DEFAULT_CACHE_THRESHOLD {
                 self.flush()?;
+                self.blocks = 0;
                 flushed = true;
+            } else if self.size_bytes >= self.max_size_bytes {
+                debug!(
+                    target: "sync::stages::index_history",
+                    current_block = block_number,
+                    size_bytes = self.size_bytes,
+                    "Flushing history index cache at size bound"
+                );
+                self.flush()?;
             }
             self.current_block = Some(block_number);
             self.blocks += 1;
@@ -620,7 +640,6 @@ where
                 .insert((self.sharded_key)(key, last), BlockNumberList::new_pre_sorted(indices))?;
         }
         self.size_bytes = 0;
-        self.blocks = 0;
         Ok(())
     }
 
@@ -639,19 +658,16 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     #[test]
-    fn history_index_cache_stays_under_size_bound() {
+    fn history_index_cache_flushes_by_size() {
         const KEYS_PER_BLOCK: usize = 50;
         const BLOCKS: u64 = 2_000;
-        let etl_file_size = 128 * 1024;
-        let max_size_bytes = etl_file_size / 2;
 
         let mut rng = generators::rng();
-        let mut cache =
-            HistoryIndexCache::new(&EtlConfig::new(None, etl_file_size), ShardedKey::new);
-        // Entries move to the collector only at block boundaries, so the cache can exceed the
-        // bound by the indices of one block: a new key and a grown `Vec` for each change.
-        let max_block_bytes =
-            KEYS_PER_BLOCK * (size_of::<(Address, Vec<u64>)>() + 1 + 4 * size_of::<u64>());
+        let mut cache = HistoryIndexCache::new(
+            &EtlConfig::new(None, 128 * 1024),
+            AddressMap::default(),
+            ShardedKey::new,
+        );
         let mut history = BTreeMap::<Address, Vec<u64>>::new();
         let mut flushes = 0;
         for block in 0..BLOCKS {
@@ -659,8 +675,11 @@ mod tests {
                 .map(|_| Address::left_padding_from(&rng.random_range(0..20_000u64).to_be_bytes()))
                 .collect::<BTreeSet<_>>();
             for address in addresses {
-                flushes += cache.insert(block, address).unwrap() as usize;
-                assert!(cache.size_bytes < max_size_bytes + max_block_bytes);
+                let size_bytes = cache.size_bytes;
+                // The block threshold does not fire in `BLOCKS` blocks, so all flushes come from
+                // the size bound.
+                assert!(!cache.insert(block, address).unwrap());
+                flushes += (cache.size_bytes < size_bytes) as usize;
                 history.entry(address).or_default().push(block);
             }
         }

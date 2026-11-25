@@ -914,8 +914,13 @@ mod tests {
             let num_blocks = (NUM_OF_INDICES_IN_SHARD * 2 + 100) as u64;
             setup_v2_storage_data(&db, 0..=num_blocks - 1);
 
+            // A small ETL file size makes the cache flush every few dozen blocks, so the history
+            // of the slot spans many collector entries.
             let input = ExecInput { target: Some(num_blocks - 1), ..Default::default() };
-            let mut stage = IndexStorageHistoryStage::default();
+            let mut stage = IndexStorageHistoryStage {
+                etl_config: EtlConfig::new(None, 1024),
+                ..Default::default()
+            };
             let provider = db.factory.database_provider_rw().unwrap();
             let out = stage.execute(&provider, input).unwrap();
             assert_eq!(out, ExecOutput::done(StageCheckpoint::new(num_blocks - 1)));
@@ -924,6 +929,8 @@ mod tests {
             let rocksdb = db.factory.rocksdb_provider();
             let shards = rocksdb.storage_history_shards(ADDRESS, STORAGE_KEY).unwrap();
             assert!(shards.len() >= 2, "Should have at least 2 shards for {} blocks", num_blocks);
+            let all_blocks: Vec<u64> = shards.iter().flat_map(|(_, list)| list.iter()).collect();
+            assert_eq!(all_blocks, (0..num_blocks).collect::<Vec<_>>());
 
             let unwind_to = NUM_OF_INDICES_IN_SHARD as u64 + 50;
             let unwind_input = UnwindInput {
