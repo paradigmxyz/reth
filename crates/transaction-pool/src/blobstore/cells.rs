@@ -193,12 +193,11 @@ impl BlobTxCellSidecar {
             .enumerate()
             .filter_map(|(position, index)| mask.contains(index).then_some(position))
             .collect();
-        Some(
-            self.cells
-                .chunks_exact(self.mask.count())
-                .flat_map(|blob| positions.iter().map(|&position| blob[position]))
-                .collect(),
-        )
+        let mut cells = Vec::with_capacity(self.commitments.len() * positions.len());
+        for blob in self.cells.chunks_exact(self.mask.count()) {
+            cells.extend(positions.iter().map(|&position| blob[position]));
+        }
+        Some(cells)
     }
 
     /// Returns the heap size of the cells, commitments and proofs, in bytes, including spare
@@ -335,7 +334,9 @@ mod tests {
         let kept = subset(BlobCellMask::from_bits(0b1011));
         let wanted = BlobCellMask::from_bits(0b1001);
         let expected = vec![all.cells[0], all.cells[3], all.cells[128], all.cells[131]];
-        assert_eq!(kept.get_cells(wanted).unwrap(), expected);
+        let cells = kept.get_cells(wanted).unwrap();
+        assert_eq!(cells.capacity(), expected.len());
+        assert_eq!(cells, expected);
         assert_eq!(kept.get_cells(BlobCellMask::from_bits(0b0100)), None);
     }
 
