@@ -1,6 +1,6 @@
 //! `eth_` `Filter` RPC handler implementation
 
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Sealable, TxHash};
 use alloy_rpc_types_eth::{
@@ -29,7 +29,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
-    ProviderReceipt, ReceiptProvider,
+    ProviderReceipt, ReceiptProvider, TransactionsProvider,
 };
 use reth_tasks::Runtime;
 use reth_transaction_pool::{PoolTransaction, TransactionPool, ValidPoolTransaction};
@@ -556,65 +556,69 @@ where
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
-                // First try to get cached block and receipts, as it's likely they're already cached
-                let Some((receipts, maybe_block)) =
-                    self.eth_cache().get_receipts_and_maybe_block(block_hash).await?
-                else {
-                    // the block itself may still exist with its receipts pruned
-                    return Err(match self.provider().block_number(block_hash)? {
-                        Some(number) => {
-                            let earliest_available = self.provider().earliest_block_number()?;
-                            if number < earliest_available {
-                                EthApiError::PrunedHistoryUnavailable {
-                                    requested: number,
-                                    earliest_available,
-                                }
-                                .into()
-                            } else {
-                                EthFilterError::ReceiptsUnavailable(number)
-                            }
-                        }
-                        None => ProviderError::HeaderNotFound(block_hash.into()).into(),
-                    })
-                };
+                // Only take what the cache already holds, so that the receipts of a block whose
+                // bloom rules out the filter are never read.
+                let (maybe_block, receipts) =
+                    self.eth_cache().maybe_cached_block_and_receipts(block_hash).await?;
 
-                let header = if let Some(block) = &maybe_block {
-                    block.clone_sealed_header()
-                } else {
-                    let header = self
-                        .provider()
-                        .header_by_hash_or_number(block_hash.into())?
-                        .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?;
-                    SealedHeader::new(header, block_hash)
-                };
-
-                // Check if the block has been pruned (EIP-4444)
-                let earliest_block = self.provider().earliest_block_number()?;
-                if header.number() < earliest_block {
-                    return Err(EthApiError::PrunedHistoryUnavailable {
-                        requested: header.number(),
-                        earliest_available: earliest_block,
+                // With the block in the cache, serving its logs needs no further reads besides
+                // the receipts, which the cache reads on its own blocking tasks.
+                if let Some(block) = maybe_block {
+                    let header = block.clone_sealed_header();
+                    if !Self::block_logs_may_match(self.provider(), &filter, &header)? {
+                        return Ok(Vec::new())
                     }
-                    .into());
+                    let receipts = match receipts {
+                        Some(receipts) => receipts,
+                        None => self
+                            .eth_cache()
+                            .get_receipts(block_hash)
+                            .await?
+                            .ok_or_else(|| Self::missing_receipts(self.provider(), &header))?,
+                    };
+
+                    let mut all_logs = Vec::new();
+                    append_matching_block_logs(
+                        &mut all_logs,
+                        self.eth_api.converter(),
+                        ProviderOrBlock::<Eth::Provider>::Block(block),
+                        &filter,
+                        &header,
+                        &receipts,
+                        false,
+                    )?;
+                    return Ok(all_logs)
                 }
 
-                if !filter.matches_bloom(header.logs_bloom()) {
-                    return Ok(Vec::new())
-                }
-
-                let mut all_logs = Vec::new();
-                append_matching_block_logs(
-                    &mut all_logs,
-                    self.eth_api.converter(),
-                    maybe_block
-                        .map(ProviderOrBlock::Block)
-                        .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
-                    &filter,
-                    &header,
-                    &receipts,
-                    false,
-                )?;
-                Ok(all_logs)
+                // Everything else is read from the provider on one blocking task, which shares the
+                // budget for blocking IO requests with the range scans instead of blocking an
+                // executor thread.
+                let cache = self.eth_cache().clone();
+                self.spawn_blocking_io_with_permit(move |eth_api| {
+                    let provider = eth_api.provider();
+                    let header = provider
+                        .sealed_header_by_hash(block_hash)?
+                        .ok_or(ProviderError::HeaderNotFound(block_hash.into()))?;
+                    if !Self::block_logs_may_match(provider, &filter, &header)? {
+                        return Ok(Vec::new())
+                    }
+                    let receipts = match receipts {
+                        Some(receipts) => receipts,
+                        None => {
+                            let receipts = Arc::new(
+                                provider
+                                    .receipts_by_block(block_hash.into())?
+                                    .ok_or_else(|| Self::missing_receipts(provider, &header))?,
+                            );
+                            // Kept for later queries of this block, as a read through the cache
+                            // would.
+                            cache.insert_receipts(block_hash, receipts.clone());
+                            receipts
+                        }
+                    };
+                    Self::block_logs_from_provider(&eth_api, &filter, &header, &receipts)
+                })
+                .await
             }
             FilterBlockOption::Range { from_block, to_block } => {
                 // Handle special case where from block is pending
@@ -935,6 +939,127 @@ where
         }
 
         Ok(all_logs)
+    }
+
+    /// Runs `f` on a blocking task once a blocking IO permit is available, holding the permit until
+    /// `f` returns.
+    async fn spawn_blocking_io_with_permit<R: Send + 'static>(
+        &self,
+        f: impl FnOnce(Eth) -> Result<R, EthFilterError> + Send + 'static,
+    ) -> Result<R, EthFilterError> {
+        let permit = self
+            .eth_api
+            .acquire_owned_blocking_io()
+            .await
+            .map_err(|_| EthFilterError::InternalError)?;
+        self.eth_api
+            .spawn_blocking_io(move |eth_api| {
+                let _permit = permit;
+                Ok(f(eth_api))
+            })
+            .await
+            .map_err(|_| EthFilterError::InternalError)?
+    }
+
+    /// Returns the logs of the block with the given header that match the filter, reading the
+    /// transactions of the receipts with matching logs from the provider.
+    ///
+    /// This performs blocking reads and must run on a blocking task.
+    fn block_logs_from_provider(
+        eth_api: &Eth,
+        filter: &Filter,
+        header: &SealedHeader<<Eth::Provider as HeaderProvider>::Header>,
+        receipts: &[ProviderReceipt<Eth::Provider>],
+    ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
+        let provider = eth_api.provider();
+        let mut all_logs = Vec::new();
+
+        // Looking up a transaction by its id costs about as much as decoding four of the block's
+        // transactions, so they are all read at once if more than a quarter of the receipts have
+        // matching logs.
+        let more_than_a_quarter_match = receipts
+            .iter()
+            .filter(|receipt| receipt.logs().iter().any(|log| filter.matches(log)))
+            .nth(receipts.len() / 4)
+            .is_some();
+        if more_than_a_quarter_match {
+            // Reading them by hash fails instead of returning the transactions of another block if
+            // this one was reorged out in the meantime.
+            let transactions = provider
+                .transactions_by_block(header.hash().into())?
+                .ok_or(ProviderError::HeaderNotFound(header.hash().into()))?;
+            logs_utils::append_matching_block_logs_with(
+                &mut all_logs,
+                eth_api.converter(),
+                filter,
+                header,
+                receipts,
+                false,
+                |receipt_idx| {
+                    // A block's transactions and receipts share their indices.
+                    let transaction =
+                        transactions.get(receipt_idx).ok_or(EthApiError::TransactionNotFound)?;
+                    Ok(Some(*transaction.tx_hash()))
+                },
+            )?;
+            return Ok(all_logs)
+        }
+
+        let res = append_matching_block_logs(
+            &mut all_logs,
+            eth_api.converter(),
+            ProviderOrBlock::Provider(provider),
+            filter,
+            header,
+            receipts,
+            false,
+        );
+
+        // The transactions were looked up by the number of the block, so they are its own only if
+        // it is still the canonical block at that number. Numbers resolve to the in-memory
+        // canonical chain before the database, as those lookups do, so this also catches a reorg
+        // the database has not applied yet. A reorg also explains a failed lookup.
+        if (res.is_err() || !all_logs.is_empty()) &&
+            provider.block_hash(header.number())? != Some(header.hash())
+        {
+            return Err(ProviderError::HeaderNotFound(header.hash().into()).into())
+        }
+        res?;
+        Ok(all_logs)
+    }
+
+    /// Returns whether the bloom of the block allows logs matching the filter.
+    ///
+    /// Returns an error if the history of the block has expired (EIP-4444).
+    fn block_logs_may_match(
+        provider: &Eth::Provider,
+        filter: &Filter,
+        header: &SealedHeader<<Eth::Provider as HeaderProvider>::Header>,
+    ) -> Result<bool, EthFilterError> {
+        let earliest_block = provider.earliest_block_number()?;
+        if header.number() < earliest_block {
+            return Err(EthApiError::PrunedHistoryUnavailable {
+                requested: header.number(),
+                earliest_available: earliest_block,
+            }
+            .into());
+        }
+
+        Ok(filter.matches_bloom(header.logs_bloom()))
+    }
+
+    /// Returns the error for a block whose receipts cannot be read although its header was found.
+    ///
+    /// The receipts were pruned, unless the block was reorged out after its header was read.
+    fn missing_receipts(
+        provider: &Eth::Provider,
+        header: &SealedHeader<<Eth::Provider as HeaderProvider>::Header>,
+    ) -> EthFilterError {
+        match provider.block_number(header.hash()) {
+            Ok(Some(_)) => EthFilterError::ReceiptsUnavailable(header.number()),
+            Ok(None) => ProviderError::HeaderNotFound(header.hash().into()).into(),
+            Err(err) => err.into(),
+        }
     }
 }
 
@@ -1703,14 +1828,15 @@ mod tests {
     use super::*;
     use crate::{eth::EthApi, EthApiBuilder};
     use alloy_consensus::TxLegacy;
+    use alloy_eips::BlockId;
     use alloy_network::{Ethereum, TransactionResponse};
-    use alloy_primitives::{Bloom, FixedBytes};
+    use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, Log, LogData, Signature, B256};
     use futures::stream;
     use jsonrpsee::{types::Id, MethodResponse, ResponsePayload};
     use rand::Rng;
     use reth_chainspec::{ChainSpec, ChainSpecProvider};
     use reth_db_api::models::StoredBlockBodyIndices;
-    use reth_ethereum_primitives::TxType;
+    use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned, TxType};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::MockEthProvider;
@@ -2228,8 +2354,6 @@ mod tests {
     fn provider_with_one_log_per_block(data: alloy_primitives::Bytes) -> MockEthProvider {
         let provider = MockEthProvider::default();
 
-        use reth_ethereum_primitives::{TransactionSigned, TxType};
-
         let tx_inner = TxLegacy {
             chain_id: Some(1),
             nonce: 0,
@@ -2417,8 +2541,6 @@ mod tests {
         let mut prev_hash = alloy_primitives::B256::default();
 
         // Create a transaction for blocks that will have receipts
-        use reth_ethereum_primitives::{TransactionSigned, TxType};
-
         let tx_inner = TxLegacy {
             chain_id: Some(1),
             nonce: 0,
@@ -2543,9 +2665,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_range_scan_across_windows() {
-        use alloy_primitives::{Address, Bloom, Bytes, Log, LogData, Signature};
-        use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
-
         let provider = MockEthProvider::default();
         let tx = TransactionSigned::new_unhashed(
             TxLegacy {
@@ -3038,6 +3157,436 @@ mod tests {
             eth_filter.new_block_filter().await.unwrap();
         }
         assert_eq!(eth_filter.active_filters().len().await, 50);
+    }
+
+    /// Adds a block with logs in two of its five receipts to the provider, but not to the cache.
+    fn add_block_with_logs(
+        provider: &MockEthProvider,
+    ) -> (SealedHeader<alloy_consensus::Header>, Vec<Receipt>) {
+        let transactions = (0..5)
+            .map(|nonce| {
+                TransactionSigned::new_unhashed(
+                    TxLegacy {
+                        chain_id: Some(1),
+                        nonce,
+                        gas_price: 21_000,
+                        gas_limit: 21_000,
+                        ..Default::default()
+                    }
+                    .into(),
+                    Signature::test_signature(),
+                )
+            })
+            .collect();
+        let log = |address: u8, topic: u8| Log {
+            address: Address::repeat_byte(address),
+            data: LogData::new_unchecked(vec![B256::repeat_byte(topic)], Bytes::new()),
+        };
+        let receipts = vec![
+            Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 21_000,
+                logs: vec![log(1, 1), log(2, 2)],
+                success: true,
+            },
+            Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 42_000,
+                logs: vec![],
+                success: true,
+            },
+            Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 63_000,
+                logs: vec![log(1, 2), log(3, 1), log(1, 1)],
+                success: true,
+            },
+            Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 84_000,
+                logs: vec![],
+                success: true,
+            },
+            Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 105_000,
+                logs: vec![],
+                success: true,
+            },
+        ];
+
+        let mut logs_bloom = Bloom::default();
+        for log in receipts.iter().flat_map(|receipt| &receipt.logs) {
+            logs_bloom.accrue_log(log);
+        }
+        let header = alloy_consensus::Header {
+            number: 7,
+            timestamp: 1_234,
+            logs_bloom,
+            ..Default::default()
+        };
+        let hash = header.hash_slow();
+        provider.add_block(
+            hash,
+            Block {
+                header: header.clone(),
+                body: BlockBody { transactions, ..Default::default() },
+            },
+        );
+        provider.add_receipts(7, receipts.clone());
+        provider.add_block_body_indices(7, StoredBlockBodyIndices { first_tx_num: 0, tx_count: 5 });
+
+        (SealedHeader::new(header, hash), receipts)
+    }
+
+    #[tokio::test]
+    async fn test_logs_at_block_hash_from_provider() {
+        let provider = MockEthProvider::default();
+        let (header, receipts) = add_block_with_logs(&provider);
+        let eth_api = build_test_eth_api(provider.clone());
+        let eth_filter =
+            EthFilter::new(eth_api.clone(), EthFilterConfig::default(), Runtime::test());
+
+        let logs = eth_filter
+            .logs_for_filter(Filter::new().at_block_hash(header.hash()), QueryLimits::default())
+            .await
+            .unwrap();
+        let tx_hashes = provider
+            .transactions_by_block(header.hash().into())
+            .unwrap()
+            .unwrap()
+            .iter()
+            .map(|tx| *tx.tx_hash())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            logs.iter()
+                .map(|log| (
+                    log.transaction_hash.unwrap(),
+                    log.transaction_index.unwrap(),
+                    log.log_index.unwrap()
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (tx_hashes[0], 0, 0),
+                (tx_hashes[0], 0, 1),
+                (tx_hashes[2], 2, 2),
+                (tx_hashes[2], 2, 3),
+                (tx_hashes[2], 2, 4),
+            ]
+        );
+        assert_eq!(
+            logs.iter().map(|log| log.inner.clone()).collect::<Vec<_>>(),
+            receipts.iter().flat_map(|receipt| receipt.logs.clone()).collect::<Vec<_>>()
+        );
+        for log in &logs {
+            assert_eq!(log.block_hash, Some(header.hash()));
+            assert_eq!(log.block_number, Some(7));
+            assert_eq!(log.block_timestamp, Some(1_234));
+            assert!(!log.removed);
+        }
+
+        for filter in [
+            Filter::new(),
+            Filter::new().address(Address::repeat_byte(1)),
+            Filter::new().event_signature(B256::repeat_byte(1)),
+            Filter::new().address(Address::repeat_byte(1)).event_signature(B256::repeat_byte(2)),
+            Filter::new().address(Address::repeat_byte(3)).event_signature(B256::repeat_byte(2)),
+            Filter::new().address(Address::repeat_byte(4)),
+        ] {
+            let filter = filter.at_block_hash(header.hash());
+            let logs =
+                eth_filter.logs_for_filter(filter.clone(), QueryLimits::default()).await.unwrap();
+
+            // the logs looking up each transaction by its id produces.
+            let mut expected = Vec::new();
+            append_matching_block_logs(
+                &mut expected,
+                eth_api.converter(),
+                ProviderOrBlock::Provider(&provider),
+                &filter,
+                &header,
+                &receipts,
+                false,
+            )
+            .unwrap();
+            assert_eq!(logs, expected, "{filter:?}");
+
+            // `eth_getFilterLogs` serves an installed filter the same way.
+            let id = EthFilterApiServer::new_filter(&eth_filter, filter).await.unwrap();
+            assert_eq!(EthFilter::filter_logs(&eth_filter, id).await.unwrap(), expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_logs_at_block_hash_rejects_replaced_block() {
+        let provider = MockEthProvider::default();
+        let (header, receipts) = add_block_with_logs(&provider);
+        let eth_api = build_test_eth_api(provider);
+
+        // a block at the same height whose hash no longer resolves, as after a reorg, must not be
+        // served with the transactions found at that height, whether they are read for the whole
+        // block or for the one receipt with a matching log.
+        let replaced = SealedHeader::new(header.clone_header(), B256::repeat_byte(0xab));
+        // a block at a height that no longer exists makes the lookups fail, which is reported the
+        // same way.
+        let dropped = SealedHeader::new(
+            alloy_consensus::Header { number: 8, ..header.clone_header() },
+            B256::repeat_byte(0xab),
+        );
+        for (replaced, filter) in [
+            (&replaced, Filter::new()),
+            (&replaced, Filter::new().address(Address::repeat_byte(3))),
+            (&dropped, Filter::new().address(Address::repeat_byte(3))),
+        ] {
+            let err = EthFilterInner::block_logs_from_provider(
+                &eth_api,
+                &filter.at_block_hash(replaced.hash()),
+                replaced,
+                &receipts,
+            )
+            .unwrap_err();
+            assert!(
+                matches!(
+                    &err,
+                    EthFilterError::EthAPIError(EthApiError::HeaderNotFound(id))
+                        if *id == BlockId::from(replaced.hash())
+                ),
+                "{err:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_logs_at_block_hash_caches_receipts() {
+        let provider = MockEthProvider::default();
+        let (header, _) = add_block_with_logs(&provider);
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter =
+            EthFilter::new(eth_api.clone(), EthFilterConfig::default(), Runtime::test());
+        let cached_receipts = async || {
+            eth_api.cache().maybe_cached_block_and_receipts(header.hash()).await.unwrap().1
+        };
+
+        // a filter the bloom rules out leaves the receipts unread.
+        let filter = Filter::new().address(Address::repeat_byte(9)).at_block_hash(header.hash());
+        let logs = eth_filter.logs_for_filter(filter, QueryLimits::default()).await.unwrap();
+        assert!(logs.is_empty());
+        assert!(cached_receipts().await.is_none());
+
+        // a matching filter reads them through the cache, which keeps them for later queries.
+        let filter = Filter::new().at_block_hash(header.hash());
+        let logs = eth_filter.logs_for_filter(filter, QueryLimits::default()).await.unwrap();
+        assert_eq!(logs.len(), 5);
+        assert!(cached_receipts().await.is_some());
+
+        // with the receipts cached, the bloom still rules out a filter.
+        let filter = Filter::new().address(Address::repeat_byte(9)).at_block_hash(header.hash());
+        let logs = eth_filter.logs_for_filter(filter, QueryLimits::default()).await.unwrap();
+        assert!(logs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_logs_at_block_hash_cached_block() {
+        let provider = MockEthProvider::default();
+        let (header, _) = add_block_with_logs(&provider);
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter =
+            EthFilter::new(eth_api.clone(), EthFilterConfig::default(), Runtime::test());
+        let filter = Filter::new().at_block_hash(header.hash());
+
+        let uncached =
+            eth_filter.logs_for_filter(filter.clone(), QueryLimits::default()).await.unwrap();
+        eth_api.cache().get_recovered_block(header.hash()).await.unwrap().unwrap();
+
+        // a cached block is served without a blocking IO permit.
+        let guard = eth_api.blocking_io_task_guard().clone();
+        let _permits =
+            guard.clone().acquire_many_owned(guard.available_permits() as u32).await.unwrap();
+        let cached = tokio::time::timeout(
+            Duration::from_secs(5),
+            eth_filter.logs_for_filter(filter, QueryLimits::default()),
+        )
+        .await
+        .expect("a cached block must not wait for a blocking IO permit")
+        .unwrap();
+        assert_eq!(cached, uncached);
+    }
+
+    #[tokio::test]
+    async fn test_logs_at_block_hash_waits_for_blocking_io_permit() {
+        let provider = MockEthProvider::default();
+        let (header, _) = add_block_with_logs(&provider);
+        let eth_api = build_test_eth_api(provider);
+
+        // take every permit so the provider reads have to wait for one.
+        let guard = eth_api.blocking_io_task_guard().clone();
+        let permits =
+            guard.clone().acquire_many_owned(guard.available_permits() as u32).await.unwrap();
+
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+        let logs = eth_filter
+            .logs_for_filter(Filter::new().at_block_hash(header.hash()), QueryLimits::default());
+        tokio::pin!(logs);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut logs).await.is_err(),
+            "provider reads must wait for a blocking IO permit"
+        );
+
+        drop(permits);
+        assert_eq!(logs.await.unwrap().len(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_logs_at_block_hash_errors() {
+        let provider = MockEthProvider::default();
+        let header = alloy_consensus::Header { number: 3, ..Default::default() };
+        let hash = header.hash_slow();
+        // a block whose receipts were pruned.
+        provider.add_block(hash, Block { header, body: Default::default() });
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider),
+            EthFilterConfig::default(),
+            Runtime::test(),
+        );
+
+        let err = eth_filter
+            .logs_for_filter(Filter::new().at_block_hash(hash), QueryLimits::default())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, EthFilterError::ReceiptsUnavailable(3)), "{err:?}");
+
+        let unknown = B256::repeat_byte(0xab);
+        let err = eth_filter
+            .logs_for_filter(Filter::new().at_block_hash(unknown), QueryLimits::default())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                EthFilterError::EthAPIError(EthApiError::HeaderNotFound(id))
+                    if *id == BlockId::from(unknown)
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_logs_at_block_hash_bloom_miss_skips_receipts() {
+        let provider = MockEthProvider::default();
+        let header = alloy_consensus::Header { number: 3, ..Default::default() };
+        let hash = header.hash_slow();
+        // a block whose receipts were pruned.
+        provider.add_block(hash, Block { header, body: Default::default() });
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter =
+            EthFilter::new(eth_api.clone(), EthFilterConfig::default(), Runtime::test());
+
+        for cached in [false, true] {
+            if cached {
+                eth_api.cache().get_recovered_block(hash).await.unwrap().unwrap();
+            }
+
+            // the empty bloom rules out the address, so the receipts are not needed.
+            let logs = eth_filter
+                .logs_for_filter(
+                    Filter::new().address(Address::repeat_byte(1)).at_block_hash(hash),
+                    QueryLimits::default(),
+                )
+                .await
+                .unwrap();
+            assert!(logs.is_empty(), "cached: {cached}");
+
+            let err = eth_filter
+                .logs_for_filter(Filter::new().at_block_hash(hash), QueryLimits::default())
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, EthFilterError::ReceiptsUnavailable(3)),
+                "cached: {cached}, {err:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_logs_at_block_hash_cached_receipts() {
+        let provider = MockEthProvider::default();
+        let (header, _) = add_block_with_logs(&provider);
+        let eth_api = build_test_eth_api(provider.clone());
+        let eth_filter =
+            EthFilter::new(eth_api.clone(), EthFilterConfig::default(), Runtime::test());
+        let filter = Filter::new().at_block_hash(header.hash());
+
+        let expected =
+            eth_filter.logs_for_filter(filter.clone(), QueryLimits::default()).await.unwrap();
+        assert_eq!(expected.len(), 5);
+
+        // only the cache holds the receipts from here on, the block is not cached.
+        eth_api.cache().get_receipts(header.hash()).await.unwrap().unwrap();
+        provider.receipts.lock().remove(&header.number());
+
+        let logs = eth_filter.logs_for_filter(filter, QueryLimits::default()).await.unwrap();
+        assert_eq!(logs, expected);
+    }
+
+    #[tokio::test]
+    async fn test_logs_at_block_hash_expired_history() {
+        let provider = MockEthProvider::default();
+        let (header, _) = add_block_with_logs(&provider);
+        provider.set_earliest_block_number(header.number() + 1);
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter =
+            EthFilter::new(eth_api.clone(), EthFilterConfig::default(), Runtime::test());
+
+        for cached in [false, true] {
+            if cached {
+                eth_api.cache().get_recovered_block(header.hash()).await.unwrap().unwrap();
+            }
+
+            // the bloom rules out the second filter, expired history is still reported first.
+            for filter in [Filter::new(), Filter::new().address(Address::repeat_byte(4))] {
+                let err = eth_filter
+                    .logs_for_filter(filter.at_block_hash(header.hash()), QueryLimits::default())
+                    .await
+                    .unwrap_err();
+                assert!(
+                    matches!(
+                        err,
+                        EthFilterError::EthAPIError(EthApiError::PrunedHistoryUnavailable {
+                            requested: 7,
+                            earliest_available: 8
+                        })
+                    ),
+                    "cached: {cached}, {err:?}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_logs_at_block_hash_reorged_out() {
+        let provider = MockEthProvider::default();
+        let (header, _) = add_block_with_logs(&provider);
+        let eth_api = build_test_eth_api(provider.clone());
+        let eth_filter =
+            EthFilter::new(eth_api.clone(), EthFilterConfig::default(), Runtime::test());
+
+        // the cache still holds the block after the provider dropped it.
+        eth_api.cache().get_recovered_block(header.hash()).await.unwrap().unwrap();
+        provider.headers.lock().remove(&header.hash());
+
+        // a matching filter needs the receipts, which are gone with the block.
+        let err = eth_filter
+            .logs_for_filter(Filter::new().at_block_hash(header.hash()), QueryLimits::default())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                EthFilterError::EthAPIError(EthApiError::HeaderNotFound(id))
+                    if *id == BlockId::from(header.hash())
+            ),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]

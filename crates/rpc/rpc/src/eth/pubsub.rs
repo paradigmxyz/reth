@@ -594,7 +594,7 @@ mod tests {
     use jsonrpsee::RpcModule;
     use jsonrpsee_types::{SubscriptionId, SubscriptionPayload, SubscriptionResponse};
     use reth_chain_state::{CanonStateNotification, CanonicalInMemoryStateWriter};
-    use reth_chainspec::ChainSpecProvider;
+    use reth_chainspec::{ChainSpecProvider, MAINNET};
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Receipt;
     use reth_evm_ethereum::EthEvmConfig;
@@ -602,7 +602,9 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
         providers::BlockchainProvider,
-        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
+        test_utils::{
+            create_test_provider_factory_with_in_memory_state_writer, MockNodeTypesWithDB,
+        },
     };
     use reth_rpc_eth_api::EthApiTypes;
     use reth_testing_utils::generators::{self, BlockParams};
@@ -623,9 +625,18 @@ mod tests {
     const NOTIFICATION_BUFFER: usize = 16;
 
     fn test_provider() -> (TestProvider, CanonicalInMemoryStateWriter) {
-        let factory = create_test_provider_factory();
+        let (factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         init_genesis(&factory).unwrap();
-        BlockchainProvider::new_with_writer(factory).unwrap()
+        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers().unwrap(),
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
+        (provider, canonical_in_memory_state_writer)
     }
 
     fn test_pubsub(provider: TestProvider, pool: TestPool) -> EthPubSub<impl EthSubscriptions> {

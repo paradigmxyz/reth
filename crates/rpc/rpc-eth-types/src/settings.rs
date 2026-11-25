@@ -39,7 +39,7 @@ pub struct EthApiSettings {
     pub pending_block_kind: PendingBlockKind,
     /// Timeout duration for `send_raw_transaction_sync` RPC method.
     pub send_raw_transaction_sync_timeout: Duration,
-    /// Maximum memory the EVM can allocate per RPC request.
+    /// Maximum memory the EVM can allocate per call frame in an RPC request.
     pub evm_memory_limit: u64,
     /// Whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
     pub force_blob_sidecar_upcasting: bool,
@@ -60,7 +60,7 @@ impl Default for EthApiSettings {
             eth_proof_window: DEFAULT_ETH_PROOF_WINDOW,
             pending_block_kind: PendingBlockKind::default(),
             send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
-            evm_memory_limit: (1 << 32) - 1,
+            evm_memory_limit: 100 * 1024 * 1024,
             force_blob_sidecar_upcasting: false,
         }
     }

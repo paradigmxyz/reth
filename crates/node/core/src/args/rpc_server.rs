@@ -454,7 +454,7 @@ impl Default for DefaultRpcServerArgs {
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
             rpc_max_active_filters: (constants::DEFAULT_MAX_ACTIVE_FILTERS as u64).into(),
             rpc_gas_cap: constants::gas_oracle::RPC_DEFAULT_GAS_CAP,
-            rpc_evm_memory_limit: (1 << 32) - 1,
+            rpc_evm_memory_limit: 100 * 1024 * 1024,
             rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
             rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
             rpc_max_trace_bytes: None,
@@ -523,7 +523,15 @@ pub struct RpcServerArgs {
     pub http_decompression_algorithms: Option<Vec<String>>,
 
     /// Rpc Modules to be configured for the HTTP server
-    #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_api.as_ref().map(|v| v.to_string().into())))]
+    #[arg(
+        long = "http.api",
+        value_parser = DefaultValueParser {
+            inner: RpcModuleSelectionValueParser::default(),
+            default: &DefaultRpcServerArgs::get_global().http_api,
+            to_default: RpcModuleSelection::to_string,
+        },
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_api.as_ref().map(|v| v.to_string().into())),
+    )]
     pub http_api: Option<RpcModuleSelection>,
 
     /// Http Corsdomain to allow request from
@@ -547,7 +555,15 @@ pub struct RpcServerArgs {
     pub ws_allowed_origins: Option<String>,
 
     /// Rpc Modules to be configured for the WS server
-    #[arg(long = "ws.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_api.as_ref().map(|v| v.to_string().into())))]
+    #[arg(
+        long = "ws.api",
+        value_parser = DefaultValueParser {
+            inner: RpcModuleSelectionValueParser::default(),
+            default: &DefaultRpcServerArgs::get_global().ws_api,
+            to_default: RpcModuleSelection::to_string,
+        },
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_api.as_ref().map(|v| v.to_string().into())),
+    )]
     pub ws_api: Option<RpcModuleSelection>,
 
     /// Disable the IPC-RPC server
@@ -630,8 +646,9 @@ pub struct RpcServerArgs {
         value_parser = DefaultValueParser {
             inner: |value: &str| JwtSecret::from_hex(value),
             default: &DefaultRpcServerArgs::get_global().rpc_jwtsecret,
+            to_default: configured_default,
         },
-        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_jwtsecret.as_ref().map(|_| "configured".into())),
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_jwtsecret.as_ref().map(|v| configured_default(v).into())),
         hide_default_value = true,
     )]
     pub rpc_jwtsecret: Option<JwtSecret>,
@@ -706,7 +723,7 @@ pub struct RpcServerArgs {
     )]
     pub rpc_gas_cap: u64,
 
-    /// Maximum memory the EVM can allocate per RPC request.
+    /// Maximum memory the EVM can allocate per call frame in an RPC request.
     #[arg(
         long = "rpc.evm-memory-limit",
         alias = "rpc-evm-memory-limit",
@@ -787,8 +804,9 @@ pub struct RpcServerArgs {
         value_parser = DefaultValueParser {
             inner: Url::parse,
             default: &DefaultRpcServerArgs::get_global().rpc_forwarder,
+            to_default: configured_default,
         },
-        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_forwarder.as_ref().map(|_| "configured".into())),
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_forwarder.as_ref().map(|v| configured_default(v).into())),
         hide_default_value = true,
     )]
     pub rpc_forwarder: Option<Url>,
@@ -801,8 +819,9 @@ pub struct RpcServerArgs {
         value_parser = DefaultValueParser {
             inner: reth_cli_util::parsers::read_json_from_file::<AddressSet>,
             default: &DefaultRpcServerArgs::get_global().builder_disallow,
+            to_default: configured_default,
         },
-        default_value = Resettable::from(DefaultRpcServerArgs::get_global().builder_disallow.as_ref().map(|_| "configured".into())),
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().builder_disallow.as_ref().map(|v| configured_default(v).into())),
         hide_default_value = true,
     )]
     pub builder_disallow: Option<AddressSet>,
@@ -1143,15 +1162,20 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
     fn parse_ref(
         &self,
         _cmd: &Command,
-        _arg: Option<&Arg>,
+        arg: Option<&Arg>,
         value: &OsStr,
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        // This will now accept any module name, creating Other(name) for unknowns
-        Ok(val
-            .parse::<RpcModuleSelection>()
-            .expect("RpcModuleSelection parsing cannot fail with Other variant"))
+        let arg = arg.map(ToString::to_string).unwrap_or_else(|| "...".to_owned());
+        // This accepts any module name, creating Other(name) for unknowns, but rejects the `all`
+        // and `none` keywords mixed with other modules.
+        val.parse::<RpcModuleSelection>().map_err(|_| {
+            clap::Error::raw(
+                clap::error::ErrorKind::ValueValidation,
+                format!("invalid value '{val}' for '{arg}': `all` and `none` cannot be combined with other modules\n"),
+            )
+        })
     }
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
@@ -1159,6 +1183,11 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
         let values = RethRpcModule::standard_variant_names().map(PossibleValue::new);
         Some(Box::new(values))
     }
+}
+
+/// Default value string for args whose typed default must not be serialized.
+fn configured_default<T>(_: &T) -> String {
+    "configured".to_string()
 }
 
 /// Uses a typed default without serializing secrets or treating address sets as file paths.
@@ -1169,6 +1198,9 @@ where
 {
     inner: P,
     default: &'static Option<P::Value>,
+    /// Formats `default` as the arg's `default_value`, so a different default set by an embedding
+    /// command, such as through `Command::mut_arg`, is parsed instead of replaced.
+    to_default: fn(&P::Value) -> String,
 }
 
 impl<P: TypedValueParser> TypedValueParser for DefaultValueParser<P>
@@ -1194,12 +1226,17 @@ where
         source: ValueSource,
     ) -> Result<Self::Value, clap::Error> {
         if source == ValueSource::DefaultValue &&
-            let Some(default) = self.default
+            let Some(default) = self.default &&
+            value == (self.to_default)(default).as_str()
         {
             Ok(default.clone())
         } else {
             self.inner.parse_ref_(cmd, arg, value, source)
         }
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        self.inner.possible_values()
     }
 }
 
@@ -1258,6 +1295,20 @@ mod tests {
         let apis = args.http_api.unwrap();
         let expected = RpcModuleSelection::Selection(Default::default());
         assert_eq!(apis, expected);
+    }
+
+    #[test]
+    fn test_rpc_server_args_parser_rejects_mixed_keywords() {
+        for flag in ["--http.api", "--ws.api"] {
+            for api in ["all,testing", "eth,all", "none,eth"] {
+                let Err(err) = CommandParser::<RpcServerArgs>::try_parse_from(["reth", flag, api])
+                else {
+                    panic!("{flag} {api} should be rejected")
+                };
+                assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation, "{flag} {api}");
+                assert!(err.to_string().contains(flag), "{err}");
+            }
+        }
     }
 
     #[test]
