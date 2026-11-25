@@ -185,16 +185,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             .is_some_and(|execution| execution.block_number > finish_block_number))
     }
 
-    /// Returns the canonical in-memory block with `state_root`.
-    fn block_state_by_root(&self, state_root: B256) -> Option<Arc<BlockState<N::Primitives>>> {
-        self.canonical_in_memory_state
-            .canonical_chain()
-            .find(|state| state.state_root() == state_root)
-    }
-
     /// Resolves `state_root` into a range view over `provider`'s snapshot and the in-memory blocks
-    /// tracked when its transaction opened, preferring `block_hash`, a canonical in-memory block
-    /// with that root, over the persisted-history fallback.
+    /// tracked when its transaction opened, preferring a canonical block of that snapshot with that
+    /// root over the persisted-history fallback.
     ///
     /// The snap attempt is read from `provider` too, so a bootstrap committing after the snapshot
     /// was taken can't slip its downloads past the check.
@@ -202,7 +195,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         &self,
         provider: StateRangeDbProvider<N>,
         in_memory: InMemoryStateSnapshot<N::Primitives>,
-        block_hash: Option<B256>,
         state_root: B256,
     ) -> ProviderResult<Option<StateRangeView>> {
         if provider.snap_attempt()?.is_some_and(|attempt| !attempt.is_verified()) {
@@ -216,7 +208,14 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             return Ok(None)
         }
 
-        let block_hash = match block_hash {
+        // The canonical chain in memory when the transaction opened holds the newest blocks.
+        let in_memory_block = in_memory
+            .canonical_head()
+            .into_iter()
+            .flat_map(|head| head.chain())
+            .find(|state| state.state_root() == state_root)
+            .map(|state| state.hash());
+        let block_hash = match in_memory_block {
             Some(block_hash) => block_hash,
             None => {
                 let Some(block_hash) =
@@ -278,12 +277,9 @@ impl<N: ProviderNodeTypes> StateRangeProviderFactory for BlockchainProvider<N> {
     /// is unverified, since no root describes its partially downloaded state, or while the
     /// `Execution` checkpoint is ahead of `Finish`.
     fn state_range_provider(&self, state_root: B256) -> ProviderResult<Option<StateRangeView>> {
-        // Persisted blocks leave memory only after their commit, so a canonical root missed here is
-        // already visible to a snapshot opened afterwards.
-        let block_hash = self.block_state_by_root(state_root).map(|state| state.hash());
         let ProviderWithInMemorySnapshot { provider, in_memory } =
             self.database.provider_with_in_memory_snapshot()?;
-        self.state_range_view(provider, in_memory, block_hash, state_root)
+        self.state_range_view(provider, in_memory, state_root)
     }
 }
 
@@ -3504,7 +3500,7 @@ mod tests {
         provider_rw.insert_account_for_hashing([(address, Some(account))])?;
         provider_rw.commit()?;
         let state = provider
-            .state_range_view(before_attempt, in_memory, None, EMPTY_ROOT_HASH)?
+            .state_range_view(before_attempt, in_memory, EMPTY_ROOT_HASH)?
             .expect("snapshot holds no attempt");
         assert_eq!(state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?.items, []);
 
@@ -3516,7 +3512,7 @@ mod tests {
         provider_rw.write_snap_attempt(&attempt)?;
         provider_rw.insert_account_for_hashing([(address, None)])?;
         provider_rw.commit()?;
-        assert!(provider.state_range_view(unverified, in_memory, None, EMPTY_ROOT_HASH)?.is_none());
+        assert!(provider.state_range_view(unverified, in_memory, EMPTY_ROOT_HASH)?.is_none());
 
         Ok(())
     }
