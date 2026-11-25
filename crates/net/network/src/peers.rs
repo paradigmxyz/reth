@@ -1177,6 +1177,10 @@ impl PeersManager {
                 peer.kind = kind;
                 peer.fork_id = fork_id.map(Box::new);
                 peer.addr = addr;
+                if peer.state.is_incoming() {
+                    // the given address is a listening endpoint, see `Self::add_peer_kind`
+                    peer.remove_after_disconnect = false;
+                }
 
                 if peer.state.is_idle() {
                     // Try connecting again.
@@ -4843,6 +4847,29 @@ mod tests {
         peers.on_incoming_session_established(trusted, "5.6.7.9:40404".parse().unwrap());
         peers.add_trusted_peer_id(trusted);
         assert!(persisted(&peers, trusted));
+    }
+
+    #[tokio::test]
+    async fn test_inbound_peer_added_as_static_is_kept() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let inbound = PeerId::random();
+        let socket_addr = "5.6.7.8:40404".parse().unwrap();
+        assert!(peers.on_incoming_pending_session(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8))).is_ok());
+        peers.on_incoming_session_established(inbound, socket_addr);
+
+        // the operator supplies its listening endpoint
+        let addr = PeerAddr::from_tcp("5.6.7.8:30303".parse().unwrap());
+        peers.add_and_connect_kind(inbound, PeerKind::Static, addr, None);
+        assert!(peers.persistable_peers().any(|peer| peer.record.id == inbound));
+
+        peers.on_active_session_dropped(
+            &socket_addr,
+            &inbound,
+            &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
+                DisconnectReason::TooManyPeers,
+            )),
+        );
+        assert!(peers.peers[&inbound].is_static());
     }
 
     #[tokio::test]
