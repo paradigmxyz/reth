@@ -1103,6 +1103,7 @@ impl PeersManager {
 
     /// Removes the tracked node from the set.
     pub(crate) fn remove_peer(&mut self, peer_id: PeerId) {
+        self.candidates.remove(&peer_id);
         let Entry::Occupied(mut entry) = self.peers.entry(peer_id) else { return };
         if entry.get().is_trusted() {
             return
@@ -4890,6 +4891,12 @@ mod tests {
         peers.add_peer(candidate, addr, None);
         assert!(!peers.peers.contains_key(&candidate));
         assert!(peers.candidates.contains(&candidate));
+
+        // removing it, as on a fork mismatch, drops it from the queue
+        let removed = PeerId::random();
+        peers.add_peer(removed, addr, None);
+        peers.remove_peer(removed);
+        assert!(!peers.candidates.contains(&removed));
 
         // banned and filtered peers are never queued
         let banned = PeerId::random();
