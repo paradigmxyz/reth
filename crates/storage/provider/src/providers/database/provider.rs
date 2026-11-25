@@ -6775,7 +6775,7 @@ mod tests {
     }
 
     #[test]
-    fn write_state_records_storage_wiped_in_hashed_state() {
+    fn write_state_and_take_state_above_handle_storage_wipe() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
         let address = Address::with_last_byte(1);
@@ -6860,6 +6860,45 @@ mod tests {
                 .get::<tables::StorageWipesHistory>(ShardedKey::last(address))
                 .unwrap(),
             Some(BlockNumberList::new_pre_sorted([1]))
+        );
+        drop(provider);
+
+        // After block 1, only `k3` is left. Unwinding the block restores all three slots.
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.tx.delete::<tables::HashedStorages>(hashed_address, None).unwrap();
+        provider_rw
+            .tx
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: hashed_slot(k3), value: U256::from(4) },
+            )
+            .unwrap();
+        provider_rw.take_state_above(0, 1).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let mut storage = provider
+            .tx_ref()
+            .cursor_dup_read::<tables::HashedStorages>()
+            .unwrap()
+            .walk_dup(Some(hashed_address), None)
+            .unwrap()
+            .map(|entry| entry.map(|(_, entry)| (entry.key, entry.value)))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        storage.sort_unstable();
+        let mut expected = [(k1, 9u64), (k2, 5), (k3, 3)]
+            .map(|(slot, value)| (hashed_slot(slot), U256::from(value)))
+            .to_vec();
+        expected.sort_unstable();
+        assert_eq!(storage, expected);
+        assert!(provider.storage_wipe_changesets_range(..).unwrap().is_empty());
+        assert_eq!(
+            provider
+                .tx_ref()
+                .get::<tables::StorageWipesHistory>(ShardedKey::last(address))
+                .unwrap(),
+            None
         );
     }
 }
