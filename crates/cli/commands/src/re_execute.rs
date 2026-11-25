@@ -17,8 +17,9 @@ use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm}
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider,
-    DatabaseProviderFactory, ReceiptProvider, StaticFileProviderFactory, TransactionVariant,
+    providers::{BlockchainProvider, ProviderWithInMemorySnapshot},
+    BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
+    ReceiptProvider, StaticFileProviderFactory, TransactionVariant,
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
 use reth_storage_api::{ChangeSetReader, DBProvider, StateProvider, StorageChangeSetReader};
@@ -150,7 +151,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                 let db_at = {
                     |block_number: u64| {
-                        let (provider, in_memory) =
+                        let ProviderWithInMemorySnapshot { provider, in_memory } =
                             provider_factory.provider_with_in_memory_snapshot()?;
                         let provider = provider.disable_long_read_transaction_safety();
                         let hash = provider.block_hash(block_number)?.ok_or_else(|| {

@@ -1,7 +1,7 @@
 use crate::{
     providers::{
-        ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
-        StaticFileProviderRWRefMut,
+        ConsistentProvider, ProviderNodeTypes, ProviderWithInMemorySnapshot, RocksDBProvider,
+        StaticFileProvider, StaticFileProviderRWRefMut,
     },
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
@@ -281,7 +281,8 @@ impl<N: ProviderNodeTypes> StateRangeProviderFactory for BlockchainProvider<N> {
         // Persisted blocks leave memory only after their commit, so a canonical root missed here is
         // already visible to a snapshot opened afterwards.
         let block_hash = self.block_state_by_root(state_root).map(|state| state.hash());
-        let (provider, in_memory) = self.database.provider_with_in_memory_snapshot()?;
+        let ProviderWithInMemorySnapshot { provider, in_memory } =
+            self.database.provider_with_in_memory_snapshot()?;
         self.state_range_view(provider, in_memory, block_hash, state_root)
     }
 }
@@ -872,7 +873,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        let (provider, in_memory) = provider.into_parts();
+        let ProviderWithInMemorySnapshot { provider, in_memory } = provider.into_parts();
         self.state_provider_from_database(provider, in_memory, hash)
     }
 
@@ -880,7 +881,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        let (provider, in_memory) = provider.into_parts();
+        let ProviderWithInMemorySnapshot { provider, in_memory } = provider.into_parts();
         self.state_provider_from_database(provider, in_memory, block_hash)
     }
 
@@ -1103,7 +1104,8 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
             ))))
         }
 
-        let (provider, in_memory) = self.database.provider_with_in_memory_snapshot()?;
+        let ProviderWithInMemorySnapshot { provider, in_memory } =
+            self.database.provider_with_in_memory_snapshot()?;
         let Some(block_body) = provider.block_body_indices(block)? else { return Ok(None) };
 
         let account_changeset = provider.account_changesets_range(block..=block)?;
@@ -3432,7 +3434,8 @@ mod tests {
     fn historical_state_checks_pipeline_progress_on_its_snapshot() -> eyre::Result<()> {
         let (factory, _) = test_provider_factory_with_genesis()?;
         let provider = BlockchainProvider::new(factory.clone())?;
-        let (before_execution, in_memory) = factory.provider_with_in_memory_snapshot()?;
+        let ProviderWithInMemorySnapshot { provider: before_execution, in_memory } =
+            factory.provider_with_in_memory_snapshot()?;
         let genesis_hash = before_execution.block_hash(0)?.expect("genesis exists");
 
         let provider_rw = factory.provider_rw()?;
@@ -3494,7 +3497,8 @@ mod tests {
         let mut attempt = SnapAttempt::start(None, BlockNumHash::default(), B256::ZERO);
 
         // A snapshot taken before the attempt starts keeps serving, without its downloads.
-        let (before_attempt, in_memory) = factory.provider_with_in_memory_snapshot()?;
+        let ProviderWithInMemorySnapshot { provider: before_attempt, in_memory } =
+            factory.provider_with_in_memory_snapshot()?;
         let provider_rw = factory.provider_rw()?;
         provider_rw.write_snap_attempt(&attempt)?;
         provider_rw.insert_account_for_hashing([(address, Some(account))])?;
@@ -3505,7 +3509,8 @@ mod tests {
         assert_eq!(state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?.items, []);
 
         // A snapshot taken while the attempt is unverified stays refused after verification.
-        let (unverified, in_memory) = factory.provider_with_in_memory_snapshot()?;
+        let ProviderWithInMemorySnapshot { provider: unverified, in_memory } =
+            factory.provider_with_in_memory_snapshot()?;
         attempt.verify();
         let provider_rw = factory.provider_rw()?;
         provider_rw.write_snap_attempt(&attempt)?;

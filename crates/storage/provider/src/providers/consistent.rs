@@ -1,4 +1,4 @@
-use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes};
+use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes, ProviderWithInMemorySnapshot};
 use crate::{
     changeset_walker::changeset_block_range,
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
@@ -74,19 +74,14 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     }
 
     /// Returns the in-memory canonical head when this view was created.
-    fn head_block(&self) -> Option<&Arc<BlockState<N::Primitives>>> {
+    const fn head_block(&self) -> Option<&Arc<BlockState<N::Primitives>>> {
         self.in_memory.canonical_head()
     }
 
     /// Consumes this consistent view and returns its database provider and the in-memory blocks
     /// tracked when its transaction opened.
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        <ProviderFactory<N> as DatabaseProviderFactory>::Provider,
-        InMemoryStateSnapshot<N::Primitives>,
-    ) {
-        (self.storage_provider, self.in_memory)
+    pub(crate) fn into_parts(self) -> ProviderWithInMemorySnapshot<N> {
+        ProviderWithInMemorySnapshot { provider: self.storage_provider, in_memory: self.in_memory }
     }
 
     // Helper function to convert range bounds

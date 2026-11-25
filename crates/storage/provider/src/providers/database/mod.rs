@@ -421,10 +421,10 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// transaction's durable frontiers need is in the snapshot.
     pub fn provider_with_in_memory_snapshot(
         &self,
-    ) -> ProviderResult<(DatabaseProviderRO<N::DB, N>, InMemoryStateSnapshot<N::Primitives>)> {
+    ) -> ProviderResult<ProviderWithInMemorySnapshot<N>> {
         let (provider, in_memory) =
             self.overlay_manager.in_memory_state().snapshot_during(|| self.provider());
-        Ok((provider?, in_memory))
+        Ok(ProviderWithInMemorySnapshot { provider: provider?, in_memory })
     }
 
     /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
@@ -1083,6 +1083,16 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
     }
 }
 
+/// A read-only database provider and the in-memory blocks tracked when its transaction opened, as
+/// [`ProviderFactory::provider_with_in_memory_snapshot`] returns them.
+#[derive(Debug)]
+pub struct ProviderWithInMemorySnapshot<N: ProviderNodeTypes> {
+    /// The read-only provider.
+    pub provider: DatabaseProviderRO<N::DB, N>,
+    /// The in-memory blocks tracked when the provider's transaction opened.
+    pub in_memory: InMemoryStateSnapshot<N::Primitives>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1122,7 +1132,8 @@ mod tests {
         let persisted = block.recovered_block().num_hash();
         in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new: vec![block] });
 
-        let (_provider, in_memory) = factory.provider_with_in_memory_snapshot().unwrap();
+        let ProviderWithInMemorySnapshot { in_memory, .. } =
+            factory.provider_with_in_memory_snapshot().unwrap();
         in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
 
         assert!(!factory.overlay_manager().in_memory_state().contains(&persisted.hash));
