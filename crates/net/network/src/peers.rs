@@ -288,13 +288,15 @@ impl PeersManager {
 
     /// Returns an iterator over peers suitable for persisting to disk.
     ///
-    /// Filters out backed-off and banned peers, and peers tracked only until their session ends,
-    /// and includes metadata like kind, fork ID, and reputation.
+    /// Filters out backed-off and banned peers, and untrusted peers tracked only until their
+    /// session ends, and includes metadata like kind, fork ID, and reputation.
     pub(crate) fn persistable_peers(&self) -> impl Iterator<Item = PersistedPeerInfo> + '_ {
         self.peers
             .iter()
             .filter(|(_, peer)| {
-                !peer.is_backed_off() && !peer.is_banned() && !peer.remove_after_disconnect
+                !peer.is_backed_off() &&
+                    !peer.is_banned() &&
+                    !(peer.remove_after_disconnect && !peer.is_trusted())
             })
             .map(|(peer_id, peer)| PersistedPeerInfo {
                 record: NodeRecord::new_with_ports(
@@ -4822,7 +4824,9 @@ mod tests {
         peers.on_incoming_session_established(inbound, socket_addr);
         assert!(peers.peers[&inbound].remove_after_disconnect);
         // its source port is not a listening endpoint, so it is not saved
-        assert!(!peers.persistable_peers().any(|peer| peer.record.id == inbound));
+        let persisted =
+            |peers: &PeersManager, id| peers.persistable_peers().any(|peer| peer.record.id == id);
+        assert!(!persisted(&peers, inbound));
 
         peers.on_active_session_dropped(
             &socket_addr,
@@ -4832,6 +4836,13 @@ mod tests {
             )),
         );
         assert!(!peers.peers.contains_key(&inbound));
+
+        // unless it is trusted by id, so the trust survives a restart
+        let trusted = PeerId::random();
+        assert!(peers.on_incoming_pending_session(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 9))).is_ok());
+        peers.on_incoming_session_established(trusted, "5.6.7.9:40404".parse().unwrap());
+        peers.add_trusted_peer_id(trusted);
+        assert!(persisted(&peers, trusted));
     }
 
     #[tokio::test]
