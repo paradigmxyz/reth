@@ -293,8 +293,11 @@ impl StorageHistory {
 
         // Storage wipe changesets are pruned up to the same block as the storage changesets, so the
         // wipe rows of a block count against the budget together with its storage changesets.
+        // The walk starts at genesis because the first sync of `IndexStorageHistoryStage` saves a
+        // checkpoint without pruning, which leaves wipe rows below it. Like the changeset jars
+        // below the checkpoint, they are pruned here.
         let mut wipe_cursor = provider.tx_ref().cursor_read::<tables::StorageWipeChangeSets>()?;
-        let mut wipe_rows = wipe_cursor.walk_range(BlockNumberAddress::range(range.clone()))?;
+        let mut wipe_rows = wipe_cursor.walk_range(BlockNumberAddress::range(0..=range_end))?;
         let mut next_wipe_block = wipe_rows.next().transpose()?.map(|(key, _)| key.block_number());
         let mut checkpoint_block = range_end;
 
@@ -333,10 +336,14 @@ impl StorageHistory {
             limiter.increment_deleted_entries_count();
         }
 
-        // Blocks after the last storage changeset of the range can still hold wipe rows.
+        // Blocks after the last storage changeset of the range can still hold wipe rows. Rows below
+        // the range never stop the walk, so the checkpoint does not move back.
         let mut last_block = last_changeset_pruned_block;
         while done && let Some(wipe_block) = next_wipe_block {
-            if limiter.is_limit_reached() && last_block.is_some_and(|last| last != wipe_block) {
+            if limiter.is_limit_reached() &&
+                wipe_block >= range_start &&
+                last_block.is_some_and(|last| last != wipe_block)
+            {
                 checkpoint_block = wipe_block - 1;
                 done = false;
                 break;
@@ -375,8 +382,7 @@ impl StorageHistory {
         let mut highest_wipe_blocks = BTreeMap::<Address, BlockNumber>::new();
         let mut pruned_wipe_changesets = 0usize;
         let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StorageWipeChangeSets>()?;
-        let mut walker =
-            cursor.walk_range(BlockNumberAddress::range(range_start..=checkpoint_block))?;
+        let mut walker = cursor.walk_range(BlockNumberAddress::range(0..=checkpoint_block))?;
         while let Some(row) = walker.next() {
             let (key, _) = row?;
             highest_wipe_blocks.insert(key.address(), key.block_number());
@@ -1111,6 +1117,65 @@ mod tests {
         assert_eq!(
             db.factory.provider().unwrap().storage_wipe_changesets_range(..).unwrap().len(),
             2
+        );
+    }
+
+    #[test]
+    fn prune_rocksdb_prunes_storage_wipe_changesets_below_checkpoint() {
+        let db = TestStageDB::default();
+        db.factory.set_storage_settings_cache(StorageSettings::v2());
+        let static_file_provider = db.factory.static_file_provider();
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            for block in 0..=3 {
+                writer.append_storage_changeset(Vec::new(), block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        // The first sync of `IndexStorageHistoryStage` saved checkpoint 2 without pruning the wipe
+        // row of block 1.
+        let address = Address::random();
+        let row = StorageEntry { key: B256::random(), value: U256::from(1) };
+        let provider = db.factory.database_provider_rw().unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageWipeChangeSets>(BlockNumberAddress((1, address)), row)
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageWipesHistory>(
+                ShardedKey::last(address),
+                BlockNumberList::new_pre_sorted([1]),
+            )
+            .unwrap();
+        provider.commit().unwrap();
+
+        let prune_mode = PruneMode::Before(4);
+        let input = PruneInput {
+            previous_checkpoint: Some(PruneCheckpoint {
+                block_number: Some(2),
+                tx_number: None,
+                prune_mode,
+            }),
+            to_block: 3,
+            limiter: PruneLimiter::default(),
+        };
+        let provider = db.factory.database_provider_rw().unwrap();
+        let output = StorageHistory::new(prune_mode).prune(&provider, input).unwrap();
+        assert!(output.progress.is_finished());
+        assert_eq!(output.checkpoint.unwrap().block_number, Some(3));
+        provider.commit().unwrap();
+
+        let provider = db.factory.provider().unwrap();
+        assert!(provider.storage_wipe_changesets_range(..).unwrap().is_empty());
+        assert_eq!(
+            provider
+                .tx_ref()
+                .get::<tables::StorageWipesHistory>(ShardedKey::last(address))
+                .unwrap(),
+            None
         );
     }
 
