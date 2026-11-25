@@ -10,6 +10,7 @@ mod types;
 pub use types::BlockRangeInfo;
 
 use crate::{
+    budget::DEFAULT_BUDGET_PRIORITIZED_EVENTS,
     message::PeerMessage,
     metrics::SessionManagerMetrics,
     protocol::{IntoRlpxSubProtocol, OnNotSupported, RlpxSubProtocolHandlers, RlpxSubProtocols},
@@ -118,6 +119,8 @@ pub struct SessionManager<N: NetworkPrimitives> {
     active_session_tx: MeteredPollSender<ActiveSessionMessage<N>>,
     /// Receiver half that listens for [`ActiveSessionMessage`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage<N>>,
+    /// Number of active session events returned since pending sessions were last polled.
+    active_events_in_row: u32,
     /// Additional `RLPx` sub-protocols to be used by the session manager.
     extra_protocols: RlpxSubProtocols,
     /// Tracks the ongoing graceful disconnections attempts for incoming connections.
@@ -128,6 +131,8 @@ pub struct SessionManager<N: NetworkPrimitives> {
     handshake: Arc<dyn EthRlpxHandshake>,
     /// Maximum allowed ETH message size for post-handshake ETH/Snap streams.
     eth_max_message_size: usize,
+    /// Maximum uncompressed size of a message payload on the `p2p` stream.
+    p2p_max_payload_size: usize,
     /// Shared local range information that gets propagated to active sessions.
     /// This represents the range of blocks that this node can serve to other peers.
     local_range_info: BlockRangeInfo,
@@ -151,6 +156,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         extra_protocols: RlpxSubProtocols,
         handshake: Arc<dyn EthRlpxHandshake>,
         eth_max_message_size: usize,
+        p2p_max_payload_size: usize,
         reject_block_announcements: bool,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
@@ -182,11 +188,13 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             pending_session_rx: ReceiverStream::new(pending_sessions_rx),
             active_session_tx: MeteredPollSender::new(active_session_tx, "network_active_session"),
             active_session_rx: ReceiverStream::new(active_session_rx),
+            active_events_in_row: 0,
             extra_protocols,
             disconnections_counter: Default::default(),
             metrics: Default::default(),
             handshake,
             eth_max_message_size,
+            p2p_max_payload_size,
             local_range_info,
             reject_block_announcements,
         }
@@ -319,6 +327,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             start_pending_incoming_session(
                 self.handshake.clone(),
                 self.eth_max_message_size,
+                self.p2p_max_payload_size,
                 disconnect_rx,
                 session_id,
                 stream,
@@ -373,6 +382,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             start_pending_outbound_session(
                 self.handshake.clone(),
                 self.eth_max_message_size,
+                self.p2p_max_payload_size,
                 disconnect_rx,
                 pending_events,
                 session_id,
@@ -501,13 +511,36 @@ impl<N: NetworkPrimitives> SessionManager<N> {
 
     /// This polls all the session handles and returns [`SessionEvent`].
     ///
-    /// Active sessions are prioritized.
+    /// Active sessions are prioritized, but after [`DEFAULT_BUDGET_PRIORITIZED_EVENTS`] active
+    /// session events in a row pending sessions are polled first once, so a steady stream of active
+    /// session messages can't hold back new sessions. Established incoming sessions are
+    /// disconnected with the reason returned by `inbound_session_rejection` instead of being
+    /// activated.
     pub(crate) fn poll(
         &mut self,
         cx: &mut Context<'_>,
-        has_inbound_capacity: impl Fn(PeerId) -> bool,
+        inbound_session_rejection: impl Fn(PeerId) -> Option<DisconnectReason>,
     ) -> Poll<SessionEvent<N>> {
-        // Poll events from active sessions
+        if self.active_events_in_row >= DEFAULT_BUDGET_PRIORITIZED_EVENTS {
+            self.active_events_in_row = 0;
+            if let Poll::Ready(event) =
+                self.poll_pending_session_event(cx, &inbound_session_rejection)
+            {
+                return Poll::Ready(event)
+            }
+        }
+
+        if let Poll::Ready(event) = self.poll_active_session_event(cx) {
+            self.active_events_in_row += 1;
+            return Poll::Ready(event)
+        }
+
+        self.active_events_in_row = 0;
+        self.poll_pending_session_event(cx, inbound_session_rejection)
+    }
+
+    /// Polls the next event from the active sessions.
+    fn poll_active_session_event(&mut self, cx: &mut Context<'_>) -> Poll<SessionEvent<N>> {
         match self.active_session_rx.poll_next_unpin(cx) {
             Poll::Pending => {}
             Poll::Ready(None) => {
@@ -549,8 +582,15 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 }
             }
         }
+        Poll::Pending
+    }
 
-        // Poll the pending session event stream
+    /// Polls the next event from the pending sessions.
+    fn poll_pending_session_event(
+        &mut self,
+        cx: &mut Context<'_>,
+        inbound_session_rejection: impl Fn(PeerId) -> Option<DisconnectReason>,
+    ) -> Poll<SessionEvent<N>> {
         let event = loop {
             let event = match self.pending_session_rx.poll_next_unpin(cx) {
                 Poll::Pending => return Poll::Pending,
@@ -605,8 +645,8 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 }
 
                 if direction.is_incoming() {
-                    if !has_inbound_capacity(peer_id) {
-                        self.disconnect_pending_connection(conn, DisconnectReason::TooManyPeers);
+                    if let Some(reason) = inbound_session_rejection(peer_id) {
+                        self.disconnect_pending_connection(conn, reason);
                         return Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
                             remote_addr,
                             error: None,
@@ -998,6 +1038,7 @@ pub(crate) async fn pending_session_with_timeout<F, N: NetworkPrimitives>(
 pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
     eth_max_message_size: usize,
+    p2p_max_payload_size: usize,
     disconnect_rx: oneshot::Receiver<()>,
     session_id: SessionId,
     stream: TcpStream,
@@ -1012,6 +1053,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
     authenticate(
         handshake,
         eth_max_message_size,
+        p2p_max_payload_size,
         disconnect_rx,
         events,
         stream,
@@ -1033,6 +1075,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
 async fn start_pending_outbound_session<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
     eth_max_message_size: usize,
+    p2p_max_payload_size: usize,
     mut disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent<N>>,
     session_id: SessionId,
@@ -1078,6 +1121,7 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
     authenticate(
         handshake,
         eth_max_message_size,
+        p2p_max_payload_size,
         disconnect_rx,
         events,
         stream,
@@ -1098,6 +1142,7 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
 async fn authenticate<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
     eth_max_message_size: usize,
+    p2p_max_payload_size: usize,
     disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent<N>>,
     stream: TcpStream,
@@ -1124,7 +1169,7 @@ async fn authenticate<N: NetworkPrimitives>(
             }
         };
 
-        let unauthed = UnauthedP2PStream::new(stream);
+        let unauthed = UnauthedP2PStream::new(stream).with_max_payload_size(p2p_max_payload_size);
 
         authenticate_stream(
             handshake,

@@ -267,7 +267,10 @@ impl Command {
                 AnyNode::Enr(enr) => {
                     let record = self.enr_endpoint(enr, nat)?;
                     seeds.enr_records.push(record);
-                    seeds.enrs.push(EnrCombinedKeyWrapper::from(enr.clone()).0);
+                    let EnrCombinedKeyWrapper(enr) = enr.clone().try_into().map_err(|err| {
+                        eyre::eyre!("--bootnodes entry has an invalid ENR ({err}): {node}")
+                    })?;
+                    seeds.enrs.push(enr);
                     record
                 }
                 node => eyre::bail!(
@@ -542,7 +545,7 @@ mod tests {
         ]);
         let nat = command.resolved_nat().unwrap();
         let config = command.discv5_config(&nat, &command.seed_nodes(&nat).unwrap());
-        let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let sk = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
 
         let (enr, _, _, _) = build_local_enr(&sk, &config);
 
@@ -564,7 +567,7 @@ mod tests {
         ]);
         let nat = command.resolved_nat().unwrap();
         let config = command.discv5_config(&nat, &command.seed_nodes(&nat).unwrap());
-        let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let sk = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
 
         let (enr, _, _, _) = build_local_enr(&sk, &config);
 
@@ -586,7 +589,7 @@ mod tests {
         ]);
         let nat = command.resolved_nat().unwrap();
         let config = command.discv5_config(&nat, &command.seed_nodes(&nat).unwrap());
-        let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let sk = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
 
         let (enr, _, _, _) = build_local_enr(&sk, &config);
 
@@ -900,7 +903,7 @@ mod tests {
 
         let canonical =
             Enr::builder().ip6("2001:db8::9".parse().unwrap()).udp6(30303).build(&sk).unwrap();
-        let canonical = EnrCombinedKeyWrapper::from(canonical).0;
+        let canonical = EnrCombinedKeyWrapper::try_from(canonical).unwrap().0;
         assert!(discv5_contactable(&canonical, false, true));
     }
 
@@ -926,7 +929,7 @@ mod tests {
         ]);
         let nat = command.resolved_nat().unwrap();
         let config = command.discv5_config(&nat, &command.seed_nodes(&nat).unwrap());
-        let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let sk = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
 
         let (enr, _, _, _) = build_local_enr(&sk, &config);
 

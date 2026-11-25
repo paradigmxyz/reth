@@ -13,6 +13,7 @@ use reth_provider::{
     DatabaseProviderFactory, ProviderFactory,
 };
 use reth_stages::{stages::ExecutionStage, Stage, StageCheckpoint, UnwindInput};
+use reth_storage_overlay::OverlayManager;
 use std::sync::Arc;
 use tracing::info;
 
@@ -45,6 +46,7 @@ where
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
                 RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
+                OverlayManager::default(),
                 runtime,
             )?,
             to,

@@ -7,6 +7,7 @@ use crate::{
     TrieWriter,
 };
 use alloy_primitives::B256;
+use reth_chain_state::{InMemoryState, InMemoryStateWriter};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
 use reth_db::{mdbx::DatabaseArguments, test_utils::TempDatabase, DatabaseEnv};
 use reth_errors::ProviderResult;
@@ -14,6 +15,7 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_types::{HeaderTy, NodeTypesWithDBAdapter};
 use reth_primitives_traits::{Account, SealedHeader, StorageEntry};
 use reth_storage_api::StorageSettingsCache;
+use reth_storage_overlay::OverlayManager;
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
 use std::sync::Arc;
@@ -45,6 +47,10 @@ pub type MockNodeTypesWithDB<DB = Arc<TempDatabase<DatabaseEnv>>> =
     NodeTypesWithDBAdapter<MockNodeTypes, DB>;
 
 /// Creates test provider factory with mainnet chain spec.
+///
+/// Like every factory of this module but the one of
+/// [`create_test_provider_factory_with_in_memory_state_writer`], it has a read-only in-memory
+/// state, which never has blocks.
 pub fn create_test_provider_factory() -> ProviderFactory<MockNodeTypesWithDB> {
     create_test_provider_factory_with_chain_spec(MAINNET.clone())
 }
@@ -57,6 +63,23 @@ pub fn create_test_provider_factory_with_chain_spec(
     create_test_provider_factory_with_node_types_and_genesis::<MockNodeTypes>(
         chain_spec,
         genesis_block_number,
+        OverlayManager::default(),
+    )
+}
+
+/// Creates test provider factory with provided chain spec, and the writer of its in-memory state.
+pub fn create_test_provider_factory_with_in_memory_state_writer(
+    chain_spec: Arc<ChainSpec>,
+) -> (ProviderFactory<MockNodeTypesWithDB>, InMemoryStateWriter) {
+    let genesis_block_number = chain_spec.genesis.number.unwrap_or_default();
+    let (in_memory_state, in_memory_state_writer) = InMemoryState::new();
+    (
+        create_test_provider_factory_with_node_types_and_genesis::<MockNodeTypes>(
+            chain_spec,
+            genesis_block_number,
+            OverlayManager::new(in_memory_state),
+        ),
+        in_memory_state_writer,
     )
 }
 
@@ -74,12 +97,17 @@ pub fn create_test_provider_factory_with_genesis_block_number(
 pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
     chain_spec: Arc<N::ChainSpec>,
 ) -> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<TempDatabase<DatabaseEnv>>>> {
-    create_test_provider_factory_with_node_types_and_genesis(chain_spec, 0)
+    create_test_provider_factory_with_node_types_and_genesis(
+        chain_spec,
+        0,
+        OverlayManager::default(),
+    )
 }
 
 fn create_test_provider_factory_with_node_types_and_genesis<N: NodeTypesForProvider>(
     chain_spec: Arc<N::ChainSpec>,
     genesis_block_number: u64,
+    overlay_manager: OverlayManager<N::Primitives>,
 ) -> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<TempDatabase<DatabaseEnv>>>> {
     // Create a single temp directory that contains all data dirs (db, static_files, rocksdb).
     // TempDatabase will clean up the entire directory on drop.
@@ -105,6 +133,7 @@ fn create_test_provider_factory_with_node_types_and_genesis<N: NodeTypesForProvi
             .with_default_tables()
             .build()
             .expect("failed to create test RocksDB provider"),
+        overlay_manager,
         reth_tasks::Runtime::test(),
     )
     .expect("failed to create test provider factory")
@@ -137,6 +166,7 @@ pub fn create_test_provider_factory_with_chain_spec_and_db_args(
             .with_default_tables()
             .build()
             .expect("failed to create test RocksDB provider"),
+        OverlayManager::default(),
         reth_tasks::Runtime::test(),
     )
     .expect("failed to create test provider factory")

@@ -31,7 +31,6 @@ use reth_network_p2p::{
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
 use reth_primitives_traits::{
-    crypto::secp256k1::public_key_to_address,
     proofs::{calculate_receipt_root, calculate_transaction_root},
     RecoveredBlock, SealedBlock,
 };
@@ -403,7 +402,8 @@ struct Create2SelfdestructScenario {
 fn setup_selfdestruct_scenario() -> eyre::Result<SelfdestructScenario> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
-    let signer_address = public_key_to_address(key_pair.public_key());
+    let signer_address =
+        Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
     let selfdestruct_contract = Address::repeat_byte(0x66);
     let chain_spec = build_selfdestruct_chain_spec(signer_address, selfdestruct_contract);
     let blocks = {
@@ -492,7 +492,8 @@ fn setup_selfdestruct_scenario() -> eyre::Result<SelfdestructScenario> {
 fn setup_create2_selfdestruct_scenario() -> eyre::Result<Create2SelfdestructScenario> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
-    let signer_address = public_key_to_address(key_pair.public_key());
+    let signer_address =
+        Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
     let factory_contract = Address::repeat_byte(0xaa);
     let child_init = CREATE2_SELFDESTRUCT_INIT_CODE;
     let child_contract = factory_contract.create2_from_code(TEST_CREATE2_SALT, &child_init);
@@ -612,7 +613,8 @@ struct IntraBlockAndIntraTxSelfdestructScenario {
 fn setup_reverted_slot_selfdestruct_scenario() -> eyre::Result<RevertedSlotSelfdestructScenario> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
-    let signer_address = public_key_to_address(key_pair.public_key());
+    let signer_address =
+        Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
     let selfdestruct_contract = Address::repeat_byte(0x33);
     let slot = B256::with_last_byte(0x03);
     let original_value = B256::with_last_byte(0x07);
@@ -702,7 +704,8 @@ fn setup_reverted_slot_selfdestruct_scenario() -> eyre::Result<RevertedSlotSelfd
 fn setup_same_address_double_wipe_scenario() -> eyre::Result<SameAddressDoubleWipeScenario> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
-    let signer_address = public_key_to_address(key_pair.public_key());
+    let signer_address =
+        Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
     let factory_contract = Address::repeat_byte(0xaa);
     let child_init = init_code_for_runtime(&WRITE_OR_SELFDESTRUCT_RUNTIME_CODE);
     let child_contract = factory_contract.create2_from_code(TEST_CREATE2_SALT, &child_init);
@@ -798,7 +801,8 @@ fn setup_same_address_recreate_and_write_same_block_then_wipe_scenario(
 ) -> eyre::Result<SameAddressDifferentSlotsDoubleWipeScenario> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
-    let signer_address = public_key_to_address(key_pair.public_key());
+    let signer_address =
+        Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
     let factory_contract = Address::repeat_byte(0xaa);
     let child_init = init_code_for_runtime(&WRITE_TWO_SLOT_SETS_OR_SELFDESTRUCT_RUNTIME_CODE);
     let child_contract = factory_contract.create2_from_code(TEST_CREATE2_SALT, &child_init);
@@ -943,7 +947,8 @@ fn setup_intra_block_and_intra_tx_selfdestruct_scenario(
 ) -> eyre::Result<IntraBlockAndIntraTxSelfdestructScenario> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
-    let signer_address = public_key_to_address(key_pair.public_key());
+    let signer_address =
+        Address::from_raw_public_key(&key_pair.public_key().serialize_uncompressed()[1..]);
     let multi_tx_contract = Address::repeat_byte(0x44);
     let intra_tx_contract = Address::repeat_byte(0x55);
 

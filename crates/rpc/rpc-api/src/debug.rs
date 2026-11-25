@@ -11,8 +11,7 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
 
 /// Debug rpc interface.
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "debug"))]
+#[rpc(server, namespace = "debug")]
 pub trait DebugApi<TxReq: RpcObject> {
     /// Returns an RLP-encoded header.
     #[method(name = "getRawHeader")]
@@ -292,8 +291,8 @@ pub trait DebugApi<TxReq: RpcObject> {
         end_number: u64,
     ) -> RpcResult<()>;
 
-    /// Executes a block (bad- or canon- or side-), and returns a list of intermediate roots: the
-    /// stateroot after each transaction.
+    /// Executes a canonical or bad block, and returns a list of intermediate roots: the stateroot
+    /// after each transaction up to the first invalid one.
     #[method(name = "intermediateRoots")]
     async fn debug_intermediate_roots(
         &self,

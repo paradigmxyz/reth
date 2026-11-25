@@ -237,6 +237,18 @@ impl Environment {
 
         Ok(freelist)
     }
+
+    /// Clears reader lock table slots left behind by processes that no longer exist.
+    ///
+    /// Returns `true` if stale slots were cleared or the reader table mutex was recovered from a
+    /// dead owner. The mutex recovery clears stale slots without counting them, so no count is
+    /// returned.
+    pub fn reader_check(&self) -> Result<bool> {
+        let mut dead = 0;
+        // SAFETY: `env_ptr` is valid for the lifetime of `self` and `dead` is a valid out-pointer.
+        let recovered = mdbx_result(unsafe { ffi::mdbx_reader_check(self.env_ptr(), &mut dead) })?;
+        Ok(recovered || dead > 0)
+    }
 }
 
 /// Container type for Environment internals.
@@ -258,6 +270,9 @@ struct EnvironmentInner {
 
 impl Drop for EnvironmentInner {
     fn drop(&mut self) {
+        #[cfg(feature = "read-tx-timeouts")]
+        self.txn_manager.stop_read_transaction_monitor();
+
         // Abort all pooled read transactions before closing the environment.
         self.ro_txn_pool.drain();
 
@@ -464,6 +479,21 @@ impl Info {
         } else {
             Mode::ReadWrite { sync_mode: SyncMode::Durable }
         }
+    }
+
+    /// Returns the id of the latest transaction whose meta page MDBX marked steady, which a new
+    /// boot rolls back to after an unclean shutdown. Under [`SyncMode::NoMetaSync`] that meta page
+    /// may not be flushed yet.
+    pub fn last_steady_txnid(&self) -> Option<u64> {
+        // Mirrors `SIGN_IS_STEADY` in mdbx.c: signatures 0 and 1 mark empty and weak metas.
+        const DATASIGN_WEAK: u64 = 1;
+        self.0
+            .mi_meta_sign
+            .iter()
+            .zip(self.0.mi_meta_txnid)
+            .filter(|(sign, _)| **sign > DATASIGN_WEAK)
+            .map(|(_, txnid)| txnid)
+            .max()
     }
 }
 

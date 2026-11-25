@@ -14,6 +14,8 @@ workspace = true
 # reth
 reth-storage-errors.workspace = true
 
+evm2 = { workspace = true, features = ["block"] }
+
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 nybbles.workspace = true
@@ -23,6 +25,7 @@ thiserror.workspace = true
 [features]
 default = ["std"]
 std = [
+    "evm2/std",
     "alloy-primitives/std",
     "alloy-rlp/std",
     "thiserror/std",

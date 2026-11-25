@@ -1,6 +1,6 @@
 use crate::{cli::config::PayloadBuilderConfig, version::default_extra_data};
 use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
-use alloy_primitives::Bytes;
+use alloy_primitives::{hex, Bytes};
 use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
@@ -11,8 +11,8 @@ use reth_cli_util::{
 };
 use std::{ffi::OsStr, sync::OnceLock, time::Duration};
 
-/// Global static payload builder defaults
-static PAYLOAD_BUILDER_DEFAULTS: OnceLock<DefaultPayloadBuilderValues> = OnceLock::new();
+/// Registered defaults and the decoded extra data used to construct node configs.
+static PAYLOAD_BUILDER_DEFAULTS: OnceLock<(DefaultPayloadBuilderValues, Bytes)> = OnceLock::new();
 
 /// Default values for payload builder that can be customized
 ///
@@ -30,17 +30,46 @@ pub struct DefaultPayloadBuilderValues {
 }
 
 impl DefaultPayloadBuilderValues {
-    /// Initialize the global payload builder defaults with this configuration
+    /// Initialize the global payload builder defaults with this configuration.
+    ///
+    /// Returns the supplied configuration if defaults are already installed or the extra data
+    /// is invalid. Use [`Self::try_init_detailed`] to distinguish the two cases.
     pub fn try_init(self) -> Result<(), Self> {
-        PAYLOAD_BUILDER_DEFAULTS.set(self)
+        self.try_init_detailed().map_err(|err| match err {
+            PayloadBuilderDefaultsError::AlreadyInitialized(defaults) |
+            PayloadBuilderDefaultsError::InvalidExtraData { defaults, .. } => defaults,
+        })
+    }
+
+    /// Initialize the global payload builder defaults, returning the reason for failure.
+    ///
+    /// Returns [`PayloadBuilderDefaultsError::AlreadyInitialized`] if defaults are already
+    /// installed. [`PayloadBuilderDefaultsError::InvalidExtraData`] returns the configuration
+    /// for correction without initializing the defaults.
+    pub fn try_init_detailed(self) -> Result<(), PayloadBuilderDefaultsError> {
+        if PAYLOAD_BUILDER_DEFAULTS.get().is_some() {
+            return Err(PayloadBuilderDefaultsError::AlreadyInitialized(self));
+        }
+        let extra_data = match decode_extra_data(&self.extra_data) {
+            Ok(bytes) => bytes,
+            Err(source) => {
+                return Err(PayloadBuilderDefaultsError::InvalidExtraData { defaults: self, source })
+            }
+        };
+        PAYLOAD_BUILDER_DEFAULTS
+            .set((self, extra_data))
+            .map_err(|(defaults, _)| PayloadBuilderDefaultsError::AlreadyInitialized(defaults))
     }
 
     /// Get a reference to the global payload builder defaults
     pub fn get_global() -> &'static Self {
-        PAYLOAD_BUILDER_DEFAULTS.get_or_init(Self::default)
+        &Self::global().0
     }
 
-    /// Set the default extra data
+    /// Set the default extra data as `0x`-prefixed hex or plain UTF-8 text.
+    ///
+    /// [`Self::try_init`] checks the hex encoding. The 32-byte limit is enforced when the CLI
+    /// parses the default, since programmatic configs may target chains with a higher limit.
     pub fn with_extra_data(mut self, v: impl Into<String>) -> Self {
         self.extra_data = v.into();
         self
@@ -62,6 +91,14 @@ impl DefaultPayloadBuilderValues {
     pub const fn with_max_payload_tasks(mut self, v: usize) -> Self {
         self.max_payload_tasks = v;
         self
+    }
+
+    fn global() -> &'static (Self, Bytes) {
+        PAYLOAD_BUILDER_DEFAULTS.get_or_init(|| {
+            let defaults = Self::default();
+            let extra_data = Bytes::copy_from_slice(defaults.extra_data.as_bytes());
+            (defaults, extra_data)
+        })
     }
 }
 
@@ -132,9 +169,9 @@ pub struct PayloadBuilderArgs {
 
 impl Default for PayloadBuilderArgs {
     fn default() -> Self {
-        let defaults = DefaultPayloadBuilderValues::get_global();
+        let (defaults, extra_data) = DefaultPayloadBuilderValues::global();
         Self {
-            extra_data: Bytes::from(defaults.extra_data.as_bytes().to_vec()),
+            extra_data: extra_data.clone(),
             interval: parse_duration_from_secs_or_ms(defaults.interval.as_str()).unwrap(),
             gas_limit: None,
             deadline: Duration::from_secs(defaults.deadline.parse().unwrap()),
@@ -170,6 +207,22 @@ impl PayloadBuilderConfig for PayloadBuilderArgs {
     }
 }
 
+/// Failure to register global payload builder defaults. Both variants return the supplied values.
+#[derive(Debug, thiserror::Error)]
+pub enum PayloadBuilderDefaultsError {
+    /// Another configuration has already been installed.
+    #[error("payload builder defaults already initialized")]
+    AlreadyInitialized(DefaultPayloadBuilderValues),
+    /// The supplied `0x`-prefixed extra data is not valid hex and was not installed.
+    #[error("invalid hex in payload builder default extra data")]
+    InvalidExtraData {
+        /// The supplied defaults, which can be corrected and submitted again.
+        defaults: DefaultPayloadBuilderValues,
+        /// The reason the extra data was rejected.
+        source: hex::FromHexError,
+    },
+}
+
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 struct ExtraDataValueParser;
@@ -186,18 +239,12 @@ impl TypedValueParser for ExtraDataValueParser {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
 
-        let bytes = if let Some(hex) = val.strip_prefix("0x") {
-            alloy_primitives::hex::decode(hex).map_err(|e| {
-                clap::Error::raw(
-                    clap::error::ErrorKind::InvalidValue,
-                    format!("Invalid hex in extradata: {e}"),
-                )
-            })?
+        let max_len = if val.starts_with("0x") {
+            "0x".len() + 2 * MAXIMUM_EXTRA_DATA_SIZE
         } else {
-            val.as_bytes().to_vec()
+            MAXIMUM_EXTRA_DATA_SIZE
         };
-
-        if bytes.len() > MAXIMUM_EXTRA_DATA_SIZE {
+        if val.len() > max_len {
             return Err(clap::Error::raw(
                 clap::error::ErrorKind::InvalidValue,
                 format!(
@@ -206,7 +253,21 @@ impl TypedValueParser for ExtraDataValueParser {
             ))
         }
 
-        Ok(bytes.into())
+        decode_extra_data(val).map_err(|e| {
+            clap::Error::raw(
+                clap::error::ErrorKind::InvalidValue,
+                format!("Invalid hex in extradata: {e}"),
+            )
+        })
+    }
+}
+
+/// Decodes `0x`-prefixed hex and keeps any other value as UTF-8 bytes.
+fn decode_extra_data(val: &str) -> Result<Bytes, hex::FromHexError> {
+    if val.starts_with("0x") {
+        hex::decode(val).map(Bytes::from)
+    } else {
+        Ok(Bytes::copy_from_slice(val.as_bytes()))
     }
 }
 
@@ -216,7 +277,7 @@ mod tests {
     use clap::Parser;
 
     /// A helper type to parse Args more easily
-    #[derive(Parser)]
+    #[derive(Debug, Parser)]
     struct CommandParser<T: Args> {
         #[command(flatten)]
         args: T,
@@ -287,13 +348,29 @@ mod tests {
     }
 
     #[test]
+    fn extra_data_size_is_checked_before_hex_decoding() {
+        let oversized = format!("0x{}zz", "ff".repeat(MAXIMUM_EXTRA_DATA_SIZE));
+        let err = ExtraDataValueParser
+            .parse_ref(&Command::new("reth"), None, OsStr::new(&oversized))
+            .unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
+        assert_eq!(
+            err.to_string(),
+            format!("error: Payload builder extradata size exceeds {MAXIMUM_EXTRA_DATA_SIZE}-byte limit")
+        );
+    }
+
+    #[test]
     fn test_invalid_hex_extra_data() {
-        assert!(CommandParser::<PayloadBuilderArgs>::try_parse_from([
-            "reth",
-            "--builder.extradata",
-            "0xZZZZ",
-        ])
-        .is_err());
+        for invalid in ["0xZZZZ", "0x0x", "0x0xab", "0x0Xab"] {
+            let err = CommandParser::<PayloadBuilderArgs>::try_parse_from([
+                "reth",
+                "--builder.extradata",
+                invalid,
+            ])
+            .unwrap_err();
+            assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
+        }
     }
 
     #[test]

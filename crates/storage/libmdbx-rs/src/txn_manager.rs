@@ -40,7 +40,7 @@ impl fmt::Debug for TxnManagerMessage {
 pub(crate) struct TxnManager {
     sender: SyncSender<TxnManagerMessage>,
     #[cfg(feature = "read-tx-timeouts")]
-    read_transactions: Option<std::sync::Arc<read_transactions::ReadTransactions>>,
+    read_transactions: Option<read_transactions::ReadTransactionMonitor>,
 }
 
 impl TxnManager {
@@ -128,7 +128,12 @@ mod read_transactions {
     use dashmap::{DashMap, DashSet};
     use std::{
         backtrace::Backtrace,
-        sync::{mpsc::sync_channel, Arc},
+        ops::Deref,
+        sync::{
+            mpsc::{channel, sync_channel, RecvTimeoutError, Sender},
+            Arc,
+        },
+        thread::JoinHandle,
         time::{Duration, Instant},
     };
     use tracing::{error, trace, warn};
@@ -143,7 +148,7 @@ mod read_transactions {
             duration: Duration,
         ) -> Self {
             let read_transactions = Arc::new(ReadTransactions::new(duration));
-            read_transactions.clone().start_monitor();
+            let read_transactions = read_transactions.start_monitor();
 
             let (tx, rx) = sync_channel(0);
 
@@ -152,6 +157,11 @@ mod read_transactions {
             txn_manager.start_message_listener(env, rx);
 
             txn_manager
+        }
+
+        /// Stops and joins the read transaction monitor before the environment is closed.
+        pub(crate) fn stop_read_transaction_monitor(&mut self) {
+            drop(self.read_transactions.take());
         }
 
         /// Adds a new transaction to the list of active read transactions.
@@ -177,6 +187,34 @@ mod read_transactions {
             self.read_transactions
                 .as_ref()
                 .map(|read_transactions| read_transactions.timed_out_not_aborted())
+        }
+    }
+
+    /// Owns the monitor thread and joins it when the environment is closed.
+    #[derive(Debug)]
+    pub(super) struct ReadTransactionMonitor {
+        transactions: Arc<ReadTransactions>,
+        shutdown: Option<Sender<()>>,
+        handle: Option<JoinHandle<()>>,
+    }
+
+    impl Deref for ReadTransactionMonitor {
+        type Target = ReadTransactions;
+
+        fn deref(&self) -> &Self::Target {
+            &self.transactions
+        }
+    }
+
+    impl Drop for ReadTransactionMonitor {
+        fn drop(&mut self) {
+            // Disconnecting wakes the monitor even if it has not started waiting yet.
+            drop(self.shutdown.take());
+            if let Some(handle) = self.handle.take() &&
+                handle.join().is_err()
+            {
+                error!(target: "libmdbx", "Read transaction monitor panicked during shutdown");
+            }
         }
     }
 
@@ -222,6 +260,14 @@ mod read_transactions {
             self.active.remove(&(ptr as usize)).is_some()
         }
 
+        /// Returns `true` if `tx` is still the active read transaction registered for `ptr`.
+        ///
+        /// Pointers can be reused by new read transactions, so the transaction identity is
+        /// compared as well.
+        fn is_active(&self, ptr: usize, tx: &TransactionPtr) -> bool {
+            self.active.get(&ptr).is_some_and(|entry| entry.value().0.is_same(tx))
+        }
+
         /// Returns the number of timed out transactions that were not aborted by the user yet.
         pub(super) fn timed_out_not_aborted(&self) -> usize {
             self.timed_out_not_aborted.len()
@@ -229,54 +275,28 @@ mod read_transactions {
 
         /// Spawns a new [`std::thread`] that monitors the list of active read transactions and
         /// timeouts those that are open for longer than `ReadTransactions.max_duration`.
-        pub(super) fn start_monitor(self: Arc<Self>) {
+        pub(super) fn start_monitor(self: Arc<Self>) -> ReadTransactionMonitor {
+            let transactions = self.clone();
+            let (shutdown, receiver) = channel();
             let task = move || {
-                let mut timed_out_active = Vec::new();
+                let mut expired = Vec::new();
 
                 loop {
                     let now = Instant::now();
                     let mut max_active_transaction_duration = None;
 
-                    // Iterate through active read transactions and time out those that's open for
-                    // longer than `self.max_duration`.
+                    // Collect active read transactions that are open for longer than
+                    // `self.max_duration`.
+                    //
+                    // The transaction locks must not be taken while iterating: commit and drop
+                    // hold the transaction lock and then remove the entry from `active`, which
+                    // needs the write lock of the shard that the iterator is holding.
                     for entry in &self.active {
                         let (tx, start, backtrace) = entry.value();
                         let duration = now - *start;
 
                         if duration > self.max_duration {
-                            let result = tx.txn_execute_fail_on_timeout(|txn_ptr| {
-                                // Time out the transaction.
-                                //
-                                // We use `mdbx_txn_reset` instead of `mdbx_txn_abort` here to
-                                // prevent MDBX from reusing the pointer of the aborted
-                                // transaction for new read-only transactions. This is
-                                // important because we store the pointer in the `active` list
-                                // and assume that it is unique.
-                                //
-                                // See https://libmdbx.dqdkfa.ru/group__c__transactions.html#gae9f34737fe60b0ba538d5a09b6a25c8d for more info.
-                                let result = mdbx_result(unsafe { ffi::mdbx_txn_reset(txn_ptr) });
-                                if result.is_ok() {
-                                    tx.set_timed_out();
-                                }
-                                (txn_ptr, duration, result)
-                            });
-
-                            match result {
-                                Ok((txn_ptr, duration, error)) => {
-                                    // Add the transaction to `timed_out_active`. We can't remove it
-                                    // instantly from the list of active transactions, because we
-                                    // iterate through it.
-                                    timed_out_active.push((
-                                        txn_ptr,
-                                        duration,
-                                        backtrace.clone(),
-                                        error,
-                                    ));
-                                }
-                                Err(err) => {
-                                    error!(target: "libmdbx", %err, ?backtrace, "Failed to abort the long-lived read transaction")
-                                }
-                            }
+                            expired.push((*entry.key(), tx.clone(), duration, backtrace.clone()));
                         } else {
                             max_active_transaction_duration = Some(
                                 duration.max(max_active_transaction_duration.unwrap_or_default()),
@@ -284,29 +304,63 @@ mod read_transactions {
                         }
                     }
 
-                    // Walk through timed out transactions, and delete them from the list of active
-                    // transactions.
-                    for (ptr, open_duration, backtrace, err) in timed_out_active.iter().cloned() {
-                        // Try deleting the transaction from the list of active transactions.
-                        let was_in_active = self.remove_active(ptr);
-                        if let Err(err) = err {
-                            if was_in_active {
-                                // If the transaction was in the list of active transactions,
-                                // then user didn't abort it and we failed to do so.
-                                error!(target: "libmdbx", %err, ?open_duration, ?backtrace, "Failed to time out the long-lived read transaction");
+                    // Time out the collected transactions.
+                    for (ptr, tx, open_duration, backtrace) in &expired {
+                        let ptr = *ptr;
+                        let result = tx.txn_execute_fail_on_timeout(|txn_ptr| {
+                            // The transaction could have been committed or dropped after it was
+                            // collected, and its pointer could even have been reused by a new
+                            // read transaction from the pool. We hold the transaction lock, so
+                            // it can't be finished from now on. If the entry is still ours, the
+                            // transaction is live.
+                            if !self.is_active(ptr, tx) {
+                                return None
                             }
-                        } else {
-                            // Happy path, the transaction has been timed out by us with no errors.
-                            warn!(target: "libmdbx", ?open_duration, ?backtrace, "Long-lived read transaction has been timed out");
-                            // Add transaction to the list of timed out transactions that were not
-                            // aborted by the user yet.
-                            self.timed_out_not_aborted.insert(ptr as usize);
+
+                            // Time out the transaction.
+                            //
+                            // We use `mdbx_txn_reset` instead of `mdbx_txn_abort` here to
+                            // prevent MDBX from reusing the pointer of the aborted
+                            // transaction for new read-only transactions. This is
+                            // important because we store the pointer in the `active` list
+                            // and assume that it is unique.
+                            //
+                            // See https://libmdbx.dqdkfa.ru/group__c__transactions.html#gae9f34737fe60b0ba538d5a09b6a25c8d for more info.
+                            let result = mdbx_result(unsafe { ffi::mdbx_txn_reset(txn_ptr) });
+                            if result.is_ok() {
+                                tx.set_timed_out();
+                            }
+
+                            // Delete the transaction from the list of active transactions while
+                            // still holding the transaction lock, so that it can't be dropped
+                            // in between.
+                            let was_in_active = self.remove_active(txn_ptr);
+                            match result {
+                                Ok(_) => {
+                                    // Happy path, the transaction has been timed out by us with
+                                    // no errors. Add it to the list of timed out transactions
+                                    // that were not aborted by the user yet.
+                                    self.timed_out_not_aborted.insert(txn_ptr as usize);
+                                    warn!(target: "libmdbx", ?open_duration, ?backtrace, "Long-lived read transaction has been timed out");
+                                }
+                                Err(err) if was_in_active => {
+                                    // If the transaction was in the list of active transactions,
+                                    // then user didn't abort it and we failed to do so.
+                                    error!(target: "libmdbx", %err, ?open_duration, ?backtrace, "Failed to time out the long-lived read transaction");
+                                }
+                                Err(_) => {}
+                            }
+                            Some(())
+                        });
+
+                        if let Err(err) = result {
+                            error!(target: "libmdbx", %err, ?backtrace, "Failed to abort the long-lived read transaction")
                         }
                     }
 
-                    // Clear the list of timed out transactions, but not de-allocate the reserved
-                    // capacity to save on further pushes.
-                    timed_out_active.clear();
+                    // Clear the list, but not de-allocate the reserved capacity to save on
+                    // further pushes.
+                    expired.clear();
 
                     if !self.active.is_empty() {
                         trace!(
@@ -326,24 +380,28 @@ mod read_transactions {
                         self.max_duration - max_active_transaction_duration.unwrap_or_default(),
                     );
                     trace!(target: "libmdbx", ?sleep_duration, elapsed = ?now.elapsed(), "Putting transaction monitor to sleep");
-                    std::thread::sleep(sleep_duration);
+                    match receiver.recv_timeout(sleep_duration) {
+                        Err(RecvTimeoutError::Timeout) => {}
+                        Ok(()) | Err(RecvTimeoutError::Disconnected) => break,
+                    }
                 }
             };
-            std::thread::Builder::new()
+            let handle = std::thread::Builder::new()
                 .name("mdbx-rs-read-tx-timeouts".to_string())
                 .spawn(task)
                 .unwrap();
+
+            ReadTransactionMonitor { transactions, shutdown: Some(shutdown), handle: Some(handle) }
         }
     }
 
     #[cfg(test)]
     mod tests {
-        use crate::{
-            txn_manager::read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, Environment, Error,
-            MaxReadTransactionDuration,
-        };
+        use super::*;
+        use crate::{Environment, Error, MaxReadTransactionDuration};
         use std::{
-            thread::sleep,
+            sync::mpsc,
+            thread::{self, sleep},
             time::{Duration, Instant},
         };
         use tempfile::tempdir;
@@ -370,10 +428,18 @@ mod read_transactions {
                     cfg!(all(debug_assertions, not(feature = "fuzz"))),
                 );
 
+                let snapshot = read_transactions.active.get(&tx_ptr).unwrap().0.clone();
+                assert!(read_transactions.is_active(tx_ptr, &snapshot));
                 tx.open_db(None).unwrap();
                 drop(tx);
 
-                assert!(!read_transactions.active.contains_key(&tx_ptr));
+                assert!(!read_transactions.is_active(tx_ptr, &snapshot));
+
+                // A collected entry must not match a later transaction reusing its pooled handle.
+                let tx = env.begin_ro_txn().unwrap();
+                assert_eq!(tx.txn() as usize, tx_ptr);
+                assert!(!read_transactions.is_active(tx_ptr, &snapshot));
+                tx.open_db(None).unwrap();
             }
 
             // Create a read-only transaction, successfully use it, close it by committing.
@@ -430,6 +496,62 @@ mod read_transactions {
             }
         }
 
+        /// Commits and drops read transactions around their timeout while the monitor is timing
+        /// them out. The monitor must not hold a lock on the active transactions while waiting
+        /// for a transaction lock, otherwise it deadlocks with commit and drop.
+        #[test]
+        fn txn_manager_read_transactions_timeout_commit_drop_race() {
+            const MAX_DURATION: Duration = Duration::from_millis(10);
+            const THREADS: usize = 16;
+            const RUN_FOR: Duration = Duration::from_secs(2);
+
+            let dir = tempdir().unwrap();
+            let env = Environment::builder()
+                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(MAX_DURATION))
+                .open(dir.path())
+                .unwrap();
+
+            let (done_tx, done_rx) = mpsc::channel();
+            for thread_id in 0..THREADS {
+                let env = env.clone();
+                let done_tx = done_tx.clone();
+                thread::spawn(move || {
+                    let deadline = Instant::now() + RUN_FOR;
+                    let mut i = thread_id;
+                    while Instant::now() < deadline {
+                        let tx = env.begin_ro_txn().unwrap();
+                        // Finish the transaction right around the moment it expires.
+                        sleep(
+                            MAX_DURATION - Duration::from_millis(3) +
+                                Duration::from_millis(i as u64 % 6),
+                        );
+                        // The transaction might have been timed out already.
+                        if i % 2 == 0 {
+                            if let Err(err) = tx.commit() {
+                                assert_eq!(err, Error::ReadTransactionTimeout);
+                            }
+                        } else {
+                            drop(tx);
+                        }
+                        i += 1;
+                    }
+                    done_tx.send(()).unwrap();
+                });
+            }
+            drop(done_tx);
+
+            for _ in 0..THREADS {
+                done_rx
+                    .recv_timeout(Duration::from_secs(30))
+                    .expect("read transaction timeout monitor deadlocked");
+            }
+
+            // Every transaction was finished, so nothing must be left behind.
+            let read_transactions = env.txn_manager().read_transactions.as_ref().unwrap();
+            assert!(read_transactions.active.is_empty());
+            assert!(read_transactions.timed_out_not_aborted.is_empty());
+        }
+
         #[test]
         fn txn_manager_read_transactions_duration_unbounded() {
             let dir = tempdir().unwrap();
@@ -442,6 +564,37 @@ mod read_transactions {
 
             let tx = env.begin_ro_txn().unwrap();
             assert!(tx.commit().is_ok())
+        }
+
+        #[test]
+        fn read_transaction_monitor_stops_on_last_environment_drop() {
+            let dir = tempdir().unwrap();
+            let env = Environment::builder()
+                .set_max_read_transaction_duration(MaxReadTransactionDuration::Set(
+                    Duration::from_secs(60),
+                ))
+                .open(dir.path())
+                .unwrap();
+            let transactions =
+                Arc::downgrade(&env.txn_manager().read_transactions.as_ref().unwrap().transactions);
+            let clone = env.clone();
+            drop(env);
+            assert!(transactions.upgrade().is_some());
+
+            drop(clone);
+            assert!(transactions.upgrade().is_none(), "monitor retained transaction state");
+        }
+
+        #[test]
+        fn read_transaction_monitor_shutdown_wakes_waiter() {
+            let transactions = Arc::new(ReadTransactions::new(Duration::from_secs(60)));
+            let monitor = transactions.start_monitor();
+            // Retaining the state proves shutdown does not depend on its reference count.
+            let transactions = monitor.transactions.clone();
+            let started = Instant::now();
+            drop(monitor);
+            assert!(started.elapsed() < READ_TRANSACTIONS_CHECK_INTERVAL);
+            assert_eq!(Arc::strong_count(&transactions), 1);
         }
     }
 }
