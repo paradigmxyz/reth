@@ -69,8 +69,8 @@ fn coverage_branch_masks(
 }
 
 /// Observes a proof target at emission, before any mutation changes its logical parent.
-/// A blinded root has no revealed parent shape. Collapse proof parents contain only the
-/// current child and its blinded sibling, so they cannot have any taken sibling to resolve.
+/// A blinded root or opaque backing branch has no revealed parent shape. Collapse parents contain
+/// only the current child and its blinded sibling, so they have no taken sibling to resolve.
 #[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
 fn observe_proof_target(
     arena: &NodeArena,
@@ -82,11 +82,20 @@ fn observe_proof_target(
         branch_idx(arena, parent_idx).is_some()
     {
         let branch = branch_data(arena, parent_idx);
+        let target = target_path.get_unchecked(depth);
+        // An opaque extension's backing branch has no revealed immediate branch neighborhood.
+        if let Some(child_idx) = BranchChildIdx::new(branch.state_mask, target) &&
+            let Some(idx) = branch.children[child_idx].revealed_index() &&
+            has_blinded_branch(arena, idx)
+        {
+            observe_blind_root_proof_target();
+            return;
+        }
         let (revealed, leaf) = coverage_branch_masks(arena, branch, taken);
         sparse_guidance::observe_proof_target(
             depth,
             true,
-            target_path.get_unchecked(depth),
+            target,
             branch.state_mask.get(),
             revealed,
             leaf,
@@ -96,7 +105,7 @@ fn observe_proof_target(
     }
 }
 
-/// Observes a proof request for a blind root, which has no revealed parent shape.
+/// Observes a proof request without a revealed immediate branch neighborhood.
 #[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
 pub(crate) fn observe_blind_root_proof_target() {
     sparse_guidance::observe_proof_target(0, false, 0, 0, 0, 0);

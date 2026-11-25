@@ -92,8 +92,8 @@ fn local_index(observation: &Observation, target: u8) -> usize {
 
 /// Observes a blinded proof target at sparse-trie proof emission, never at the caller/model.
 ///
-/// Masks describe its local revealed logical parent. A blinded root has no parent and
-/// passes zero masks/depth/target; it hits a separate bounded control, not the local bank.
+/// Masks describe its local revealed logical parent. A blinded root or opaque backing branch
+/// has no revealed parent neighborhood and passes zero masks/depth/target to a separate control.
 pub(super) fn observe_proof_target(
     branch_path_len: usize,
     has_parent: bool,
