@@ -364,11 +364,6 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         serde(bound = "N::PooledTransaction: serde::Serialize + serde::de::DeserializeOwned")
     )]
     PooledTransactions(RequestPair<PooledTransactions<N::PooledTransaction>>),
-    /// Represents an eth/72 `PooledTransactions` response, whose blob transactions carry no blobs.
-    ///
-    /// It shares the message ID of [`Self::PooledTransactions`] and only selects the eth/72
-    /// encoding.
-    PooledTransactionsEth72(RequestPair<PooledTransactionsEth72<N::PooledTransaction>>),
     /// Represents a `GetNodeData` request-response pair.
     GetNodeData(RequestPair<GetNodeData>),
     /// Represents a `NodeData` request-response pair.
@@ -419,6 +414,11 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     BlockRangeUpdate(BlockRangeUpdate),
     /// Represents an encoded message that doesn't match any other variant
     Other(RawCapabilityMessage),
+    /// Represents an eth/72 `PooledTransactions` response, whose blob transactions carry no blobs.
+    ///
+    /// It shares the message ID of [`Self::PooledTransactions`] and only selects the eth/72
+    /// encoding.
+    PooledTransactionsEth72(RequestPair<PooledTransactionsEth72<N::PooledTransaction>>),
 }
 
 impl<N: NetworkPrimitives> EthMessage<N> {
