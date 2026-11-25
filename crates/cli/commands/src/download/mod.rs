@@ -999,19 +999,22 @@ fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Co
     }
 }
 
-/// Removes existing snapshot data that is managed by `reth download`.
+/// Removes existing snapshot data managed by `reth download` without following symlinks.
 fn clear_existing_datadir(target_dir: &Path, static_files_dir: Option<&Path>) -> Result<()> {
     info!(target: "reth::cli", dir = ?target_dir, "Clearing existing snapshot data");
     for entry in MANAGED_DATADIR_PATHS {
         let path = managed_datadir_path(entry, target_dir, static_files_dir);
-        if !path.try_exists()? {
-            continue;
-        }
-
-        let metadata = fs::metadata(&path)?;
-        if metadata.is_dir() {
+        let file_type = match path.symlink_metadata() {
+            Ok(metadata) => metadata.file_type(),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(fs::FsPathError::metadata(err, path).into()),
+        };
+        let is_dir = file_type.is_dir();
+        #[cfg(windows)]
+        let is_dir = is_dir || std::os::windows::fs::FileTypeExt::is_symlink_dir(&file_type);
+        if is_dir {
             fs::remove_dir_all(&path)?;
-        } else if metadata.is_file() {
+        } else if file_type.is_file() || file_type.is_symlink() {
             fs::remove_file(&path)?;
         }
     }
@@ -1254,6 +1257,29 @@ mod tests {
             components,
             extensions: Default::default(),
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clear_existing_datadir_removes_managed_links_without_following_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let datadir = dir.path().join("datadir");
+        let existing = dir.path().join("storage");
+        let missing = dir.path().join("old-config.toml");
+        fs::create_dir_all(&datadir).unwrap();
+        fs::create_dir_all(&existing).unwrap();
+        fs::write(existing.join("data"), b"keep").unwrap();
+        std::os::unix::fs::symlink(&existing, datadir.join("db")).unwrap();
+        std::os::unix::fs::symlink(&missing, datadir.join("reth.toml")).unwrap();
+
+        clear_existing_datadir(&datadir, None).unwrap();
+
+        for entry in ["db", "reth.toml"] {
+            let err = datadir.join(entry).symlink_metadata().unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        }
+        assert_eq!(fs::read(existing.join("data")).unwrap(), b"keep");
+        assert!(!missing.exists());
     }
 
     #[test]
