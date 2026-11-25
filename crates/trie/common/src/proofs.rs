@@ -668,7 +668,8 @@ fn encode_path_proof_nodes(proof_nodes: &[ProofTrieNode], path: &Nibbles) -> Vec
         if let TrieNode::Extension(extension) = &node.node &&
             !path.slice(node.path.len()..).starts_with(&extension.key) &&
             let Some(branch) = index.checked_sub(1).map(|index| &proof_nodes[index]) &&
-            branch.path == node.path.join(&extension.key)
+            branch.path.starts_with(&node.path) &&
+            branch.path.slice(node.path.len()..) == extension.key
         {
             nodes.push(branch);
         }
@@ -1291,6 +1292,35 @@ mod tests {
         let proof = multiproof.account_proof(Address::ZERO, &[B256::ZERO]).unwrap();
         assert_eq!(proof.proof, vec![account_extension, account_branch]);
         assert_eq!(proof.storage_proofs[0].proof, vec![storage_extension, storage_branch]);
+    }
+
+    #[test]
+    fn v2_proof_ignores_overlong_extension() {
+        let path = Nibbles::unpack(keccak256(Address::ZERO));
+        let branch =
+            BranchNode::new(vec![RlpNode::word_rlp(&B256::repeat_byte(0x11))], TrieMask::from(1));
+        let branch_rlp = alloy_rlp::encode(&branch);
+        // The key diverges from `path` and would take the branch path past 64 nibbles.
+        let extension_path = path.slice(..63);
+        let key = Nibbles::from_nibbles([path.get(63).unwrap() ^ 1, 0]);
+        let extension =
+            TrieNode::Extension(ExtensionNode::new(key, RlpNode::from_rlp(&branch_rlp)));
+        let extension_rlp = alloy_rlp::encode(&extension);
+        let multiproof = DecodedMultiProofV2 {
+            account_proofs: vec![
+                ProofTrieNode {
+                    path: Nibbles::from_nibbles([path.get(0).unwrap() ^ 1]),
+                    node: TrieNode::Branch(branch),
+                    masks: None,
+                },
+                ProofTrieNode { path: extension_path, node: extension, masks: None },
+            ],
+            ..Default::default()
+        };
+
+        let proof = multiproof.account_proof(Address::ZERO, &[]).unwrap();
+
+        assert_eq!(proof.proof, vec![Bytes::from(extension_rlp)]);
     }
 
     fn decode_witness(witness: &B256Map<impl AsRef<[u8]>>) -> B256Map<TrieNode> {
