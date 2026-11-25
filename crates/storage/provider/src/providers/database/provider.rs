@@ -870,6 +870,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                         let (_, entry) = entry?;
                         storage.insert(entry.key, entry.value);
                     }
+                    // A parent's hashed state lists every slot its own wipe destroyed as zero,
+                    // since `hashed_post_state` expands wipes, so earlier wipes are applied here.
                     for parent in &state_blocks[..first_block + index] {
                         let Some(parent_storage) =
                             parent.hashed_state_ref().storages.get(&hashed_address)
