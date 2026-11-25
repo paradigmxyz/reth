@@ -461,7 +461,13 @@ pub trait LoadState:
     {
         async move {
             let pending = if at.is_pending() {
-                self.local_pending_block_or_state().await.ok().flatten()
+                let pending = self.local_pending_block_or_state().await.ok().flatten();
+                // Opening the pending block's state costs more than opening the latest state.
+                // Yielding once lets an idle worker steal the read instead of running it on the
+                // worker that just polled the request; without the yield, concurrent inline
+                // pending reads were slower than reads on the blocking pool.
+                tokio::task::yield_now().await;
+                pending
             } else if at.is_latest() {
                 None
             } else {
