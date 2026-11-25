@@ -570,19 +570,17 @@ mod tests {
     async fn oversized_wrapper_is_rejected_before_transaction_resolution() {
         let pool = testing_pool();
         let admission = DependencyAdmission::new(pool.clone());
-        let wrapper = DependencyWrapper {
+        // Construct malformed peer input directly because the production encoder rejects it.
+        let wrapper = WireWrapper {
             transactions: vec![Bytes::copy_from_slice(B256::repeat_byte(1).as_slice())],
-            evidence: Arc::new(
-                DependencyEvidence::aggregate(
-                    dependencies(MAX_LEANSIG_DEPS_PER_WRAPPER + 1),
-                    Bytes::from_static(&[1]),
-                )
-                .unwrap(),
-            ),
+            mode: 1,
+            content: WireContent {
+                dependencies: dependencies(MAX_LEANSIG_DEPS_PER_WRAPPER + 1),
+                witnesses: Bytes::from_static(&[1]),
+            },
         };
-        // The pinned codec permits this block-sized evidence, but admission must reject it.
         assert!(matches!(
-            admission.submit(wrapper.encode().unwrap()).await,
+            admission.submit(alloy_rlp::encode(wrapper).into()).await,
             Err(DependencyAdmissionError::Proof(ProofError::Wrapper)),
         ));
         assert_eq!(pool.pool_size().total, 0);
