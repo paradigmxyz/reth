@@ -91,3 +91,59 @@ where
         destroyed_accounts,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::U256;
+    use reth_db_api::{models::StorageSettings, transaction::DbTxMut};
+    use reth_primitives_traits::StorageEntry;
+    use reth_provider::{
+        test_utils::create_test_provider_factory, StaticFileProviderFactory, StaticFileSegment,
+        StaticFileWriter, StorageSettingsCache,
+    };
+
+    #[test]
+    fn load_prefix_sets_includes_storage_wipe_changesets() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        {
+            let sf = factory.static_file_provider();
+            let mut headers = sf.latest_writer(StaticFileSegment::Headers).unwrap();
+            for number in 0..=1 {
+                let header = Header { number, ..Default::default() };
+                headers.append_header(&header, &B256::ZERO).unwrap();
+            }
+            headers.commit().unwrap();
+            let mut accounts = sf.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            let mut storages = sf.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            for block in 0..=1 {
+                accounts.append_account_changeset(vec![], block).unwrap();
+                storages.append_storage_changeset(vec![], block).unwrap();
+            }
+            accounts.commit().unwrap();
+            storages.commit().unwrap();
+        }
+
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let hashed_slot = keccak256(B256::with_last_byte(1));
+        let provider = factory.provider_rw().unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::StorageWipeChangeSets>(
+                BlockNumberAddress((1, address)),
+                StorageEntry { key: hashed_slot, value: U256::from(9) },
+            )
+            .unwrap();
+
+        let mut prefix_sets = load_prefix_sets_with_provider(&*provider, 1..=1).unwrap();
+
+        assert!(prefix_sets.account_prefix_set.contains(&Nibbles::unpack(hashed_address)));
+        assert!(prefix_sets
+            .storage_prefix_sets
+            .get_mut(&hashed_address)
+            .is_some_and(|prefix_set| prefix_set.contains(&Nibbles::unpack(hashed_slot))));
+    }
+}
