@@ -2,12 +2,19 @@
 
 use crate::broadcast::decode_list_with_memory_budget;
 use alloc::vec::Vec;
-use alloy_consensus::transaction::{PooledTransaction, TxHashRef};
-use alloy_eips::eip7594::{BlobCellMask, Cell};
+use alloy_consensus::{
+    constants::EIP4844_TX_TYPE_ID,
+    transaction::{PooledTransaction, RlpEcdsaEncodableTx, TxEip4844WithSidecar, TxHashRef},
+    Signed,
+};
+use alloy_eips::eip7594::{
+    BlobCellMask, BlobSidecarEncoding, BlobTransactionSidecarVariant, Cell, Encodable7594,
+};
 use alloy_primitives::{B128, B256};
-use alloy_rlp::{Decodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
+use alloy_rlp::{BufMut, Decodable, Encodable, Header, RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
+use reth_ethereum_primitives::PooledTransactionVariant;
 use reth_primitives_traits::InMemorySize;
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
@@ -70,6 +77,106 @@ pub struct PooledTransactions<T = PooledTransaction>(
     pub Vec<T>,
 );
 
+/// An eth/72 `PooledTransactions` response.
+///
+/// eth/72 drops the blobs from type 3 transactions, which keep their commitments and proofs,
+/// because the blob data is fetched separately with `GetCells`. This is the same
+/// `PooledTransactions` message (`0x0a`) on the wire, see [EIP-8070].
+///
+/// [EIP-8070]: https://eips.ethereum.org/EIPS/eip-8070
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PooledTransactionsEth72<T = PooledTransaction>(pub Vec<T>);
+
+impl<T> From<PooledTransactions<T>> for PooledTransactionsEth72<T> {
+    fn from(transactions: PooledTransactions<T>) -> Self {
+        Self(transactions.0)
+    }
+}
+
+impl<T> From<PooledTransactionsEth72<T>> for PooledTransactions<T> {
+    fn from(transactions: PooledTransactionsEth72<T>) -> Self {
+        Self(transactions.0)
+    }
+}
+
+impl<T: Decodable + InMemorySize> PooledTransactionsEth72<T> {
+    /// Decodes an eth/72 response with the same memory budget as a regular response.
+    ///
+    /// A transaction without blobs decodes like any other pooled transaction, with an empty blob
+    /// list.
+    pub fn decode_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        decode_list_with_memory_budget(buf, memory_budget).map(Self)
+    }
+}
+
+impl<T: EncodableEth72PooledTransaction> Encodable for PooledTransactionsEth72<T> {
+    fn encode(&self, out: &mut dyn BufMut) {
+        let payload_length = self.0.iter().map(T::eth72_length).sum();
+        Header { list: true, payload_length }.encode(out);
+        for transaction in &self.0 {
+            transaction.encode_eth72(out);
+        }
+    }
+
+    fn length(&self) -> usize {
+        let payload_length = self.0.iter().map(T::eth72_length).sum();
+        Header { list: true, payload_length }.length_with_payload()
+    }
+}
+
+/// Encodes a pooled transaction for an eth/72 `PooledTransactions` response.
+///
+/// The defaults keep the regular encoding, which is correct for transaction types that never
+/// carry blobs.
+pub trait EncodableEth72PooledTransaction: Encodable {
+    /// Writes the transaction without its blobs, keeping commitments and proofs.
+    fn encode_eth72(&self, out: &mut dyn BufMut) {
+        self.encode(out);
+    }
+
+    /// Returns the length of [`Self::encode_eth72`].
+    fn eth72_length(&self) -> usize {
+        self.length()
+    }
+}
+
+impl EncodableEth72PooledTransaction for PooledTransactionVariant {
+    fn encode_eth72(&self, out: &mut dyn BufMut) {
+        let Self::Eip4844(transaction) = self else { return self.encode(out) };
+        let (tx, signature) = (transaction.tx(), transaction.signature());
+        let (envelope, fields) = eip4844_without_blobs_headers(transaction);
+        envelope.encode(out);
+        out.put_u8(EIP4844_TX_TYPE_ID);
+        fields.encode(out);
+        tx.tx.rlp_encode_signed(signature, out);
+        tx.sidecar.encode_7594_with(BlobSidecarEncoding::WithoutBlobs, out);
+    }
+
+    fn eth72_length(&self) -> usize {
+        let Self::Eip4844(transaction) = self else { return self.length() };
+        eip4844_without_blobs_headers(transaction).0.length_with_payload()
+    }
+}
+
+/// Returns the headers of a type 3 network encoding with an empty blob list:
+/// `string(type || list(signed tx fields, sidecar without blobs))`.
+fn eip4844_without_blobs_headers(
+    transaction: &Signed<TxEip4844WithSidecar<BlobTransactionSidecarVariant>>,
+) -> (Header, Header) {
+    let (tx, signature) = (transaction.tx(), transaction.signature());
+    let fields = Header {
+        list: true,
+        payload_length: tx.tx.rlp_encoded_length_with_signature(signature) +
+            tx.sidecar.encode_7594_len_with(BlobSidecarEncoding::WithoutBlobs),
+    };
+    let envelope = Header { list: false, payload_length: 1 + fields.length_with_payload() };
+    (envelope, fields)
+}
+
 impl<T: Decodable + InMemorySize> PooledTransactions<T> {
     /// Decodes the RLP list of transactions, stopping once the cumulative
     /// [`InMemorySize`] of decoded transactions exceeds `memory_budget` bytes.
@@ -114,10 +221,12 @@ impl<T> Default for PooledTransactions<T> {
 
 /// A list of transaction hashes and the cell indices requested for each transaction.
 ///
-/// See [EIP-8070]: Sparse Blobpool
+/// This encodes as the fields of the eth/72 packet, which [`RequestPair`] wraps in a single list
+/// with the request ID: `[request_id, hashes, cell_mask]`. See [EIP-8070]: Sparse Blobpool
 ///
+/// [`RequestPair`]: crate::message::RequestPair
 /// [EIP-8070]: https://eips.ethereum.org/EIPS/eip-8070
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GetCells {
     /// Transaction hashes to request cells for.
@@ -140,8 +249,28 @@ impl InMemorySize for GetCells {
     }
 }
 
+impl Encodable for GetCells {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.hashes.encode(out);
+        self.cell_mask.encode(out);
+    }
+
+    fn length(&self) -> usize {
+        self.hashes.length() + self.cell_mask.length()
+    }
+}
+
+impl Decodable for GetCells {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        Ok(Self { hashes: Decodable::decode(buf)?, cell_mask: Decodable::decode(buf)? })
+    }
+}
+
 /// The response to [`GetCells`], containing requested cells for each transaction hash.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+///
+/// Like [`GetCells`], this encodes as the packet fields after the request ID:
+/// `[request_id, hashes, cells, cell_mask]`.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Cells {
     /// Transaction hashes corresponding to the returned cell lists.
@@ -152,14 +281,46 @@ pub struct Cells {
     pub cell_mask: B128,
 }
 
+impl Encodable for Cells {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.hashes.encode(out);
+        self.cells.encode(out);
+        self.cell_mask.encode(out);
+    }
+
+    fn length(&self) -> usize {
+        self.hashes.length() + self.cells.length() + self.cell_mask.length()
+    }
+}
+
+impl Decodable for Cells {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        Ok(Self {
+            hashes: Decodable::decode(buf)?,
+            cells: Decodable::decode(buf)?,
+            cell_mask: Decodable::decode(buf)?,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
-    use alloy_consensus::{transaction::PooledTransaction, TxEip1559, TxLegacy};
-    use alloy_primitives::{address, b256, hex, Address, Signature, TxKind, U256};
+    use crate::{
+        message::RequestPair, EncodableEth72PooledTransaction, GetPooledTransactions,
+        PooledTransactions, PooledTransactionsEth72,
+    };
+    use alloy_consensus::{
+        transaction::PooledTransaction, SignableTransaction, TxEip1559, TxEip4844,
+        TxEip4844WithSidecar, TxLegacy,
+    };
+    use alloy_eips::{
+        eip4844::{Blob, Bytes48},
+        eip7594::BlobTransactionSidecarEip7594,
+    };
+    use alloy_primitives::{address, b256, hex, Address, Signature, TxKind, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_chainspec::MIN_TRANSACTION_GAS;
-    use reth_ethereum_primitives::{Transaction, TransactionSigned};
+    use reth_ethereum_primitives::{PooledTransactionVariant, Transaction, TransactionSigned};
     use std::str::FromStr;
 
     #[test]
@@ -609,5 +770,48 @@ mod tests {
         let expected_str = hex::encode(expected);
         assert_eq!(encoded_str.len(), expected_str.len());
         assert_eq!(encoded_str, expected_str);
+    }
+
+    #[test]
+    fn eth72_pooled_transactions_encode_without_blobs() {
+        let sidecar = BlobTransactionSidecarEip7594::new(
+            vec![Blob::repeat_byte(1)],
+            vec![Bytes48::repeat_byte(2)],
+            vec![Bytes48::repeat_byte(3); 128],
+        );
+        let blob_tx = TxEip4844WithSidecar {
+            tx: TxEip4844 { blob_versioned_hashes: vec![B256::ZERO], ..Default::default() },
+            sidecar: sidecar.into(),
+        }
+        .into_signed(Signature::test_signature());
+        let transactions = vec![
+            PooledTransactionVariant::Eip4844(blob_tx),
+            PooledTransactionVariant::Eip1559(
+                TxEip1559::default().into_signed(Signature::test_signature()),
+            ),
+        ];
+
+        // alloy's blob clearing gives the expected encoding.
+        let mut cleared = transactions.clone();
+        for transaction in &mut cleared {
+            transaction.clear_eip7594_blobs();
+        }
+        let expected = alloy_rlp::encode(PooledTransactions(cleared.clone()));
+        let encoded = alloy_rlp::encode(PooledTransactionsEth72(transactions.clone()));
+        assert_eq!(encoded, expected);
+        assert_eq!(PooledTransactionsEth72(transactions.clone()).length(), encoded.len());
+        for (transaction, cleared) in transactions.iter().zip(&cleared) {
+            assert_eq!(transaction.eth72_length(), cleared.length());
+        }
+
+        // A body without blobs decodes as a regular pooled transaction with an empty blob list.
+        let decoded =
+            PooledTransactionsEth72::<PooledTransactionVariant>::decode_with_memory_budget(
+                &mut encoded.as_slice(),
+                usize::MAX,
+            )
+            .unwrap();
+        assert_eq!(decoded.0, cleared);
+        assert!(alloy_rlp::encode(PooledTransactions(transactions)).len() > encoded.len());
     }
 }

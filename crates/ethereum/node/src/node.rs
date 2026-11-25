@@ -21,7 +21,10 @@ use reth_evm_ethereum::RethEvmFactory;
 use reth_evm_ethereum::{
     JitBackend, JitMetrics, JitMode, RethEvmFactory, RuntimeConfig, RuntimeTuning,
 };
-use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
+use reth_network::{
+    primitives::BasicNetworkPrimitives, types::EncodableEth72PooledTransaction, NetworkHandle,
+    PeersInfo,
+};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
     PayloadAttributesBuilder, PrimitivesTy, TxTy,
@@ -753,6 +756,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
+    PoolPooledTx<Pool>: EncodableEth72PooledTransaction,
 {
     type Network =
         NetworkHandle<BasicNetworkPrimitives<PrimitivesTy<Node::Types>, PoolPooledTx<Pool>>>;
