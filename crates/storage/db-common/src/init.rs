@@ -801,16 +801,7 @@ where
     let rocksdb_provider = provider_rw.rocksdb_provider();
     let mut history_batch = rocksdb_provider.batch_with_auto_commit();
     if snapshot_state_tables_empty(provider_rw.tx_ref())? {
-        reset_pre_snapshot_changeset_segment(
-            &static_file_provider,
-            StaticFileSegment::AccountChangeSets,
-            block,
-        )?;
-        reset_pre_snapshot_changeset_segment(
-            &static_file_provider,
-            StaticFileSegment::StorageChangeSets,
-            block,
-        )?;
+        reset_pre_snapshot_changesets(&static_file_provider, block)?;
     }
 
     {
@@ -818,6 +809,16 @@ where
             static_file_provider.get_writer(block, StaticFileSegment::AccountChangeSets)?;
         let mut storage_changeset_writer =
             static_file_provider.get_writer(block, StaticFileSegment::StorageChangeSets)?;
+        // A genesis file recreated by the reset above starts at genesis, as `init_genesis` makes
+        // it, instead of being padded with empty blocks from the start of its fixed range.
+        let genesis_block = static_file_provider.genesis_block_number();
+        for writer in [&mut account_changeset_writer, &mut storage_changeset_writer] {
+            if writer.user_header().block_range().is_none() &&
+                writer.user_header().expected_block_range().contains(genesis_block)
+            {
+                writer.user_header_mut().set_expected_block_start(genesis_block);
+            }
+        }
         prepare_account_changeset_writer(&mut account_changeset_writer, block)?;
         prepare_storage_changeset_writer(&mut storage_changeset_writer, block)?;
 
@@ -941,33 +942,52 @@ fn snapshot_state_tables_empty<TX: reth_db_api::transaction::DbTx>(
         tx.entries::<tables::Bytecodes>()? == 0)
 }
 
-fn reset_pre_snapshot_changeset_segment<N: NodePrimitives>(
+/// Resets changeset segments that end before the import block or consist of an empty genesis file.
+/// The caller has checked that the current state tables are empty. Validate both segments before
+/// removing either, since v2 history can exist even when those tables are empty.
+fn reset_pre_snapshot_changesets<N: NodePrimitives>(
     static_file_provider: &reth_provider::providers::StaticFileProvider<N>,
-    segment: StaticFileSegment,
     block: u64,
 ) -> ProviderResult<()> {
     if block == 0 {
         return Ok(())
     }
 
-    let Some(highest_block) = static_file_provider.get_highest_static_file_block(segment) else {
-        return Ok(())
-    };
-
-    if highest_block >= block {
-        return Ok(())
+    let mut segments_to_reset = Vec::new();
+    for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets] {
+        let Some(highest_block) = static_file_provider.get_highest_static_file_block(segment)
+        else {
+            continue;
+        };
+        if highest_block >= block {
+            let is_empty_genesis_file = highest_block == block &&
+                block == static_file_provider.genesis_block_number() &&
+                static_file_provider.get_lowest_range_end(segment) == Some(block) &&
+                static_file_provider
+                    .get_segment_provider_for_block(segment, block, None)?
+                    .rows() ==
+                    0;
+            if !is_empty_genesis_file {
+                return Err(ProviderError::UnexpectedStaticFileBlockNumber(
+                    segment,
+                    block,
+                    highest_block.saturating_add(1),
+                ));
+            }
+        }
+        segments_to_reset.push((segment, highest_block));
     }
 
-    let file_start = static_file_provider.find_fixed_range(segment, block).start();
-    info!(
-        target: "reth::cli",
-        ?segment,
-        highest_block,
-        import_block = block,
-        file_start,
-        "Resetting pre-snapshot changeset static files before state import"
-    );
-    static_file_provider.delete_segment(segment)?;
+    for (segment, highest_block) in segments_to_reset {
+        info!(
+            target: "reth::cli",
+            ?segment,
+            highest_block,
+            import_block = block,
+            "Resetting pre-snapshot changeset static files before state import"
+        );
+        static_file_provider.delete_segment(segment)?;
+    }
 
     Ok(())
 }
@@ -1397,7 +1417,10 @@ mod tests {
     use reth_db::DatabaseEnv;
     use reth_db_api::{
         cursor::DbCursorRO,
-        models::{storage_sharded_key::StorageShardedKey, IntegerList, ShardedKey},
+        models::{
+            storage_sharded_key::StorageShardedKey, AccountBeforeTx, IntegerList, ShardedKey,
+            StorageBeforeTx,
+        },
         table::{Table, TableRow},
         transaction::DbTx,
         Database,
@@ -1406,6 +1429,7 @@ mod tests {
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
         ProviderFactory, RocksDBProviderFactory,
     };
+    use reth_storage_overlay::OverlayManager;
     use std::{collections::BTreeMap, sync::Arc};
 
     fn collect_table_entries<DB, T>(
@@ -1879,6 +1903,224 @@ mod tests {
         assert_dump_state_overlays_genesis_state(StorageSettings::v2());
     }
 
+    /// A genesis at a block that is not the start of a static file range, as on chains that
+    /// start from carried-over state.
+    const UNALIGNED_GENESIS: u64 = 500_010;
+
+    /// Initializes a v2 genesis at [`UNALIGNED_GENESIS`] with an empty alloc, as for a chain whose
+    /// state is imported with `init-state`.
+    fn init_unaligned_v2_genesis() -> ProviderFactory<MockNodeTypesWithDB> {
+        let genesis = Genesis {
+            number: Some(UNALIGNED_GENESIS),
+            alloc: Default::default(),
+            ..MAINNET.genesis.clone()
+        };
+        let factory = create_test_provider_factory_with_chain_spec(Arc::new(
+            reth_chainspec::ChainSpecBuilder::mainnet().genesis(genesis).build(),
+        ));
+        init_genesis_with_settings_and_validate(&factory, StorageSettings::v2(), false).unwrap();
+        factory
+    }
+
+    /// Reopens the factory's static files as a later process does: a fresh provider on the same
+    /// directory, with its index rebuilt from disk and no cached writers.
+    fn reopen_static_files(
+        factory: &ProviderFactory<MockNodeTypesWithDB>,
+    ) -> reth_provider::providers::StaticFileProvider<
+        <ProviderFactory<MockNodeTypesWithDB> as reth_provider::NodePrimitivesProvider>::Primitives,
+    > {
+        reth_provider::providers::StaticFileProviderBuilder::read_write(
+            factory.static_file_provider().directory(),
+        )
+        .with_genesis_block_number(UNALIGNED_GENESIS)
+        .build()
+        .unwrap()
+    }
+
+    #[test]
+    fn init_genesis_v2_unaligned_changeset_writers_resume_after_reopen() {
+        let factory = init_unaligned_v2_genesis();
+        let static_files = reopen_static_files(&factory);
+        for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
+        {
+            let writer = static_files.latest_writer(segment).unwrap();
+            assert_eq!(writer.next_block_number(), UNALIGNED_GENESIS + 1, "{segment}");
+        }
+    }
+
+    #[test]
+    fn dump_state_v2_at_unaligned_genesis_replaces_empty_genesis_changeset() {
+        let storage_key = B256::with_last_byte(3);
+        let input = br#"{"address":"0x0000000000000000000000000000000000000002","balance":"0x5","storage":{"0x0000000000000000000000000000000000000000000000000000000000000003":"0x0000000000000000000000000000000000000000000000000000000000000004"}}
+"#;
+        let factory = init_unaligned_v2_genesis();
+        let collector = parse_accounts(&input[..], EtlConfig::new(None, 128)).unwrap();
+        dump_state(collector, &factory, UNALIGNED_GENESIS).unwrap();
+
+        let static_files = factory.static_file_provider();
+        static_files.initialize_index().unwrap();
+        let provider = factory.provider().unwrap();
+        let address = Address::with_last_byte(2);
+        assert_eq!(
+            reth_provider::ChangeSetReader::account_block_changeset(&provider, UNALIGNED_GENESIS)
+                .unwrap(),
+            vec![AccountBeforeTx { address, info: None }]
+        );
+        assert_eq!(
+            reth_provider::StorageChangeSetReader::storage_changeset(&provider, UNALIGNED_GENESIS)
+                .unwrap(),
+            vec![(
+                BlockNumberAddress((UNALIGNED_GENESIS, address)),
+                StorageEntry { key: storage_key, value: U256::ZERO }
+            )]
+        );
+        for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
+        {
+            assert_eq!(
+                static_files.get_lowest_range_start(segment),
+                Some(UNALIGNED_GENESIS),
+                "{segment}"
+            );
+            let writer = static_files.latest_writer(segment).unwrap();
+            assert_eq!(writer.next_block_number(), UNALIGNED_GENESIS + 1, "{segment}");
+        }
+    }
+
+    #[test]
+    fn init_state_v2_rejects_import_at_existing_non_genesis_changeset_tip() {
+        let factory = init_unaligned_v2_genesis();
+        let block = UNALIGNED_GENESIS + 1;
+        let static_files = factory.static_file_provider();
+        let change = AccountBeforeTx {
+            address: Address::with_last_byte(7),
+            info: Some(Account { balance: U256::from(5), ..Default::default() }),
+        };
+        {
+            let mut writer =
+                static_files.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            writer.append_account_changeset(vec![change.clone()], block).unwrap();
+            writer.commit().unwrap();
+        }
+        let header = alloy_consensus::Header {
+            number: block,
+            state_root: alloy_consensus::EMPTY_ROOT_HASH,
+            ..Default::default()
+        };
+        {
+            let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
+            writer.append_header(&header, &header.hash_slow()).unwrap();
+            writer.commit().unwrap();
+        }
+
+        let dump = serde_json::to_vec(&StateRoot { root: header.state_root }).unwrap();
+        let result = init_from_state_dump(&dump[..], &factory, EtlConfig::new(None, 128));
+        assert!(matches!(
+            result.unwrap_err().downcast_ref::<ProviderError>(),
+            Some(ProviderError::UnexpectedStaticFileBlockNumber(
+                StaticFileSegment::AccountChangeSets,
+                _,
+                _
+            ))
+        ));
+        assert_eq!(
+            reth_provider::ChangeSetReader::account_block_changeset(&static_files, block).unwrap(),
+            vec![change]
+        );
+    }
+
+    #[test]
+    fn dump_state_v2_validates_both_genesis_changeset_segments_before_resetting() {
+        let factory = init_unaligned_v2_genesis();
+        let static_files = factory.static_file_provider();
+        let storage_segment = StaticFileSegment::StorageChangeSets;
+        static_files.delete_segment(storage_segment).unwrap();
+        let address = Address::with_last_byte(2);
+        let key = B256::with_last_byte(3);
+        let value = U256::from(4);
+        {
+            let mut writer = static_files.get_writer(UNALIGNED_GENESIS, storage_segment).unwrap();
+            writer.user_header_mut().set_expected_block_start(UNALIGNED_GENESIS);
+            writer
+                .append_storage_changeset(
+                    vec![StorageBeforeTx { address, key, value }],
+                    UNALIGNED_GENESIS,
+                )
+                .unwrap();
+            writer.commit().unwrap();
+        }
+
+        let collector = parse_accounts(&[][..], EtlConfig::new(None, 128)).unwrap();
+        let result = dump_state(collector, &factory, UNALIGNED_GENESIS);
+        assert!(matches!(
+            result.unwrap_err().downcast_ref::<ProviderError>(),
+            Some(ProviderError::UnexpectedStaticFileBlockNumber(
+                StaticFileSegment::StorageChangeSets,
+                _,
+                _
+            ))
+        ));
+        assert_eq!(
+            static_files.get_lowest_range_start(StaticFileSegment::AccountChangeSets),
+            Some(UNALIGNED_GENESIS)
+        );
+        assert_eq!(
+            reth_provider::StorageChangeSetReader::storage_changeset(
+                &static_files,
+                UNALIGNED_GENESIS
+            )
+            .unwrap(),
+            vec![(BlockNumberAddress((UNALIGNED_GENESIS, address)), StorageEntry { key, value })]
+        );
+    }
+
+    /// Rolls changesets back to the genesis block after a reopen, as a reorg does, through the
+    /// first file, whose start is the genesis block rather than its range start.
+    #[test]
+    fn init_genesis_v2_unaligned_changesets_unwind_to_genesis_after_reopen() {
+        let factory = init_unaligned_v2_genesis();
+        let segment = StaticFileSegment::AccountChangeSets;
+        let address = Address::with_last_byte(7);
+        {
+            let static_files = factory.static_file_provider();
+            let mut writer = static_files.latest_writer(segment).unwrap();
+            for block in UNALIGNED_GENESIS + 1..=UNALIGNED_GENESIS + 3 {
+                writer
+                    .append_account_changeset(vec![AccountBeforeTx { address, info: None }], block)
+                    .unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        let static_files = reopen_static_files(&factory);
+        assert_eq!(
+            static_files.get_highest_static_file_block(segment),
+            Some(UNALIGNED_GENESIS + 3)
+        );
+        {
+            let mut writer = static_files.latest_writer(segment).unwrap();
+            writer.prune_account_changesets(UNALIGNED_GENESIS).unwrap();
+            writer.commit().unwrap();
+        }
+        assert_eq!(static_files.get_highest_static_file_block(segment), Some(UNALIGNED_GENESIS));
+
+        // The chain continues from genesis as if the rolled-back blocks had never existed.
+        {
+            let mut writer = static_files.latest_writer(segment).unwrap();
+            assert_eq!(writer.next_block_number(), UNALIGNED_GENESIS + 1);
+            writer
+                .append_account_changeset(
+                    vec![AccountBeforeTx { address, info: None }],
+                    UNALIGNED_GENESIS + 1,
+                )
+                .unwrap();
+            writer.commit().unwrap();
+        }
+        assert_eq!(
+            static_files.get_highest_static_file_block(segment),
+            Some(UNALIGNED_GENESIS + 1)
+        );
+    }
+
     #[test]
     fn success_init_genesis_mainnet() {
         let genesis_hash =
@@ -1920,6 +2162,7 @@ mod tests {
                 MAINNET.clone(),
                 static_file_provider,
                 rocksdb_provider,
+                OverlayManager::default(),
                 reth_tasks::Runtime::test(),
             )
             .unwrap(),
@@ -1947,6 +2190,7 @@ mod tests {
                 MAINNET.clone(),
                 static_file_provider,
                 rocksdb_provider,
+                OverlayManager::default(),
                 reth_tasks::Runtime::test(),
             )
             .unwrap(),

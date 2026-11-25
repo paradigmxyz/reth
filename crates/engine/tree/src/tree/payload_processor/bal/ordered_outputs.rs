@@ -146,7 +146,7 @@ mod tests {
         assert!(err.to_string().contains(text), "expected `{err}` to contain `{text}`");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn yields_outputs_in_transaction_order() {
         let (tx, rx) = crossbeam_channel::unbounded();
         tx.send(Ok(output(2, 20))).unwrap();
@@ -161,7 +161,7 @@ mod tests {
         assert_eq!(results, vec![0, 10, 20]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn forwards_worker_errors_and_then_stops() {
         let (tx, rx) = crossbeam_channel::unbounded();
         tx.send(Err(BalWorkerError::Setup(BalExecutionError::Execution(
@@ -176,7 +176,7 @@ mod tests {
         assert!(outputs.next().is_none());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn orders_recovery_and_execution_errors_by_transaction_index() {
         let (tx, rx) = crossbeam_channel::unbounded();
         tx.send(Err(BalWorkerError::Execution {
@@ -200,7 +200,7 @@ mod tests {
         assert!(outputs.next().is_none());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_closed_channel_before_all_outputs_arrive() {
         let (tx, rx) = crossbeam_channel::unbounded();
         drop(tx);
@@ -211,7 +211,7 @@ mod tests {
         assert!(outputs.next().is_none());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     #[should_panic(expected = "out-of-bounds transaction index")]
     fn panics_on_out_of_bounds_index() {
         let (tx, rx) = crossbeam_channel::unbounded();
@@ -222,7 +222,7 @@ mod tests {
         let _ = outputs.next();
     }
 
-    #[test]
+    #[reth_concurrency::test]
     #[should_panic(expected = "duplicate transaction index")]
     fn panics_on_duplicate_pending_index() {
         let (tx, rx) = crossbeam_channel::unbounded();
@@ -234,7 +234,7 @@ mod tests {
         let _ = outputs.next();
     }
 
-    #[test]
+    #[reth_concurrency::test]
     #[should_panic(expected = "duplicate transaction index")]
     fn panics_on_duplicate_already_yielded_index() {
         let (tx, rx) = crossbeam_channel::unbounded();

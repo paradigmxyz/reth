@@ -10,6 +10,9 @@ use tracing::{instrument, trace};
 /// The max size that the initial handshake packet can be. Currently 2KiB.
 const MAX_INITIAL_HANDSHAKE_SIZE: usize = 2048;
 
+/// The largest frame body the 24-bit size field of an `RLPx` frame header can describe.
+pub(crate) const MAX_FRAME_SIZE: usize = (1 << 24) - 1;
+
 /// Tokio codec for ECIES
 #[derive(Debug)]
 pub struct ECIESCodec {
@@ -165,6 +168,15 @@ impl Encoder<EgressECIESValue> for ECIESCodec {
                 self.ecies.write_ack(buf);
             }
             EgressECIESValue::Message(data) => {
+                if data.len() > MAX_FRAME_SIZE {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        ECIESError::from(ECIESErrorImpl::FrameTooLarge {
+                            size: data.len(),
+                            max_size: MAX_FRAME_SIZE,
+                        }),
+                    ))
+                }
                 self.ecies.write_header(buf, data.len());
                 self.ecies.write_body(buf, &data);
             }

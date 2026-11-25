@@ -1,0 +1,32 @@
+[package]
+name = "jsonrpsee-proc-macros"
+description = "Procedueral macros for jsonrpsee"
+version = "0.26.1"
+authors = ["Parity Technologies <admin@parity.io>", "Pierre Krieger <pierre.krieger1708@gmail.com>"]
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+homepage.workspace = true
+repository.workspace = true
+
+[lints.rust]
+rust_2024_compatibility = { level = "warn", priority = -1 }
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+missing_copy_implementations = "warn"
+
+[lints.clippy]
+manual_async_fn = "allow"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = { version = "1" }
+quote = { version = "1" }
+syn = { version = "2", default-features = false, features = ["extra-traits", "full", "visit", "parsing", "printing", "clone-impls", "proc-macro"] }
+proc-macro-crate = { version = "3" }
+
+[dev-dependencies]
+jsonrpsee = { path = "../jsonrpsee", features = ["server", "macros"] }
+tokio = { workspace = true, features = ["rt", "macros"] }

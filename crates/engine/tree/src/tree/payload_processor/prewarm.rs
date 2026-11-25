@@ -1053,7 +1053,7 @@ mod tests {
     use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
     use std::time::Duration;
 
-    #[test]
+    #[reth_concurrency::test]
     fn terminate_event_stops_transaction_execution() {
         let terminate_execution = Arc::new(AtomicBool::new(false));
         let ctx = PrewarmContext {
@@ -1093,7 +1093,7 @@ mod tests {
         assert!(terminate_execution.load(Ordering::Relaxed));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rebuilds_evm_for_each_prewarm_run() {
         let caller = Address::repeat_byte(1);
         let provider = MockEthProvider::default();
@@ -1156,7 +1156,7 @@ mod tests {
         assert!(!state.account_changes().any(|a| a.address == Address::repeat_byte(0xa)));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn transaction_prewarm_releases_worker_cache_before_cache_task_finishes() {
         let runtime = Runtime::test();
         let saved = SavedCache::new(B256::ZERO, crate::tree::ExecutionCache::new(1_000));
@@ -1273,7 +1273,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_releases_warm_cache_before_duration_metric() {
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
@@ -1309,7 +1309,7 @@ mod tests {
         drop(release_tx);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_blocks_reuse_while_execution_cache_is_cloned() {
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
@@ -1383,7 +1383,7 @@ mod tests {
         (result_rx, reader)
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_freeing_waits_for_validator_cache_references() {
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
@@ -1498,32 +1498,32 @@ mod tests {
         drop(release_tx);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_drops_replaced_allocation_after_unlock() {
         assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, false);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_drops_invalid_allocations_after_unlock() {
         assert_save_cache_drops_removed_caches(CacheSlot::Distinct, false, false);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_drops_allocations_after_unlock_on_insert_error() {
         assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, true);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_drops_shared_allocation_after_unlock_on_invalid_block() {
         assert_save_cache_drops_removed_caches(CacheSlot::Shared, false, false);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_drops_shared_allocation_after_unlock_on_insert_error() {
         assert_save_cache_drops_removed_caches(CacheSlot::Shared, true, true);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_handles_empty_slot() {
         for (valid, insert_error) in [(true, false), (false, false), (true, true)] {
             assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid, insert_error);

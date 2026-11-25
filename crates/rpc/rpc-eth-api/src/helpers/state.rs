@@ -584,38 +584,50 @@ pub trait LoadState:
     {
         let at = block_id.unwrap_or_default();
         self.spawn_blocking_io_with_state(at, move |this, state| {
-            // first fetch the on chain nonce of the account
-            let on_chain_account_nonce = state
-                .account_nonce(&address)
-                .map_err(Self::Error::from_eth_err)?
-                .unwrap_or_default();
+            this.transaction_count_with_state(address, at, &state)
+        })
+    }
 
-            if at.is_pending() {
-                // for pending tag we need to find the highest nonce of txn in the pending state.
-                if let Some(highest_pool_tx) = this
-                    .pool()
-                    .get_highest_consecutive_transaction_by_sender(address, on_chain_account_nonce)
+    /// Returns the number of transactions sent from an address, given the state at `at`.
+    ///
+    /// If `at` is the pending tag, this accounts for the sender's pool transactions that follow
+    /// the account's nonce in `state` without a gap. Called by [`Self::transaction_count`] once
+    /// the state is open, so implementations can choose the state the nonce is read from.
+    fn transaction_count_with_state(
+        &self,
+        address: Address,
+        at: BlockId,
+        state: &StateProviderBox,
+    ) -> Result<U256, Self::Error> {
+        // first fetch the on chain nonce of the account
+        let on_chain_account_nonce =
+            state.account_nonce(&address).map_err(Self::Error::from_eth_err)?.unwrap_or_default();
+
+        if at.is_pending() {
+            // for pending tag we need to find the highest nonce of txn in the pending state.
+            if let Some(highest_pool_tx) = self
+                .pool()
+                .get_highest_consecutive_transaction_by_sender(address, on_chain_account_nonce)
+            {
                 {
-                    {
-                        // and the corresponding txcount is nonce + 1 of the highest tx in the pool
-                        // (on chain nonce is increased after tx)
-                        let next_tx_nonce =
-                            highest_pool_tx.nonce().checked_add(1).ok_or_else(|| {
-                                Self::Error::from(EthApiError::InvalidTransaction(
-                                    RpcInvalidTransactionError::NonceMaxValue,
-                                ))
-                            })?;
+                    // and the corresponding txcount is nonce + 1 of the highest tx in the pool
+                    // (on chain nonce is increased after tx)
+                    let next_tx_nonce =
+                        highest_pool_tx.nonce().checked_add(1).ok_or_else(|| {
+                            Self::Error::from(EthApiError::InvalidTransaction(
+                                RpcInvalidTransactionError::NonceMaxValue,
+                            ))
+                        })?;
 
-                        // guard against drifts in the pool
-                        let next_tx_nonce = on_chain_account_nonce.max(next_tx_nonce);
+                    // guard against drifts in the pool
+                    let next_tx_nonce = on_chain_account_nonce.max(next_tx_nonce);
 
-                        let tx_count = on_chain_account_nonce.max(next_tx_nonce);
-                        return Ok(U256::from(tx_count));
-                    }
+                    let tx_count = on_chain_account_nonce.max(next_tx_nonce);
+                    return Ok(U256::from(tx_count));
                 }
             }
-            Ok(U256::from(on_chain_account_nonce))
-        })
+        }
+        Ok(U256::from(on_chain_account_nonce))
     }
 
     /// Returns code of given account, at the given identifier.

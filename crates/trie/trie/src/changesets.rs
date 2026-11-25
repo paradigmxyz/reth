@@ -136,7 +136,7 @@ mod tests {
     use reth_trie_common::updates::StorageTrieUpdatesSorted;
     use std::collections::BTreeMap;
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_empty_updates() {
         // Create an empty mock factory
         // Note: We need to include B256::default() in storage_tries because
@@ -156,7 +156,7 @@ mod tests {
         assert!(changesets.storage_tries_ref().is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_account_changesets() {
         // Create some initial account trie state
         let path1 = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
@@ -199,7 +199,7 @@ mod tests {
         assert_eq!(changesets.account_nodes_ref()[1].1, None);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_storage_changesets() {
         let hashed_address = B256::repeat_byte(1u8);
 
