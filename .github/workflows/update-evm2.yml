@@ -123,11 +123,17 @@ jobs:
             "s#(github\.com/(alloy-rs|DaniPopes)/evm2\", rev = \")[0-9a-f]+\"#\1${NEW_REV}\"#g" {} +
           echo "Updated evm2 rev: $CURRENT_REV -> $NEW_REV"
 
+      # Clippy runs on the nightly that lint.yml uses (the workspace enables nightly-only lints);
+      # stable is installed last so it stays the default for the test-compilation check, as in CI.
       - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
         if: steps.update.outputs.bumped == 'true'
         with:
           toolchain: nightly-2026-11-18
           components: clippy
+      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+        if: steps.update.outputs.bumped == 'true'
+        with:
+          toolchain: stable
       - uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
         if: steps.update.outputs.bumped == 'true'
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -204,7 +210,7 @@ jobs:
         env:
           AMP_API_KEY: ${{ secrets.AMP_API_KEY }}
           RUSTFLAGS: -D warnings
-          CHECK: cargo clippy --workspace --lib --examples --tests --benches --all-features
+          CHECK: cargo +nightly-2026-11-18 clippy --workspace --lib --examples --tests --benches --all-features
         run: |
           PROMPT="This Rust workspace just had its evm2 dependency (alloy-rs/evm2, patched with DaniPopes/evm2) \
           updated to the latest commit on evm2's main branch, and \`RUSTFLAGS=-D warnings $CHECK\` now fails.
