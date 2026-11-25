@@ -6901,4 +6901,67 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn unwind_storage_hashing_range_restores_storage_wipe() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let [k1, k2, k3] = [1, 2, 3].map(B256::with_last_byte);
+        {
+            let sf = factory.static_file_provider();
+            let mut headers = sf.latest_writer(StaticFileSegment::Headers).unwrap();
+            for number in 0..=1 {
+                let header = Header { number, ..Default::default() };
+                headers.append_header(&header, &B256::ZERO).unwrap();
+            }
+            headers.commit().unwrap();
+            let mut storages = sf.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            storages.append_storage_changeset(vec![], 0).unwrap();
+            storages
+                .append_storage_changeset(
+                    vec![StorageBeforeTx { address, key: k2, value: U256::from(5) }],
+                    1,
+                )
+                .unwrap();
+            storages.commit().unwrap();
+        }
+
+        // Block 1 wiped `k1` without loading it, loaded `k2`, and wrote `k3` after the wipe.
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .tx
+            .put::<tables::StorageWipeChangeSets>(
+                BlockNumberAddress((1, address)),
+                StorageEntry { key: keccak256(k1), value: U256::from(9) },
+            )
+            .unwrap();
+        provider_rw
+            .tx
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: keccak256(k3), value: U256::from(4) },
+            )
+            .unwrap();
+
+        let keys = provider_rw.unwind_storage_hashing_range(1..=1).unwrap();
+
+        assert_eq!(keys, B256Map::from_iter([(hashed_address, [k1, k2].map(keccak256).into())]));
+        let mut storage = provider_rw
+            .tx
+            .cursor_dup_read::<tables::HashedStorages>()
+            .unwrap()
+            .walk_dup(Some(hashed_address), None)
+            .unwrap()
+            .map(|entry| entry.map(|(_, entry)| (entry.key, entry.value)))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        storage.sort_unstable();
+        let mut expected = [(k1, 9u64), (k2, 5), (k3, 4)]
+            .map(|(slot, value)| (keccak256(slot), U256::from(value)))
+            .to_vec();
+        expected.sort_unstable();
+        assert_eq!(storage, expected);
+    }
 }
