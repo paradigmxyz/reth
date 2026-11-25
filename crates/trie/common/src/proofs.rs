@@ -657,17 +657,23 @@ fn matching_v2_proof_nodes<'a>(
 /// A matching extension is followed by its child branch even when `path` diverges within the
 /// extension key, which some proof consumers need to verify absence.
 fn encode_path_proof_nodes(proof_nodes: &[ProofTrieNode], path: &Nibbles) -> Vec<Bytes> {
-    encode_v2_proof_nodes(matching_v2_proof_nodes(proof_nodes, path).flat_map(|node| {
-        let branch = if let TrieNode::Extension(extension) = &node.node {
-            let branch_path = node.path.join(&extension.key);
-            proof_nodes
-                .iter()
-                .find(|node| node.path == branch_path && !path.starts_with(&node.path))
-        } else {
-            None
-        };
-        core::iter::once(node).chain(branch)
-    }))
+    let mut nodes = Vec::new();
+    for (index, node) in proof_nodes.iter().enumerate().rev() {
+        if !path.starts_with(&node.path) {
+            continue
+        }
+        nodes.push(node);
+        // Nodes are in depth-first post-order and an extension has a single child, so its child
+        // branch, if present, is the node right before it.
+        if let TrieNode::Extension(extension) = &node.node &&
+            !path.slice(node.path.len()..).starts_with(&extension.key) &&
+            let Some(branch) = index.checked_sub(1).map(|index| &proof_nodes[index]) &&
+            branch.path == node.path.join(&extension.key)
+        {
+            nodes.push(branch);
+        }
+    }
+    encode_v2_proof_nodes(nodes.into_iter())
 }
 
 /// Encodes V2 proof nodes as standard MPT proof nodes.
