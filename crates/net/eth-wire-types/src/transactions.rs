@@ -186,9 +186,12 @@ pub trait EncodableEth72PooledTransaction: Encodable {
     }
 }
 
+/// Legacy EIP-4844 sidecars keep their blobs, since they have no cell proofs to serve `GetCells`.
 impl EncodableEth72PooledTransaction for PooledTransactionVariant {
     fn encode_eth72(&self, out: &mut dyn BufMut) {
-        let Self::Eip4844(transaction) = self else { return self.encode(out) };
+        let Some(transaction) = self.as_eip4844().filter(|tx| tx.tx().sidecar.is_eip7594()) else {
+            return self.encode(out)
+        };
         let (tx, signature) = (transaction.tx(), transaction.signature());
         let (envelope, fields) = eip4844_without_blobs_headers(transaction);
         envelope.encode(out);
@@ -199,7 +202,9 @@ impl EncodableEth72PooledTransaction for PooledTransactionVariant {
     }
 
     fn eth72_length(&self) -> usize {
-        let Self::Eip4844(transaction) = self else { return self.length() };
+        let Some(transaction) = self.as_eip4844().filter(|tx| tx.tx().sidecar.is_eip7594()) else {
+            return self.length()
+        };
         eip4844_without_blobs_headers(transaction).0.length_with_payload()
     }
 }
@@ -314,7 +319,7 @@ mod tests {
         TxEip4844WithSidecar, TxLegacy,
     };
     use alloy_eips::{
-        eip4844::{Blob, Bytes48},
+        eip4844::{Blob, BlobTransactionSidecar, Bytes48},
         eip7594::BlobTransactionSidecarEip7594,
     };
     use alloy_primitives::{address, b256, hex, Address, Signature, TxKind, B256, U256};
@@ -784,8 +789,20 @@ mod tests {
             sidecar: sidecar.into(),
         }
         .into_signed(Signature::test_signature());
+        // Legacy sidecars have no cell proofs, so they keep their blobs.
+        let legacy_blob_tx = TxEip4844WithSidecar {
+            tx: TxEip4844 { blob_versioned_hashes: vec![B256::ZERO], ..Default::default() },
+            sidecar: BlobTransactionSidecar::new(
+                vec![Blob::repeat_byte(1)],
+                vec![Bytes48::repeat_byte(2)],
+                vec![Bytes48::repeat_byte(3)],
+            )
+            .into(),
+        }
+        .into_signed(Signature::test_signature());
         let transactions = vec![
             PooledTransactionVariant::Eip4844(blob_tx),
+            PooledTransactionVariant::Eip4844(legacy_blob_tx),
             PooledTransactionVariant::Eip1559(
                 TxEip1559::default().into_signed(Signature::test_signature()),
             ),
