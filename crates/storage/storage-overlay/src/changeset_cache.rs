@@ -276,6 +276,7 @@ impl ChangesetCache {
     /// - Database access fails
     /// - Block hash lookup fails
     /// - Changeset computation fails
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn get_or_compute_range<N, P>(
         &self,
         overlay_manager: &OverlayManager<N>,

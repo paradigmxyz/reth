@@ -69,6 +69,7 @@ serde = [
     "reth-primitives-traits/serde",
     "reth-trie/serde",
     "evm2?/serde",
+    "rpds/serde",
 ]
 test-utils = [
     "reth-concurrency/test-utils",
