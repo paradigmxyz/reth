@@ -117,8 +117,8 @@ impl BlobTxCellSidecar {
             ))
             .into())
         }
-        for (&expected, have) in versioned_hashes.iter().zip(self.versioned_hashes()) {
-            if expected != have {
+        for (&have, expected) in versioned_hashes.iter().zip(self.versioned_hashes()) {
+            if have != expected {
                 return Err(BlobTransactionValidationError::WrongVersionedHash { have, expected })
             }
         }
@@ -285,13 +285,19 @@ mod tests {
             Err(BlobTransactionValidationError::InvalidProof)
         ));
 
+        // `have` is the transaction's hash and `expected` the commitment's, as for full sidecars.
         let mut wrong_hashes = hashes.clone();
         wrong_hashes[1] = B256::ZERO;
-        assert!(matches!(
-            valid.validate(&wrong_hashes, settings()),
-            Err(BlobTransactionValidationError::WrongVersionedHash { have, expected })
-                if have == hashes[1] && expected == B256::ZERO
-        ));
+        let (full, _) = fixture();
+        for result in
+            [valid.validate(&wrong_hashes, settings()), full.validate(&wrong_hashes, settings())]
+        {
+            assert!(matches!(
+                result,
+                Err(BlobTransactionValidationError::WrongVersionedHash { have, expected })
+                    if have == B256::ZERO && expected == hashes[1]
+            ));
+        }
         assert!(matches!(
             valid.validate(&hashes[..1], settings()),
             Err(BlobTransactionValidationError::KZGError(c_kzg::Error::MismatchLength(_)))
