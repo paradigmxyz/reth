@@ -520,7 +520,9 @@ RPC:
           [default: 256]
 
       --rpc.max-trace-bytes <BYTES>
-          Max bytes a traced tx may record, defaults to 2x `--rpc.max-response-size`, 0 is unlimited
+          Max bytes a traced tx may record, defaults to 2x `--rpc.max-response-size`, 0 is unlimited.
+
+          The default struct logs of a debug trace response are limited to `--rpc.max-response-size` as well, whatever this value is.
 
       --rpc.compute-state-root-for-eth-simulate
           Compute state roots for `eth_simulateV1` responses
