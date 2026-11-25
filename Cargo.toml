@@ -554,7 +554,7 @@ metrics-process = "2.1.0"
 metrics-util = { default-features = false, version = "0.20.3" }
 
 # tokio
-tokio = { version = "1.52.3", default-features = false }
+tokio = { version = "1.53.3", default-features = false }
 tokio-stream = "0.1.11"
 tokio-tungstenite = "0.29.0"
 tokio-util = { version = "0.7.11", features = ["codec"] }
