@@ -264,7 +264,11 @@ async fn test_ws_upgrade_origin_allowlist() {
                 }
                 if same_port {
                     // Ordinary HTTP still relies on response CORS headers, not request rejection.
-                    for origin in ["https://allowed.example", "https://denied.example"] {
+                    for origin in [
+                        "http://localhost:3000",
+                        "https://allowed.example",
+                        "https://denied.example",
+                    ] {
                         let mut request = client
                             .post(&url)
                             .header("origin", origin)
