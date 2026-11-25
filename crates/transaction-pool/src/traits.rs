@@ -76,7 +76,7 @@ use alloy_primitives::{
     Address, Bytes, TxHash, TxKind, B256, U256,
 };
 use futures_util::{ready, Stream};
-use reth_eth_wire_types::HandleMempoolData;
+use reth_eth_wire_types::{EncodableEth72PooledTransaction, HandleMempoolData};
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{Block, InMemorySize, Recovered, SealedBlock, SignedTransaction};
@@ -85,6 +85,7 @@ use std::{
     fmt,
     fmt::Debug,
     future::Future,
+    num::NonZeroUsize,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -1518,6 +1519,13 @@ pub trait PoolTransaction:
     /// Note: Implementations should cache this value.
     fn encoded_length(&self) -> usize;
 
+    /// Returns the EIP-2718 size to announce to eth/72 peers, or `None` if the pool cannot
+    /// serve the transaction in that version. Blob pools can cache this before detaching the
+    /// sidecar.
+    fn encoded_length_eth72(&self) -> Option<usize> {
+        (!self.is_eip4844()).then(|| self.encoded_length())
+    }
+
     /// Ensures that the transaction's code size does not exceed the provided `max_init_code_size`.
     ///
     /// This is specifically relevant for contract creation transactions ([`TxKind::Create`]),
@@ -1630,6 +1638,10 @@ pub struct EthPooledTransaction<T = TransactionSigned> {
     /// pool.
     pub encoded_length: usize,
 
+    /// EIP-2718 size with blobs elided, retained after detaching an EIP-7594 sidecar.
+    /// Transactions without a known EIP-7594 sidecar have no cached blobless size.
+    pub blobless_encoded_length: Option<NonZeroUsize>,
+
     /// Cached in-memory size of `transaction`, excluding the blob sidecar.
     ///
     /// Must be updated if `transaction` is modified or replaced.
@@ -1678,6 +1690,7 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
             transaction,
             cost,
             encoded_length,
+            blobless_encoded_length: None,
             in_memory_size,
             blob_sidecar,
             blob_cell_availability,
@@ -1716,6 +1729,8 @@ impl PoolTransaction for EthPooledTransaction {
 
     fn from_pooled(tx: Recovered<Self::Pooled>) -> Self {
         let encoded_length = tx.encode_2718_len();
+        let blobless_encoded_length =
+            tx.as_eip4844().and_then(|_| tx.eth72_2718_len()).and_then(NonZeroUsize::new);
         let (tx, signer) = tx.into_parts();
         match tx {
             PooledTransactionVariant::Eip4844(tx) => {
@@ -1726,6 +1741,7 @@ impl PoolTransaction for EthPooledTransaction {
                 let tx = TransactionSigned::from(tx);
                 let tx = Recovered::new_unchecked(tx, signer);
                 let mut pooled = Self::new(tx, encoded_length);
+                pooled.blobless_encoded_length = blobless_encoded_length;
                 if let Some(availability) = pooled.blob_cell_availability.clone() {
                     pooled.blob_sidecar = EthBlobTransactionSidecar::Present(
                         PooledBlobSidecar::new(blob, availability),
@@ -1769,6 +1785,14 @@ impl PoolTransaction for EthPooledTransaction {
     /// Returns the length of the rlp encoded object
     fn encoded_length(&self) -> usize {
         self.encoded_length
+    }
+
+    fn encoded_length_eth72(&self) -> Option<usize> {
+        if self.is_eip4844() {
+            self.blobless_encoded_length.map(NonZeroUsize::get)
+        } else {
+            Some(self.encoded_length)
+        }
     }
 }
 

@@ -1,15 +1,18 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types, including the
 //! eth/72 response without blobs, and the eth/72 `GetCells` and `Cells` message types.
 
-use crate::broadcast::decode_list_with_memory_budget;
+use crate::broadcast::{decode_list_with_memory_budget, decode_list_with_memory_budget_by};
 use alloc::vec::Vec;
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
     transaction::{PooledTransaction, RlpEcdsaEncodableTx, TxEip4844WithSidecar, TxHashRef},
     Signed,
 };
-use alloy_eips::eip7594::{
-    BlobCellMask, BlobSidecarEncoding, BlobTransactionSidecarVariant, Cell, Encodable7594,
+use alloy_eips::{
+    eip2718::Encodable2718,
+    eip7594::{
+        BlobCellMask, BlobSidecarEncoding, BlobTransactionSidecarVariant, Cell, Encodable7594,
+    },
 };
 use alloy_primitives::{B128, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header, RlpDecodableWrapper, RlpEncodableWrapper};
@@ -143,31 +146,53 @@ impl<T> From<PooledTransactionsEth72<T>> for PooledTransactions<T> {
     }
 }
 
-impl<T: Decodable + InMemorySize> PooledTransactionsEth72<T> {
+impl<T: Decodable + InMemorySize + EncodableEth72PooledTransaction> PooledTransactionsEth72<T> {
     /// Decodes an eth/72 response with the same memory budget as a regular response.
     ///
-    /// A transaction without blobs decodes like any other pooled transaction, with an empty blob
-    /// list.
+    /// Rejects blob transactions with a legacy sidecar or a nonempty blob list.
     pub fn decode_with_memory_budget(
         buf: &mut &[u8],
         memory_budget: usize,
     ) -> alloy_rlp::Result<Self> {
-        decode_list_with_memory_budget(buf, memory_budget).map(Self)
+        decode_list_with_memory_budget_by(buf, memory_budget, |buf| {
+            let tx = T::decode(buf)?;
+            if !tx.is_eth72_body() {
+                return Err(alloy_rlp::Error::Custom(
+                    "expected a blobless eth/72 pooled transaction",
+                ))
+            }
+            Ok(tx)
+        })
+        .map(Self)
+    }
+}
+
+impl<T: EncodableEth72PooledTransaction> PooledTransactionsEth72<T> {
+    fn payload_length(&self) -> usize {
+        self.0
+            .iter()
+            .filter_map(|tx| {
+                let payload_length = tx.eth72_2718_len()?;
+                Some(if tx.is_legacy() {
+                    payload_length
+                } else {
+                    Header { list: false, payload_length }.length_with_payload()
+                })
+            })
+            .sum()
     }
 }
 
 impl<T: EncodableEth72PooledTransaction> Encodable for PooledTransactionsEth72<T> {
     fn encode(&self, out: &mut dyn BufMut) {
-        let payload_length = self.0.iter().map(T::eth72_length).sum();
-        Header { list: true, payload_length }.encode(out);
+        Header { list: true, payload_length: self.payload_length() }.encode(out);
         for transaction in &self.0 {
             transaction.encode_eth72(out);
         }
     }
 
     fn length(&self) -> usize {
-        let payload_length = self.0.iter().map(T::eth72_length).sum();
-        Header { list: true, payload_length }.length_with_payload()
+        Header { list: true, payload_length: self.payload_length() }.length_with_payload()
     }
 }
 
@@ -175,24 +200,32 @@ impl<T: EncodableEth72PooledTransaction> Encodable for PooledTransactionsEth72<T
 ///
 /// The defaults keep the regular encoding, which is correct for transaction types that never
 /// carry blobs.
-pub trait EncodableEth72PooledTransaction: Encodable {
-    /// Writes the transaction without its blobs, keeping commitments and proofs.
+pub trait EncodableEth72PooledTransaction: Encodable + Encodable2718 {
+    /// Writes the network encoding, omitting the transaction if it cannot be served over eth/72.
     fn encode_eth72(&self, out: &mut dyn BufMut) {
-        self.encode(out);
+        if !self.is_eip4844() {
+            self.encode(out);
+        }
     }
 
-    /// Returns the length of [`Self::encode_eth72`].
-    fn eth72_length(&self) -> usize {
-        self.length()
+    /// Returns the EIP-2718 length advertised to eth/72 peers, or `None` for an unservable body.
+    fn eth72_2718_len(&self) -> Option<usize> {
+        (!self.is_eip4844()).then(|| self.encode_2718_len())
+    }
+
+    /// Returns whether a decoded transaction has the sidecar shape required by eth/72.
+    fn is_eth72_body(&self) -> bool {
+        !self.is_eip4844()
     }
 }
 
-/// Legacy EIP-4844 sidecars keep their blobs, since they have no cell proofs to serve `GetCells`.
+/// Legacy sidecars have no cell proofs and cannot be served over eth/72.
 impl EncodableEth72PooledTransaction for PooledTransactionVariant {
     fn encode_eth72(&self, out: &mut dyn BufMut) {
-        let Some(transaction) = self.as_eip4844().filter(|tx| tx.tx().sidecar.is_eip7594()) else {
-            return self.encode(out)
-        };
+        let Some(transaction) = self.as_eip4844() else { return self.encode(out) };
+        if !transaction.tx().sidecar.is_eip7594() {
+            return
+        }
         let (tx, signature) = (transaction.tx(), transaction.signature());
         let (envelope, fields) = eip4844_without_blobs_headers(transaction);
         envelope.encode(out);
@@ -202,11 +235,15 @@ impl EncodableEth72PooledTransaction for PooledTransactionVariant {
         tx.sidecar.encode_7594_with(BlobSidecarEncoding::WithoutBlobs, out);
     }
 
-    fn eth72_length(&self) -> usize {
-        let Some(transaction) = self.as_eip4844().filter(|tx| tx.tx().sidecar.is_eip7594()) else {
-            return self.length()
-        };
-        eip4844_without_blobs_headers(transaction).0.length_with_payload()
+    fn eth72_2718_len(&self) -> Option<usize> {
+        let Some(tx) = self.as_eip4844() else { return Some(self.encode_2718_len()) };
+        tx.tx().sidecar.is_eip7594().then(|| eip4844_without_blobs_headers(tx).0.payload_length)
+    }
+
+    fn is_eth72_body(&self) -> bool {
+        self.as_eip4844().is_none_or(|tx| {
+            tx.tx().sidecar.as_eip7594().is_some_and(|sidecar| sidecar.blobs.is_empty())
+        })
     }
 }
 
@@ -312,8 +349,7 @@ impl Decodable for Cells {
 #[cfg(test)]
 mod tests {
     use crate::{
-        message::RequestPair, EncodableEth72PooledTransaction, GetPooledTransactions,
-        PooledTransactions, PooledTransactionsEth72,
+        message::RequestPair, GetPooledTransactions, PooledTransactions, PooledTransactionsEth72,
     };
     use alloy_consensus::{
         transaction::PooledTransaction, SignableTransaction, TxEip1559, TxEip4844,
@@ -790,7 +826,7 @@ mod tests {
             sidecar: sidecar.into(),
         }
         .into_signed(Signature::test_signature());
-        // Legacy sidecars have no cell proofs, so they keep their blobs.
+        // Legacy sidecars cannot serve cells and are omitted from eth/72.
         let legacy_blob_tx = TxEip4844WithSidecar {
             tx: TxEip4844 { blob_versioned_hashes: vec![B256::ZERO], ..Default::default() },
             sidecar: BlobTransactionSidecar::new(
@@ -809,19 +845,13 @@ mod tests {
             ),
         ];
 
-        // alloy's blob clearing gives the expected encoding.
-        let mut cleared = transactions.clone();
-        for transaction in &mut cleared {
-            transaction.clear_eip7594_blobs();
-        }
+        // The first and third transactions can be served over eth/72, in their original order.
+        let mut cleared = vec![transactions[0].clone(), transactions[2].clone()];
+        cleared[0].clear_eip7594_blobs();
         let expected = alloy_rlp::encode(PooledTransactions(cleared.clone()));
         let encoded = alloy_rlp::encode(PooledTransactionsEth72(transactions.clone()));
         assert_eq!(encoded, expected);
         assert_eq!(PooledTransactionsEth72(transactions.clone()).length(), encoded.len());
-        for (transaction, cleared) in transactions.iter().zip(&cleared) {
-            assert_eq!(transaction.eth72_length(), cleared.length());
-        }
-
         // A body without blobs decodes as a regular pooled transaction with an empty blob list.
         let decoded = <PooledTransactionsEth72>::decode_with_memory_budget(
             &mut encoded.as_slice(),
@@ -829,6 +859,20 @@ mod tests {
         )
         .unwrap();
         assert_eq!(decoded.0, cleared);
-        assert!(alloy_rlp::encode(PooledTransactions(transactions)).len() > encoded.len());
+        for tx in transactions.into_iter().take(2) {
+            let full = PooledTransactions(vec![tx]);
+            let encoded = alloy_rlp::encode(&full);
+            assert_eq!(
+                PooledTransactions::decode_with_memory_budget(&mut encoded.as_slice(), usize::MAX),
+                Ok(full)
+            );
+            assert_eq!(
+                <PooledTransactionsEth72>::decode_with_memory_budget(
+                    &mut encoded.as_slice(),
+                    usize::MAX
+                ),
+                Err(alloy_rlp::Error::Custom("expected a blobless eth/72 pooled transaction"))
+            );
+        }
     }
 }

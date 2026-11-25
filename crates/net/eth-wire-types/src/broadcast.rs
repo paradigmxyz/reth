@@ -169,6 +169,15 @@ pub fn decode_list_with_memory_budget<T: Decodable + InMemorySize>(
     buf: &mut &[u8],
     memory_budget: usize,
 ) -> alloy_rlp::Result<Vec<T>> {
+    decode_list_with_memory_budget_by(buf, memory_budget, T::decode)
+}
+
+/// Decodes each item with the version-specific decoder before charging its memory usage.
+pub(crate) fn decode_list_with_memory_budget_by<T: InMemorySize>(
+    buf: &mut &[u8],
+    memory_budget: usize,
+    mut decode: impl FnMut(&mut &[u8]) -> alloy_rlp::Result<T>,
+) -> alloy_rlp::Result<Vec<T>> {
     let Header { list, payload_length } = Header::decode(buf)?;
     if !list {
         return Err(alloy_rlp::Error::UnexpectedString)
@@ -180,7 +189,7 @@ pub fn decode_list_with_memory_budget<T: Decodable + InMemorySize>(
     let mut total_size = 0usize;
 
     while !payload.is_empty() {
-        let item = T::decode(&mut payload)?;
+        let item = decode(&mut payload)?;
         total_size = total_size.saturating_add(item.size());
 
         if total_size > memory_budget {
