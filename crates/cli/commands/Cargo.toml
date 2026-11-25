@@ -120,13 +120,11 @@ fuzz = [
     "reth-etl/fuzz",
     "reth-evm/fuzz",
     "reth-network/fuzz",
-    "reth-node-builder/fuzz",
     "reth-provider/fuzz",
     "reth-stages/fuzz",
     "reth-static-file/fuzz",
     "reth-trie-common?/fuzz",
     "reth-db/fuzz",
-    "reth-ethereum-cli/fuzz",
     "reth-prune/fuzz",
 ]
 arbitrary = [

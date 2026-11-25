@@ -111,7 +111,6 @@ fuzz = [
     "reth-trie-sparse/fuzz",
     "reth-db/fuzz",
     "reth-evm-ethereum/fuzz",
-    "reth-node-ethereum/fuzz",
     "reth-stages?/fuzz",
     "reth-static-file?/fuzz",
     "reth-prune/fuzz",
