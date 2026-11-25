@@ -1030,7 +1030,10 @@ mod tests {
         }];
 
         let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::call_many(
-            &eth_api, bundles, None, None,
+            &eth_api,
+            bundles.into(),
+            None,
+            None,
         )
         .await;
 
@@ -1055,7 +1058,10 @@ mod tests {
         }];
 
         let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::call_many(
-            &eth_api, bundles, None, None,
+            &eth_api,
+            bundles.into(),
+            None,
+            None,
         )
         .await;
 
