@@ -1629,18 +1629,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         // changeset or row was seen for it.
         Ok(wipe_changesets
             .into_iter()
-            .filter(|(key, entry)| match oldest_blocks.entry((key.address(), entry.key)) {
-                hash_map::Entry::Occupied(mut oldest) => {
-                    if *oldest.get() < key.block_number() {
-                        return false
-                    }
-                    oldest.insert(key.block_number());
-                    true
+            .filter(|(key, entry)| {
+                let block_number = key.block_number();
+                let oldest =
+                    oldest_blocks.entry((key.address(), entry.key)).or_insert(block_number);
+                if *oldest < block_number {
+                    return false
                 }
-                hash_map::Entry::Vacant(oldest) => {
-                    oldest.insert(key.block_number());
-                    true
-                }
+                *oldest = block_number;
+                true
             })
             .map(|(key, entry)| (keccak256(key.address()), entry))
             .collect())
