@@ -203,28 +203,29 @@ async fn test_eth72_blob_announcements_and_elided_pooled_response(eth_version: E
     assert_eq!(node.network().num_connected_peers(), 1);
 }
 
+#[test_case(EthVersion::Eth72, false; "eth72_shared")]
+#[test_case(EthVersion::Eth73, false; "eth73_shared")]
+#[test_case(EthVersion::Eth73, true; "eth73_indexed")]
 #[tokio::test(flavor = "multi_thread")]
-async fn test_eth73_indexed_cells_and_response_form() {
+async fn test_cells_and_response_form(eth_version: EthVersion, indexed: bool) {
     let provider = MockEthProvider::default().with_genesis_block();
-    let net =
-        Testnet::from_configs([PeerConfig::new(provider).with_protocols([EthVersion::Eth73])])
-            .await
-            .with_eth_pool()
-            .with_request_handlers()
-            .spawn();
+    let net = Testnet::from_configs([PeerConfig::new(provider).with_protocols([eth_version])])
+        .await
+        .with_eth_pool()
+        .with_request_handlers()
+        .spawn();
     let [node] = net.peers_array();
     let mut events = node.event_stream();
     let raw_key = rng_secret_key();
     let raw_id = pk2id(&raw_key.public_key());
     let tcp = TcpStream::connect(node.local_addr()).await.unwrap();
     let ecies = ECIESStream::connect(tcp, raw_key, *node.peer_id()).await.unwrap();
-    let hello = HelloMessageWithProtocols::builder(raw_id)
-        .protocols(vec![EthVersion::Eth73.into()])
-        .build();
+    let hello =
+        HelloMessageWithProtocols::builder(raw_id).protocols(vec![eth_version.into()]).build();
     let (p2p, _) = UnauthedP2PStream::new(ecies).handshake(hello).await.unwrap();
-    assert_eq!(p2p.shared_capabilities().eth_version().unwrap(), EthVersion::Eth73);
+    assert_eq!(p2p.shared_capabilities().eth_version().unwrap(), eth_version);
     let mut status = StatusBuilder::default().build();
-    status.set_eth_version(EthVersion::Eth73);
+    status.set_eth_version(eth_version);
     let filter = MAINNET.hardfork_fork_filter(EthereumHardfork::Frontier).unwrap();
     let (mut stream, _) = UnauthedEthStream::new(p2p)
         .handshake::<EthNetworkPrimitives>(status, filter)
@@ -232,7 +233,10 @@ async fn test_eth73_indexed_cells_and_response_form() {
         .unwrap();
     assert_eq!(events.next_session_established().await.unwrap(), raw_id);
     let hashes = vec![B256::ZERO, B256::repeat_byte(1)];
-    let masks = vec![B128::from(1u128.to_le_bytes()), B128::from(2u128.to_le_bytes())];
+    let masks = vec![
+        B128::from(1u128.to_le_bytes()),
+        B128::from(if indexed { 2u128 } else { 1u128 }.to_le_bytes()),
+    ];
     let request = GetCells::from_masks(hashes.clone(), masks.clone()).unwrap();
     stream
         .send(EthMessage::GetCells(RequestPair { request_id: 7, message: request.clone() }))
@@ -245,13 +249,19 @@ async fn test_eth73_indexed_cells_and_response_form() {
     assert_eq!(
         response.message,
         Cells {
-            cell_mask: CellMasks::Indexed { masks: vec![], mask_ids: Default::default() },
+            cell_mask: if indexed {
+                CellMasks::Indexed { masks: vec![], mask_ids: Default::default() }
+            } else {
+                masks[0].into()
+            },
             ..Default::default()
         }
     );
     assert_eq!(response.message.validate_response(&request), Ok(()));
 
-    for valid_form in [true, false] {
+    // An indexed response is a protocol error on eth/72 before session correlation runs.
+    let forms: &[_] = if eth_version == EthVersion::Eth72 { &[true] } else { &[true, false] };
+    for &valid_form in forms {
         let handle = node.transactions().unwrap().clone();
         let hashes = hashes.clone();
         let masks = masks.clone();
@@ -263,7 +273,18 @@ async fn test_eth73_indexed_cells_and_response_form() {
             panic!("expected get cells")
         };
         assert_eq!(outgoing.message, request);
-        let reply = if valid_form { response.message.clone() } else { Cells::default() };
+        let reply = if valid_form {
+            response.message.clone()
+        } else {
+            Cells {
+                cell_mask: if indexed {
+                    CellMasks::Shared(B128::ZERO)
+                } else {
+                    CellMasks::Indexed { masks: vec![], mask_ids: Default::default() }
+                },
+                ..Default::default()
+            }
+        };
         stream
             .send(EthMessage::Cells(RequestPair {
                 request_id: outgoing.request_id,

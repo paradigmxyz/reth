@@ -17,7 +17,7 @@ use crate::{
     EthNetworkPrimitives, EthVersion, GetCells, NetworkPrimitives, NewPooledTransactionHashes72,
     RawCapabilityMessage, Receipts69, Receipts70, SharedTransactions,
 };
-use alloc::{boxed::Box, string::String, sync::Arc};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_primitives::{
     bytes::{Buf, BufMut},
     Bytes,
@@ -215,7 +215,11 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 if version < EthVersion::Eth72 {
                     return Err(MessageError::Invalid(version, EthMessageID::Cells))
                 }
-                let response: RequestPair<Cells> = RequestPair::decode(buf)?;
+                let response: RequestPair<Cells> = if version == EthVersion::Eth72 {
+                    RequestPair::decode_nested(buf)?
+                } else {
+                    RequestPair::decode(buf)?
+                };
                 if response.message.cell_mask.is_indexed() && version < EthVersion::Eth73 {
                     return Err(MessageError::Invalid(version, EthMessageID::Cells))
                 }
@@ -225,7 +229,11 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 if version < EthVersion::Eth72 {
                     return Err(MessageError::Invalid(version, EthMessageID::GetCells))
                 }
-                let request: RequestPair<GetCells> = RequestPair::decode(buf)?;
+                let request: RequestPair<GetCells> = if version == EthVersion::Eth72 {
+                    RequestPair::decode_nested(buf)?
+                } else {
+                    RequestPair::decode(buf)?
+                };
                 if request.message.cell_mask.is_indexed() && version < EthVersion::Eth73 {
                     return Err(MessageError::Invalid(version, EthMessageID::GetCells))
                 }
@@ -242,11 +250,38 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
         };
         Ok(Self { message_type, message })
     }
+
+    /// Encodes for the negotiated version, retaining Reth's legacy nested cell payloads on
+    /// eth/72. Eth/73 uses the canonical flat EIP-8408 framing for both cell forms.
+    pub fn encoded_for_version(&self, version: EthVersion) -> Vec<u8> {
+        if version == EthVersion::Eth72 {
+            let (request_id, message): (_, &dyn Encodable) = match &self.message {
+                EthMessage::GetCells(request) => (request.request_id, &request.message),
+                EthMessage::Cells(response) => (response.request_id, &response.message),
+                _ => return alloy_rlp::encode(self),
+            };
+            let inner = Header { list: true, payload_length: message.length() };
+            let outer = Header {
+                list: true,
+                payload_length: request_id.length() + inner.length_with_payload(),
+            };
+            let mut out =
+                Vec::with_capacity(self.message_type.length() + outer.length_with_payload());
+            self.message_type.encode(&mut out);
+            outer.encode(&mut out);
+            request_id.encode(&mut out);
+            inner.encode(&mut out);
+            message.encode(&mut out);
+            return out
+        }
+        alloy_rlp::encode(self)
+    }
 }
 
 impl<N: NetworkPrimitives> Encodable for ProtocolMessage<N> {
     /// Encodes the protocol message into bytes. The message type is encoded as a single byte and
-    /// prepended to the message.
+    /// prepended to the message. Cell messages use canonical flat framing; connections must use
+    /// [`Self::encoded_for_version`] to preserve legacy eth/72 framing.
     fn encode(&self, out: &mut dyn BufMut) {
         self.message_type.encode(out);
         self.message.encode(out);
@@ -840,6 +875,20 @@ where
     fn length(&self) -> usize {
         let payload_length = self.request_id.length() + self.message.length();
         Header { list: true, payload_length }.length_with_payload()
+    }
+}
+
+impl<T: Decodable> RequestPair<T> {
+    /// Decodes the legacy eth/72 cell payload's extra list within the request pair.
+    fn decode_nested(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        Self::decode_with(buf, |buf| {
+            let mut payload = Header::decode_bytes(buf, true)?;
+            let message = T::decode(&mut payload)?;
+            if !payload.is_empty() {
+                return Err(alloy_rlp::Error::UnexpectedLength)
+            }
+            Ok(message)
+        })
     }
 }
 

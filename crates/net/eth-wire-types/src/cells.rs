@@ -1,10 +1,11 @@
 //! Shared (EIP-8070) and indexed (EIP-8408) cell retrieval messages.
 //!
 //! Payload codecs are flattened: `RequestPair` supplies the outer RLP list and request id.
+//! `ProtocolMessage` preserves the extra legacy cell-payload list on eth/72 connections.
 
 use alloc::vec::Vec;
 use alloy_eips::eip7594::{BlobCellMask, Cell};
-use alloy_primitives::{Bytes, B128, B256};
+use alloy_primitives::{map::B256Set, Bytes, B128, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Error, Header};
 use reth_primitives_traits::InMemorySize;
 
@@ -241,10 +242,25 @@ impl Cells {
         {
             return Err(Error::Custom("invalid cell response form"))
         }
+        // Indexed requests are bounded to 64 hashes. Large shared responses need a lookup
+        // table to prevent peer-controlled repeated hashes from causing quadratic work.
+        let shared_hashes = (matches!(request.cell_mask, CellMasks::Shared(_)) &&
+            request.hashes.len() > MAX_INDEXED_CELL_HASHES &&
+            self.hashes.len() > MAX_INDEXED_CELL_HASHES)
+            .then(|| request.hashes.iter().copied().collect::<B256Set>());
         for (index, hash) in self.hashes.iter().enumerate() {
-            let Some(request_index) = request.hashes.iter().position(|requested| requested == hash)
-            else {
-                return Err(Error::Custom("unrequested cell transaction hash"))
+            let request_index = if let Some(hashes) = &shared_hashes {
+                if !hashes.contains(hash) {
+                    return Err(Error::Custom("unrequested cell transaction hash"))
+                }
+                // Shared masks do not depend on the transaction position.
+                0
+            } else {
+                request
+                    .hashes
+                    .iter()
+                    .position(|requested| requested == hash)
+                    .ok_or(Error::Custom("unrequested cell transaction hash"))?
             };
             let mask = self
                 .cell_mask
@@ -330,7 +346,7 @@ mod tests {
         message::RequestPair, EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion,
         ProtocolMessage,
     };
-    use alloy_primitives::hex;
+    use alloy_primitives::{hex, U256};
     use proptest::prelude::*;
 
     fn indexed(hashes: Vec<B256>, masks: Vec<B128>, ids: &[u8]) -> GetCells {
@@ -358,6 +374,63 @@ mod tests {
         let expected = hex!("d401c0c09000000000000000000000000000000000");
         assert_eq!(alloy_rlp::encode(&response), expected);
         assert_eq!(alloy_rlp::decode_exact::<RequestPair<Cells>>(&expected).unwrap(), response);
+    }
+
+    #[test]
+    fn shared_cell_framing_by_version() {
+        let messages = [
+            EthMessage::<EthNetworkPrimitives>::GetCells(RequestPair {
+                request_id: 1,
+                message: GetCells::default(),
+            }),
+            EthMessage::Cells(RequestPair { request_id: 1, message: Cells::default() }),
+        ];
+        // Frozen base-revision encodings, including the extra cell-payload list.
+        let legacy = [
+            hex!("14d401d2c09000000000000000000000000000000000").to_vec(),
+            hex!("15d501d3c0c09000000000000000000000000000000000").to_vec(),
+        ];
+        for (message, expected) in messages.into_iter().zip(legacy) {
+            let protocol = ProtocolMessage::from(message);
+            assert_eq!(protocol.encoded_for_version(EthVersion::Eth72), expected);
+            let mut buf = expected.as_slice();
+            assert_eq!(
+                ProtocolMessage::decode_message(EthVersion::Eth72, &mut buf).unwrap(),
+                protocol
+            );
+            assert!(buf.is_empty());
+            let canonical = alloy_rlp::encode(&protocol);
+            assert_eq!(protocol.encoded_for_version(EthVersion::Eth73), canonical);
+            let mut buf = canonical.as_slice();
+            assert_eq!(
+                ProtocolMessage::decode_message(EthVersion::Eth73, &mut buf).unwrap(),
+                protocol
+            );
+            assert!(buf.is_empty());
+        }
+    }
+
+    #[test]
+    fn legacy_cell_payload_is_bounded() {
+        let mut wire = hex!("14d401d2c09000000000000000000000000000000000").to_vec();
+        wire.push(0x80);
+        let mut buf = wire.as_slice();
+        ProtocolMessage::<EthNetworkPrimitives>::decode_message(EthVersion::Eth72, &mut buf)
+            .unwrap();
+        assert_eq!(buf, &[0x80]);
+        // Extra fields inside either list must not be silently consumed.
+        for wire in [
+            hex!("14d501d3c0900000000000000000000000000000000080"),
+            hex!("14d501d2c0900000000000000000000000000000000080"),
+        ] {
+            assert!(matches!(
+                ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+                    EthVersion::Eth72,
+                    &mut wire.as_slice()
+                ),
+                Err(crate::message::MessageError::RlpError(Error::UnexpectedLength))
+            ));
+        }
     }
 
     #[test]
@@ -520,6 +593,59 @@ mod tests {
     }
 
     #[test]
+    fn shared_response_hash_lookup() {
+        for count in [1, MAX_INDEXED_CELL_HASHES, MAX_INDEXED_CELL_HASHES + 1, 4096] {
+            let request = GetCells {
+                hashes: (0..count).map(|index| B256::from(U256::from(index))).collect(),
+                cell_mask: B128::from(1u128.to_le_bytes()).into(),
+            };
+            // Repeated last hashes with no returned cells were the quadratic-work case.
+            let mut response = Cells {
+                hashes: vec![request.hashes[count - 1]; count],
+                cells: vec![vec![]; count],
+                cell_mask: B128::ZERO.into(),
+            };
+            assert_eq!(response.validate_response(&request), Ok(()));
+            response.hashes[count - 1] = B256::repeat_byte(0xff);
+            assert_eq!(
+                response.validate_response(&request),
+                Err(Error::Custom("unrequested cell transaction hash"))
+            );
+            response.hashes[count - 1] = request.hashes[0];
+            response.cell_mask = B128::from(2u128.to_le_bytes()).into();
+            assert_eq!(
+                response.validate_response(&request),
+                Err(Error::Custom("unrequested cell index"))
+            );
+        }
+    }
+
+    #[test]
+    fn small_shared_response_to_large_request() {
+        let request = GetCells {
+            hashes: (0..=MAX_INDEXED_CELL_HASHES)
+                .map(|index| B256::from(U256::from(index)))
+                .collect(),
+            cell_mask: B128::ZERO.into(),
+        };
+        for count in [0, 1, MAX_INDEXED_CELL_HASHES] {
+            let mut response = Cells {
+                hashes: vec![request.hashes[MAX_INDEXED_CELL_HASHES]; count],
+                cells: vec![vec![]; count],
+                cell_mask: B128::ZERO.into(),
+            };
+            assert_eq!(response.validate_response(&request), Ok(()));
+            if let Some(hash) = response.hashes.last_mut() {
+                *hash = B256::repeat_byte(0xff);
+                assert_eq!(
+                    response.validate_response(&request),
+                    Err(Error::Custom("unrequested cell transaction hash"))
+                );
+            }
+        }
+    }
+
+    #[test]
     fn decoding_is_bounded_by_request_pair() {
         let pair = RequestPair { request_id: 1, message: request() };
         let mut wire = alloy_rlp::encode(&pair);
@@ -562,8 +688,9 @@ mod tests {
                 .unwrap(),
                 protocol
             );
+            let legacy = protocol.encoded_for_version(EthVersion::Eth72);
             assert!(
-                matches!(ProtocolMessage::<EthNetworkPrimitives>::decode_message(EthVersion::Eth72,&mut encoded.as_slice()),Err(crate::message::MessageError::Invalid(EthVersion::Eth72, id)) if id == message_type)
+                matches!(ProtocolMessage::<EthNetworkPrimitives>::decode_message(EthVersion::Eth72,&mut legacy.as_slice()),Err(crate::message::MessageError::Invalid(EthVersion::Eth72, id)) if id == message_type)
             );
         }
         assert_eq!(
@@ -636,9 +763,46 @@ mod tests {
         }
 
         #[test]
+        fn shared_versions_roundtrip(
+            hashes in proptest::collection::vec(any::<[u8; 32]>(), 0..70),
+            mask in any::<[u8; 16]>(),
+            request_id in any::<u64>(),
+        ) {
+            let hashes = hashes.into_iter().map(B256::from).collect::<Vec<_>>();
+            let messages = [
+                EthMessage::<EthNetworkPrimitives>::GetCells(RequestPair {
+                    request_id,
+                    message: GetCells { hashes: hashes.clone(), cell_mask: B128::from(mask).into() },
+                }),
+                EthMessage::Cells(RequestPair {
+                    request_id,
+                    message: Cells {
+                        cells: vec![vec![]; hashes.len()],
+                        hashes,
+                        cell_mask: B128::ZERO.into(),
+                    },
+                }),
+            ];
+            for message in messages {
+                let protocol = ProtocolMessage::from(message);
+                for version in [EthVersion::Eth72, EthVersion::Eth73] {
+                    let wire = protocol.encoded_for_version(version);
+                    let mut buf = wire.as_slice();
+                    prop_assert_eq!(&ProtocolMessage::decode_message(version, &mut buf).unwrap(),
+                        &protocol);
+                    prop_assert!(buf.is_empty());
+                }
+            }
+        }
+
+        #[test]
         fn arbitrary_input_does_not_panic(data in proptest::collection::vec(any::<u8>(),0..4096)) {
             let _request = RequestPair::<GetCells>::decode(&mut data.as_slice());
             let _response = RequestPair::<Cells>::decode(&mut data.as_slice());
+            for version in [EthVersion::Eth72, EthVersion::Eth73] {
+                let _message = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+                    version, &mut data.as_slice());
+            }
         }
     }
 }

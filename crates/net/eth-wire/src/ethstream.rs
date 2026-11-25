@@ -214,7 +214,7 @@ where
             self.pending_responses.insert(request_id, response);
         }
 
-        Ok(Bytes::from(alloy_rlp::encode(ProtocolMessage::from(item))))
+        Ok(Bytes::from(ProtocolMessage::from(item).encoded_for_version(self.version)))
     }
 
     /// Consumes the pending request an encoded response answers, without decoding the response's
@@ -484,6 +484,9 @@ fn response_exceeds_items(
             bool::decode(&mut payload)?;
         }
         EthMessageID::Cells => {
+            if version == EthVersion::Eth72 {
+                payload = Header::decode_bytes(&mut payload, true)?;
+            }
             return Ok(list_exceeds_items(&mut payload, max_items)? ||
                 list_exceeds_items(&mut payload, max_items)?)
         }
@@ -1131,37 +1134,44 @@ mod tests {
 
     #[test]
     fn cells_response_bounds_hashes_and_cells() {
-        let mut eth = EthStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth72);
-        let request = |request_id| {
-            EthMessage::GetCells(RequestPair {
-                request_id,
-                message: GetCells { hashes: vec![B256::ZERO], cell_mask: B128::ZERO.into() },
-            })
-        };
-        let response = |request_id, hashes, cells| {
-            EthMessage::Cells(RequestPair {
-                request_id,
-                message: Cells {
-                    hashes: vec![B256::ZERO; hashes],
-                    cells: vec![Vec::new(); cells],
-                    cell_mask: B128::ZERO.into(),
-                },
-            })
-        };
+        for version in [EthVersion::Eth72, EthVersion::Eth73] {
+            let mut eth = EthStreamInner::<EthNetworkPrimitives>::new(version);
+            let request = |request_id| {
+                EthMessage::GetCells(RequestPair {
+                    request_id,
+                    message: GetCells { hashes: vec![B256::ZERO], cell_mask: B128::ZERO.into() },
+                })
+            };
+            let response = |request_id, hashes, cells| {
+                EthMessage::Cells(RequestPair {
+                    request_id,
+                    message: Cells {
+                        hashes: vec![B256::ZERO; hashes],
+                        cells: vec![Vec::new(); cells],
+                        cell_mask: B128::ZERO.into(),
+                    },
+                })
+            };
 
-        eth.encode_message(request(1)).unwrap();
-        assert_eq!(eth.decode_message(encode(response(1, 1, 1))).unwrap(), response(1, 1, 1));
+            let mut peer = EthStreamInner::<EthNetworkPrimitives>::new(version);
+            // Decode and answer through both ends so version-specific framing is exercised.
+            let wire = eth.encode_message(request(1)).unwrap();
+            assert_eq!(peer.decode_message(wire.into()).unwrap(), request(1));
+            let wire = peer.encode_message(response(1, 1, 1)).unwrap();
+            assert_eq!(eth.decode_message(wire.into()).unwrap(), response(1, 1, 1));
 
-        for (request_id, hashes, cells) in [(2, 2, 1), (3, 1, 2)] {
-            eth.encode_message(request(request_id)).unwrap();
-            assert!(matches!(
-                eth.decode_message(encode(response(request_id, hashes, cells))).unwrap_err(),
-                EthStreamError::ResponseExceedsRequest {
-                    message_id: EthMessageID::Cells,
-                    max_items: 1,
-                    ..
-                }
-            ));
+            for (request_id, hashes, cells) in [(2, 2, 1), (3, 1, 2)] {
+                eth.encode_message(request(request_id)).unwrap();
+                let wire = peer.encode_message(response(request_id, hashes, cells)).unwrap();
+                assert!(matches!(
+                    eth.decode_message(wire.into()).unwrap_err(),
+                    EthStreamError::ResponseExceedsRequest {
+                        message_id: EthMessageID::Cells,
+                        max_items: 1,
+                        ..
+                    }
+                ));
+            }
         }
     }
 }
