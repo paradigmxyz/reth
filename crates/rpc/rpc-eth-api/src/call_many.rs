@@ -3,7 +3,7 @@
 use alloy_rpc_types_eth::Bundle;
 use reth_rpc_eth_types::{utils::CallManyBudget, EthApiError};
 use serde::{
-    de::{DeserializeOwned, IgnoredAny, SeqAccess, Visitor},
+    de::{DeserializeOwned, IgnoredAny, MapAccess, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize,
 };
 use serde_json::value::RawValue;
@@ -91,10 +91,58 @@ impl<'de> Visitor<'de> for BundlesVisitor {
 }
 
 /// The transactions of a bundle, counted without decoding them. Other fields are skipped.
-#[derive(Deserialize)]
 struct BundleCalls {
-    #[serde(default)]
     transactions: ArrayLen,
+}
+
+impl<'de> Deserialize<'de> for BundleCalls {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_struct(
+            "Bundle",
+            &["transactions", "blockOverride"],
+            BundleCallsVisitor,
+        )
+    }
+}
+
+/// Reads the transactions of a bundle in either encoding [`Bundle`] accepts: an object, or an
+/// array of its fields in order.
+struct BundleCallsVisitor;
+
+impl<'de> Visitor<'de> for BundleCallsVisitor {
+    type Value = BundleCalls;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a bundle")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut transactions = ArrayLen::default();
+        while let Some(key) = map.next_key::<BundleField>()? {
+            match key {
+                BundleField::Transactions => transactions = map.next_value()?,
+                BundleField::Other => {
+                    map.next_value::<IgnoredAny>()?;
+                }
+            }
+        }
+        Ok(BundleCalls { transactions })
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let transactions = seq.next_element()?.unwrap_or_default();
+        while seq.next_element::<IgnoredAny>()?.is_some() {}
+        Ok(BundleCalls { transactions })
+    }
+}
+
+/// The bundle fields the call count reads.
+#[derive(Deserialize)]
+#[serde(field_identifier, rename_all = "camelCase")]
+enum BundleField {
+    Transactions,
+    #[serde(other)]
+    Other,
 }
 
 /// The length of a JSON array, counted without decoding its elements.
@@ -217,6 +265,18 @@ mod tests {
         assert_eq!(err.to_string(), limit_err(calls));
 
         assert_eq!(DECODED.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn counts_array_encoded_bundles() {
+        let input = r#"[[[{}, {}], null], [[{}]]]"#;
+        let parsed = parse::<Vec<Bundle<TransactionRequest>>>(input).unwrap();
+        assert_eq!(parsed.iter().map(|bundle| bundle.transactions.len()).sum::<usize>(), 3);
+
+        let input =
+            format!("[[[{}], null]]", vec!["{}"; DEFAULT_MAX_CALL_MANY_CALLS + 1].join(","));
+        let err = parse::<Vec<Bundle<TransactionRequest>>>(&input).unwrap_err();
+        assert_eq!(err.to_string(), limit_err(DEFAULT_MAX_CALL_MANY_CALLS + 1));
     }
 
     #[test]
