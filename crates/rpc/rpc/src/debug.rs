@@ -1245,8 +1245,10 @@ where
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<Vec<GethTrace>>> {
-        let _permit = self.acquire_trace_permit().await;
+        // Decoding is bounded by the call limit, so malformed input is rejected without waiting
+        // for a tracing permit.
         let bundles = bundles.into_inner()?;
+        let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_call_many(self, bundles, state_context, opts).await.map_err(Into::into)
     }
 

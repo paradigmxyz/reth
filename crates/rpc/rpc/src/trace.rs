@@ -744,8 +744,10 @@ where
         calls: CallManyRequest<Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>>,
         block_id: Option<BlockId>,
     ) -> RpcResult<Vec<TraceResults>> {
-        let _permit = self.acquire_trace_permit().await;
+        // Decoding is bounded by the call limit, so malformed input is rejected without waiting
+        // for a tracing permit.
         let calls = calls.into_inner()?;
+        let _permit = self.acquire_trace_permit().await;
         Self::trace_call_many(self, calls, block_id).await.map_err(Into::into)
     }
 
