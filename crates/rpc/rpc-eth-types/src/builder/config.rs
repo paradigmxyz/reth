@@ -283,7 +283,7 @@ impl EthConfig {
         self
     }
 
-    /// Configures the maximum memory the EVM can allocate per RPC request.
+    /// Configures the maximum memory the EVM can allocate per call frame in an RPC request.
     pub const fn rpc_evm_memory_limit(mut self, memory_limit: u64) -> Self {
         self.rpc_evm_memory_limit = memory_limit;
         self
