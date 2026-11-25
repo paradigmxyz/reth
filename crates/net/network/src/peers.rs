@@ -982,12 +982,17 @@ impl PeersManager {
     ///
     /// If the peer already exists, then the address, kind and `fork_id` will be updated. Once
     /// [`MAX_TRACKED_PEERS`] peers are tracked, a new untrusted peer is queued as a dial candidate
-    /// instead, so it never pushes out an existing one. Only one candidate is queued per IP.
+    /// instead, so it never pushes out an existing one. Only one candidate is queued per IP, and a
+    /// full queue keeps its oldest candidates.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId>) {
         if self.is_full_for(&peer_id) {
             let ip = addr.tcp().ip();
             if self.ip_filter.is_allowed(&ip) &&
                 !self.ban_list.is_banned(&peer_id, &ip) &&
+                // A full queue keeps its oldest candidates, so a flood of new identities cannot
+                // push out the ones queued before it.
+                (self.candidates.len() < MAX_PEER_CANDIDATES as usize ||
+                    self.candidates.contains(&peer_id)) &&
                 // One candidate per IP, so a single host announcing many identities cannot fill
                 // the queue and take the candidates' share of dials.
                 !self.candidates.iter().any(|(id, candidate)| {
@@ -5066,12 +5071,15 @@ mod tests {
         assert!(!peers.candidates.contains(&filtered));
         peers.ip_filter = IpFilter::allow_all();
 
-        // the queue keeps the newest candidates
+        // the queue keeps the oldest candidates
+        let newest = PeerId::random();
         for index in 0..MAX_PEER_CANDIDATES as u16 {
             peers.add_peer(PeerId::random(), unique_ip_addr(index), None);
         }
+        peers.add_peer(newest, unique_ip_addr(MAX_PEER_CANDIDATES as u16), None);
         assert_eq!(peers.candidates.len(), MAX_PEER_CANDIDATES as usize);
-        assert!(!peers.candidates.contains(&candidate));
+        assert!(peers.candidates.contains(&candidate));
+        assert!(!peers.candidates.contains(&newest));
     }
 
     #[tokio::test]
