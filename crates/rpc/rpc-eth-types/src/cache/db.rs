@@ -2,7 +2,7 @@
 
 use crate::error::StateOverrideError;
 use alloy_eip7928::{bal::DecodedBal, BlockAccessIndex};
-use alloy_primitives::{map::DefaultHashBuilder, Bytes, U256};
+use alloy_primitives::{map::DefaultHashBuilder, Address, Bytes, U256};
 use alloy_rpc_types_eth::{state::StateOverride, BlockOverrides};
 use evm2::{
     bytecode::{Bytecode, BytecodeDecodeError},
@@ -223,6 +223,15 @@ pub fn attach_bal_before_tx<DB: DynDatabase>(
     db.bal_context.set_bal_index(BlockAccessIndex::from_tx_index(tx_index as u64));
 }
 
+/// Returns addresses whose explicit code overrides must shadow native dispatch, including empty
+/// code.
+pub fn code_override_addresses(overrides: &StateOverride) -> Vec<Address> {
+    overrides
+        .iter()
+        .filter_map(|(address, account)| account.code.as_ref().map(|_| *address))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -231,6 +240,26 @@ mod tests {
     use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
     use alloy_rpc_types_eth::state::AccountOverride;
     use evm2::evm::{AccountBal, AccountInfo, Bal, BalChanges, InMemoryDB};
+
+    #[test]
+    fn code_override_addresses_preserve_explicit_empty_code() {
+        let empty = Address::with_last_byte(1);
+        let replacement = Address::with_last_byte(2);
+        let balance_only = Address::with_last_byte(3);
+        let untouched = Address::with_last_byte(4);
+        let overrides = StateOverride::from_iter([
+            (empty, AccountOverride { code: Some(Bytes::new()), ..Default::default() }),
+            (
+                replacement,
+                AccountOverride { code: Some(Bytes::from_static(&[0x00])), ..Default::default() },
+            ),
+            (balance_only, AccountOverride { balance: Some(U256::from(1)), ..Default::default() }),
+            (untouched, AccountOverride::default()),
+        ]);
+        let mut addresses = code_override_addresses(&overrides);
+        addresses.sort_unstable();
+        assert_eq!(addresses, vec![empty, replacement]);
+    }
 
     #[test]
     fn state_overrides_remove_accounts_left_empty() {

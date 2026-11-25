@@ -18,7 +18,7 @@ use reth_evm::{
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::{apply_block_overrides, apply_state_overrides},
+    cache::db::{apply_block_overrides, apply_state_overrides, code_override_addresses},
     error::api::{FromEvmHalt, FromRevert},
     EthApiError, RpcInvalidTransactionError,
 };
@@ -84,6 +84,9 @@ pub trait EstimateCall: Call {
             apply_block_overrides(*block_overrides, &mut db, &mut evm_env);
         }
 
+        let code_overrides =
+            overrides.state.as_ref().map(code_override_addresses).unwrap_or_default();
+
         // Apply any state overrides if specified.
         if let Some(state_override) = overrides.state {
             apply_state_overrides(state_override, &mut db).map_err(Self::Error::from_eth_err)?;
@@ -132,6 +135,7 @@ pub trait EstimateCall: Call {
         trace!(target: "rpc::eth::estimate", ?tx_env, gas_limit = highest_gas_limit, is_basic_transfer, "Starting gas estimation");
 
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
+        evm.disable_precompiles(code_overrides);
         let mut execute = move |gas_limit| {
             tx_env.inner_mut().set_gas_limit(gas_limit);
             evm.transact_result(&tx_env).map_err(Self::Error::from_evm_err)
