@@ -211,9 +211,10 @@ where
 
                 let block_env = *evm_env.block_env();
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let trace_limits = eth_api.trace_limits();
-                let inspector = match new_debug_inspector(opts) {
-                    Ok(inspector) => inspector,
+                // Notifications are not bound by the response size limit, so only the trace byte
+                // limit of each transaction applies.
+                let mut inspector = match new_debug_inspector(opts) {
+                    Ok(inspector) => inspector.with_limits(eth_api.trace_limits()),
                     Err(err) => {
                         if let Some((_, tx)) = transactions.peek() {
                             results.push(Some(TraceResult::Error {
@@ -225,10 +226,6 @@ where
                         return Ok(results)
                     }
                 };
-                // Each block is its own subscription message.
-                let mut response =
-                    ResponseBudget::new(&inspector, eth_api.eth_api_settings().max_response_size);
-                let mut inspector = inspector.with_limits(response.limit(trace_limits));
                 let mut executor = eth_api.block_executor(&block, &mut db, evm_env)?;
 
                 while let Some((index, tx)) = transactions.next() {
@@ -269,7 +266,6 @@ where
                         }
                     };
 
-                    response.charge(&inspector);
                     results.push(Some(TraceResult::Success { result, tx_hash: Some(tx_hash) }));
                     if let Some((_, next_tx)) = transactions.peek() {
                         if let Err(err) = inspector.fuse() {
@@ -279,7 +275,6 @@ where
                             }));
                             break
                         }
-                        inspector.set_limits(response.limit(trace_limits));
                         if let Err(err) = executor.commit_transaction(output) {
                             results.push(Some(TraceResult::Error {
                                 error: err.to_string(),
