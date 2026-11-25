@@ -1244,11 +1244,20 @@ async fn rpc_evm_memory_limit_applies_to_all_call_methods() -> eyre::Result<()> 
     // `PUSH0 PUSH0 PUSH0 PUSH0 PUSH0 PUSH1 0x43 GAS CALL POP STOP`.
     let parent = Address::with_last_byte(0x44);
     let parent_100k = Address::with_last_byte(0x45);
+    // Stops if more than 3M gas is left, else writes one byte past the limit:
+    // `GAS PUSH3 3000000 LT PUSH1 0x13 JUMPI PUSH1 0 PUSH3 0x100000 MSTORE8 PUSH0 PUSH0 REVERT
+    // JUMPDEST STOP`.
+    let gas_dependent = Address::with_last_byte(0x46);
     let overrides = StateOverride::from_iter([
         (writer, AccountOverride::default().with_code(bytes!("5f355f905300"))),
         (past_limit, AccountOverride::default().with_code(bytes!("6000621000005300"))),
         (parent, AccountOverride::default().with_code(bytes!("5f5f5f5f5f60435af15000"))),
         (parent_100k, AccountOverride::default().with_code(bytes!("5f5f5f5f5f6043620186a0f15000"))),
+        (
+            gas_dependent,
+            AccountOverride::default()
+                .with_code(bytes!("5a622dc6c010601357600062100000535f5ffd5b00")),
+        ),
     ]);
     let write_at = |offset: u64| {
         TransactionRequest::default()
@@ -1284,7 +1293,9 @@ async fn rpc_evm_memory_limit_applies_to_all_call_methods() -> eyre::Result<()> 
     // With all the gas, `past_limit` could grow its memory past the limit in a mined transaction,
     // so the estimate must not follow the path where the call fails. Growing past 1 MiB costs about
     // 2.2M gas, so with 100k gas the call runs out of gas at the same point either way.
-    for (to, fits) in [(parent, false), (parent_100k, true)] {
+    // `gas_dependent` succeeds with the highest gas limit, and the search then probes lower limits
+    // that the memory limit decides, which must count as failures instead of ending the estimate.
+    for (to, fits) in [(parent, false), (parent_100k, true), (gas_dependent, true)] {
         let tx = TransactionRequest::default().to(to);
         let estimate: Result<U256, _> =
             provider.raw_request("eth_estimateGas".into(), (&tx, "latest", &overrides)).await;

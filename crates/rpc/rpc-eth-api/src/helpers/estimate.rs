@@ -141,6 +141,7 @@ pub trait EstimateCall: Call {
             MemoryLimitInspector::new(evm_env.version(), memory_limit_hit.clone());
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
         evm.set_inspector(memory_limit_inspector);
+        let probe_hit_memory_limit = memory_limit_hit.clone();
         let mut execute = move |gas_limit| {
             tx_env.inner_mut().set_gas_limit(gas_limit);
             memory_limit_hit.set(false);
@@ -223,17 +224,24 @@ pub trait EstimateCall: Call {
         if optimistic_gas_limit < highest_gas_limit {
             // Re-execute the transaction with the new gas limit and update the result and
             // environment.
-            res = execute(optimistic_gas_limit)?;
-
-            // Update the gas used based on the new result.
-            gas_used = res.tx_gas_used();
-            // Update the gas limit estimates (highest and lowest) based on the execution result.
-            update_estimated_gas_range::<EvmTypesFor<Self::Evm>>(
-                res,
-                optimistic_gas_limit,
-                &mut highest_gas_limit,
-                &mut lowest_gas_limit,
-            )?;
+            match execute(optimistic_gas_limit) {
+                // A higher gas limit already succeeded, so a lower one that the memory limit
+                // decided counts as a failure, like a halt, instead of ending the estimate.
+                Err(_) if probe_hit_memory_limit.get() => lowest_gas_limit = optimistic_gas_limit,
+                ethres => {
+                    res = ethres?;
+                    // Update the gas used based on the new result.
+                    gas_used = res.tx_gas_used();
+                    // Update the gas limit estimates (highest and lowest) based on the execution
+                    // result.
+                    update_estimated_gas_range::<EvmTypesFor<Self::Evm>>(
+                        res,
+                        optimistic_gas_limit,
+                        &mut highest_gas_limit,
+                        &mut lowest_gas_limit,
+                    )?;
+                }
+            }
         };
 
         // Pick a point that's close to the estimated gas
@@ -268,6 +276,8 @@ pub trait EstimateCall: Call {
                     // Increase the lowest gas limit if gas is too low
                     lowest_gas_limit = mid_gas_limit;
                 }
+                // A probe that the memory limit decided counts as a failure, see above.
+                Err(_) if probe_hit_memory_limit.get() => lowest_gas_limit = mid_gas_limit,
                 // Handle other cases, including successful transactions.
                 ethres => {
                     // Update the estimated gas range based on the execution result.
