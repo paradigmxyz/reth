@@ -376,6 +376,21 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         out.extend(self.get_pooled_transaction_elements(tx_hashes.to_vec(), limit));
     }
 
+    /// Returns pooled transactions like [`Self::get_pooled_transaction_elements`], with blob
+    /// transactions served without their blobs, since eth/72 peers fetch them with `GetCells`.
+    ///
+    /// The size limit counts the transactions without their blobs. Blob transactions whose
+    /// sidecar has no cell proofs can be left out. The default implementation keeps the blobs.
+    ///
+    /// Consumer: P2P
+    fn get_pooled_transaction_elements_without_blobs(
+        &self,
+        tx_hashes: Vec<TxHash>,
+        limit: GetPooledTransactionLimit,
+    ) -> Vec<<Self::Transaction as PoolTransaction>::Pooled> {
+        self.get_pooled_transaction_elements(tx_hashes, limit)
+    }
+
     /// Returns the pooled transaction variant for the given transaction hash.
     ///
     /// This adheres to the expected behavior of

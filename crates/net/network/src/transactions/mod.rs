@@ -1137,14 +1137,17 @@ where
                 return
             }
 
-            let transactions = self.pool.get_pooled_transaction_elements(
-                request.0,
-                GetPooledTransactionLimit::ResponseSizeSoftLimit(
-                    self.config
-                        .transaction_fetcher_config
-                        .soft_limit_byte_size_pooled_transactions_response,
-                ),
+            let limit = GetPooledTransactionLimit::ResponseSizeSoftLimit(
+                self.config
+                    .transaction_fetcher_config
+                    .soft_limit_byte_size_pooled_transactions_response,
             );
+            // eth/72 peers fetch blobs with `GetCells`.
+            let transactions = if peer.version.is_eth72() {
+                self.pool.get_pooled_transaction_elements_without_blobs(request.0, limit)
+            } else {
+                self.pool.get_pooled_transaction_elements(request.0, limit)
+            };
             trace!(target: "net::tx::propagation", sent_txs=?transactions.iter().map(|tx| tx.tx_hash()), "Sending requested transactions to peer");
 
             // we sent a response at which point we assume that the peer is aware of the
