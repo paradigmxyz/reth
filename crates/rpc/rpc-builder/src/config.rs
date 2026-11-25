@@ -205,7 +205,10 @@ impl RethRpcServerConfig for RpcServerArgs {
     fn rpc_server_config(&self) -> RpcServerConfig {
         let mut config = RpcServerConfig::default()
             .with_jwt_secret(self.rpc_secret_key())
-            .with_rpc_metrics_enabled(self.rpc_metrics_enabled());
+            .with_rpc_metrics_enabled(self.rpc_metrics_enabled())
+            .with_max_params_containers(
+                self.rpc_max_params_containers.0.map(|max| max.try_into().unwrap_or(usize::MAX)),
+            );
 
         if self.http_api.is_some() && !self.http {
             warn!(

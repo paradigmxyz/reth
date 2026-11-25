@@ -447,6 +447,11 @@ RPC:
 
           [default: 15]
 
+      --rpc.max-params-containers <COUNT>
+          Maximum number of JSON objects and arrays in the params of one RPC call, counting the params array itself. Calls over the limit are rejected before their params are decoded. (0 = no limit)
+
+          [default: 100000]
+
       --rpc.max-response-size <RPC_MAX_RESPONSE_SIZE>
           Set the maximum RPC response payload size for both HTTP and WS in megabytes
 

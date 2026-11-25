@@ -91,6 +91,7 @@ pub struct DefaultRpcServerArgs {
     rpc_jwtsecret: Option<JwtSecret>,
     rpc_disable_metrics: bool,
     rpc_max_request_size: MaxU32,
+    rpc_max_params_containers: ZeroAsNoneU64,
     rpc_max_response_size: MaxU32,
     rpc_max_subscriptions_per_connection: MaxU32,
     rpc_max_connections: MaxU32,
@@ -301,6 +302,12 @@ impl DefaultRpcServerArgs {
         self
     }
 
+    /// Set the default max JSON objects and arrays in a call's params
+    pub const fn with_rpc_max_params_containers(mut self, v: ZeroAsNoneU64) -> Self {
+        self.rpc_max_params_containers = v;
+        self
+    }
+
     /// Set the default max blocking IO requests
     pub const fn with_rpc_max_blocking_io_requests(mut self, v: usize) -> Self {
         self.rpc_max_blocking_io_requests = v;
@@ -444,6 +451,7 @@ impl Default for DefaultRpcServerArgs {
             rpc_jwtsecret: None,
             rpc_disable_metrics: false,
             rpc_max_request_size: RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into(),
+            rpc_max_params_containers: constants::DEFAULT_MAX_PARAMS_CONTAINERS.into(),
             rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),
             rpc_max_subscriptions_per_connection: RPC_DEFAULT_MAX_SUBS_PER_CONN.into(),
             rpc_max_connections: RPC_DEFAULT_MAX_CONNECTIONS.into(),
@@ -663,6 +671,12 @@ pub struct RpcServerArgs {
     /// payloads.
     #[arg(long = "rpc.max-request-size", alias = "rpc-max-request-size", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_request_size)]
     pub rpc_max_request_size: MaxU32,
+
+    /// Maximum number of JSON objects and arrays in the params of one RPC call, counting the
+    /// params array itself. Calls over the limit are rejected before their params are decoded. (0
+    /// = no limit)
+    #[arg(long = "rpc.max-params-containers", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_params_containers)]
+    pub rpc_max_params_containers: ZeroAsNoneU64,
 
     /// Set the maximum RPC response payload size for both HTTP and WS in megabytes.
     #[arg(long = "rpc.max-response-size", alias = "rpc-max-response-size", visible_alias = "rpc.returndata.limit", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_response_size)]
@@ -1065,6 +1079,7 @@ impl Default for RpcServerArgs {
             rpc_jwtsecret,
             rpc_disable_metrics,
             rpc_max_request_size,
+            rpc_max_params_containers,
             rpc_max_response_size,
             rpc_max_subscriptions_per_connection,
             rpc_max_connections,
@@ -1116,6 +1131,7 @@ impl Default for RpcServerArgs {
             rpc_jwtsecret,
             rpc_disable_metrics,
             rpc_max_request_size,
+            rpc_max_params_containers,
             rpc_max_response_size,
             rpc_max_subscriptions_per_connection,
             rpc_max_connections,
@@ -1483,6 +1499,7 @@ mod tests {
             ),
             rpc_disable_metrics: false,
             rpc_max_request_size: 15u32.into(),
+            rpc_max_params_containers: 1000u64.into(),
             rpc_max_response_size: 160u32.into(),
             rpc_max_subscriptions_per_connection: 1024u32.into(),
             rpc_max_connections: 500u32.into(),
@@ -1562,6 +1579,8 @@ mod tests {
             "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
             "--rpc.max-request-size",
             "15",
+            "--rpc.max-params-containers",
+            "1000",
             "--rpc.max-response-size",
             "160",
             "--rpc.max-subscriptions-per-connection",

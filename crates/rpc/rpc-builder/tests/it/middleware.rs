@@ -1,5 +1,6 @@
 use crate::utils::{test_address, test_rpc_builder};
 use alloy_primitives::U64;
+use alloy_transport::TransportError;
 use jsonrpsee::{
     core::middleware::{Batch, Notification},
     server::middleware::rpc::RpcServiceT,
@@ -9,6 +10,7 @@ use jsonrpsee::{
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tokio_util::EventSender;
+use serde_json::json;
 use std::{
     future::Future,
     sync::{
@@ -88,4 +90,50 @@ async fn test_rpc_middleware() {
     client.request_noparams::<U64>("eth_protocolVersion").await.unwrap();
     let count = mylayer.count.load(Ordering::Relaxed);
     assert_eq!(count, 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_rpc_params_limit() {
+    let builder = test_rpc_builder();
+    let eth_api = builder.bootstrap_eth_api();
+    let modules = builder.build(
+        TransportRpcModuleConfig::set_http(RpcModuleSelection::All),
+        eth_api,
+        EventSender::new(1),
+    );
+
+    let handle = RpcServerConfig::http(Default::default())
+        .with_http_address(test_address())
+        .with_max_params_containers(Some(4))
+        .start(&modules)
+        .await
+        .unwrap();
+    let client = handle.http_client().unwrap();
+    let limit_err = "params exceed 4 JSON objects and arrays";
+    let is_limit_err = |err: &TransportError| {
+        err.as_error_resp()
+            .is_some_and(|payload| payload.code == -32602 && payload.message == limit_err)
+    };
+
+    // The params array, the bundles array and two bundles are within the limit, so the method
+    // decodes them.
+    let err = client
+        .request::<_, serde_json::Value>("eth_callMany", (json!([{}, {}]),))
+        .await
+        .unwrap_err();
+    assert!(err.as_error_resp().is_some() && !is_limit_err(&err), "{err:?}");
+
+    let err = client
+        .request::<_, serde_json::Value>("eth_callMany", (json!([{}, {}, {}]),))
+        .await
+        .unwrap_err();
+    assert!(is_limit_err(&err), "{err:?}");
+
+    let mut batch = client.new_batch();
+    let version = batch.add_call::<_, U64>("eth_protocolVersion", &()).unwrap();
+    let call_many =
+        batch.add_call::<_, serde_json::Value>("eth_callMany", &(json!([{}, {}, {}]),)).unwrap();
+    batch.send().await.unwrap();
+    version.await.unwrap();
+    assert!(is_limit_err(&call_many.await.unwrap_err()));
 }

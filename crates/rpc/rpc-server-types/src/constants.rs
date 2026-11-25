@@ -58,6 +58,9 @@ pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = "/tmp/reth_engine_api.ipc";
 /// The default limit for blocks count in `eth_simulateV1`.
 pub const DEFAULT_MAX_SIMULATE_BLOCKS: u64 = 256;
 
+/// The default maximum number of JSON objects and arrays in a single call's params.
+pub const DEFAULT_MAX_PARAMS_CONTAINERS: u64 = 100_000;
+
 /// The default maximum number of calls in a single `eth_callMany`, `trace_callMany` or
 /// `debug_traceCallMany` request.
 pub const DEFAULT_MAX_CALL_MANY_CALLS: usize = 1024;

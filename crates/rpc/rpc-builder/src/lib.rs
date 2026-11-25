@@ -115,6 +115,9 @@ use reth_rpc::eth::sim_bundle::EthSimBundle;
 // Rpc rate limiter
 pub mod rate_limiter;
 
+mod params_limit;
+pub use params_limit::{RpcParamsLimit, RpcParamsLimitService};
+
 /// A builder type to configure the RPC module: See [`RpcModule`]
 ///
 /// This is the main entrypoint and the easiest way to configure an RPC server.
@@ -1121,6 +1124,8 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     jwt_secret: Option<JwtSecret>,
     /// Whether RPC request metrics are enabled.
     rpc_metrics_enabled: bool,
+    /// The most JSON objects and arrays a call's params may hold, `None` for no limit.
+    max_params_containers: Option<usize>,
     /// Configurable RPC middleware
     rpc_middleware: RpcMiddleware,
 }
@@ -1145,6 +1150,7 @@ impl Default for RpcServerConfig<Identity> {
             ipc_endpoint: None,
             jwt_secret: None,
             rpc_metrics_enabled: true,
+            max_params_containers: None,
             rpc_middleware: Default::default(),
         }
     }
@@ -1213,6 +1219,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
             ipc_endpoint: self.ipc_endpoint,
             jwt_secret: self.jwt_secret,
             rpc_metrics_enabled: self.rpc_metrics_enabled,
+            max_params_containers: self.max_params_containers,
             rpc_middleware,
         }
     }
@@ -1220,6 +1227,13 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Configures whether the built-in RPC request metrics layer is enabled.
     pub const fn with_rpc_metrics_enabled(mut self, enabled: bool) -> Self {
         self.rpc_metrics_enabled = enabled;
+        self
+    }
+
+    /// Configures the most JSON objects and arrays a call's params may hold on the http, ws and
+    /// ipc servers, see [`RpcParamsLimit`]. `None` disables the limit.
+    pub const fn with_max_params_containers(mut self, max: Option<usize>) -> Self {
+        self.max_params_containers = max;
         self
     }
 
@@ -1435,17 +1449,20 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         )));
 
         let rpc_metrics_enabled = self.rpc_metrics_enabled;
+        let params_limit = self.max_params_containers.map(RpcParamsLimit::new);
         let ipc_path =
             self.ipc_endpoint.clone().unwrap_or_else(|| constants::DEFAULT_IPC_ENDPOINT.into());
 
         if let Some(builder) = self.ipc_server_config {
             let ipc = builder
                 .set_rpc_middleware(
-                    IpcRpcServiceBuilder::new().option_layer(
-                        rpc_metrics_enabled
-                            .then(|| modules.ipc.as_ref().map(RpcRequestMetrics::ipc))
-                            .flatten(),
-                    ),
+                    IpcRpcServiceBuilder::new()
+                        .option_layer(
+                            rpc_metrics_enabled
+                                .then(|| modules.ipc.as_ref().map(RpcRequestMetrics::ipc))
+                                .flatten(),
+                        )
+                        .option_layer(params_limit),
                 )
                 .build(ipc_path);
             ipc_handle = Some(ipc.start(modules.ipc.clone().expect("ipc server error")).await?);
@@ -1506,6 +1523,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                                     })
                                     .flatten(),
                             )
+                            .option_layer(params_limit)
                             .layer(self.rpc_middleware.clone()),
                     )
                     .set_config(config.build())
@@ -1556,6 +1574,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                                 .then(|| modules.ws.as_ref().map(RpcRequestMetrics::ws))
                                 .flatten(),
                         )
+                        .option_layer(params_limit)
                         .layer(self.rpc_middleware.clone()),
                 )
                 .build(ws_socket_addr)
@@ -1594,6 +1613,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                                 .then(|| modules.http.as_ref().map(RpcRequestMetrics::http))
                                 .flatten(),
                         )
+                        .option_layer(params_limit)
                         .layer(self.rpc_middleware.clone()),
                 )
                 .build(http_socket_addr)
