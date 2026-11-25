@@ -96,9 +96,13 @@ impl<N: NodePrimitives> InMemoryState<N> {
     /// the writer removed since. Call [`InMemoryStateSnapshot::with_blocks_tracked_now`] right
     /// after the transaction opens to also keep the blocks inserted in between.
     pub fn snapshot(&self) -> InMemoryStateSnapshot<N> {
+        let blocks = self.inner.blocks.read();
+        let generation = self.removal_generation();
         InMemoryStateSnapshot {
-            blocks: self.inner.blocks.read().snapshot(),
+            blocks: blocks.snapshot(),
             later: InMemoryBlocksSnapshot::empty(),
+            generation,
+            later_generation: generation,
             live: self.clone(),
         }
     }
@@ -111,6 +115,8 @@ impl<N: NodePrimitives> InMemoryState<N> {
         InMemoryStateSnapshot {
             blocks: InMemoryBlocksSnapshot::empty(),
             later: InMemoryBlocksSnapshot::empty(),
+            generation: 0,
+            later_generation: 0,
             live: self.clone(),
         }
     }
@@ -297,6 +303,10 @@ pub struct InMemoryStateSnapshot<N: NodePrimitives = EthPrimitives> {
     blocks: InMemoryBlocksSnapshot<N>,
     /// The blocks tracked when [`Self::with_blocks_tracked_now`] was called, if it was.
     later: InMemoryBlocksSnapshot<N>,
+    /// The removal generation of `blocks`.
+    generation: u64,
+    /// The removal generation of `later`, or `generation` if it was not taken.
+    later_generation: u64,
     live: InMemoryState<N>,
 }
 
@@ -307,8 +317,22 @@ impl<N: NodePrimitives> InMemoryStateSnapshot<N> {
     /// and the transaction can be one of the transaction's durable frontiers, and the writer can
     /// remove it from the live state before the snapshot is read.
     pub fn with_blocks_tracked_now(mut self) -> Self {
-        self.later = self.live.inner.blocks.read().snapshot();
+        let blocks = self.live.inner.blocks.read();
+        self.later = blocks.snapshot();
+        self.later_generation = self.live.removal_generation();
+        drop(blocks);
         self
+    }
+
+    /// Returns `true` if the writer removed blocks between the snapshot and
+    /// [`Self::with_blocks_tracked_now`].
+    ///
+    /// Otherwise the second capture holds every block that was tracked when a transaction opened
+    /// between the two, so it holds every in-memory block that transaction's durable frontiers
+    /// need. If it returns `true`, open a fresh transaction and take a fresh snapshot, see
+    /// [`IN_MEMORY_SNAPSHOT_ATTEMPTS`].
+    pub const fn blocks_removed_between_captures(&self) -> bool {
+        self.generation != self.later_generation
     }
 
     /// Returns the state of the block with the given hash, canonical or not: the one the
@@ -346,6 +370,14 @@ impl<N: NodePrimitives> InMemoryStateSnapshot<N> {
         frozen.or(later).or(live)
     }
 }
+
+/// How often a reader opens a fresh transaction and snapshot when the writer removed blocks
+/// between the two captures of its snapshot, see
+/// [`InMemoryStateSnapshot::blocks_removed_between_captures`].
+///
+/// Blocks are removed once per persistence, so a retry almost always succeeds. After the last
+/// attempt the reader keeps both captures and falls back to the live state for what they miss.
+pub const IN_MEMORY_SNAPSHOT_ATTEMPTS: usize = 3;
 
 /// The numbers of blocks an [`InMemoryState`] tracks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

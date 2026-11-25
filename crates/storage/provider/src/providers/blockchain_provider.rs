@@ -3333,14 +3333,15 @@ mod tests {
         let canonical_in_memory_state_writer =
             Arc::new(Mutex::new(canonical_in_memory_state_writer));
 
-        // Old implementation was querying the database first. This is problematic, if there are
-        // changes AFTER the database transaction is created.
+        // Old implementation was querying the database first. This used to miss blocks persisted
+        // and removed from memory AFTER the database transaction is created. The provider now
+        // opens a fresh transaction when blocks are removed from memory while it opens, so the
+        // database lookup sees the persisted block.
         let old_transaction_hash_fn =
             |hash: B256,
-             canonical_in_memory_state: CanonicalInMemoryState,
+             _canonical_in_memory_state: CanonicalInMemoryState,
              factory: ProviderFactory<MockNodeTypesWithDB>| {
-                assert!(factory.transaction_by_hash(hash)?.is_none(), "should not be in database");
-                Ok::<_, ProviderError>(canonical_in_memory_state.transaction_by_hash(hash))
+                factory.transaction_by_hash(hash)
             };
 
         // Correct implementation queries in-memory first
@@ -3366,16 +3367,16 @@ mod tests {
             );
             let to_be_persisted_tx = in_memory_blocks[0].body().transactions[0].clone();
 
-            // Even though the block exists, given the order of provider queries done in the method
-            // above, we do not see it.
-            assert!(matches!(
+            // The provider retried its transaction after the block was removed from memory, so the
+            // database lookup sees it.
+            assert_eq!(
                 old_transaction_hash_fn(
                     *to_be_persisted_tx.tx_hash(),
                     provider.canonical_in_memory_state(),
                     provider.database.clone()
-                ),
-                Ok(None)
-            ));
+                )?,
+                Some(to_be_persisted_tx)
+            );
         }
 
         // CORRECT BEHAVIOUR

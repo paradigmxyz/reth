@@ -4,6 +4,7 @@ use crate::{
 };
 use alloy_primitives::{map::B256Map, Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
+use reth_chain_state::IN_MEMORY_SNAPSHOT_ATTEMPTS;
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx, DatabaseError};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
@@ -136,20 +137,26 @@ where
     ) -> ProviderResult<OverlayStateProvider<OwnedProvider<F::Provider>, N>> {
         let overall_start = Instant::now();
 
-        // Snapshot the in-memory blocks before the transaction opens, so that the blocks its
-        // durable frontiers need are still there when the overlay is built. See
-        // `InMemoryState::snapshot`.
-        let in_memory = self.overlay_builder.overlay_manager().in_memory_state().snapshot();
-
-        // Get a read-only provider
-        let provider = {
+        // Snapshot the in-memory blocks before and right after the transaction opens, so that
+        // the blocks its durable frontiers need are still there when the overlay is built. If
+        // blocks were removed in between, retry with a fresh transaction. See
+        // `InMemoryStateSnapshot::blocks_removed_between_captures`.
+        let in_memory_state = self.overlay_builder.overlay_manager().in_memory_state();
+        let mut attempt = 1;
+        let (provider, in_memory) = loop {
+            let in_memory = in_memory_state.snapshot();
             let start = Instant::now();
-            let res = self.factory.database_provider_ro()?;
+            let provider = self.factory.database_provider_ro()?;
             self.metrics.create_provider_duration.record(start.elapsed());
-            res
+            let in_memory = in_memory.with_blocks_tracked_now();
+            if !in_memory.blocks_removed_between_captures() ||
+                attempt == IN_MEMORY_SNAPSHOT_ATTEMPTS
+            {
+                break (provider, in_memory)
+            }
+            attempt += 1;
         };
 
-        let in_memory = in_memory.with_blocks_tracked_now();
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
         Ok(OverlayStateProvider::from_parts(
@@ -1162,6 +1169,7 @@ mod tests {
         updates::TrieUpdatesSorted, BranchNodeCompact, HashedPostState, HashedStorage, Nibbles,
         SortedTrieData,
     };
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn with_unique_trie_data(
         block: &ExecutedBlock<EthPrimitives>,
@@ -1232,41 +1240,6 @@ mod tests {
     }
 
     #[reth_concurrency::test]
-    fn provider_snapshots_in_memory_blocks_before_its_transaction() {
-        // The factory's builder exists before the engine inserts the chain from Finish down to
-        // the state trie tip, and the engine removes that chain right after the provider opens
-        // its transaction.
-        let (factory, blocks) = setup_frontiers(1, 3);
-        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
-        let parent_hash = blocks[1].recovered_block().hash();
-        let state_provider_factory =
-            OverlayStateProviderFactory::new(factory.clone(), manager.overlay_builder(parent_hash));
-        in_memory_state_writer
-            .update_chain(NewCanonicalChain::Commit { new: blocks[2..=4].to_vec() });
-        let expected =
-            OverlayStateProviderFactory::new(factory.clone(), manager.overlay_builder(parent_hash))
-                .database_provider_ro()
-                .unwrap()
-                .state_trie_overlay(false)
-                .unwrap()
-                .clone();
-
-        let persisted = blocks[3].recovered_block().num_hash();
-        let in_memory_state_writer = Mutex::new(in_memory_state_writer);
-        factory.db_ref().set_post_transaction_hook(Box::new(move || {
-            in_memory_state_writer.lock().on_blocks_persisted(persisted, persisted, None);
-        }));
-        let provider = state_provider_factory.database_provider_ro().unwrap();
-        factory.db_ref().set_post_transaction_hook(Box::new(|| ()));
-        assert!(!manager.in_memory_state().contains(&persisted.hash));
-
-        let overlay = provider.state_trie_overlay(false).unwrap();
-        assert!(!account_node_paths(&expected).is_empty());
-        assert_eq!(account_keys(overlay), account_keys(&expected));
-        assert_eq!(account_node_paths(overlay), account_node_paths(&expected));
-    }
-
-    #[reth_concurrency::test]
     fn provider_keeps_blocks_inserted_before_its_transaction() {
         // The engine inserts the chain from Finish down to the state trie tip after the factory
         // snapshots the in-memory blocks but before the provider opens its transaction, and
@@ -1300,6 +1273,40 @@ mod tests {
         assert!(!account_node_paths(&expected).is_empty());
         assert_eq!(account_keys(overlay), account_keys(&expected));
         assert_eq!(account_node_paths(overlay), account_node_paths(&expected));
+    }
+
+    #[reth_concurrency::test]
+    fn provider_retries_when_blocks_are_removed_between_captures() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let (manager, in_memory_state_writer) = overlay_manager_with_writer();
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            factory.clone(),
+            manager.overlay_builder(blocks[1].recovered_block().hash()),
+        );
+
+        // On the first transaction the engine inserts the chain from Finish down to the state
+        // trie tip after the factory's first capture and removes it again before the second one.
+        let in_memory_state_writer = Arc::new(Mutex::new(in_memory_state_writer));
+        let transactions = Arc::new(AtomicUsize::new(0));
+        let chain = blocks[2..=4].to_vec();
+        let (writer, count) = (Arc::clone(&in_memory_state_writer), Arc::clone(&transactions));
+        factory.db_ref().set_pre_transaction_hook(Box::new(move || {
+            if count.fetch_add(1, Ordering::SeqCst) == 0 {
+                writer.lock().update_chain(NewCanonicalChain::Commit { new: chain.clone() });
+            }
+        }));
+        let persisted = blocks[3].recovered_block().num_hash();
+        let (writer, count) = (Arc::clone(&in_memory_state_writer), Arc::clone(&transactions));
+        factory.db_ref().set_post_transaction_hook(Box::new(move || {
+            if count.load(Ordering::SeqCst) == 1 {
+                writer.lock().on_blocks_persisted(persisted, persisted, None);
+            }
+        }));
+        state_provider_factory.database_provider_ro().unwrap();
+        factory.db_ref().set_pre_transaction_hook(Box::new(|| ()));
+        factory.db_ref().set_post_transaction_hook(Box::new(|| ()));
+
+        assert_eq!(transactions.load(Ordering::SeqCst), 2);
     }
 
     #[reth_concurrency::test]
