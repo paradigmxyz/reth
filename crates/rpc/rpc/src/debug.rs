@@ -947,6 +947,9 @@ where
 /// limit bounds what it may record, across every transaction the response traces. Other tracers
 /// record data that is several times larger or smaller than their JSON, so only the trace byte
 /// limit of each transaction bounds them.
+///
+/// The budget counts the struct logs alone, not the separators between them or the other fields of
+/// the response, so the server can still reject a response that is slightly over its limit.
 #[derive(Debug, Clone, Copy)]
 struct ResponseBudget {
     /// Bytes left in the response, `None` for other tracers or without a response size limit.

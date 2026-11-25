@@ -753,6 +753,9 @@ pub struct RpcServerArgs {
     pub rpc_max_simulate_blocks: u64,
 
     /// Max bytes a traced tx may record, defaults to 2x `--rpc.max-response-size`, 0 is unlimited.
+    ///
+    /// The default struct logs of a debug trace response are limited to `--rpc.max-response-size`
+    /// as well, whatever this value is.
     #[arg(
         long = "rpc.max-trace-bytes",
         value_name = "BYTES",
