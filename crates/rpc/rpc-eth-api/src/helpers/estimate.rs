@@ -68,8 +68,8 @@ pub trait EstimateCall: Call {
         );
 
         // Keep a stricter limit that the EVM configuration sets for block execution.
-        evm_env.version_mut().memory_limit =
-            evm_env.version().memory_limit.min(self.evm_memory_limit());
+        let block_memory_limit = evm_env.version().memory_limit;
+        evm_env.version_mut().memory_limit = block_memory_limit.min(self.evm_memory_limit());
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();
@@ -137,11 +137,13 @@ pub trait EstimateCall: Call {
         trace!(target: "rpc::eth::estimate", ?tx_env, gas_limit = highest_gas_limit, is_basic_transfer, "Starting gas estimation");
 
         let memory_limit_hit = Rc::new(Cell::new(false));
-        let memory_limit_inspector =
-            MemoryLimitInspector::new(evm_env.version(), memory_limit_hit.clone());
+        // Only a limit below the one block execution uses can make the estimate diverge from it.
+        let memory_limit_inspector = (evm_env.version().memory_limit < block_memory_limit)
+            .then(|| MemoryLimitInspector::new(evm_env.version(), memory_limit_hit.clone()));
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
-        evm.set_inspector(memory_limit_inspector);
-        let probe_hit_memory_limit = memory_limit_hit.clone();
+        if let Some(inspector) = memory_limit_inspector {
+            evm.set_inspector(inspector);
+        }
         let mut execute = move |gas_limit| {
             tx_env.inner_mut().set_gas_limit(gas_limit);
             memory_limit_hit.set(false);
@@ -227,7 +229,7 @@ pub trait EstimateCall: Call {
             match execute(optimistic_gas_limit) {
                 // A higher gas limit already succeeded, so a lower one that the memory limit
                 // decided counts as a failure, like a halt, instead of ending the estimate.
-                Err(_) if probe_hit_memory_limit.get() => lowest_gas_limit = optimistic_gas_limit,
+                Err(err) if is_memory_limit_err(&err) => lowest_gas_limit = optimistic_gas_limit,
                 ethres => {
                     res = ethres?;
                     // Update the gas used based on the new result.
@@ -277,7 +279,7 @@ pub trait EstimateCall: Call {
                     lowest_gas_limit = mid_gas_limit;
                 }
                 // A probe that the memory limit decided counts as a failure, see above.
-                Err(_) if probe_hit_memory_limit.get() => lowest_gas_limit = mid_gas_limit,
+                Err(err) if is_memory_limit_err(&err) => lowest_gas_limit = mid_gas_limit,
                 // Handle other cases, including successful transactions.
                 ethres => {
                     // Update the estimated gas range based on the execution result.
@@ -372,6 +374,14 @@ pub fn update_estimated_gas_range<EvmTypes: evm2::EvmTypes>(
     }
 
     Ok(())
+}
+
+/// Returns whether `err` is the error a probe returns when the memory limit decided it.
+fn is_memory_limit_err(err: &impl AsEthApiError) -> bool {
+    matches!(
+        err.as_err(),
+        Some(EthApiError::InvalidTransaction(RpcInvalidTransactionError::MemoryLimitOutOfGas))
+    )
 }
 
 /// Flags a frame that hit the memory limit while it had the gas to grow its memory past it.
