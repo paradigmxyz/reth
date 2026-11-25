@@ -4570,6 +4570,17 @@ mod tests {
         )
     }
 
+    /// Returns the hashed storage of `hashed_address`, ordered by hashed slot.
+    fn hashed_storage(tx: &impl DbTx, hashed_address: B256) -> Vec<(B256, U256)> {
+        tx.cursor_dup_read::<tables::HashedStorages>()
+            .unwrap()
+            .walk_dup(Some(hashed_address), None)
+            .unwrap()
+            .map(|entry| entry.map(|(_, entry)| (entry.key, entry.value)))
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
     #[test]
     fn snap_attempt_guards_finish_checkpoint_writers() {
         let factory = create_test_provider_factory();
@@ -6770,16 +6781,7 @@ mod tests {
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
-        let mut storage = provider
-            .tx_ref()
-            .cursor_dup_read::<tables::HashedStorages>()
-            .unwrap()
-            .walk_dup(Some(hashed_address), None)
-            .unwrap()
-            .map(|entry| entry.map(|(_, entry)| (entry.key, entry.value)))
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        storage.sort_unstable();
+        let storage = hashed_storage(provider.tx_ref(), hashed_address);
         let mut expected = vec![
             (hashed_slot(k1), U256::from(9)),
             (hashed_slot(k2), U256::from(5)),
@@ -6892,16 +6894,7 @@ mod tests {
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
-        let mut storage = provider
-            .tx_ref()
-            .cursor_dup_read::<tables::HashedStorages>()
-            .unwrap()
-            .walk_dup(Some(hashed_address), None)
-            .unwrap()
-            .map(|entry| entry.map(|(_, entry)| (entry.key, entry.value)))
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        storage.sort_unstable();
+        let storage = hashed_storage(provider.tx_ref(), hashed_address);
         let mut expected = [(k1, 9u64), (k2, 5), (k3, 3)]
             .map(|(slot, value)| (hashed_slot(slot), U256::from(value)))
             .to_vec();
@@ -6961,16 +6954,7 @@ mod tests {
         let keys = provider_rw.unwind_storage_hashing_range(1..=1).unwrap();
 
         assert_eq!(keys, B256Map::from_iter([(hashed_address, [k1, k2].map(keccak256).into())]));
-        let mut storage = provider_rw
-            .tx
-            .cursor_dup_read::<tables::HashedStorages>()
-            .unwrap()
-            .walk_dup(Some(hashed_address), None)
-            .unwrap()
-            .map(|entry| entry.map(|(_, entry)| (entry.key, entry.value)))
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        storage.sort_unstable();
+        let storage = hashed_storage(&provider_rw.tx, hashed_address);
         let mut expected = [(k1, 9u64), (k2, 5), (k3, 4)]
             .map(|(slot, value)| (keccak256(slot), U256::from(value)))
             .to_vec();
