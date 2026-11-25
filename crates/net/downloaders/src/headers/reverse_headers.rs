@@ -550,7 +550,7 @@ where
                     self.metrics.buffered_responses.increment(1.);
                     // can't validate yet. The missing headers are requested right away unless this
                     // response fills the buffer, otherwise only once it is validated, so partial
-                    // responses can't keep growing the buffer past `max_buffered_responses`
+                    // responses can't keep growing the buffer past `max_buffered_responses`.
                     let deferred_missing_headers =
                         if self.buffered_responses.len() + 1 < self.max_buffered_responses {
                             self.requeue_missing_headers(
@@ -1835,7 +1835,7 @@ mod tests {
         downloader.next_chain_tip_block_number = 10;
 
         // a partial response that fills the buffer is buffered without requesting the missing
-        // suffix
+        // suffix.
         let request = HeadersRequest::falling(5u64.into(), 3);
         let response = vec![Header { number: 5, ..Default::default() }];
         let outcome = downloader.on_headers_outcome(HeadersRequestOutcome {
@@ -1847,7 +1847,7 @@ mod tests {
         assert_eq!(downloader.buffered_responses.len(), 1);
         assert!(client.numeric_requests().is_empty());
 
-        // the next expected response validates the buffered one, which requests the suffix
+        // the next expected response validates the buffered one, which requests the suffix.
         let request = HeadersRequest::falling(10u64.into(), 5);
         let response =
             (6..=10).rev().map(|number| Header { number, ..Default::default() }).collect();
@@ -1864,7 +1864,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn partial_responses_do_not_grow_buffer_past_limit() {
+    async fn partial_responses_keep_buffer_bounded() {
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .request_limit(10)
             .max_buffered_responses(2)
@@ -1878,7 +1878,8 @@ mod tests {
         // response, so nothing buffered can be validated.
         assert!(futures::poll!(downloader.next()).is_pending());
 
-        // the two lower ranges plus the one suffix requested while the buffer had room
+        // The buffer may exceed `max_buffered_responses` by the requests already in flight: the two
+        // lower ranges plus the one suffix requested while the buffer had room.
         assert_eq!(downloader.buffered_responses.len(), 3);
     }
 
