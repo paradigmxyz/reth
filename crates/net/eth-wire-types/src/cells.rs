@@ -9,15 +9,33 @@ use alloy_primitives::{map::B256Set, Bytes, B128, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Error, Header};
 use reth_primitives_traits::InMemorySize;
 
+#[cfg(feature = "serde")]
+use core::fmt;
+#[cfg(feature = "serde")]
+use serde::{
+    de::{
+        value::{SeqAccessDeserializer, StrDeserializer},
+        SeqAccess, Visitor,
+    },
+    Deserialize, Deserializer, Serialize, Serializer,
+};
+
 /// Mandatory transaction count bound for indexed cell messages (EIP-8408).
 pub const MAX_INDEXED_CELL_HASHES: usize = 64;
 
 /// Mandatory mask table bound for indexed cell messages (EIP-8408).
 pub const MAX_INDEXED_CELL_MASKS: usize = 64;
 
+#[cfg(feature = "serde")]
+const MAX_SERIALIZED_CELL_MASK_BYTES: usize =
+    Header { list: true, payload_length: MAX_INDEXED_CELL_MASKS * (B128::len_bytes() + 1) }
+        .length_with_payload() +
+        Header { list: false, payload_length: MAX_INDEXED_CELL_HASHES }.length_with_payload();
+
 /// Cell indices shared by all transactions or selected through a canonical mask table.
+/// Serde preserves the `B128` representation for shared masks. Indexed masks serialize as
+/// their RLP field sequence in a hex string (or bytes for binary formats).
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CellMasks {
     /// The eth/72 form, also accepted on eth/73 without indexed-form limits.
     Shared(B128),
@@ -128,6 +146,81 @@ impl Decodable for CellMasks {
             return Err(Error::Custom("invalid indexed cell counts"))
         }
         Ok(Self::Indexed { masks, mask_ids: Bytes::copy_from_slice(ids) })
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for CellMasks {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Shared(mask) => mask.serialize(serializer),
+            Self::Indexed { masks, mask_ids } => {
+                if masks.len() > MAX_INDEXED_CELL_MASKS || mask_ids.len() > MAX_INDEXED_CELL_HASHES
+                {
+                    return Err(serde::ser::Error::custom("invalid indexed cell counts"))
+                }
+                let encoded = alloy_rlp::encode(self);
+                // Valid indexed forms are either two bytes (empty) or at least 19 bytes.
+                if encoded.len() == B128::len_bytes() {
+                    return Err(serde::ser::Error::custom("invalid indexed cell mask encoding"))
+                }
+                Bytes::from(encoded).serialize(serializer)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for CellMasks {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct CellMasksVisitor;
+
+        impl<'de> Visitor<'de> for CellMasksVisitor {
+            type Value = CellMasks;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a 16-byte shared mask or bounded indexed cell mask bytes")
+            }
+
+            fn visit_bytes<E: serde::de::Error>(self, encoded: &[u8]) -> Result<Self::Value, E> {
+                if encoded.len() == B128::len_bytes() {
+                    return Ok(CellMasks::Shared(B128::from_slice(encoded)))
+                }
+                if encoded.len() > MAX_SERIALIZED_CELL_MASK_BYTES {
+                    return Err(E::custom("serialized cell masks exceed indexed bounds"))
+                }
+                let mut buf = encoded;
+                let masks = CellMasks::decode(&mut buf).map_err(E::custom)?;
+                if !masks.is_indexed() || !buf.is_empty() {
+                    return Err(E::custom("invalid indexed cell mask encoding"))
+                }
+                Ok(masks)
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                let shared_hex_len = B128::len_bytes() * 2;
+                if value.len() == shared_hex_len || value.len() == shared_hex_len + 2 {
+                    return B128::deserialize(StrDeserializer::<E>::new(value))
+                        .map(CellMasks::Shared)
+                }
+                // Bound the hex input before Bytes allocates its decoding buffer.
+                if value.len() > MAX_SERIALIZED_CELL_MASK_BYTES * 2 + 2 {
+                    return Err(E::custom("serialized cell masks exceed indexed bounds"))
+                }
+                let encoded = Bytes::deserialize(StrDeserializer::<E>::new(value))?;
+                self.visit_bytes(&encoded)
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
+                B128::deserialize(SeqAccessDeserializer::new(seq)).map(CellMasks::Shared)
+            }
+        }
+
+        if deserializer.is_human_readable() {
+            deserializer.deserialize_any(CellMasksVisitor)
+        } else {
+            deserializer.deserialize_bytes(CellMasksVisitor)
+        }
     }
 }
 
@@ -803,6 +896,198 @@ mod tests {
                 let _message = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
                     version, &mut data.as_slice());
             }
+        }
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod serde_tests {
+    use super::*;
+
+    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+    struct LegacyGetCells {
+        hashes: Vec<B256>,
+        cell_mask: B128,
+    }
+
+    #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+    struct LegacyCells {
+        hashes: Vec<B256>,
+        cells: Vec<Vec<Cell>>,
+        cell_mask: B128,
+    }
+
+    #[test]
+    fn shared_requests_preserve_legacy_serde() {
+        for mask in [B128::ZERO, B128::repeat_byte(0x81)] {
+            let legacy = LegacyGetCells { hashes: vec![B256::ZERO], cell_mask: mask };
+            let request = GetCells { hashes: legacy.hashes.clone(), cell_mask: mask.into() };
+            let json = serde_json::to_string(&legacy).unwrap();
+            assert_eq!(serde_json::to_string(&request).unwrap(), json);
+            assert_eq!(serde_json::from_str::<GetCells>(&json).unwrap(), request);
+            assert_eq!(serde_json::from_str::<LegacyGetCells>(&json).unwrap(), legacy);
+            let bytes = bincode::serialize(&legacy).unwrap();
+            assert_eq!(bincode::serialize(&request).unwrap(), bytes);
+            assert_eq!(bincode::deserialize::<GetCells>(&bytes).unwrap(), request);
+            assert_eq!(bincode::deserialize::<LegacyGetCells>(&bytes).unwrap(), legacy);
+        }
+    }
+
+    #[test]
+    fn shared_responses_preserve_legacy_serde() {
+        for mask in [B128::ZERO, B128::repeat_byte(0x81)] {
+            let legacy = LegacyCells {
+                hashes: vec![B256::ZERO],
+                cells: vec![vec![
+                    Cell::ZERO;
+                    u128::from_le_bytes(mask.into()).count_ones() as usize
+                ]],
+                cell_mask: mask,
+            };
+            let response = Cells {
+                hashes: legacy.hashes.clone(),
+                cells: legacy.cells.clone(),
+                cell_mask: mask.into(),
+            };
+            let json = serde_json::to_string(&legacy).unwrap();
+            assert_eq!(serde_json::to_string(&response).unwrap(), json);
+            assert_eq!(serde_json::from_str::<Cells>(&json).unwrap(), response);
+            assert_eq!(serde_json::from_str::<LegacyCells>(&json).unwrap(), legacy);
+            let bytes = bincode::serialize(&legacy).unwrap();
+            assert_eq!(bincode::serialize(&response).unwrap(), bytes);
+            assert_eq!(bincode::deserialize::<Cells>(&bytes).unwrap(), response);
+            assert_eq!(bincode::deserialize::<LegacyCells>(&bytes).unwrap(), legacy);
+        }
+    }
+
+    #[test]
+    fn indexed_masks_serde_roundtrip() {
+        for count in [0, 1, MAX_INDEXED_CELL_MASKS] {
+            let masks = CellMasks::Indexed {
+                masks: (0..count).map(|index| B128::repeat_byte(index as u8)).collect(),
+                mask_ids: (0..count).map(|index| index as u8).collect::<Vec<_>>().into(),
+            };
+            let json = serde_json::to_string(&masks).unwrap();
+            assert_eq!(serde_json::from_str::<CellMasks>(&json).unwrap(), masks);
+            let bytes = bincode::serialize(&masks).unwrap();
+            assert_eq!(bincode::deserialize::<CellMasks>(&bytes).unwrap(), masks);
+        }
+        assert_eq!(
+            serde_json::to_string(&CellMasks::Indexed { masks: vec![], mask_ids: Bytes::new() })
+                .unwrap(),
+            "\"0xc080\""
+        );
+    }
+
+    #[test]
+    fn serde_rejects_ambiguous_and_trailing_encodings() {
+        // This malformed indexed table would otherwise collide with a raw B128's length.
+        let ambiguous = CellMasks::Indexed { masks: vec![], mask_ids: vec![0; 14].into() };
+        assert_eq!(alloy_rlp::encode(&ambiguous).len(), B128::len_bytes());
+        assert!(matches!(bincode::serialize(&ambiguous).unwrap_err().as_ref(),
+            bincode::ErrorKind::Custom(message) if message == "invalid indexed cell mask encoding"));
+        for masks in [
+            CellMasks::Shared(B128::ZERO),
+            CellMasks::Indexed { masks: vec![], mask_ids: Bytes::new() },
+        ] {
+            let mut encoded = alloy_rlp::encode(&masks);
+            if masks.is_indexed() {
+                encoded.push(0x80);
+            }
+            let bytes = bincode::serialize(&Bytes::from(encoded)).unwrap();
+            assert!(matches!(bincode::deserialize::<CellMasks>(&bytes).unwrap_err().as_ref(),
+                bincode::ErrorKind::Custom(message) if message == "invalid indexed cell mask encoding"));
+        }
+    }
+
+    #[test]
+    fn serde_rejects_malformed_or_oversized_indexed_bytes() {
+        for (encoded, expected) in [
+            (Bytes::new(), Error::InputTooShort),
+            (
+                Bytes::from(alloy_rlp::encode(CellMasks::Indexed {
+                    masks: vec![B128::ZERO; MAX_INDEXED_CELL_MASKS + 1],
+                    mask_ids: Bytes::new(),
+                })),
+                Error::Custom("invalid indexed cell counts"),
+            ),
+            (
+                Bytes::from(alloy_rlp::encode(CellMasks::Indexed {
+                    masks: vec![],
+                    mask_ids: vec![0; MAX_INDEXED_CELL_HASHES + 1].into(),
+                })),
+                Error::Custom("invalid indexed cell counts"),
+            ),
+        ] {
+            let bytes = bincode::serialize(&encoded).unwrap();
+            assert!(matches!(bincode::deserialize::<CellMasks>(&bytes).unwrap_err().as_ref(),
+                bincode::ErrorKind::Custom(message) if *message == expected.to_string()));
+        }
+    }
+
+    #[test]
+    fn serde_bounds_input_before_hex_decoding() {
+        let encoded = Bytes::from(vec![0; MAX_SERIALIZED_CELL_MASK_BYTES + 1]);
+        let value = serde_json::to_value(&encoded).unwrap();
+        assert_eq!(
+            serde_json::from_value::<CellMasks>(value).unwrap_err().to_string(),
+            "serialized cell masks exceed indexed bounds"
+        );
+        let bytes = bincode::serialize(&encoded).unwrap();
+        assert!(matches!(bincode::deserialize::<CellMasks>(&bytes).unwrap_err().as_ref(),
+            bincode::ErrorKind::Custom(message) if message == "serialized cell masks exceed indexed bounds"));
+        for masks in [
+            CellMasks::Indexed {
+                masks: vec![B128::ZERO; MAX_INDEXED_CELL_MASKS + 1],
+                mask_ids: Bytes::new(),
+            },
+            CellMasks::Indexed {
+                masks: vec![],
+                mask_ids: vec![0; MAX_INDEXED_CELL_HASHES + 1].into(),
+            },
+        ] {
+            assert!(matches!(bincode::serialize(&masks).unwrap_err().as_ref(),
+                bincode::ErrorKind::Custom(message) if message == "invalid indexed cell counts"));
+        }
+    }
+
+    #[test]
+    fn indexed_responses_serde_roundtrip() {
+        for response in [
+            Cells {
+                cell_mask: CellMasks::Indexed { masks: vec![], mask_ids: Bytes::new() },
+                ..Default::default()
+            },
+            Cells {
+                hashes: vec![B256::ZERO],
+                cells: vec![vec![Cell::ZERO]],
+                cell_mask: CellMasks::Indexed {
+                    masks: vec![B128::from(1u128.to_le_bytes())],
+                    mask_ids: vec![0].into(),
+                },
+            },
+        ] {
+            let json = serde_json::to_string(&response).unwrap();
+            assert_eq!(serde_json::from_str::<Cells>(&json).unwrap(), response);
+            let bytes = bincode::serialize(&response).unwrap();
+            assert_eq!(bincode::deserialize::<Cells>(&bytes).unwrap(), response);
+        }
+        assert_eq!(
+            serde_json::from_str::<CellMasks>(&serde_json::to_string(&[0u8; 16]).unwrap()).unwrap(),
+            CellMasks::Shared(B128::ZERO)
+        );
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn adaptive_masks_serde_roundtrip(values in proptest::collection::vec(proptest::prelude::any::<u128>(), 1..=64)) {
+            let hashes = (0..values.len()).map(|index| B256::repeat_byte(index as u8)).collect();
+            let masks = values.into_iter().map(|bits| B128::from(bits.to_le_bytes())).collect();
+            let request = GetCells::from_masks(hashes, masks).unwrap();
+            let json = serde_json::to_string(&request).unwrap();
+            proptest::prop_assert_eq!(&serde_json::from_str::<GetCells>(&json).unwrap(), &request);
+            let bytes = bincode::serialize(&request).unwrap();
+            proptest::prop_assert_eq!(bincode::deserialize::<GetCells>(&bytes).unwrap(), request);
         }
     }
 }
