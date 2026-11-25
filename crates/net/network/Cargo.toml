@@ -159,7 +159,3 @@ test-utils = [
 name = "tx_fetcher"
 harness = false
 required-features = ["test-utils"]
-
-[[bench]]
-name = "cells"
-harness = false
