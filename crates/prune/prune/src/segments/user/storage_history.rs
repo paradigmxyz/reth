@@ -319,6 +319,7 @@ impl StorageHistory {
         let walker = provider
             .static_file_provider()
             .walk_storage_changeset_range(range_start..=wipe_range_end);
+        let mut walk_interrupted = false;
         for result in walker {
             let (block_address, entry) = result?;
             let block_number = block_address.block_number();
@@ -331,6 +332,7 @@ impl StorageHistory {
                 last_changeset_pruned_block.is_some_and(|last| last != block_number)
             {
                 done = false;
+                walk_interrupted = true;
                 break;
             }
             highest_deleted_storages.insert((address, entry.key), block_number);
@@ -341,7 +343,12 @@ impl StorageHistory {
 
         trace!(target: "pruner", processed = %changesets_processed, %done, "Scanned storage changesets from static files");
 
-        let last_changeset_pruned_block = last_changeset_pruned_block.unwrap_or(wipe_range_end);
+        // A walk that was not interrupted scanned every block up to `wipe_range_end`, including the
+        // blocks after its last changeset that only hold storage wipe changesets.
+        let last_changeset_pruned_block = match last_changeset_pruned_block {
+            Some(last) if walk_interrupted => last,
+            _ => wipe_range_end,
+        };
 
         // Prune RocksDB history shards for affected storage slots
         let mut deleted_shards = 0usize;
@@ -941,19 +948,25 @@ mod tests {
         let db = TestStageDB::default();
         db.factory.set_storage_settings_cache(StorageSettings::v2());
         let static_file_provider = db.factory.static_file_provider();
+        let address = Address::random();
         {
             let mut writer =
                 static_file_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            // Block 1 has a storage changeset, and block 2 only a storage wipe changeset.
             for block in 0..=3 {
-                writer.append_storage_changeset(Vec::new(), block).unwrap();
+                let changeset = if block == 1 {
+                    vec![StorageBeforeTx { address, key: B256::random(), value: U256::from(1) }]
+                } else {
+                    Vec::new()
+                };
+                writer.append_storage_changeset(changeset, block).unwrap();
             }
             writer.commit().unwrap();
         }
 
-        let address = Address::random();
         let row = StorageEntry { key: B256::random(), value: U256::from(1) };
         let provider = db.factory.database_provider_rw().unwrap();
-        for block in [1, 3] {
+        for block in [2, 3] {
             provider
                 .tx_ref()
                 .put::<tables::StorageWipeChangeSets>(BlockNumberAddress((block, address)), row)
@@ -963,7 +976,7 @@ mod tests {
             .tx_ref()
             .put::<tables::StorageWipesHistory>(
                 ShardedKey::last(address),
-                BlockNumberList::new_pre_sorted([1, 3]),
+                BlockNumberList::new_pre_sorted([2, 3]),
             )
             .unwrap();
         provider.commit().unwrap();
@@ -974,6 +987,7 @@ mod tests {
         let provider = db.factory.database_provider_rw().unwrap();
         let result = StorageHistory::new(prune_mode).prune(&provider, input).unwrap();
         assert!(result.progress.is_finished());
+        assert_eq!(result.checkpoint.unwrap().block_number, Some(2));
         provider.commit().unwrap();
 
         let provider = db.factory.provider().unwrap();
