@@ -124,7 +124,7 @@ use source::{
 use std::{
     borrow::Cow,
     collections::BTreeMap,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::{Arc, OnceLock},
     time::Duration,
 };
@@ -557,6 +557,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             DownloadPlan::from_planned(&prepared.manifest, &planned)
                 .write_json(std::io::stdout().lock())?;
             return Ok(Some(prepared))
+        }
+
+        // Check the complete plan before pruning, reusing, or cleaning up any outputs.
+        for output in planned.archives.iter().flat_map(|archive| &archive.archive.output_files) {
+            let path = output.relative_path()?;
+            eyre::ensure!(
+                is_managed_snapshot_path(path, false),
+                "Not a snapshot output path: `{}`",
+                path.display()
+            );
         }
 
         let target_dir = prepared.data_dir.as_path();
@@ -1019,6 +1029,23 @@ fn clear_existing_datadir(target_dir: &Path, static_files_dir: Option<&Path>) ->
     Ok(())
 }
 
+/// Whether an archive entry belongs to the downloader's managed output paths.
+fn is_managed_snapshot_path(path: &Path, directory: bool) -> bool {
+    let mut components = path.components().peekable();
+    if components.peek() == Some(&Component::CurDir) {
+        components.next();
+    }
+    let Some(Component::Normal(root)) = components.next() else { return false };
+    if !MANAGED_DATADIR_PATHS.iter().any(|name| root == *name) {
+        return false
+    }
+    if root == "reth.toml" {
+        return !directory && components.next().is_none()
+    }
+    (directory || components.peek().is_some()) &&
+        components.all(|part| matches!(part, Component::Normal(_)))
+}
+
 /// Resolves one of [`MANAGED_DATADIR_PATHS`], honoring a custom static files directory.
 fn managed_datadir_path(
     entry: &str,
@@ -1232,6 +1259,17 @@ mod tests {
             components,
             extensions: Default::default(),
         }
+    }
+
+    #[test]
+    fn managed_snapshot_paths_match_output_types() {
+        assert!(is_managed_snapshot_path(Path::new("./db/data"), false));
+        assert!(is_managed_snapshot_path(Path::new("static_files"), true));
+        assert!(is_managed_snapshot_path(Path::new("reth.toml"), false));
+        assert!(!is_managed_snapshot_path(Path::new("db"), false));
+        assert!(!is_managed_snapshot_path(Path::new("reth.toml/settings"), false));
+        assert!(!is_managed_snapshot_path(Path::new("reth.toml"), true));
+        assert!(!is_managed_snapshot_path(Path::new("logs/restore.log"), false));
     }
 
     #[test]

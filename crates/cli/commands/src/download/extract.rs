@@ -1,5 +1,6 @@
 use super::{
     fetch::{ArchiveFetcher, DownloadedArchive},
+    is_managed_snapshot_path,
     progress::{
         ArchiveExtractionProgress, ArchiveExtractionProgressHandle, DownloadProgress,
         DownloadRequestLimiter, ProgressReader, SharedProgressReader,
@@ -280,8 +281,6 @@ fn unpack_archive<R: Read>(
     mut progress: Option<&mut ArchiveExtractionProgress>,
     hasher: Option<&RefCell<FileHasher>>,
 ) -> Result<()> {
-    // Every entry goes through `unpack_entry` so link entries are rejected; `Archive::unpack`
-    // would create them.
     let entries = archive.entries().wrap_err_with(|| {
         format!("failed to read archive entries for `{}`", target_dir.display())
     })?;
@@ -290,6 +289,20 @@ fn unpack_archive<R: Read>(
         let mut entry = entry.wrap_err_with(|| {
             format!("failed to read archive entry for `{}`", target_dir.display())
         })?;
+        // Check the path before it can contribute an extraction hash or touch the output tree.
+        let entry_type = entry.header().entry_type();
+        let path = entry.path()?;
+        eyre::ensure!(
+            !entry_type.is_symlink() && !entry_type.is_hard_link(),
+            "Archive links are unsupported: `{}`",
+            path.display()
+        );
+        // Match tar's directory handling for archives that predate USTAR.
+        let directory = entry_type.is_dir() ||
+            (entry.header().as_ustar().is_none() && entry.path_bytes().ends_with(b"/"));
+        if !is_managed_snapshot_path(&path, directory) {
+            continue
+        }
         let hashing = match hasher {
             Some(hasher) => {
                 hasher.borrow_mut().start_entry(&entry, target_dir, static_files_dir)?
@@ -629,26 +642,21 @@ fn unpack_entry<R: Read>(
     target_dir: &Path,
     static_files_dir: Option<&Path>,
 ) -> Result<()> {
-    // Links planted by an archive could redirect later extraction, or retry cleanup running
-    // concurrently for another archive, outside the datadir. Snapshots never contain links.
-    let entry_type = entry.header().entry_type();
-    eyre::ensure!(
-        !entry_type.is_symlink() && !entry_type.is_hard_link(),
-        "Archive links are unsupported: `{}`",
-        entry.path()?.display()
-    );
     let path = entry.path()?.into_owned();
     if let Some(static_files_dir) = static_files_dir &&
         let Some(relative_path) = static_file_relative_path(&path)
     {
         unpack_static_file(entry, static_files_dir, relative_path)
-    } else if is_regular_file(entry) &&
-        let Some(dest) = entry_destination_path(entry, target_dir, static_files_dir)?
-    {
-        write_regular_file(entry, &dest, target_dir)
     } else {
-        entry.unpack_in(target_dir)?;
-        Ok(())
+        ensure_no_symlinks(target_dir, &path)?;
+        if is_regular_file(entry) &&
+            let Some(dest) = entry_destination_path(entry, target_dir, static_files_dir)?
+        {
+            write_regular_file(entry, &dest, target_dir)
+        } else {
+            entry.unpack_in(target_dir)?;
+            Ok(())
+        }
     }
 }
 
@@ -1473,6 +1481,30 @@ mod tests {
         assert_eq!(metadata.accessed().unwrap(), time);
         assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
         assert_eq!(fs::read(&path).unwrap(), b"data");
+    }
+
+    #[test]
+    fn archive_installs_only_managed_outputs() {
+        let mut archive = tar::Builder::new(Vec::new());
+        for path in ["db/data", "rocksdb/index", "static_files/header", "reth.toml", "README.txt"] {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(4);
+            header.set_mode(0o600);
+            archive.append_data(&mut header, path, b"data".as_slice()).unwrap();
+        }
+        let target = tempfile::tempdir().unwrap();
+        unpack_archive(
+            Archive::new(archive.into_inner().unwrap().as_slice()),
+            target.path(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        for path in ["db/data", "rocksdb/index", "static_files/header", "reth.toml"] {
+            assert_eq!(fs::read(target.path().join(path)).unwrap(), b"data");
+        }
+        assert!(!target.path().join("README.txt").exists());
     }
 
     #[test]
