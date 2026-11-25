@@ -128,9 +128,26 @@ impl<T: PoolTransaction> BlobBuffer<T> {
         let (peer, transaction) = entry.body?;
         Some(BufferedBlob { peer, transaction, deliveries: entry.deliveries })
     }
+
+    /// Returns a job that failed verification to the buffer, so only the columns of the rejected
+    /// deliveries need to be fetched again. Returns the mask of the restored columns, which is
+    /// empty if the buffer has no room for them.
+    pub(super) fn restore(&mut self, hash: B256, job: BufferedBlob<T>, now: Instant) -> u128 {
+        if self.body(job.peer, job.transaction, now).is_err() {
+            return 0
+        }
+        let mut restored = 0;
+        for delivery in job.deliveries {
+            if self.cells(hash, delivery.peer, delivery.mask, delivery.cells, now) {
+                restored |= delivery.mask.bits();
+            }
+        }
+        restored
+    }
 }
 
 /// Owned verification job. Keeps provenance until every peer's delivery has been checked.
+#[derive(Debug)]
 pub(super) struct BufferedBlob<T> {
     pub(super) peer: PeerId,
     transaction: T,
@@ -138,7 +155,9 @@ pub(super) struct BufferedBlob<T> {
 }
 
 impl<T: PoolTransaction> BufferedBlob<T> {
-    pub(super) fn verify(mut self) -> Result<(PeerId, T), Vec<PeerId>> {
+    /// On failure, returns the peers whose cells failed verification and, if any did, the job
+    /// without their deliveries.
+    pub(super) fn verify(mut self) -> Result<(PeerId, T), (Vec<PeerId>, Option<Self>)> {
         let metadata = self
             .transaction
             .blob_sidecar()
@@ -161,19 +180,31 @@ impl<T: PoolTransaction> BufferedBlob<T> {
                 }
             } else {
                 mask |= delivery.mask.bits();
-                verified.push(sidecar);
+                verified.push((delivery.peer, sidecar));
             }
         }
         if !bad.is_empty() {
-            return Err(bad)
+            // Keep the honest cells so they need not be fetched again, but drop every delivery
+            // of a peer that sent invalid cells.
+            let deliveries = verified
+                .into_iter()
+                .filter(|(peer, _)| !bad.contains(peer))
+                .map(|(peer, sidecar)| Delivery {
+                    peer,
+                    mask: sidecar.mask(),
+                    cells: sidecar.cells,
+                })
+                .collect();
+            let job = Self { peer: self.peer, transaction: self.transaction, deliveries };
+            return Err((bad, Some(job)))
         }
         let mask = BlobCellMask::from_bits(mask);
         let mut cells = Vec::with_capacity(metadata.commitments.len() * mask.count());
         for blob in 0..metadata.commitments.len() {
             for column in mask.selected_indices() {
-                let source = verified
+                let (_, source) = verified
                     .iter()
-                    .find(|s| s.mask().contains(column))
+                    .find(|(_, s)| s.mask().contains(column))
                     .expect("union of verified masks");
                 let offset = source.mask().selected_indices().position(|i| i == column).unwrap();
                 cells.push(source.cells[blob * source.mask().count() + offset]);
@@ -186,7 +217,7 @@ impl<T: PoolTransaction> BufferedBlob<T> {
             cell_mask: B128::from(mask.bits()),
         };
         if !self.transaction.set_blob_sidecar(PooledBlobSidecar::from_cells(sidecar)) {
-            return Err(Vec::new())
+            return Err((Vec::new(), None))
         }
         Ok((self.peer, self.transaction))
     }
@@ -279,7 +310,12 @@ pub(super) mod tests {
         corrupted[0][31] ^= 1;
         buffer.cells(hash, bad, second, corrupted, now);
         let result = buffer.take_ready(hash, BlobCellMask::from_bits(3)).unwrap().verify();
-        assert_eq!(result.unwrap_err(), vec![bad]);
+        let Err((peers, Some(job))) = result else { panic!("bad cells must be rejected") };
+        assert_eq!(peers, vec![bad]);
+        assert_eq!(buffer.restore(hash, job, now), first.bits());
+        assert!(buffer.take_ready(hash, BlobCellMask::from_bits(3)).is_none());
+        let (_, tx) = buffer.take_ready(hash, first).unwrap().verify().unwrap();
+        assert_eq!(tx.blob_cell_availability().unwrap().get(), first);
     }
 
     #[test]

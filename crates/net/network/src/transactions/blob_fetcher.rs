@@ -1,6 +1,9 @@
 //! ETH/72 cell scheduling, provider failover, and sparse custody selection.
 
-use super::{blob_buffer::BlobBuffer, PeerMetadata};
+use super::{
+    blob_buffer::{BlobBuffer, BufferedBlob},
+    PeerMetadata,
+};
 use alloy_eips::eip7594::BlobCellMask;
 use alloy_primitives::{
     map::{B256Map, FbBuildHasher, HashMap},
@@ -44,8 +47,12 @@ impl<T> std::fmt::Debug for BlobFetcher<T> {
 
 type RequestFuture =
     Pin<Box<dyn Future<Output = (B256, PeerId, BlobCellMask, Option<Cells>)> + Send>>;
-type VerifyFuture<T> =
-    Pin<Box<dyn Future<Output = (B256, Result<(PeerId, T), Vec<PeerId>>)> + Send>>;
+type VerifyFuture<T> = Pin<
+    Box<
+        dyn Future<Output = (B256, Result<(PeerId, T), (Vec<PeerId>, Option<BufferedBlob<T>>)>)>
+            + Send,
+    >,
+>;
 const MAX_PENDING: usize = 4096;
 const MAX_REQUESTS: usize = 16;
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -102,16 +109,30 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
         self.metrics.pending.set(self.pending.len() as f64);
         self.metrics.inflight.set(self.requests.len() as f64);
         if let Poll::Ready(Some((hash, result))) = self.verification.poll_next_unpin(cx) {
-            if result.is_ok() {
-                self.metrics.completed.increment(1);
-            } else {
-                self.metrics.invalid.increment(1);
-            }
-            self.pending.remove(&hash);
-            return Poll::Ready(match result {
-                Ok((peer, tx)) => BlobFetchEvent::Transaction(peer, tx),
-                Err(peers) => BlobFetchEvent::BadPeers(peers),
-            })
+            let event = match result {
+                Ok((peer, tx)) => {
+                    self.metrics.completed.increment(1);
+                    self.pending.remove(&hash);
+                    BlobFetchEvent::Transaction(peer, tx)
+                }
+                Err((peers, job)) => {
+                    self.metrics.invalid.increment(1);
+                    if let Some(job) = job &&
+                        let Some(pending) = self.pending.get_mut(&hash)
+                    {
+                        // Keep the transaction and refetch the rejected columns from the
+                        // remaining providers.
+                        pending.received = self.buffer.restore(hash, job, Instant::now());
+                        pending.providers.retain(|(id, _)| !peers.contains(id));
+                        pending.target = None;
+                        pending.verifying = false;
+                    } else {
+                        self.pending.remove(&hash);
+                    }
+                    BlobFetchEvent::BadPeers(peers)
+                }
+            };
+            return Poll::Ready(event)
         }
         while let Poll::Ready(Some((hash, peer, requested, response))) =
             self.requests.poll_next_unpin(cx)
@@ -203,7 +224,7 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                 self.verification.push(Box::pin(async move {
                     let result = tokio::task::spawn_blocking(move || job.verify())
                         .await
-                        .unwrap_or_else(|_| Err(Vec::new()));
+                        .unwrap_or_else(|_| Err((Vec::new(), None)));
                     (hash, result)
                 }));
             }
@@ -499,6 +520,80 @@ mod tests {
         .unwrap();
         let BlobFetchEvent::Transaction(_, tx) = event else { panic!("valid cells must import") };
         assert_eq!(tx.blob_cell_availability().unwrap().get().count(), 64);
+    }
+
+    #[tokio::test]
+    async fn full_fetch_refetches_cells_rejected_by_verification() {
+        let (tx, cells) = super::super::blob_buffer::tests::fixture();
+        let hash = *tx.hash();
+        let honest = PeerId::random();
+        let bad = PeerId::random();
+        let (p1, mut rx1) = peer(honest);
+        let (p2, mut rx2) = peer(bad);
+        let peers = HashMap::from_iter([(honest, p1), (bad, p2)]);
+        let mut fetcher = BlobFetcher::new(CellCustody::default(), 100);
+        let all = BlobCellMask::from_bits(u128::MAX);
+        fetcher.announce(hash, honest, all);
+        fetcher.announce(hash, bad, all);
+        fetcher.body(honest, tx).unwrap();
+        let mut cx = Context::from_waker(noop_waker_ref());
+        assert!(fetcher.poll(&mut cx, &peers).is_pending());
+        let PeerRequest::GetCells { response, .. } = rx1.try_recv().unwrap() else {
+            panic!("expected cells")
+        };
+        let low = BlobCellMask::from_bits(u32::MAX as u128);
+        response
+            .send(Ok(Cells {
+                hashes: vec![hash],
+                cells: vec![cells.get_cells(low).unwrap()],
+                cell_mask: B128::from(low.bits().to_le_bytes()),
+            }))
+            .unwrap();
+        assert!(fetcher.poll(&mut cx, &peers).is_pending());
+        let PeerRequest::GetCells { request, response } = rx2.try_recv().unwrap() else {
+            panic!("expected remainder from the second provider")
+        };
+        let high = BlobCellMask::from_bits(u128::from_le_bytes(request.cell_mask.into()));
+        let mut corrupted = cells.get_cells(high).unwrap();
+        corrupted[0][31] ^= 1;
+        response
+            .send(Ok(Cells {
+                hashes: vec![hash],
+                cells: vec![corrupted],
+                cell_mask: request.cell_mask,
+            }))
+            .unwrap();
+        let event = tokio::time::timeout(
+            Duration::from_secs(10),
+            std::future::poll_fn(|cx| fetcher.poll(cx, &peers)),
+        )
+        .await
+        .unwrap();
+        let BlobFetchEvent::BadPeers(reported) = event else {
+            panic!("bad cells must be rejected")
+        };
+        assert_eq!(reported, vec![bad]);
+        assert!(fetcher.poll(&mut cx, &peers).is_pending());
+        let PeerRequest::GetCells { request, response } = rx1.try_recv().unwrap() else {
+            panic!("expected refetch of the rejected columns")
+        };
+        assert_eq!(request.cell_mask, B128::from(high.bits().to_le_bytes()));
+        response
+            .send(Ok(Cells {
+                hashes: vec![hash],
+                cells: vec![cells.get_cells(high).unwrap()],
+                cell_mask: request.cell_mask,
+            }))
+            .unwrap();
+        let event = tokio::time::timeout(
+            Duration::from_secs(10),
+            std::future::poll_fn(|cx| fetcher.poll(cx, &peers)),
+        )
+        .await
+        .unwrap();
+        let BlobFetchEvent::Transaction(_, tx) = event else { panic!("valid cells must import") };
+        assert_eq!(tx.blob_cell_availability().unwrap().get().count(), 64);
+        assert!(rx2.try_recv().is_err());
     }
 
     #[tokio::test]
