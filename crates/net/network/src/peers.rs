@@ -583,9 +583,11 @@ impl PeersManager {
     fn backoff_peer_until(&mut self, peer_id: PeerId, until: std::time::Instant) {
         trace!(target: "net::peers", ?peer_id, "backing off");
 
+        // A failed dial candidate has no row left, but its deadline still applies if it is
+        // queued again.
+        self.backed_off_peers.insert(peer_id, until);
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.backed_off = true;
-            self.backed_off_peers.insert(peer_id, until);
         }
     }
 
@@ -938,8 +940,9 @@ impl PeersManager {
                 trace!(target: "net", ?peer_id, "removed peer after failed connection");
                 let (peer_id, _) = self.peers.remove_entry(peer_id).expect("peer must exist");
                 self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
-            } else if let Some(backoff_until) = backoff_until {
-                // otherwise, backoff the peer if marked as such
+            }
+            if let Some(backoff_until) = backoff_until {
+                // also for a removed peer, so a requeued dial candidate still waits
                 self.backoff_peer_until(*peer_id, backoff_until);
             }
         }
@@ -1396,8 +1399,9 @@ impl PeersManager {
     /// Dials the oldest dial candidate, tracking it only until its session ends.
     fn dial_candidate(&mut self) {
         while let Some((peer_id, (addr, fork_id))) = self.candidates.pop_oldest() {
-            // it may have been added or banned since it was queued
+            // it may have been added, backed off or banned since it was queued
             if self.peers.contains_key(&peer_id) ||
+                self.backed_off_peers.contains_key(&peer_id) ||
                 self.ban_list.is_banned(&peer_id, &addr.tcp().ip())
             {
                 continue
@@ -4972,6 +4976,34 @@ mod tests {
         // the set is still full, so a session keeps it only until the session ends
         peers.on_active_outgoing_established(second);
         assert!(peers.peers[&second].remove_after_disconnect);
+    }
+
+    #[tokio::test]
+    async fn test_failed_candidate_not_redialed_during_backoff() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        // tracked peers are backed off, so every free slot goes to a candidate
+        for _ in 0..MAX_TRACKED_PEERS {
+            let peer_id = PeerId::random();
+            peers.add_peer(peer_id, addr, None);
+            peers.peers.get_mut(&peer_id).unwrap().backed_off = true;
+        }
+        let too_many_peers = PendingSessionHandshakeError::Eth(EthStreamError::P2PStreamError(
+            P2PStreamError::Disconnected(DisconnectReason::TooManyPeers),
+        ));
+        for err in [PendingSessionHandshakeError::Timeout, too_many_peers] {
+            let candidate = PeerId::random();
+            peers.add_peer(candidate, addr, None);
+            peers.fill_outbound_slots();
+            assert!(peers.peers[&candidate].state.is_pending_out());
+            peers.on_outgoing_pending_session_dropped(&addr.tcp(), &candidate, &err);
+            assert!(!peers.peers.contains_key(&candidate));
+
+            // rediscovered while backed off
+            peers.add_peer(candidate, addr, None);
+            peers.fill_outbound_slots();
+            assert!(!peers.peers.contains_key(&candidate));
+        }
     }
 
     #[tokio::test]
