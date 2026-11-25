@@ -3,7 +3,7 @@
 use alloy_rpc_types_eth::Bundle;
 use reth_rpc_eth_types::{utils::CallManyBudget, EthApiError};
 use serde::{
-    de::{DeserializeOwned, IgnoredAny, MapAccess, SeqAccess, Visitor},
+    de::{DeserializeOwned, Error as _, IgnoredAny, MapAccess, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize,
 };
 use serde_json::value::RawValue;
@@ -117,16 +117,21 @@ impl<'de> Visitor<'de> for BundleCallsVisitor {
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        let mut transactions = ArrayLen::default();
+        let mut transactions = None;
         while let Some(key) = map.next_key::<BundleField>()? {
             match key {
-                BundleField::Transactions => transactions = map.next_value()?,
+                // Rejected like the typed decoder does, so the count covers every array it would
+                // decode.
+                BundleField::Transactions if transactions.is_some() => {
+                    return Err(A::Error::duplicate_field("transactions"))
+                }
+                BundleField::Transactions => transactions = Some(map.next_value()?),
                 BundleField::Other => {
                     map.next_value::<IgnoredAny>()?;
                 }
             }
         }
-        Ok(BundleCalls { transactions })
+        Ok(BundleCalls { transactions: transactions.unwrap_or_default() })
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
@@ -277,6 +282,16 @@ mod tests {
             format!("[[[{}], null]]", vec!["{}"; DEFAULT_MAX_CALL_MANY_CALLS + 1].join(","));
         let err = parse::<Vec<Bundle<TransactionRequest>>>(&input).unwrap_err();
         assert_eq!(err.to_string(), limit_err(DEFAULT_MAX_CALL_MANY_CALLS + 1));
+    }
+
+    /// A repeated `transactions` key is rejected before the typed decoder could decode the
+    /// arrays the count skipped.
+    #[test]
+    fn rejects_duplicate_transactions_without_decoding() {
+        let calls = vec!["{}"; DEFAULT_MAX_CALL_MANY_CALLS + 1].join(",");
+        let input = format!(r#"[{{"transactions":[{calls}],"transactions":[]}}]"#);
+        let err = parse::<Vec<Bundle<TransactionRequest>>>(&input).unwrap_err();
+        assert_eq!(err.to_string(), "duplicate field `transactions` at line 1 column 3108");
     }
 
     #[test]
