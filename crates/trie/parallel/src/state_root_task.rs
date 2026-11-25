@@ -540,7 +540,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn state_access_hint_converts_to_sparse_targets() {
         let account = B256::repeat_byte(0x01);
         let storage_account = B256::repeat_byte(0x02);
@@ -565,7 +565,7 @@ mod tests {
 
     /// A hook dropped by a panic unwind must not finish the stream: the updates are
     /// incomplete, and a finish marker would make the task compute a root from them.
-    #[test]
+    #[reth_concurrency::test]
     fn hook_dropped_during_panic_does_not_finish_stream() {
         let sink = Arc::new(CountingSink::default());
         let hook = StateRootUpdateStream::new(sink.clone()).into_state_hook();
@@ -582,7 +582,7 @@ mod tests {
 
     /// The authoritative capability is a single slot: taking it as a hook and then again as
     /// a hashed update stream (or in any other combination) must panic.
-    #[test]
+    #[reth_concurrency::test]
     #[should_panic(expected = "authoritative update capability already taken")]
     fn authoritative_capability_can_only_be_taken_once() {
         let (updates_tx, _updates_rx) = crossbeam_channel::unbounded();
@@ -605,7 +605,7 @@ mod tests {
     /// hook streams updates into the sink and signals completion on drop, the hashed-state
     /// receiver can be taken exactly once, and the outcome arrives through the state-root
     /// channel.
-    #[test]
+    #[reth_concurrency::test]
     fn payload_state_root_handle_lifecycle() {
         let sink = Arc::new(CountingSink::default());
         let hook = StateRootUpdateStream::new(sink.clone()).into_state_hook();
@@ -640,7 +640,7 @@ mod tests {
         assert_eq!(outcome.state_root, B256::repeat_byte(0x42));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn payload_state_root_receiver_retains_cancellation() {
         let (updates_tx, _updates_rx) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();

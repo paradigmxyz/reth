@@ -47,6 +47,7 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-primitives-traits = { workspace = true, features = ["serde"] }
 reth-codecs = { workspace = true, features = ["alloy"] }
 alloy-eips.workspace = true
@@ -69,6 +70,7 @@ serde_with.workspace = true
 [features]
 default = ["std"]
 std = [
+    "reth-concurrency/std",
     "alloy-consensus/std",
     "alloy-genesis/std",
     "alloy-primitives/std",
@@ -123,6 +125,7 @@ serde-bincode-compat = [
     "alloy-eips/serde-bincode-compat",
 ]
 test-utils = [
+    "reth-concurrency/test-utils",
     "dep:plain_hasher",
     "dep:hash-db",
     "arbitrary",

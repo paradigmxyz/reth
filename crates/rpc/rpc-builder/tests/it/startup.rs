@@ -8,7 +8,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use jsonrpsee::{rpc_params, Methods};
+use jsonrpsee::Methods;
 use reth_rpc_builder::{
     error::{RpcError, ServerKind, WsHttpSamePortError},
     RpcServerConfig, TransportRpcModuleConfig,
@@ -41,8 +41,13 @@ async fn test_rpc_modules_per_transport() {
     );
 
     let namespaces = |methods: Methods| async move {
-        let modules: HashMap<String, String> =
-            methods.call("rpc_modules", rpc_params![]).await.unwrap();
+        let (response, _) = methods
+            .raw_json_request(r#"{"jsonrpc":"2.0","id":1,"method":"rpc_modules"}"#, 1)
+            .await
+            .unwrap();
+        let response = serde_json::from_str::<serde_json::Value>(&response).unwrap();
+        let modules =
+            serde_json::from_value::<HashMap<String, String>>(response["result"].clone()).unwrap();
         modules.into_keys().collect::<HashSet<_>>()
     };
     let expected = |names: [&str; 2]| names.into_iter().map(String::from).collect::<HashSet<_>>();

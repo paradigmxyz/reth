@@ -17,7 +17,6 @@ use alloy_rpc_types_engine::{
     ForkchoiceUpdatedResponseV2, PayloadId, PayloadStatus, PayloadStatusV2, PraguePayloadFields,
     MAX_BYTES_PER_INCLUSION_LIST,
 };
-use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
@@ -29,7 +28,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{AlloyBlockHeader, Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
-use reth_storage_api::{BalProvider, BlockReader, StateProviderFactory};
+use reth_storage_api::{BalProvider, BlockReader, BlockSource, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_transaction_pool::{BestTransactions, TransactionPool};
 use std::{
@@ -865,6 +864,9 @@ where
     }
 
     /// Called to retrieve execution payload bodies by hashes.
+    ///
+    /// This also returns the bodies of non-canonical blocks the engine tree still holds, such as
+    /// reorged-out blocks, because the by-hash methods are not limited to the canonical chain.
     pub async fn get_payload_bodies_by_hash_with<F, R>(
         &self,
         hashes: Vec<BlockHash>,
@@ -889,7 +891,7 @@ where
                     return;
                 }
 
-                let block_result = inner.provider.block(BlockHashOrNumber::Hash(hash));
+                let block_result = inner.provider.find_block_by_hash(hash, BlockSource::Any);
                 match block_result {
                     Ok(block) => {
                         result.push(block.map(&f));
@@ -1331,7 +1333,6 @@ where
 }
 
 // This is the concrete ethereum engine API implementation.
-#[async_trait]
 impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
@@ -1380,7 +1381,7 @@ where
             }),
         };
 
-        Ok(self.new_payload_v3_metered(payload).await?)
+        self.new_payload_v3_metered(payload).await
     }
 
     /// Handler for `engine_newPayloadV4`
@@ -1407,7 +1408,7 @@ where
             ),
         };
 
-        Ok(self.new_payload_v4_metered(payload).await?)
+        self.new_payload_v4_metered(payload).await
     }
 
     /// Handler for `engine_newPayloadV5`
@@ -1436,7 +1437,7 @@ where
             ),
         };
 
-        Ok(self.new_payload_v5_metered(payload).await?)
+        self.new_payload_v5_metered(payload).await
     }
 
     /// Handler for `engine_newPayloadV6`.

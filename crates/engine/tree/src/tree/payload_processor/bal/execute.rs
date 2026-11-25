@@ -539,7 +539,7 @@ mod tests {
         ));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn empty_block_happy_path_round_trip() {
         // Two-pass end-to-end:
         //   1. Build the canonical BAL an empty Amsterdam block produces (via
@@ -564,7 +564,7 @@ mod tests {
         assert!(output.receipts.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn multi_tx_happy_path_round_trip() {
         // End-to-end with two value transfers from distinct senders to the same recipient.
         //
@@ -617,7 +617,7 @@ mod tests {
         assert!(output.gas_used >= 42_000);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn shadow_empty_block() {
         // System calls only — no txs. Both paths should produce identical system-call
         // side effects in their execution state (beacon roots storage, history storage, etc.).
@@ -629,7 +629,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn shadow_multi_value_transfer() {
         // Two senders → same recipient. Byte-equal across paths means: worker-produced
         // diffs commit identically to a directly-executed serial path.
@@ -651,7 +651,7 @@ mod tests {
         assert_shadow_equal(evm_config, db, empty_amsterdam_block(B256::ZERO), txs);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_tx_gas_limit_that_exceeds_remaining_block_gas() {
         // Each worker sees an empty block, so both transactions fit individually. The ordered
         // commit loop must still reject tx2 because tx1's committed gas leaves too little
@@ -702,7 +702,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn shadow_tx_with_revert() {
         // A tx that reverts in a deployed contract. Both paths must produce identical receipts
         // (success = false, gas charged, state rolled back except for gas payment + nonce bump).
@@ -725,7 +725,7 @@ mod tests {
         assert_shadow_equal(evm_config, db, empty_amsterdam_block(B256::ZERO), vec![tx]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn shadow_tx_with_sstore() {
         // Tx calls a deployed contract that does `SSTORE(0, 0x42)`. The storage write must
         // commit identically across serial and BAL paths even though the canonical state applies
@@ -748,7 +748,7 @@ mod tests {
         assert_shadow_equal(evm_config, db, empty_amsterdam_block(B256::ZERO), vec![tx]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn returns_built_bal_for_final_hash_mismatch() {
         // Build the BAL an empty block actually produces, then append a phantom address
         // that execution never touches. The rebuilt BAL omits it, and the outer consensus
@@ -785,7 +785,7 @@ mod tests {
         assert_ne!(compute_block_access_list_hash(&built_bal), tampered_hash);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn canonical_make_db_failure() {
         // A make_db that always fails must surface as Provider.
         let block = empty_amsterdam_block(B256::ZERO);
@@ -803,7 +803,7 @@ mod tests {
         assert!(matches!(result, Err(BalExecutionError::Provider(_))));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn worker_tx_recovery_error_becomes_validation_error() {
         // A tx recovery failure fed into the worker channel must surface as
         // a block validation error. Uses execute_block directly since tx_stream hardcodes
@@ -837,7 +837,7 @@ mod tests {
         ));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn gas_tracker_non_amsterdam_uses_cumulative_gas() {
         // tx2's gas limit fits the block gas limit on its own but not the gas left after tx1, so
         // non-Amsterdam admission, which budgets by cumulative gas, must reject it.
@@ -878,7 +878,7 @@ mod tests {
         assert!(matches!(result, Err(BalExecutionError::Execution(_))));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn gas_tracker_caps_oversized_tx_gas_limit_at_tx_gas_limit_cap() {
         // A tx with gas_limit above the tx gas limit cap (EIP-7825) is admitted when the
         // capped value fits in the remaining block gas.
@@ -981,7 +981,7 @@ mod tests {
         (pre_block_db, reference_bal, tx1, tx2)
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn default_tx_gas_limit_cap_matches_serial_execution() {
         let evm_config = test_evm_config();
         let block_gas_limit = 20_000_000;
@@ -1011,7 +1011,7 @@ mod tests {
         assert_eq!(parallel.receipts, serial.receipts);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn propagates_bal_miss_of_admitted_transaction_as_block_verdict() {
         // The BAL covers neither transaction: the first slot's speculative failure is
         // adjudicated in block order and becomes the block's verdict.
@@ -1047,7 +1047,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn admission_rejects_before_speculative_worker_failure_surfaces() {
         // tx2 exceeds the remaining block gas AND misses the BAL; block-gas admission is
         // adjudicated first, so the verdict is the gas error, not tx2's BAL failure.
@@ -1066,19 +1066,23 @@ mod tests {
         );
 
         match result {
-            Err(BalExecutionError::Execution(err)) => assert!(
-                matches!(
-                    err.as_validation(),
-                    Some(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas { .. })
-                ),
-                "expected block gas validation error, got {err:?}"
-            ),
+            Err(BalExecutionError::Execution(err)) => {
+                assert!(
+                    matches!(
+                        err.as_validation(),
+                        Some(
+                            BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas { .. }
+                        )
+                    ),
+                    "expected block gas validation error, got {err:?}"
+                )
+            }
             Err(err) => panic!("expected block gas validation error, got {err:?}"),
             Ok(_) => panic!("expected block gas validation error, got Ok"),
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn worker_reuses_provider_after_failure_and_finishes_earlier_transactions() {
         let evm_config = test_evm_config();
         let (pre_block_db, reference_bal, tx1, tx2) =
@@ -1155,7 +1159,7 @@ mod tests {
         assert_eq!(setups.load(Ordering::Relaxed), 1);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn amsterdam_state_gas_admission_matches_serial_execution() {
         let evm_config = EthEvmConfig::new(Arc::new(
             reth_chainspec::ChainSpecBuilder::mainnet().amsterdam_activated().build(),

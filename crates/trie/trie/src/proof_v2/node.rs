@@ -2,8 +2,8 @@ use crate::proof_v2::DeferredValueEncoder;
 use alloy_rlp::Encodable;
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    BranchNodeMasks, BranchNodeV2, ExtensionNodeRef, LeafNode, LeafNodeRef, Nibbles,
-    ProofTrieNodeV2, RlpNode, TrieMask, TrieNodeV2,
+    BranchNode, BranchNodeMasks, ExtensionNode, ExtensionNodeRef, LeafNode, LeafNodeRef, Nibbles,
+    ProofTrieNode, RlpNode, TrieMask, TrieNode,
 };
 
 /// A trie node which is the child of a branch in the trie.
@@ -19,7 +19,9 @@ pub(crate) enum ProofTrieBranchChild<RF> {
     /// A branch node whose children have already been flattened into [`RlpNode`]s.
     Branch {
         /// The node itself, for use during RLP encoding.
-        node: BranchNodeV2,
+        node: BranchNode,
+        /// Short key of the separate parent extension, if any.
+        short_key: Nibbles,
         /// Bitmasks carried over from cached `BranchNodeCompact` values, if any.
         masks: Option<BranchNodeMasks>,
     },
@@ -70,9 +72,15 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
                 LeafNodeRef::new(&short_key, value_buf).encode(&mut leaf_buf);
                 Ok((RlpNode::from_rlp(&buf[value_enc_len..]), None))
             }
-            Self::Branch { node: branch_node, .. } => {
-                branch_node.encode(buf);
-                Ok((RlpNode::from_rlp(buf), Some(branch_node.stack)))
+            Self::Branch { node, short_key, .. } => {
+                node.encode(buf);
+                let branch_rlp = RlpNode::from_rlp(buf);
+                if short_key.is_empty() {
+                    return Ok((branch_rlp, Some(node.stack)));
+                }
+                buf.clear();
+                ExtensionNodeRef::new(&short_key, branch_rlp.as_slice()).encode(buf);
+                Ok((RlpNode::from_rlp(buf), Some(node.stack)))
             }
             Self::RlpNode { node, short_key, hash_mask_bit, .. } => {
                 if short_key.is_empty() {
@@ -88,7 +96,9 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
         }
     }
 
-    /// Converts this child into a [`ProofTrieNodeV2`] having the given path.
+    /// Converts this child into a proof node and its separate child branch, if any.
+    ///
+    /// The optional branch precedes the returned extension in depth-first order.
     ///
     /// # Errors
     ///
@@ -97,7 +107,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
         self,
         path: Nibbles,
         buf: &mut Vec<u8>,
-    ) -> Result<ProofTrieNodeV2, StateProofError> {
+    ) -> Result<(ProofTrieNode, Option<ProofTrieNode>), StateProofError> {
         let (node, masks) = match self {
             Self::Leaf { short_key, value } => {
                 value.encode(buf)?;
@@ -109,9 +119,27 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
                 // this value, and the passed in buffer can remain with whatever large capacity it
                 // already has.
                 let rlp_val = buf.clone();
-                (TrieNodeV2::Leaf(LeafNode::new(short_key, rlp_val)), None)
+                (TrieNode::Leaf(LeafNode::new(short_key, rlp_val)), None)
             }
-            Self::Branch { node, masks } => (TrieNodeV2::Branch(node), masks),
+            Self::Branch { node, short_key, masks } => {
+                if short_key.is_empty() {
+                    (TrieNode::Branch(node), masks)
+                } else {
+                    node.encode(buf);
+                    let child = RlpNode::from_rlp(buf);
+                    let branch = ProofTrieNode {
+                        path: path.join(&short_key),
+                        node: TrieNode::Branch(node),
+                        masks,
+                    };
+                    let extension = ProofTrieNode {
+                        path,
+                        node: TrieNode::Extension(ExtensionNode::new(short_key, child)),
+                        masks: None,
+                    };
+                    return Ok((extension, Some(branch)));
+                }
+            }
             // Cached hashes cannot be retained as proof nodes: targeted children are recalculated,
             // while untargeted children are either combined into a branch or discarded. Reaching
             // this arm means inconsistent cached trie data left a blinded node as the local root.
@@ -122,14 +150,14 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
             }
         };
 
-        Ok(ProofTrieNodeV2 { node, path, masks })
+        Ok((ProofTrieNode { node, path, masks }, None))
     }
 
     /// Returns the child's short key.
     pub(crate) const fn short_key(&self) -> &Nibbles {
         match self {
             Self::Leaf { short_key, .. } |
-            Self::Branch { node: BranchNodeV2 { key: short_key, .. }, .. } |
+            Self::Branch { short_key, .. } |
             Self::RlpNode { short_key, .. } => short_key,
         }
     }
@@ -138,8 +166,8 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     pub(crate) fn mask_bits(&self) -> (bool, bool) {
         match self {
             Self::Leaf { .. } => (false, false),
-            Self::Branch { node, masks } => (
-                node.key.is_empty() && node.length() >= 32,
+            Self::Branch { node, short_key, masks } => (
+                short_key.is_empty() && node.length() >= 32,
                 masks.is_some_and(|masks| !masks.is_empty()),
             ),
             Self::RlpNode { short_key, hash_mask_bit, tree_mask_bit, .. } => {
@@ -155,14 +183,10 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     /// - If the given len is longer than the short key
     pub(crate) fn trim_short_key_prefix(&mut self, len: usize) {
         match self {
-            Self::Leaf { short_key, .. } | Self::RlpNode { short_key, .. } => {
+            Self::Leaf { short_key, .. } |
+            Self::Branch { short_key, .. } |
+            Self::RlpNode { short_key, .. } => {
                 *short_key = trim_nibbles_prefix(short_key, len);
-            }
-            Self::Branch { node: BranchNodeV2 { key, branch_rlp_node, .. }, .. } => {
-                *key = trim_nibbles_prefix(key, len);
-                if key.is_empty() {
-                    *branch_rlp_node = None;
-                }
             }
         }
     }
@@ -193,6 +217,52 @@ pub(crate) fn trim_nibbles_prefix(n: &Nibbles, len: usize) -> Nibbles {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proof_v2::value::StorageDeferredValueEncoder;
+    use alloy_primitives::B256;
+
+    #[test]
+    fn branch_proofs_keep_extensions_separate() {
+        for stack in [
+            vec![RlpNode::from_rlp(&[0xc2, 0x20, 0x01]); 2],
+            vec![RlpNode::word_rlp(&B256::repeat_byte(0x11)); 2],
+        ] {
+            let node = BranchNode::new(stack, TrieMask::new(0b11));
+            let encoded_branch = alloy_rlp::encode(&node);
+            let branch_rlp = RlpNode::from_rlp(&encoded_branch);
+            let key = Nibbles::from_nibbles([2, 3]);
+            let extension = ExtensionNode::new(key, branch_rlp);
+            let masks =
+                Some(BranchNodeMasks { hash_mask: TrieMask::new(1), tree_mask: TrieMask::new(2) });
+            let child = ProofTrieBranchChild::<StorageDeferredValueEncoder>::Branch {
+                node: node.clone(),
+                short_key: key,
+                masks,
+            };
+            let path = Nibbles::from_nibbles([1]);
+            let (proof, branch) = child.into_proof_trie_node(path, &mut Vec::new()).unwrap();
+
+            assert_eq!(
+                proof,
+                ProofTrieNode { path, node: TrieNode::Extension(extension.clone()), masks: None }
+            );
+            assert_eq!(
+                branch,
+                Some(ProofTrieNode {
+                    path: path.join(&key),
+                    node: TrieNode::Branch(node.clone()),
+                    masks,
+                })
+            );
+            let child = ProofTrieBranchChild::<StorageDeferredValueEncoder>::Branch {
+                node,
+                short_key: key,
+                masks,
+            };
+            let (rlp, freed) = child.into_rlp(&mut Vec::new()).unwrap();
+            assert_eq!(rlp, RlpNode::from_rlp(&alloy_rlp::encode(extension)));
+            assert_eq!(freed.unwrap().len(), 2);
+        }
+    }
 
     #[test]
     fn test_trim_nibbles_prefix_basic() {

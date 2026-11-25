@@ -30,9 +30,11 @@ use tracing::{debug, trace};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// [`MAX_PAYLOAD_SIZE`] is the maximum size of an uncompressed message payload.
+/// [`MAX_PAYLOAD_SIZE`] is the default maximum size of an uncompressed message payload.
 /// This is defined in [EIP-706](https://eips.ethereum.org/EIPS/eip-706).
-const MAX_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
+///
+/// See [`UnauthedP2PStream::with_max_payload_size`] to use a different limit.
+pub const MAX_PAYLOAD_SIZE: usize = 16 * 1024 * 1024;
 
 /// Maximum size of a decompressed `p2p` disconnect payload: [`DisconnectReason`] decodes at most
 /// two bytes, a reason code optionally wrapped in a one-item list.
@@ -96,12 +98,24 @@ const MAX_COMPRESS_SCRATCH_SIZE: usize = 256 * 1024;
 pub struct UnauthedP2PStream<S> {
     #[pin]
     inner: S,
+    /// Maximum size of an uncompressed message payload, carried into the [`P2PStream`].
+    max_payload_size: usize,
 }
 
 impl<S> UnauthedP2PStream<S> {
     /// Create a new `UnauthedP2PStream` from a type `S` which implements `Stream` and `Sink`.
     pub const fn new(inner: S) -> Self {
-        Self { inner }
+        Self { inner, max_payload_size: MAX_PAYLOAD_SIZE }
+    }
+
+    /// Sets the maximum size of an uncompressed message payload, which defaults to
+    /// [`MAX_PAYLOAD_SIZE`].
+    ///
+    /// The limit applies to the handshake and to every message of the [`P2PStream`] it yields, in
+    /// both directions.
+    pub const fn with_max_payload_size(mut self, max_payload_size: usize) -> Self {
+        self.max_payload_size = max_payload_size;
+        self
     }
 
     /// Returns a reference to the inner stream.
@@ -133,10 +147,10 @@ where
         // Check that the uncompressed message length does not exceed the max payload size.
         // Note: The first message (Hello/Disconnect) is not snappy compressed. We will check the
         // decompressed length again for subsequent messages after the handshake.
-        if first_message_bytes.len() > MAX_PAYLOAD_SIZE {
+        if first_message_bytes.len() > self.max_payload_size {
             return Err(P2PStreamError::MessageTooBig {
                 message_size: first_message_bytes.len(),
-                max_size: MAX_PAYLOAD_SIZE,
+                max_size: self.max_payload_size,
             })
         }
 
@@ -200,7 +214,8 @@ where
             Ok(cap) => Ok(cap),
         }?;
 
-        let stream = P2PStream::new(self.inner, shared_capability);
+        let mut stream = P2PStream::new(self.inner, shared_capability);
+        stream.set_max_payload_size(self.max_payload_size);
 
         Ok((stream, their_hello))
     }
@@ -301,6 +316,9 @@ pub struct P2PStream<S> {
     /// Explicit frame limits registered by installed subprotocol handlers.
     inbound_protocol_limits: Vec<InboundProtocolLimit>,
 
+    /// Maximum size of an uncompressed message payload, in both directions.
+    max_payload_size: usize,
+
     /// Outgoing messages buffered for sending to the underlying stream.
     outgoing_messages: VecDeque<Bytes>,
 
@@ -334,6 +352,7 @@ impl<S> P2PStream<S> {
             ping_token_bucket: PingTokenBucket::new(Instant::now()),
             shared_capabilities,
             inbound_protocol_limits: Vec::new(),
+            max_payload_size: MAX_PAYLOAD_SIZE,
             outgoing_messages: VecDeque::new(),
             outgoing_message_buffer_capacity: MAX_P2P_CAPACITY,
             disconnecting: false,
@@ -355,6 +374,12 @@ impl<S> P2PStream<S> {
     pub const fn set_outgoing_message_buffer_capacity(&mut self, capacity: usize) {
         assert!(capacity != 0);
         self.outgoing_message_buffer_capacity = capacity;
+    }
+
+    /// Sets the maximum size of an uncompressed message payload, which defaults to
+    /// [`MAX_PAYLOAD_SIZE`]. It applies to both incoming and outgoing messages.
+    pub const fn set_max_payload_size(&mut self, max_payload_size: usize) {
+        self.max_payload_size = max_payload_size;
     }
 
     /// Returns the shared capabilities for this stream.
@@ -634,10 +659,10 @@ where
             // first check that the compressed message length does not exceed the max
             // payload size
             let decompressed_len = snap::raw::decompress_len(&bytes[1..])?;
-            if decompressed_len > MAX_PAYLOAD_SIZE {
+            if decompressed_len > this.max_payload_size {
                 return Poll::Ready(Some(Err(P2PStreamError::MessageTooBig {
                     message_size: decompressed_len,
-                    max_size: MAX_PAYLOAD_SIZE,
+                    max_size: this.max_payload_size,
                 })))
             }
 
@@ -799,10 +824,10 @@ where
     }
 
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
-        if item.len() > MAX_PAYLOAD_SIZE {
+        if item.len() > self.max_payload_size {
             return Err(P2PStreamError::MessageTooBig {
                 message_size: item.len(),
-                max_size: MAX_PAYLOAD_SIZE,
+                max_size: self.max_payload_size,
             })
         }
 
@@ -1509,6 +1534,71 @@ mod tests {
         );
 
         // make sure the server receives the message and asserts before ending the test
+        handle.await.unwrap();
+    }
+
+    /// An `eth` message larger than [`MAX_PAYLOAD_SIZE`], as the stream yields and accepts it: a
+    /// relative message id (0) followed by the payload.
+    fn oversized_eth_message() -> Vec<u8> {
+        vec![0u8; MAX_PAYLOAD_SIZE + 4 * 1024 * 1024]
+    }
+
+    #[tokio::test]
+    async fn max_payload_size_bounds_both_directions() {
+        let message = oversized_eth_message();
+        let mut encoder = snap::raw::Encoder::new();
+        let wire_id = MAX_RESERVED_MESSAGE_ID + 1;
+        let frame = compress_frame(&mut encoder, &mut Vec::new(), wire_id, &message[1..])
+            .map(|frame| BytesMut::from(frame.as_ref()))
+            .unwrap();
+        let payload_len = message.len() - 1;
+
+        let mut default_stream = stream_with_incoming(frame.clone());
+        assert!(matches!(
+            default_stream.next().await.unwrap().unwrap_err(),
+            P2PStreamError::MessageTooBig { message_size, max_size: MAX_PAYLOAD_SIZE }
+                if message_size == payload_len
+        ));
+        assert!(matches!(
+            Pin::new(&mut default_stream).start_send(Bytes::from(message.clone())).unwrap_err(),
+            P2PStreamError::MessageTooBig { max_size: MAX_PAYLOAD_SIZE, .. }
+        ));
+
+        let mut raised_stream = stream_with_incoming(frame);
+        raised_stream.set_max_payload_size(2 * MAX_PAYLOAD_SIZE);
+        assert!(raised_stream.next().await.unwrap().unwrap().as_ref() == message.as_slice());
+        Pin::new(&mut raised_stream).start_send(Bytes::from(message)).unwrap();
+    }
+
+    #[tokio::test]
+    async fn handshake_carries_max_payload_size_into_the_stream() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let message = oversized_eth_message();
+        let expected = message.clone();
+
+        let handle = tokio::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = crate::PassthroughCodec::default().framed(incoming);
+            let (server_hello, _) = eth_hello();
+            let (mut p2p_stream, _) = UnauthedP2PStream::new(stream)
+                .with_max_payload_size(2 * MAX_PAYLOAD_SIZE)
+                .handshake(server_hello)
+                .await
+                .unwrap();
+            assert!(p2p_stream.next().await.unwrap().unwrap().as_ref() == expected.as_slice());
+        });
+
+        let outgoing = TcpStream::connect(local_addr).await.unwrap();
+        let sink = crate::PassthroughCodec::default().framed(outgoing);
+        let (client_hello, _) = eth_hello();
+        let (mut p2p_stream, _) = UnauthedP2PStream::new(sink)
+            .with_max_payload_size(2 * MAX_PAYLOAD_SIZE)
+            .handshake(client_hello)
+            .await
+            .unwrap();
+        p2p_stream.send(Bytes::from(message)).await.unwrap();
+
         handle.await.unwrap();
     }
 
