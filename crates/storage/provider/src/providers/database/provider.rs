@@ -4514,6 +4514,7 @@ mod tests {
     use reth_primitives_traits::{SealedBlock, SealedHeader};
     use reth_storage_api::{
         DatabaseProviderFactory, DurableBlockReader, MetadataWriter, StateProviderFactory,
+        StateReader,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
@@ -6745,6 +6746,23 @@ mod tests {
                 );
             }
         }
+
+        // A block reloaded from disk keeps its wipe, so persisting it again wipes the storage and
+        // records the storage wipe changesets.
+        let outcome = blockchain_provider.get_state(3).unwrap().unwrap();
+        assert!(outcome.bundle.state[&address].was_destroyed());
+        assert!(outcome.bundle.reverts[0]
+            .iter()
+            .any(|(revert_address, revert)| *revert_address == address && revert.wipe_storage));
+        let hashed_state = blockchain_provider
+            .history_by_block_number(2)
+            .unwrap()
+            .hashed_post_state(&outcome.bundle)
+            .unwrap();
+        assert_eq!(
+            hashed_state.storages[&hashed_address].storage.get(&hashed_slot(k1)),
+            Some(&U256::ZERO)
+        );
         drop(blockchain_provider);
         drop(provider);
 

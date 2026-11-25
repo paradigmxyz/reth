@@ -13,7 +13,9 @@ use crate::{
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
-use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256};
+use alloy_primitives::{
+    map::AddressSet, Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256,
+};
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ExecutedBlock, ForkChoiceNotifications,
     ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
@@ -36,6 +38,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::{OverlayStateProvider, OverlayStateProviderFactory, OwnedProvider};
 use reth_trie::{
+    bundle_state::AccountStatus,
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,
     proof::{Proof, StorageProof},
@@ -1145,7 +1148,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         )?;
         let receipts = provider.receipts_by_tx_range(block_body.tx_num_range())?;
 
-        Ok(Some(ExecutionOutcome::new_init(
+        let mut outcome = ExecutionOutcome::new_init(
             state,
             reverts,
             // We skip new contracts since we never delete them from the database
@@ -1153,7 +1156,28 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
             vec![receipts],
             block,
             Vec::new(),
-        )))
+        );
+        // The storage changeset lacks the slots a wipe destroyed without loading them, so the
+        // accounts with storage wipe changesets are marked as wiped. Otherwise persisting the
+        // block again, after an unwind restored those slots, would neither wipe nor record them.
+        let wiped = provider
+            .storage_wipe_changesets_range(block..=block)?
+            .into_iter()
+            .map(|(key, _)| key.address())
+            .collect::<AddressSet>();
+        for (address, account) in &mut outcome.bundle.state {
+            if wiped.contains(address) {
+                account.status = if account.info.is_some() {
+                    AccountStatus::DestroyedChanged
+                } else {
+                    AccountStatus::Destroyed
+                };
+            }
+        }
+        for (address, revert) in outcome.bundle.reverts.iter_mut().flatten() {
+            revert.wipe_storage |= wiped.contains(address);
+        }
+        Ok(Some(outcome))
     }
 }
 
