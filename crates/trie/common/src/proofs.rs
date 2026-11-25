@@ -462,22 +462,11 @@ impl DecodedMultiProofV2 {
 
     /// Construct an account proof from the V2 multiproof.
     ///
-    /// Same as [`Self::account_proof_with`] with `drop_excluded_branches` set.
-    pub fn account_proof(
-        &self,
-        address: Address,
-        slots: &[B256],
-    ) -> Result<AccountProof, alloy_rlp::Error> {
-        self.account_proof_with(address, slots, true)
-    }
-
-    /// Construct an account proof from the V2 multiproof.
-    ///
     /// When `drop_excluded_branches` is `false`, an extension on a requested path is followed by
     /// its child branch even when the path diverges within the extension key. This is the proof
     /// shape from before extensions and branches were separate proof nodes. The branch is only
     /// emitted if the multiproof holds it.
-    pub fn account_proof_with(
+    pub fn account_proof(
         &self,
         address: Address,
         slots: &[B256],
@@ -1267,7 +1256,7 @@ mod tests {
             ..Default::default()
         };
 
-        let proof = multiproof.account_proof(Address::ZERO, &[]).unwrap();
+        let proof = multiproof.account_proof(Address::ZERO, &[], true).unwrap();
 
         assert_eq!(proof.proof, vec![Bytes::from(extension_rlp), Bytes::from(branch_rlp)]);
         assert!(proof.info.is_none());
@@ -1304,11 +1293,11 @@ mod tests {
             storage_proofs: B256Map::from_iter([(hashed_address, storage_nodes)]),
         };
 
-        let proof = multiproof.account_proof_with(Address::ZERO, &[B256::ZERO], true).unwrap();
+        let proof = multiproof.account_proof(Address::ZERO, &[B256::ZERO], true).unwrap();
         assert_eq!(proof.proof, vec![account_extension.clone()]);
         assert_eq!(proof.storage_proofs[0].proof, vec![storage_extension.clone()]);
 
-        let proof = multiproof.account_proof_with(Address::ZERO, &[B256::ZERO], false).unwrap();
+        let proof = multiproof.account_proof(Address::ZERO, &[B256::ZERO], false).unwrap();
         assert_eq!(proof.proof, vec![account_extension, account_branch]);
         assert_eq!(proof.storage_proofs[0].proof, vec![storage_extension, storage_branch]);
     }
