@@ -15,6 +15,83 @@ macro_rules! once {
     }};
 }
 
+/// CPUs reserved for latency-critical threads, set by [`reserve_critical_cpus`].
+static RESERVED_CPUS: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
+
+/// Reserves the first `count` CPUs of the process's affinity mask for latency-critical threads
+/// (the engine and the payload builder). Their hyperthread siblings are left idle, and the
+/// calling thread, and every thread it spawns later, is restricted to the remaining CPUs.
+///
+/// Call it at startup, before any other thread is spawned. Linux only; a no-op elsewhere or if
+/// fewer than `count` + 2 cores remain.
+pub fn reserve_critical_cpus(count: usize) {
+    #[cfg(target_os = "linux")]
+    // SAFETY: sched_getaffinity/sched_setaffinity on the calling thread with a valid cpu_set_t.
+    unsafe {
+        let mut set: libc::cpu_set_t = std::mem::zeroed();
+        if libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut set) != 0 {
+            return
+        }
+        let allowed: Vec<usize> =
+            (0..libc::CPU_SETSIZE as usize).filter(|&c| libc::CPU_ISSET(c, &set)).collect();
+        let siblings = |cpu: usize| -> Vec<usize> {
+            let path = format!("/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list");
+            let Ok(list) = std::fs::read_to_string(path) else { return vec![cpu] };
+            list.trim()
+                .split(',')
+                .flat_map(|part| match part.split_once('-') {
+                    Some((a, b)) => {
+                        let (a, b) = (a.parse().unwrap_or(cpu), b.parse().unwrap_or(cpu));
+                        (a..=b).collect::<Vec<_>>()
+                    }
+                    None => vec![part.parse().unwrap_or(cpu)],
+                })
+                .collect()
+        };
+        let mut reserved = Vec::new();
+        let mut excluded = std::collections::HashSet::new();
+        for &cpu in &allowed {
+            if reserved.len() == count {
+                break
+            }
+            if excluded.contains(&cpu) {
+                continue
+            }
+            reserved.push(cpu);
+            excluded.extend(siblings(cpu));
+            excluded.insert(cpu);
+        }
+        let rest: Vec<usize> = allowed.iter().copied().filter(|c| !excluded.contains(c)).collect();
+        if reserved.len() < count || rest.len() < 4 {
+            return
+        }
+        let mut rest_set: libc::cpu_set_t = std::mem::zeroed();
+        for &c in &rest {
+            libc::CPU_SET(c, &mut rest_set);
+        }
+        if libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &rest_set) == 0 {
+            tracing::info!(?reserved, ?rest, "reserved CPUs for critical threads");
+            let _ = RESERVED_CPUS.set(reserved);
+        }
+    }
+}
+
+/// Pins the calling thread to reserved critical CPU `slot`, if [`reserve_critical_cpus`] reserved
+/// one. No-op otherwise.
+pub fn pin_current_thread_to_reserved_cpu(slot: usize) {
+    #[cfg(target_os = "linux")]
+    if let Some(&cpu) = RESERVED_CPUS.get().and_then(|cpus| cpus.get(slot)) {
+        // SAFETY: sched_setaffinity on the calling thread with a valid cpu_set_t.
+        unsafe {
+            let mut set: libc::cpu_set_t = std::mem::zeroed();
+            libc::CPU_SET(cpu, &mut set);
+            libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &set);
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = slot;
+}
+
 /// Increases the current thread's priority.
 ///
 /// Tries [`ThreadPriority::Max`] first. If that fails (e.g. missing `CAP_SYS_NICE`),

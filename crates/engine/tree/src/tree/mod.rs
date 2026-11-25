@@ -461,6 +461,7 @@ where
         );
         let incoming = task.incoming_tx.clone();
         spawn_os_thread("engine", || {
+            reth_tasks::utils::pin_current_thread_to_reserved_cpu(0);
             increase_thread_priority();
             task.run()
         });
