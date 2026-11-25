@@ -76,6 +76,36 @@ pub fn reserve_critical_cpus(count: usize) {
     }
 }
 
+/// Restricts the calling thread, and every thread it spawns later, to one hardware thread per
+/// physical core of the process's affinity mask, so no two threads share a core. Linux only.
+pub fn restrict_to_physical_cores() {
+    #[cfg(target_os = "linux")]
+    // SAFETY: sched_getaffinity/sched_setaffinity on the calling thread with a valid cpu_set_t.
+    unsafe {
+        let mut set: libc::cpu_set_t = std::mem::zeroed();
+        if libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut set) != 0 {
+            return
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut keep: libc::cpu_set_t = std::mem::zeroed();
+        let mut kept = 0;
+        for cpu in 0..libc::CPU_SETSIZE as usize {
+            if !libc::CPU_ISSET(cpu, &set) {
+                continue
+            }
+            let path = format!("/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list");
+            let key = std::fs::read_to_string(path).unwrap_or_else(|_| cpu.to_string());
+            if seen.insert(key.trim().to_string()) {
+                libc::CPU_SET(cpu, &mut keep);
+                kept += 1;
+            }
+        }
+        if kept >= 2 {
+            libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &keep);
+        }
+    }
+}
+
 /// Pins the calling thread to reserved critical CPU `slot`, if [`reserve_critical_cpus`] reserved
 /// one. No-op otherwise.
 pub fn pin_current_thread_to_reserved_cpu(slot: usize) {
