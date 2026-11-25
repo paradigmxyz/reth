@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 // Two escaped input strings leave at least 5536 bytes for native request metadata.
 const MAX_INPUT_BYTES: usize = 28_672;
 const MAX_ESCAPED_INPUT_BYTES: usize = 30_000;
-const OPERATORS: [&str; 13] = [
+const OPERATORS: [&str; 14] = [
     "action.insert",
     "action.remove",
     "action.duplicate",
@@ -20,6 +20,7 @@ const OPERATORS: [&str; 13] = [
     "update.remove",
     "update.duplicate",
     "update.crossover",
+    "update.lifecycle",
     "key.update",
     "key.prefix",
     "value.update",
@@ -97,18 +98,31 @@ pub(crate) fn sites(input: &Input, operator: &str) -> Result<Vec<Site>, Error> {
                     if operator == "update.insert" && updates.len() < 4 {
                         paths.push(path.clone());
                     }
-                    for index in 0..updates.len() {
+                    for (index, update) in updates.iter().enumerate() {
                         let mut path = path.clone();
                         path.extend(["updates".into(), index.to_string()]);
                         match operator {
                             "update.remove" => paths.push(path),
                             "update.duplicate" if updates.len() < 4 => paths.push(path),
                             "update.crossover" => paths.push(path),
-                            "key.update" | "key.prefix" => {
-                                path.push("key".into());
+                            "update.lifecycle"
+                                if matches!(
+                                    update,
+                                    Change::Account { .. } | Change::DeleteAccount { .. }
+                                ) =>
+                            {
                                 paths.push(path);
                             }
-                            "value.update" => {
+                            "key.update" | "key.prefix" => {
+                                let mut key = path.clone();
+                                key.push("key".into());
+                                paths.push(key);
+                                if matches!(update, Change::Storage { .. }) {
+                                    path.push("slot".into());
+                                    paths.push(path);
+                                }
+                            }
+                            "value.update" if !matches!(update, Change::DeleteAccount { .. }) => {
                                 path.push("value".into());
                                 paths.push(path);
                             }
@@ -116,9 +130,16 @@ pub(crate) fn sites(input: &Input, operator: &str) -> Result<Vec<Site>, Error> {
                         }
                     }
                 }
-                Action::Reveal { .. } if matches!(operator, "key.update" | "key.prefix") => {
-                    path.push("key".into());
-                    paths.push(path);
+                Action::Reveal { .. } | Action::Prewarm { .. }
+                    if matches!(operator, "key.update" | "key.prefix") =>
+                {
+                    let mut key = path.clone();
+                    key.push("key".into());
+                    paths.push(key);
+                    if matches!(action, Action::Prewarm { slot: Some(_), .. }) {
+                        path.push("slot".into());
+                        paths.push(path);
+                    }
                 }
                 Action::Prune { .. } if operator == "prune.update" => {
                     path.push("cutoff".into());
@@ -161,14 +182,38 @@ fn updates_mut<'a>(input: &'a mut Input, path: &[String]) -> Result<&'a mut Vec<
 }
 
 fn key_mut<'a>(input: &'a mut Input, path: &[String]) -> Result<&'a mut [u8; 32], Error> {
+    let field = path.last().map(String::as_str);
     let update = if path.len() == 6 { Some(index(path, 4)?) } else { None };
-    match (action_mut(input, path)?, update) {
-        (Action::Reveal { key }, None) => Ok(key),
-        (Action::UpdateBatch { updates }, Some(index)) => updates
-            .get_mut(index)
-            .map(|change| &mut change.key)
-            .ok_or(Error::Invalid("invalid mutation path")),
+    match (action_mut(input, path)?, update, field) {
+        (Action::Reveal { key } | Action::Prewarm { key, .. }, None, Some("key")) => Ok(key),
+        (Action::Prewarm { slot: Some(slot), .. }, None, Some("slot")) => Ok(&mut slot.0),
+        (Action::UpdateBatch { updates }, Some(index), field) => {
+            match (updates.get_mut(index), field) {
+                (
+                    Some(
+                        Change::Account { key, .. } |
+                        Change::DeleteAccount { key } |
+                        Change::Storage { key, .. } |
+                        Change::Leaf { key, .. },
+                    ),
+                    Some("key"),
+                ) => Ok(key),
+                (Some(Change::Storage { slot, .. }), Some("slot")) => Ok(slot),
+                _ => Err(Error::Invalid("mutation needs a key")),
+            }
+        }
         _ => Err(Error::Invalid("mutation needs a key")),
+    }
+}
+
+fn value_mut<'a>(input: &'a mut Input, path: &[String]) -> Result<&'a mut [u8; 32], Error> {
+    match updates_mut(input, path)?.get_mut(index(path, 4)?) {
+        Some(
+            Change::Account { value, .. } |
+            Change::Storage { value, .. } |
+            Change::Leaf { value, .. },
+        ) => Ok(value),
+        _ => Err(Error::Invalid("mutation needs a value")),
     }
 }
 
@@ -195,12 +240,13 @@ pub(crate) fn mutate(
         "action.insert" => {
             let at = (random % (input.rounds[round].len() + 1) as u64) as usize;
             let mut generated = Input::generate(seed);
-            let action = match mix(random) % 6 {
+            let action = match mix(random) % 7 {
                 0 => generated.rounds[round].remove(0),
                 1 => Action::Reveal { key: [random as u8; 32] },
                 2 => Action::Prune { cutoff: mix(random) % 200 },
                 3 => Action::Snapshot,
                 4 => Action::Clone,
+                5 => Action::Prewarm { key: [random as u8; 32], slot: None },
                 _ => Action::TrackingReset,
             };
             input.rounds[round].insert(at, action);
@@ -259,6 +305,18 @@ pub(crate) fn mutate(
                 }
             }
         }
+        "update.lifecycle" => {
+            let update = &mut updates_mut(&mut input, path)?[index(path, 4)?];
+            *update = match *update {
+                Change::Account { key, .. } => Change::DeleteAccount { key },
+                Change::DeleteAccount { key } => Change::Account {
+                    key,
+                    nonce: 1,
+                    value: alloy_primitives::U256::ONE.to_be_bytes(),
+                },
+                _ => return Err(Error::Invalid("mutation needs an account lifecycle update")),
+            };
+        }
         "key.update" => {
             let key = key_mut(&mut input, path)?;
             key[(random % 32) as usize] ^= 1 << (mix(random) % 8);
@@ -275,8 +333,7 @@ pub(crate) fn mutate(
             }
         }
         "value.update" => {
-            let at = index(path, 4)?;
-            let value = &mut updates_mut(&mut input, path)?[at].value;
+            let value = value_mut(&mut input, path)?;
             let old = *value;
             match random % 5 {
                 0 => *value = [0; 32],
@@ -346,19 +403,20 @@ mod tests {
 
     #[test]
     fn largest_generated_action_shape_fits_two_input_request() {
-        let change = Change { key: [255; 32], value: [255; 32] };
+        let change = Change::Storage { key: [255; 32], slot: [255; 32], value: [255; 32] };
         let mut input = Input::generate(u64::MAX);
         input.rounds[0] = vec![Action::UpdateBatch { updates: vec![change.clone(); 4] }];
-        // Four separate update batches plus three update hints and eight unrelated hints.
-        let mut round = vec![Action::Reveal { key: [255; 32] }; 11];
+        // Four separate update batches, three storage hints and one unrelated account hint.
+        let mut round = vec![Action::Prewarm { key: [255; 32], slot: Some([255; 32].into()) }; 3];
+        round.extend(vec![Action::Prewarm { key: [255; 32], slot: None }; 1]);
         round.extend(vec![Action::UpdateBatch { updates: vec![change] }; 4]);
         input.rounds[1..].fill(round);
         let value = text(&input).unwrap();
         assert_eq!(parse(&value).unwrap(), input);
         let request = json!({"method":"mutate-input","params":{
             "args":{},"input":value,"donor":value,"operator":"update.crossover",
-            "seed":u64::MAX,"path":["rounds","15","14","updates","0"],
-            "donor_path":["rounds","15","14","updates","0"]
+            "seed":u64::MAX,"path":["rounds","15","9","updates","0"],
+            "donor_path":["rounds","15","9","updates","0"]
         }})
         .to_string();
         assert!(request.len() <= MAX_REQUEST_BYTES);
@@ -403,14 +461,13 @@ mod tests {
             let location = sites(&input, operator).unwrap().remove(0).path;
             let mut result =
                 parse(&mutate(input.clone(), operator, &location, 99, None).unwrap()).unwrap();
-            let result_key = *key_mut(&mut result, &location).unwrap();
             let mut expected = input.clone();
             if operator == "key.update" {
-                *key_mut(&mut expected, &location).unwrap() = result_key;
+                *key_mut(&mut expected, &location).unwrap() =
+                    *key_mut(&mut result, &location).unwrap();
             } else {
-                let at = index(&location, 4).unwrap();
-                updates_mut(&mut expected, &location).unwrap()[at].value =
-                    updates_mut(&mut result, &location).unwrap()[at].value;
+                *value_mut(&mut expected, &location).unwrap() =
+                    *value_mut(&mut result, &location).unwrap();
             }
             assert_eq!(result, expected);
         }
@@ -544,8 +601,14 @@ mod tests {
             "unknown mutation operator"
         );
         let mut invalid = input.clone();
-        invalid.version = 1;
+        invalid.version = 3;
         assert_eq!(text(&invalid).unwrap_err().to_string(), "unsupported input version");
+        invalid = input.clone();
+        invalid.clustered = Some(0..5);
+        assert_eq!(
+            text(&invalid).unwrap_err().to_string(),
+            "clustered episode is outside the round bounds"
+        );
         invalid = input.clone();
         invalid.rounds.pop();
         assert_eq!(text(&invalid).unwrap_err().to_string(), "input requires sixteen rounds");
@@ -577,7 +640,7 @@ mod tests {
         for actions in &mut full.rounds {
             *actions = vec![
                 Action::UpdateBatch {
-                    updates: vec![Change { key: [255; 32], value: [255; 32] }; 4]
+                    updates: vec![Change::Leaf { key: [255; 32], value: [255; 32] }; 4]
                 };
                 8
             ];
@@ -591,7 +654,7 @@ mod tests {
         for actions in &mut input.rounds {
             *actions = vec![
                 Action::UpdateBatch {
-                    updates: vec![Change { key: [255; 32], value: [255; 32] }]
+                    updates: vec![Change::Leaf { key: [255; 32], value: [255; 32] }]
                 };
                 6
             ];

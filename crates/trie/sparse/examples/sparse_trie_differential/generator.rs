@@ -1,11 +1,9 @@
-//! Stateful storage-leaf input generation with normal and clustered working-set episodes.
-//!
-//! Account identities become prehashed leaves: account-only episodes rewrite nonzero leaf values,
-//! while storage-heavy episodes can delete or rewrite those same leaves. There is no second-level
-//! slot keyspace, account metadata, prefix-preimage dataset, or background-worker scheduling here.
-//! Round boundaries replace commits; the driver retains its independent mandatory trait checks.
+//! Stateful account, storage and clustered working-set generation on prehashed keys.
 
-use super::{Action, Change, Input, INPUT_VERSION};
+use super::{
+    sparse_trie_accounts::{update_model, Model},
+    Action, Change, Input, INPUT_VERSION,
+};
 use alloy_primitives::{B256, U256};
 use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 use std::collections::BTreeSet;
@@ -16,17 +14,35 @@ const UPDATES: usize = 4;
 pub(super) fn generate(seed: u64) -> Input {
     let mut rng = StdRng::seed_from_u64(seed ^ 0x636c_7573_7465_7200);
     // Retain plain histories and at least one normal episode in every mixed history.
-    let rounds = if rng.random_ratio(1, 3) {
-        unstructured(seed, ROUNDS)
+    let (rounds, clustered) = if rng.random_ratio(1, 3) {
+        (unstructured(seed, ROUNDS), None)
     } else {
         let length = rng.random_range(6..=ROUNDS - 2);
         let episode = clustered_episode(&mut rng, length);
         let mut rounds = unstructured(seed, ROUNDS - length);
         let at = rng.random_range(1..=rounds.len());
         rounds.splice(at..at, episode);
-        rounds
+        (rounds, Some(at..at + length))
     };
-    Input { version: INPUT_VERSION, fixture_seed: seed, rounds }
+    let mut present = BTreeSet::new();
+    let valid = rounds.iter().flatten().all(|action| match action {
+        Action::UpdateBatch { updates } => updates.iter().all(|change| match change {
+            Change::Account { key, .. } => {
+                present.insert(*key);
+                true
+            }
+            Change::DeleteAccount { key } => {
+                present.remove(key);
+                true
+            }
+            Change::Storage { key, .. } => present.contains(key),
+            Change::Leaf { .. } => unreachable!(),
+        }),
+        _ => true,
+    });
+    let (rounds, clustered) =
+        if valid { (rounds, clustered) } else { (unstructured(seed, ROUNDS), None) };
+    Input { version: INPUT_VERSION, fixture_seed: seed, clustered, rounds }
 }
 
 fn unstructured(seed: u64, rounds: usize) -> Vec<Vec<Action>> {
@@ -38,15 +54,18 @@ fn unstructured(seed: u64, rounds: usize) -> Vec<Vec<Action>> {
     let mut population = population.into_iter().collect::<Vec<_>>();
     population.shuffle(&mut population_rng);
     let mut introduced = population_rng.random_range(1..=population.len().min(32).min(UPDATES));
-    let mut known = population[..introduced].iter().copied().collect::<BTreeSet<_>>();
+    let mut state = Model::new();
     let initialized = population[..introduced]
         .iter()
-        .map(|key| Change { key: key.0, value: U256::ONE.to_be_bytes() })
-        .collect();
+        .map(|key| Change::Account { key: key.0, nonce: 1, value: U256::ONE.to_be_bytes() })
+        .collect::<Vec<_>>();
+    for change in &initialized {
+        update_model(&mut state, change);
+    }
     let mut rounds_out = vec![vec![Action::UpdateBatch { updates: initialized }]];
     let mut hot = Vec::new();
     let mut remaining = 0;
-    let mut rewrite_weight = 0;
+    let mut account_weight = 0;
     let mut rotating = 0;
     for number in 1..rounds {
         if remaining == 0 {
@@ -59,7 +78,7 @@ fn unstructured(seed: u64, rounds: usize) -> Vec<Vec<Action>> {
             } else {
                 population_rng.random_range(1..=available)
             };
-            rewrite_weight = population_rng.random_range(0..=4);
+            account_weight = population_rng.random_range(0..=4);
         }
         remaining -= 1;
         let mut active = Vec::new();
@@ -84,18 +103,26 @@ fn unstructured(seed: u64, rounds: usize) -> Vec<Vec<Action>> {
             }
         }
         let mut rng = StdRng::seed_from_u64(seed.wrapping_add(number as u64));
-        let generated = generate_updates(&mut rng, &mut known, &active, rewrite_weight);
-        let mut targets = generated.iter().map(|update| B256::from(update.key)).collect::<Vec<_>>();
+        let generated = generate_updates(&mut rng, &mut state, &active, account_weight);
+        let mut targets = generated
+            .iter()
+            .map(|update| {
+                let slot = match update {
+                    Change::Storage { slot, .. } => Some(B256::from(*slot)),
+                    _ => None,
+                };
+                (B256::from(update.key()), slot)
+            })
+            .collect::<Vec<_>>();
         targets.shuffle(&mut rng);
         targets.truncate(rng.random_range(1..targets.len()));
-        for _ in 0..rng.random_range(1..=8) {
-            // These hints deliberately miss the population, including future introductions.
-            let mut key = B256::from(rng.random::<[u8; 32]>());
-            while population.contains(&key) || targets.contains(&key) {
-                key = B256::from(rng.random::<[u8; 32]>());
-            }
-            targets.push(key);
+        // Bound the wider account/slot hints so the worst case fits the native request.
+        // This hint deliberately misses the population, including future introductions.
+        let mut key = B256::from(rng.random::<[u8; 32]>());
+        while population.contains(&key) || targets.iter().any(|(target, _)| *target == key) {
+            key = B256::from(rng.random::<[u8; 32]>());
         }
+        targets.push((key, None));
         targets.shuffle(&mut rng);
         let mut targets = targets.into_iter().peekable();
         let mut updates = generated.into_iter().peekable();
@@ -103,8 +130,12 @@ fn unstructured(seed: u64, rounds: usize) -> Vec<Vec<Action>> {
         while targets.peek().is_some() || updates.peek().is_some() {
             if targets.peek().is_some() && (updates.peek().is_none() || rng.random_bool(0.5)) {
                 let size = rng.random_range(1..=targets.len().min(16));
-                actions
-                    .extend(targets.by_ref().take(size).map(|key| Action::Reveal { key: key.0 }));
+                actions.extend(
+                    targets
+                        .by_ref()
+                        .take(size)
+                        .map(|(key, slot)| Action::Prewarm { key: key.0, slot }),
+                );
             } else {
                 let size = rng.random_range(1..=updates.len().min(16));
                 actions
@@ -119,14 +150,16 @@ fn unstructured(seed: u64, rounds: usize) -> Vec<Vec<Action>> {
 fn clustered_episode(rng: &mut StdRng, rounds: usize) -> Vec<Vec<Action>> {
     let leaves = clustered_keys(rng);
     let targets = clustered_targets(rng, leaves, rounds);
-    let mut known = BTreeSet::new();
+    let mut state = Model::new();
     targets
         .into_iter()
         .map(|active| {
-            let generated = generate_updates(rng, &mut known, &active, 4);
+            let generated = generate_updates(rng, &mut state, &active, 4);
             let mut actions = Vec::new();
             if rng.random_bool(0.5) {
-                actions.extend(active.into_iter().map(|key| Action::Reveal { key: key.0 }));
+                actions.extend(
+                    active.into_iter().map(|key| Action::Prewarm { key: key.0, slot: None }),
+                );
             }
             actions.push(Action::UpdateBatch { updates: generated });
             actions
@@ -185,24 +218,42 @@ fn clustered_keys(rng: &mut StdRng) -> Vec<B256> {
 
 fn generate_updates(
     rng: &mut StdRng,
-    known: &mut BTreeSet<B256>,
+    known: &mut Model,
     active: &[B256],
     rewrite_weight: u32,
 ) -> Vec<Change> {
     (0..UPDATES)
         .map(|index| {
-            // Visit every active leaf before drawing repeats; cold identities stay untouched.
             let key = active
                 [if index < active.len() { index } else { rng.random_range(0..active.len()) }];
-            // Remember identities after zero writes, just like account/touched-slot history.
-            let value = if known.insert(key) || rng.random_ratio(rewrite_weight, 4) {
-                rng.random_range(1..=1_000_000u64)
-            } else if rng.random_ratio(1, 3) {
-                0
+            // Account removal precedes metadata/storage weighting, including clustered episodes.
+            let change = if known.contains_key(&key) && rng.random_ratio(1, 8) {
+                Change::DeleteAccount { key: key.0 }
+            } else if !known.contains_key(&key) || rng.random_ratio(rewrite_weight, 4) {
+                Change::Account {
+                    key: key.0,
+                    nonce: known.get(&key).map_or(1, |account| account.nonce + 1),
+                    value: U256::from(rng.random_range(1..=1_000_000u64)).to_be_bytes(),
+                }
             } else {
-                rng.random::<u64>()
+                let touched = &known[&key].touched;
+                let slot = if !touched.is_empty() && rng.random_bool(0.5) {
+                    *touched
+                        .iter()
+                        .nth(rng.random_range(0..touched.len()))
+                        .expect("bounded slot index")
+                } else {
+                    B256::from(rng.random::<[u8; 32]>())
+                };
+                let value = if rng.random_ratio(1, 3) {
+                    U256::ZERO
+                } else {
+                    U256::from(rng.random::<u64>())
+                };
+                Change::Storage { key: key.0, slot: slot.0, value: value.to_be_bytes() }
             };
-            Change { key: key.0, value: U256::from(value).to_be_bytes() }
+            update_model(known, &change);
+            change
         })
         .collect()
 }
@@ -213,146 +264,39 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
-    fn histories_are_deterministic_bounded_and_keep_initialization() {
-        let mut plain = false;
-        let mut mixed = false;
-        for seed in (0..128).chain([u64::MAX]) {
+    fn generated_histories_include_clustered_deletions_and_storage_wipes() {
+        let mut deleted = false;
+        let mut recreated = false;
+        let mut wiped = false;
+        let mut clustered_delete = false;
+        for seed in 0..128 {
             let input = generate(seed);
             assert_eq!(input, generate(seed));
-            assert_eq!(input.version, INPUT_VERSION);
-            assert_eq!(input.fixture_seed, seed);
-            assert_eq!(input.rounds.len(), ROUNDS);
-            let initialized = updates(&input.rounds[0]);
-            assert!((1..=UPDATES).contains(&initialized.len()));
-            assert!(initialized
-                .iter()
-                .all(|update| U256::from_be_bytes(update.value) == U256::ONE));
-            for (number, round) in input.rounds.iter().enumerate() {
-                assert!(!round.is_empty() && round.len() <= 32);
-                assert!(round.iter().all(|action| match action {
-                    Action::UpdateBatch { updates } =>
-                        !updates.is_empty() && updates.len() <= UPDATES,
-                    Action::Reveal { .. } => true,
-                    _ => false,
-                }));
-                if number != 0 {
-                    assert_eq!(updates(round).len(), UPDATES);
-                }
-            }
-            let normal = unstructured(seed, ROUNDS);
-            plain |= input.rounds == normal;
-            mixed |= input.rounds != normal;
-        }
-        assert!(plain && mixed);
-    }
-
-    #[test]
-    fn normal_episodes_stage_rotate_persist_and_interleave() {
-        let mut staged = false;
-        let mut persisted = false;
-        let mut rotated = false;
-        let mut deletion = false;
-        let mut reveal_before = false;
-        let mut reveal_after = false;
-        let mut sizes = BTreeSet::new();
-        for seed in 0..128 {
-            let rounds = unstructured(seed, ROUNDS);
-            let mut known = updates(&rounds[0]).iter().map(|u| u.key).collect::<BTreeSet<_>>();
-            let mut previous = known.clone();
-            for round in &rounds[1..] {
-                let generated = updates(round);
-                let active = generated.iter().map(|u| u.key).collect::<BTreeSet<_>>();
-                assert_eq!(generated.len(), UPDATES);
-                assert!(!active.is_empty() && active.len() <= UPDATES);
-                sizes.insert(active.len());
-                staged |= !active.is_subset(&known);
-                persisted |= !active.is_disjoint(&previous);
-                rotated |= !previous.is_subset(&active);
-                deletion |= generated.iter().any(|u| u.value == [0; 32]);
-                let hints = round
-                    .iter()
-                    .filter_map(|action| match action {
-                        Action::Reveal { key } => Some(*key),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
-                assert!((2..=11).contains(&hints.len()));
-                assert!(hints.iter().any(|key| active.contains(key)));
-                assert!(hints.iter().any(|key| !active.contains(key)));
-                reveal_before |= matches!(round.first(), Some(Action::Reveal { .. }));
-                reveal_after |= matches!(round.last(), Some(Action::Reveal { .. }));
-                known.extend(&active);
-                previous = active;
-            }
-        }
-        assert!(staged && persisted && rotated && deletion);
-        assert!(reveal_before && reveal_after);
-        assert_eq!(sizes, BTreeSet::from([1, 2, 3, 4]));
-    }
-
-    #[test]
-    fn leaf_updates_visit_active_before_repeating_and_remember_touched() {
-        let active = (1..=3).map(B256::with_last_byte).collect::<Vec<_>>();
-        let mut deletion = false;
-        let mut storage_value = false;
-        for seed in 0..128 {
-            for weight in 0..=4 {
-                let mut known = active.iter().copied().collect::<BTreeSet<_>>();
-                let mut expected_known = known.clone();
-                let generated =
-                    generate_updates(&mut StdRng::seed_from_u64(seed), &mut known, &active, weight);
-                assert_eq!(
-                    generated
-                        .iter()
-                        .take(active.len())
-                        .map(|u| B256::from(u.key))
-                        .collect::<Vec<_>>(),
-                    active
-                );
-                for update in generated {
-                    let key = B256::from(update.key);
-                    let value = U256::from_be_bytes(update.value);
-                    if weight == 4 || !expected_known.contains(&key) {
-                        assert!((U256::ONE..=U256::from(1_000_000)).contains(&value));
+            input.validate().unwrap();
+            let mut state = Model::new();
+            let mut removed = BTreeSet::new();
+            for change in input.rounds.iter().flatten().flat_map(|action| match action {
+                Action::UpdateBatch { updates } => updates.as_slice(),
+                _ => &[],
+            }) {
+                let key = B256::from(change.key());
+                match change {
+                    Change::DeleteAccount { .. } => {
+                        deleted = true;
+                        wiped |= state.get(&key).is_some_and(|account| !account.storage.is_empty());
+                        removed.insert(key);
                     }
-                    deletion |= value.is_zero();
-                    storage_value |= value > U256::from(1_000_000);
-                    expected_known.insert(key);
+                    Change::Account { .. } => recreated |= removed.contains(&key),
+                    Change::Storage { .. } => assert!(state.contains_key(&key)),
+                    Change::Leaf { .. } => unreachable!(),
                 }
-                assert_eq!(known, expected_known);
-                let mut absent = BTreeSet::new();
-                let created = generate_updates(
-                    &mut StdRng::seed_from_u64(seed),
-                    &mut absent,
-                    &active,
-                    weight,
-                );
-                assert!(created[..active.len()].iter().all(|u| u.value != [0; 32]));
+                update_model(&mut state, change);
             }
-        }
-        assert!(deletion && storage_value);
-    }
-
-    #[test]
-    fn touched_leaves_allow_repeated_deletions() {
-        let active = [B256::with_last_byte(1)];
-        let mut repeated_deletion = false;
-        for seed in 0..128 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let mut known = BTreeSet::new();
-            let mut previous = None;
-            for _ in 0..4 {
-                for update in generate_updates(&mut rng, &mut known, &active, 0) {
-                    if previous.is_none() {
-                        assert_ne!(update.value, [0; 32], "first write creates the leaf");
-                    }
-                    repeated_deletion |= previous == Some([0; 32]) && update.value == [0; 32];
-                    previous = Some(update.value);
-                    assert_eq!(known, BTreeSet::from(active));
-                }
-            }
+            clustered_delete |= clustered_episode(&mut rng, 14).iter().flatten().any(|action|
+                matches!(action, Action::UpdateBatch { updates } if updates.iter().any(|change| matches!(change, Change::DeleteAccount { .. }))));
         }
-        assert!(repeated_deletion, "zero writes must not forget touched identities");
+        assert!(deleted && recreated && wiped && clustered_delete);
     }
 
     #[test]
@@ -430,6 +374,83 @@ mod tests {
     }
 
     #[test]
+    fn initialization_and_working_sets_stay_bounded() {
+        let mut plain = false;
+        let mut mixed = false;
+        let mut sizes = BTreeSet::new();
+        for seed in 0..128 {
+            let input = generate(seed);
+            plain |= input.clustered.is_none();
+            mixed |= input.clustered.is_some();
+            let Action::UpdateBatch { updates } = &input.rounds[0][0] else {
+                panic!("initialization batch")
+            };
+            assert!((1..=UPDATES).contains(&updates.len()));
+            assert!(updates
+                .iter()
+                .all(|change| matches!(change, Change::Account { nonce: 1, .. })));
+            for actions in &input.rounds[1..] {
+                let changes = actions
+                    .iter()
+                    .flat_map(|action| match action {
+                        Action::UpdateBatch { updates } => updates.as_slice(),
+                        _ => &[],
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(changes.len(), UPDATES);
+                let active = changes.iter().map(|change| change.key()).collect::<BTreeSet<_>>();
+                sizes.insert(active.len());
+            }
+        }
+        assert!(plain && mixed);
+        assert_eq!(sizes, BTreeSet::from([1, 2, 3, 4]));
+    }
+
+    #[test]
+    fn normal_episodes_stage_rotate_persist_and_interleave() {
+        let mut staged = false;
+        let mut persisted = false;
+        let mut rotated = false;
+        let mut deletion = false;
+        let mut reveal_before = false;
+        let mut reveal_after = false;
+        let mut sizes = BTreeSet::new();
+        for seed in 0..128 {
+            let rounds = unstructured(seed, ROUNDS);
+            let mut known = updates(&rounds[0]).iter().map(|u| u.key()).collect::<BTreeSet<_>>();
+            let mut previous = known.clone();
+            for round in &rounds[1..] {
+                let generated = updates(round);
+                let active = generated.iter().map(|u| u.key()).collect::<BTreeSet<_>>();
+                assert_eq!(generated.len(), UPDATES);
+                assert!(!active.is_empty() && active.len() <= UPDATES);
+                sizes.insert(active.len());
+                staged |= !active.is_subset(&known);
+                persisted |= !active.is_disjoint(&previous);
+                rotated |= !previous.is_subset(&active);
+                deletion |= generated.iter().any(|u| matches!(u, Change::DeleteAccount { .. }));
+                let hints = round
+                    .iter()
+                    .filter_map(|action| match action {
+                        Action::Prewarm { key, .. } => Some(*key),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert!((2..=4).contains(&hints.len()));
+                assert!(hints.iter().any(|key| active.contains(key)));
+                assert!(hints.iter().any(|key| !active.contains(key)));
+                reveal_before |= matches!(round.first(), Some(Action::Prewarm { .. }));
+                reveal_after |= matches!(round.last(), Some(Action::Prewarm { .. }));
+                known.extend(&active);
+                previous = active;
+            }
+        }
+        assert!(staged && persisted && rotated && deletion);
+        assert!(reveal_before && reveal_after);
+        assert_eq!(sizes, BTreeSet::from([1, 2, 3, 4]));
+    }
+
+    #[test]
     fn mixed_histories_splice_whole_clustered_rounds_and_retain_normal_episodes() {
         let mut lengths = BTreeSet::new();
         let mut prewarmed = false;
@@ -447,16 +468,21 @@ mod tests {
             let at = rng.random_range(1..=normal.len());
             let input = generate(seed);
             assert!(normal.len() >= 2);
+            if input.clustered.is_none() {
+                assert_eq!(input.rounds, unstructured(seed, ROUNDS));
+                continue;
+            }
+            assert_eq!(input.clustered, Some(at..at + length));
             assert_eq!(input.rounds[..at], normal[..at]);
             assert_eq!(input.rounds[at..at + length], episode);
             assert_eq!(input.rounds[at + length..], normal[at..]);
             for round in episode {
                 let generated = updates(&round);
                 assert_eq!(generated.len(), UPDATES);
-                assert!(generated
-                    .iter()
-                    .all(|u| (U256::ONE..=U256::from(1_000_000))
-                        .contains(&U256::from_be_bytes(u.value))));
+                assert!(generated.iter().all(|change| matches!(
+                    change,
+                    Change::Account { .. } | Change::DeleteAccount { .. }
+                )));
                 assert!(matches!(round.last(), Some(Action::UpdateBatch { .. })));
                 assert_eq!(
                     round
@@ -468,7 +494,7 @@ mod tests {
                 let hints = round
                     .iter()
                     .filter_map(|action| match action {
-                        Action::Reveal { key } => Some(*key),
+                        Action::Prewarm { key, .. } => Some(*key),
                         _ => None,
                     })
                     .collect::<BTreeSet<_>>();
@@ -476,7 +502,7 @@ mod tests {
                     cold = true;
                 } else {
                     prewarmed = true;
-                    assert_eq!(hints, generated.iter().map(|u| u.key).collect());
+                    assert_eq!(hints, generated.iter().map(|u| u.key()).collect());
                 }
             }
         }
@@ -492,5 +518,74 @@ mod tests {
                 _ => [].iter(),
             })
             .collect()
+    }
+
+    #[test]
+    fn lifecycle_updates_visit_active_before_repeating_and_recreate_empty() {
+        let active = (1..=3).map(B256::with_last_byte).collect::<Vec<_>>();
+        let mut deletion = false;
+        let mut storage = false;
+        for seed in 0..128 {
+            for weight in 0..=4 {
+                let mut known = Model::new();
+                for _ in 0..4 {
+                    let generated = generate_updates(
+                        &mut StdRng::seed_from_u64(seed),
+                        &mut known,
+                        &active,
+                        weight,
+                    );
+                    assert_eq!(
+                        generated
+                            .iter()
+                            .take(active.len())
+                            .map(|u| B256::from(u.key()))
+                            .collect::<Vec<_>>(),
+                        active
+                    );
+                    deletion |= generated.iter().any(|u| matches!(u, Change::DeleteAccount { .. }));
+                    storage |= generated.iter().any(|u| matches!(u, Change::Storage { .. }));
+                }
+            }
+        }
+        assert!(deletion && storage);
+        let key = active[0];
+        let mut model = Model::new();
+        update_model(
+            &mut model,
+            &Change::Account { key: key.0, nonce: 1, value: U256::ONE.to_be_bytes() },
+        );
+        update_model(
+            &mut model,
+            &Change::Storage { key: key.0, slot: [0x55; 32], value: U256::ONE.to_be_bytes() },
+        );
+        update_model(&mut model, &Change::DeleteAccount { key: key.0 });
+        let generated = generate_updates(&mut StdRng::seed_from_u64(0), &mut model, &[key], 4);
+        assert!(matches!(generated[0], Change::Account { nonce: 1, .. }));
+        assert!(model
+            .values()
+            .all(|account| account.storage.is_empty() && account.touched.is_empty()));
+    }
+
+    #[test]
+    fn touched_slots_survive_zero_writes_but_not_account_deletion() {
+        let key = [0x11; 32];
+        let slot = [0x22; 32];
+        let mut state = Model::new();
+        update_model(
+            &mut state,
+            &Change::Account { key, nonce: 1, value: U256::ONE.to_be_bytes() },
+        );
+        for value in [U256::ONE, U256::ZERO, U256::ZERO] {
+            update_model(&mut state, &Change::Storage { key, slot, value: value.to_be_bytes() });
+        }
+        assert!(state[&B256::from(key)].storage.is_empty());
+        assert_eq!(state[&B256::from(key)].touched, BTreeSet::from([B256::from(slot)]));
+        update_model(&mut state, &Change::DeleteAccount { key });
+        update_model(
+            &mut state,
+            &Change::Account { key, nonce: 1, value: U256::ONE.to_be_bytes() },
+        );
+        assert!(state[&B256::from(key)].touched.is_empty());
     }
 }

@@ -7,7 +7,7 @@ use alloy_primitives::{map::B256Map, B256, U256};
 use alloy_rlp::encode_fixed_size;
 use alloy_trie::{nodes::TrieNode, EMPTY_ROOT_HASH};
 use reth_trie::test_utils::{storage_root_prehashed, TrieTestHarness};
-use reth_trie_common::{Nibbles, ProofV2Target};
+use reth_trie_common::{Nibbles, ProofTrieNode, ProofV2Target};
 use reth_trie_sparse::{
     ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafLookup, LeafLookupError, LeafUpdate,
     PersistentArenaParallelSparseTrie, PersistentArenaParallelismThresholds, SparseTrie,
@@ -17,15 +17,23 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
+    ops::Range,
 };
+
+#[path = "sparse_trie_differential/accounts.rs"]
+mod sparse_trie_accounts;
 
 #[path = "sparse_trie_differential/generator.rs"]
 mod sparse_trie_generator;
 
 /// Stable ordered dimensions for measured, instrumented workload coverage.
 pub const COVERAGE_OPERATIONS: &[&str] = &[
+    "account_deletes",
+    "account_recreates",
+    "account_storage_wipes",
     "blocked_update_batches",
     "clear",
+    "clustered_account_deletes",
     "clone",
     "delete",
     "find_leaf",
@@ -76,7 +84,7 @@ impl Evidence {
 }
 
 /// Version of the explicit, locally mutable workload input.
-pub const INPUT_VERSION: u8 = 3;
+pub const INPUT_VERSION: u8 = 4;
 
 /// A generated fixture plus an explicit action sequence for each mandatory round.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,6 +94,9 @@ pub struct Input {
     pub version: u8,
     /// Seed for the fixed trait-check spine, never used to regenerate explicit actions.
     pub fixture_seed: u64,
+    /// Generator provenance: rounds originally drawn from the clustered episode, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clustered: Option<Range<usize>>,
     /// Exactly sixteen rounds; an empty action list leaves that round's fixed checks intact.
     pub rounds: Vec<Vec<Action>>,
 }
@@ -94,9 +105,9 @@ pub struct Input {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
-    /// Apply a batch (empty is a no-op); repeated keys use the last value in this batch.
+    /// Apply changes in order; an empty batch is a no-op.
     UpdateBatch {
-        /// At most four key/value changes, with zero values representing deletion.
+        /// At most four explicit changes.
         updates: Vec<Change>,
     },
     /// Reveal an ancestor-closed prefix of a model-derived proof, including for an absent key.
@@ -104,6 +115,15 @@ pub enum Action {
         /// Prehashed key; its final byte also selects a proof depth modulo 65.
         #[serde(with = "word")]
         key: [u8; 32],
+    },
+    /// Look up an account or reveal a model-derived path in its storage trie.
+    Prewarm {
+        /// Prehashed account key.
+        #[serde(with = "word")]
+        key: [u8; 32],
+        /// Optional prehashed storage slot; its final byte selects the storage proof depth.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slot: Option<B256>,
     },
     /// Blind nodes older than the supplied epoch.
     Prune {
@@ -118,16 +138,59 @@ pub enum Action {
     TrackingReset,
 }
 
-/// An explicit storage-leaf change; arrays keep serialization independent of alloy features.
+/// One explicitly ordered change to the account workload or to the separate storage trait spine.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Change {
-    /// Already hashed, full-width trie key.
-    #[serde(with = "word")]
-    pub key: [u8; 32],
-    /// Big-endian integer; zero deletes, nonzero is canonically RLP encoded by the driver.
-    #[serde(with = "word")]
-    pub value: [u8; 32],
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Change {
+    /// Insert or replace account metadata without changing its storage.
+    Account {
+        /// Prehashed account key.
+        #[serde(with = "word")]
+        key: [u8; 32],
+        /// The account nonce.
+        nonce: u64,
+        /// Big-endian account balance.
+        #[serde(with = "word")]
+        value: [u8; 32],
+    },
+    /// Remove the account and all of its storage.
+    DeleteAccount {
+        /// Prehashed account key to remove.
+        #[serde(with = "word")]
+        key: [u8; 32],
+    },
+    /// Change one storage slot. A zero value deletes the slot.
+    Storage {
+        /// Prehashed account key. A write to an absent account is a no-op.
+        #[serde(with = "word")]
+        key: [u8; 32],
+        /// Prehashed storage key.
+        #[serde(with = "word")]
+        slot: [u8; 32],
+        /// Big-endian storage value.
+        #[serde(with = "word")]
+        value: [u8; 32],
+    },
+    /// Mutate a leaf in the independent storage trait spine. Zero deletes it.
+    Leaf {
+        /// Prehashed storage key.
+        #[serde(with = "word")]
+        key: [u8; 32],
+        /// Big-endian storage value.
+        #[serde(with = "word")]
+        value: [u8; 32],
+    },
+}
+
+impl Change {
+    const fn key(&self) -> [u8; 32] {
+        match self {
+            Self::Account { key, .. } |
+            Self::DeleteAccount { key } |
+            Self::Storage { key, .. } |
+            Self::Leaf { key, .. } => *key,
+        }
+    }
 }
 
 impl Input {
@@ -143,6 +206,11 @@ impl Input {
         }
         if self.rounds.len() != 16 {
             return Err("input requires sixteen rounds");
+        }
+        if self.clustered.as_ref().is_some_and(|range| {
+            range.start == 0 || range.start >= range.end || range.end > self.rounds.len()
+        }) {
+            return Err("clustered episode is outside the round bounds");
         }
         for actions in &self.rounds {
             if actions.len() > 32 {
@@ -255,7 +323,15 @@ fn reveal<T: SparseTrie>(
     evidence: &mut Evidence,
 ) -> Result<(), DifferentialFailure> {
     targets.sort_by_key(|target| target.key_nibbles);
-    let (mut nodes, _) = harness.proof_v2(targets);
+    let (nodes, _) = harness.proof_v2(targets);
+    reveal_proof(trie, nodes, evidence)
+}
+
+fn reveal_proof<T: SparseTrie>(
+    trie: &mut T,
+    mut nodes: Vec<ProofTrieNode>,
+    evidence: &mut Evidence,
+) -> Result<(), DifferentialFailure> {
     // Reverse depth order deliberately: the public API accepts unsorted proofs.
     nodes.sort_by_key(|node| std::cmp::Reverse(node.path));
     for node in &nodes {
@@ -277,6 +353,21 @@ fn apply<T: SparseTrie>(
     harness: &TrieTestHarness,
     pending: &mut B256Map<LeafUpdate>,
     evidence: &mut Evidence,
+) -> Result<(), DifferentialFailure> {
+    apply_with_proofs(trie, pending, evidence, |trie, targets, evidence| {
+        reveal(trie, harness, targets, evidence)
+    })
+}
+
+fn apply_with_proofs<T: SparseTrie>(
+    trie: &mut T,
+    pending: &mut B256Map<LeafUpdate>,
+    evidence: &mut Evidence,
+    mut reveal_target: impl FnMut(
+        &mut T,
+        &mut [ProofV2Target],
+        &mut Evidence,
+    ) -> Result<(), DifferentialFailure>,
 ) -> Result<(), DifferentialFailure> {
     // Bound retries even if a backend makes no progress. A Patricia path has at most 64 nibbles.
     for _ in 0..130 {
@@ -303,7 +394,7 @@ fn apply<T: SparseTrie>(
         }
         evidence.features.insert("blinded_update_retry");
         evidence.hit("blocked_update_batches");
-        reveal(trie, harness, &mut targets, evidence)?;
+        reveal_target(trie, &mut targets, evidence)?;
     }
     Err(DifferentialFailure {
         signature: "sparse-trie/retry-bound".into(),
@@ -410,20 +501,7 @@ fn retained<T: SparseTrie>(
     changes: &BTreeMap<B256, U256>,
     evidence: &mut Evidence,
 ) -> Result<SparseTrieUpdates, DifferentialFailure> {
-    let before = trie.updates_ref().into_owned();
-    evidence.hit("updates_ref");
-    let mut updates = trie.take_updates();
-    evidence.hit("take_updates");
-    equal(updates.clone(), before, "updates-ref-take")?;
-    // Oracle minimization below ignores harmless re-emissions, but backend equivalence must not.
-    evidence.raw_updates.push(updates.clone());
-    equal(trie.take_updates(), SparseTrieUpdates::default(), "take-drains")?;
-    evidence.hit("take_updates");
-    equal(
-        updates.removed_nodes.iter().any(|path| updates.updated_nodes.contains_key(path)),
-        false,
-        "update-disjointness",
-    )?;
+    let mut updates = take_retained(trie, evidence)?;
     updates
         .updated_nodes
         .retain(|path, node| harness.storage_trie_updates().storage_nodes.get(path) != Some(node));
@@ -446,6 +524,27 @@ fn retained<T: SparseTrie>(
     Ok(updates)
 }
 
+fn take_retained<T: SparseTrie>(
+    trie: &mut T,
+    evidence: &mut Evidence,
+) -> Result<SparseTrieUpdates, DifferentialFailure> {
+    let before = trie.updates_ref().into_owned();
+    evidence.hit("updates_ref");
+    let updates = trie.take_updates();
+    evidence.hit("take_updates");
+    equal(updates.clone(), before, "updates-ref-take")?;
+    // Oracle minimization below ignores harmless re-emissions, but backend equivalence must not.
+    evidence.raw_updates.push(updates.clone());
+    equal(trie.take_updates(), SparseTrieUpdates::default(), "take-drains")?;
+    evidence.hit("take_updates");
+    equal(
+        updates.removed_nodes.iter().any(|path| updates.updated_nodes.contains_key(path)),
+        false,
+        "update-disjointness",
+    )?;
+    Ok(updates)
+}
+
 fn prune<T: SparseTrie>(trie: &mut T, cutoff: u64, evidence: &mut Evidence) -> usize {
     let count = trie.prune(epoch(cutoff));
     evidence.hit("prune");
@@ -465,9 +564,16 @@ fn randomized_actions<T: SparseTrie + Clone>(
     evidence: &mut Evidence,
 ) -> Result<(), DifferentialFailure> {
     for action in actions {
+        if matches!(action, Action::Prewarm { .. }) ||
+            matches!(action, Action::UpdateBatch { updates } if !updates.is_empty() &&
+                !updates.iter().any(|change| matches!(change, Change::Leaf { .. })))
+        {
+            continue;
+        }
         evidence.hit("scheduled_actions");
-        evidence.transcript.push(format!("scheduled-action={action:?}"));
+        evidence.transcript.push(format!("scheduled-spine-action={action:?}"));
         match action {
+            Action::Prewarm { .. } => unreachable!(),
             Action::Prune { cutoff } => {
                 prune(trie, *cutoff, evidence);
                 evidence.features.insert(if *cutoff == 0 {
@@ -479,23 +585,7 @@ fn randomized_actions<T: SparseTrie + Clone>(
             Action::Reveal { key } => {
                 let key = B256::from(*key);
                 let (mut nodes, _) = harness.proof_v2(&mut [ProofV2Target::new(key)]);
-                // Keep an ancestor-closed prefix; extension children may arrive in a later action
-                // or in the proof retry loop, rather than being forced into the same batch.
-                let depth = usize::from(key[31]) % 65;
-                if nodes.iter().any(|node| {
-                    node.path.len() <= depth &&
-                        matches!(&node.node, TrieNode::Extension(extension)
-                        if node.path.len() + extension.key.len() > depth)
-                }) {
-                    evidence.features.insert("schedule_extension_only_reveal");
-                }
-                nodes.retain(|node| node.path.len() <= depth);
-                nodes.reverse();
-                succeeded(trie.reveal_nodes(&mut nodes), "scheduled-prefix-reveal")?;
-                evidence.hit("reveal_nodes");
-                evidence.hit("proof_batches");
-                evidence.features.insert("schedule_reveal");
-                evidence.features.insert("schedule_prefix_reveal");
+                reveal_prefix(trie, &mut nodes, key, evidence)?;
             }
             Action::Snapshot | Action::Clone => {
                 let snapshot = matches!(action, Action::Snapshot);
@@ -527,7 +617,12 @@ fn randomized_actions<T: SparseTrie + Clone>(
             Action::UpdateBatch { updates } => {
                 let changes = updates
                     .iter()
-                    .map(|change| (B256::from(change.key), U256::from_be_bytes(change.value)))
+                    .filter_map(|change| match change {
+                        Change::Leaf { key, value } => {
+                            Some((B256::from(*key), U256::from_be_bytes(*value)))
+                        }
+                        _ => None,
+                    })
                     .collect::<BTreeMap<_, _>>();
                 for (key, value) in &changes {
                     evidence.hit(if value.is_zero() {
@@ -549,6 +644,32 @@ fn randomized_actions<T: SparseTrie + Clone>(
         }
         root(trie, harness.original_root(), at, evidence)?;
     }
+    Ok(())
+}
+
+fn reveal_prefix<T: SparseTrie>(
+    trie: &mut T,
+    nodes: &mut Vec<ProofTrieNode>,
+    key: B256,
+    evidence: &mut Evidence,
+) -> Result<(), DifferentialFailure> {
+    // Keep an ancestor-closed prefix; extension children may arrive in a later action
+    // or in the proof retry loop, rather than being forced into the same batch.
+    let depth = usize::from(key[31]) % 65;
+    if nodes.iter().any(|node| {
+        node.path.len() <= depth &&
+            matches!(&node.node, TrieNode::Extension(extension)
+            if node.path.len() + extension.key.len() > depth)
+    }) {
+        evidence.features.insert("schedule_extension_only_reveal");
+    }
+    nodes.retain(|node| node.path.len() <= depth);
+    nodes.reverse();
+    succeeded(trie.reveal_nodes(nodes), "scheduled-prefix-reveal")?;
+    evidence.hit("reveal_nodes");
+    evidence.hit("proof_batches");
+    evidence.features.insert("schedule_reveal");
+    evidence.features.insert("schedule_prefix_reveal");
     Ok(())
 }
 
@@ -942,6 +1063,7 @@ fn exercise<T: SparseTrie + Clone>(
         "delete_last_leaf",
         "capacity_reserve",
     ]);
+    sparse_trie_accounts::exercise(input, factory, &mut evidence)?;
     Ok(evidence)
 }
 
@@ -1331,7 +1453,8 @@ mod tests {
         );
         let mut evidence = Evidence::default();
         initialize(&mut trie, &harness, true, &mut evidence).unwrap();
-        let change = |value: u64| Change { key: key.0, value: U256::from(value).to_be_bytes() };
+        let change =
+            |value: u64| Change::Leaf { key: key.0, value: U256::from(value).to_be_bytes() };
         let actions = [
             Action::UpdateBatch { updates: vec![change(2), change(3)] },
             Action::Snapshot,

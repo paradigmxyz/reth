@@ -84,7 +84,7 @@ def main():
         mutated = []
         expected_operators = {
             'action.insert', 'action.remove', 'action.duplicate', 'action.crossover', 'action.swap',
-            'update.insert', 'update.remove', 'update.duplicate', 'update.crossover',
+            'update.insert', 'update.remove', 'update.duplicate', 'update.crossover', 'update.lifecycle',
             'key.update', 'key.prefix', 'value.update', 'prune.update',
         }
         assert {operator['name'] for operator in operators} == expected_operators
@@ -102,7 +102,7 @@ def main():
             assert isinstance(result, str) and result != fixture, name
             assert result == invoke(handle, 'mutate-input', mutation)
             original, changed = json.loads(fixture), json.loads(result)
-            assert changed['version'] == 3 and changed['fixture_seed'] == original['fixture_seed']
+            assert changed['version'] == 4 and changed['fixture_seed'] == original['fixture_seed']
             round_index = int(sites[0]['path'][1])
             assert all(changed['rounds'][i] == original['rounds'][i]
                        for i in range(16) if i != round_index), name
@@ -128,6 +128,7 @@ def main():
             edge_maps = set()
             native_slots = set()
             max_coverage_threads = 0
+            lifecycle_features = set()
             for index, value in enumerate(cases):
                 out = str(pathlib.Path(temporary) / str(index))
                 result = invoke(handle, 'execute', {'input': value, 'seed': index, 'out': out})
@@ -160,6 +161,8 @@ def main():
                 if status == 'passed':
                     report = finished['verdict']['report']
                     assert report['execution_modes'] == 2 and report['worker_threads'] == 2, report
+                    assert {'account_deleted', 'account_recreated', 'account_storage_wiped'} <= set(report['features']), report
+                    lifecycle_features.update(report['features'])
                 objectives += bool(finished['objective_signatures'])
                 if index == 0:
                     replay_input, replay_result = value, result
@@ -172,6 +175,9 @@ def main():
                                          for slot in first_counts.keys() | replay_counts.keys())
             if replay['pending']:
                 invoke(handle, 'finish', {'admitted': False, 'n': len(cases)})
+            if '--all-seeds' in sys.argv[2:]:
+                assert {'generated_account_deleted', 'generated_clustered_account_deleted',
+                        'generated_account_storage_wiped', 'generated_account_recreated'} <= lifecycle_features, lifecycle_features
             assert max_coverage_threads == 2, 'instrumented target did not reach both workers'
             assert len(layouts) == 1, 'native slot layout changed between executions'
             assert len(edge_maps) > 1, 'native counters did not respond to different inputs'

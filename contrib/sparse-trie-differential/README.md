@@ -1,6 +1,7 @@
 # Sparse trie differential workload
 
-Rift is the external coverage-guided fuzzer that loads this plugin (the **host**). It generates and mutates
+This directory is a native sparse-trie differential plugin. Rift, the external
+coverage-guided fuzzer (the **host**), loads this plugin. It generates and mutates
 inputs, runs them, and keeps inputs that expose new native code paths or semantic
 features: completed scenario names and logarithmic operation-count ranges. This
 plugin is its native adapter, loaded once into each **worker** (also called a
@@ -14,41 +15,68 @@ difference is an **objective**, returned to Rift with an `objective_signatures`
 category, an array of stable failure identifiers, and diagnostic details. Replaying the complete input reproduces the operation
 sequence from beginning to end; successful reports include the fixture seed, operation counts and scenarios.
 
-Inputs are version-3 JSON text: `version`, an unsigned 64-bit `fixture_seed`,
-and `rounds` containing exactly sixteen ordered action lists. The fixture seed
-generates a starting trie with densely branching and long shared-prefix paths,
-plus fixed checks of the sparse-trie API; explicit actions
-are never regenerated during execution. Partial proofs can reveal an extension before its branch child; later reveals and update retries hydrate that child. Each round accepts up to thirty-two actions:
-`update_batch` (up to four 32-byte hexadecimal key/value changes, zero values delete),
-`reveal` (supply a depth-limited proof derived from that leaf map for a key), `prune` (replace
-old nodes with their hashes, using a cutoff on sequentially numbered update epochs), `snapshot` and `clone` (copy and check the root), and
-`tracking_reset` (clear the retained-update accumulator).
-Repeated keys in a batch use its last value. Empty batches and action lists are
-valid shrinking results. Every execution still rebuilds and compares roots and node
-updates, retries updates after supplying missing proofs, and checks that snapshots
-are isolated from later changes. These fixed checks are the mandatory check sequence. Inputs are limited to 28672 raw bytes and 30000 bytes when JSON-escaped, leaving room
-for a second input used as a crossover **donor** in the 65536-byte native request.
-Older input versions are rejected. The host uses randomness to generate or mutate inputs, but its execution seed
-never changes an already serialized action tape.
+Each execution combines two in-memory checks: a fixed sequence of checks of the `SparseTrie` trait
+(the shared backend API) on a standalone storage trie, and sixteen rounds of
+explicit account/storage actions. We call the first sequence the **storage trait
+spine** and the second the **action tape**. The fixture seed chooses the spine's starting leaves;
+all API checks run even if mutations remove every tape action.
 
-Generation starts with 1–4 leaves initialized to one, then uses a shuffled population
-of 256 prehashed keys. New keys enter over time; hot-key episodes repeatedly target a
-small working set while a cursor rotates through other, cold keys. Normal rounds visit every active key before
-repeating one, vary rewrite/delete weights, and interleave update batches with proof
-reveals for both updated and unrelated keys. One third of histories remain normal;
-the rest replace part of the sixteen-round history with 6–14 rounds targeting
-keys whose first six nibbles form varied shared-prefix branches. These clustered
-rounds refresh their working sets independently. The initialization round and at
-least one normal round remain. Histories retain this workload's sixteen-round, four-updates-per-round budget.
-Account identities and storage writes map to flat leaves; round boundaries replace
-commits. Account metadata, nested slot keyspaces, prefix-preimage lookup files and
-background-worker timing are not modeled by this sparse-trie API.
+Inputs are version-4 JSON text: `version`, an unsigned 64-bit `fixture_seed`,
+optional `clustered` range recording which rounds came from the cluster generator,
+and exactly sixteen ordered action lists in `rounds`, one list per round. The seed
+generates the storage trait spine; execution never
+regenerates the explicit actions. Each round accepts up to thirty-two actions:
+`update_batch` (up to four ordered changes), `prewarm` (look up an account or reveal
+a depth-limited storage proof), `reveal` (a proof for the separate storage trait
+spine), `prune` (blind old nodes), `snapshot` and `clone` (copy and check the root),
+and `tracking_reset` (reset the retained-update accumulator). Proofs may reveal an
+extension before its branch child; retries hydrate missing children. An update is
+`account` (nonce and balance, preserving storage), `delete_account` (remove the
+account and all storage), `storage` (account key, slot and value; zero deletes the
+slot), or `leaf` (an update to the separate storage trait spine). Keys, slots and
+values are fixed-width hexadecimal words. Changes execute in order, so a delete
+followed by recreation in the same batch starts with empty storage. Mutations may
+produce storage writes to absent accounts; these are explicit no-ops, not errors.
+Empty batches and action lists remain valid shrinking results. Inputs are limited
+to 28672 raw bytes and 30000 JSON-escaped bytes, leaving room for a second input
+used as a crossover donor in the 65536-byte native request. Older versions are
+rejected; the host execution seed cannot change an already serialized tape.
+
+Generation starts with 1–4 accounts, then uses a shuffled population of 256
+prehashed account keys. New accounts enter over time; hot-key episodes persist
+while a cursor rotates through cold keys. Each round visits active accounts before
+repeating any and interleaves updates with targeted and unrelated prewarm hints.
+One third of histories remain plain; the others splice in 6–14 clustered rounds.
+The cluster generator uses 24-bit indices (six nibbles), shared prefixes of 0–3
+nibbles, 6–24 unique keys, and randomly resampled suffixes of existing anchor keys.
+The introduced set holds keys available so far; the active set is the current
+working set. Each refreshes with 25% probability. The initialization and
+at least one plain round remain, within sixteen rounds and four updates per round.
+An existing account has a 1/8 deletion chance before metadata/storage weighting,
+including in clustered rounds. Absent accounts are recreated with nonce one;
+metadata changes preserve slots. Storage updates reuse touched slots half the
+time and write zero one third of the time. Deletion forgets storage and touched
+slot history. Mixed splices that would write storage to a deleted account fall
+back to the plain history, rather than silently resurrecting the account.
+
+The account trie contains canonical account RLP, including each actual storage
+trie's root. Independent ordered-map models rebuild storage and account roots;
+an independent `alloy_trie::HashBuilder` rebuild checks account branch updates, while the existing
+storage proof/update oracle checks slot changes. Raw retained updates are also
+compared across backends. Account paths stay revealed; storage prewarms exercise
+partial proofs. A mandatory populated-wipe/recreation case checks that clearing
+a trie really yields an empty root before reinitialization can hide stale state.
+Counters and features distinguish generated deletions, generated clustered
+deletions and generated populated wipes from these fixed checks. Account identity
+and storage are modeled, but persistence, database commits, prefix-preimage lookup
+files and background-worker timing are not.
+
 A trie "fork" here means an independent in-memory snapshot, not a blockchain
 fork. Persistent snapshots share unchanged nodes; writes must not leak between
 copies. A nested snapshot is a snapshot of a snapshot. Existing fixed checks
 mutate sibling copies and verify survivors after their source is cleared or
-dropped. Fixed extension-only checks also snapshot or clone opaque children, hydrate and mutate the copy, and verify the source remains unchanged. Arbitrary snapshot ancestry and drop order are not mutable tape actions.
-The mandatory check sequence runs alongside generated actions. Thirteen local mutation
+dropped. Fixed extension-only checks also snapshot or clone hash-only (opaque) children, hydrate and mutate the copy, and verify the source remains unchanged. Arbitrary snapshot ancestry and drop order are not mutable tape actions.
+The mandatory check sequence runs alongside generated actions. Fourteen local mutation
 operators edit those actions, batches, keys, values and prune cutoffs; they are listed
 in the Native calling interface section below.
 
@@ -182,7 +210,7 @@ its retained result.
   editable location as an array of field names and indices. `mutate-input` deterministically
   applies `action.insert/remove/duplicate/crossover/swap`,
   `update.insert/remove/duplicate/crossover`, `key.update`, `key.prefix`,
-  `value.update`, or `prune.update` to the selected local site. Action/update
+  `update.lifecycle` (toggle account metadata/deletion), `value.update`, or `prune.update` to the selected local site. Action/update
   crossover and `key.prefix` (nibble-prefix crossover) require both `donor` input text and
   `donor_path` (the selected location within that donor); other operators reject donors. Indices and action types are
   validated before mutation. Operator metadata omits fixed path selectors so Rift asks for the
@@ -190,7 +218,7 @@ its retained result.
   input instead of a planning error. Removal supports shrinking; unchanged rounds and the
   fixture seed remain intact. `key.prefix` crossover replaces a key prefix while keeping its suffix,
   while value mutations cover deletion and RLP integer boundaries. There are no
-  database, sleep, account or artificial commit-boundary operators.
+  database, sleep or artificial commit-boundary operators.
 - `execute` runs all checks immediately and returns native `coverage` slot/count
   pairs, `coverage_size`, a build/layout `coverage_id`, `coverage_threads` (distinct
   threads that hit instrumented target code), semantic features and a
