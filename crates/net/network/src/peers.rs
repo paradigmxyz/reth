@@ -1183,8 +1183,12 @@ impl PeersManager {
                 peer.kind = kind;
                 peer.fork_id = fork_id.map(Box::new);
                 peer.addr = addr;
-                if peer.state.is_incoming() {
-                    // the given address is a listening endpoint, see `Self::add_peer_kind`
+                // the given address is a listening endpoint, so the peer is kept unless it is
+                // already being disconnected by `Self::remove_peer`
+                if !matches!(
+                    peer.state,
+                    PeerConnectionState::DisconnectingIn | PeerConnectionState::DisconnectingOut
+                ) {
                     peer.remove_after_disconnect = false;
                 }
 
@@ -4856,26 +4860,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_inbound_peer_added_as_static_is_kept() {
+    async fn test_peer_added_as_static_is_kept() {
         let mut peers = PeersManager::new(PeersConfig::test());
-        let inbound = PeerId::random();
-        let socket_addr = "5.6.7.8:40404".parse().unwrap();
-        assert!(peers.on_incoming_pending_session(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8))).is_ok());
-        peers.on_incoming_session_established(inbound, socket_addr);
-
-        // the operator supplies its listening endpoint
         let addr = PeerAddr::from_tcp("5.6.7.8:30303".parse().unwrap());
+
+        // an inbound peer, once the operator supplies its listening endpoint
+        let inbound = PeerId::random();
+        assert!(peers.on_incoming_pending_session(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8))).is_ok());
+        peers.on_incoming_session_established(inbound, "5.6.7.8:40404".parse().unwrap());
         peers.add_and_connect_kind(inbound, PeerKind::Static, addr, None);
         assert!(peers.persistable_peers().any(|peer| peer.record.id == inbound));
 
-        peers.on_active_session_dropped(
-            &socket_addr,
-            &inbound,
-            &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
-                DisconnectReason::TooManyPeers,
-            )),
+        // a peer removed while it was dialed, then added again before the dial fails
+        let dialed = PeerId::random();
+        peers.add_and_connect_kind(dialed, PeerKind::Basic, addr, None);
+        peers.remove_peer(dialed);
+        peers.add_and_connect_kind(dialed, PeerKind::Static, addr, None);
+        peers.on_outgoing_connection_failure(
+            &addr.tcp(),
+            &dialed,
+            &io::Error::new(io::ErrorKind::ConnectionRefused, ""),
         );
-        assert!(peers.peers[&inbound].is_static());
+        assert!(peers.peers[&dialed].is_static());
+
+        // but not one already being disconnected, whose removal was reported
+        peers.remove_peer(inbound);
+        peers.add_and_connect_kind(inbound, PeerKind::Static, addr, None);
+        peers.on_active_session_gracefully_closed(inbound);
+        assert!(!peers.peers.contains_key(&inbound));
     }
 
     #[tokio::test]
