@@ -146,7 +146,7 @@ impl PeersManager {
         let unban_interval = ban_duration.min(backoff_durations.low) / 2;
 
         let mut peers: HashMap<PeerId, Peer, FbBuildHasher<64>> = HashMap::with_capacity_and_hasher(
-            trusted_nodes.len() + basic_nodes.len() + persisted_peers.len(),
+            trusted_nodes.len() + basic_nodes.len() + persisted_peers.len().min(MAX_TRACKED_PEERS),
             Default::default(),
         );
         let mut trusted_peer_ids: HashSet<PeerId, FbBuildHasher<64>> =
@@ -4841,8 +4841,8 @@ mod tests {
             PeersConfig::test().with_ip_filter(IpFilter::from_cidr_string("1.2.3.0/24").unwrap());
         config.trusted_nodes =
             vec![NodeRecord::new("5.6.7.8:30303".parse().unwrap(), trusted).into()];
-        // One basic record more than fits, then peers that are not limited.
-        config.persisted_peers = (0..=MAX_TRACKED_PEERS)
+        // Twice as many basic records as fit, then peers that are not limited.
+        config.persisted_peers = (0..2 * MAX_TRACKED_PEERS)
             .map(|_| PeerId::random())
             .chain([trusted])
             .map(|id| {
@@ -4865,5 +4865,7 @@ mod tests {
         assert!(peers.peers[&trusted].kind.is_trusted());
         assert!(peers.peers[&static_peer].is_static());
         assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS + 2);
+        // skipped records don't keep their space reserved
+        assert!(peers.peers.capacity() < 2 * MAX_TRACKED_PEERS);
     }
 }
