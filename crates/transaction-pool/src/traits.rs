@@ -382,13 +382,8 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         out.extend(self.get_pooled_transaction_elements(tx_hashes.to_vec(), limit));
     }
 
-    /// Returns pooled transactions like [`Self::get_pooled_transaction_elements`], with blob
-    /// transactions served without their blobs, since eth/72 peers fetch them with `GetCells`.
-    ///
-    /// The size limit counts the transactions without their blobs. Blob transactions whose
-    /// sidecar has no cell proofs are left out. The default implementation leaves out every blob
-    /// transaction, matching [`PoolTransaction::encoded_length_eth72`], which doesn't announce
-    /// them.
+    /// Returns pooled transactions for eth/72 peers, converted with
+    /// [`PoolTransaction::pooled_without_blobs`]. The default counts blobs against the size limit.
     ///
     /// Consumer: P2P
     fn get_pooled_transaction_elements_without_blobs(
@@ -396,9 +391,10 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
     ) -> Vec<<Self::Transaction as PoolTransaction>::Pooled> {
-        let mut transactions = self.get_pooled_transaction_elements(tx_hashes, limit);
-        transactions.retain(|tx| !tx.is_eip4844());
-        transactions
+        self.get_pooled_transaction_elements(tx_hashes, limit)
+            .into_iter()
+            .filter_map(Self::Transaction::pooled_without_blobs)
+            .collect()
     }
 
     /// Returns the pooled transaction variant for the given transaction hash.
@@ -1535,6 +1531,12 @@ pub trait PoolTransaction:
         (!self.is_eip4844()).then(|| self.encoded_length())
     }
 
+    /// Returns the transaction as served to eth/72 peers, without its blobs, or `None` if it can't
+    /// be served. Must return `Some` exactly when [`Self::encoded_length_eth72`] does.
+    fn pooled_without_blobs(pooled: Self::Pooled) -> Option<Self::Pooled> {
+        (!pooled.is_eip4844()).then_some(pooled)
+    }
+
     /// Ensures that the transaction's code size does not exceed the provided `max_init_code_size`.
     ///
     /// This is specifically relevant for contract creation transactions ([`TxKind::Create`]),
@@ -1802,6 +1804,15 @@ impl PoolTransaction for EthPooledTransaction {
         } else {
             Some(self.encoded_length)
         }
+    }
+
+    fn pooled_without_blobs(mut pooled: Self::Pooled) -> Option<Self::Pooled> {
+        // Legacy sidecars have no cell proofs, so eth/72 can't carry them.
+        if pooled.as_eip4844().is_some_and(|tx| !tx.tx().sidecar.is_eip7594()) {
+            return None
+        }
+        pooled.clear_eip7594_blobs();
+        Some(pooled)
     }
 }
 
@@ -2119,7 +2130,10 @@ mod tests {
         EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
         TxEnvelope, TxLegacy,
     };
-    use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
+    use alloy_eips::{
+        eip4844::{Blob, BlobTransactionSidecar, Bytes48, DATA_GAS_PER_BLOB},
+        eip7594::{BlobTransactionSidecarEip7594, CELLS_PER_EXT_BLOB},
+    };
     use alloy_primitives::Signature;
 
     #[test]
@@ -2308,5 +2322,54 @@ mod tests {
         // Test with size exceeding the limit
         // 3MB is above the 2MB limit, should return true
         assert!(size_limit_2mb.exceeds(3 * 1024 * 1024));
+    }
+
+    #[test]
+    fn eth72_announced_transactions_are_served() {
+        let blob_tx = |sidecar: BlobTransactionSidecarVariant| {
+            PooledTransactionVariant::Eip4844(
+                TxEip4844WithSidecar {
+                    tx: TxEip4844 { blob_versioned_hashes: vec![B256::ZERO], ..Default::default() },
+                    sidecar,
+                }
+                .into_signed(Signature::test_signature()),
+            )
+        };
+        let eip7594 = blob_tx(
+            BlobTransactionSidecarEip7594::new(
+                vec![Blob::repeat_byte(1)],
+                vec![Bytes48::repeat_byte(2)],
+                vec![Bytes48::repeat_byte(3); CELLS_PER_EXT_BLOB],
+            )
+            .into(),
+        );
+        let eip4844 = blob_tx(
+            BlobTransactionSidecar::new(
+                vec![Blob::repeat_byte(1)],
+                vec![Bytes48::repeat_byte(2)],
+                vec![Bytes48::repeat_byte(3)],
+            )
+            .into(),
+        );
+        let eip1559 = PooledTransactionVariant::Eip1559(
+            TxEip1559::default().into_signed(Signature::test_signature()),
+        );
+        let mut without_blobs = eip7594.clone();
+        without_blobs.clear_eip7594_blobs();
+
+        for (tx, served) in
+            [(eip1559.clone(), Some(eip1559)), (eip7594, Some(without_blobs)), (eip4844, None)]
+        {
+            let pooled = EthPooledTransaction::from_pooled(Recovered::new_unchecked(
+                tx.clone(),
+                Default::default(),
+            ));
+            // The default eth/72 response uses this, so it serves what the pool announces.
+            assert_eq!(EthPooledTransaction::pooled_without_blobs(tx), served);
+            assert_eq!(
+                pooled.encoded_length_eth72(),
+                served.as_ref().map(Encodable2718::encode_2718_len)
+            );
+        }
     }
 }
