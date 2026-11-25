@@ -1,15 +1,17 @@
 //! Storage for blob data of EIP4844 transactions.
 
 use alloy_eips::{
-    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
+    eip4844::{env_settings::EnvKzgSettings, BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
 };
-use alloy_primitives::{TxHash, B256};
+use alloy_primitives::{map::FbBuildHasher, TxHash, B256};
 pub use cells::BlobTxCellSidecar;
 pub use converter::BlobSidecarConverter;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
 pub use noop::NoopBlobStore;
+use parking_lot::Mutex;
+use reth_lru::LruMap;
 use std::{
     fmt,
     ops::Deref,
@@ -18,6 +20,7 @@ use std::{
         Arc,
     },
 };
+use tracing::error;
 pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
 
 mod cells;
@@ -131,6 +134,19 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
 
     /// Inserts multiple blob sidecars into the store
     fn insert_all(&self, txs: Vec<(B256, PooledBlobSidecar)>) -> Result<(), BlobStoreError>;
+
+    /// Inserts a validated sidecar that keeps only some cells, unless `tx` has a sidecar already.
+    ///
+    /// The default rebuilds the blobs and inserts the full sidecar, so it fails with too few cells.
+    fn insert_cells(&self, tx: B256, data: BlobTxCellSidecar) -> Result<(), BlobStoreError> {
+        if self.contains(tx)? {
+            return Ok(())
+        }
+        let sidecar = data
+            .recover(EnvKzgSettings::Default.get())
+            .map_err(|err| BlobStoreError::Other(Box::new(err)))?;
+        self.insert(tx, BlobTransactionSidecarVariant::Eip7594(sidecar).into())
+    }
 
     /// Deletes the blob sidecar from the store
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError>;
@@ -319,6 +335,83 @@ impl PartialEq for BlobStoreSize {
     }
 }
 
+/// Most bytes of sidecars rebuilt from cells to keep in memory.
+const MAX_REBUILT_SIDECARS_SIZE: usize = 64 * 1024 * 1024;
+
+/// Sidecars rebuilt from stored cells, so reads don't rebuild them on every call.
+///
+/// Evicts the least recently used sidecars past [`MAX_REBUILT_SIDECARS_SIZE`].
+#[derive(Debug)]
+pub(crate) struct RebuiltSidecars {
+    cache: Mutex<RebuiltCache>,
+    // Most bytes to keep, [`MAX_REBUILT_SIDECARS_SIZE`] outside tests.
+    max_size: usize,
+}
+
+impl RebuiltSidecars {
+    /// Returns the cached sidecar, or rebuilds it outside the lock if `cells` is recoverable.
+    pub(crate) fn get_or_rebuild(
+        &self,
+        tx: TxHash,
+        cells: &BlobTxCellSidecar,
+    ) -> Option<Arc<BlobTransactionSidecarVariant>> {
+        if let Some(sidecar) = self.cache.lock().sidecars.get(&tx) {
+            return Some(Arc::clone(sidecar))
+        }
+        if !cells.is_recoverable() {
+            return None
+        }
+        let sidecar = match cells.recover(EnvKzgSettings::Default.get()) {
+            Ok(sidecar) => Arc::new(BlobTransactionSidecarVariant::Eip7594(sidecar)),
+            Err(err) => {
+                // Stored cells are validated, so this is a local fault.
+                error!(target: "txpool::blob", %err, ?tx, "Failed to rebuild blobs from cells");
+                return None
+            }
+        };
+        let cache = &mut *self.cache.lock();
+        // A concurrent read may have rebuilt it first.
+        if let Some(cached) = cache.sidecars.get(&tx) {
+            return Some(Arc::clone(cached))
+        }
+        cache.size += sidecar.size();
+        cache.sidecars.insert(tx, Arc::clone(&sidecar));
+        while cache.size > self.max_size &&
+            let Some((_, evicted)) = cache.sidecars.pop_oldest()
+        {
+            cache.size -= evicted.size();
+        }
+        Some(sidecar)
+    }
+
+    /// Drops the rebuilt sidecar of `tx`, if any.
+    pub(crate) fn remove(&self, tx: &TxHash) {
+        let cache = &mut *self.cache.lock();
+        if let Some(evicted) = cache.sidecars.remove(tx) {
+            cache.size -= evicted.size();
+        }
+    }
+}
+
+impl Default for RebuiltSidecars {
+    fn default() -> Self {
+        Self {
+            cache: Mutex::new(RebuiltCache {
+                sidecars: LruMap::with_hasher(u32::MAX, Default::default()),
+                size: 0,
+            }),
+            max_size: MAX_REBUILT_SIDECARS_SIZE,
+        }
+    }
+}
+
+// The rebuilt sidecars, least recently used first out, and their total size.
+#[derive(Debug)]
+struct RebuiltCache {
+    sidecars: LruMap<TxHash, Arc<BlobTransactionSidecarVariant>, FbBuildHasher<32>>,
+    size: usize,
+}
+
 /// Statistics for the cleanup operation.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BlobStoreCleanupStat {
@@ -331,6 +424,38 @@ pub struct BlobStoreCleanupStat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blobstore::cells::tests::{fixture, subset};
+    use alloy_eips::eip7594::CELLS_PER_EXT_BLOB;
+
+    // A store with the sizes it counts for a cell sidecar and for the full sidecar.
+    struct TestStore {
+        store: Box<dyn BlobStore>,
+        cells_size: usize,
+        full_size: usize,
+        _dir: Option<tempfile::TempDir>,
+    }
+
+    // An in-memory and a disk store for `cells`.
+    fn stores(cells: &BlobTxCellSidecar) -> Vec<TestStore> {
+        let (full, _) = fixture();
+        let full = BlobTransactionSidecarVariant::Eip7594(full.clone());
+        let dir = tempfile::tempdir().unwrap();
+        let disk = DiskFileBlobStore::open(dir.path(), Default::default()).unwrap();
+        vec![
+            TestStore {
+                store: Box::new(InMemoryBlobStore::default()),
+                cells_size: cells.size(),
+                full_size: full.size(),
+                _dir: None,
+            },
+            TestStore {
+                store: Box::new(disk),
+                cells_size: 1 + alloy_rlp::Encodable::length(cells),
+                full_size: full.rlp_encoded_fields_length(),
+                _dir: Some(dir),
+            },
+        ]
+    }
 
     #[expect(dead_code)]
     struct DynStore {
@@ -346,5 +471,125 @@ mod tests {
         assert!(mask.contains(0));
         assert!(mask.contains(65));
         assert_eq!(mask.count(), 2);
+    }
+
+    #[test]
+    fn rebuilt_sidecars_are_cached_within_their_size() {
+        let (full, _) = fixture();
+        let full = Arc::new(BlobTransactionSidecarVariant::Eip7594(full.clone()));
+        let half = subset(BlobCellMask::from_bits(u128::MAX / 3));
+        let too_few = subset(BlobCellMask::from_bits(1));
+        let (first, second) = (B256::random(), B256::random());
+
+        let rebuilt = RebuiltSidecars { max_size: full.size(), ..Default::default() };
+        assert_eq!(rebuilt.get_or_rebuild(first, &too_few), None);
+        assert_eq!(rebuilt.get_or_rebuild(first, &half), Some(full.clone()));
+        // A cached sidecar is returned without rebuilding, even from unrecoverable cells.
+        assert_eq!(rebuilt.get_or_rebuild(first, &too_few), Some(full.clone()));
+
+        // Caching a second one goes over the size, so the first is evicted.
+        assert_eq!(rebuilt.get_or_rebuild(second, &half), Some(full.clone()));
+        assert_eq!(rebuilt.get_or_rebuild(first, &too_few), None);
+        assert_eq!(rebuilt.get_or_rebuild(second, &too_few), Some(full));
+        rebuilt.remove(&second);
+        let cache = rebuilt.cache.lock();
+        assert!(cache.sidecars.is_empty());
+        assert_eq!(cache.size, 0);
+    }
+
+    #[test]
+    fn stores_rebuild_blobs_from_half_of_the_cells() {
+        let (full, all) = fixture();
+        let hash = all.versioned_hashes().next().unwrap();
+        let expected = BlobAndProofV2 {
+            blob: Box::new(full.blobs[0]),
+            proofs: full.cell_proofs[..CELLS_PER_EXT_BLOB].to_vec(),
+        };
+        let full = Arc::new(BlobTransactionSidecarVariant::Eip7594(full.clone()));
+        let (cells, proofs) = (all.cells(), all.proofs());
+        // Every other column.
+        let half = subset(BlobCellMask::from_bits(u128::MAX / 3));
+
+        for TestStore { store, cells_size, full_size, _dir } in stores(&half) {
+            let tx = B256::random();
+            store.insert_cells(tx, half.clone()).unwrap();
+            assert!(store.contains(tx).unwrap());
+            assert_eq!((store.blobs_len(), store.data_size_hint()), (1, Some(cells_size)));
+
+            let rebuilt = store.get(tx).unwrap().unwrap();
+            assert_eq!(rebuilt, full);
+            // Rebuilt once, then served from the cache.
+            assert!(Arc::ptr_eq(&rebuilt, &store.get(tx).unwrap().unwrap()));
+            assert_eq!(store.get_all(vec![tx, B256::ZERO]).unwrap(), vec![(tx, full.clone())]);
+            assert_eq!(store.get_exact(vec![tx]).unwrap(), vec![full.clone()]);
+            assert_eq!(
+                store.get_by_versioned_hashes_v3(&[hash, B256::ZERO]).unwrap(),
+                vec![Some(expected.clone()), None]
+            );
+            assert_eq!(store.has_versioned_hashes(&[hash, B256::ZERO]).unwrap(), vec![true, false]);
+
+            // Cells are served from the kept ones without rebuilding.
+            assert_eq!(
+                store.get_cells(tx, BlobCellMask::from_bits(0b101)).unwrap(),
+                Some(vec![cells[0], cells[2], cells[128], cells[130]])
+            );
+            assert_eq!(store.get_cells(tx, BlobCellMask::from_bits(0b110)).unwrap(), None);
+            assert_eq!(
+                store.get_by_versioned_hashes_v4(&[hash], BlobCellMask::from_bits(0b110)).unwrap(),
+                vec![Some(BlobCellsAndProofsV1 {
+                    blob_cells: vec![None, Some(cells[2])],
+                    proofs: vec![None, Some(proofs[2])],
+                })]
+            );
+
+            // A full sidecar replaces the cells, and later cells are ignored.
+            store.insert(tx, (*full).clone().into()).unwrap();
+            store.insert_cells(tx, half.clone()).unwrap();
+            assert_eq!(store.get(tx).unwrap(), Some(full.clone()));
+            assert_eq!((store.blobs_len(), store.data_size_hint()), (1, Some(full_size)));
+            let other = B256::random();
+            store.insert_cells(other, half.clone()).unwrap();
+            store.insert_all(vec![(other, (*full).clone().into())]).unwrap();
+            assert_eq!((store.blobs_len(), store.data_size_hint()), (2, Some(2 * full_size)));
+        }
+    }
+
+    #[test]
+    fn stores_serve_cells_they_cannot_rebuild() {
+        let (_, all) = fixture();
+        let hash = all.versioned_hashes().next().unwrap();
+        let (cells, proofs) = (all.cells(), all.proofs());
+        let kept = BlobCellMask::from_bits(0b1011);
+        let partial = subset(kept);
+
+        for TestStore { store, cells_size, _dir, .. } in stores(&partial) {
+            let tx = B256::random();
+            store.insert_cells(tx, partial.clone()).unwrap();
+            assert_eq!((store.blobs_len(), store.data_size_hint()), (1, Some(cells_size)));
+            assert_eq!(store.get(tx).unwrap(), None);
+            assert!(matches!(
+                store.get_exact(vec![tx]),
+                Err(BlobStoreError::MissingSidecar(missing)) if missing == tx
+            ));
+            assert_eq!(store.get_by_versioned_hashes_v3(&[hash]).unwrap(), vec![None]);
+            assert_eq!(store.has_versioned_hashes(&[hash]).unwrap(), vec![false]);
+            assert_eq!(
+                store.get_cells(tx, kept).unwrap(),
+                Some(vec![cells[0], cells[1], cells[3], cells[128], cells[129], cells[131]])
+            );
+            assert_eq!(
+                store.get_by_versioned_hashes_v4(&[hash], BlobCellMask::from_bits(0b110)).unwrap(),
+                vec![Some(BlobCellsAndProofsV1 {
+                    blob_cells: vec![Some(cells[1]), None],
+                    proofs: vec![Some(proofs[1]), None],
+                })]
+            );
+
+            store.delete(tx).unwrap();
+            store.cleanup();
+            assert!(!store.contains(tx).unwrap());
+            assert_eq!((store.blobs_len(), store.data_size_hint()), (0, Some(0)));
+            assert_eq!(store.get_cells(tx, kept).unwrap(), None);
+        }
     }
 }

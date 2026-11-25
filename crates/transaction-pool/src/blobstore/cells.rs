@@ -3,7 +3,7 @@
 
 use alloy_eips::{
     eip4844::{
-        c_kzg, env_settings::KzgSettings, kzg_to_versioned_hash, AsCkzg,
+        c_kzg, env_settings::KzgSettings, kzg_to_versioned_hash, AsCkzg, BlobCellsAndProofsV1,
         BlobTransactionValidationError, Bytes48,
     },
     eip7594::{
@@ -12,6 +12,7 @@ use alloy_eips::{
     },
 };
 use alloy_primitives::B256;
+use alloy_rlp::{BufMut, Decodable, Encodable, Header};
 use std::borrow::Cow;
 
 /// An EIP-7594 sidecar that keeps the same subset of cells for every blob.
@@ -206,16 +207,85 @@ impl BlobTxCellSidecar {
         self.cells.capacity() * size_of::<Cell>() +
             (self.commitments.capacity() + self.proofs.capacity()) * size_of::<Bytes48>()
     }
+
+    /// Returns `(index, cells and proofs at mask)` for every entry of `versioned_hashes` that is
+    /// one of this sidecar's blobs. Cells that are not kept are `None`, with their proof.
+    pub fn match_versioned_hashes_cells<'a>(
+        &'a self,
+        versioned_hashes: &'a [B256],
+        mask: BlobCellMask,
+    ) -> impl Iterator<Item = (usize, BlobCellsAndProofsV1)> + 'a {
+        let hashes: Vec<_> = self.versioned_hashes().collect();
+        // Each requested cell index with its position among the kept cells, if kept.
+        let requested: Vec<_> = mask
+            .selected_indices()
+            .map(|index| (index, self.mask.selected_indices().position(|kept| kept == index)))
+            .collect();
+        versioned_hashes.iter().enumerate().filter_map(move |(index, wanted)| {
+            let blob = hashes.iter().position(|hash| hash == wanted)?;
+            let cells = &self.cells[blob * self.mask.count()..][..self.mask.count()];
+            let proofs = &self.proofs[blob * CELLS_PER_EXT_BLOB..][..CELLS_PER_EXT_BLOB];
+            let (blob_cells, proofs) = requested
+                .iter()
+                .map(|&(cell, position)| {
+                    position.map(|position| (cells[position], proofs[cell])).unzip()
+                })
+                .unzip();
+            Some((index, BlobCellsAndProofsV1 { blob_cells, proofs }))
+        })
+    }
+
+    // Returns the length of the encoded fields, without the list header.
+    fn fields_length(&self) -> usize {
+        self.mask.bits().length() +
+            self.commitments.length() +
+            self.proofs.length() +
+            self.cells.length()
+    }
+}
+
+// The blob store's encoding: `rlp([mask, commitments, proofs, cells])`, with the mask as a `u128`.
+impl Encodable for BlobTxCellSidecar {
+    fn encode(&self, out: &mut dyn BufMut) {
+        Header { list: true, payload_length: self.fields_length() }.encode(out);
+        self.mask.bits().encode(out);
+        self.commitments.encode(out);
+        self.proofs.encode(out);
+        self.cells.encode(out);
+    }
+
+    fn length(&self) -> usize {
+        Header { list: true, payload_length: self.fields_length() }.length_with_payload()
+    }
+}
+
+impl Decodable for BlobTxCellSidecar {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let mut fields = Header::decode_bytes(buf, true)?;
+        let mask = BlobCellMask::from_bits(Decodable::decode(&mut fields)?);
+        let sidecar = Self::new(
+            Decodable::decode(&mut fields)?,
+            Decodable::decode(&mut fields)?,
+            Decodable::decode(&mut fields)?,
+            mask,
+        )
+        .ok_or(alloy_rlp::Error::Custom("cell sidecar counts do not match"))?;
+        if !fields.is_empty() {
+            return Err(alloy_rlp::Error::ListLengthMismatch { expected: 0, got: fields.len() })
+        }
+        Ok(sidecar)
+    }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use alloy_eips::eip4844::{env_settings::EnvKzgSettings, Blob};
+    use alloy_primitives::{b256, hex, keccak256};
     use std::sync::OnceLock;
 
     // A full sidecar with two different blobs, and all of its cells.
-    fn fixture() -> &'static (BlobTransactionSidecarEip7594, BlobTxCellSidecar) {
+    pub(crate) fn fixture() -> &'static (BlobTransactionSidecarEip7594, BlobTxCellSidecar) {
         static FIXTURE: OnceLock<(BlobTransactionSidecarEip7594, BlobTxCellSidecar)> =
             OnceLock::new();
         FIXTURE.get_or_init(|| {
@@ -233,7 +303,7 @@ mod tests {
     }
 
     // Keeps only the cells at `mask`.
-    fn subset(mask: BlobCellMask) -> BlobTxCellSidecar {
+    pub(crate) fn subset(mask: BlobCellMask) -> BlobTxCellSidecar {
         let (_, all) = fixture();
         BlobTxCellSidecar::new(
             all.commitments().to_vec(),
@@ -363,6 +433,48 @@ mod tests {
         assert_eq!(
             sparse.size(),
             capacity * size_of::<Cell>() + (2 + 2 * CELLS_PER_EXT_BLOB) * size_of::<Bytes48>()
+        );
+    }
+
+    #[test]
+    fn match_versioned_hashes_cells_marks_missing_cells() {
+        let (_, all) = fixture();
+        let kept = subset(BlobCellMask::from_bits(0b1011));
+        let hashes: Vec<_> = kept.versioned_hashes().collect();
+        let request = [hashes[1], B256::ZERO, hashes[1]];
+        let cells = |blob: usize, index: usize| Some(all.cells[blob * CELLS_PER_EXT_BLOB + index]);
+        let proof = |blob: usize, index: usize| Some(all.proofs[blob * CELLS_PER_EXT_BLOB + index]);
+        let expected = BlobCellsAndProofsV1 {
+            blob_cells: vec![cells(1, 0), None, cells(1, 3)],
+            proofs: vec![proof(1, 0), None, proof(1, 3)],
+        };
+        assert_eq!(
+            kept.match_versioned_hashes_cells(&request, BlobCellMask::from_bits(0b1101))
+                .collect::<Vec<_>>(),
+            vec![(0, expected.clone()), (2, expected)]
+        );
+    }
+
+    #[test]
+    fn encoding_round_trips_and_is_pinned() {
+        let kept = subset(BlobCellMask::from_bits(0b1011));
+        let encoded = alloy_rlp::encode(&kept);
+        assert_eq!(encoded.len(), kept.length());
+        assert_eq!(BlobTxCellSidecar::decode(&mut encoded.as_slice()).unwrap(), kept);
+        // The stored format: changing it must be deliberate.
+        assert_eq!(encoded.len(), 24960);
+        // `list(24957 bytes) || mask 0b1011 || list(2 commitments)`, then the proofs and cells.
+        assert_eq!(encoded[..6], hex!("f9617d0bf862"));
+        assert_eq!(
+            keccak256(&encoded),
+            b256!("0x742b1fe64f3373584a06565e19373be52a44f3790489650a35ba3b6b2f96a992")
+        );
+
+        let mut mismatched = kept;
+        mismatched.cells.pop();
+        assert_eq!(
+            BlobTxCellSidecar::decode(&mut alloy_rlp::encode(&mismatched).as_slice()),
+            Err(alloy_rlp::Error::Custom("cell sidecar counts do not match"))
         );
     }
 }
