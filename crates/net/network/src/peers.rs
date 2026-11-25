@@ -959,41 +959,18 @@ impl PeersManager {
     /// Called for a newly discovered peer.
     ///
     /// If the peer already exists, then the address, kind and `fork_id` will be updated. A new
-    /// untrusted peer is skipped if [`Self::make_room_for_discovered_peer`] finds no room.
+    /// untrusted peer is skipped once [`MAX_TRACKED_PEERS`] peers are tracked, so it never pushes
+    /// out an existing one.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId>) {
         // A peer tracked only until its session ends starts counting once discovery keeps it.
         let is_new = self.peers.get(&peer_id).is_none_or(|peer| peer.remove_after_disconnect) &&
             !self.trusted_peer_ids.contains(&peer_id);
-        if is_new && !self.make_room_for_discovered_peer(peer_id, addr.tcp().ip()) {
-            trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "Skipping discovered peer, no room for it");
+        let tracked = self.peers.len() - usize::from(self.peers.contains_key(&peer_id));
+        if is_new && tracked >= MAX_TRACKED_PEERS {
+            trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "Skipping discovered peer, peer set is full");
             return
         }
         self.add_peer_kind(peer_id, None, addr, fork_id)
-    }
-
-    /// Returns whether a new basic peer at `ip` fits within [`MAX_TRACKED_PEERS`], removing an
-    /// idle basic peer to make room. Banned or filtered peers never cause a removal.
-    fn make_room_for_discovered_peer(&mut self, peer_id: PeerId, ip: IpAddr) -> bool {
-        let tracked = self.peers.len() - usize::from(self.peers.contains_key(&peer_id));
-        if tracked < MAX_TRACKED_PEERS {
-            return true
-        }
-        if !self.ip_filter.is_allowed(&ip) || self.ban_list.is_banned(&peer_id, &ip) {
-            return false
-        }
-        // Backed off peers go first, since unreachable identities are what fills the set.
-        let Some(evicted) = self
-            .peers
-            .iter()
-            .filter(|(_, peer)| peer.kind.is_basic() && peer.state.is_idle())
-            .min_by_key(|(_, peer)| (!peer.backed_off, peer.reputation))
-            .map(|(peer_id, _)| *peer_id)
-        else {
-            return false
-        };
-        trace!(target: "net::peers", ?evicted, ?peer_id, "Evicting idle peer for a discovered peer");
-        self.remove_peer(evicted);
-        true
     }
 
     /// Marks the given peer as trusted.
@@ -4795,21 +4772,20 @@ mod tests {
         for _ in 0..MAX_TRACKED_PEERS {
             peers.add_peer(PeerId::random(), addr, None);
         }
-        // Ties go to the first peer in iteration order, so back off the last one.
-        let backed_off = *peers.peers.keys().last().unwrap();
+        let backed_off = *peers.peers.keys().next().unwrap();
         peers.peers.get_mut(&backed_off).unwrap().backed_off = true;
 
-        // The backed off peer makes room for the newly discovered one.
+        // a newly discovered peer never pushes out a tracked one, even a backed off one
         let discovered = PeerId::random();
         peers.add_peer(discovered, addr, None);
-        assert!(peers.peers.contains_key(&discovered));
-        assert!(!peers.peers.contains_key(&backed_off));
+        assert!(!peers.peers.contains_key(&discovered));
+        assert!(peers.peers.contains_key(&backed_off));
         assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS);
 
         // a known peer is still updated
         let new_addr = PeerAddr::from_tcp("5.6.7.8:30303".parse().unwrap());
-        peers.add_peer(discovered, new_addr, None);
-        assert_eq!(peers.peers[&discovered].addr, new_addr);
+        peers.add_peer(backed_off, new_addr, None);
+        assert_eq!(peers.peers[&backed_off].addr, new_addr);
 
         // a trusted id is still added
         let trusted = PeerId::random();
@@ -4828,20 +4804,19 @@ mod tests {
         }
         // an unknown inbound peer is tracked only until it disconnects, and discovering it keeps it
         // past the session, so it must fit within the budget
-        let mut promote_inbound = |ip: [u8; 4]| {
+        let mut discover_inbound = |ip: [u8; 4]| {
             let inbound = PeerId::random();
             assert!(peers.on_incoming_pending_session(IpAddr::from(ip)).is_ok());
             peers.on_incoming_session_established(inbound, SocketAddr::from((ip, 40404)));
             assert!(peers.peers[&inbound].remove_after_disconnect);
             peers.add_peer(inbound, PeerAddr::from_tcp(SocketAddr::from((ip, 30303))), None);
-            assert!(!peers.peers[&inbound].remove_after_disconnect);
-            peers.peers.len()
+            (peers.peers[&inbound].remove_after_disconnect, peers.peers.len())
         };
 
-        // the entry already counts, so a free slot is enough without evicting another peer
-        assert_eq!(promote_inbound([5, 6, 7, 8]), MAX_TRACKED_PEERS);
-        // a full set evicts an idle peer for it
-        assert_eq!(promote_inbound([5, 6, 7, 9]), MAX_TRACKED_PEERS);
+        // the entry already counts, so the last free slot is enough to keep it
+        assert_eq!(discover_inbound([5, 6, 7, 8]), (false, MAX_TRACKED_PEERS));
+        // a full set leaves it tracked only for its session
+        assert_eq!(discover_inbound([5, 6, 7, 9]), (true, MAX_TRACKED_PEERS + 1));
     }
 
     #[tokio::test]
@@ -4861,7 +4836,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_persisted_trusted_id_loaded_into_full_set() {
+    async fn test_persisted_non_basic_peers_loaded_into_full_set() {
         // The trusted node's own address is filtered, so only its basic record can add it.
         let trusted = PeerId::random();
         let mut config =
@@ -4878,10 +4853,19 @@ mod tests {
                 ))
             })
             .collect();
+        let static_peer = PeerId::random();
+        config.persisted_peers.push(PersistedPeerInfo {
+            kind: PeerKind::Static,
+            ..PersistedPeerInfo::from_node_record(NodeRecord::new(
+                "1.2.3.4:30303".parse().unwrap(),
+                static_peer,
+            ))
+        });
 
         let peers = PeersManager::new(config);
         assert!(peers.peers[&trusted].kind.is_trusted());
-        assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS + 1);
+        assert!(peers.peers[&static_peer].is_static());
+        assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS + 2);
     }
 
     #[tokio::test]
