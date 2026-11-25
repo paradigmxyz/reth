@@ -288,11 +288,15 @@ impl PeersManager {
 
     /// Returns an iterator over peers suitable for persisting to disk.
     ///
-    /// Filters out backed-off and banned peers, and includes metadata like kind, fork ID, and
-    /// reputation.
+    /// Filters out backed-off and banned peers, and peers tracked only until their session ends,
+    /// and includes metadata like kind, fork ID, and reputation.
     pub(crate) fn persistable_peers(&self) -> impl Iterator<Item = PersistedPeerInfo> + '_ {
-        self.peers.iter().filter(|(_, peer)| !peer.is_backed_off() && !peer.is_banned()).map(
-            |(peer_id, peer)| PersistedPeerInfo {
+        self.peers
+            .iter()
+            .filter(|(_, peer)| {
+                !peer.is_backed_off() && !peer.is_banned() && !peer.remove_after_disconnect
+            })
+            .map(|(peer_id, peer)| PersistedPeerInfo {
                 record: NodeRecord::new_with_ports(
                     peer.addr.tcp().ip(),
                     peer.addr.tcp().port(),
@@ -302,8 +306,7 @@ impl PeersManager {
                 kind: peer.kind,
                 fork_id: peer.fork_id.as_deref().copied(),
                 reputation: peer.reputation,
-            },
-        )
+            })
     }
 
     /// Returns the `NodeRecord` and `PeerKind` for the given peer id
@@ -4822,6 +4825,8 @@ mod tests {
         assert!(peers.on_incoming_pending_session(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8))).is_ok());
         peers.on_incoming_session_established(inbound, socket_addr);
         assert!(peers.peers[&inbound].remove_after_disconnect);
+        // its source port is not a listening endpoint, so it is not saved
+        assert!(!peers.persistable_peers().any(|peer| peer.record.id == inbound));
 
         peers.on_active_session_dropped(
             &socket_addr,
