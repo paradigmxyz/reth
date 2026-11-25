@@ -790,6 +790,29 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
         txs.into_iter().map(|tx| self.recover_raw_transaction(tx.as_ref())).collect()
     }
 
+    /// Decodes and recovers a raw transaction in the pool's pooled format.
+    ///
+    /// Used by RPC methods that execute raw transactions a client could also submit to the pool,
+    /// such as `eth_callBundle`, `mev_simBundle` and `trace_rawTransaction`. The default delegates
+    /// to [`Self::recover_raw_transaction`]; implementations can override it to customize decoding
+    /// or recovery for their pooled transaction type.
+    fn recover_raw_pooled_transaction(
+        &self,
+        tx: &[u8],
+    ) -> EthResult<Recovered<PoolPooledTx<Self::Pool>>> {
+        self.recover_raw_transaction(tx)
+    }
+
+    /// Decodes and recovers raw pooled transactions in order, stopping at the first error.
+    ///
+    /// Uses [`Self::recover_raw_pooled_transaction`] for each transaction.
+    fn recover_raw_pooled_transactions(
+        &self,
+        txs: impl IntoIterator<Item = impl AsRef<[u8]>>,
+    ) -> EthResult<Vec<Recovered<PoolPooledTx<Self::Pool>>>> {
+        txs.into_iter().map(|tx| self.recover_raw_pooled_transaction(tx.as_ref())).collect()
+    }
+
     /// Recovers the sender of a mined transaction, reusing a cached sender when configured.
     ///
     /// Mined transactions can predate EIP-2, so recovery does not reject high-s signatures. A

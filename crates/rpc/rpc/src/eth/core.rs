@@ -1267,6 +1267,27 @@ mod tests {
         );
     }
 
+    /// Requesting more blocks than exist since a nonzero genesis returns the blocks since genesis
+    #[tokio::test]
+    async fn test_fee_history_clamps_to_nonzero_genesis() {
+        let genesis_block = 500_010;
+        let block_count = 37;
+        let newest_block = genesis_block + block_count - 1;
+        let genesis = Genesis { number: Some(genesis_block), ..Default::default() };
+        let mock_provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().genesis(genesis).build());
+
+        let (eth_api, base_fees_per_gas, gas_used_ratios) =
+            prepare_eth_api(newest_block, None, block_count, mock_provider);
+
+        let fee_history =
+            eth_api.fee_history(U64::from(1024), BlockNumberOrTag::Latest, None).await.unwrap();
+
+        assert_eq!(fee_history.oldest_block, genesis_block);
+        assert_eq!(fee_history.base_fee_per_gas, base_fees_per_gas);
+        assert_eq!(fee_history.gas_used_ratio, gas_used_ratios);
+    }
+
     #[tokio::test]
     async fn call_allowance_respects_rpc_gas_cap() {
         use reth_tasks::pool::BlockingTaskGuard;
@@ -1643,6 +1664,40 @@ mod tests {
         let estimated = EthCall::estimate_gas_at(&sufficient, request, at, EvmOverrides::default())
             .await
             .unwrap();
+        assert_eq!(estimated, U256::from(21_000));
+    }
+
+    /// `eth_estimateGas` waits for a blocking IO permit, like `eth_call`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn estimate_gas_takes_blocking_io_permit() {
+        let provider = MockEthProvider::default();
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header { number: 1, gas_limit: 30_000_000, ..Default::default() },
+                body: BlockBody::default(),
+            },
+        );
+        let api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .max_blocking_io_requests(1)
+        .build();
+        let request = TransactionRequest::default().with_to(Address::repeat_byte(0xaa));
+
+        let permit = api.acquire_owned_blocking_io().await.unwrap();
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            EthApiServer::estimate_gas(&api, request.clone(), None, None, None)
+        )
+        .await
+        .is_err());
+
+        drop(permit);
+        let estimated = EthApiServer::estimate_gas(&api, request, None, None, None).await.unwrap();
         assert_eq!(estimated, U256::from(21_000));
     }
 

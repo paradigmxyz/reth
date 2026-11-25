@@ -230,8 +230,9 @@ impl TestHarness {
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
         let runtime = reth_tasks::Runtime::test();
+        let (in_memory_state, in_memory_state_writer) = InMemoryState::new();
         let overlay_manager = OverlayManager::with_worker_pool(
-            InMemoryState::default(),
+            in_memory_state,
             runtime.state_trie_overlay_worker_pool(),
         );
 
@@ -246,7 +247,7 @@ impl TestHarness {
         );
         let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
             ChainInfoHeaders { canonical_head: header, safe: None, finalized: None },
-            overlay_manager.in_memory_state().clone(),
+            in_memory_state_writer,
         );
 
         let (to_payload_service, payload_command_rx) = unbounded_channel();
@@ -298,21 +299,11 @@ impl TestHarness {
     }
 
     fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
-        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
-            ChainInfoHeaders {
-                canonical_head: blocks.last().unwrap().recovered_block().clone_sealed_header(),
-                safe: None,
-                finalized: None,
-            },
-            self.tree.state.tree_state.overlay_manager.in_memory_state().clone(),
-        );
-
         self.tree
             .state
             .tree_state
             .set_canonical_head(blocks.last().unwrap().recovered_block().num_hash());
 
-        self.tree.canonical_in_memory_state_writer = canonical_in_memory_state_writer;
         self.tree
             .canonical_in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
@@ -1821,6 +1812,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     let backfill_tip_block = main_chain[(backfill_finished_block_number - 1) as usize].clone();
     // add block to mock provider to enable persistence clean up.
     test_harness.provider.add_block(backfill_tip_block.hash(), backfill_tip_block.into_block());
+    test_harness.provider.enable_database_provider();
     let _ = test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished)).unwrap();
 
     let event = test_harness.from_tree_rx.recv().await.unwrap();
@@ -1876,6 +1868,7 @@ fn backfill_finish_drops_in_memory_blocks_through_the_backfill_height() {
     // Backfill finishes at block 2, which the tree still holds in memory.
     let backfill_tip = blocks[2].recovered_block();
     test_harness.provider.add_block(backfill_tip.hash(), backfill_tip.clone().into_block());
+    test_harness.provider.enable_database_provider();
     test_harness
         .tree
         .on_backfill_sync_finished(ControlFlow::Continue { block_number: backfill_tip.number })
@@ -1909,6 +1902,7 @@ fn backfill_finish_drops_in_memory_blocks_below_the_backfill_height_off_the_pers
     // Backfill finishes at block 2, which the tree still holds in memory.
     let backfill_tip = blocks[2].recovered_block();
     test_harness.provider.add_block(backfill_tip.hash(), backfill_tip.clone().into_block());
+    test_harness.provider.enable_database_provider();
     test_harness
         .tree
         .on_backfill_sync_finished(ControlFlow::Continue { block_number: backfill_tip.number })
@@ -3330,6 +3324,7 @@ fn test_backfill_reaching_sync_target_head_updates_finalized() {
         .forkchoice_state_tracker
         .set_latest(fcu_state, ForkchoiceStatus::Syncing);
 
+    test_harness.provider.enable_database_provider();
     test_harness
         .tree
         .on_backfill_sync_finished(ControlFlow::Continue { block_number: sync_target.number })
@@ -3595,6 +3590,7 @@ async fn assert_post_backfill_recheck_uses_threshold(
     let backfill_finished_block_number = DEFAULT_BACKFILL_RUN_THRESHOLD + 1;
     let backfill_tip_block = main_chain[(backfill_finished_block_number - 1) as usize].clone();
     test_harness.provider.add_block(backfill_tip_block.hash(), backfill_tip_block.into_block());
+    test_harness.provider.enable_database_provider();
     let backfill_finished = FromOrchestrator::BackfillSyncFinished(ControlFlow::Continue {
         block_number: backfill_finished_block_number,
     });

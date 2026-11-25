@@ -653,7 +653,7 @@ impl ChangesetCacheInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::canonical_in_memory_state_writer_for, StateTrieOverlay};
+    use crate::{test_utils::overlay_manager_with_writer, StateTrieOverlay};
     use alloy_consensus::Header;
     use alloy_primitives::{
         keccak256,
@@ -776,8 +776,11 @@ mod tests {
     {
         let individual_state_revert =
             HashedPostStateSorted::from_reverts(provider, block_number..=block_number).unwrap();
-        let cumulative_state_revert =
-            HashedPostStateSorted::from_reverts(provider, (block_number + 1)..).unwrap();
+        let cumulative_state_revert = HashedPostStateSorted::from_reverts(
+            provider,
+            (block_number + 1)..=provider.last_block_number().unwrap(),
+        )
+        .unwrap();
 
         let mut cumulative_state_revert_prev = cumulative_state_revert.clone();
         cumulative_state_revert_prev.extend_ref_and_sort(&individual_state_revert);
@@ -940,14 +943,13 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
-        let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
-        let mut canonical_in_memory_state_writer = canonical_in_memory_state_writer_for(&manager);
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
         for (block, updates) in [
             (&blocks[1], Arc::new(storage_updates(vec![(removed, Some(node))]))),
             (&blocks[2], Arc::clone(&finish_updates)),
             (&blocks[3], Arc::default()),
         ] {
-            canonical_in_memory_state_writer.insert_executed(ExecutedBlock::new(
+            in_memory_state_writer.insert_executed(ExecutedBlock::new(
                 Arc::clone(&block.recovered_block),
                 Arc::clone(&block.execution_output),
                 SortedTrieData::new(Arc::default(), updates),
@@ -990,7 +992,7 @@ mod tests {
         // live in-memory state, because persistence removes the blocks that mask Finish.
         let head_state =
             manager.in_memory_state().state_by_hash(blocks[3].recovered_block().hash());
-        canonical_in_memory_state_writer.clear_state();
+        in_memory_state_writer.clear_state();
         cache.evict(2);
         let (frontier, finish) = database_state_frontiers(&before).unwrap();
         let builder = manager
