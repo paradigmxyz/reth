@@ -12,6 +12,7 @@ IMAGES=(
     "/tmp/ethereum_sync.tar"
     "/tmp/eels_enginex.tar"
     "/tmp/eels_wirex.tar"
+    "/tmp/eels_reorg.tar"
     "/tmp/eels_blobs.tar"
     "/tmp/reth_image.tar"
 )

@@ -44,6 +44,7 @@ rayon = { workspace = true, optional = true }
 tracing.workspace = true
 
 [dev-dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-chain-state = { workspace = true, features = ["test-utils"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }

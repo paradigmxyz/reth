@@ -90,7 +90,7 @@ impl<T: Send + std::fmt::Debug + 'static> std::fmt::Debug for LazyHandle<T> {
 mod tests {
     use super::*;
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_lazy_handle_resolves() {
         let (tx, rx) = oneshot::channel();
         let handle = LazyHandle::new(rx);
@@ -100,7 +100,7 @@ mod tests {
         assert_eq!(*handle.get(), 42);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_lazy_handle_clone_shares_value() {
         let (tx, rx) = oneshot::channel();
         let handle = LazyHandle::new(rx);
@@ -110,7 +110,7 @@ mod tests {
         assert_eq!(*handle2.get(), 99);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_lazy_handle_try_into_inner() {
         let (tx, rx) = oneshot::channel();
         let handle = LazyHandle::new(rx);
@@ -118,7 +118,7 @@ mod tests {
         assert_eq!(handle.try_into_inner().unwrap(), "hello");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_lazy_handle_try_into_inner_returns_self_with_clone() {
         let (tx, rx) = oneshot::channel();
         let handle = LazyHandle::new(rx);
@@ -128,7 +128,7 @@ mod tests {
         assert_eq!(*handle.get(), "hello");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     #[should_panic(expected = "LazyHandle task dropped without producing a value")]
     fn test_lazy_handle_panics_on_dropped_sender() {
         let (_tx, rx) = oneshot::channel::<u64>();

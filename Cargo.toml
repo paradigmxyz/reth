@@ -18,6 +18,8 @@ members = [
     "crates/cli/commands/",
     "crates/cli/runner/",
     "crates/cli/util/",
+    "crates/concurrency/",
+    "crates/concurrency/macros/",
     "crates/config/",
     "crates/consensus/common/",
     "crates/consensus/consensus/",
@@ -338,6 +340,8 @@ reth-cli-runner = { path = "crates/cli/runner" }
 reth-cli-util = { path = "crates/cli/util" }
 reth-codecs = { version = "0.8.2", default-features = false }
 reth-codecs-derive = "0.8.2"
+reth-concurrency = { path = "crates/concurrency", default-features = false }
+reth-concurrency-macros = { path = "crates/concurrency/macros" }
 reth-config = { path = "crates/config", default-features = false }
 reth-consensus = { path = "crates/consensus/consensus", default-features = false }
 reth-consensus-common = { path = "crates/consensus/common", default-features = false }
@@ -442,9 +446,9 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f", default-features = false }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f", default-features = false }
-evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f", default-features = false }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "0a8a935c4ffe274a23cf8480f7a3a07015f3030e", default-features = false }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "0a8a935c4ffe274a23cf8480f7a3a07015f3030e", default-features = false }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "0a8a935c4ffe274a23cf8480f7a3a07015f3030e", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -521,6 +525,9 @@ parking_lot = "0.12"
 paste = "1.0"
 rand = "0.9"
 rayon = "1.7"
+shuttle = "=0.9.10"
+shuttle-sync = { version = "0.1.0", default-features = false }
+shuttle-parking_lot = { version = "0.12.5", default-features = false }
 thread-priority = "3.0.0"
 rustc-hash = { version = "2.0", default-features = false }
 serde = { version = "1.0", default-features = false }
@@ -533,7 +540,7 @@ thiserror = { version = "2.0.20", default-features = false }
 tar = "0.4.46"
 tracing = { version = "0.1.0", default-features = false, features = ["attributes"] }
 tracing-appender = "0.2.5"
-url = { version = "2.3", default-features = false }
+url = { version = "2.5.9", default-features = false }
 zstd = "0.14.3"
 byteorder = "1"
 fixed-cache = { version = "0.1.10", default-features = false, features = ["alloc"] }
@@ -551,6 +558,11 @@ tokio = { version = "1.52.3", default-features = false }
 tokio-stream = "0.1.11"
 tokio-tungstenite = "0.29.0"
 tokio-util = { version = "0.7.11", features = ["codec"] }
+
+# proc-macros
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", default-features = false }
 
 # async
 async-compression = { version = "0.4", default-features = false }
@@ -679,9 +691,9 @@ ipnet = "2.11"
 # evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
 # rejects a patch from the same source.
 [patch."https://github.com/alloy-rs/evm2"]
-evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f" }
-evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f" }
-evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f" }
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "0a8a935c4ffe274a23cf8480f7a3a07015f3030e" }
+evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "0a8a935c4ffe274a23cf8480f7a3a07015f3030e" }
+evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "0a8a935c4ffe274a23cf8480f7a3a07015f3030e" }
 
 [patch.crates-io]
 # reth-core

@@ -598,7 +598,8 @@ where
         // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
 
-        let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
+        let sequential_reason = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
+        let parallel_bal_execution = sequential_reason.is_none();
 
         // Prepare the state-root job before execution so it can provide streaming hooks.
         let mut state_root_job =
@@ -712,6 +713,10 @@ where
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
+        let path = if parallel_bal_execution { "parallel" } else { "sequential" };
+        let reason = sequential_reason.unwrap_or_default();
+        let NumHash { number, hash } = input.num_hash();
+        debug!(target: "engine::tree::bal_execution_path", block = number, %hash, path, reason, "Executing block");
         let execute_block_start = Instant::now();
         let execution_result = if parallel_bal_execution {
             self.execute_block_bal(env, &input, &handle, &make_state_provider)
@@ -1084,7 +1089,8 @@ where
         Ok((output, senders, result_rx, built_bal))
     }
 
-    /// Returns true when the BAL execute path should be used for this block.
+    /// Returns `None` when the BAL execute path should be used for this block, or else the first
+    /// gate that rules it out: `no-access-list` or `disabled`.
     // TODO: extend with stronger gating before enabling on mainnet:
     //   - Fork check: `Amsterdam.active_at_timestamp(env.evm_env.timestamp)`. Today a BAL only
     //     exists post-Amsterdam, so the BAL-presence check is a sufficient proxy. It is a proxy,
@@ -1092,17 +1098,24 @@ where
     //   - Tx-count threshold (`bal_execute_path_min_tx_count`): below the parallelism break-even
     //     point, provider setup and worker scheduling overhead can exceed the gain. Tune
     //     empirically once workers are parallel; meaningless while the commit loop is sequential.
-    fn bal_path_eligible(&self, bal: Option<&DecodedBal>) -> Result<bool, InsertBlockErrorKind> {
-        let has_bal = bal.is_some();
-        let parallel_execution = has_bal && !self.config.disable_bal_parallel_execution();
-        if parallel_execution && self.config.disable_bal_parallel_state_root() {
+    fn bal_path_eligible(
+        &self,
+        bal: Option<&DecodedBal>,
+    ) -> Result<Option<&'static str>, InsertBlockErrorKind> {
+        if bal.is_none() {
+            return Ok(Some("no-access-list"))
+        }
+        if self.config.disable_bal_parallel_execution() {
+            return Ok(Some("disabled"))
+        }
+        if self.config.disable_bal_parallel_state_root() {
             return Err(InsertBlockErrorKind::Other(
                 "disabling parallel state root is impossible when parallel execution is enabled"
                     .into(),
             ));
         }
 
-        Ok(parallel_execution)
+        Ok(None)
     }
 
     /// Executes the block on the BAL path. Mirrors the return shape of [`Self::execute_block`]

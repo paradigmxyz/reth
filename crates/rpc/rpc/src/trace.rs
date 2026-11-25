@@ -15,9 +15,7 @@ use alloy_rpc_types_trace::{
     tracerequest::TraceCallRequest,
 };
 use evm2_inspectors::{
-    opcode::OpcodeGasInspector,
-    storage::StorageInspector,
-    tracing::{TracingInspector, TracingInspectorConfig},
+    opcode::OpcodeGasInspector, storage::StorageInspector, tracing::TracingInspectorConfig,
 };
 use futures::{FutureExt, StreamExt};
 use jsonrpsee::core::RpcResult;
@@ -33,7 +31,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{error::EthApiError, utils::CallManyBudget, EthConfig};
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
-use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
@@ -111,7 +109,7 @@ where
                         &mut *db,
                         evm_env,
                         &tx_env,
-                        TracingInspector::new(config),
+                        this.eth_api().tracing_inspector(config),
                         code_overrides,
                     )?;
                     let trace_res = inspector
@@ -134,7 +132,7 @@ where
     ) -> Result<TraceResults, Eth::Error> {
         let tx = self
             .eth_api()
-            .recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
+            .recover_raw_pooled_transaction(&tx)?
             .map(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
         let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
@@ -188,8 +186,9 @@ where
                     )?;
                     budget.admit(&mut tx_env)?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
+                    let inspector = eth_api.tracing_inspector(config);
                     let (inspector, res) = eth_api
-                        .inspect(&mut db, evm_env, &tx_env, TracingInspector::new(config))
+                        .inspect(&mut db, evm_env, &tx_env, inspector)
                         .map_err(|err| budget.map_call_err(err))?;
                     budget.charge(&res.result)?;
 
@@ -984,6 +983,40 @@ mod tests {
         let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(response["result"], serde_json::to_value(latest).unwrap());
+    }
+
+    #[tokio::test]
+    async fn vm_trace_halts_past_byte_limit() {
+        let provider = MockEthProvider::default();
+        let target = Address::with_last_byte(0x42);
+        // JUMPDEST PUSH1 0 JUMP: loops until out of gas, recording steps but no memory.
+        provider.add_account(
+            target,
+            ExtendedAccount::new(0, U256::ZERO).with_bytecode(bytes!("5b600056")),
+        );
+        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        let call = TransactionRequest::default().to(target).gas_limit(1_000_000);
+
+        for max_trace_bytes in [None, Some(1 << 16)] {
+            let eth_api = EthApiBuilder::new(
+                provider.clone(),
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(provider.chain_spec()),
+            )
+            .max_trace_bytes(max_trace_bytes)
+            .build();
+            let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
+            let result = api.trace_call(TraceCallRequest::new(call.clone()).with_vm_trace()).await;
+            match max_trace_bytes {
+                None => assert!(result.unwrap().vm_trace.unwrap().ops.len() > 100_000),
+                Some(_) => assert_eq!(
+                    result.unwrap_err().to_string(),
+                    "fatal error: trace recorded byte limit exceeded"
+                ),
+            }
+        }
     }
 
     #[tokio::test]

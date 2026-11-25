@@ -18,8 +18,8 @@ use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
-    ProofV2Target, RlpNode, TrieNodeV2,
+    prefix_set::PrefixSet, BranchNode, BranchNodeMasks, Nibbles, ProofTrieNode, ProofV2Target,
+    RlpNode, TrieNode,
 };
 use std::{cmp::Ordering, sync::Arc};
 use tracing::{error, instrument, trace};
@@ -72,7 +72,7 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     cached_branch_stack: Vec<(Nibbles, BranchNodeCompact)>,
     /// The proofs which will be returned from the calculation. This gets taken at the end of every
     /// proof call.
-    retained_proofs: Vec<ProofTrieNodeV2>,
+    retained_proofs: Vec<ProofTrieNode>,
     /// Free-list of re-usable buffers of [`RlpNode`]s, used for encoding branch nodes to RLP.
     ///
     /// We are generally able to re-use these buffers across different branch nodes for the
@@ -272,18 +272,20 @@ where
 
         trace!(target: TRACE_TARGET, ?child_path, "Retaining child");
 
-        // Convert to `ProofTrieNodeV2`, which will be what is retained.
+        // Convert to `ProofTrieNode`, which will be what is retained.
         //
         // If this node is a branch then its `rlp_nodes_buf` will be taken and not returned to the
         // `rlp_nodes_bufs` free-list.
         self.rlp_encode_buf.clear();
-        let proof_node = child.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
+        let (proof_node, branch_node) =
+            child.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
 
-        // Use the `ProofTrieNodeV2` to encode the `RlpNode`, and then push it onto retained nodes
+        // Use the `ProofTrieNode` to encode the `RlpNode`, and then push it onto retained nodes
         // before returning.
         self.rlp_encode_buf.clear();
         proof_node.node.encode(&mut self.rlp_encode_buf);
 
+        self.retained_proofs.extend(branch_node);
         self.retained_proofs.push(proof_node);
         Ok(RlpNode::from_rlp(&self.rlp_encode_buf))
     }
@@ -586,23 +588,15 @@ where
             self.branch_path.len() - branch.ext_len as usize,
         );
 
-        // Compute hash for the branch node if it has a parent extension.
-        let rlp_node = if short_key.is_empty() {
-            None
-        } else {
-            self.rlp_encode_buf.clear();
-            BranchNodeRef::new(&rlp_nodes_buf, branch.state_mask).encode(&mut self.rlp_encode_buf);
-            Some(RlpNode::from_rlp(&self.rlp_encode_buf))
-        };
-
         // Update the branch_path. If this branch is the only branch then only its extension needs
         // to be trimmed, otherwise we also need to remove its nibble from its parent.
         let new_path_len =
             self.branch_path.len() - branch.ext_len as usize - self.maybe_parent_nibble();
 
-        // Wrap the `BranchNodeV2` so it can be pushed onto the child stack.
+        // Keep the branch and its pending parent extension key on the child stack.
         let branch_as_child = ProofTrieBranchChild::Branch {
-            node: BranchNodeV2::new(short_key, rlp_nodes_buf, branch.state_mask, rlp_node),
+            node: BranchNode::new(rlp_nodes_buf, branch.state_mask),
+            short_key,
             masks: (!masks.is_empty()).then_some(masks),
         };
 
@@ -1342,19 +1336,20 @@ where
         // A full-trie calculation always retains a root, using an empty root when traversal
         // produced no root node.
         if sub_trie_targets.parent_prefix.is_none() {
-            let mut root_node = if let Some(root_node) = root_node {
+            let (mut root_node, branch_node) = if let Some(root_node) = root_node {
                 self.rlp_encode_buf.clear();
                 root_node.into_proof_trie_node(Nibbles::new(), &mut self.rlp_encode_buf)?
             } else {
-                ProofTrieNodeV2::empty()
+                (ProofTrieNode::empty(), None)
             };
 
             // Direct root branches do not have an entry in the branch node table. A root extension
-            // still carries the masks of the child branch embedded within it.
-            if matches!(&root_node.node, TrieNodeV2::Branch(branch) if branch.key.is_empty()) {
+            // has a separate child branch carrying its own masks.
+            if matches!(&root_node.node, TrieNode::Branch(_)) {
                 root_node.masks = None;
             }
 
+            self.retained_proofs.extend(branch_node);
             self.retained_proofs.push(root_node);
             return Ok(())
         };
@@ -1380,7 +1375,9 @@ where
         // Retain the requested child with only the path below its parent edge in the short key.
         root_node.trim_short_key_prefix(child_path_len);
         self.rlp_encode_buf.clear();
-        let root_node = root_node.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
+        let (root_node, branch_node) =
+            root_node.into_proof_trie_node(child_path, &mut self.rlp_encode_buf)?;
+        self.retained_proofs.extend(branch_node);
         self.retained_proofs.push(root_node);
 
         Ok(())
@@ -1402,7 +1399,7 @@ where
         &mut self,
         value_encoder: &mut VE,
         targets: &mut [ProofV2Target],
-    ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
+    ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         // If there are no targets then nothing could be returned, return early.
         if targets.is_empty() {
             trace!(target: TRACE_TARGET, "Empty targets, returning");
@@ -1472,8 +1469,10 @@ where
 
     /// Generate a proof for the given targets.
     ///
-    /// Given a set of [`ProofV2Target`]s, returns nodes whose paths are a prefix of any target. The
-    /// returned nodes are sorted in depth-first post-order (children before parents).
+    /// Given a set of [`ProofV2Target`]s, returns nodes on the requested paths, including the child
+    /// branch of every retained extension so its persistence masks remain available even for an
+    /// absence target that diverges within the extension key. Nodes are sorted in depth-first
+    /// post-order (children before parents).
     ///
     /// Targets may be supplied in any order. Calculation sorts the slice in place by known parent
     /// context, then by key within each group.
@@ -1482,7 +1481,7 @@ where
         &mut self,
         value_encoder: &mut VE,
         targets: &mut [ProofV2Target],
-    ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
+    ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         self.trie_cursor.reset();
         self.hashed_cursor.reset();
         self.proof_inner(value_encoder, targets)
@@ -1496,7 +1495,7 @@ where
     /// This method reuses the internal RLP encode buffer for efficiency.
     pub fn compute_root_hash(
         &mut self,
-        proof_nodes: &[ProofTrieNodeV2],
+        proof_nodes: &[ProofTrieNode],
     ) -> Result<Option<B256>, StateProofError> {
         // Find the root node (node at empty path)
         let root_node = proof_nodes.iter().find(|node| node.path.is_empty());
@@ -1515,13 +1514,23 @@ where
 
     /// Calculates the root node of the trie.
     ///
-    /// This method does not accept targets nor retain proofs. Returns the root node which can
-    /// be used to compute the root hash via [`Self::compute_root_hash`].
+    /// This method does not accept targets or retain descendant proofs. Returns the standard root
+    /// node, which can be used to compute the root hash via [`Self::compute_root_hash`]. For a root
+    /// extension, use [`Self::root_nodes`] to also obtain its separate child branch.
     #[instrument(target = TRACE_TARGET, level = "trace", skip(self, value_encoder))]
-    pub fn root_node(
+    pub fn root_node(&mut self, value_encoder: &mut VE) -> Result<ProofTrieNode, StateProofError> {
+        self.root_nodes(value_encoder)?.pop().ok_or_else(|| {
+            StateProofError::TrieInconsistency("root calculation returned no root node".to_string())
+        })
+    }
+
+    /// Calculates the root and, for an extension root, its separate child branch.
+    ///
+    /// Nodes are returned children before parents; the root is always last, even for an empty trie.
+    pub fn root_nodes(
         &mut self,
         value_encoder: &mut VE,
-    ) -> Result<ProofTrieNodeV2, StateProofError> {
+    ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         self.trie_cursor.reset();
         self.hashed_cursor.reset();
 
@@ -1548,26 +1557,7 @@ where
             return Err(err);
         }
 
-        // `proof_subtrie` retains the root node when there is no known parent, regardless of
-        // whether there are any targets.
-        let mut proofs = core::mem::take(&mut self.retained_proofs);
-        trace!(
-            target: TRACE_TARGET,
-            proofs_len = ?proofs.len(),
-            "root_node: extracting root",
-        );
-
-        // The root node is at the empty path. Since there is no parent and targets is empty, there
-        // should be no other retained proofs.
-        debug_assert_eq!(
-            proofs.len(), 1,
-            "prefix is empty, parent path is None, and targets is empty, so there must be only the root node"
-        );
-
-        // Find and remove the root node (node at empty path)
-        let root_node = proofs.pop().expect("prefix is empty, parent path is None, and targets is empty, so there must be only the root node");
-
-        Ok(root_node)
+        Ok(core::mem::take(&mut self.retained_proofs))
     }
 }
 
@@ -1586,8 +1576,10 @@ where
 
     /// Generate a proof for a storage trie at the given hashed address.
     ///
-    /// Given a set of [`ProofV2Target`]s, returns nodes whose paths are a prefix of any target. The
-    /// returned nodes are sorted in depth-first post-order (children before parents).
+    /// Given a set of [`ProofV2Target`]s, returns nodes on the requested paths, including the child
+    /// branch of every retained extension so its persistence masks remain available even for an
+    /// absence target that diverges within the extension key. Nodes are sorted in depth-first
+    /// post-order (children before parents).
     ///
     /// Targets may be supplied in any order. Calculation sorts the slice in place by known parent
     /// context, then by key within each group.
@@ -1596,15 +1588,15 @@ where
         &mut self,
         hashed_address: B256,
         targets: &mut [ProofV2Target],
-    ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
+    ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         self.hashed_cursor.set_hashed_address(hashed_address);
 
         // Shortcut: check if storage is empty
         if self.hashed_cursor.is_storage_empty()? {
             return Ok(if targets.iter().any(|target| !target.parent.is_known()) {
-                vec![ProofTrieNodeV2 {
+                vec![ProofTrieNode {
                     path: Nibbles::default(),
-                    node: TrieNodeV2::EmptyRoot,
+                    node: TrieNode::EmptyRoot,
                     masks: None,
                 }]
             } else {
@@ -1623,21 +1615,32 @@ where
 
     /// Calculates the root node of a storage trie.
     ///
-    /// This method does not accept targets nor retain proofs. Returns the root node which can
-    /// be used to compute the root hash via [`Self::compute_root_hash`].
+    /// This method does not accept targets or retain descendant proofs. Returns the standard root
+    /// node, which can be used to compute the root hash via [`Self::compute_root_hash`]. For a root
+    /// extension, use [`Self::storage_root_nodes`] to also obtain its separate child branch.
     #[instrument(target = TRACE_TARGET, level = "trace", skip(self))]
     pub fn storage_root_node(
         &mut self,
         hashed_address: B256,
-    ) -> Result<ProofTrieNodeV2, StateProofError> {
+    ) -> Result<ProofTrieNode, StateProofError> {
+        self.storage_root_nodes(hashed_address)?.pop().ok_or_else(|| {
+            StateProofError::TrieInconsistency(
+                "storage root calculation returned no root node".to_string(),
+            )
+        })
+    }
+
+    /// Calculates storage root nodes in children-before-parents order.
+    ///
+    /// Includes the separate child branch of an extension root, even without proof targets.
+    pub fn storage_root_nodes(
+        &mut self,
+        hashed_address: B256,
+    ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         self.hashed_cursor.set_hashed_address(hashed_address);
 
         if self.hashed_cursor.is_storage_empty()? {
-            return Ok(ProofTrieNodeV2 {
-                path: Nibbles::default(),
-                node: TrieNodeV2::EmptyRoot,
-                masks: None,
-            })
+            return Ok(vec![ProofTrieNode::empty()]);
         }
 
         // Don't call `set_hashed_address` on the trie cursor until after the previous shortcut has
@@ -1646,7 +1649,7 @@ where
 
         // Create a mutable storage value encoder
         let mut storage_value_encoder = StorageValueEncoder;
-        self.root_node(&mut storage_value_encoder)
+        self.root_nodes(&mut storage_value_encoder)
     }
 
     /// Calculates the storage root hash of the account at `hashed_address`.
@@ -1867,34 +1870,15 @@ mod tests {
     use reth_trie_common::{
         prefix_set::{PrefixSet, PrefixSetMut},
         updates::TrieUpdatesSorted,
-        HashedPostState, HashedStorage, ProofTrieNode, ProofV2TargetParent, TrieNode,
-        EMPTY_ROOT_HASH,
+        HashedPostState, HashedStorage, ProofV2TargetParent, EMPTY_ROOT_HASH,
     };
     use std::collections::BTreeMap;
 
-    /// Converts legacy proofs to V2 proofs by combining extension nodes with their child branch
-    /// nodes.
-    ///
-    /// In the legacy proof format, extension nodes and branch nodes are separate. In the V2 format,
-    /// they are combined into a single `BranchNodeV2` where the extension's key becomes the
-    /// branch's `key` field.
-    ///
-    /// Converts legacy proofs (sorted in depth-first order) to V2 format.
-    ///
-    /// In depth-first order, children come BEFORE parents. So when we encounter an extension node,
-    /// its child branch has already been processed and is in the result. We need to pop it and
-    /// combine it with the extension.
-    fn convert_legacy_proofs_to_v2(legacy_proofs: &[ProofTrieNode]) -> Vec<ProofTrieNodeV2> {
-        ProofTrieNodeV2::from_sorted_trie_nodes(
-            legacy_proofs.iter().map(|p| (p.path, p.node.clone(), p.masks)),
-        )
-    }
-
     /// Projects a legacy proof node into the representation requested by a V2 target.
     fn project_legacy_proof_node(
-        node: &ProofTrieNodeV2,
+        node: &ProofTrieNode,
         target: &ProofV2Target,
-    ) -> Option<ProofTrieNodeV2> {
+    ) -> Option<ProofTrieNode> {
         let Some(parent_path_len) = target.parent.path_len() else {
             return target.key_nibbles.starts_with(&node.path).then(|| node.clone())
         };
@@ -1904,9 +1888,9 @@ mod tests {
         }
 
         let logical_path = match &node.node {
-            TrieNodeV2::Leaf(leaf) => node.path.join(&leaf.key),
-            TrieNodeV2::Branch(branch) => node.path.join(&branch.key),
-            TrieNodeV2::EmptyRoot | TrieNodeV2::Extension(_) => return None,
+            TrieNode::Leaf(leaf) => node.path.join(&leaf.key),
+            TrieNode::Extension(ext) => node.path.join(&ext.key),
+            TrieNode::EmptyRoot | TrieNode::Branch(_) => return None,
         };
         let child_path_len = parent_path_len + 1;
         if logical_path.len() < child_path_len {
@@ -1922,29 +1906,41 @@ mod tests {
         let mut projected = node.clone();
         projected.path = child_path;
         match &mut projected.node {
-            TrieNodeV2::Leaf(leaf) => leaf.key = leaf.key.slice(trim_len..),
-            TrieNodeV2::Branch(branch) => {
-                branch.key = branch.key.slice(trim_len..);
-                if branch.key.is_empty() {
-                    branch.branch_rlp_node = None;
+            TrieNode::Leaf(leaf) => leaf.key = leaf.key.slice(trim_len..),
+            TrieNode::Extension(ext) => {
+                // The branch itself is projected separately when the extension is fully trimmed.
+                if ext.key.len() == trim_len {
+                    return None;
                 }
+                ext.key = ext.key.slice(trim_len..);
             }
-            TrieNodeV2::EmptyRoot | TrieNodeV2::Extension(_) => unreachable!(),
+            TrieNode::EmptyRoot | TrieNode::Branch(_) => unreachable!(),
         }
         Some(projected)
     }
 
     /// Builds the exact V2 representation expected for a legacy proof and set of targets.
     fn project_legacy_proof(
-        legacy_nodes: &[ProofTrieNodeV2],
+        legacy_nodes: &[ProofTrieNode],
         targets: &[ProofV2Target],
-    ) -> Vec<ProofTrieNodeV2> {
+    ) -> Vec<ProofTrieNode> {
         let mut projected = targets
             .iter()
             .flat_map(|target| {
                 legacy_nodes.iter().filter_map(move |node| project_legacy_proof_node(node, target))
             })
             .collect::<Vec<_>>();
+        // A retained extension also reveals its child branch and persistence masks, even when
+        // the target diverges within the extension key.
+        let branches = projected
+            .iter()
+            .filter_map(|node| {
+                let TrieNode::Extension(extension) = &node.node else { return None };
+                let branch_path = node.path.join(&extension.key);
+                legacy_nodes.iter().find(|node| node.path == branch_path).cloned()
+            })
+            .collect::<Vec<_>>();
+        projected.extend(branches);
         projected.sort_unstable_by(|a, b| depth_first::cmp(&a.path, &b.path));
         projected.dedup_by(|a, b| {
             if a.path != b.path {
@@ -2047,10 +2043,7 @@ mod tests {
                 .sorted_by(|a, b| depth_first::cmp(&a.path, &b.path))
                 .collect::<Vec<_>>();
 
-            // Convert legacy proofs to V2 proofs by combining extensions with their child branches
-            let all_legacy_nodes_v2 = convert_legacy_proofs_to_v2(&proof_legacy_nodes);
-
-            let expected_v2 = project_legacy_proof(&all_legacy_nodes_v2, &targets_vec);
+            let expected_v2 = project_legacy_proof(&proof_legacy_nodes, &targets_vec);
             pretty_assertions::assert_eq!(expected_v2, proof_v2_result);
 
             Ok(())
@@ -2061,7 +2054,7 @@ mod tests {
     /// `StorageProofCalculator` to be reused after a mid-computation error left stale state.
     /// Before the fix, stale data in `branch_stack`, `child_stack`, and `branch_path`
     /// could cause a `usize` underflow panic in `pop_branch`.
-    #[test]
+    #[reth_concurrency::test]
     fn test_proof_calculator_reuse_after_error() {
         reth_tracing::init_test_tracing();
 
@@ -2119,7 +2112,7 @@ mod tests {
         pretty_assertions::assert_eq!(fresh_result, result);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_root_node_reuse_with_overlay() {
         let storage = BTreeMap::from([
             (B256::right_padding_from(&[0x10]), U256::ONE),
@@ -2144,7 +2137,7 @@ mod tests {
         let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
         let first_root = calculator.root_node(&mut StorageValueEncoder).unwrap();
-        assert!(matches!(first_root.node, TrieNodeV2::Branch(_)));
+        assert!(matches!(first_root.node, TrieNode::Branch(_)));
         assert_eq!(
             calculator.compute_root_hash(core::slice::from_ref(&first_root)).unwrap(),
             Some(harness.original_root())
@@ -2154,7 +2147,7 @@ mod tests {
         pretty_assertions::assert_eq!(first_root, second_root);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_partial_storage_proof_after_root_calculation() {
         let slot_a = B256::right_padding_from(&[0xae, 0xd4, 0x00]);
         let slot_b = B256::right_padding_from(&[0xae, 0xd4, 0x10]);
@@ -2243,7 +2236,7 @@ mod tests {
 
         proptest! {
             #![proptest_config(ProptestConfig::with_cases(4000))]
-            #[test]
+            #[reth_concurrency::test]
             /// Tests that `StorageProofCalculator` produces valid proofs for randomly generated
             /// storage datasets with proof targets.
             fn proptest_proof_with_targets(
@@ -2261,7 +2254,7 @@ mod tests {
                 harness.assert_proof(targets).expect("Proof generation failed");
             }
 
-            #[test]
+            #[reth_concurrency::test]
             fn proptest_proof_with_dirty_prefixes(
                 before in prop::collection::btree_map(dirty_key_strategy(), 1u64..100, 0..80),
                 changes in prop::collection::btree_map(dirty_key_strategy(), 0u64..100, 0..8),
@@ -2313,7 +2306,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_exact_subtrie_targets_with_root_target() {
         reth_tracing::init_test_tracing();
 
@@ -2334,7 +2327,7 @@ mod tests {
         harness.assert_proof(targets).expect("Proof generation failed");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_rebases_singleton_subtrie_root_below_known_parent() {
         let slot = B256::right_padding_from(&[0xae, 0xd4, 0x09]);
         let slot_nibbles = Nibbles::unpack(slot);
@@ -2346,13 +2339,13 @@ mod tests {
         assert!(root.is_none());
         assert_eq!(proof.len(), 1);
         assert_eq!(proof[0].path, slot_nibbles.slice(0..4));
-        let TrieNodeV2::Leaf(leaf) = &proof[0].node else {
+        let TrieNode::Leaf(leaf) = &proof[0].node else {
             panic!("singleton subtrie root should remain a leaf")
         };
         assert_eq!(leaf.key, slot_nibbles.slice(4..));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_rebases_singleton_leaf_at_max_parent_depth() {
         let slot = B256::repeat_byte(0xae);
         let slot_nibbles = Nibbles::unpack(slot);
@@ -2364,13 +2357,13 @@ mod tests {
         assert!(root.is_none());
         assert_eq!(proof.len(), 1);
         assert_eq!(proof[0].path, slot_nibbles);
-        let TrieNodeV2::Leaf(leaf) = &proof[0].node else {
+        let TrieNode::Leaf(leaf) = &proof[0].node else {
             panic!("singleton subtrie root should remain a leaf")
         };
         assert!(leaf.key.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_root_and_root_parent_targets_retain_both_singleton_representations() {
         let slot = B256::right_padding_from(&[0x20]);
         let slot_nibbles = Nibbles::unpack(slot);
@@ -2384,19 +2377,19 @@ mod tests {
 
         assert_eq!(root, Some(harness.original_root()));
         let root_node = proof.iter().find(|node| node.path.is_empty()).expect("root proof");
-        let TrieNodeV2::Leaf(root_leaf) = &root_node.node else { panic!("root should be a leaf") };
+        let TrieNode::Leaf(root_leaf) = &root_node.node else { panic!("root should be a leaf") };
         assert_eq!(root_leaf.key, slot_nibbles);
 
         let child_path = slot_nibbles.slice(0..1);
         let child_node =
             proof.iter().find(|node| node.path == child_path).expect("rebased root child proof");
-        let TrieNodeV2::Leaf(child_leaf) = &child_node.node else {
+        let TrieNode::Leaf(child_leaf) = &child_node.node else {
             panic!("root child should be a leaf")
         };
         assert_eq!(child_leaf.key, slot_nibbles.slice(1..));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_exhausted_cursor_resets_at_equal_target_boundary() {
         let first = B256::ZERO;
         let last = B256::with_last_byte(1);
@@ -2415,11 +2408,11 @@ mod tests {
             .iter()
             .find(|node| node.path == last_nibbles)
             .expect("depth-63 target child proof");
-        let TrieNodeV2::Leaf(leaf) = &child.node else { panic!("target child should be a leaf") };
+        let TrieNode::Leaf(leaf) = &child.node else { panic!("target child should be a leaf") };
         assert!(leaf.key.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_rebases_compressed_branch_subtrie_root() {
         let slot_a = B256::right_padding_from(&[0xae, 0xd4, 0x00]);
         let slot_b = B256::right_padding_from(&[0xae, 0xd4, 0x10]);
@@ -2434,14 +2427,12 @@ mod tests {
         let branch_path = slot_nibbles.slice(0..4);
         let branch_node =
             proof.iter().find(|node| node.path == branch_path).expect("rebased compressed branch");
-        let TrieNodeV2::Branch(branch) = &branch_node.node else {
+        let TrieNode::Branch(_) = &branch_node.node else {
             panic!("rebased node should be a branch")
         };
-        assert!(branch.key.is_empty());
-        assert!(branch.branch_rlp_node.is_none());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_known_parent_retains_child() {
         let slot_a = B256::right_padding_from(&[0xae, 0xd2]);
         let slot_b = B256::right_padding_from(&[0xae, 0xd4]);
@@ -2457,7 +2448,7 @@ mod tests {
         assert!(proof.iter().any(|node| node.path == slot_nibbles.slice(0..4)));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_rebased_root_matches_direct_child_not_full_short_key() {
         let stored_slot = B256::right_padding_from(&[0xae, 0xd4, 0x09]);
         let same_child_target = B256::right_padding_from(&[0xae, 0xd4, 0xff]);
@@ -2475,7 +2466,7 @@ mod tests {
         assert!(proof.is_empty(), "a different direct child is unrelated to the target");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_known_parent_separate_child_ranges() {
         let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
         let stored_slot_b = B256::right_padding_from(&[0xeb, 0x53]);
@@ -2499,7 +2490,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_known_parent_does_not_use_stale_parent_mask() {
         let stored_slot_a = B256::right_padding_from(&[0xea, 0x53]);
         let stored_slot = B256::right_padding_from(&[0xeb, 0x53]);
@@ -2533,13 +2524,13 @@ mod tests {
         assert!(root.is_none());
         assert_eq!(proof.len(), 1);
         assert_eq!(proof[0].path, stored_slot_nibbles.slice(0..2));
-        let TrieNodeV2::Leaf(leaf) = &proof[0].node else {
+        let TrieNode::Leaf(leaf) = &proof[0].node else {
             panic!("live direct child should be reconstructed as a leaf")
         };
         assert_eq!(leaf.key, stored_slot_nibbles.slice(2..));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_empty_storage_respects_parent_context() {
         let harness = ProofTestHarness::new(BTreeMap::new());
         let slot = B256::ZERO;
@@ -2553,15 +2544,16 @@ mod tests {
         let mut root_target = [ProofV2Target::new(slot)];
         let (root_proof, root) = harness.proof_v2(&mut root_target);
         assert_eq!(root_proof.len(), 1);
-        assert!(matches!(root_proof[0].node, TrieNodeV2::EmptyRoot));
+        assert!(matches!(root_proof[0].node, TrieNode::EmptyRoot));
         assert_eq!(root, Some(EMPTY_ROOT_HASH));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_big_trie() {
         use rand::prelude::*;
 
         reth_tracing::init_test_tracing();
+
         let mut rng = rand::rngs::SmallRng::seed_from_u64(1);
 
         let mut rand_b256 = || {
@@ -2593,7 +2585,7 @@ mod tests {
             .expect("Proof generation failed");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_node_with_masked_empty_child() {
         reth_tracing::init_test_tracing();
 
@@ -2649,7 +2641,7 @@ mod tests {
     /// the hashed cursor still has keys (at `0x70...`), so `proof_subtrie` does not break and
     /// re-enters `next_uncached_key_range` with `uncalculated_lower_bound = Some(0x7)`.
     /// Since `0x7` is past `0x6`, all remaining children are skipped and the branch is popped.
-    #[test]
+    #[reth_concurrency::test]
     fn test_node_with_masked_empty_child_lower_bound_past_branch() {
         reth_tracing::init_test_tracing();
 
@@ -2703,7 +2695,7 @@ mod tests {
     /// The prefix set contains the new key. Without prefix set support, the calculator would
     /// skip nibble 3 entirely and produce a stale root hash. With prefix set support, nibble 3
     /// is discovered and its subtrie is recalculated from leaves.
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_adds_child_nibbles() {
         reth_tracing::init_test_tracing();
 
@@ -2754,7 +2746,7 @@ mod tests {
     /// dirty. Without prefix set support, the calculator would use the stale cached hash for
     /// nibble 5 and produce a wrong root. With prefix set support, the cached hash is skipped
     /// and the subtrie is recalculated from the updated leaf data.
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_invalidates_cached_hash() {
         reth_tracing::init_test_tracing();
 
@@ -2806,7 +2798,7 @@ mod tests {
         B256::from_slice(&alloy_primitives::hex::decode(s).expect("valid hex string"))
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_root_proof_processes_sibling_after_cached_descendant() {
         reth_tracing::init_test_tracing();
 
@@ -2836,7 +2828,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_root_proof_processes_trailing_dirty_sibling() {
         reth_tracing::init_test_tracing();
 
@@ -2866,7 +2858,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_preserves_cached_siblings() {
         let storage = (0..4096u16)
             .map(|key| (B256::right_padding_from(&key.to_be_bytes()), U256::from(1)))
@@ -2902,7 +2894,7 @@ mod tests {
             .any(|visit| visit.visited_key == Some(clean_key)));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_finishes_branch_before_returning_to_ancestor() {
         let storage =
             [[0x10, 0x00, 0x00], [0x12, 0x10, 0x00], [0x12, 0x10, 0x20], [0x12, 0x11, 0x00]]
@@ -3009,17 +3001,17 @@ mod tests {
         pretty_assertions::assert_eq!(expected_root, root);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_branch_collapse_removed_child_before_remaining() {
         assert_branch_collapse(1, 0);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_branch_collapse_removed_child_after_remaining() {
         assert_branch_collapse(4, 9);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_root_proof_preserves_clean_sibling_after_cached_branch_collapse() {
         reth_tracing::init_test_tracing();
 
@@ -3059,7 +3051,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_prefix_set_range_skips_covered_cached_branch() {
         reth_tracing::init_test_tracing();
 
@@ -3088,7 +3080,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_cached_branch_extension_skips_diverging_target() {
         reth_tracing::init_test_tracing();
 
@@ -3199,7 +3191,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_cached_branch_extension_skips_diverging_target_before() {
         reth_tracing::init_test_tracing();
 
@@ -3310,7 +3302,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_skipped_parent_branch_with_unskipped_child() {
         reth_tracing::init_test_tracing();
 
@@ -3378,7 +3370,7 @@ mod tests {
         pretty_assertions::assert_eq!(expected_root, got_root);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_blinded_local_root_returns_trie_inconsistency() {
         let key = B256::right_padding_from(&[0x63, 0xaa]);
         let value = U256::ONE;
@@ -3404,7 +3396,7 @@ mod tests {
         ));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_cached_hash_with_deleted_leaf() {
         reth_tracing::init_test_tracing();
 
@@ -3468,7 +3460,11 @@ mod tests {
         let proofs = calculator
             .storage_proof(harness.hashed_address(), &mut targets)
             .expect("storage_proof should succeed");
-        assert_eq!(1, proofs.len());
+        assert_eq!(2, proofs.len());
+        assert_eq!(proofs[0].path, Nibbles::from_nibbles([6]));
+        assert!(matches!(proofs[0].node, TrieNode::Branch(_)));
+        assert!(matches!(proofs[1].node, TrieNode::Extension(_)));
+        assert!(proofs[1].masks.is_none());
         let got_root = calculator
             .compute_root_hash(&proofs)
             .expect("compute_root_hash should succeed")
