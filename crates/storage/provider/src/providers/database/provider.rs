@@ -6810,8 +6810,8 @@ mod tests {
         let address = Address::with_last_byte(1);
         let hashed_address = keccak256(address);
         let slot = U256::from(1);
-        let account = Account { nonce: 1, ..Default::default() };
         let hashed_state = |value: u64| {
+            let account = Account { nonce: 1, ..Default::default() };
             HashedPostState::default()
                 .with_accounts([(hashed_address, Some(account))])
                 .with_storages([(

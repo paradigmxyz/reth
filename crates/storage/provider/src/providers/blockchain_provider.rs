@@ -1158,8 +1158,10 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         // An account recreated with its old info and no storage changes has no other changeset.
         for &address in &wiped {
             if let hash_map::Entry::Vacant(entry) = state.entry(address) {
-                let account = state_provider.basic_account(&address)?;
-                entry.insert((account, account, Default::default()));
+                // Read twice, since `Account` is not `Copy` with `account-ext`.
+                let original = state_provider.basic_account(&address)?;
+                let present = state_provider.basic_account(&address)?;
+                entry.insert((original, present, Default::default()));
                 reverts.entry(block).or_default().insert(address, (None, Vec::new()));
             }
         }
