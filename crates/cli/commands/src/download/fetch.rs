@@ -227,7 +227,7 @@ impl ArchiveFetcher {
             }
             _ => {
                 let response = client.head(&self.url).send()?.error_for_status()?;
-                (false, response.content_length())
+                (false, response.content_length().or(self.expected_size))
             }
         };
 
@@ -266,7 +266,9 @@ impl ArchiveFetcher {
         }
 
         let client = BlockingClient::builder().timeout(Duration::from_secs(30)).build()?;
-        let mut total_size: Option<u64> = None;
+        // A manifest size is the total for every response. Without one there is no declared size
+        // to enforce, so the total is learned from the responses as the download goes.
+        let mut total_size: Option<u64> = self.expected_size;
         let mut last_error: Option<eyre::Error> = None;
 
         let mut attempt = 0;
@@ -337,18 +339,24 @@ impl ArchiveFetcher {
             // Appending a range that starts elsewhere would silently corrupt the `.part` file.
             let range_start = range.map(|range| range.start);
             if is_partial && range_start != Some(existing_size) {
-                // Resuming this `.part` file would likely fail the same way, so retry from scratch.
-                // A `.part` left behind would be resumed or promoted as if it were complete.
-                fs::remove_file_if_exists(self.paths.part_path())?;
-                // The deleted bytes' total no longer applies to the fresh download.
-                total_size = None;
-                last_error = Some(eyre::eyre!(
+                let error = eyre::eyre!(
                     "Server resumed {} at byte {} instead of requested offset {existing_size}",
                     self.paths.file_name(),
                     range_start.map_or_else(|| "unknown".to_string(), |start| start.to_string())
-                ));
+                );
+                if self.expected_size.is_some() {
+                    return Err(error)
+                }
+                // Without a manifest size, resuming this `.part` file would likely fail the same
+                // way, so retry from scratch. A `.part` left behind would be resumed or promoted as
+                // if it were complete.
+                fs::remove_file_if_exists(self.paths.part_path())?;
+                // The deleted bytes' total no longer applies to the fresh download.
+                total_size = None;
+                last_error = Some(error);
                 continue;
             }
+            // Only reachable without a manifest size, since `check_total_size` rejects other sizes.
             // A different total means the remote archive changed under the `.part` file.
             if is_partial &&
                 let (Some(known), Some(size)) = (total_size, size) &&
@@ -449,14 +457,24 @@ impl ArchiveFetcher {
                 continue;
             }
 
+            // With a manifest size, the body must end at the limit. Data past it contradicts the
+            // size the response declares, so fail rather than truncate. A read error here is not
+            // an overrun: the length check below handles a body that ended early.
+            if self.expected_size.is_some() &&
+                matches!(reader.into_inner().read(&mut [0; 1]), Ok(n) if n > 0)
+            {
+                // The bytes already written came from a response that contradicts the manifest.
+                self.paths.cleanup_partial();
+                eyre::bail!(
+                    "Server sent more data for {} than the {limit} bytes at offset {start_offset}",
+                    self.paths.file_name()
+                )
+            }
+
             let downloaded = fs::metadata(self.paths.part_path())?.len();
             if downloaded < current_total {
-                // The body ended early without an error, so resume from what landed. A server may
-                // answer an open-ended range with a shorter one, so a response that added bytes
-                // does not use a retry; each adds at least one byte, which bounds the loop.
-                if downloaded > existing_size {
-                    attempt -= 1;
-                }
+                // The body ended early without an error, so resume from what landed. Each short
+                // response uses a retry, so a server sending a byte at a time cannot loop forever.
                 last_error = Some(eyre::eyre!(
                     "Download of {} ended at {downloaded} of {current_total} bytes",
                     self.paths.file_name()
@@ -1678,10 +1696,47 @@ mod tests {
     }
 
     #[test]
-    fn sequential_resume_restarts_after_wrong_offset() {
+    fn sequential_resume_rejects_wrong_offset() {
         let url = spawn_response_server(vec![
             b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-9/10\r\n\
               Content-Length: 10\r\nConnection: close\r\n\r\nXXXXXXXXXX",
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("archive.tar.zst.part"), b"01234").unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new())
+            .with_retry_backoff(Some(Duration::ZERO));
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(10));
+
+        let error = fetcher.download(None, None).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "Server resumed archive.tar.zst at byte 0 instead of requested offset 5"
+        );
+        assert_eq!(std::fs::read(dir.path().join("archive.tar.zst.part")).unwrap(), b"01234");
+    }
+
+    #[test]
+    fn sequential_wrong_offset_without_expected_size_restarts_from_zero() {
+        let url = spawn_response_server(vec![
+            b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-9/10\r\n\
+              Content-Length: 10\r\nConnection: close\r\n\r\nXXXXXXXXXX",
+            b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n0123456789",
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("archive.tar.zst.part"), b"01234").unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new())
+            .with_retry_backoff(Some(Duration::ZERO));
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, None);
+
+        let downloaded = fetcher.download(None, None).unwrap();
+
+        assert_eq!(std::fs::read(downloaded.path).unwrap(), b"0123456789");
+    }
+
+    #[test]
+    fn sequential_resume_full_response_restarts_from_zero() {
+        let url = spawn_response_server(vec![
             b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n0123456789",
         ]);
         let dir = tempfile::tempdir().unwrap();
@@ -1695,11 +1750,43 @@ mod tests {
     }
 
     #[test]
-    fn sequential_download_stops_at_declared_size() {
+    fn sequential_download_rejects_body_past_declared_size() {
         let response = b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-9/10\r\n\
                          Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n\
                          14\r\n01234567890123456789\r\n0\r\n\r\n";
         let url = spawn_response_server(vec![response]);
+        let dir = tempfile::tempdir().unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new());
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(10));
+
+        let error = fetcher.download(None, None).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "Server sent more data for archive.tar.zst than the 10 bytes at offset 0"
+        );
+        assert!(!dir.path().join("archive.tar.zst.part").exists());
+    }
+
+    #[test]
+    fn download_chunked_body_ending_at_expected_size_succeeds() {
+        let url = spawn_response_server(vec![
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n\
+              a\r\n0123456789\r\n0\r\n\r\n",
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new());
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(10));
+
+        let downloaded = fetcher.download(None, None).unwrap();
+
+        assert_eq!(std::fs::read(downloaded.path).unwrap(), b"0123456789");
+    }
+
+    #[test]
+    fn download_without_content_length_accepts_expected_size() {
+        let url =
+            spawn_response_server(vec![b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n0123456789"]);
         let dir = tempfile::tempdir().unwrap();
         let session = DownloadSession::new(None, None, CancellationToken::new());
         let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(10));
@@ -1897,13 +1984,11 @@ mod tests {
     }
 
     #[test]
-    fn sequential_resume_stops_at_declared_range_end() {
-        // Declares bytes 2-3 but streams four bytes; only the declared two may be appended.
+    fn sequential_resume_rejects_body_past_declared_range() {
+        // Declares bytes 2-3 but streams four bytes, so the body runs past its declared range.
         let url = spawn_response_server(vec![
             b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 2-3/6\r\n\
               Content-Length: 4\r\nConnection: close\r\n\r\n23XX",
-            b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 4-5/6\r\n\
-              Content-Length: 2\r\nConnection: close\r\n\r\n45",
         ]);
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("archive.tar.zst.part"), b"01").unwrap();
@@ -1911,14 +1996,38 @@ mod tests {
             .with_retry_backoff(Some(Duration::ZERO));
         let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(6));
 
-        let downloaded = fetcher.download(None, None).unwrap();
+        let error = fetcher.download(None, None).unwrap_err();
 
-        assert_eq!(std::fs::read(downloaded.path).unwrap(), b"012345");
+        assert_eq!(
+            format!("{error:#}"),
+            "Server sent more data for archive.tar.zst than the 2 bytes at offset 2"
+        );
+        assert!(!dir.path().join("archive.tar.zst.part").exists());
     }
 
     #[test]
-    fn sequential_resume_progress_does_not_use_retries() {
-        // Each response returns one byte of an open-ended range: more responses than retries.
+    fn sequential_resume_rejects_size_other_than_expected() {
+        let url = spawn_response_server(vec![
+            b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 5-9/20\r\n\
+              Content-Length: 5\r\nConnection: close\r\n\r\n56789",
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("archive.tar.zst.part"), b"01234").unwrap();
+        let session = DownloadSession::new(None, None, CancellationToken::new());
+        let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(10));
+
+        let error = fetcher.download(None, None).unwrap_err();
+
+        assert_eq!(
+            format!("{error:#}"),
+            "Archive size mismatch: manifest declares 10 bytes, server reported 20"
+        );
+    }
+
+    #[test]
+    fn sequential_resume_short_responses_use_retries() {
+        // Each response returns one byte of an open-ended range, and the budget allows three
+        // attempts, so progress alone does not keep the download going.
         let responses = (2..8)
             .map(|i| {
                 format!(
@@ -1936,9 +2045,10 @@ mod tests {
             .with_retry_backoff(Some(Duration::ZERO));
         let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(8));
 
-        let downloaded = fetcher.download_sequential(3, None).unwrap();
+        let error = fetcher.download_sequential(3, None).unwrap_err();
 
-        assert_eq!(std::fs::read(downloaded.path).unwrap(), b"01234567");
+        assert_eq!(format!("{error:#}"), "Download of archive.tar.zst ended at 5 of 8 bytes");
+        assert_eq!(std::fs::read(dir.path().join("archive.tar.zst.part")).unwrap(), b"01234");
     }
 
     #[test]
