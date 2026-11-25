@@ -11,7 +11,7 @@ use reth_db_api::{
     cursor::DbCursorRO,
     models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress, ShardedKey},
     tables,
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
 };
 use reth_provider::{DBProvider, EitherWriter, RocksDBProviderFactory, StaticFileProviderFactory};
 use reth_prune_types::{
@@ -291,10 +291,34 @@ impl StorageHistory {
         let mut changesets_processed = 0usize;
         let mut done = true;
 
+        // Storage wipe changesets are pruned up to the same block as the storage changesets, so
+        // they take their share of the budget first and bound the storage changeset walk. Like
+        // the walk below, this stops on block boundaries only.
+        let mut wipe_range_end = range_end;
+        let mut last_wipe_block = None;
+        for row in provider
+            .tx_ref()
+            .cursor_read::<tables::StorageWipeChangeSets>()?
+            .walk_range(BlockNumberAddress::range(range))?
+        {
+            let block_number = row?.0.block_number();
+            if limiter.is_limit_reached() &&
+                last_wipe_block.is_some_and(|last| last != block_number)
+            {
+                wipe_range_end = block_number - 1;
+                done = false;
+                break;
+            }
+            last_wipe_block = Some(block_number);
+            limiter.increment_deleted_entries_count();
+        }
+
         // Walk storage changesets from static files using a streaming iterator.
         // For each changeset, track the highest block number seen for each (address, storage_key)
         // pair to determine which history shard entries need pruning.
-        let walker = provider.static_file_provider().walk_storage_changeset_range(range);
+        let walker = provider
+            .static_file_provider()
+            .walk_storage_changeset_range(range_start..=wipe_range_end);
         for result in walker {
             let (block_address, entry) = result?;
             let block_number = block_address.block_number();
@@ -317,7 +341,7 @@ impl StorageHistory {
 
         trace!(target: "pruner", processed = %changesets_processed, %done, "Scanned storage changesets from static files");
 
-        let last_changeset_pruned_block = last_changeset_pruned_block.unwrap_or(range_end);
+        let last_changeset_pruned_block = last_changeset_pruned_block.unwrap_or(wipe_range_end);
 
         // Prune RocksDB history shards for affected storage slots
         let mut deleted_shards = 0usize;
@@ -344,8 +368,6 @@ impl StorageHistory {
 
         trace!(target: "pruner", deleted = deleted_shards, updated = updated_shards, %done, "Pruned storage history (RocksDB indices)");
 
-        // Storage wipe changesets and their index live in MDBX, and are pruned up to the same
-        // block as the storage changesets.
         let mut highest_wipe_blocks = BTreeMap::<Address, BlockNumber>::new();
         let mut pruned_wipe_changesets = 0usize;
         let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StorageWipeChangeSets>()?;
@@ -966,6 +988,71 @@ mod tests {
                 .unwrap(),
             Some(BlockNumberList::new_pre_sorted([3]))
         );
+    }
+
+    #[test]
+    fn prune_rocksdb_limits_storage_wipe_changesets() {
+        let db = TestStageDB::default();
+        db.factory.set_storage_settings_cache(StorageSettings::v2());
+        let static_file_provider = db.factory.static_file_provider();
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            for block in 0..=3 {
+                writer.append_storage_changeset(Vec::new(), block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        let address = Address::random();
+        let row = StorageEntry { key: B256::random(), value: U256::from(1) };
+        let provider = db.factory.database_provider_rw().unwrap();
+        for block in [1, 2] {
+            provider
+                .tx_ref()
+                .put::<tables::StorageWipeChangeSets>(BlockNumberAddress((block, address)), row)
+                .unwrap();
+        }
+        provider
+            .tx_ref()
+            .put::<tables::StorageWipesHistory>(
+                ShardedKey::last(address),
+                BlockNumberList::new_pre_sorted([1, 2]),
+            )
+            .unwrap();
+        provider.commit().unwrap();
+
+        let prune = |previous_checkpoint| {
+            let input = PruneInput {
+                previous_checkpoint,
+                to_block: 2,
+                limiter: PruneLimiter::default().set_deleted_entries_limit(1),
+            };
+            let provider = db.factory.database_provider_rw().unwrap();
+            let output = StorageHistory::new(PruneMode::Before(3)).prune(&provider, input).unwrap();
+            provider.commit().unwrap();
+            let provider = db.factory.provider().unwrap();
+            let rows = provider.storage_wipe_changesets_range(..).unwrap();
+            let history =
+                provider.tx_ref().get::<tables::StorageWipesHistory>(ShardedKey::last(address));
+            (output, rows, history.unwrap())
+        };
+
+        // A budget of one prunes only the first block's row.
+        let (output, rows, history) = prune(None);
+        assert!(!output.progress.is_finished());
+        let checkpoint = output.checkpoint.unwrap();
+        assert_eq!(checkpoint.block_number, Some(1));
+        assert_eq!(rows, vec![(BlockNumberAddress((2, address)), row)]);
+        assert_eq!(history, Some(BlockNumberList::new_pre_sorted([2])));
+
+        // The next run resumes after the checkpoint.
+        let (output, rows, history) =
+            prune(Some(checkpoint.as_prune_checkpoint(PruneMode::Before(3))));
+        assert!(output.progress.is_finished());
+        assert_eq!(output.checkpoint.unwrap().block_number, Some(2));
+        assert!(rows.is_empty());
+        assert_eq!(history, None);
     }
 
     /// A block holding at least a whole run's budget of changesets must not stall pruning: the
