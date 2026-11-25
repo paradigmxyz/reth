@@ -10,6 +10,7 @@ use alloy_rpc_types_trace::{
 };
 use evm2_inspectors::tracing::DebugTrace;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_rpc_eth_api::CallManyRequest;
 use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
 
 /// Debug rpc interface.
@@ -144,7 +145,7 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "traceCallMany")]
     async fn debug_trace_call_many(
         &self,
-        bundles: Vec<Bundle<TxReq>>,
+        bundles: CallManyRequest<Vec<Bundle<TxReq>>>,
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<Vec<DebugTrace>>>;

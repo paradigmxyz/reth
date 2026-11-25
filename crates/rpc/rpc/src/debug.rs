@@ -34,7 +34,7 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    AsEthApiError, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
+    AsEthApiError, CallManyRequest, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{utils::CallManyBudget, EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -1250,10 +1250,13 @@ where
 
     async fn debug_trace_call_many(
         &self,
-        bundles: Vec<Bundle<RpcTxReq<Eth::NetworkTypes>>>,
+        bundles: CallManyRequest<Vec<Bundle<RpcTxReq<Eth::NetworkTypes>>>>,
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<Vec<DebugTrace>>> {
+        // Decoding is bounded by the call limit, so malformed input is rejected without waiting
+        // for a tracing permit.
+        let bundles = bundles.into_inner()?;
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_call_many(self, bundles, state_context, opts).await.map_err(Into::into)
     }
