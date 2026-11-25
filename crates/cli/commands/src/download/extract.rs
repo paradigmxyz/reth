@@ -97,54 +97,39 @@ fn extract_archive<R: Read>(
     target_dir: &Path,
     static_files_dir: Option<&Path>,
     cancel_token: CancellationToken,
-) -> Result<()> {
+) -> Result<bool> {
     let progress_reader = ProgressReader::new(reader, total_size, cancel_token);
-
-    match format {
-        CompressionFormat::Lz4 => {
-            let decoder = Decoder::new(progress_reader)?;
-            unpack_archive(Archive::new(decoder), target_dir, static_files_dir, None, None)?;
-        }
-        CompressionFormat::Zstd => {
-            let decoder = ZstdDecoder::new(progress_reader)?;
-            unpack_archive(Archive::new(decoder), target_dir, static_files_dir, None, None)?;
-        }
-    }
-
+    let installed =
+        extract_archive_raw(progress_reader, format, target_dir, static_files_dir, None)?;
     println!();
-    Ok(())
+    Ok(installed)
 }
 
-/// Extracts a compressed tar archive without progress tracking.
-pub(crate) fn extract_archive_raw<R: Read>(
+/// Extracts a compressed tar archive without progress tracking and reports whether it installed
+/// any execution files.
+fn extract_archive_raw<R: Read>(
     reader: R,
     format: CompressionFormat,
     target_dir: &Path,
     static_files_dir: Option<&Path>,
     progress: Option<&mut ArchiveExtractionProgress>,
-) -> Result<()> {
+) -> Result<bool> {
     match format {
-        CompressionFormat::Lz4 => {
-            unpack_archive(
-                Archive::new(Decoder::new(reader)?),
-                target_dir,
-                static_files_dir,
-                progress,
-                None,
-            )?;
-        }
-        CompressionFormat::Zstd => {
-            unpack_archive(
-                Archive::new(ZstdDecoder::new(reader)?),
-                target_dir,
-                static_files_dir,
-                progress,
-                None,
-            )?;
-        }
+        CompressionFormat::Lz4 => unpack_archive(
+            Archive::new(Decoder::new(reader)?),
+            target_dir,
+            static_files_dir,
+            progress,
+            None,
+        ),
+        CompressionFormat::Zstd => unpack_archive(
+            Archive::new(ZstdDecoder::new(reader)?),
+            target_dir,
+            static_files_dir,
+            progress,
+            None,
+        ),
     }
-
-    Ok(())
 }
 
 /// Extracts a compressed tar archive like [`extract_archive_raw`], hashing each declared output
@@ -280,11 +265,12 @@ fn unpack_archive<R: Read>(
     static_files_dir: Option<&Path>,
     mut progress: Option<&mut ArchiveExtractionProgress>,
     hasher: Option<&RefCell<FileHasher>>,
-) -> Result<()> {
+) -> Result<bool> {
     let entries = archive.entries().wrap_err_with(|| {
         format!("failed to read archive entries for `{}`", target_dir.display())
     })?;
 
+    let mut installed_execution_file = false;
     for entry in entries {
         let mut entry = entry.wrap_err_with(|| {
             format!("failed to read archive entry for `{}`", target_dir.display())
@@ -307,18 +293,22 @@ fn unpack_archive<R: Read>(
             }
             None => false,
         };
-        extract_entry_with_progress(
+        // A config file or a directory does not count as restored execution data.
+        let execution_file = !directory &&
+            (entry_type.is_file() || entry_type.is_contiguous() || entry_type.is_gnu_sparse()) &&
+            path.strip_prefix(".").unwrap_or(&path) != Path::new("reth.toml");
+        installed_execution_file |= extract_entry_with_progress(
             &mut entry,
             target_dir,
             static_files_dir,
             progress.as_deref_mut(),
-        )?;
+        )? && execution_file;
         if hashing && let Some(hasher) = hasher {
             hasher.borrow_mut().finish_file()?;
         }
     }
 
-    Ok(())
+    Ok(installed_execution_file)
 }
 
 /// Passes archive bytes from the decompressor to the tar reader, feeding them to a
@@ -641,21 +631,22 @@ fn unpack_entry<R: Read>(
     entry: &mut tar::Entry<'_, R>,
     target_dir: &Path,
     static_files_dir: Option<&Path>,
-) -> Result<()> {
+) -> Result<bool> {
     let path = entry.path()?.into_owned();
     if let Some(static_files_dir) = static_files_dir &&
         let Some(relative_path) = static_file_relative_path(&path)
     {
-        unpack_static_file(entry, static_files_dir, relative_path)
+        unpack_static_file(entry, static_files_dir, relative_path)?;
+        Ok(true)
     } else {
         ensure_no_symlinks(target_dir, &path)?;
         if is_regular_file(entry) &&
             let Some(dest) = entry_destination_path(entry, target_dir, static_files_dir)?
         {
-            write_regular_file(entry, &dest, target_dir)
+            write_regular_file(entry, &dest, target_dir)?;
+            Ok(true)
         } else {
-            entry.unpack_in(target_dir)?;
-            Ok(())
+            Ok(entry.unpack_in(target_dir)?)
         }
     }
 }
@@ -665,39 +656,33 @@ fn extract_entry_with_progress<R: Read>(
     target_dir: &Path,
     static_files_dir: Option<&Path>,
     progress: Option<&mut ArchiveExtractionProgress>,
-) -> Result<()> {
+) -> Result<bool> {
     let size = entry.header().entry_size().unwrap_or(0);
     let entry_type = entry.header().entry_type();
 
     if !entry_type.is_file() || size == 0 {
-        unpack_entry(entry, target_dir, static_files_dir).wrap_err_with(|| {
-            format!("failed to extract archive into `{}`", target_dir.display())
-        })?;
-        return Ok(())
+        return unpack_entry(entry, target_dir, static_files_dir)
+            .wrap_err_with(|| format!("failed to extract archive into `{}`", target_dir.display()))
     }
 
     if size < STREAMING_EXTRACTION_PROGRESS_MIN_FILE_SIZE {
-        unpack_entry(entry, target_dir, static_files_dir).wrap_err_with(|| {
+        let installed = unpack_entry(entry, target_dir, static_files_dir).wrap_err_with(|| {
             format!("failed to extract archive into `{}`", target_dir.display())
         })?;
         if let Some(progress) = progress {
             progress.record_extracted(size);
         }
-        return Ok(())
+        return Ok(installed)
     }
 
     let Some(progress_handle) = progress.as_ref().and_then(|progress| progress.handle()) else {
-        unpack_entry(entry, target_dir, static_files_dir).wrap_err_with(|| {
-            format!("failed to extract archive into `{}`", target_dir.display())
-        })?;
-        return Ok(())
+        return unpack_entry(entry, target_dir, static_files_dir)
+            .wrap_err_with(|| format!("failed to extract archive into `{}`", target_dir.display()))
     };
 
     let Some(entry_path) = entry_destination_path(entry, target_dir, static_files_dir)? else {
-        unpack_entry(entry, target_dir, static_files_dir).wrap_err_with(|| {
-            format!("failed to extract archive into `{}`", target_dir.display())
-        })?;
-        return Ok(())
+        return unpack_entry(entry, target_dir, static_files_dir)
+            .wrap_err_with(|| format!("failed to extract archive into `{}`", target_dir.display()))
     };
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -707,10 +692,9 @@ fn extract_entry_with_progress<R: Read>(
     stop.store(true, Ordering::Relaxed);
 
     let monitor_result = monitor.join();
-    unpack_result?;
-
+    let installed = unpack_result?;
     monitor_result.map_err(|_| eyre::eyre!("extraction progress monitor panicked"))?;
-    Ok(())
+    Ok(installed)
 }
 
 fn entry_destination_path<R: Read>(
@@ -781,7 +765,7 @@ fn extract_from_file(
     format: CompressionFormat,
     target_dir: &Path,
     static_files_dir: Option<&Path>,
-) -> Result<()> {
+) -> Result<bool> {
     let file = std::fs::File::open(path)?;
     let total_size = file.metadata()?.len();
     info!(target: "reth::cli",
@@ -790,7 +774,7 @@ fn extract_from_file(
         "Extracting local archive"
     );
     let start = Instant::now();
-    extract_archive(
+    let installed = extract_archive(
         file,
         total_size,
         format,
@@ -798,29 +782,32 @@ fn extract_from_file(
         static_files_dir,
         CancellationToken::new(),
     )?;
-    info!(target: "reth::cli",
-        file = %path.display(),
-        elapsed = %DownloadProgress::format_duration(start.elapsed()),
-        "Local extraction complete"
-    );
-    Ok(())
+    if installed {
+        info!(target: "reth::cli",
+            file = %path.display(),
+            elapsed = %DownloadProgress::format_duration(start.elapsed()),
+            "Local extraction complete"
+        );
+    }
+    Ok(installed)
 }
 
 /// Streams a remote archive directly into the extractor without writing to disk.
 ///
-/// On failure, retries from scratch up to [`MAX_DOWNLOAD_RETRIES`] times.
+/// Returns whether it installed any execution files. On failure, retries from scratch up to
+/// [`MAX_DOWNLOAD_RETRIES`] times.
 pub(crate) fn streaming_download_and_extract(
     url: &str,
     format: CompressionFormat,
     target_dir: &Path,
     static_files_dir: Option<&Path>,
     session: &DownloadSession,
-) -> Result<()> {
+) -> Result<bool> {
     if let Some(path) = archive_file_url_path(url)? {
         let size = path.metadata()?.len();
-        extract_from_file(&path, format, target_dir, static_files_dir)?;
+        let installed = extract_from_file(&path, format, target_dir, static_files_dir)?;
         session.record_archive_output_complete(size);
-        return Ok(())
+        return Ok(installed)
     }
 
     let shared = session.progress();
@@ -890,7 +877,7 @@ pub(crate) fn streaming_download_and_extract(
         };
 
         match result {
-            Ok(()) => return Ok(()),
+            Ok(installed) => return Ok(installed),
             Err(error) => {
                 if attempt < MAX_DOWNLOAD_RETRIES {
                     warn!(target: "reth::cli",
@@ -954,8 +941,8 @@ fn download_and_extract(
     }
     let file = fs::open(&downloaded_path)?;
 
-    if quiet {
-        extract_archive_raw(file, format, target_dir, static_files_dir, None)?;
+    let installed = if quiet {
+        extract_archive_raw(file, format, target_dir, static_files_dir, None)?
     } else {
         extract_archive(
             file,
@@ -964,7 +951,10 @@ fn download_and_extract(
             target_dir,
             static_files_dir,
             session.cancel_token().clone(),
-        )?;
+        )?
+    };
+    ensure_execution_files(installed)?;
+    if !quiet {
         info!(target: "reth::cli",
             file = %file_name,
             "Extraction complete"
@@ -974,6 +964,11 @@ fn download_and_extract(
     fetcher.cleanup_downloaded_files();
     session.record_archive_output_complete(total_size);
 
+    Ok(())
+}
+
+fn ensure_execution_files(installed: bool) -> Result<()> {
+    eyre::ensure!(installed, "Snapshot archive contains no execution files");
     Ok(())
 }
 
@@ -1001,11 +996,10 @@ fn blocking_download_and_extract(
         let file_path = parsed_url
             .to_file_path()
             .map_err(|_| eyre::eyre!("Invalid file:// URL path: {}", url))?;
-        let result = extract_from_file(&file_path, format, target_dir, static_files_dir);
-        if result.is_ok() {
-            session.record_archive_output_complete(file_path.metadata()?.len());
-        }
-        result
+        let installed = extract_from_file(&file_path, format, target_dir, static_files_dir)?;
+        ensure_execution_files(installed)?;
+        session.record_archive_output_complete(file_path.metadata()?.len());
+        Ok(())
     } else if let Some(request_limiter) = request_limiter {
         download_and_extract(
             url,
@@ -1023,12 +1017,11 @@ fn blocking_download_and_extract(
     } else {
         let session =
             DownloadSession::new(None, None, cancel_token).with_retry_backoff(retry_backoff);
-        let result =
-            streaming_download_and_extract(url, format, target_dir, static_files_dir, &session);
-        if result.is_ok() {
-            session.record_archive_output_complete(0);
-        }
-        result
+        let installed =
+            streaming_download_and_extract(url, format, target_dir, static_files_dir, &session)?;
+        ensure_execution_files(installed)?;
+        session.record_archive_output_complete(0);
+        Ok(())
     }
 }
 
@@ -1452,10 +1445,51 @@ mod tests {
         let tar = zstd::encode_all(archive.into_inner().unwrap().as_slice(), 0).unwrap();
 
         let target = tempfile::tempdir().unwrap();
-        extract_archive_raw(tar.as_slice(), CompressionFormat::Zstd, target.path(), None, None)
-            .unwrap();
+        assert!(extract_archive_raw(
+            tar.as_slice(),
+            CompressionFormat::Zstd,
+            target.path(),
+            None,
+            None,
+        )
+        .unwrap());
         assert!(target.path().join("db").is_dir());
         assert_eq!(fs::read(target.path().join("db/data")).unwrap(), b"data");
+    }
+
+    #[test]
+    fn legacy_restore_requires_execution_files() {
+        let mut archive = tar::Builder::new(Vec::new());
+        let mut directory = tar::Header::new_gnu();
+        directory.set_entry_type(tar::EntryType::Directory);
+        directory.set_size(0);
+        directory.set_mode(0o755);
+        archive.append_data(&mut directory, "db", io::empty()).unwrap();
+
+        let config = b"[stages]";
+        let mut header = tar::Header::new_gnu();
+        header.set_size(config.len() as u64);
+        header.set_mode(0o600);
+        archive.append_data(&mut header, "reth.toml", config.as_slice()).unwrap();
+
+        let snapshot = tempfile::tempdir().unwrap();
+        let path = snapshot.path().join("snapshot.tar.zst");
+        fs::write(&path, zstd::encode_all(archive.into_inner().unwrap().as_slice(), 0).unwrap())
+            .unwrap();
+        let url = Url::from_file_path(path).unwrap();
+        let target = tempfile::tempdir().unwrap();
+
+        let err = blocking_download_and_extract(
+            url.as_str(),
+            target.path(),
+            None,
+            false,
+            None,
+            CancellationToken::new(),
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(err.to_string(), "Snapshot archive contains no execution files");
     }
 
     #[test]
