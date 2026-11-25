@@ -476,7 +476,7 @@ pub(super) fn test_standalone_extension_boundary_hydration<T: SparseTrie>(new_tr
     }
 }
 
-/// Hashing a collapsed opaque extension retains the epoch of the applied deletion.
+/// Pending updates and sibling removals remain correct across hashing and pruning.
 pub(super) fn test_standalone_extension_pending_update_collapse<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {
@@ -502,7 +502,7 @@ pub(super) fn test_standalone_extension_pending_update_collapse<T: SparseTrie>(
         let mut updates = SuiteTestHarness::leaf_updates(&changes);
         trie.update_leaves(&mut updates, |_, _| {}).unwrap();
         assert!(updates.contains_key(&first));
-        // Parallel processing may apply the deletion while the earlier update needs a proof.
+        // Only completed updates contribute to the root before the pending proof arrives.
         let applied = changes
             .iter()
             .filter(|(key, _)| !updates.contains_key(*key))
@@ -527,5 +527,92 @@ pub(super) fn test_standalone_extension_pending_update_collapse<T: SparseTrie>(
         harness.reveal_and_update(&mut reference, &mut SuiteTestHarness::leaf_updates(&changes));
         assert_eq!(trie.root(epoch(2)), reference.root(epoch(2)));
         assert_eq!(trie.take_updates(), reference.take_updates());
+    }
+}
+
+/// Sibling collapses request opaque backing branches before applying removals.
+pub(super) fn test_standalone_extension_parallel_collapse_requires_proof<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
+    for nonroot in [false, true] {
+        for persisted_parent in [false, true] {
+            for retain_updates in [false, true] {
+                let first = B256::right_padding_from(&[0x10, 0x34, 0x56]);
+                let second = B256::right_padding_from(&[0x10, 0x34, 0x57]);
+                let sibling = B256::right_padding_from(&[0x11]);
+                let sibling_child = B256::right_padding_from(&[0x11, 0x10]);
+                let mut storage = BTreeMap::from([
+                    (first, U256::ONE),
+                    (second, U256::from(2)),
+                    (sibling, U256::from(3)),
+                ]);
+                if nonroot {
+                    storage.insert(B256::right_padding_from(&[0x90]), U256::from(4));
+                }
+                if persisted_parent {
+                    storage.insert(sibling_child, U256::from(5));
+                }
+                let mut harness = SuiteTestHarness::new(storage);
+                let (mut proof, _) = harness.proof_v2(
+                    &mut harness
+                        .storage()
+                        .keys()
+                        .copied()
+                        .map(ProofV2Target::new)
+                        .collect::<Vec<_>>(),
+                );
+                proof.retain(|node| node.path.len() < 5);
+                let mut trie = (new_trie)();
+                trie.set_root(&mut proof, retain_updates).unwrap();
+                trie.reveal_nodes(&mut proof).unwrap();
+                assert_eq!(trie.root(epoch(0)), harness.original_root());
+                let prior_changes = BTreeMap::from([(sibling, U256::from(7))]);
+                harness.reveal_and_update(
+                    &mut trie,
+                    &mut SuiteTestHarness::leaf_updates(&prior_changes),
+                );
+                assert_eq!(trie.root(epoch(4)), harness.get_root_with_updates(&prior_changes).0);
+                trie.take_updates();
+                harness.apply_changeset(prior_changes);
+                let mut changes = BTreeMap::from([(first, U256::from(10)), (sibling, U256::ZERO)]);
+                if persisted_parent {
+                    changes.insert(sibling_child, U256::ZERO);
+                }
+                let mut pending = SuiteTestHarness::leaf_updates(&changes);
+                let mut targets = Vec::new();
+                trie.update_leaves(&mut pending, |key, parent| {
+                    targets.push(ProofV2Target::new(key).with_parent(parent));
+                })
+                .unwrap();
+                assert_eq!(pending, SuiteTestHarness::leaf_updates(&changes));
+                assert_eq!(
+                    targets.iter().map(|target| (target.key(), target.parent)).collect::<Vec<_>>(),
+                    vec![
+                        (first, ProofV2TargetParent::new(1)),
+                        (
+                            B256::right_padding_from(&[0x10, 0x34, 0x50]),
+                            ProofV2TargetParent::new(1)
+                        ),
+                    ],
+                );
+                assert_eq!(trie.find_leaf(&Nibbles::unpack(sibling), None), Ok(LeafLookup::Exists));
+                assert_eq!(trie.root(epoch(5)), harness.original_root());
+                assert_eq!(trie.root_epoch(), Some(epoch(4)));
+                assert_eq!(trie.take_updates(), SparseTrieUpdates::default());
+                trie.prune(epoch(4));
+                let (mut proof, _) = harness.proof_v2(&mut targets);
+                trie.reveal_nodes(&mut proof).unwrap();
+                harness.reveal_and_update(&mut trie, &mut pending);
+                assert!(pending.is_empty());
+                let mut reference = harness.init_trie_fully_revealed(retain_updates, new_trie);
+                harness.reveal_and_update(
+                    &mut reference,
+                    &mut SuiteTestHarness::leaf_updates(&changes),
+                );
+                assert_eq!(trie.root(epoch(6)), reference.root(epoch(6)));
+                assert_eq!(trie.root(epoch(6)), harness.get_root_with_updates(&changes).0);
+                assert_eq!(trie.take_updates(), reference.take_updates());
+            }
+        }
     }
 }

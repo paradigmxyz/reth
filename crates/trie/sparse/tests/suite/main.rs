@@ -231,6 +231,7 @@ sparse_trie_tests! {
     test_standalone_extension_embedded_branch,
     test_standalone_extension_boundary_hydration,
     test_standalone_extension_pending_update_collapse,
+    test_standalone_extension_parallel_collapse_requires_proof,
     test_standalone_extension_collapse_across_arenas,
     test_standalone_extension_prune_and_reveal,
     test_standalone_extension_split_and_collapse,

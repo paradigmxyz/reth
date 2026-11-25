@@ -3171,8 +3171,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let might_empty_subtrie =
                         all_removals && num_subtrie_updates as u64 >= subtrie_num_leaves;
 
+                    // Keep opaque extension roots visible to sibling collapse proof checks.
                     if (num_subtrie_updates >= threshold || parallelize_distributed_updates) &&
-                        !might_empty_subtrie
+                        !might_empty_subtrie &&
+                        !has_blinded_branch(&self.upper_arena, child_idx)
                     {
                         // Take subtrie for parallel update.
                         trace!(target: TRACE_TARGET, ?subtrie_root_path, num_subtrie_updates, "Taking subtrie for parallel update");
