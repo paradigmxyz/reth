@@ -616,4 +616,25 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn stores_merge_cells_of_one_blob_from_different_sidecars() {
+        let (_, all) = fixture();
+        let hash = all.versioned_hashes().next().unwrap();
+        let (cells, proofs) = (all.cells(), all.proofs());
+        let first = subset(BlobCellMask::from_bits(0b01));
+
+        for TestStore { store, _dir, .. } in stores(&first) {
+            store.insert_cells(B256::random(), first.clone()).unwrap();
+            store.insert_cells(B256::random(), subset(BlobCellMask::from_bits(0b10))).unwrap();
+
+            assert_eq!(
+                store.get_by_versioned_hashes_v4(&[hash], BlobCellMask::from_bits(0b11)).unwrap(),
+                vec![Some(BlobCellsAndProofsV1 {
+                    blob_cells: vec![Some(cells[0]), Some(cells[1])],
+                    proofs: vec![Some(proofs[0]), Some(proofs[1])],
+                })]
+            );
+        }
+    }
 }

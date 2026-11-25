@@ -277,6 +277,24 @@ impl Decodable for BlobTxCellSidecar {
     }
 }
 
+// Fills the cells and proofs that `slot` lacks from `found`, since sidecars of different
+// transactions may keep different cells of the same blob.
+pub(crate) fn merge_cells(slot: &mut Option<BlobCellsAndProofsV1>, found: BlobCellsAndProofsV1) {
+    let Some(slot) = slot else {
+        *slot = Some(found);
+        return
+    };
+    let cells = slot.blob_cells.iter_mut().zip(&mut slot.proofs);
+    for ((cell, proof), (found_cell, found_proof)) in
+        cells.zip(found.blob_cells.into_iter().zip(found.proofs))
+    {
+        if cell.is_none() {
+            *cell = found_cell;
+            *proof = found_proof;
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

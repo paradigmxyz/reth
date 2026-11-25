@@ -1,6 +1,6 @@
 use crate::blobstore::{
-    BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize, BlobTxCellSidecar,
-    PooledBlobSidecar, RebuiltSidecars,
+    cells::merge_cells, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
+    BlobTxCellSidecar, PooledBlobSidecar, RebuiltSidecars,
 };
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
@@ -95,7 +95,7 @@ impl InMemoryBlobStore {
             for (hash_idx, match_result) in
                 cells.match_versioned_hashes_cells(versioned_hashes, cell_mask)
             {
-                result[hash_idx].get_or_insert(match_result);
+                merge_cells(&mut result[hash_idx], match_result);
             }
         }
         Ok(result)
