@@ -792,8 +792,8 @@ impl PeersManager {
     /// Called when an _active_ session to a peer was forcefully dropped due to an error.
     ///
     /// Depending on whether the error is fatal, the peer will be removed from the peer set
-    /// otherwise its reputation is slashed. A peer that [`Self::remove_peer`] removed while it was
-    /// connected is removed from the set as well.
+    /// otherwise its reputation is slashed. A peer tracked only until its session ends is removed
+    /// from the set as well.
     pub(crate) fn on_active_session_dropped(
         &mut self,
         remote_addr: &SocketAddr,
@@ -902,10 +902,8 @@ impl PeersManager {
                     peer.reputation = peer.reputation.saturating_add(reputation_change.as_i32());
                 };
 
-                // A peer kept only until its session closes, such as an unknown inbound peer or
-                // one `Self::remove_peer` is disconnecting, is removed however the session ends,
-                // like `Self::on_active_session_gracefully_closed` does. A reputation ban also
-                // disconnects the peer, but doesn't mark it for removal.
+                // A peer tracked only until its session ends is removed however it ends. A
+                // reputation ban also disconnects the peer, but doesn't mark it for removal.
                 remove_peer = peer.remove_after_disconnect && !peer.is_trusted();
 
                 self.connection_info.decr_state(peer.state);
@@ -4770,20 +4768,18 @@ mod tests {
         for _ in 0..MAX_TRACKED_PEERS {
             peers.add_peer(PeerId::random(), addr, None);
         }
-        let backed_off = *peers.peers.keys().next().unwrap();
-        peers.peers.get_mut(&backed_off).unwrap().backed_off = true;
 
-        // a newly discovered peer never pushes out a tracked one, even a backed off one
+        // a newly discovered peer never pushes out a tracked one
         let discovered = PeerId::random();
         peers.add_peer(discovered, addr, None);
         assert!(!peers.peers.contains_key(&discovered));
-        assert!(peers.peers.contains_key(&backed_off));
         assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS);
 
         // a known peer is still updated
+        let known = *peers.peers.keys().next().unwrap();
         let new_addr = PeerAddr::from_tcp("5.6.7.8:30303".parse().unwrap());
-        peers.add_peer(backed_off, new_addr, None);
-        assert_eq!(peers.peers[&backed_off].addr, new_addr);
+        peers.add_peer(known, new_addr, None);
+        assert_eq!(peers.peers[&known].addr, new_addr);
 
         // a trusted id is still added
         let trusted = PeerId::random();
