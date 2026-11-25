@@ -10299,6 +10299,7 @@ dependencies = [
  "http",
  "jsonrpsee",
  "jsonrpsee-test-utils",
+ "memchr",
  "metrics",
  "pin-project",
  "reqwest",
