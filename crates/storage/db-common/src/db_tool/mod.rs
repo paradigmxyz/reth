@@ -122,7 +122,8 @@ impl<N: ProviderNodeTypes> DbTool<N> {
         self.provider_factory.db_ref().view(|tx| tx.get::<T>(key))?.map_err(|e| eyre::eyre!(e))
     }
 
-    /// Grabs the content of the `DupSort` table for the given key and subkey
+    /// Returns the first value for `key` whose subkey is greater than or equal to `subkey`,
+    /// or `None` if there is no such value.
     pub fn get_dup<T: DupSort>(&self, key: T::Key, subkey: T::SubKey) -> Result<Option<T::Value>> {
         self.provider_factory
             .db_ref()

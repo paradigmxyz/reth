@@ -62,6 +62,11 @@ impl<N: NodePrimitives> BlockState<N> {
         self.block.recovered_block().number()
     }
 
+    /// Returns the hash of the parent block.
+    pub fn parent_hash(&self) -> B256 {
+        self.block.recovered_block().parent_hash()
+    }
+
     /// Returns the state root after applying the executed block that determines
     /// the state.
     pub fn state_root(&self) -> B256 {
@@ -123,6 +128,12 @@ impl<N: NodePrimitives> BlockState<N> {
     /// This yields the blocks from newest to oldest (highest to lowest).
     pub fn iter(self: Arc<Self>) -> impl Iterator<Item = Arc<Self>> {
         std::iter::successors(Some(self), |state| state.parent.clone())
+    }
+
+    /// Returns the hashes of [`Self::chain`] from newest to oldest, followed by the hash of the
+    /// block the chain builds on, see [`Self::anchor`].
+    pub fn chain_hashes(&self) -> impl Iterator<Item = B256> + '_ {
+        std::iter::once(self.hash()).chain(self.chain().map(Self::parent_hash))
     }
 
     /// Tries to find a block by [`BlockHashOrNumber`] in the chain ending at this block.
@@ -291,6 +302,21 @@ mod tests {
         assert_eq!(block_state_chain[0].block().recovered_block().number, 1);
     }
 
+    #[test]
+    fn test_block_state_chain_hashes() {
+        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
+        let chain = create_mock_state_chain(&mut test_block_builder, 3);
+
+        assert_eq!(
+            chain[2].chain_hashes().collect::<Vec<_>>(),
+            [chain[2].hash(), chain[1].hash(), chain[0].hash(), chain[2].anchor().hash]
+        );
+        assert_eq!(
+            chain[0].chain_hashes().collect::<Vec<_>>(),
+            [chain[0].hash(), chain[0].anchor().hash]
+        );
+    }
+
     fn block_state_chain(depth: usize, mut parent: Option<Arc<BlockState>>) -> Arc<BlockState> {
         let block = ExecutedBlock::default();
         for _ in 0..depth {
@@ -299,7 +325,7 @@ mod tests {
         parent.expect("nonempty chain")
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn deep_chain_drop_preserves_shared_tail() {
         const DEPTH: usize = 100_000;
 

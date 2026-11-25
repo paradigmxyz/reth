@@ -19,7 +19,7 @@ use reth_rpc_eth_types::{
 use reth_storage_api::BlockReaderIdExt;
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{
-    EthBlobTransactionSidecar, EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
+    EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionPool,
 };
 use std::{
     sync::Arc,
@@ -101,8 +101,7 @@ where
             .map(Duration::from_millis)
             .map_or(DEFAULT_SIM_TIMEOUT, |timeout| timeout.min(MAX_SIM_TIMEOUT));
 
-        let transactions =
-            self.eth_api().recover_raw_transactions::<PoolPooledTx<Eth::Pool>>(txs)?;
+        let transactions = self.eth_api().recover_raw_pooled_transactions(txs)?;
 
         let block_id: alloy_rpc_types_eth::BlockId = state_block_number.into();
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
@@ -425,7 +424,7 @@ mod tests {
     use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip2718::Encodable2718, BlockNumberOrTag};
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{Address, TxKind};
-    use reth_chain_state::ExecutedBlock;
+    use reth_chain_state::{CanonicalInMemoryStateWriter, ExecutedBlock};
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Block as EthBlock;
@@ -433,10 +432,13 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::RecoveredBlock;
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+        providers::BlockchainProvider,
+        test_utils::{
+            create_test_provider_factory_with_chain_spec,
+            create_test_provider_factory_with_in_memory_state_writer,
+        },
     };
     use reth_rpc_eth_api::helpers::SpawnBlocking;
-    use reth_storage_overlay::OverlayManager;
     use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
     use reth_transaction_pool::test_utils::testing_pool;
 
@@ -471,11 +473,17 @@ mod tests {
             )]);
         let chain_spec =
             Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
-        let overlay_manager = OverlayManager::default();
-        let factory = create_test_provider_factory_with_chain_spec(chain_spec)
-            .with_overlay_manager(overlay_manager.clone());
+        let (factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(chain_spec);
         init_genesis(&factory).unwrap();
-        let provider = BlockchainProvider::new(factory).unwrap();
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers().unwrap(),
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         let eth_api = EthApiBuilder::new(
             provider.clone(),
@@ -532,8 +540,7 @@ mod tests {
             )),
             ..Default::default()
         };
-        overlay_manager.insert_block(pending_block.clone());
-        provider.canonical_in_memory_state().set_pending_block(pending_block);
+        canonical_in_memory_state_writer.set_pending_block(pending_block);
         let pending_next_base_fee = next_base_fee - next_base_fee / 8;
         for base_fee in [None, Some((pending_next_base_fee - 1) as u128)] {
             let response = api

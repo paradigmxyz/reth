@@ -10,6 +10,7 @@ use derive_more::{Deref, DerefMut, From, Into};
 use itertools::Itertools;
 use parking_lot::RwLock;
 use reth_lru::LruMap;
+use reth_primitives_traits::{Block, RecoveredBlock};
 use reth_rpc_server_types::{
     constants,
     constants::gas_oracle::{
@@ -176,7 +177,7 @@ where
             } else {
                 // Otherwise we fetch it using get_block_values
                 let (parent_hash, block_values) = self
-                    .get_block_values(current_hash, SAMPLE_NUMBER)
+                    .get_block_values(current_hash)
                     .await?
                     .ok_or(EthApiError::HeaderNotFound(current_hash.into()))?;
                 tip_cache.insert(current_hash, (parent_hash, block_values.clone()));
@@ -225,67 +226,16 @@ where
         Ok(price)
     }
 
-    /// Get the `limit` lowest effective tip values for the given block. If the oracle has a
-    /// configured `ignore_price` threshold, then tip values under that threshold will be ignored
-    /// before returning a result.
-    ///
-    /// If the block cannot be found, then this will return `None`.
-    ///
-    /// This method also returns the parent hash for the given block.
-    async fn get_block_values(
-        &self,
-        block_hash: B256,
-        limit: usize,
-    ) -> EthResult<Option<(B256, Vec<U256>)>> {
+    /// Returns the parent hash and up to [`SAMPLE_NUMBER`] of the block's lowest effective tips
+    /// in ascending order. Excludes transactions from the beneficiary and tips below
+    /// `ignore_price`. Returns `None` if the block cannot be found.
+    async fn get_block_values(&self, block_hash: B256) -> EthResult<Option<(B256, Vec<U256>)>> {
         // check the cache (this will hit the disk if the block is not cached)
         let Some(block) = self.cache.get_recovered_block(block_hash).await? else {
             return Ok(None)
         };
 
-        let base_fee_per_gas = block.base_fee_per_gas();
-        let parent_hash = block.parent_hash();
-
-        // sort the functions by ascending effective tip first
-        let sorted_transactions = block.transactions_recovered().sorted_by_cached_key(|tx| {
-            if let Some(base_fee) = base_fee_per_gas {
-                (*tx).effective_tip_per_gas(base_fee)
-            } else {
-                Some((*tx).priority_fee_or_price())
-            }
-        });
-
-        let mut prices = Vec::with_capacity(limit);
-
-        for tx in sorted_transactions {
-            let effective_tip = if let Some(base_fee) = base_fee_per_gas {
-                tx.effective_tip_per_gas(base_fee)
-            } else {
-                Some(tx.priority_fee_or_price())
-            };
-
-            // ignore transactions with a tip under the configured threshold
-            if let Some(ignore_under) = self.ignore_price &&
-                effective_tip < Some(ignore_under)
-            {
-                continue
-            }
-
-            // check if the sender was the coinbase, if so, ignore
-            if tx.signer() == block.beneficiary() {
-                continue
-            }
-
-            // a `None` effective_gas_tip represents a transaction where the max_fee_per_gas is
-            // less than the base fee which would be invalid
-            prices.push(U256::from(effective_tip.ok_or(RpcInvalidTransactionError::FeeCapTooLow)?));
-
-            // we have enough entries
-            if prices.len() >= limit {
-                break
-            }
-        }
-
-        Ok(Some((parent_hash, prices)))
+        Ok(Some((block.parent_hash(), sample_block_tips(&block, self.ignore_price)?)))
     }
 
     /// Suggests a max priority fee value using a simplified and more predictable algorithm
@@ -410,6 +360,31 @@ where
     }
 }
 
+/// Samples the lowest eligible tips, preserving duplicate prices.
+fn sample_block_tips(
+    block: &RecoveredBlock<impl Block>,
+    ignore_price: Option<u128>,
+) -> Result<Vec<U256>, RpcInvalidTransactionError> {
+    let base_fee_per_gas = block.base_fee_per_gas();
+    let beneficiary = block.beneficiary();
+    block
+        .transactions_recovered()
+        .filter(|tx| tx.signer() != beneficiary)
+        .map(|tx| {
+            if let Some(base_fee) = base_fee_per_gas {
+                tx.effective_tip_per_gas(base_fee)
+            } else {
+                Some(tx.priority_fee_or_price())
+            }
+        })
+        // An invalid fee cap (`None`) sorts below any configured threshold.
+        .filter(|tip| *tip >= ignore_price)
+        .k_smallest(SAMPLE_NUMBER)
+        .map(|tip| tip.map(U256::from))
+        .collect::<Option<_>>()
+        .ok_or(RpcInvalidTransactionError::FeeCapTooLow)
+}
+
 /// Wrapper struct for `LruMap`
 #[derive(Deref, DerefMut)]
 pub struct EffectiveTipLruCache(LruMap<B256, (B256, Vec<U256>), FbBuildHasher<32>>);
@@ -452,7 +427,9 @@ impl Default for GasCap {
 mod tests {
     use super::*;
     use crate::EthStateCacheConfig;
-    use reth_ethereum_primitives::EthPrimitives;
+    use alloy_consensus::{Header, TxLegacy};
+    use alloy_primitives::{Address, Signature};
+    use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives, TransactionSigned};
     use reth_storage_api::noop::NoopProvider;
     use reth_tasks::Runtime;
     use std::time::Duration;
@@ -501,5 +478,69 @@ mod tests {
             matches!(&err, EthApiError::HeaderNotFound(id) if *id == BlockId::latest()),
             "{err:?}"
         );
+    }
+
+    fn block_with_gas_prices(
+        base_fee_per_gas: Option<u64>,
+        txs: &[(Address, u128)],
+    ) -> RecoveredBlock<Block> {
+        let (senders, transactions) = txs
+            .iter()
+            .map(|&(sender, gas_price)| {
+                let tx = TxLegacy { gas_price, ..Default::default() };
+                (sender, TransactionSigned::new_unhashed(tx.into(), Signature::test_signature()))
+            })
+            .unzip();
+        RecoveredBlock::new_unhashed(
+            Block {
+                header: Header {
+                    beneficiary: Address::ZERO,
+                    base_fee_per_gas,
+                    ..Default::default()
+                },
+                body: BlockBody { transactions, ..Default::default() },
+            },
+            senders,
+        )
+    }
+
+    #[test]
+    fn samples_lowest_eligible_tips_with_duplicates() {
+        let sender = Address::with_last_byte(1);
+        let txs = [
+            (sender, 19),
+            (sender, 16),
+            (sender, 17),
+            (Address::ZERO, 12),
+            (sender, 11),
+            (sender, 15),
+            (sender, 12),
+            (sender, 15),
+        ];
+        let block = block_with_gas_prices(Some(10), &txs);
+        assert_eq!(sample_block_tips(&block, Some(2)).unwrap(), [2, 5, 5].map(U256::from));
+    }
+
+    #[test]
+    fn samples_gas_prices_before_london() {
+        let sender = Address::with_last_byte(1);
+        let block = block_with_gas_prices(None, &[(sender, 12), (sender, 7)]);
+        assert_eq!(sample_block_tips(&block, None).unwrap(), [7, 12].map(U256::from));
+    }
+
+    #[test]
+    fn fee_cap_below_base_fee_only_errors_for_eligible_transactions() {
+        let sender = Address::with_last_byte(1);
+        let mut txs = [(sender, 13), (sender, 12), (sender, 11), (sender, 9)];
+        let block = block_with_gas_prices(Some(10), &txs);
+        let err = sample_block_tips(&block, None).unwrap_err();
+        assert!(matches!(err, RpcInvalidTransactionError::FeeCapTooLow), "{err:?}");
+
+        let expected = [1, 2, 3].map(U256::from);
+        assert_eq!(sample_block_tips(&block, Some(0)).unwrap(), expected);
+
+        txs[3].0 = Address::ZERO;
+        let block = block_with_gas_prices(Some(10), &txs);
+        assert_eq!(sample_block_tips(&block, None).unwrap(), expected);
     }
 }

@@ -6,9 +6,9 @@ use alloy_provider::{Provider, ProviderBuilder};
 use jsonrpsee::server::ServerConfigBuilder;
 use jsonrpsee_test_utils::mocks::WebSocketTestClient;
 use reth_consensus::noop::NoopConsensus;
+use reth_db_common::init::init_genesis;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
-use reth_primitives_traits::SealedHeader;
 use reth_provider::{
     providers::BlockchainProvider,
     test_utils::{create_test_provider_factory, NoopProvider},
@@ -20,7 +20,7 @@ use reth_transaction_pool::{
     test_utils::{TestPool, TestPoolBuilder},
     PoolTransaction, TransactionOrigin, TransactionPool,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::time::Instant;
 
@@ -40,9 +40,9 @@ async fn launch_ws_eth() -> RpcServerHandle {
 /// With a live sender, subscription tasks block on the stream the same way they do on a running
 /// node.
 async fn launch_ws_eth_with_canon_state(max_subscriptions_per_connection: u32) -> RpcServerHandle {
-    let provider =
-        BlockchainProvider::with_latest(create_test_provider_factory(), SealedHeader::default())
-            .unwrap();
+    let factory = create_test_provider_factory();
+    init_genesis(&factory).unwrap();
+    let provider = BlockchainProvider::new(factory).unwrap();
     let pool: TestPool = TestPoolBuilder::default().into();
     let builder = RpcModuleBuilder::default()
         .with_provider(provider)
@@ -143,6 +143,38 @@ async fn test_eth_subscribe_invalid_kind_rejected() {
     let result = provider.subscribe::<_, Value>(("invalidKind",)).await;
 
     assert!(result.is_err(), "invalid subscription kind must be rejected");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_subscribe_invalid_params_rejected() {
+    let handle = launch_ws_eth().await;
+    let mut client = WebSocketTestClient::new(handle.ws_local_addr().unwrap()).await.unwrap();
+
+    for (kind, params) in [
+        ("logs", json!(true)),
+        (
+            "logs",
+            json!({"address": "0x0000000000000000000000000000000000000001", "transactionHashes": null}),
+        ),
+        ("newPendingTransactions", json!({})),
+        ("transactionReceipts", json!(true)),
+    ] {
+        let response = ws_call(&mut client, "eth_subscribe", json!([kind, params])).await;
+        let error = jsonrpsee::types::ErrorObject::owned(
+            jsonrpsee::types::error::INVALID_PARAMS_CODE,
+            format!("Invalid params for {kind}"),
+            None::<()>,
+        );
+        assert_eq!(response, json!({"jsonrpc": "2.0", "id": 1, "error": error}));
+    }
+
+    let response = ws_call(
+        &mut client,
+        "eth_subscribe",
+        json!(["transactionReceipts", {"fromBlock": "latest"}]),
+    )
+    .await;
+    assert!(response["result"].is_string(), "{response}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -272,7 +304,11 @@ async fn test_eth_subscribe_syncing_releases_permit_on_unsubscribe() {
 async fn ws_call(client: &mut WebSocketTestClient, method: &str, params: Value) -> Value {
     let request =
         serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
-    let response = client.send_request_text(request.to_string()).await.unwrap();
+    let response =
+        tokio::time::timeout(Duration::from_secs(5), client.send_request_text(request.to_string()))
+            .await
+            .expect("timed out waiting for WebSocket response")
+            .unwrap();
     serde_json::from_str(&response).unwrap()
 }
 

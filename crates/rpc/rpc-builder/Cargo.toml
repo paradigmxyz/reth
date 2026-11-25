@@ -65,6 +65,7 @@ reth-evm-ethereum.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-db-common.workspace = true
 reth-rpc-api.workspace = true
 reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }

@@ -14,6 +14,7 @@ use crate::{
     tree::{EngineApiTreeHandler, EngineValidator, TreeConfig, WaitForCaches},
 };
 use futures::Stream;
+use reth_chain_state::CanonicalInMemoryStateWriter;
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::BeaconEngineMessage;
 use reth_evm::ConfigureEvm;
@@ -83,6 +84,9 @@ where
     pub provider: ProviderFactory<N>,
     /// Blockchain provider backing the engine tree.
     pub blockchain_db: BlockchainProvider<N>,
+    /// Writer of the canonical in-memory state that `blockchain_db` reads. The engine tree
+    /// changes that state through it.
+    pub canonical_in_memory_state_writer: CanonicalInMemoryStateWriter<N::Primitives>,
     /// Pruner run by the persistence service.
     pub pruner: PrunerWithFactory<ProviderFactory<N>>,
     /// Handle to the payload builder service.
@@ -138,6 +142,7 @@ where
             pipeline_task_spawner,
             provider,
             blockchain_db,
+            canonical_in_memory_state_writer,
             pruner,
             payload_builder,
             payload_validator,
@@ -154,15 +159,13 @@ where
         let persistence_handle =
             PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
 
-        let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
-
         let (to_tree_tx, from_tree) = EngineApiTreeHandler::spawn_new(
             blockchain_db,
             consensus,
             payload_validator,
             persistence_handle,
             payload_builder,
-            canonical_in_memory_state,
+            canonical_in_memory_state_writer,
             overlay_manager,
             tree_config,
             engine_kind,

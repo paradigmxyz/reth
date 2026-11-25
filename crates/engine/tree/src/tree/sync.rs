@@ -89,12 +89,11 @@ where
     /// Checks the tracked finalized block against the block on disk and requests another backfill
     /// run if the distance to the tip exceeds the threshold for another backfill run.
     ///
-    /// This will also do the necessary housekeeping of the tree state, this includes:
+    /// This will also do the necessary housekeeping of the in-memory state, this includes:
     ///  - removing all blocks below the backfill height
-    ///  - resetting the canonical in-memory state
+    ///  - moving the remaining canonical in-memory blocks to the non-canonical section
     ///
-    /// In case backfill resulted in an unwind, this will clear the tree state above the unwind
-    /// target block.
+    /// In case backfill resulted in an unwind, this will remove all in-memory blocks.
     pub(super) fn on_backfill_sync_finished(
         &mut self,
         ctrl: ControlFlow,
@@ -120,9 +119,6 @@ where
 
         // state house keeping after backfill sync
         // remove all executed blocks below the backfill height
-        //
-        // We set the `finalized_num` to `Some(backfill_height)` to ensure we remove all state
-        // before that
         let Some(backfill_num_hash) = self
             .provider
             .block_hash(backfill_height)?
@@ -136,12 +132,15 @@ where
             // the node reset so we need to clear everything above that height so that backfill
             // height is the new canonical block.
             self.state.set_pending_sparse_trie_prune(false);
-            self.state.tree_state.reset(backfill_num_hash)
+            self.state.tree_state.set_canonical_head(backfill_num_hash);
+            self.canonical_in_memory_state_writer.clear_state();
         } else {
-            self.state.tree_state.remove_until(
-                backfill_num_hash,
+            // The in-memory state drops the blocks up to the backfill height and the blocks that
+            // conflict with the backfill block. The other executed blocks stay in it, but none of
+            // them is canonical.
+            self.canonical_in_memory_state_writer.on_backfill_finished(
                 self.persistence_state.last_persisted_block.hash,
-                Some(backfill_num_hash),
+                backfill_num_hash,
             );
         }
 
@@ -151,9 +150,6 @@ where
         // remove all buffered blocks below the backfill height
         self.state.buffer.remove_old_blocks(backfill_height);
         self.purge_timing_stats(backfill_height, None);
-        // we remove all entries because now we're synced to the backfill target and consider this
-        // the canonical chain
-        self.canonical_in_memory_state.clear_state();
 
         if let Ok(Some(new_head)) = self.provider.sealed_header(backfill_height) {
             // update the tracked chain height, after backfill sync both the canonical height and
@@ -162,7 +158,7 @@ where
             self.persistence_state.finish(new_head.num_hash(), new_head.num_hash());
 
             // update the tracked canonical head
-            self.canonical_in_memory_state.set_canonical_head(new_head);
+            self.canonical_in_memory_state_writer.set_canonical_head(new_head);
 
             // If the pipeline reached the head of the syncing FCU, apply its safe and finalized
             // blocks now that the head is canonical. An unwind must wait for a new FCU because the
@@ -333,7 +329,7 @@ where
     /// for access lists of blocks past the fork. Access list downloads are best-effort anyway, so
     /// those blocks simply take the regular execution path.
     pub(super) fn should_download_access_lists(&self) -> bool {
-        self.canonical_in_memory_state.get_canonical_head().block_access_list_hash().is_some()
+        self.canonical_in_memory_state().get_canonical_head().block_access_list_hash().is_some()
     }
 
     /// Returns true if the distance from the local tip to the block is greater than the configured

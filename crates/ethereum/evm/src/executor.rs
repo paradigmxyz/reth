@@ -955,7 +955,7 @@ mod tests {
         assert_eq!(output.account(&beneficiary).unwrap().unwrap().balance, U256::from(7));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn dao_fork_drain_keeps_empty_accounts() {
         let [absent, empty, empty_with_balance, nonce_only, ..] = dao_fork::DAO_HARDFORK_ACCOUNTS;
         let beneficiary = dao_fork::DAO_HARDFORK_BENEFICIARY;

@@ -100,6 +100,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                 total_pruned = total_pruned.saturating_add(batch_pruned);
 
                 if output.progress.is_finished() {
+                    // History segments delete changeset jars only below a committed checkpoint,
+                    // so one more run deletes the jars that the last batch made prunable.
+                    pruner.run(prune_tip)?;
                     info!(target: "reth::cli", total_pruned, "Pruned data from database");
                     break;
                 }

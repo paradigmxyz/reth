@@ -23,7 +23,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tracing::debug;
+use tracing::{debug, warn};
 
 // Keeps storage requests inclusive through the full trie keyspace.
 const MAX_HASH: B256 = B256::repeat_byte(0xff);
@@ -414,11 +414,16 @@ impl StorageRangeVerifier {
         let mut decoded = Vec::with_capacity(slots.len());
         let mut previous = None;
 
-        for slot in slots {
+        for (slot_index, slot) in slots.iter().enumerate() {
             if slot.hash < origin || previous.is_some_and(|previous| slot.hash <= previous) {
-                debug!(
+                warn!(
                     target: "downloaders::snap",
                     %account_hash,
+                    %origin,
+                    slot_index,
+                    slot_hash = %slot.hash,
+                    previous_hash = ?previous,
+                    slot_count = slots.len(),
                     "Storage slots precede origin or are not strictly ordered"
                 );
                 return Err(RequestError::BadResponse)
