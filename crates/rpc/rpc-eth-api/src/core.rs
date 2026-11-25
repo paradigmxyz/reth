@@ -417,15 +417,11 @@ pub trait EthApi<
     ) -> RpcResult<EIP1186AccountProofResponse>;
 
     /// Returns the account and storage values of the specified targets including Merkle proofs.
-    ///
-    /// Unless `drop_excluded_branches` is `true`, a proof through an extension also includes the
-    /// extension's child branch when the requested path diverges within the extension key.
     #[method(name = "getMultiProof")]
     async fn get_multi_proof(
         &self,
         targets: Vec<(Address, Vec<B256>)>,
         block_number: Option<BlockId>,
-        drop_excluded_branches: Option<bool>,
     ) -> RpcResult<Vec<EIP1186AccountProofResponse>>;
 
     /// Returns the account's balance, nonce, and code.
@@ -980,22 +976,9 @@ where
         &self,
         targets: Vec<(Address, Vec<B256>)>,
         block_number: Option<BlockId>,
-        drop_excluded_branches: Option<bool>,
     ) -> RpcResult<Vec<EIP1186AccountProofResponse>> {
-        trace!(
-            target: "rpc::eth",
-            ?targets,
-            ?block_number,
-            ?drop_excluded_branches,
-            "Serving eth_getMultiProof"
-        );
-        Ok(EthState::get_multi_proof(
-            self,
-            targets,
-            block_number,
-            drop_excluded_branches.unwrap_or_default(),
-        )?
-        .await?)
+        trace!(target: "rpc::eth", ?targets, ?block_number, "Serving eth_getMultiProof");
+        Ok(EthState::get_multi_proof(self, targets, block_number)?.await?)
     }
 
     /// Handler for: `eth_getAccountInfo`

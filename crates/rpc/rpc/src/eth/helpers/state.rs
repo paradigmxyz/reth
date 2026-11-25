@@ -168,13 +168,13 @@ mod tests {
 
         // Exactly at the limit, on both axes.
         let targets = vec![(address, vec![B256::ZERO; DEFAULT_MAX_PROOF_SLOTS])];
-        assert!(eth_api.get_multi_proof(targets, None, false).is_ok());
+        assert!(eth_api.get_multi_proof(targets, None).is_ok());
         let targets = vec![(address, Vec::new()); DEFAULT_MAX_PROOF_SLOTS];
-        assert!(eth_api.get_multi_proof(targets, None, false).is_ok());
+        assert!(eth_api.get_multi_proof(targets, None).is_ok());
 
         // Too many slots in a single target.
         let targets = vec![(address, vec![B256::ZERO; DEFAULT_MAX_PROOF_SLOTS + 1])];
-        let Err(err) = eth_api.get_multi_proof(targets, None, false) else {
+        let Err(err) = eth_api.get_multi_proof(targets, None) else {
             panic!("expected over-limit request to be rejected");
         };
         assert_eq!(err.to_string(), "total slot count 1025 exceeds limit 1024");
@@ -184,14 +184,14 @@ mod tests {
             (address, vec![B256::ZERO; DEFAULT_MAX_PROOF_SLOTS]),
             (Address::random(), vec![B256::ZERO]),
         ];
-        let Err(err) = eth_api.get_multi_proof(targets, None, false) else {
+        let Err(err) = eth_api.get_multi_proof(targets, None) else {
             panic!("expected over-limit request to be rejected");
         };
         assert_eq!(err.to_string(), "total slot count 1025 exceeds limit 1024");
 
         // Too many targets without any slots.
         let targets = vec![(address, Vec::new()); DEFAULT_MAX_PROOF_SLOTS + 1];
-        let Err(err) = eth_api.get_multi_proof(targets, None, false) else {
+        let Err(err) = eth_api.get_multi_proof(targets, None) else {
             panic!("expected over-limit request to be rejected");
         };
         assert_eq!(err.to_string(), "target count 1025 exceeds limit 1024");

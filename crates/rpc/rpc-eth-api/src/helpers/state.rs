@@ -199,14 +199,10 @@ pub trait EthState: LoadState + SpawnBlocking {
     ///
     /// Enforces a cap of [`DEFAULT_MAX_PROOF_SLOTS`] on both the number of targets and the total
     /// slot count across all targets, before a proof permit is acquired.
-    ///
-    /// See [`reth_trie_common::DecodedMultiProofV2::account_proof`] for
-    /// `drop_excluded_branches`.
     fn get_multi_proof(
         &self,
         targets: Vec<(Address, Vec<B256>)>,
         block_id: Option<BlockId>,
-        drop_excluded_branches: bool,
     ) -> Result<
         impl Future<Output = Result<Vec<EIP1186AccountProofResponse>, Self::Error>> + Send,
         Self::Error,
@@ -261,7 +257,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                     .into_iter()
                     .map(|(address, slots)| {
                         let proof = multiproof
-                            .account_proof(address, &slots, drop_excluded_branches)
+                            .account_proof(address, &slots)
                             .map_err(RethError::other)
                             .map_err(Self::Error::from_eth_err)?;
                         let storage_keys =

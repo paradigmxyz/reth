@@ -1348,7 +1348,7 @@ mod tests {
                     },
                     false,
                 )?
-                .account_proof(other_address, &[], true)?
+                .account_proof(other_address, &[])?
                 .verify(root)?;
             assert_eq!(state.state_root(HashedPostState::default())?, root);
             assert_eq!(

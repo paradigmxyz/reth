@@ -472,7 +472,6 @@ pub trait EngineEthApi<TxReq: RpcObject, B: RpcObject, R: RpcObject, L: RpcObjec
         &self,
         targets: Vec<(Address, Vec<B256>)>,
         block_number: Option<BlockId>,
-        drop_excluded_branches: Option<bool>,
     ) -> RpcResult<Vec<EIP1186AccountProofResponse>>;
 
     /// Returns the EIP-7928 block access list for a block by hash.

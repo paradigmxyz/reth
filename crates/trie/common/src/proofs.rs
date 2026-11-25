@@ -462,15 +462,12 @@ impl DecodedMultiProofV2 {
 
     /// Construct an account proof from the V2 multiproof.
     ///
-    /// When `drop_excluded_branches` is `false`, an extension on a requested path is followed by
-    /// its child branch even when the path diverges within the extension key. This is the proof
-    /// shape from before extensions and branches were separate proof nodes. The branch is only
-    /// emitted if the multiproof holds it.
+    /// An extension on a requested path is followed by its child branch, if the multiproof holds
+    /// it, even when the path diverges within the extension key.
     pub fn account_proof(
         &self,
         address: Address,
         slots: &[B256],
-        drop_excluded_branches: bool,
     ) -> Result<AccountProof, alloy_rlp::Error> {
         let hashed_address = keccak256(address);
         let nibbles = Nibbles::unpack(hashed_address);
@@ -488,7 +485,7 @@ impl DecodedMultiProofV2 {
             (None, EMPTY_ROOT_HASH)
         };
 
-        let proof = encode_path_proof_nodes(&self.account_proofs, &nibbles, drop_excluded_branches);
+        let proof = encode_path_proof_nodes(&self.account_proofs, &nibbles);
         let storage_nodes = self.storage_proofs.get(&hashed_address);
         let mut storage_proofs = Vec::with_capacity(slots.len());
         for slot in slots {
@@ -508,7 +505,7 @@ impl DecodedMultiProofV2 {
                 nibbles,
                 value,
                 proof: storage_nodes
-                    .map(|nodes| encode_path_proof_nodes(nodes, &nibbles, drop_excluded_branches))
+                    .map(|nodes| encode_path_proof_nodes(nodes, &nibbles))
                     .unwrap_or_default(),
             });
         }
@@ -657,18 +654,10 @@ fn matching_v2_proof_nodes<'a>(
 
 /// Encodes the proof nodes matching `path` in root-to-leaf order.
 ///
-/// Unless `drop_excluded_branches` is set, a matching extension is followed by its child branch
-/// when `path` diverges within the extension key.
-fn encode_path_proof_nodes(
-    proof_nodes: &[ProofTrieNode],
-    path: &Nibbles,
-    drop_excluded_branches: bool,
-) -> Vec<Bytes> {
-    let nodes = matching_v2_proof_nodes(proof_nodes, path);
-    if drop_excluded_branches {
-        return encode_v2_proof_nodes(nodes)
-    }
-    encode_v2_proof_nodes(nodes.flat_map(|node| {
+/// A matching extension is followed by its child branch even when `path` diverges within the
+/// extension key, which some proof consumers need to verify absence.
+fn encode_path_proof_nodes(proof_nodes: &[ProofTrieNode], path: &Nibbles) -> Vec<Bytes> {
+    encode_v2_proof_nodes(matching_v2_proof_nodes(proof_nodes, path).flat_map(|node| {
         let branch = if let TrieNode::Extension(extension) = &node.node {
             let branch_path = node.path.join(&extension.key);
             proof_nodes
@@ -1256,14 +1245,14 @@ mod tests {
             ..Default::default()
         };
 
-        let proof = multiproof.account_proof(Address::ZERO, &[], true).unwrap();
+        let proof = multiproof.account_proof(Address::ZERO, &[]).unwrap();
 
         assert_eq!(proof.proof, vec![Bytes::from(extension_rlp), Bytes::from(branch_rlp)]);
         assert!(proof.info.is_none());
     }
 
     #[test]
-    fn v2_proof_keeps_excluded_extension_branch_unless_dropped() {
+    fn v2_proof_keeps_excluded_extension_branch() {
         // Returns proof nodes for an extension whose key diverges from `path` at its second
         // nibble, with the extension and child branch encodings.
         fn diverging_extension(path: &Nibbles) -> (Vec<ProofTrieNode>, Bytes, Bytes) {
@@ -1293,11 +1282,7 @@ mod tests {
             storage_proofs: B256Map::from_iter([(hashed_address, storage_nodes)]),
         };
 
-        let proof = multiproof.account_proof(Address::ZERO, &[B256::ZERO], true).unwrap();
-        assert_eq!(proof.proof, vec![account_extension.clone()]);
-        assert_eq!(proof.storage_proofs[0].proof, vec![storage_extension.clone()]);
-
-        let proof = multiproof.account_proof(Address::ZERO, &[B256::ZERO], false).unwrap();
+        let proof = multiproof.account_proof(Address::ZERO, &[B256::ZERO]).unwrap();
         assert_eq!(proof.proof, vec![account_extension, account_branch]);
         assert_eq!(proof.storage_proofs[0].proof, vec![storage_extension, storage_branch]);
     }
