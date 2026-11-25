@@ -293,11 +293,7 @@ impl PeersManager {
     pub(crate) fn persistable_peers(&self) -> impl Iterator<Item = PersistedPeerInfo> + '_ {
         self.peers
             .iter()
-            .filter(|(_, peer)| {
-                !peer.is_backed_off() &&
-                    !peer.is_banned() &&
-                    !(peer.remove_after_disconnect && !peer.is_trusted())
-            })
+            .filter(|(_, peer)| !peer.is_backed_off() && !peer.is_banned() && !peer.is_temporary())
             .map(|(peer_id, peer)| PersistedPeerInfo {
                 record: NodeRecord::new_with_ports(
                     peer.addr.tcp().ip(),
@@ -738,7 +734,7 @@ impl PeersManager {
                 trace!(target: "net::peers", ?peer_id, direction=?entry.get().state, "active session gracefully closed");
                 self.connection_info.decr_state(entry.get().state);
 
-                if entry.get().remove_after_disconnect && !entry.get().is_trusted() {
+                if entry.get().is_temporary() {
                     // this peer should be removed from the set
                     entry.remove();
                     self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
@@ -904,9 +900,8 @@ impl PeersManager {
                     peer.reputation = peer.reputation.saturating_add(reputation_change.as_i32());
                 };
 
-                // A peer tracked only until its session ends is removed however it ends. A
-                // reputation ban also disconnects the peer, but doesn't mark it for removal.
-                remove_peer = peer.remove_after_disconnect && !peer.is_trusted();
+                // a temporary peer is removed however its session ends
+                remove_peer = peer.is_temporary();
 
                 self.connection_info.decr_state(peer.state);
                 peer.state = PeerConnectionState::Idle;
@@ -960,15 +955,26 @@ impl PeersManager {
     /// untrusted peer is skipped once [`MAX_TRACKED_PEERS`] peers are tracked, so it never pushes
     /// out an existing one.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId>) {
-        // A peer tracked only until its session ends starts counting once discovery keeps it.
-        let is_new = self.peers.get(&peer_id).is_none_or(|peer| peer.remove_after_disconnect) &&
-            !self.trusted_peer_ids.contains(&peer_id);
-        let tracked = self.peers.len() - usize::from(self.peers.contains_key(&peer_id));
-        if is_new && tracked >= MAX_TRACKED_PEERS {
+        if self.is_full_for(&peer_id) {
             trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "Skipping discovered peer, peer set is full");
             return
         }
         self.add_peer_kind(peer_id, None, addr, fork_id)
+    }
+
+    /// Returns `true` if keeping the discovered peer would exceed [`MAX_TRACKED_PEERS`].
+    ///
+    /// A trusted or already kept peer always fits. A peer tracked only until its session ends
+    /// starts counting once discovery keeps it, in the place it already takes.
+    fn is_full_for(&self, peer_id: &PeerId) -> bool {
+        if self.trusted_peer_ids.contains(peer_id) {
+            return false
+        }
+        match self.peers.get(peer_id) {
+            Some(peer) if !peer.remove_after_disconnect => false,
+            Some(_) => self.peers.len() > MAX_TRACKED_PEERS,
+            None => self.peers.len() >= MAX_TRACKED_PEERS,
+        }
     }
 
     /// Marks the given peer as trusted.
@@ -4781,18 +4787,18 @@ mod tests {
         assert!(!peers.peers.contains_key(&discovered));
         assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS);
 
-        // a known peer is still updated
-        let known = *peers.peers.keys().next().unwrap();
-        let new_addr = PeerAddr::from_tcp("5.6.7.8:30303".parse().unwrap());
-        peers.add_peer(known, new_addr, None);
-        assert_eq!(peers.peers[&known].addr, new_addr);
-
         // a trusted id is still added
         let trusted = PeerId::random();
         peers.add_trusted_peer_id(trusted);
         peers.add_peer(trusted, addr, None);
         assert!(peers.peers.contains_key(&trusted));
         assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS + 1);
+
+        // a known peer is still updated, also past the limit
+        let known = *peers.peers.keys().find(|id| **id != trusted).unwrap();
+        let new_addr = PeerAddr::from_tcp("5.6.7.8:30303".parse().unwrap());
+        peers.add_peer(known, new_addr, None);
+        assert_eq!(peers.peers[&known].addr, new_addr);
     }
 
     #[tokio::test]
