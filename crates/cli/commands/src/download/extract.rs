@@ -297,9 +297,7 @@ fn unpack_archive<R: Read>(
             "Archive links are unsupported: `{}`",
             path.display()
         );
-        // Match tar's directory handling for archives that predate USTAR.
-        let directory = entry_type.is_dir() ||
-            (entry.header().as_ustar().is_none() && entry.path_bytes().ends_with(b"/"));
+        let directory = entry_type.is_dir() || is_legacy_tar_directory(&entry);
         if !is_managed_snapshot_path(&path, directory) {
             continue
         }
@@ -560,12 +558,14 @@ fn unpack_static_file<R: Read>(
 }
 
 /// Returns whether `entry` holds its data as one sequential run of bytes.
-///
-/// Like `tar`, a non-USTAR entry whose path ends in `/` is a directory whatever its type flag.
 fn is_regular_file<R: Read>(entry: &tar::Entry<'_, R>) -> bool {
     let entry_type = entry.header().entry_type();
-    (entry_type.is_file() || entry_type.is_contiguous()) &&
-        !(entry.header().as_ustar().is_none() && entry.path_bytes().ends_with(b"/"))
+    (entry_type.is_file() || entry_type.is_contiguous()) && !is_legacy_tar_directory(entry)
+}
+
+/// Keeps directory classification consistent with the `tar` crate's BSD-tar compatibility rule.
+fn is_legacy_tar_directory<R: Read>(entry: &tar::Entry<'_, R>) -> bool {
+    entry.header().as_ustar().is_none() && entry.path_bytes().ends_with(b"/")
 }
 
 /// Writes a regular file entry to `dest` in large blocks.
