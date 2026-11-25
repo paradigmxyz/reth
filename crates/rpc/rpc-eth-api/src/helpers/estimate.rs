@@ -67,7 +67,9 @@ pub trait EstimateCall: Call {
             EvmFeatures::FEE_CHARGE | EvmFeatures::BALANCE_CHECK | EvmFeatures::BALANCE_TOP_UP,
         );
 
-        evm_env.version_mut().memory_limit = self.evm_memory_limit();
+        // Keep a stricter limit that the EVM configuration sets for block execution.
+        evm_env.version_mut().memory_limit =
+            evm_env.version().memory_limit.min(self.evm_memory_limit());
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();

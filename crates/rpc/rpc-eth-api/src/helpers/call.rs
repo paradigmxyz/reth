@@ -158,7 +158,9 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                     // <https://github.com/ethereum/execution-apis/blob/main/docs-api/docs/ethsimulatev1-notes.mdx>.
                     evm_env.version_mut().tx_total_gas_cap = u64::MAX;
 
-                    evm_env.version_mut().memory_limit = this.evm_memory_limit();
+                    // Keep a stricter limit that the EVM configuration sets for block execution.
+                    evm_env.version_mut().memory_limit =
+                        evm_env.version().memory_limit.min(this.evm_memory_limit());
 
                     if !validation {
                         // If not explicitly required, we disable nonce check <https://github.com/paradigmxyz/reth/issues/16108>
@@ -969,7 +971,9 @@ pub trait Call:
             .features
             .remove(evm2::EvmFeatures::BALANCE_CHECK | evm2::EvmFeatures::BALANCE_TOP_UP);
 
-        evm_env.version_mut().memory_limit = self.evm_memory_limit();
+        // Keep a stricter limit that the EVM configuration sets for block execution.
+        evm_env.version_mut().memory_limit =
+            evm_env.version().memory_limit.min(self.evm_memory_limit());
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();
