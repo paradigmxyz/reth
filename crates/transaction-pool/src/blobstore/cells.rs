@@ -12,6 +12,7 @@ use alloy_eips::{
     },
 };
 use alloy_primitives::B256;
+use std::borrow::Cow;
 
 /// An EIP-7594 sidecar that keeps the same subset of cells for every blob.
 ///
@@ -144,14 +145,30 @@ impl BlobTxCellSidecar {
     }
 
     /// Rebuilds the full sidecar, checking each rebuilt blob against its commitment.
+    ///
+    /// Only the first 64 kept columns are used: they determine the blob, so once its commitment
+    /// matches, the recomputed proofs are valid too, even if other kept cells are corrupt.
     pub fn recover(
         &self,
         settings: &KzgSettings,
     ) -> Result<BlobTransactionSidecarEip7594, BlobCellRecoveryError> {
+        let needed = CELLS_PER_EXT_BLOB / 2;
+        let (mask, cells) = if self.mask.count() > needed {
+            let mask = self.mask.selected_indices().take(needed).fold(0, |bits, i| bits | 1 << i);
+            let cells = self
+                .cells
+                .chunks_exact(self.mask.count())
+                .flat_map(|blob| &blob[..needed])
+                .copied()
+                .collect();
+            (BlobCellMask::from_bits(mask), Cow::Owned(cells))
+        } else {
+            (self.mask, Cow::Borrowed(self.cells.as_slice()))
+        };
         BlobTransactionSidecarEip7594::try_recover_from_cells_with_settings(
             self.commitments.clone(),
-            self.mask,
-            &self.cells,
+            mask,
+            &cells,
             settings,
         )
     }
@@ -255,6 +272,14 @@ mod tests {
         assert_eq!(half.mask().count(), CELLS_PER_EXT_BLOB / 2);
         assert!(half.is_recoverable());
         assert_eq!(&half.recover(settings()).unwrap(), full);
+
+        // Cells past the first 64 kept columns are not used, so a corrupt one still recovers
+        // valid proofs.
+        let mut corrupt = all.clone();
+        corrupt.cells[100][31] ^= 1;
+        let recovered = corrupt.recover(settings()).unwrap();
+        recovered.validate(&all.versioned_hashes().collect::<Vec<_>>(), settings()).unwrap();
+        assert_eq!(&recovered, full);
 
         let too_few = subset(BlobCellMask::from_bits(u64::MAX as u128 >> 1));
         assert!(!too_few.is_recoverable());
