@@ -129,20 +129,19 @@ impl<T: PoolTransaction> BlobBuffer<T> {
         Some(BufferedBlob { peer, transaction, deliveries: entry.deliveries })
     }
 
-    /// Returns a job that failed verification to the buffer, so only the columns of the rejected
-    /// deliveries need to be fetched again. Returns the mask of the restored columns, which is
-    /// empty if the buffer has no room for them.
-    pub(super) fn restore(&mut self, hash: B256, job: BufferedBlob<T>, now: Instant) -> u128 {
-        if self.body(job.peer, job.transaction, now).is_err() {
-            return 0
+    /// Returns the verified cells of a rejected job to the buffer, so only the rejected columns
+    /// need to be fetched again. Returns the columns buffered for the hash afterwards, which
+    /// leaves out deliveries the buffer has no room for.
+    pub(super) fn restore_cells(
+        &mut self,
+        hash: B256,
+        deliveries: Vec<Delivery>,
+        now: Instant,
+    ) -> u128 {
+        for delivery in deliveries {
+            self.cells(hash, delivery.peer, delivery.mask, delivery.cells, now);
         }
-        let mut restored = 0;
-        for delivery in job.deliveries {
-            if self.cells(hash, delivery.peer, delivery.mask, delivery.cells, now) {
-                restored |= delivery.mask.bits();
-            }
-        }
-        restored
+        self.entries.get(&hash).map_or(0, |entry| entry.mask)
     }
 }
 
@@ -155,9 +154,9 @@ pub(super) struct BufferedBlob<T> {
 }
 
 impl<T: PoolTransaction> BufferedBlob<T> {
-    /// On failure, returns the peers whose cells failed verification and, if any did, the job
-    /// without their deliveries.
-    pub(super) fn verify(mut self) -> Result<(PeerId, T), (Vec<PeerId>, Option<Self>)> {
+    /// On failure, returns the peers whose cells failed verification and the deliveries that
+    /// passed, or `None` if the failure is local.
+    pub(super) fn verify(mut self) -> Result<(PeerId, T), Option<Rejected>> {
         let metadata = self
             .transaction
             .blob_sidecar()
@@ -186,7 +185,7 @@ impl<T: PoolTransaction> BufferedBlob<T> {
         if !bad.is_empty() {
             // Keep the honest cells so they need not be fetched again, but drop every delivery
             // of a peer that sent invalid cells.
-            let deliveries = verified
+            let verified = verified
                 .into_iter()
                 .filter(|(peer, _)| !bad.contains(peer))
                 .map(|(peer, sidecar)| Delivery {
@@ -195,8 +194,7 @@ impl<T: PoolTransaction> BufferedBlob<T> {
                     cells: sidecar.cells,
                 })
                 .collect();
-            let job = Self { peer: self.peer, transaction: self.transaction, deliveries };
-            return Err((bad, Some(job)))
+            return Err(Some(Rejected { peers: bad, verified }))
         }
         let mask = BlobCellMask::from_bits(mask);
         let mut cells = Vec::with_capacity(metadata.commitments.len() * mask.count());
@@ -217,10 +215,19 @@ impl<T: PoolTransaction> BufferedBlob<T> {
             cell_mask: B128::from(mask.bits()),
         };
         if !self.transaction.set_blob_sidecar(PooledBlobSidecar::from_cells(sidecar)) {
-            return Err((Vec::new(), None))
+            return Err(None)
         }
         Ok((self.peer, self.transaction))
     }
+}
+
+/// Outcome of a verification job in which some peers sent invalid cells.
+#[derive(Debug)]
+pub(super) struct Rejected {
+    /// Peers whose cells failed verification.
+    pub(super) peers: Vec<PeerId>,
+    /// Deliveries of the other peers, which passed verification.
+    pub(super) verified: Vec<Delivery>,
 }
 
 #[derive(Debug)]
@@ -237,7 +244,7 @@ impl<T> Entry<T> {
     }
 }
 #[derive(Debug)]
-struct Delivery {
+pub(super) struct Delivery {
     peer: PeerId,
     mask: BlobCellMask,
     cells: Vec<Cell>,
@@ -302,7 +309,7 @@ pub(super) mod tests {
         let bad = PeerId::random();
         let now = Instant::now();
         let mut buffer = BlobBuffer::default();
-        buffer.body(body_peer, tx, now).unwrap();
+        buffer.body(body_peer, tx.clone(), now).unwrap();
         let first = BlobCellMask::from_bits(1);
         let second = BlobCellMask::from_bits(2);
         buffer.cells(hash, honest, first, cells.get_cells(first).unwrap(), now);
@@ -310,9 +317,12 @@ pub(super) mod tests {
         corrupted[0][31] ^= 1;
         buffer.cells(hash, bad, second, corrupted, now);
         let result = buffer.take_ready(hash, BlobCellMask::from_bits(3)).unwrap().verify();
-        let Err((peers, Some(job))) = result else { panic!("bad cells must be rejected") };
-        assert_eq!(peers, vec![bad]);
-        assert_eq!(buffer.restore(hash, job, now), first.bits());
+        let Err(Some(rejected)) = result else { panic!("bad cells must be rejected") };
+        assert_eq!(rejected.peers, vec![bad]);
+        assert_eq!(buffer.restore_cells(hash, rejected.verified, now), first.bits());
+        // The body is dropped with the rejected cells, so the verified cells wait for a new one.
+        assert!(buffer.take_ready(hash, first).is_none());
+        buffer.body(honest, tx, now).unwrap();
         assert!(buffer.take_ready(hash, BlobCellMask::from_bits(3)).is_none());
         let (_, tx) = buffer.take_ready(hash, first).unwrap().verify().unwrap();
         assert_eq!(tx.blob_cell_availability().unwrap().get(), first);

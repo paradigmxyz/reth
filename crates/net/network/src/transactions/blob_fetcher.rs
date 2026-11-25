@@ -1,7 +1,7 @@
 //! ETH/72 cell scheduling, provider failover, and sparse custody selection.
 
 use super::{
-    blob_buffer::{BlobBuffer, BufferedBlob},
+    blob_buffer::{BlobBuffer, Rejected},
     PeerMetadata,
 };
 use alloy_eips::eip7594::BlobCellMask;
@@ -47,12 +47,8 @@ impl<T> std::fmt::Debug for BlobFetcher<T> {
 
 type RequestFuture =
     Pin<Box<dyn Future<Output = (B256, PeerId, BlobCellMask, Option<Cells>)> + Send>>;
-type VerifyFuture<T> = Pin<
-    Box<
-        dyn Future<Output = (B256, Result<(PeerId, T), (Vec<PeerId>, Option<BufferedBlob<T>>)>)>
-            + Send,
-    >,
->;
+type VerifyFuture<T> =
+    Pin<Box<dyn Future<Output = (B256, Result<(PeerId, T), Option<Rejected>>)> + Send>>;
 const MAX_PENDING: usize = 4096;
 const MAX_REQUESTS: usize = 16;
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -115,21 +111,25 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                     self.pending.remove(&hash);
                     BlobFetchEvent::Transaction(peer, tx)
                 }
-                Err((peers, job)) => {
+                Err(Some(rejected)) => {
                     self.metrics.invalid.increment(1);
-                    if let Some(job) = job &&
-                        let Some(pending) = self.pending.get_mut(&hash)
-                    {
-                        // Keep the transaction and refetch the rejected columns from the
-                        // remaining providers.
-                        pending.received = self.buffer.restore(hash, job, Instant::now());
-                        pending.providers.retain(|(id, _)| !peers.contains(id));
+                    if let Some(pending) = self.pending.get_mut(&hash) {
+                        // Drop the body, which the buffer would otherwise keep over any later
+                        // copy: its proofs are not bound by the transaction hash. A later
+                        // announcement fetches a body again, while the verified cells are kept
+                        // and the rejected columns are fetched from the remaining providers.
+                        pending.received =
+                            self.buffer.restore_cells(hash, rejected.verified, Instant::now());
+                        pending.providers.retain(|(id, _)| !rejected.peers.contains(id));
                         pending.target = None;
                         pending.verifying = false;
-                    } else {
-                        self.pending.remove(&hash);
                     }
-                    BlobFetchEvent::BadPeers(peers)
+                    BlobFetchEvent::BadPeers(rejected.peers)
+                }
+                Err(None) => {
+                    self.metrics.invalid.increment(1);
+                    self.pending.remove(&hash);
+                    BlobFetchEvent::BadPeers(Vec::new())
                 }
             };
             return Poll::Ready(event)
@@ -224,7 +224,7 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                 self.verification.push(Box::pin(async move {
                     let result = tokio::task::spawn_blocking(move || job.verify())
                         .await
-                        .unwrap_or_else(|_| Err((Vec::new(), None)));
+                        .unwrap_or_else(|_| Err(None));
                     (hash, result)
                 }));
             }
@@ -535,7 +535,7 @@ mod tests {
         let all = BlobCellMask::from_bits(u128::MAX);
         fetcher.announce(hash, honest, all);
         fetcher.announce(hash, bad, all);
-        fetcher.body(honest, tx).unwrap();
+        fetcher.body(honest, tx.clone()).unwrap();
         let mut cx = Context::from_waker(noop_waker_ref());
         assert!(fetcher.poll(&mut cx, &peers).is_pending());
         let PeerRequest::GetCells { response, .. } = rx1.try_recv().unwrap() else {
@@ -585,6 +585,10 @@ mod tests {
                 cell_mask: request.cell_mask,
             }))
             .unwrap();
+        // The body was dropped with the rejected cells, so the cells wait for a new body.
+        assert!(fetcher.poll(&mut cx, &peers).is_pending());
+        assert!(fetcher.verification.is_empty());
+        fetcher.body(honest, tx).unwrap();
         let event = tokio::time::timeout(
             Duration::from_secs(10),
             std::future::poll_fn(|cx| fetcher.poll(cx, &peers)),
