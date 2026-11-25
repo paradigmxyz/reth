@@ -128,7 +128,7 @@ impl<T> Default for PooledTransactions<T> {
 /// [EIP-8070]: https://eips.ethereum.org/EIPS/eip-8070
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct PooledTransactionsEth72<T = PooledTransaction>(pub Vec<T>);
+pub struct PooledTransactionsEth72<T = PooledTransactionVariant>(pub Vec<T>);
 
 impl<T> From<PooledTransactions<T>> for PooledTransactionsEth72<T> {
     fn from(transactions: PooledTransactions<T>) -> Self {
@@ -805,12 +805,11 @@ mod tests {
         }
 
         // A body without blobs decodes as a regular pooled transaction with an empty blob list.
-        let decoded =
-            PooledTransactionsEth72::<PooledTransactionVariant>::decode_with_memory_budget(
-                &mut encoded.as_slice(),
-                usize::MAX,
-            )
-            .unwrap();
+        let decoded = <PooledTransactionsEth72>::decode_with_memory_budget(
+            &mut encoded.as_slice(),
+            usize::MAX,
+        )
+        .unwrap();
         assert_eq!(decoded.0, cleared);
         assert!(alloy_rlp::encode(PooledTransactions(transactions)).len() > encoded.len());
     }
