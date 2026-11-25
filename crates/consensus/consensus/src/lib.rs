@@ -80,7 +80,7 @@ pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
     /// If `receipt_root_bloom` is provided, the implementation should use the pre-computed
     /// receipt root and logs bloom instead of computing them from the receipts.
     ///
-    /// Importers and executors must also call [`Self::validate_block_supplemental_data`].
+    /// Importers and executors must also call [`Consensus::validate_block_supplemental_data`].
     ///
     /// Note: validating blocks does not include other validations of the Consensus
     fn validate_block_post_execution(
