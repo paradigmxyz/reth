@@ -865,11 +865,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     }
 
                     let hashed_address = keccak256(address);
-                    let mut storage = B256Map::default();
-                    for entry in storage_cursor.walk_dup(Some(hashed_address), None)? {
-                        let (_, entry) = entry?;
-                        storage.insert(entry.key, entry.value);
-                    }
+                    let mut storage = hashed_storage_of(&mut storage_cursor, hashed_address)?;
                     // A parent's hashed state lists every slot its own wipe destroyed as zero,
                     // since `hashed_post_state` expands wipes, so earlier wipes are applied here.
                     for parent in &state_blocks[..first_block + index] {
@@ -1149,6 +1145,19 @@ where
 
     // No shards found or all processed
     Ok(Vec::new())
+}
+
+/// Returns the hashed storage of `hashed_address`, keyed by hashed slot.
+fn hashed_storage_of(
+    cursor: &mut impl DbDupCursorRO<tables::HashedStorages>,
+    hashed_address: B256,
+) -> ProviderResult<B256Map<U256>> {
+    let mut storage = B256Map::default();
+    for entry in cursor.walk_dup(Some(hashed_address), None)? {
+        let (_, entry) = entry?;
+        storage.insert(entry.key, entry.value);
+    }
+    Ok(storage)
 }
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
@@ -3025,13 +3034,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                         // Only the bundle's first wipe of an account is flagged, so the database
                         // still holds the storage from before it. Slots without a plain key in
                         // the reverts are recorded by hashed slot.
-                        let mut hashed_storage = B256Map::default();
-                        for entry in
-                            hashed_storage_cursor.walk_dup(Some(keccak256(address)), None)?
-                        {
-                            let (_, entry) = entry?;
-                            hashed_storage.insert(entry.key, entry.value);
-                        }
+                        let mut hashed_storage =
+                            hashed_storage_of(&mut hashed_storage_cursor, keccak256(address))?;
                         for (key, revert) in &storage {
                             if let Some(value) = hashed_storage.remove(&keccak256(key)) &&
                                 *revert == RevertToSlot::Destroyed
