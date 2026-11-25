@@ -221,7 +221,7 @@ async fn test_eth73_indexed_cells_and_response_form() {
         .protocols(vec![EthVersion::Eth73.into()])
         .build();
     let (p2p, _) = UnauthedP2PStream::new(ecies).handshake(hello).await.unwrap();
-    assert_eq!(p2p.shared_capabilities().eth_version(), Some(EthVersion::Eth73));
+    assert_eq!(p2p.shared_capabilities().eth_version().unwrap(), EthVersion::Eth73);
     let mut status = StatusBuilder::default().build();
     status.set_eth_version(EthVersion::Eth73);
     let filter = MAINNET.hardfork_fork_filter(EthereumHardfork::Frontier).unwrap();
