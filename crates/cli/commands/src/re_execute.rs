@@ -150,15 +150,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                 let db_at = {
                     |block_number: u64| {
-                        let provider = provider_factory
-                            .database_provider_ro()?
-                            .disable_long_read_transaction_safety();
+                        let (provider, in_memory) =
+                            provider_factory.provider_with_in_memory_snapshot()?;
+                        let provider = provider.disable_long_read_transaction_safety();
                         let hash = provider.block_hash(block_number)?.ok_or_else(|| {
                             eyre::eyre!("hash for block {block_number} not found in the database")
                         })?;
                         eyre::Ok(StateProviderDatabase(
                             state_provider_factory
-                                .state_provider_from_database(provider, hash)?
+                                .state_provider_from_database(provider, in_memory, hash)?
                                 .into_evm_state_provider(),
                         ))
                     }

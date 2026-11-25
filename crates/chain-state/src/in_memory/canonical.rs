@@ -1,5 +1,5 @@
 use super::{
-    blocks::{InMemoryBlocks, InMemoryBlocksSnapshot, InMemoryBlocksStats},
+    blocks::{InMemoryBlocks, InMemoryBlocksStats, InMemoryStateSnapshot},
     BlockState, ExecutedBlock, NewCanonicalChain,
 };
 use crate::{
@@ -87,38 +87,15 @@ impl<N: NodePrimitives> InMemoryState<N> {
         self.inner.blocks.read().contains(hash)
     }
 
-    /// Returns a frozen copy of the tracked blocks, canonical or not, that falls back to this
-    /// state for blocks inserted afterwards.
+    /// Runs `f` while no block can be inserted or removed, and returns its result with a
+    /// snapshot of the blocks tracked while it ran.
     ///
-    /// Taking it is a read lock and three reference count increments. The writer removes blocks
-    /// only after persistence has committed them, so a snapshot taken before a database
-    /// transaction opens still holds every block that transaction's durable frontiers need and
-    /// the writer removed since. Call [`InMemoryStateSnapshot::with_blocks_tracked_now`] right
-    /// after the transaction opens to also keep the blocks inserted in between.
-    pub fn snapshot(&self) -> InMemoryStateSnapshot<N> {
+    /// The writer waits until `f` returns. `f` must not access this state, because the lock it
+    /// runs under is not reentrant.
+    pub fn snapshot_during<R>(&self, f: impl FnOnce() -> R) -> (R, InMemoryStateSnapshot<N>) {
         let blocks = self.inner.blocks.read();
-        let generation = self.removal_generation();
-        InMemoryStateSnapshot {
-            blocks: blocks.snapshot(),
-            later: InMemoryBlocksSnapshot::empty(),
-            generation,
-            later_generation: generation,
-            live: self.clone(),
-        }
-    }
-
-    /// Returns a snapshot that holds no blocks and looks every block up in this state.
-    ///
-    /// It pins no blocks, and suits callers that cannot race with the writer, such as the engine
-    /// itself or a read-write provider.
-    pub fn live_view(&self) -> InMemoryStateSnapshot<N> {
-        InMemoryStateSnapshot {
-            blocks: InMemoryBlocksSnapshot::empty(),
-            later: InMemoryBlocksSnapshot::empty(),
-            generation: 0,
-            later_generation: 0,
-            live: self.clone(),
-        }
+        let result = f();
+        (result, blocks.snapshot())
     }
 
     /// Returns the numbers of tracked canonical blocks and of tracked blocks that are not
@@ -291,93 +268,6 @@ struct InMemoryStateInner<N: NodePrimitives> {
     /// Metrics for the in-memory state.
     metrics: InMemoryStateMetrics,
 }
-
-/// A frozen copy of the blocks an [`InMemoryState`] tracks, taken with
-/// [`InMemoryState::snapshot`], over the live state it was taken from.
-///
-/// Each state it holds keeps its whole in-memory chain, whatever the writer removes from the
-/// [`InMemoryState`] afterwards. Cloning it is five reference count increments.
-#[derive(Debug, Clone)]
-pub struct InMemoryStateSnapshot<N: NodePrimitives = EthPrimitives> {
-    /// The blocks tracked when the snapshot was taken.
-    blocks: InMemoryBlocksSnapshot<N>,
-    /// The blocks tracked when [`Self::with_blocks_tracked_now`] was called, if it was.
-    later: InMemoryBlocksSnapshot<N>,
-    /// The removal generation of `blocks`.
-    generation: u64,
-    /// The removal generation of `later`, or `generation` if it was not taken.
-    later_generation: u64,
-    live: InMemoryState<N>,
-}
-
-impl<N: NodePrimitives> InMemoryStateSnapshot<N> {
-    /// Also keeps the blocks the live state tracks now.
-    ///
-    /// Call it right after the database transaction opens: a block inserted between the snapshot
-    /// and the transaction can be one of the transaction's durable frontiers, and the writer can
-    /// remove it from the live state before the snapshot is read.
-    pub fn with_blocks_tracked_now(mut self) -> Self {
-        let blocks = self.live.inner.blocks.read();
-        self.later = blocks.snapshot();
-        self.later_generation = self.live.removal_generation();
-        drop(blocks);
-        self
-    }
-
-    /// Returns `true` if the writer removed blocks between the snapshot and
-    /// [`Self::with_blocks_tracked_now`].
-    ///
-    /// Otherwise the second capture holds every block that was tracked when a transaction opened
-    /// between the two, so it holds every in-memory block that transaction's durable frontiers
-    /// need. If it returns `true`, open a fresh transaction and take a fresh snapshot, see
-    /// [`IN_MEMORY_SNAPSHOT_ATTEMPTS`].
-    pub const fn blocks_removed_between_captures(&self) -> bool {
-        self.generation != self.later_generation
-    }
-
-    /// Returns the state of the block with the given hash, canonical or not: the one the
-    /// snapshot holds, or else the one the live state tracks now.
-    ///
-    /// The lookups are safe to combine, because a hash names one block.
-    pub fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
-        self.blocks
-            .get(&hash)
-            .or_else(|| self.later.get(&hash))
-            .cloned()
-            .or_else(|| self.live.state_by_hash(hash))
-    }
-
-    /// Returns the state of the block with the given hash whose chain reaches `anchor`: the one
-    /// the snapshot holds, or else the one the live state tracks now. Without such a state, this
-    /// is [`Self::state_by_hash`].
-    ///
-    /// A hash names a block but not how far a state's parent links extend: after an unwind and
-    /// replay the live state can link a block further down than the snapshot's state of it.
-    pub fn state_reaching(&self, hash: B256, anchor: B256) -> Option<Arc<BlockState<N>>> {
-        let reaches = |state: &Arc<BlockState<N>>| state.chain_hashes().any(|h| h == anchor);
-        let frozen = self.blocks.get(&hash).cloned();
-        if frozen.as_ref().is_some_and(reaches) {
-            return frozen
-        }
-        let later = self.later.get(&hash).cloned();
-        if later.as_ref().is_some_and(reaches) {
-            return later
-        }
-        let live = self.live.state_by_hash(hash);
-        if live.as_ref().is_some_and(reaches) {
-            return live
-        }
-        frozen.or(later).or(live)
-    }
-}
-
-/// How often a reader opens a fresh transaction and snapshot when the writer removed blocks
-/// between the two captures of its snapshot, see
-/// [`InMemoryStateSnapshot::blocks_removed_between_captures`].
-///
-/// Blocks are removed once per persistence, so a retry almost always succeeds. After the last
-/// attempt the reader keeps both captures and falls back to the live state for what they miss.
-pub const IN_MEMORY_SNAPSHOT_ATTEMPTS: usize = 3;
 
 /// The numbers of blocks an [`InMemoryState`] tracks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1169,6 +1059,49 @@ mod tests {
 
         canonical_in_memory_state_writer.clear_state(state.get_canonical_head());
         assert_eq!(state.pending_state(), None);
+    }
+
+    #[reth_concurrency::test]
+    fn snapshot_keeps_removed_blocks_and_their_chains() {
+        let (in_memory_state, mut in_memory_state_writer) = InMemoryState::new();
+        let mut block_builder = TestBlockBuilder::eth();
+        let blocks = block_builder.get_executed_blocks(1..4).collect::<Vec<_>>();
+        let hash = |number: usize| blocks[number - 1].recovered_block().hash();
+        let fork = block_builder.get_executed_block_with_number(3, hash(2));
+        let fork_hash = fork.recovered_block().hash();
+        in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        in_memory_state_writer.insert_executed(fork);
+        let ((), snapshot) = in_memory_state.snapshot_during(|| ());
+
+        let persisted = blocks[1].recovered_block().num_hash();
+        in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
+        assert!(!in_memory_state.contains(&hash(1)));
+
+        // The snapshot still holds every block of both sections, and each one's whole chain.
+        let head = snapshot.canonical_head().unwrap();
+        assert_eq!(head.hash(), hash(3));
+        assert_eq!(head.chain().count(), 3);
+        assert_eq!(snapshot.state_by_hash(hash(1)).unwrap().hash(), hash(1));
+        assert_eq!(snapshot.state_by_hash(fork_hash).unwrap().chain().count(), 3);
+        assert!(snapshot.state_by_hash(B256::random()).is_none());
+    }
+
+    #[test]
+    fn snapshot_during_holds_off_the_writer() {
+        let (in_memory_state, mut in_memory_state_writer) = InMemoryState::new();
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::random());
+        let block_hash = block.recovered_block().hash();
+
+        let (writer, snapshot) = in_memory_state.snapshot_during(|| {
+            let writer = std::thread::spawn(move || in_memory_state_writer.insert_executed(block));
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            assert!(!writer.is_finished(), "the writer inserted while the snapshot was taken");
+            writer
+        });
+        writer.join().unwrap();
+
+        assert!(snapshot.state_by_hash(block_hash).is_none());
+        assert!(in_memory_state.contains(&block_hash));
     }
 
     #[test]

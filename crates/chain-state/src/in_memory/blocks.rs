@@ -9,10 +9,6 @@ use reth_primitives_traits::NodePrimitives;
 use rpds::HashTrieMapSync;
 use std::{cmp::Reverse, collections::BTreeMap, sync::Arc};
 
-/// Block states by hash, in a persistent map so that a snapshot of it is a reference count
-/// increment.
-pub(super) type BlockStates<N> = HashTrieMapSync<B256, Arc<BlockState<N>>, FbBuildHasher<32>>;
-
 /// All executed in-memory blocks, split into the canonical and the non-canonical section.
 ///
 /// # Invariants
@@ -90,11 +86,12 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
         }
     }
 
-    /// Returns a frozen copy of the blocks of both sections.
-    pub(super) fn snapshot(&self) -> InMemoryBlocksSnapshot<N> {
-        InMemoryBlocksSnapshot {
+    /// Returns a snapshot of the tracked blocks of both sections and of the canonical head.
+    pub(super) fn snapshot(&self) -> InMemoryStateSnapshot<N> {
+        InMemoryStateSnapshot {
             canonical: self.canonical.blocks.clone(),
             non_canonical: self.non_canonical.blocks.clone(),
+            canonical_head: self.canonical.head().cloned(),
         }
     }
 
@@ -433,7 +430,7 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
 #[derive(Debug, Default)]
 pub(super) struct InMemoryCanonicalBlocks<N: NodePrimitives> {
     /// Canonical blocks by hash.
-    blocks: BlockStates<N>,
+    blocks: BlockStateMap<N>,
     /// Canonical block hashes by number.
     numbers: BTreeMap<BlockNumber, B256>,
 }
@@ -503,7 +500,7 @@ impl<N: NodePrimitives> InMemoryCanonicalBlocks<N> {
     ///
     /// If the block is not canonical.
     fn remove(&mut self, hash: &B256) -> Arc<BlockState<N>> {
-        let Some(state) = take(&mut self.blocks, hash) else {
+        let Some(state) = remove_state(&mut self.blocks, hash) else {
             unreachable!("block {hash} is not canonical")
         };
         let indexed = self.numbers.remove(&state.number());
@@ -519,7 +516,7 @@ impl<N: NodePrimitives> InMemoryCanonicalBlocks<N> {
             *first.key() <= number
         {
             let hash = first.remove();
-            let Some(state) = take(&mut self.blocks, &hash) else {
+            let Some(state) = remove_state(&mut self.blocks, &hash) else {
                 unreachable!("canonical block {hash} is indexed by number but not tracked")
             };
             removed.push(state);
@@ -536,7 +533,7 @@ impl<N: NodePrimitives> InMemoryCanonicalBlocks<N> {
 #[derive(Debug, Default)]
 pub(super) struct InMemoryNonCanonicalBlocks<N: NodePrimitives> {
     /// Non-canonical blocks by hash.
-    blocks: BlockStates<N>,
+    blocks: BlockStateMap<N>,
     /// Non-canonical block hashes by number. Forks can put several blocks at the same height.
     numbers: BTreeMap<BlockNumber, B256Set>,
     /// Non-canonical block hashes by parent hash. The parent can be non-canonical, canonical or
@@ -566,7 +563,7 @@ impl<N: NodePrimitives> InMemoryNonCanonicalBlocks<N> {
     ///
     /// If the block is not non-canonical.
     fn remove(&mut self, hash: &B256) -> Arc<BlockState<N>> {
-        let Some(state) = take(&mut self.blocks, hash) else {
+        let Some(state) = remove_state(&mut self.blocks, hash) else {
             unreachable!("block {hash} is not non-canonical")
         };
         if remove_indexed(self.numbers.get_mut(&state.number()), hash) {
@@ -642,34 +639,6 @@ pub(super) struct InMemoryBlocksStats {
     pub(super) latest: Option<BlockNumber>,
 }
 
-/// A frozen copy of the blocks of an [`InMemoryBlocks`].
-///
-/// Every state in it keeps its parent links, so the chain of a block it holds stays complete
-/// whatever is removed from the [`InMemoryBlocks`] afterwards.
-#[derive(Debug)]
-pub(super) struct InMemoryBlocksSnapshot<N: NodePrimitives> {
-    canonical: BlockStates<N>,
-    non_canonical: BlockStates<N>,
-}
-
-impl<N: NodePrimitives> InMemoryBlocksSnapshot<N> {
-    /// Returns a snapshot that holds no blocks.
-    pub(super) fn empty() -> Self {
-        Self { canonical: BlockStates::default(), non_canonical: BlockStates::default() }
-    }
-
-    /// Returns the state of the block with the given hash, canonical or not.
-    pub(super) fn get(&self, hash: &B256) -> Option<&Arc<BlockState<N>>> {
-        self.canonical.get(hash).or_else(|| self.non_canonical.get(hash))
-    }
-}
-
-impl<N: NodePrimitives> Clone for InMemoryBlocksSnapshot<N> {
-    fn clone(&self) -> Self {
-        Self { canonical: self.canonical.clone(), non_canonical: self.non_canonical.clone() }
-    }
-}
-
 /// Removes `hash` from `hashes`, the set an index of the non-canonical section holds for a block,
 /// and returns `true` if the set is empty afterwards and has to be removed from the index.
 fn remove_indexed(hashes: Option<&mut B256Set>, hash: &B256) -> bool {
@@ -682,8 +651,44 @@ fn remove_indexed(hashes: Option<&mut B256Set>, hash: &B256) -> bool {
     hashes.is_empty()
 }
 
-/// Removes `hash` from `blocks` and returns its state.
-fn take<N: NodePrimitives>(blocks: &mut BlockStates<N>, hash: &B256) -> Option<Arc<BlockState<N>>> {
+/// Block states by hash, in a persistent map, so that a snapshot shares its nodes with the map it
+/// was taken from.
+pub(super) type BlockStateMap<N> = HashTrieMapSync<B256, Arc<BlockState<N>>, FbBuildHasher<32>>;
+
+/// The executed in-memory blocks an [`InMemoryState`](super::InMemoryState) tracked at one
+/// moment, taken with [`InMemoryState::snapshot_during`](super::InMemoryState::snapshot_during).
+///
+/// Each state it holds keeps its parent links, so the chain of every block it holds stays
+/// complete whatever the writer removes afterwards. It never changes.
+#[derive(Debug, Clone)]
+pub struct InMemoryStateSnapshot<N: NodePrimitives> {
+    /// The canonical blocks by hash.
+    canonical: BlockStateMap<N>,
+    /// The blocks that were not canonical, by hash.
+    non_canonical: BlockStateMap<N>,
+    /// The highest canonical block.
+    canonical_head: Option<Arc<BlockState<N>>>,
+}
+
+impl<N: NodePrimitives> InMemoryStateSnapshot<N> {
+    /// Returns the state of the block with the given hash, canonical or not.
+    pub fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
+        self.canonical.get(&hash).or_else(|| self.non_canonical.get(&hash)).cloned()
+    }
+
+    /// Returns the state of the highest canonical block, if a canonical block was tracked.
+    pub const fn canonical_head(&self) -> Option<&Arc<BlockState<N>>> {
+        self.canonical_head.as_ref()
+    }
+}
+
+/// Removes the state of block `hash` from `blocks` and returns it.
+///
+/// A persistent map's removal does not return the removed value, so the state is read first.
+fn remove_state<N: NodePrimitives>(
+    blocks: &mut BlockStateMap<N>,
+    hash: &B256,
+) -> Option<Arc<BlockState<N>>> {
     let state = blocks.get(hash).cloned()?;
     blocks.remove_mut(hash);
     Some(state)

@@ -17,7 +17,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use core::fmt;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
-use reth_chain_state::{ChainInfoHeaders, InMemoryState, IN_MEMORY_SNAPSHOT_ATTEMPTS};
+use reth_chain_state::{ChainInfoHeaders, InMemoryState, InMemoryStateSnapshot};
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
@@ -147,7 +147,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             Arc::new(RwLock::new(legacy_settings)),
             rocksdb_provider.clone(),
             overlay_manager.clone(),
-            overlay_manager.in_memory_state().live_view(),
             runtime.clone(),
             db.path(),
             database_provider_metrics.clone(),
@@ -389,23 +388,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// data.
     #[track_caller]
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N>> {
-        // Snapshot the in-memory blocks before and right after opening the transaction, so that
-        // the blocks its durable frontiers need are still there when an overlay is built over
-        // it. If blocks were removed in between, retry with a fresh transaction. See
-        // `InMemoryStateSnapshot::blocks_removed_between_captures`.
-        let in_memory_state = self.overlay_manager.in_memory_state();
-        let mut attempt = 1;
-        let (db_tx, in_memory_snapshot) = loop {
-            let in_memory_snapshot = in_memory_state.snapshot();
-            let db_tx = self.db.tx()?;
-            let in_memory_snapshot = in_memory_snapshot.with_blocks_tracked_now();
-            if !in_memory_snapshot.blocks_removed_between_captures() ||
-                attempt == IN_MEMORY_SNAPSHOT_ATTEMPTS
-            {
-                break (db_tx, in_memory_snapshot)
-            }
-            attempt += 1;
-        };
+        let db_tx = self.db.tx()?;
 
         // Sync providers after opening the database transaction to make
         // sure that no data is pruned from rocksdb or static files.
@@ -423,12 +406,25 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
             self.overlay_manager.clone(),
-            in_memory_snapshot,
             self.runtime.clone(),
             self.db.path(),
             self.database_provider_metrics.clone(),
         )
         .with_minimum_pruning_distance(self.minimum_pruning_distance))
+    }
+
+    /// Returns a read-only provider like [`Self::provider`], and the in-memory blocks tracked when
+    /// its transaction opened.
+    ///
+    /// No in-memory block is inserted or removed while the transaction opens. Blocks are removed
+    /// from memory only after their persistence committed, so every in-memory block the
+    /// transaction's durable frontiers need is in the snapshot.
+    pub fn provider_with_in_memory_snapshot(
+        &self,
+    ) -> ProviderResult<(DatabaseProviderRO<N::DB, N>, InMemoryStateSnapshot<N::Primitives>)> {
+        let (provider, in_memory) =
+            self.overlay_manager.in_memory_state().snapshot_during(|| self.provider());
+        Ok((provider?, in_memory))
     }
 
     /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
@@ -447,7 +443,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
                 self.storage_settings.clone(),
                 self.rocksdb_provider.clone(),
                 self.overlay_manager.clone(),
-                self.overlay_manager.in_memory_state().live_view(),
                 self.runtime.clone(),
                 self.db.path(),
                 self.database_provider_metrics.clone(),
@@ -476,7 +471,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
             self.overlay_manager.clone(),
-            self.overlay_manager.in_memory_state().live_view(),
             self.runtime.clone(),
             self.db.path(),
             self.database_provider_metrics.clone(),
@@ -1105,7 +1099,6 @@ mod tests {
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{TxNumber, B256};
     use assert_matches::assert_matches;
-    use parking_lot::Mutex;
     use reth_chain_state::{test_utils::TestBlockBuilder, NewCanonicalChain};
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_db::{
@@ -1119,65 +1112,22 @@ mod tests {
     use reth_storage_api::MetadataWriter;
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
-    use std::{
-        ops::RangeInclusive,
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            Arc,
-        },
-    };
+    use std::{ops::RangeInclusive, sync::Arc};
 
     #[test]
-    fn provider_keeps_blocks_inserted_before_its_transaction() {
-        let (factory, in_memory_state_writer) =
+    fn provider_keeps_the_in_memory_blocks_tracked_when_it_opened() {
+        let (factory, mut in_memory_state_writer) =
             create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::ZERO);
         let persisted = block.recovered_block().num_hash();
+        in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new: vec![block] });
 
-        // The engine inserts the block after the provider snapshots the in-memory blocks but
-        // before it opens its transaction, and removes it again while the provider is open.
-        let in_memory_state_writer = Arc::new(Mutex::new(in_memory_state_writer));
-        let hook_writer = Arc::clone(&in_memory_state_writer);
-        factory.db_ref().set_pre_transaction_hook(Box::new(move || {
-            hook_writer.lock().update_chain(NewCanonicalChain::Commit { new: vec![block.clone()] });
-        }));
-        let provider = factory.provider().unwrap();
-        factory.db_ref().set_pre_transaction_hook(Box::new(|| ()));
-        in_memory_state_writer.lock().on_blocks_persisted(persisted, persisted, None);
+        let (_provider, in_memory) = factory.provider_with_in_memory_snapshot().unwrap();
+        in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
 
         assert!(!factory.overlay_manager().in_memory_state().contains(&persisted.hash));
-        assert!(provider.in_memory_snapshot().state_by_hash(persisted.hash).is_some());
-    }
-
-    #[test]
-    fn provider_retries_when_blocks_are_removed_between_captures() {
-        let (factory, in_memory_state_writer) =
-            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
-        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::ZERO);
-        let persisted = block.recovered_block().num_hash();
-
-        // On the first transaction the engine inserts the block after the provider's first
-        // capture and removes it again before the second one.
-        let in_memory_state_writer = Arc::new(Mutex::new(in_memory_state_writer));
-        let transactions = Arc::new(AtomicUsize::new(0));
-        let (writer, count) = (Arc::clone(&in_memory_state_writer), Arc::clone(&transactions));
-        factory.db_ref().set_pre_transaction_hook(Box::new(move || {
-            if count.fetch_add(1, Ordering::SeqCst) == 0 {
-                writer.lock().update_chain(NewCanonicalChain::Commit { new: vec![block.clone()] });
-            }
-        }));
-        let (writer, count) = (Arc::clone(&in_memory_state_writer), Arc::clone(&transactions));
-        factory.db_ref().set_post_transaction_hook(Box::new(move || {
-            if count.load(Ordering::SeqCst) == 1 {
-                writer.lock().on_blocks_persisted(persisted, persisted, None);
-            }
-        }));
-        let provider = factory.provider().unwrap();
-        factory.db_ref().set_pre_transaction_hook(Box::new(|| ()));
-        factory.db_ref().set_post_transaction_hook(Box::new(|| ()));
-
-        assert_eq!(transactions.load(Ordering::SeqCst), 2);
-        assert!(!provider.in_memory_snapshot().blocks_removed_between_captures());
+        assert_eq!(in_memory.state_by_hash(persisted.hash).unwrap().hash(), persisted.hash);
+        assert_eq!(in_memory.canonical_head().unwrap().hash(), persisted.hash);
     }
 
     #[test]

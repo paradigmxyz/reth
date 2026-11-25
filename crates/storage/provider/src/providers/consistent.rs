@@ -13,7 +13,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
-use reth_chain_state::{BlockState, CanonicalInMemoryState};
+use reth_chain_state::{BlockState, CanonicalInMemoryState, InMemoryStateSnapshot};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::RecoveredBlockAndExecutionOutput;
@@ -47,8 +47,8 @@ use std::{
 pub struct ConsistentProvider<N: ProviderNodeTypes> {
     /// Storage provider.
     storage_provider: <ProviderFactory<N> as DatabaseProviderFactory>::Provider,
-    /// Head block at time of [`Self`] creation
-    head_block: Option<Arc<BlockState<N::Primitives>>>,
+    /// The in-memory blocks tracked when the storage provider's transaction opened.
+    in_memory: InMemoryStateSnapshot<N::Primitives>,
     /// In-memory canonical state. This is not a snapshot, and can change! Use with caution.
     canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
 }
@@ -56,39 +56,37 @@ pub struct ConsistentProvider<N: ProviderNodeTypes> {
 impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     /// Create a new provider using [`ProviderFactory`] and [`CanonicalInMemoryState`],
     ///
-    /// Underneath it will take a snapshot by fetching [`CanonicalInMemoryState::head_state`] and
-    /// [`ProviderFactory::database_provider_ro`] effectively maintaining one single snapshotted
-    /// view of memory and database.
+    /// Underneath it opens [`ProviderFactory::database_provider_ro`] while no in-memory block can
+    /// be inserted or removed, and takes the in-memory head from the blocks tracked at that moment,
+    /// effectively maintaining one single snapshotted view of memory and database.
     pub fn new(
         storage_provider_factory: ProviderFactory<N>,
         state: CanonicalInMemoryState<N::Primitives>,
     ) -> ProviderResult<Self> {
-        // Each one provides a snapshot at the time of instantiation, but its order matters.
-        //
-        // If we acquire first the database provider, it's possible that before the in-memory chain
-        // snapshot is instantiated, it will flush blocks to disk. This would
-        // mean that our database provider would not have access to the flushed blocks (since it's
-        // working under an older view), while the in-memory state may have deleted them
-        // entirely. Resulting in gaps on the range.
-        let head_block = state.head_state();
-        let storage_provider = storage_provider_factory.database_provider_ro()?;
-        Ok(Self { storage_provider, head_block, canonical_in_memory_state: state })
+        // Blocks leave memory only after their persistence committed, and none leaves while the
+        // transaction opens, so every block is either in the in-memory chain or visible to the
+        // transaction, and there are no gaps in the range.
+        let (storage_provider, in_memory) = state
+            .in_memory_state()
+            .snapshot_during(|| storage_provider_factory.database_provider_ro());
+        let storage_provider = storage_provider?;
+        Ok(Self { storage_provider, in_memory, canonical_in_memory_state: state })
     }
 
-    /// Consumes this consistent view and returns its database provider snapshot.
-    pub(crate) fn into_database_provider(
+    /// Returns the in-memory canonical head when this view was created.
+    fn head_block(&self) -> Option<&Arc<BlockState<N::Primitives>>> {
+        self.in_memory.canonical_head()
+    }
+
+    /// Consumes this consistent view and returns its database provider and the in-memory blocks
+    /// tracked when its transaction opened.
+    pub(crate) fn into_parts(
         self,
-    ) -> <ProviderFactory<N> as DatabaseProviderFactory>::Provider {
-        self.storage_provider
-    }
-
-    /// Returns the in-memory chain ending at `hash`, if `hash` was part of the canonical in-memory
-    /// chain when this view was created.
-    pub(crate) fn in_memory_state_by_hash(
-        &self,
-        hash: B256,
-    ) -> Option<Arc<BlockState<N::Primitives>>> {
-        self.head_block.clone()?.iter().find(|state| state.hash() == hash)
+    ) -> (
+        <ProviderFactory<N> as DatabaseProviderFactory>::Provider,
+        InMemoryStateSnapshot<N::Primitives>,
+    ) {
+        (self.storage_provider, self.in_memory)
     }
 
     // Helper function to convert range bounds
@@ -150,7 +148,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         // working under an older view), while the in-memory state may have deleted them
         // entirely. Resulting in gaps on the range.
         let mut in_memory_chain =
-            self.head_block.as_ref().map(|b| b.chain().collect::<Vec<_>>()).unwrap_or_default();
+            self.head_block().map(|b| b.chain().collect::<Vec<_>>()).unwrap_or_default();
         let db_provider = &self.storage_provider;
 
         let (start, end) = self.convert_range_bounds(range, || {
@@ -246,7 +244,8 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         ) -> ProviderResult<Vec<R>>,
         M: Fn(RangeInclusive<usize>, &BlockState<N::Primitives>) -> ProviderResult<Vec<R>>,
     {
-        let in_mem_chain = self.head_block.iter().flat_map(|b| b.chain()).collect::<Vec<_>>();
+        let in_mem_chain =
+            self.head_block().into_iter().flat_map(|b| b.chain()).collect::<Vec<_>>();
         let provider = &self.storage_provider;
 
         // Get the last block number stored in the storage which does NOT overlap with in-memory
@@ -343,7 +342,8 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         S: FnOnce(&DatabaseProviderRO<N::DB, N>) -> ProviderResult<Option<R>>,
         M: Fn(usize, TxNumber, &BlockState<N::Primitives>) -> ProviderResult<Option<R>>,
     {
-        let in_mem_chain = self.head_block.iter().flat_map(|b| b.chain()).collect::<Vec<_>>();
+        let in_mem_chain =
+            self.head_block().into_iter().flat_map(|b| b.chain()).collect::<Vec<_>>();
         let provider = &self.storage_provider;
 
         // Get the last block number stored in the database which does NOT overlap with in-memory
@@ -410,7 +410,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         S: FnOnce(&DatabaseProviderRO<N::DB, N>) -> ProviderResult<R>,
         M: Fn(&BlockState<N::Primitives>) -> ProviderResult<R>,
     {
-        if let Some(Some(block_state)) = self.head_block.as_ref().map(|b| b.block_on_chain(id)) {
+        if let Some(Some(block_state)) = self.head_block().map(|b| b.block_on_chain(id)) {
             return fetch_from_block_state(block_state)
         }
         fetch_from_db(&self.storage_provider)
@@ -462,7 +462,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         let start = *range.start();
         let mut first_in_memory = None;
         let mut memory = Vec::new();
-        for state in self.head_block.iter().flat_map(|head| head.chain()) {
+        for state in self.head_block().into_iter().flat_map(|head| head.chain()) {
             let block = state.number();
             first_in_memory = Some(block);
             if range.contains(&block) {
@@ -609,7 +609,7 @@ impl<N: ProviderNodeTypes> BlockNumReader for ConsistentProvider<N> {
     }
 
     fn best_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.head_block.as_ref().map(|b| Ok(b.number())).unwrap_or_else(|| self.last_block_number())
+        self.head_block().map(|b| Ok(b.number())).unwrap_or_else(|| self.last_block_number())
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
@@ -852,7 +852,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
-        if let Some(tx) = self.head_block.as_ref().and_then(|b| b.transaction_on_chain(hash)) {
+        if let Some(tx) = self.head_block().and_then(|b| b.transaction_on_chain(hash)) {
             return Ok(Some(tx))
         }
 
@@ -864,7 +864,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
         if let Some((tx, meta)) =
-            self.head_block.as_ref().and_then(|b| b.transaction_meta_on_chain(tx_hash))
+            self.head_block().and_then(|b| b.transaction_meta_on_chain(tx_hash))
         {
             return Ok(Some((tx, meta)))
         }
@@ -876,7 +876,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         &self,
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta, Option<Address>)>> {
-        if let Some(found) = self.head_block.as_ref().and_then(|b| {
+        if let Some(found) = self.head_block().and_then(|b| {
             b.chain().find_map(|block_state| {
                 let indexed = block_state.find_indexed(tx_hash)?;
                 Some((indexed.tx().clone(), indexed.meta(), Some(indexed.recovered_tx().signer())))
@@ -967,7 +967,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
-        for block_state in self.head_block.iter().flat_map(|b| b.chain()) {
+        for block_state in self.head_block().into_iter().flat_map(|b| b.chain()) {
             let executed_block = block_state.block_ref();
             let block = executed_block.recovered_block();
             let receipts = block_state.executed_block_receipts_ref();
@@ -1030,8 +1030,7 @@ impl<N: ProviderNodeTypes> ReceiptProviderIdExt for ConsistentProvider<N> {
                 if receipts.is_none() &&
                     !rpc_block_hash.require_canonical.unwrap_or(false) &&
                     let Some(state) = self
-                        .head_block
-                        .as_ref()
+                        .head_block()
                         .and_then(|b| b.block_on_chain(rpc_block_hash.block_hash.into()))
                 {
                     receipts = Some(state.executed_block_receipts());
@@ -1231,9 +1230,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
-        if let Some(state) =
-            self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
-        {
+        if let Some(state) = self.head_block().and_then(|b| b.block_on_chain(block_number.into())) {
             let changesets = state
                 .block()
                 .execution_output
@@ -1266,9 +1263,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         address: Address,
         storage_key: B256,
     ) -> ProviderResult<Option<StorageEntry>> {
-        if let Some(state) =
-            self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
-        {
+        if let Some(state) = self.head_block().and_then(|b| b.block_on_chain(block_number.into())) {
             let changeset = state
                 .block_ref()
                 .execution_output
@@ -1325,9 +1320,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
-        if let Some(state) =
-            self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
-        {
+        if let Some(state) = self.head_block().and_then(|b| b.block_on_chain(block_number.into())) {
             let changesets = state
                 .block_ref()
                 .execution_output
@@ -1352,9 +1345,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
         block_number: BlockNumber,
         address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
-        if let Some(state) =
-            self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
-        {
+        if let Some(state) = self.head_block().and_then(|b| b.block_on_chain(block_number.into())) {
             // Search in-memory state for the account changeset
             let changeset = state
                 .block_ref()

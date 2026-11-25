@@ -4,11 +4,12 @@ mod block_state;
 pub use block_state::BlockState;
 
 mod blocks;
+pub use blocks::InMemoryStateSnapshot;
 
 mod canonical;
 pub use canonical::{
     CanonicalInMemoryState, CanonicalInMemoryStateWriter, InMemoryState, InMemoryStateBlockCounts,
-    InMemoryStateSnapshot, InMemoryStateWriter, IN_MEMORY_SNAPSHOT_ATTEMPTS,
+    InMemoryStateWriter,
 };
 
 mod executed_block;
