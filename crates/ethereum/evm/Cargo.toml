@@ -104,3 +104,7 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
 ]
+
+[[test]]
+name = "execute"
+required-features = ["std"]
