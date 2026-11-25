@@ -10,7 +10,7 @@ use super::{
 };
 use eyre::{Result, WrapErr};
 use lz4::Decoder;
-use reqwest::blocking::Client as BlockingClient;
+use reqwest::{blocking::Client as BlockingClient, StatusCode};
 use reth_cli_util::cancellation::CancellationToken;
 use reth_fs_util as fs;
 use std::{
@@ -613,15 +613,24 @@ fn extract_from_file(
 /// Streams a remote archive directly into the extractor without writing to disk.
 ///
 /// On failure, retries from scratch up to [`MAX_DOWNLOAD_RETRIES`] times.
+/// When `expected_size` is present, rejects mismatched lengths and bounds the compressed input.
 pub(crate) fn streaming_download_and_extract(
     url: &str,
     format: CompressionFormat,
     target_dir: &Path,
     static_files_dir: Option<&Path>,
     session: &DownloadSession,
+    expected_size: Option<u64>,
 ) -> Result<()> {
     if let Some(path) = archive_file_url_path(url)? {
         let size = path.metadata()?.len();
+        if let Some(expected) = expected_size &&
+            size != expected
+        {
+            eyre::bail!(
+                "Archive size mismatch: manifest declares {expected} bytes, file has {size}"
+            )
+        }
         extract_from_file(&path, format, target_dir, static_files_dir)?;
         session.record_archive_output_complete(size);
         return Ok(())
@@ -670,7 +679,21 @@ pub(crate) fn streaming_download_and_extract(
             }
         };
 
-        if !quiet && let Some(size) = response.content_length() {
+        let total_size = response.content_length();
+        if let Some(expected) = expected_size {
+            if response.status() == StatusCode::PARTIAL_CONTENT {
+                eyre::bail!("Server returned partial content for a full archive request")
+            }
+            if let Some(size) = total_size &&
+                size != expected
+            {
+                eyre::bail!(
+                    "Archive size mismatch: manifest declares {expected} bytes, server reported {size}"
+                )
+            }
+        }
+
+        if !quiet && let Some(size) = total_size {
             info!(target: "reth::cli",
                 url = %url,
                 size = %DownloadProgress::format_size(size),
@@ -678,20 +701,47 @@ pub(crate) fn streaming_download_and_extract(
             );
         }
 
-        let result = if let Some(progress) = shared {
-            let reader = SharedProgressReader { inner: response, progress: Arc::clone(progress) };
+        let mut reader = response.take(expected_size.unwrap_or(u64::MAX));
+        let mut result = if let Some(progress) = shared {
+            let reader =
+                SharedProgressReader { inner: &mut reader, progress: Arc::clone(progress) };
             extract_archive_raw(reader, format, target_dir, static_files_dir, None)
         } else {
-            let total_size = response.content_length().unwrap_or(0);
             extract_archive(
-                response,
-                total_size,
+                &mut reader,
+                expected_size.or(total_size).unwrap_or(0),
                 format,
                 target_dir,
                 static_files_dir,
                 session.cancel_token().clone(),
             )
         };
+
+        if result.is_ok() &&
+            let Some(expected) = expected_size
+        {
+            // Tar extraction may stop before the compressed input ends. Drain only up to the
+            // manifest limit before checking both a short body and data beyond that limit.
+            let tail = io::copy(&mut reader, &mut io::sink())
+                .and_then(|_| reader.get_mut().read(&mut [0; 1]));
+            match tail {
+                Err(error) => result = Err(error.into()),
+                Ok(extra) => {
+                    let remaining = reader.limit();
+                    if remaining != 0 {
+                        eyre::bail!(
+                            "Archive size mismatch: manifest declares {expected} bytes, downloaded {}",
+                            expected - remaining
+                        )
+                    }
+                    if extra != 0 {
+                        eyre::bail!(
+                            "Server sent more data than the manifest-declared {expected} bytes"
+                        )
+                    }
+                }
+            }
+        }
 
         match result {
             Ok(()) => return Ok(()),
@@ -827,8 +877,14 @@ fn blocking_download_and_extract(
     } else {
         let session =
             DownloadSession::new(None, None, cancel_token).with_retry_backoff(retry_backoff);
-        let result =
-            streaming_download_and_extract(url, format, target_dir, static_files_dir, &session);
+        let result = streaming_download_and_extract(
+            url,
+            format,
+            target_dir,
+            static_files_dir,
+            &session,
+            None,
+        );
         if result.is_ok() {
             session.record_archive_output_complete(0);
         }
@@ -871,6 +927,10 @@ pub(crate) async fn stream_and_extract(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        io::{BufRead, Write},
+        net::TcpListener,
+    };
 
     #[test]
     fn custom_static_root_cannot_be_redirected_by_archive_symlinks() {
@@ -1158,5 +1218,127 @@ mod tests {
             Ok(CompressionFormat::Zstd)
         ));
         assert!(CompressionFormat::from_url("https://example.com/snapshot.tar.gz").is_err());
+    }
+
+    #[test]
+    fn streaming_download_enforces_manifest_size() {
+        let mut archive = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(4);
+        header.set_mode(0o644);
+        header.set_cksum();
+        archive.append_data(&mut header, "data", b"data".as_slice()).unwrap();
+        let compressed = zstd::encode_all(archive.into_inner().unwrap().as_slice(), 0).unwrap();
+        let size = compressed.len() as u64;
+
+        for (extra, expected, interrupted_tail, error) in [
+            (false, Some(size), false, None),
+            (false, Some(size), true, None),
+            (true, None, false, None),
+            (
+                false,
+                Some(size + 1),
+                false,
+                Some(format!(
+                    "Archive size mismatch: manifest declares {} bytes, downloaded {size}",
+                    size + 1
+                )),
+            ),
+            (
+                true,
+                Some(size),
+                false,
+                Some(format!("Server sent more data than the manifest-declared {size} bytes")),
+            ),
+        ] {
+            let mut body = compressed.clone();
+            if extra {
+                body.push(0);
+            }
+            let mut response = format!(
+                "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\
+                 Connection: close\r\n\r\n{:x}\r\n",
+                body.len()
+            )
+            .into_bytes();
+            response.extend_from_slice(&body);
+            response.extend_from_slice(b"\r\n");
+            let mut responses = Vec::new();
+            if interrupted_tail {
+                // The tar is extractable, but the missing chunk terminator must trigger a retry.
+                responses.push(response.clone());
+            }
+            response.extend_from_slice(b"0\r\n\r\n");
+            responses.push(response);
+            let (url, server) = spawn_response_server(responses);
+            let target = tempfile::tempdir().unwrap();
+            let session = DownloadSession::new(None, None, CancellationToken::new())
+                .with_retry_backoff(Some(Duration::ZERO));
+
+            let result = streaming_download_and_extract(
+                &url,
+                CompressionFormat::Zstd,
+                target.path(),
+                None,
+                &session,
+                expected,
+            );
+
+            match error {
+                Some(error) => assert_eq!(format!("{:#}", result.unwrap_err()), error),
+                None => {
+                    result.unwrap();
+                    assert_eq!(fs::read(target.path().join("data")).unwrap(), b"data");
+                }
+            }
+            server.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn streaming_download_rejects_conflicting_metadata() {
+        for (status, error) in [
+            ("200 OK", "Archive size mismatch: manifest declares 10 bytes, server reported 20"),
+            ("206 Partial Content", "Server returned partial content for a full archive request"),
+        ] {
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Length: 20\r\n\
+                 Connection: close\r\n\r\n01234567890123456789"
+            )
+            .into_bytes();
+            let (url, server) = spawn_response_server(vec![response]);
+            let target = tempfile::tempdir().unwrap();
+            let session = DownloadSession::new(None, None, CancellationToken::new());
+
+            let result = streaming_download_and_extract(
+                &url,
+                CompressionFormat::Zstd,
+                target.path(),
+                None,
+                &session,
+                Some(10),
+            );
+
+            assert_eq!(format!("{:#}", result.unwrap_err()), error);
+            assert!(!target.path().join("data").exists());
+            server.join().unwrap();
+        }
+    }
+
+    fn spawn_response_server(responses: Vec<Vec<u8>>) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/archive.tar.zst", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            for response in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = io::BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                while request.read_line(&mut line).unwrap() != 0 && line != "\r\n" {
+                    line.clear();
+                }
+                stream.write_all(&response).unwrap();
+            }
+        });
+        (url, server)
     }
 }
