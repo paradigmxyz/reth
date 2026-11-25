@@ -25,7 +25,7 @@ use core::{
     borrow::Borrow,
     fmt,
     hash::{BuildHasher, Hash},
-    iter::FusedIterator,
+    iter::{self, FusedIterator},
     mem::{self, MaybeUninit},
 };
 use hashbrown::HashTable;
@@ -295,6 +295,26 @@ where
         (self.oldest != NONE).then(|| self.take(self.oldest))
     }
 
+    /// Removes and yields matching entries from oldest to newest as the iterator advances.
+    /// Skipped and unvisited entries keep their positions.
+    pub fn extract_if(
+        &mut self,
+        mut predicate: impl FnMut(&K, &V) -> bool,
+    ) -> impl Iterator<Item = (K, V)> {
+        let mut next = self.oldest;
+        iter::from_fn(move || {
+            while next != NONE {
+                let index = next;
+                next = self.node(index).newer;
+                let (key, value) = self.entry(index);
+                if predicate(key, value) {
+                    return Some(self.take(index))
+                }
+            }
+            None
+        })
+    }
+
     #[inline]
     fn find<Q>(&self, key: &Q) -> Option<u32>
     where
@@ -530,6 +550,18 @@ mod tests {
         assert_eq!(map.pop_oldest(), Some((3, 31)));
         assert_eq!(map.len(), 2);
         assert_eq!(map.iter().len(), 2);
+    }
+
+    #[test]
+    fn pops_oldest_match_without_refreshing_skipped_entries() {
+        let mut map = LruMap::new(4);
+        for key in 1..=4 {
+            map.insert(key, key);
+        }
+        assert_eq!(map.extract_if(|_, value| *value > 4).next(), None);
+        assert_eq!(map.extract_if(|_, value| *value > 1).next(), Some((2, 2)));
+        assert_eq!(keys(&map), [4, 3, 1]);
+        assert_eq!(map.extract_if(|_, _| true).collect::<Vec<_>>(), [(1, 1), (3, 3), (4, 4)]);
     }
 
     #[test]

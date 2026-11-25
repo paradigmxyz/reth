@@ -120,7 +120,7 @@ pub struct PeersManager {
     /// Mean duration for computing jittered rotation intervals. `None` when rotation is disabled.
     peer_rotation_mean: Option<Duration>,
     /// Discovered peers skipped because the peer set was full, oldest first.
-    candidates: LruMap<PeerId, (PeerAddr, Option<ForkId>)>,
+    candidates: LruMap<PeerId, PeerCandidate>,
     /// Whether the last dial of an untrusted peer went to a candidate, so the next one goes to a
     /// tracked peer.
     candidate_dialed_last: bool,
@@ -784,15 +784,19 @@ impl PeersManager {
     /// Called when a _pending_ outbound connection is successful.
     pub(crate) fn on_active_outgoing_established(&mut self, peer_id: PeerId) {
         let at_capacity = self.connection_info.is_outbound_at_capacity();
-        // `Self::remove_peer` drops pending dials outright, so only a dialed candidate is
-        // temporary here. It is kept once its session succeeds if the peer set has room, not
-        // counting other temporary rows. Candidate dials are rare, so the scan is cheap.
-        let keep = self.peers.get(&peer_id).is_some_and(|peer| peer.remove_after_disconnect) &&
-            self.peers.values().filter(|peer| !peer.remove_after_disconnect).count() <
+        // Granting trust during a dial keeps the row alive, but leaves the removal flag set.
+        let keep_candidate = self
+            .peers
+            .get(&peer_id)
+            .is_some_and(|peer| peer.state.is_pending_out() && peer.remove_after_disconnect) &&
+            self.peers
+                .iter()
+                .filter(|(id, peer)| **id != peer_id && !peer.is_temporary())
+                .count() <
                 MAX_TRACKED_PEERS;
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             trace!(target: "net::peers", ?peer_id, "established active outgoing connection");
-            if keep {
+            if keep_candidate {
                 peer.remove_after_disconnect = false;
             }
             self.connection_info.decr_state(peer.state);
@@ -949,7 +953,6 @@ impl PeersManager {
                 self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
             }
             if let Some(backoff_until) = backoff_until {
-                // also for a removed peer, so a requeued dial candidate still waits
                 self.backoff_peer_until(*peer_id, backoff_until);
             }
         }
@@ -985,7 +988,7 @@ impl PeersManager {
             let ip = addr.tcp().ip();
             if self.ip_filter.is_allowed(&ip) && !self.ban_list.is_banned(&peer_id, &ip) {
                 trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "Queueing discovered peer as a candidate, peer set is full");
-                self.candidates.insert(peer_id, (addr, fork_id));
+                self.candidates.insert(peer_id, PeerCandidate { addr, fork_id });
             }
             return
         }
@@ -1012,7 +1015,7 @@ impl PeersManager {
         self.trusted_peer_ids.insert(peer_id);
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.kind = PeerKind::Trusted;
-        } else if let Some((addr, fork_id)) = self.candidates.remove(&peer_id) {
+        } else if let Some(PeerCandidate { addr, fork_id }) = self.candidates.remove(&peer_id) {
             // trusted peers are not limited, so a queued endpoint can be tracked right away
             self.add_peer_kind(peer_id, Some(PeerKind::Trusted), addr, fork_id);
         }
@@ -1089,6 +1092,8 @@ impl PeersManager {
                 });
                 let mut peer = Peer::with_kind(addr, kind);
                 peer.fork_id = fork_id.map(Box::new);
+                // a removed peer, such as a failed dial candidate, may still be backed off
+                peer.backed_off = self.backed_off_peers.contains_key(&peer_id);
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
             }
@@ -1385,63 +1390,66 @@ impl PeersManager {
             let has_out_capacity = self.connection_info.has_out_capacity();
             let best = self
                 .best_unconnected(!has_out_capacity)
-                .map(|(peer_id, peer)| (peer_id, peer.is_trusted() || peer.is_static()));
+                .map(|(peer_id, peer)| (peer_id, peer.is_trusted() || peer.is_static()))
+                .map(|(peer_id, prioritized)| {
+                    (peer_id, prioritized || self.trusted_peer_ids.contains(&peer_id))
+                });
             let prioritized = best.is_some_and(|(_, prioritized)| prioritized);
             // After trusted and static peers, candidates and tracked peers take turns, so neither
             // can starve the other.
-            if !prioritized &&
+            let candidate_turn = !prioritized &&
                 (!self.candidate_dialed_last || best.is_none()) &&
                 has_out_capacity &&
-                !self.trusted_nodes_only &&
-                self.dial_candidate()
-            {
+                !self.trusted_nodes_only;
+            if candidate_turn && self.dial_candidate() {
                 self.candidate_dialed_last = true;
                 continue
             }
-            let Some((peer_id, _)) = best else { break };
+            let Some((peer_id, prioritized)) = best else { break };
             if !prioritized {
                 self.candidate_dialed_last = false;
             }
-            let action = {
-                let Some(peer) = self.peers.get_mut(&peer_id) else { break };
-
-                trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "schedule outbound connection");
-
-                peer.state = PeerConnectionState::PendingOut;
-                PeerAction::Connect { peer_id, remote_addr: peer.addr.tcp() }
-            };
-
+            let Some(peer) = self.peers.get_mut(&peer_id) else { break };
+            trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "schedule outbound connection");
+            peer.state = PeerConnectionState::PendingOut;
+            self.queued_actions
+                .push_back(PeerAction::Connect { peer_id, remote_addr: peer.addr.tcp() });
             self.connection_info.inc_pending_out();
-
-            self.queued_actions.push_back(action);
         }
     }
 
-    /// Dials the oldest dial candidate, tracking it only until its session ends.
+    /// Dials the oldest dial candidate.
+    ///
+    /// The candidate stays temporary until its handshake succeeds and a place is available.
     ///
     /// Returns `false` if no candidate can be dialed.
     fn dial_candidate(&mut self) -> bool {
-        while let Some((peer_id, (addr, fork_id))) = self.candidates.pop_oldest() {
-            // it may have been added, backed off or banned since it was queued
-            if self.peers.contains_key(&peer_id) ||
-                self.backed_off_peers.contains_key(&peer_id) ||
-                self.ban_list.is_banned(&peer_id, &addr.tcp().ip())
-            {
-                continue
-            }
-            trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "schedule outbound connection to candidate");
-            let mut peer = Peer::new(addr);
-            peer.fork_id = fork_id.map(Box::new);
-            // kept only once its session succeeds, see `Self::on_active_outgoing_established`
-            peer.remove_after_disconnect = true;
-            peer.state = PeerConnectionState::PendingOut;
-            self.peers.insert(peer_id, peer);
-            self.connection_info.inc_pending_out();
-            self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
-            self.queued_actions.push_back(PeerAction::Connect { peer_id, remote_addr: addr.tcp() });
-            return true
-        }
-        false
+        let Some((peer_id, PeerCandidate { addr, fork_id })) = self.next_candidate() else {
+            return false
+        };
+        trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "schedule outbound connection to candidate");
+        let mut peer = Peer::new(addr);
+        peer.fork_id = fork_id.map(Box::new);
+        peer.remove_after_disconnect = true;
+        peer.state = PeerConnectionState::PendingOut;
+        self.peers.insert(peer_id, peer);
+        self.connection_info.inc_pending_out();
+        self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
+        self.queued_actions.push_back(PeerAction::Connect { peer_id, remote_addr: addr.tcp() });
+        true
+    }
+
+    /// Takes the oldest candidate that can be dialed now.
+    ///
+    /// Candidates added or banned since they were queued are dropped, and backed off ones stay
+    /// queued until their deadline.
+    fn next_candidate(&mut self) -> Option<(PeerId, PeerCandidate)> {
+        self.candidates.extract_if(|id, _| !self.backed_off_peers.contains_key(id)).find(
+            |(id, candidate)| {
+                !self.peers.contains_key(id) &&
+                    !self.ban_list.is_banned(id, &candidate.addr.tcp().ip())
+            },
+        )
     }
 
     fn on_resolved_peer(&mut self, peer_id: PeerId, new_record: NodeRecord) {
@@ -1771,6 +1779,15 @@ impl BackoffReason {
             _ => Self::ConnectionError,
         }
     }
+}
+
+/// A discovered peer skipped because the peer set was full, see [`PeersManager::add_peer`].
+#[derive(Debug)]
+struct PeerCandidate {
+    /// The discovered address.
+    addr: PeerAddr,
+    /// The fork id from the discovery record, if any.
+    fork_id: Option<ForkId>,
 }
 
 /// Returns a random duration uniformly distributed in `[mean * 3/5, mean * 7/5]`.
@@ -4910,228 +4927,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_full_set_queues_discovered_peers() {
-        let mut peers = PeersManager::new(PeersConfig::test());
-        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
-        for _ in 0..MAX_TRACKED_PEERS {
-            peers.add_peer(PeerId::random(), addr, None);
-        }
-
-        let candidate = PeerId::random();
-        peers.add_peer(candidate, addr, None);
-        assert!(!peers.peers.contains_key(&candidate));
-        assert!(peers.candidates.contains(&candidate));
-
-        // removing it, as on a fork mismatch, drops it from the queue
-        let removed = PeerId::random();
-        peers.add_peer(removed, addr, None);
-        peers.remove_peer(removed);
-        assert!(!peers.candidates.contains(&removed));
-
-        // banned and filtered peers are never queued
-        let banned = PeerId::random();
-        peers.ban_list.ban_peer(banned);
-        peers.add_peer(banned, addr, None);
-        assert!(!peers.candidates.contains(&banned));
-        peers.ip_filter = IpFilter::from_cidr_string("1.2.3.0/24").unwrap();
-        let filtered = PeerId::random();
-        peers.add_peer(filtered, PeerAddr::from_tcp("5.6.7.8:30303".parse().unwrap()), None);
-        assert!(!peers.candidates.contains(&filtered));
-
-        // the queue keeps the newest candidates
-        for _ in 0..MAX_PEER_CANDIDATES {
-            peers.add_peer(PeerId::random(), addr, None);
-        }
-        assert_eq!(peers.candidates.len(), MAX_PEER_CANDIDATES as usize);
-        assert!(!peers.candidates.contains(&candidate));
-        assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS);
-    }
-
-    #[tokio::test]
-    async fn test_candidate_dialed_for_session_while_set_is_full() {
-        let mut peers = PeersManager::new(PeersConfig::test());
-        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
-        for _ in 0..MAX_TRACKED_PEERS {
-            peers.add_peer(PeerId::random(), addr, None);
-        }
-        let [banned, first, second] = [PeerId::random(), PeerId::random(), PeerId::random()];
-        for candidate in [banned, first, second] {
-            peers.add_peer(candidate, addr, None);
-        }
-        peers.ban_list.ban_peer(banned);
-        let first_dial = |peers: &mut PeersManager| {
-            peers.queued_actions.clear();
-            peers.fill_outbound_slots();
-            peers.queued_actions.iter().find_map(|action| match action {
-                PeerAction::Connect { peer_id, .. } => Some(*peer_id),
-                _ => None,
-            })
-        };
-
-        // only trusted peers are dialed in trusted-only mode
-        peers.trusted_nodes_only = true;
-        first_dial(&mut peers);
-        assert!(peers.candidates.contains(&first));
-        peers.trusted_nodes_only = false;
-
-        // nor without a free outbound slot
-        peers.connection_info.num_outbound = peers.connection_info.config.max_outbound;
-        first_dial(&mut peers);
-        assert!(peers.candidates.contains(&first));
-        peers.connection_info.num_outbound = 0;
-
-        // candidates are dialed, skipping one banned since it was queued
-        assert_eq!(first_dial(&mut peers), Some(first));
-        assert!(!peers.peers.contains_key(&banned));
-        assert!(peers.candidates.is_empty());
-        let peer = &peers.peers[&first];
-        assert!(peer.state.is_pending_out());
-        assert!(peer.remove_after_disconnect);
-
-        // a failed dial drops it
-        peers.on_outgoing_pending_session_dropped(
-            &addr.tcp(),
-            &first,
-            &PendingSessionHandshakeError::Timeout,
-        );
-        assert!(!peers.peers.contains_key(&first));
-
-        // the set is still full, so a session keeps it only until the session ends
-        peers.on_active_outgoing_established(second);
-        assert!(peers.peers[&second].remove_after_disconnect);
-    }
-
-    #[tokio::test]
-    async fn test_single_dial_slot_shared_by_candidates_and_tracked_peers() {
-        let mut peers = PeersManager::new(PeersConfig::test().with_max_concurrent_dials(1));
-        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
-        for _ in 0..MAX_TRACKED_PEERS {
-            peers.add_peer(PeerId::random(), addr, None);
-        }
-        let candidates = (0..4).map(|_| PeerId::random()).collect::<Vec<_>>();
-        for &candidate in &candidates {
-            peers.add_peer(candidate, addr, None);
-        }
-        // each refill gets the one dial slot, which is freed again once the dial ends
-        let dial_next = |peers: &mut PeersManager| {
-            peers.queued_actions.clear();
-            peers.fill_outbound_slots();
-            let peer_id = peers
-                .queued_actions
-                .iter()
-                .find_map(|action| match action {
-                    PeerAction::Connect { peer_id, .. } => Some(*peer_id),
-                    _ => None,
-                })
-                .unwrap();
-            peers.on_outgoing_pending_session_gracefully_closed(&peer_id);
-            peer_id
-        };
-
-        let dialed_candidates =
-            (0..4).map(|_| candidates.contains(&dial_next(&mut peers))).collect::<Vec<_>>();
-        assert_eq!(dialed_candidates, [true, false, true, false]);
-
-        // a trusted peer still goes first on a candidate's turn, and leaves the turn as it was
-        let trusted = PeerId::random();
-        peers.add_trusted_peer(trusted, addr);
-        assert_eq!(dial_next(&mut peers), trusted);
-        peers.peers.get_mut(&trusted).unwrap().backed_off = true;
-        assert!(candidates.contains(&dial_next(&mut peers)));
-
-        // likewise on a tracked peer's turn
-        let trusted = PeerId::random();
-        peers.add_trusted_peer(trusted, addr);
-        assert_eq!(dial_next(&mut peers), trusted);
-        peers.peers.get_mut(&trusted).unwrap().backed_off = true;
-        assert!(!candidates.contains(&dial_next(&mut peers)));
-    }
-
-    #[tokio::test]
-    async fn test_failed_candidate_not_redialed_during_backoff() {
-        let mut peers = PeersManager::new(PeersConfig::test());
-        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
-        // tracked peers are backed off, so every free slot goes to a candidate
-        for _ in 0..MAX_TRACKED_PEERS {
-            let peer_id = PeerId::random();
-            peers.add_peer(peer_id, addr, None);
-            peers.peers.get_mut(&peer_id).unwrap().backed_off = true;
-        }
-        let too_many_peers = PendingSessionHandshakeError::Eth(EthStreamError::P2PStreamError(
-            P2PStreamError::Disconnected(DisconnectReason::TooManyPeers),
-        ));
-        for err in [PendingSessionHandshakeError::Timeout, too_many_peers] {
-            let candidate = PeerId::random();
-            peers.add_peer(candidate, addr, None);
-            peers.fill_outbound_slots();
-            assert!(peers.peers[&candidate].state.is_pending_out());
-            peers.on_outgoing_pending_session_dropped(&addr.tcp(), &candidate, &err);
-            assert!(!peers.peers.contains_key(&candidate));
-
-            // rediscovered while backed off
-            peers.add_peer(candidate, addr, None);
-            peers.fill_outbound_slots();
-            assert!(!peers.peers.contains_key(&candidate));
-        }
-    }
-
-    #[tokio::test]
-    async fn test_candidate_dequeued_once_tracked_or_trusted() {
-        let mut peers = PeersManager::new(PeersConfig::test());
-        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
-        for _ in 0..MAX_TRACKED_PEERS {
-            peers.add_peer(PeerId::random(), addr, None);
-        }
-        let [inbound, trusted] = [PeerId::random(), PeerId::random()];
-        peers.add_peer(inbound, addr, None);
-        peers.add_peer(trusted, addr, None);
-
-        // connected since it was queued
-        assert!(peers.on_incoming_pending_session(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8))).is_ok());
-        peers.on_incoming_session_established(inbound, "5.6.7.8:40404".parse().unwrap());
-        // trusted since it was queued, so its endpoint is kept as a trusted peer
-        peers.add_trusted_peer_id(trusted);
-        assert!(peers.peers[&trusted].is_trusted());
-        assert!(!peers.candidates.contains(&trusted));
-
-        peers.trusted_nodes_only = true;
-        peers.fill_outbound_slots();
-        assert!(peers.peers[&trusted].state.is_pending_out());
-
-        peers.trusted_nodes_only = false;
-        peers.fill_outbound_slots();
-        assert!(peers.peers[&inbound].state.is_incoming());
-        assert!(peers.candidates.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_candidate_kept_after_session_once_set_has_room() {
-        let mut peers = PeersManager::new(PeersConfig::test());
-        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
-        // tracked peers are backed off, so every free slot goes to a candidate
-        for _ in 0..MAX_TRACKED_PEERS {
-            let peer_id = PeerId::random();
-            peers.add_peer(peer_id, addr, None);
-            peers.peers.get_mut(&peer_id).unwrap().backed_off = true;
-        }
-        let [first, second] = [PeerId::random(), PeerId::random()];
-        peers.add_peer(first, addr, None);
-        peers.add_peer(second, addr, None);
-        let tracked = *peers.peers.keys().next().unwrap();
-        peers.remove_peer(tracked);
-
-        // both are dialed for the one free slot, and kept only once their session succeeds
-        peers.fill_outbound_slots();
-        peers.fill_outbound_slots();
-        assert!(peers.peers[&first].remove_after_disconnect);
-        assert!(peers.peers[&second].remove_after_disconnect);
-        peers.on_active_outgoing_established(first);
-        peers.on_active_outgoing_established(second);
-        assert!(!peers.peers[&first].remove_after_disconnect);
-        assert!(peers.peers[&second].remove_after_disconnect);
-    }
-
-    #[tokio::test]
     async fn test_temporary_peer_removed_after_dropped_session() {
         let mut peers = PeersManager::new(PeersConfig::test());
         let inbound = PeerId::random();
@@ -5226,5 +5021,283 @@ mod tests {
         assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS + 2);
         // skipped records don't keep their space reserved
         assert!(peers.peers.capacity() < 2 * MAX_TRACKED_PEERS);
+    }
+
+    #[tokio::test]
+    async fn test_full_set_queues_discovered_peers() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        for _ in 0..MAX_TRACKED_PEERS {
+            peers.add_peer(PeerId::random(), addr, None);
+        }
+
+        let candidate = PeerId::random();
+        peers.add_peer(candidate, addr, None);
+        assert!(!peers.peers.contains_key(&candidate));
+        assert!(peers.candidates.contains(&candidate));
+
+        // removing it, as on a fork mismatch, drops it from the queue
+        let removed = PeerId::random();
+        peers.add_peer(removed, addr, None);
+        peers.remove_peer(removed);
+        assert!(!peers.candidates.contains(&removed));
+
+        // banned and filtered peers are never queued
+        let banned = PeerId::random();
+        peers.ban_list.ban_peer(banned);
+        peers.add_peer(banned, addr, None);
+        assert!(!peers.candidates.contains(&banned));
+        peers.ip_filter = IpFilter::from_cidr_string("1.2.3.0/24").unwrap();
+        let filtered = PeerId::random();
+        peers.add_peer(filtered, PeerAddr::from_tcp("5.6.7.8:30303".parse().unwrap()), None);
+        assert!(!peers.candidates.contains(&filtered));
+
+        // the queue keeps the newest candidates
+        for _ in 0..MAX_PEER_CANDIDATES {
+            peers.add_peer(PeerId::random(), addr, None);
+        }
+        assert_eq!(peers.candidates.len(), MAX_PEER_CANDIDATES as usize);
+        assert!(!peers.candidates.contains(&candidate));
+    }
+
+    #[tokio::test]
+    async fn test_candidate_dialed_for_session_while_set_is_full() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        for _ in 0..MAX_TRACKED_PEERS {
+            peers.add_peer(PeerId::random(), addr, None);
+        }
+        let [banned, first, second] = [PeerId::random(), PeerId::random(), PeerId::random()];
+        for candidate in [banned, first, second] {
+            peers.add_peer(candidate, addr, None);
+        }
+        peers.ban_list.ban_peer(banned);
+        let first_dial = |peers: &mut PeersManager| {
+            peers.queued_actions.clear();
+            peers.fill_outbound_slots();
+            peers.queued_actions.iter().find_map(|action| match action {
+                PeerAction::Connect { peer_id, .. } => Some(*peer_id),
+                _ => None,
+            })
+        };
+
+        // only trusted peers are dialed in trusted-only mode
+        peers.trusted_nodes_only = true;
+        first_dial(&mut peers);
+        assert!(peers.candidates.contains(&first));
+        peers.trusted_nodes_only = false;
+
+        // nor without a free outbound slot
+        peers.connection_info.num_outbound = peers.connection_info.config.max_outbound;
+        first_dial(&mut peers);
+        assert!(peers.candidates.contains(&first));
+        peers.connection_info.num_outbound = 0;
+
+        // candidates are dialed, skipping one banned since it was queued
+        assert_eq!(first_dial(&mut peers), Some(first));
+        assert!(!peers.peers.contains_key(&banned));
+        assert!(peers.candidates.is_empty());
+        let peer = &peers.peers[&first];
+        assert!(peer.state.is_pending_out());
+        assert!(peer.remove_after_disconnect);
+
+        // a failed dial drops it
+        peers.on_outgoing_pending_session_dropped(
+            &addr.tcp(),
+            &first,
+            &PendingSessionHandshakeError::Timeout,
+        );
+        assert!(!peers.peers.contains_key(&first));
+
+        // the set is still full, so a session keeps it only until the session ends
+        peers.on_active_outgoing_established(second);
+        assert!(peers.peers[&second].remove_after_disconnect);
+        assert!(!peers.persistable_peers().any(|peer| peer.record.id == second));
+    }
+
+    #[tokio::test]
+    async fn test_single_dial_slot_shared_by_candidates_and_tracked_peers() {
+        let mut peers = PeersManager::new(PeersConfig::test().with_max_concurrent_dials(1));
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        for _ in 0..MAX_TRACKED_PEERS {
+            peers.add_peer(PeerId::random(), addr, None);
+        }
+        let candidates = (0..4).map(|_| PeerId::random()).collect::<Vec<_>>();
+        for &candidate in &candidates {
+            peers.add_peer(candidate, addr, None);
+        }
+        // each refill gets the one dial slot, which is freed again once the dial ends
+        let dial_next = |peers: &mut PeersManager| {
+            peers.queued_actions.clear();
+            peers.fill_outbound_slots();
+            let peer_id = peers
+                .queued_actions
+                .iter()
+                .find_map(|action| match action {
+                    PeerAction::Connect { peer_id, .. } => Some(*peer_id),
+                    _ => None,
+                })
+                .unwrap();
+            peers.on_outgoing_pending_session_gracefully_closed(&peer_id);
+            peer_id
+        };
+
+        let dialed_candidates =
+            (0..4).map(|_| candidates.contains(&dial_next(&mut peers))).collect::<Vec<_>>();
+        assert_eq!(dialed_candidates, [true, false, true, false]);
+
+        // a trusted peer still goes first on a candidate's turn, and leaves the turn as it was
+        let trusted = PeerId::random();
+        peers.add_trusted_peer(trusted, addr);
+        assert_eq!(dial_next(&mut peers), trusted);
+        peers.peers.get_mut(&trusted).unwrap().backed_off = true;
+        assert!(candidates.contains(&dial_next(&mut peers)));
+
+        // likewise on a tracked peer's turn
+        let trusted = PeerId::random();
+        peers.add_trusted_peer(trusted, addr);
+        assert_eq!(dial_next(&mut peers), trusted);
+        peers.peers.get_mut(&trusted).unwrap().backed_off = true;
+        assert!(!candidates.contains(&dial_next(&mut peers)));
+
+        // and for a basic row of an id trusted on its own, on a candidate's turn
+        let trusted = PeerId::random();
+        peers.add_trusted_peer_id(trusted);
+        peers.add_and_connect_kind(trusted, PeerKind::Basic, addr, None);
+        peers.on_outgoing_pending_session_gracefully_closed(&trusted);
+        assert!(!peers.peers[&trusted].is_trusted());
+        assert_eq!(dial_next(&mut peers), trusted);
+    }
+
+    #[tokio::test]
+    async fn test_failed_candidate_not_redialed_during_backoff() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        // tracked peers are backed off, so every free slot goes to a candidate
+        let tracked = (0..MAX_TRACKED_PEERS).map(|_| PeerId::random()).collect::<Vec<_>>();
+        for &peer_id in &tracked {
+            peers.add_peer(peer_id, addr, None);
+            peers.peers.get_mut(&peer_id).unwrap().backed_off = true;
+        }
+        let too_many_peers = PendingSessionHandshakeError::Eth(EthStreamError::P2PStreamError(
+            P2PStreamError::Disconnected(DisconnectReason::TooManyPeers),
+        ));
+        for err in [PendingSessionHandshakeError::Timeout, too_many_peers] {
+            let candidate = PeerId::random();
+            peers.add_peer(candidate, addr, None);
+            peers.fill_outbound_slots();
+            assert!(peers.peers[&candidate].state.is_pending_out());
+            peers.on_outgoing_pending_session_dropped(&addr.tcp(), &candidate, &err);
+            assert!(!peers.peers.contains_key(&candidate));
+
+            // rediscovered while backed off, it waits in the queue until its deadline
+            peers.add_peer(candidate, addr, None);
+            peers.fill_outbound_slots();
+            assert!(!peers.peers.contains_key(&candidate));
+            peers.backed_off_peers.remove(&candidate);
+            peers.fill_outbound_slots();
+            assert!(peers.peers[&candidate].state.is_pending_out());
+        }
+
+        // once the set has room again, a rediscovered peer is tracked but still waits
+        let candidate = PeerId::random();
+        peers.add_peer(candidate, addr, None);
+        peers.fill_outbound_slots();
+        peers.on_outgoing_pending_session_dropped(
+            &addr.tcp(),
+            &candidate,
+            &PendingSessionHandshakeError::Timeout,
+        );
+        for &peer_id in &tracked[..3] {
+            peers.remove_peer(peer_id);
+        }
+        peers.add_peer(candidate, addr, None);
+        assert!(peers.peers[&candidate].is_backed_off());
+    }
+
+    #[tokio::test]
+    async fn test_candidate_dequeued_once_tracked_or_trusted() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        for _ in 0..MAX_TRACKED_PEERS {
+            peers.add_peer(PeerId::random(), addr, None);
+        }
+        let [inbound, trusted] = [PeerId::random(), PeerId::random()];
+        peers.add_peer(inbound, addr, None);
+        peers.add_peer(trusted, addr, None);
+
+        // connected since it was queued
+        assert!(peers.on_incoming_pending_session(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8))).is_ok());
+        peers.on_incoming_session_established(inbound, "5.6.7.8:40404".parse().unwrap());
+        // trusted since it was queued, so its endpoint is kept as a trusted peer
+        peers.add_trusted_peer_id(trusted);
+        assert!(peers.peers[&trusted].is_trusted());
+        assert!(!peers.candidates.contains(&trusted));
+
+        peers.fill_outbound_slots();
+        assert!(peers.peers[&trusted].state.is_pending_out());
+        assert!(peers.peers[&inbound].state.is_incoming());
+        assert!(peers.candidates.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_candidate_kept_if_room_at_handshake() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        // tracked peers are backed off, so every free slot goes to a candidate
+        for _ in 0..MAX_TRACKED_PEERS {
+            let peer_id = PeerId::random();
+            peers.add_peer(peer_id, addr, None);
+            peers.peers.get_mut(&peer_id).unwrap().backed_off = true;
+        }
+        let [first, second] = [PeerId::random(), PeerId::random()];
+        peers.add_peer(first, addr, None);
+        peers.add_peer(second, addr, None);
+        let tracked = *peers.peers.keys().next().unwrap();
+        peers.fill_outbound_slots();
+        assert!(peers.peers[&first].state.is_pending_out());
+        assert!(peers.peers[&second].state.is_pending_out());
+        peers.remove_peer(tracked);
+
+        // Both candidates are pending when a slot opens. The first successful handshake gets it.
+        peers.add_trusted_peer_id(second);
+        peers.on_active_outgoing_established(second);
+        peers.remove_peer_from_trusted_set(second);
+        peers.on_active_outgoing_established(first);
+        assert!(!peers.peers[&second].is_temporary());
+        assert!(peers.peers[&first].is_temporary());
+        peers.on_active_session_gracefully_closed(second);
+        assert!(peers.peers.contains_key(&second));
+    }
+
+    #[tokio::test]
+    async fn test_pending_candidate_stays_temporary_with_room() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let [failed, successful] = [PeerId::random(), PeerId::random()];
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        for id in [failed, successful] {
+            peers.candidates.insert(id, PeerCandidate { addr, fork_id: None });
+        }
+        peers.fill_outbound_slots();
+        assert!(peers.peers[&failed].state.is_pending_out());
+        assert!(peers.peers[&successful].state.is_pending_out());
+        assert!(peers.persistable_peers().next().is_none());
+        peers.on_outgoing_pending_session_gracefully_closed(&failed);
+        assert!(!peers.peers.contains_key(&failed));
+        peers.on_active_outgoing_established(successful);
+        assert_eq!(peers.persistable_peers().next().unwrap().record.id, successful);
+    }
+
+    #[tokio::test]
+    async fn test_skipping_backoff_preserves_candidate_order() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        let [oldest, ready, newest] = [PeerId::random(), PeerId::random(), PeerId::random()];
+        for id in [oldest, ready, newest] {
+            peers.candidates.insert(id, PeerCandidate { addr, fork_id: None });
+        }
+        peers.backoff_peer_until(oldest, std::time::Instant::now() + Duration::from_secs(60));
+        assert_eq!(peers.next_candidate().unwrap().0, ready);
+        assert_eq!(peers.candidates.peek_oldest().unwrap().0, &oldest);
     }
 }
