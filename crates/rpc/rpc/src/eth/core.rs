@@ -21,7 +21,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{
     builder::config::PendingBlockKind, receipt::EthReceiptConverter, EthApiError, EthApiSettings,
-    EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock,
+    EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock, RpcMemoryBudget,
 };
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
@@ -205,6 +205,10 @@ where
     }
 
     #[inline]
+    fn memory_budget(&self) -> Option<&RpcMemoryBudget> {
+        self.inner.memory_budget()
+    }
+
     fn blocking_io_task_guard(&self) -> &std::sync::Arc<tokio::sync::Semaphore> {
         self.inner.blocking_io_request_semaphore()
     }
@@ -239,6 +243,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
 
     /// Semaphore to limit concurrent blocking IO requests (`eth_call`, `eth_estimateGas`, etc.)
     blocking_io_request_semaphore: Arc<Semaphore>,
+
+    /// Memory budget shared by heavy requests, if configured.
+    memory_budget: Option<RpcMemoryBudget>,
 
     /// Transaction broadcast channel
     raw_tx_sender: broadcast::Sender<Bytes>,
@@ -312,6 +319,7 @@ where
             blocking_io_request_semaphore: Arc::new(Semaphore::new(
                 settings.max_blocking_io_requests,
             )),
+            memory_budget: settings.memory_budget_mb.map(RpcMemoryBudget::new),
             settings,
             raw_tx_sender,
             raw_tx_forwarder,
@@ -449,6 +457,12 @@ where
     #[inline]
     pub const fn blocking_task_guard(&self) -> &BlockingTaskGuard {
         &self.blocking_task_guard
+    }
+
+    /// Returns the memory budget shared by heavy requests, if configured.
+    #[inline]
+    pub const fn memory_budget(&self) -> Option<&RpcMemoryBudget> {
+        self.memory_budget.as_ref()
     }
 
     /// Returns [`broadcast::Receiver`] of new raw transactions
@@ -750,11 +764,11 @@ mod tests {
     async fn test_eth_api_settings() {
         use evm2_inspectors::tracing::{TraceLimitBehavior, TraceLimits};
         use reth_rpc_eth_api::{
-            helpers::{Call, EthState, EthTransactions, LoadPendingBlock, Trace},
+            helpers::{Call, EthState, EthTransactions, LoadPendingBlock, SpawnBlocking, Trace},
             EthApiTypes,
         };
         use reth_rpc_eth_types::{builder::config::PendingBlockKind, EthApiSettings};
-        use std::time::Duration;
+        use std::{num::NonZeroU32, time::Duration};
 
         fn settings(api: &impl EthApiTypes) -> &EthApiSettings {
             api.eth_api_settings()
@@ -769,6 +783,7 @@ mod tests {
             assert_eq!(actual.max_simulate_blocks, expected.max_simulate_blocks);
             assert_eq!(actual.max_trace_bytes, expected.max_trace_bytes);
             assert_eq!(actual.max_response_size, expected.max_response_size);
+            assert_eq!(actual.memory_budget_mb, expected.memory_budget_mb);
             assert_eq!(
                 actual.compute_state_root_for_eth_simulate,
                 expected.compute_state_root_for_eth_simulate
@@ -789,6 +804,7 @@ mod tests {
 
         let default_api = build_test_eth_api(MockEthProvider::default());
         assert_settings(settings(&default_api), &EthApiSettings::default());
+        assert!(SpawnBlocking::memory_budget(&default_api).is_none());
 
         let expected = EthApiSettings {
             sender_recovery_cache: Some(reth_evm::SenderRecoveryCache::new(16)),
@@ -800,6 +816,7 @@ mod tests {
             max_simulate_blocks: 7,
             max_trace_bytes: Some(4096),
             max_response_size: Some(8192),
+            memory_budget_mb: NonZeroU32::new(256),
             compute_state_root_for_eth_simulate: true,
             eth_proof_window: 42,
             pending_block_kind: PendingBlockKind::Empty,
@@ -825,6 +842,7 @@ mod tests {
         .max_simulate_blocks(expected.max_simulate_blocks)
         .max_trace_bytes(expected.max_trace_bytes)
         .max_response_size(expected.max_response_size)
+        .memory_budget_mb(expected.memory_budget_mb)
         .compute_state_root_for_eth_simulate(expected.compute_state_root_for_eth_simulate)
         .eth_proof_window(expected.eth_proof_window)
         .pending_block_kind(expected.pending_block_kind)
@@ -839,6 +857,7 @@ mod tests {
             expected.max_blocking_io_requests
         );
         assert_eq!(Call::call_gas_limit(&api), expected.gas_cap);
+        assert_eq!(SpawnBlocking::memory_budget(&api).map(RpcMemoryBudget::total_mib), Some(256));
         assert_eq!(Call::max_simulate_blocks(&api), expected.max_simulate_blocks);
         assert_eq!(
             Trace::trace_limits(&api),

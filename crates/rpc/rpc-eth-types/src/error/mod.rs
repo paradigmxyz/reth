@@ -23,6 +23,10 @@ use reth_transaction_pool::error::{
 use std::convert::Infallible;
 use tokio::sync::oneshot::error::RecvError;
 
+/// JSON-RPC error code for a request that exceeds a server limit, see
+/// <https://eips.ethereum.org/EIPS/eip-1474#error-codes>.
+pub const LIMIT_EXCEEDED_CODE: i32 = -32005;
+
 /// A trait to convert an error to an RPC error.
 pub trait ToRpcError: core::error::Error + Send + Sync + 'static {
     /// Converts the error to a JSON-RPC error object.
@@ -166,6 +170,13 @@ pub enum EthApiError {
     /// Error thrown when a (tracing) call exceeds the configured timeout
     #[error("execution aborted (timeout = {0:?})")]
     ExecutionTimedOut(Duration),
+    /// Error thrown when the memory a request may hold is not available in the RPC memory budget
+    /// in time, see [`RpcMemoryBudget`](crate::RpcMemoryBudget).
+    #[error("request needs {weight_mib} MiB of the RPC memory budget, which is in use")]
+    MemoryBudgetExhausted {
+        /// The memory the request may hold, in MiB.
+        weight_mib: u64,
+    },
     /// Internal Error thrown by the javascript tracer
     #[error("{0}")]
     InternalJsTracerError(String),
@@ -395,6 +406,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             }
             err @ (EthApiError::InternalBlockingTaskError | EthApiError::InternalEthError) => {
                 internal_rpc_err(err.to_string())
+            }
+            err @ EthApiError::MemoryBudgetExhausted { .. } => {
+                rpc_error_with_code(LIMIT_EXCEEDED_CODE, err.to_string())
             }
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
             EthApiError::PrunedHistoryUnavailable { .. } | EthApiError::ExceedsMaxProofWindow => {
@@ -1197,6 +1211,17 @@ mod tests {
     fn timed_out_error() {
         let err = EthApiError::ExecutionTimedOut(Duration::from_secs(10));
         assert_eq!(err.to_string(), "execution aborted (timeout = 10s)");
+    }
+
+    #[test]
+    fn memory_budget_exhausted_error() {
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::MemoryBudgetExhausted { weight_mib: 112 }.into();
+        assert_eq!(err.code(), LIMIT_EXCEEDED_CODE);
+        assert_eq!(
+            err.message(),
+            "request needs 112 MiB of the RPC memory budget, which is in use"
+        );
     }
 
     #[test]

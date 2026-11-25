@@ -6,7 +6,7 @@ use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKING_IO_REQUEST, DEFAULT_MAX_SIMULATE_BLOCKS,
     DEFAULT_PROOF_PERMITS, RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
 };
-use std::time::Duration;
+use std::{num::NonZeroU32, time::Duration};
 
 /// Settings used when initializing the API and serving `eth` RPC requests.
 ///
@@ -34,6 +34,9 @@ pub struct EthApiSettings {
     /// The RPC server's response size limit in bytes, which bounds the struct logs of a debug
     /// trace response. `None` is unlimited.
     pub max_response_size: Option<usize>,
+    /// Memory, in MiB, the heavy requests of the RPC servers may hold at once. `None` does not
+    /// budget memory.
+    pub memory_budget_mb: Option<NonZeroU32>,
     /// Whether to compute state roots for `eth_simulateV1`.
     pub compute_state_root_for_eth_simulate: bool,
     /// Maximum number of blocks into the past for generating state proofs.
@@ -60,6 +63,7 @@ impl Default for EthApiSettings {
             max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
             max_trace_bytes: None,
             max_response_size: None,
+            memory_budget_mb: None,
             compute_state_root_for_eth_simulate: false,
             eth_proof_window: DEFAULT_ETH_PROOF_WINDOW,
             pending_block_kind: PendingBlockKind::default(),

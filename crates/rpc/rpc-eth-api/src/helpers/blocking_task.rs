@@ -2,7 +2,7 @@
 //! are executed on the `tokio` runtime.
 
 use futures::Future;
-use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_types::{EthApiError, RpcMemoryBudget};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     CancelOnDrop, Runtime,
@@ -42,6 +42,30 @@ pub trait SpawnBlocking: EthApiTypes + 'static {
     /// This semaphore is used to limit concurrent blocking IO operations like `eth_call`,
     /// `eth_estimateGas` and the `eth_getLogs` queries that read from the provider.
     fn blocking_io_task_guard(&self) -> &Arc<Semaphore>;
+
+    /// Returns the memory budget heavy requests share, `None` if memory is not budgeted.
+    fn memory_budget(&self) -> Option<&RpcMemoryBudget> {
+        None
+    }
+
+    /// Takes `weight_mib` MiB of the [`memory_budget`](Self::memory_budget), see
+    /// [`RpcMemoryBudget::acquire`].
+    ///
+    /// Returns `None` if memory is not budgeted. Requests that can hold a lot of memory, such as
+    /// traces, proofs and simulations, should move the permit into the task doing their work, so
+    /// that the memory stays taken until that work ends even if the request is dropped.
+    fn acquire_memory_budget(
+        &self,
+        weight_mib: u64,
+    ) -> impl Future<Output = Result<Option<OwnedSemaphorePermit>, EthApiError>> + Send {
+        let budget = self.memory_budget().cloned();
+        async move {
+            match budget {
+                Some(budget) => budget.acquire(weight_mib).await.map(Some),
+                None => Ok(None),
+            }
+        }
+    }
 
     /// Acquires a permit from the tracing task semaphore.
     ///

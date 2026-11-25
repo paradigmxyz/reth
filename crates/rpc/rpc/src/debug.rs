@@ -10,7 +10,10 @@ use alloy_rpc_types_eth::{
 };
 use alloy_rpc_types_trace::{
     common::TraceResult,
-    geth::{GethDebugTracingCallOptions, GethDebugTracingOptions},
+    geth::{
+        GethDebugBuiltInTracerType, GethDebugTracerType, GethDebugTracingCallOptions,
+        GethDebugTracingOptions,
+    },
 };
 use evm2::evm::StateChangeSource;
 use evm2_inspectors::tracing::{
@@ -36,7 +39,11 @@ use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
     AsEthApiError, CallManyRequest, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::{utils::CallManyBudget, EthApiError, StateCacheDb};
+use reth_rpc_eth_types::{
+    memory_budget::{bytes_to_mib, calls_gas, TRACE_CALL_BYTES},
+    utils::CallManyBudget,
+    EthApiError, StateCacheDb, TransactionSource,
+};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
@@ -55,9 +62,7 @@ use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
 #[cfg(feature = "js-tracer")]
-use alloy_rpc_types_trace::geth::{
-    GethDebugBuiltInTracerType, GethDebugTracerConfig, GethDebugTracerType,
-};
+use alloy_rpc_types_trace::geth::GethDebugTracerConfig;
 #[cfg(feature = "js-tracer")]
 use evm2_inspectors::tracing::js::JsInspectorInterrupt;
 #[cfg(feature = "js-tracer")]
@@ -136,9 +141,18 @@ where
         opts: GethDebugTracingOptions,
         permit: Option<OwnedSemaphorePermit>,
     ) -> Result<Vec<TraceResult<DebugTrace, String>>, Eth::Error> {
+        let weight = geth_trace_weight_mib(
+            &opts,
+            block.header().gas_used(),
+            block.body().transactions().len() as u64,
+            self.eth_api().eth_api_settings().max_trace_bytes,
+        );
+        let memory =
+            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let _permit = permit;
+                let _memory = memory;
                 let mut results = Vec::with_capacity(block.body().transactions().len());
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
@@ -377,12 +391,23 @@ where
                 None => return Err(EthApiError::TracingTransactionNotFound.into()),
                 Some(res) => res,
             };
+        let (TransactionSource::Pool(tx) | TransactionSource::Block { transaction: tx, .. }) =
+            &transaction;
+        let weight = geth_trace_weight_mib(
+            &opts,
+            alloy_consensus::Transaction::gas_limit(tx.inner()),
+            1,
+            self.eth_api().eth_api_settings().max_trace_bytes,
+        );
+        let memory =
+            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
 
         let interrupt = JsTraceInterrupt::new(&opts)?;
         let tracer_interrupt = interrupt.clone();
         let trace = self.eth_api().spawn_with_state_at_block(
             block.parent_hash(),
             move |eth_api, mut db| {
+                let _memory = memory;
                 // configure env for the target transaction
                 let (tx, tx_info) = transaction.split();
                 let tx_hash = *tx.tx_hash();
@@ -449,11 +474,26 @@ where
             tx_index,
         } = opts;
         let overrides = EvmOverrides::new(state_overrides, block_overrides.map(Box::new));
+        let weight = geth_trace_weight_mib(
+            &tracing_options,
+            calls_gas(self.eth_api().call_gas_limit(), [&call]),
+            1,
+            self.eth_api().eth_api_settings().max_trace_bytes,
+        );
+        let memory =
+            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
 
         // Check if we need to replay transactions for a specific tx_index
         if let Some(tx_idx) = tx_index {
             return self
-                .debug_trace_call_at_tx_index(call, at, tx_idx as usize, tracing_options, overrides)
+                .debug_trace_call_at_tx_index(
+                    call,
+                    at,
+                    tx_idx as usize,
+                    tracing_options,
+                    overrides,
+                    memory,
+                )
                 .await;
         }
 
@@ -462,6 +502,7 @@ where
         let this = self.clone();
         let trace =
             self.eth_api().spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
+                let _memory = memory;
                 let inspector =
                     new_debug_inspector(tracing_options).map_err(Eth::Error::from_eth_err)?;
                 let limits = ResponseBudget::new(
@@ -496,6 +537,7 @@ where
         tx_index: usize,
         tracing_options: GethDebugTracingOptions,
         overrides: EvmOverrides,
+        memory: Option<OwnedSemaphorePermit>,
     ) -> Result<DebugTrace, Eth::Error> {
         // Get the target block to check transaction count
         let (block, bal) = self
@@ -525,6 +567,7 @@ where
         let trace = self.eth_api().spawn_with_state_at_block(
             block.parent_hash(),
             move |eth_api, mut db| {
+                let _memory = memory;
                 // 1. position the state before the transaction at the index
                 eth_api.replay_block_until(&mut db, &block, tx_index, bal.as_deref())?;
 
@@ -578,6 +621,19 @@ where
 
         let opts = opts.unwrap_or_default();
         let GethDebugTracingCallOptions { tracing_options, mut state_overrides, .. } = opts;
+        let calls = bundles.iter().map(|bundle| bundle.transactions.len().max(1)).sum::<usize>();
+        let gas = calls_gas(
+            self.eth_api().call_gas_limit(),
+            bundles.iter().flat_map(|bundle| &bundle.transactions),
+        );
+        let weight = geth_trace_weight_mib(
+            &tracing_options,
+            gas,
+            calls as u64,
+            self.eth_api().eth_api_settings().max_trace_bytes,
+        );
+        let memory =
+            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
 
         // we're essentially replaying the transactions in the block here, hence we need the state
         // that points to the beginning of the block, which is the state at the parent block
@@ -597,6 +653,7 @@ where
 
         self.eth_api()
             .spawn_with_state_at_block(at, move |eth_api, mut db| {
+                let _memory = memory;
                 // the outer vec for the bundles
                 let mut all_bundles = Vec::with_capacity(bundles.len());
 
@@ -1771,6 +1828,82 @@ struct ChainBlockTraces {
     traces: Vec<Option<TraceResult<DebugTrace, String>>>,
 }
 
+/// Smallest JSON, in bytes, of a struct log, which geth's `limit` counts.
+const MIN_STRUCT_LOG_JSON_LEN: u64 = 48;
+
+/// Memory, in bytes, a recorded struct log step holds once converted.
+const STRUCT_LOG_STEP_BYTES: u64 = 512;
+
+/// Memory, in bytes, a recorded struct log step without its stack holds once converted.
+const STRUCT_LOG_STEP_BYTES_WITHOUT_STACK: u64 = 128;
+
+/// Memory, in bytes, a converted struct log needs per storage slot it lists.
+const STRUCT_LOG_STORAGE_SLOT_BYTES: u64 = 140;
+
+/// Gas of a cold `SLOAD`, the cheapest way to add a slot to a struct log's storage, see EIP-2929.
+const COLD_SLOAD_GAS: u64 = 2100;
+
+/// Returns the most memory, in MiB, that geth-style traces of `calls` calls with `gas` gas in
+/// total may hold with `opts`, where each call may record `max_trace_bytes`.
+///
+/// The struct logger records up to a step per gas, which the trace byte budget bounds, and copies
+/// the memory and all earlier storage slots of the contract into each step when it builds the
+/// logs, which the budget does not bound. The call, prestate and ERC-7562 tracers grow with the
+/// frames and state the execution touches, at most a few bytes per gas.
+fn geth_trace_weight_mib(
+    opts: &GethDebugTracingOptions,
+    gas: u64,
+    calls: u64,
+    max_trace_bytes: Option<usize>,
+) -> u64 {
+    let recorded = match &opts.tracer {
+        None => {
+            let config = &opts.config;
+            let steps = match config.limit {
+                Some(limit) if limit > 0 => (limit / MIN_STRUCT_LOG_JSON_LEN).min(gas),
+                _ => gas,
+            };
+            let step_bytes = if config.disable_stack == Some(true) {
+                STRUCT_LOG_STEP_BYTES_WITHOUT_STACK
+            } else {
+                STRUCT_LOG_STEP_BYTES
+            };
+            let mut bytes = steps.saturating_mul(step_bytes);
+            if let Some(max_trace_bytes) = max_trace_bytes {
+                // The recording and the logs built from it.
+                bytes = bytes.min((max_trace_bytes as u64).saturating_mul(2).saturating_mul(calls));
+            }
+            if config.disable_storage != Some(true) {
+                // The n-th storage step lists n slots.
+                let slots = (gas / COLD_SLOAD_GAS).min(steps);
+                bytes = bytes.saturating_add(
+                    slots.saturating_mul(slots / 2).saturating_mul(STRUCT_LOG_STORAGE_SLOT_BYTES),
+                );
+            }
+            if config.enable_memory == Some(true) || config.disable_memory == Some(false) {
+                // Memory expansion costs at least words^2 / 512 gas.
+                let memory_hex_bytes = gas.saturating_mul(512).isqrt().saturating_mul(64);
+                bytes = bytes.saturating_add(steps.saturating_mul(memory_hex_bytes));
+            }
+            bytes
+        }
+        Some(GethDebugTracerType::BuiltInTracer(tracer)) => match tracer {
+            GethDebugBuiltInTracerType::FourByteTracer |
+            GethDebugBuiltInTracerType::NoopTracer |
+            GethDebugBuiltInTracerType::StateGasTracer => 0,
+            GethDebugBuiltInTracerType::CallTracer | GethDebugBuiltInTracerType::FlatCallTracer => {
+                gas.saturating_mul(10)
+            }
+            GethDebugBuiltInTracerType::PreStateTracer |
+            GethDebugBuiltInTracerType::Erc7562Tracer => gas.saturating_mul(20),
+            GethDebugBuiltInTracerType::MuxTracer => gas.saturating_mul(30),
+        },
+        // A JavaScript tracer keeps whatever its code collects.
+        Some(GethDebugTracerType::JsTracer(_)) => u64::MAX,
+    };
+    bytes_to_mib(TRACE_CALL_BYTES.saturating_mul(calls).saturating_add(recorded))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1791,10 +1924,11 @@ mod tests {
         create_test_provider_factory, create_test_provider_factory_with_chain_spec,
         ExtendedAccount, MockEthProvider, NoopProvider,
     };
-    use reth_rpc_eth_api::EthApiServer;
+    use reth_rpc_eth_api::{helpers::SpawnBlocking, EthApiServer};
     use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
     use reth_transaction_pool::test_utils::testing_pool;
     use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState, StorageSlot};
+    use std::num::NonZeroU32;
 
     #[tokio::test]
     async fn trace_call_out_of_range_block_error() {
@@ -2151,5 +2285,68 @@ mod tests {
 
         assert_eq!(storage.storage[&hashed_old_slot], U256::ZERO);
         assert_eq!(storage.storage[&hashed_new_slot], new_value);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn trace_call_fails_while_memory_budget_is_in_use() {
+        let provider = MockEthProvider::default();
+        let target = Address::with_last_byte(0x42);
+        provider
+            .add_account(target, ExtendedAccount::new(0, U256::ZERO).with_bytecode(bytes!("00")));
+        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        let eth_api = EthApi::<_, EthRpcConverter<ChainSpec>>::builder(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .memory_budget_mb(NonZeroU32::new(64))
+        .build();
+        let debug_api = DebugApi::new(
+            eth_api.clone(),
+            BlockingTaskGuard::new(1),
+            &Runtime::test(),
+            futures::stream::empty(),
+        );
+        let call = TransactionRequest::default().to(target).gas_limit(1_000_000);
+        let opts: GethDebugTracingCallOptions =
+            serde_json::from_value(serde_json::json!({ "tracer": "callTracer" })).unwrap();
+
+        let held = eth_api.acquire_memory_budget(64).await.unwrap();
+        let err = debug_api.debug_trace_call(call.clone(), None, opts.clone()).await.unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "request needs 26 MiB of the RPC memory budget, which is in use"
+        );
+
+        drop(held);
+        debug_api.debug_trace_call(call, None, opts).await.unwrap();
+    }
+
+    #[test]
+    fn geth_trace_weights() {
+        let opts = |json| serde_json::from_value::<GethDebugTracingOptions>(json).unwrap();
+        let max_trace_bytes = Some(320 << 20);
+        let weight = |json, gas| geth_trace_weight_mib(&opts(json), gas, 1, max_trace_bytes);
+
+        assert_eq!(weight(serde_json::json!({ "tracer": "callTracer" }), 10_000_000), 112);
+        assert_eq!(weight(serde_json::json!({ "tracer": "noopTracer" }), 10_000_000), 16);
+        assert_eq!(
+            weight(serde_json::json!({ "disableStorage": true, "limit": 10_000 }), 10_000_000),
+            17
+        );
+        // The trace byte budget bounds the recorded steps.
+        assert_eq!(weight(serde_json::json!({ "disableStorage": true }), 50_000_000), 656);
+        // It does not bound the storage and memory copied into every step.
+        assert_eq!(weight(serde_json::json!({ "disableStack": true }), 20_000_000), 6710);
+        assert_eq!(
+            weight(serde_json::json!({ "disableStorage": true, "enableMemory": true }), 300_000),
+            227_086
+        );
+        assert_eq!(
+            weight(serde_json::json!({ "tracer": "{ result: function() {} }" }), 21_000),
+            bytes_to_mib(u64::MAX)
+        );
     }
 }

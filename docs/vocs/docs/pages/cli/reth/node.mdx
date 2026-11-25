@@ -526,6 +526,13 @@ RPC:
 
           The default struct logs of a debug trace response are limited to `--rpc.max-response-size` as well, whatever this value is.
 
+      --rpc.memory-budget <MB>
+          Memory in MiB that tracing, proof, simulation and multi-call requests may hold at once, 0 to not budget memory.
+
+          Each request takes the memory its parameters allow it to hold at most until its work is done, and fails with a `-32005` error if that memory does not free up within 200ms.
+
+          [default: 0]
+
       --rpc.compute-state-root-for-eth-simulate
           Compute state roots for `eth_simulateV1` responses
 

@@ -31,7 +31,11 @@ use reth_rpc_eth_api::{
     CallManyRequest, FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    cache::db::apply_block_overrides, error::EthApiError, utils::CallManyBudget, EthConfig,
+    cache::db::apply_block_overrides,
+    error::EthApiError,
+    memory_budget::{bytes_to_mib, calls_gas, TRACE_CALL_BYTES},
+    utils::CallManyBudget,
+    EthConfig,
 };
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
@@ -100,11 +104,19 @@ where
     ) -> Result<TraceResults, Eth::Error> {
         let at = trace_request.block_id.unwrap_or_default();
         let config = TracingInspectorConfig::from_parity_config(&trace_request.trace_types);
+        let weight = parity_trace_weight_mib(
+            [&trace_request.trace_types],
+            calls_gas(self.eth_api().call_gas_limit(), [&trace_request.call]),
+            self.eth_api().eth_api_settings().max_trace_bytes,
+        );
+        let memory =
+            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
         let overrides =
             EvmOverrides::new(trace_request.state_overrides, trace_request.block_overrides);
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, evm_env, tx_env| {
+                let _memory = memory;
                 let inspector = this.eth_api().tracing_inspector(config);
                 let (inspector, res) =
                     this.eth_api().inspect(&mut *db, evm_env, &tx_env, inspector)?;
@@ -161,12 +173,20 @@ where
         overrides: EvmOverrides,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
         let mut budget = CallManyBudget::new(calls.len(), self.eth_api().call_gas_limit())?;
+        let weight = parity_trace_weight_mib(
+            calls.iter().map(|(_, trace_types)| trace_types),
+            calls_gas(self.eth_api().call_gas_limit(), calls.iter().map(|(call, _)| call)),
+            self.eth_api().eth_api_settings().max_trace_bytes,
+        );
+        let memory =
+            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
         let at = block_id.unwrap_or_default();
         let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
 
         // execute all transactions on top of each other and record the traces
         self.eth_api()
             .spawn_with_state_at_block(at, move |eth_api, mut db| {
+                let _memory = memory;
                 let mut evm_env = evm_env;
                 // The calls share one trace byte budget, since they share one response.
                 let trace_budget = RequestTraceBudget::new(eth_api.trace_limits());
@@ -937,6 +957,34 @@ pub struct BlockStorageAccess {
     pub block_number: u64,
     /// All executed transactions in the block in the order they were executed
     pub transactions: Vec<TransactionStorageAccess>,
+}
+
+/// Returns the most memory, in MiB, that parity traces of calls with the `trace_types` of each
+/// call and `gas` gas in total may hold, where each call may record `max_trace_bytes`.
+///
+/// Call traces grow with the frames the execution creates. A `vmTrace` records up to a step per
+/// gas, which the trace byte budget bounds per call, and a `stateDiff` the state the execution
+/// touches.
+fn parity_trace_weight_mib<'a>(
+    trace_types: impl IntoIterator<Item = &'a HashSet<TraceType>>,
+    gas: u64,
+    max_trace_bytes: Option<usize>,
+) -> u64 {
+    let (mut calls, mut steps) = (0u64, false);
+    for trace_types in trace_types {
+        calls += 1;
+        steps |= trace_types.contains(&TraceType::VmTrace) ||
+            trace_types.contains(&TraceType::StateDiff);
+    }
+    let mut recorded = gas.saturating_mul(4);
+    if steps {
+        let step_bytes = gas.saturating_mul(64);
+        recorded = recorded.saturating_add(max_trace_bytes.map_or(step_bytes, |max| {
+            // The recording and the response built from it.
+            step_bytes.min((max as u64).saturating_mul(2).saturating_mul(calls))
+        }));
+    }
+    bytes_to_mib(TRACE_CALL_BYTES.saturating_mul(calls).saturating_add(recorded))
 }
 
 #[cfg(test)]
@@ -1759,5 +1807,23 @@ mod tests {
                 assert_eq!(trace.full_trace, individual.full_trace);
             }
         }
+    }
+
+    #[test]
+    fn parity_trace_weights() {
+        let types = |names: &[TraceType]| names.iter().copied().collect::<HashSet<_>>();
+        let max_trace_bytes = Some(320 << 20);
+
+        assert_eq!(
+            parity_trace_weight_mib([&types(&[TraceType::Trace])], 10_000_000, max_trace_bytes),
+            55
+        );
+        assert_eq!(
+            parity_trace_weight_mib([&types(&[TraceType::VmTrace])], 10_000_000, max_trace_bytes),
+            665
+        );
+        // The trace byte budget bounds the steps each call records.
+        let calls = [types(&[TraceType::Trace]), types(&[TraceType::StateDiff])];
+        assert_eq!(parity_trace_weight_mib(&calls, 10_000_000, Some(1 << 20)), 75);
     }
 }

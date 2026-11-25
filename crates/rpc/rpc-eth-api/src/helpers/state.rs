@@ -17,6 +17,7 @@ use reth_primitives_traits::{BlockTy, RecoveredBlock, SealedHeaderFor};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     error::{FromEvmError, IntoEthApiError},
+    memory_budget::proof_weight_mib,
     EthApiError, PendingBlockEnv, RpcInvalidTransactionError, SignError,
 };
 use reth_rpc_server_types::constants::{DEFAULT_MAX_PROOF_SLOTS, DEFAULT_MAX_STORAGE_VALUES_SLOTS};
@@ -173,7 +174,9 @@ pub trait EthState: LoadState + SpawnBlocking {
             ))));
         }
 
+        let weight = proof_weight_mib(1, keys.len() as u64);
         Ok(async move {
+            let memory = self.acquire_memory_budget(weight).await?;
             let permit = self
                 .acquire_owned_tracing()
                 .await
@@ -185,6 +188,7 @@ pub trait EthState: LoadState + SpawnBlocking {
 
             self.spawn_blocking_io_with_state(block_id, move |_, state| {
                 let _permit = permit;
+                let _memory = memory;
                 let storage_keys = keys.iter().map(|key| key.as_b256()).collect::<Vec<_>>();
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
@@ -223,7 +227,9 @@ pub trait EthState: LoadState + SpawnBlocking {
             ))));
         }
 
+        let weight = proof_weight_mib(targets.len() as u64, total_slots as u64);
         Ok(async move {
+            let memory = self.acquire_memory_budget(weight).await?;
             let permit = self
                 .acquire_owned_tracing()
                 .await
@@ -235,6 +241,7 @@ pub trait EthState: LoadState + SpawnBlocking {
 
             self.spawn_blocking_io_with_state(block_id, move |_, state| {
                 let _permit = permit;
+                let _memory = memory;
                 let mut proof_targets = MultiProofTargetsV2::default();
                 proof_targets.account_targets.reserve(targets.len());
                 proof_targets.storage_targets.reserve(targets.len());
