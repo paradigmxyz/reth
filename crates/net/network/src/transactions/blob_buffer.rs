@@ -194,7 +194,7 @@ impl<T: PoolTransaction> BufferedBlob<T> {
                     cells: sidecar.cells,
                 })
                 .collect();
-            return Err(Some(Rejected { peers: bad, verified }))
+            return Err(Some(Rejected { body_peer: self.peer, peers: bad, verified }))
         }
         let mask = BlobCellMask::from_bits(mask);
         let mut cells = Vec::with_capacity(metadata.commitments.len() * mask.count());
@@ -224,6 +224,8 @@ impl<T: PoolTransaction> BufferedBlob<T> {
 /// Outcome of a verification job in which some peers sent invalid cells.
 #[derive(Debug)]
 pub(super) struct Rejected {
+    /// Peer that sent the body, whose proofs the cells were checked against.
+    pub(super) body_peer: PeerId,
     /// Peers whose cells failed verification.
     pub(super) peers: Vec<PeerId>,
     /// Deliveries of the other peers, which passed verification.
@@ -263,6 +265,11 @@ pub(super) mod tests {
     pub(in crate::transactions) fn fixture() -> (EthPooledTransaction, BlobTxCellSidecar) {
         let full = BlobTransactionSidecarEip7594::try_from_blobs(vec![Blob::default()]).unwrap();
         let cells = BlobTxCellSidecar::from_full(&full, EnvKzgSettings::Default.get()).unwrap();
+        (transaction(&cells), cells)
+    }
+
+    /// Builds the transaction body that carries the commitments and proofs of `cells`.
+    pub(in crate::transactions) fn transaction(cells: &BlobTxCellSidecar) -> EthPooledTransaction {
         let tx = TxEip4844 {
             blob_versioned_hashes: cells.versioned_hashes().collect(),
             gas_limit: 21000,
@@ -273,7 +280,7 @@ pub(super) mod tests {
             Signature::test_signature(),
         );
         let pooled = PooledTransactionVariant::Eip4844(tx);
-        (EthPooledTransaction::from_pooled(Recovered::new_unchecked(pooled, Address::ZERO)), cells)
+        EthPooledTransaction::from_pooled(Recovered::new_unchecked(pooled, Address::ZERO))
     }
 
     #[test]
@@ -318,6 +325,7 @@ pub(super) mod tests {
         buffer.cells(hash, bad, second, corrupted, now);
         let result = buffer.take_ready(hash, BlobCellMask::from_bits(3)).unwrap().verify();
         let Err(Some(rejected)) = result else { panic!("bad cells must be rejected") };
+        assert_eq!(rejected.body_peer, body_peer);
         assert_eq!(rejected.peers, vec![bad]);
         assert_eq!(buffer.restore_cells(hash, rejected.verified, now), first.bits());
         // The body is dropped with the rejected cells, so the verified cells wait for a new one.

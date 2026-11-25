@@ -113,6 +113,14 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                 }
                 Err(Some(rejected)) => {
                     self.metrics.invalid.increment(1);
+                    // A failed check means either the cells or the body's proofs are bad. Only
+                    // a peer that sent both is certainly at fault; other failing providers are
+                    // dropped for this transaction without a reputation change.
+                    let reported = if rejected.peers.contains(&rejected.body_peer) {
+                        vec![rejected.body_peer]
+                    } else {
+                        Vec::new()
+                    };
                     if let Some(pending) = self.pending.get_mut(&hash) {
                         // Drop the body, which the buffer would otherwise keep over any later
                         // copy: its proofs are not bound by the transaction hash. A later
@@ -124,7 +132,7 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                         pending.target = None;
                         pending.verifying = false;
                     }
-                    BlobFetchEvent::BadPeers(rejected.peers)
+                    BlobFetchEvent::BadPeers(reported)
                 }
                 Err(None) => {
                     self.metrics.invalid.increment(1);
@@ -411,6 +419,7 @@ struct BlobFetcherMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip4844::Bytes48;
     use futures::task::noop_waker_ref;
     use reth_eth_wire::{EthNetworkPrimitives, EthVersion};
     use reth_network_api::{PeerKind, PeerRequestSender};
@@ -535,7 +544,7 @@ mod tests {
         let all = BlobCellMask::from_bits(u128::MAX);
         fetcher.announce(hash, honest, all);
         fetcher.announce(hash, bad, all);
-        fetcher.body(honest, tx.clone()).unwrap();
+        fetcher.body(bad, tx.clone()).unwrap();
         let mut cx = Context::from_waker(noop_waker_ref());
         assert!(fetcher.poll(&mut cx, &peers).is_pending());
         let PeerRequest::GetCells { response, .. } = rx1.try_recv().unwrap() else {
@@ -598,6 +607,87 @@ mod tests {
         let BlobFetchEvent::Transaction(_, tx) = event else { panic!("valid cells must import") };
         assert_eq!(tx.blob_cell_availability().unwrap().get().count(), 64);
         assert!(rx2.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn bad_body_proofs_do_not_blame_cell_providers() {
+        let (tx, cells) = super::super::blob_buffer::tests::fixture();
+        let hash = *tx.hash();
+        // The proofs are not bound by the transaction hash, so a body with a corrupted proof
+        // keeps the hash but fails the honest cells checked against it.
+        let mut poisoned = cells.clone();
+        poisoned.proofs[0] = Bytes48::ZERO;
+        let poisoned = super::super::blob_buffer::tests::transaction(&poisoned);
+        assert_eq!(*poisoned.hash(), hash);
+        let low_provider = PeerId::random();
+        let high_provider = PeerId::random();
+        let (p1, mut rx1) = peer(low_provider);
+        let (p2, mut rx2) = peer(high_provider);
+        let peers = HashMap::from_iter([(low_provider, p1), (high_provider, p2)]);
+        let mut fetcher = BlobFetcher::new(CellCustody::default(), 100);
+        let all = BlobCellMask::from_bits(u128::MAX);
+        fetcher.announce(hash, low_provider, all);
+        fetcher.announce(hash, high_provider, all);
+        fetcher.body(PeerId::random(), poisoned).unwrap();
+        let mut cx = Context::from_waker(noop_waker_ref());
+        assert!(fetcher.poll(&mut cx, &peers).is_pending());
+        let PeerRequest::GetCells { response, .. } = rx1.try_recv().unwrap() else {
+            panic!("expected cells")
+        };
+        let low = BlobCellMask::from_bits(u32::MAX as u128);
+        response
+            .send(Ok(Cells {
+                hashes: vec![hash],
+                cells: vec![cells.get_cells(low).unwrap()],
+                cell_mask: B128::from(low.bits().to_le_bytes()),
+            }))
+            .unwrap();
+        assert!(fetcher.poll(&mut cx, &peers).is_pending());
+        let PeerRequest::GetCells { request, response } = rx2.try_recv().unwrap() else {
+            panic!("expected remainder from the second provider")
+        };
+        let high = BlobCellMask::from_bits(u128::from_le_bytes(request.cell_mask.into()));
+        response
+            .send(Ok(Cells {
+                hashes: vec![hash],
+                cells: vec![cells.get_cells(high).unwrap()],
+                cell_mask: request.cell_mask,
+            }))
+            .unwrap();
+        let event = tokio::time::timeout(
+            Duration::from_secs(10),
+            std::future::poll_fn(|cx| fetcher.poll(cx, &peers)),
+        )
+        .await
+        .unwrap();
+        let BlobFetchEvent::BadPeers(reported) = event else {
+            panic!("cells checked against bad proofs must be rejected")
+        };
+        assert!(reported.is_empty());
+        // The columns checked against the corrupted proof are fetched again from the provider
+        // whose cells passed, and a correct body completes the transaction.
+        assert!(fetcher.poll(&mut cx, &peers).is_pending());
+        let PeerRequest::GetCells { request, response } = rx2.try_recv().unwrap() else {
+            panic!("expected refetch of the rejected columns")
+        };
+        assert_eq!(request.cell_mask, B128::from(low.bits().to_le_bytes()));
+        response
+            .send(Ok(Cells {
+                hashes: vec![hash],
+                cells: vec![cells.get_cells(low).unwrap()],
+                cell_mask: request.cell_mask,
+            }))
+            .unwrap();
+        fetcher.body(high_provider, tx).unwrap();
+        let event = tokio::time::timeout(
+            Duration::from_secs(10),
+            std::future::poll_fn(|cx| fetcher.poll(cx, &peers)),
+        )
+        .await
+        .unwrap();
+        let BlobFetchEvent::Transaction(_, tx) = event else { panic!("valid cells must import") };
+        assert_eq!(tx.blob_cell_availability().unwrap().get().count(), 64);
+        assert!(rx1.try_recv().is_err());
     }
 
     #[tokio::test]
