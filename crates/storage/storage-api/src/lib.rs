@@ -13,8 +13,12 @@ extern crate alloc;
 
 // Re-export used error types.
 pub use reth_storage_errors as errors;
+
 mod bal;
 pub use bal::*;
+
+mod dependency_proof;
+pub use dependency_proof::*;
 
 mod account;
 pub use account::*;

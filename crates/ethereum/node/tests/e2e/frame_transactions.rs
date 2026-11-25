@@ -497,16 +497,16 @@ async fn lean_sphincs_wrapper_is_gossiped_and_mined() -> eyre::Result<()> {
     follower.wait_for_pooled(hashes.iter().copied()).await?;
     let payload = producer.new_payload().await?;
     assert_eq!(payload.block().body().transactions.len(), 1);
-    assert!(!payload.block().recursive_stark.as_ref().unwrap().stark_proof.is_empty());
+    assert!(!payload.dependency_proof().unwrap().is_empty());
     assert_eq!(
-        payload.block().recursive_stark.as_ref().unwrap().stark_proof.as_ref(),
+        payload.dependency_proof().unwrap().as_ref(),
         aggregate.wire_witnesses().1[0].as_ref()
     );
     follower.import_payload(payload.clone()).await?;
     producer.import_payload(payload).await?;
     producer.wait_for_pool_removal(hashes).await?;
     let empty = producer.advance_block().await?;
-    assert!(empty.block().recursive_stark.as_ref().unwrap().stark_proof.is_empty());
+    assert!(empty.dependency_proof().unwrap().is_empty());
     Ok(())
 }
 

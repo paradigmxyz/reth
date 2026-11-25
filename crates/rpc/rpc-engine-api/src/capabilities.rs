@@ -17,6 +17,11 @@ const UNSTABLE_METHODS: &[&str] = &[
     "engine_getPayloadV6",
     "engine_newPayloadV5",
     "engine_newPayloadV6",
+    "engine_newPayloadV7",
+    "engine_getPayloadV7",
+    "engine_forkchoiceUpdatedV6",
+    "engine_getPayloadBodiesByHashV3",
+    "engine_getPayloadBodiesByRangeV3",
 ];
 
 /// All Engine API capabilities supported by Reth (Ethereum mainnet).
@@ -42,6 +47,11 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_newPayloadV4",
     "engine_newPayloadV5",
     "engine_newPayloadV6",
+    "engine_newPayloadV7",
+    "engine_getPayloadV7",
+    "engine_forkchoiceUpdatedV6",
+    "engine_getPayloadBodiesByHashV3",
+    "engine_getPayloadBodiesByRangeV3",
     "engine_getPayloadBodiesByHashV1",
     "engine_getPayloadBodiesByHashV2",
     "engine_getPayloadBodiesByRangeV1",

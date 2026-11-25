@@ -105,6 +105,7 @@ pub fn maintain_transaction_pool_future<N, Client, P, St>(
 where
     N: NodePrimitives,
     Client: StateProviderFactory
+        + reth_storage_api::DependencyProofProvider
         + BlockReaderIdExt<Header = N::BlockHeader>
         + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader> + EthereumHardforks>
         + Clone
@@ -131,6 +132,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
 ) where
     N: NodePrimitives,
     Client: StateProviderFactory
+        + reth_storage_api::DependencyProofProvider
         + BlockReaderIdExt<Header = N::BlockHeader>
         + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader> + EthereumHardforks>
         + Clone
@@ -393,37 +395,37 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 let new_mined_transactions =
                     mined_transactions.iter().copied().collect::<B256Set>();
 
+                let proof_hashes: Vec<_> =
+                    old_blocks.iter().map(|(_, block)| block.hash()).collect();
+                let proof_client = client.clone();
+                let (proof_tx, proof_rx) = oneshot::channel();
+                task_spawner.spawn_blocking_task(async move {
+                    let mut proofs = alloy_primitives::map::B256Map::default();
+                    for hash in proof_hashes {
+                        match proof_client.dependency_proof(hash) {
+                            Ok(Some(proof)) => { proofs.insert(hash, proof); }
+                            Ok(None) => {}
+                            Err(error) => debug!(target: "txpool", %hash, %error, "Cannot read reorg dependency proof"),
+                        }
+                    }
+                    let _ = proof_tx.send(proofs);
+                });
+                let reorg_proofs = proof_rx.await.unwrap_or_default();
+
                 // update the pool then re-inject the pruned transactions
                 // find all transactions that were mined in the old chain but not in the new chain
                 let pruned_old_transactions = old_blocks
                     .iter()
                     .flat_map(|(_, block)| {
                         // The old canonical block's proof is sufficient evidence after reorg.
-                        let evidence = block
-                            .header()
-                            .recursive_stark()
-                            .filter(|proof| !proof.stark_proof.is_empty())
-                            .and_then(|proof| {
-                                let deps = match alloy_consensus::TxEip8141::collect_signature_dependencies(
-                                    block.body().transactions(),
-                                ) {
-                                    Ok(deps) => deps,
-                                    Err(error) => {
-                                        debug!(target: "txpool", %error, "Cannot reconstruct reorg dependency evidence");
-                                        return None;
-                                    }
-                                };
-                                match DependencyEvidence::aggregate(
-                                    deps,
-                                    proof.stark_proof.clone(),
-                                ) {
-                                    Ok(evidence) => Some(Arc::new(evidence)),
-                                    Err(error) => {
-                                        debug!(target: "txpool", %error, "Cannot retain reorg dependency evidence");
-                                        None
-                                    }
-                                }
-                            });
+                        let evidence = reorg_proofs.get(&block.hash()).filter(|proof| !proof.is_empty()).and_then(|proof| {
+                            alloy_consensus::TxEip8141::collect_signature_dependencies(block.body().transactions())
+                                .map_err(alloy_eips::eip8288::ProofError::Declaration)
+                                .and_then(|deps| DependencyEvidence::aggregate(deps, proof.clone()))
+                                .map(Arc::new)
+                                .map_err(|error| debug!(target: "txpool", %error, "Cannot retain reorg dependency evidence"))
+                                .ok()
+                        });
                         block
                             .transactions_with_sender()
                             .map(move |(sender, tx)| (sender, tx, evidence.clone()))

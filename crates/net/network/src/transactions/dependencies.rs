@@ -6,7 +6,7 @@ use alloy_eips::{
     eip2718::Decodable2718,
     eip8288::{
         prove, DependencyEvidence, DependencyWrapper, ProofError, SignatureDependency,
-        MAX_AGGREGATE_DEPENDENCIES, MAX_LEANSIG_DEPS_PER_WRAPPER, MAX_PROOF_BYTES,
+        MAX_AGGREGATE_DEPENDENCIES, MAX_DEPENDENCY_PROOF_BYTES, MAX_LEANSIG_DEPS_PER_WRAPPER,
         MAX_WRAPPER_BYTES,
     },
 };
@@ -405,7 +405,7 @@ impl<P: TransactionPool + 'static> DependencyAdmission<P> {
                             let raw = tx.transaction.encoded_2718_consensus();
                             // Reserve room for the proof, dependency list, and RLP framing.
                             let next_bytes = bytes + raw.len() + added * 100 + 16;
-                            if next_bytes > MAX_WRAPPER_BYTES - MAX_PROOF_BYTES { break }
+                            if next_bytes > MAX_WRAPPER_BYTES - MAX_DEPENDENCY_PROOF_BYTES { break }
                             bytes = next_bytes;
                             dependencies.extend(deps);
                             transactions.push((*tx.transaction.hash(), raw));
@@ -430,7 +430,7 @@ impl<P: TransactionPool + 'static> DependencyAdmission<P> {
                     job = Some(tokio::task::spawn_blocking(move || {
                         let _entered = span.enter();
                         let proof = prove(&dependencies, &inputs)?;
-                        let evidence = Arc::new(DependencyEvidence::aggregate(dependencies, proof.stark_proof)?);
+                        let evidence = Arc::new(DependencyEvidence::aggregate(dependencies, proof)?);
                         let hashes = Arc::new(transactions.iter().map(|(hash, _)| *hash).collect());
                         Ok(Snapshot { transactions, hashes, evidence })
                     }));

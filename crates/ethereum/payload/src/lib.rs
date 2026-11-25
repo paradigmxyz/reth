@@ -533,6 +533,7 @@ where
         builder.finish(state_provider.as_ref(), None)?
     };
 
+    let mut dependency_proof = None;
     let block = if dependencies_active {
         let dependencies =
             alloy_consensus::TxEip8141::collect_signature_dependencies(&block.body().transactions)
@@ -554,7 +555,9 @@ where
         }
         let (block, senders) = block.split_sealed();
         let mut block = block.into_block();
-        block.header.recursive_stark = Some(Box::new(proof));
+        block.header.dependency_proof_hash = Some(alloy_primitives::keccak256(&proof));
+        block.header.block_deps_hash = Some(alloy_eips::eip8288::dependency_digest(&dependencies));
+        dependency_proof = Some(proof);
         RecoveredBlock::new_sealed(SealedBlock::seal_slow(block), senders)
     } else {
         block
@@ -581,7 +584,8 @@ where
     let block_access_list = block_access_list.map(|bal| bal.split().1);
     let payload = EthBuiltPayload::new(Arc::new(block), total_fees, requests, block_access_list)
         // add blob sidecars from the executed txs
-        .with_sidecars(blob_sidecars);
+        .with_sidecars(blob_sidecars)
+        .with_dependency_proof(dependency_proof);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }

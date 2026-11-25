@@ -991,6 +991,7 @@ where
 
             if let Err(e) =
                 consensus.validate_block_pre_execution_with_tx_root(&block, None)
+                    .and_then(|()| consensus.validate_block_supplemental_data(&block))
             {
                 error!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate block");
                 return Err(InsertBlockError::consensus_error(e, block).into())

@@ -349,7 +349,11 @@ where
             ctx.node.evm_config().clone(),
             ctx.config.rpc.flashbots_config(),
             ctx.node.task_executor().clone(),
-            Arc::new(EthereumEngineValidator::new(ctx.config.chain.clone())),
+            Arc::new(
+                EthereumEngineValidator::new(ctx.config.chain.clone()).with_dependency_proofs(
+                    reth_provider::DependencyProofStore::new(ctx.node.provider().clone()),
+                ),
+            ),
             ctx.sender_recovery_cache.clone(),
         );
 
@@ -843,7 +847,9 @@ where
     type Consensus = Arc<EthBeaconConsensus<<Node::Types as NodeTypes>::ChainSpec>>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
+        Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec()).with_dependency_proofs(
+            reth_provider::DependencyProofStore::new(ctx.provider().clone()),
+        )))
     }
 }
 
@@ -865,6 +871,8 @@ where
     type Validator = EthereumEngineValidator<Types::ChainSpec>;
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
-        Ok(EthereumEngineValidator::new(ctx.config.chain.clone()))
+        Ok(EthereumEngineValidator::new(ctx.config.chain.clone()).with_dependency_proofs(
+            reth_provider::DependencyProofStore::new(ctx.node.provider().clone()),
+        ))
     }
 }

@@ -142,7 +142,8 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
             requests_hash,
             block_access_list_hash,
             slot_number: ctx.slot_number,
-            recursive_stark: None,
+            dependency_proof_hash: None,
+            block_deps_hash: None,
         };
 
         Ok(Block {

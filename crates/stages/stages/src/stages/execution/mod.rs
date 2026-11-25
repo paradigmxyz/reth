@@ -351,6 +351,19 @@ where
 
             cumulative_gas += block.header().gas_used();
 
+            self.consensus.validate_block_supplemental_data(block.sealed_block()).map_err(
+                |err| {
+                    if err.is_dependency_proof_unavailable() {
+                        StageError::Fatal(Box::new(err))
+                    } else {
+                        StageError::Block {
+                            block: Box::new(block.block_with_parent()),
+                            error: BlockErrorKind::Validation(err),
+                        }
+                    }
+                },
+            )?;
+
             // Configure the executor to use the current state.
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body().transactions().len(), "Executing block");
 

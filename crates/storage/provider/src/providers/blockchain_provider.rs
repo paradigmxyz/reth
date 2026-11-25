@@ -30,9 +30,9 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderROFactory, NodePrimitivesProvider, RangeEnd,
-    RangeResponse, RangeResult, StateRangeProvider, StateRangeProviderFactory, StateRangeView,
-    StorageChangeSetReader, StorageRangeResult,
+    BlockBodyIndicesProvider, DatabaseProviderROFactory, DependencyProofProvider,
+    NodePrimitivesProvider, RangeEnd, RangeResponse, RangeResult, StateRangeProvider,
+    StateRangeProviderFactory, StateRangeView, StorageChangeSetReader, StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::{OverlayStateProvider, OverlayStateProviderFactory, OwnedProvider};
@@ -1077,6 +1077,16 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
             block,
             Vec::new(),
         )))
+    }
+}
+
+impl<N: ProviderNodeTypes> DependencyProofProvider for BlockchainProvider<N> {
+    fn dependency_proof(&self, hash: B256) -> ProviderResult<Option<Bytes>> {
+        self.database.dependency_proof(hash)
+    }
+
+    fn insert_dependency_proof(&self, hash: B256, proof: Bytes) -> ProviderResult<()> {
+        self.database.insert_dependency_proof(hash, proof)
     }
 }
 

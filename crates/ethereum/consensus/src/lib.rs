@@ -28,11 +28,13 @@ use reth_consensus_common::validation::{
     validate_header_gas,
 };
 use reth_execution_types::BlockExecutionResult;
-#[cfg(feature = "std")]
-use reth_primitives_traits::BlockBody;
 use reth_primitives_traits::{
-    AlloyBlockHeader, Block, BlockHeader, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    AlloyBlockHeader, Block, BlockBody, BlockHeader, NodePrimitives, RecoveredBlock, SealedBlock,
+    SealedHeader,
 };
+
+#[cfg(any(feature = "std", test))]
+use alloy_primitives::Bytes;
 
 mod validation;
 pub use validation::{
@@ -42,26 +44,52 @@ pub use validation::{
 fn validate_dependency_proof<B: Block, C: EthChainSpec + EthereumHardforks>(
     block: &SealedBlock<B>,
     chain_spec: &C,
+    proofs: &reth_storage_api::DependencyProofStore,
+    require_proof: bool,
 ) -> Result<(), ConsensusError> {
     if !chain_spec.is_bogota_active_at_timestamp(block.header().timestamp()) {
-        return if block.header().recursive_stark().is_none() {
+        return Ok(());
+    }
+    let dependencies = alloy_consensus::TxEip8141::collect_signature_dependencies(
+        block.body().transactions_iter(),
+    )
+    .map_err(ConsensusError::other)?;
+    if block.header().block_deps_hash() !=
+        Some(alloy_eips::eip8288::dependency_digest(&dependencies))
+    {
+        return Err(ConsensusError::DependencyCommitmentMismatch);
+    }
+    // Empty proofs can be verified from their commitment even when supplemental data was pruned.
+    if dependencies.is_empty() {
+        return if block.header().dependency_proof_hash() == Some(alloy_primitives::keccak256([])) {
             Ok(())
         } else {
-            Err(ConsensusError::UnexpectedDependencyProof)
+            Err(ConsensusError::DependencyProofCommitmentMismatch)
         };
+    }
+    if !require_proof {
+        return Ok(());
     }
     #[cfg(feature = "std")]
     {
-        let proof =
-            block.header().recursive_stark().ok_or(ConsensusError::MissingDependencyProof)?;
-        let dependencies = alloy_consensus::TxEip8141::collect_signature_dependencies(
-            block.body().transactions_iter(),
-        )
-        .map_err(ConsensusError::other)?;
-        alloy_eips::eip8288::verify_header(&dependencies, proof).map_err(ConsensusError::other)
+        let proof = read_dependency_proof(
+            proofs,
+            block.hash(),
+            block.header().dependency_proof_hash().ok_or(ConsensusError::MissingDependencyProof)?,
+        )?;
+        alloy_eips::eip8288::verify_proof(&dependencies, &proof).map_err(|err| {
+            if err == alloy_eips::eip8288::ProofError::VerifierUnavailable {
+                ConsensusError::DependencyProofProcessing(Arc::new(err))
+            } else {
+                ConsensusError::other(err)
+            }
+        })
     }
     #[cfg(not(feature = "std"))]
-    Err(ConsensusError::DependencyProofUnsupported)
+    {
+        let _ = proofs;
+        Err(ConsensusError::DependencyProofUnsupported)
+    }
 }
 
 /// Ethereum beacon consensus
@@ -71,6 +99,8 @@ fn validate_dependency_proof<B: Block, C: EthChainSpec + EthereumHardforks>(
 pub struct EthBeaconConsensus<ChainSpec> {
     /// Configuration
     chain_spec: Arc<ChainSpec>,
+    /// Supplemental dependency proofs shared with payload import.
+    proofs: reth_storage_api::DependencyProofStore,
     /// Maximum allowed extra data size in bytes
     max_extra_data_size: usize,
     /// When true, skips the gas limit change validation between parent and child blocks.
@@ -88,12 +118,22 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self {
             chain_spec,
+            proofs: reth_storage_api::DependencyProofStore::unconfigured(),
             max_extra_data_size: MAXIMUM_EXTRA_DATA_SIZE,
             skip_gas_limit_ramp_check: false,
             skip_blob_gas_used_check: false,
             skip_requests_hash_check: false,
             allow_bal_hashes: false,
         }
+    }
+
+    /// Uses a durable store for separately transported dependency proofs.
+    pub fn with_dependency_proofs(
+        mut self,
+        proofs: reth_storage_api::DependencyProofStore,
+    ) -> Self {
+        self.proofs = proofs;
+        self
     }
 
     /// Returns the maximum allowed extra data size.
@@ -173,6 +213,13 @@ where
     B: Block,
     ChainSpec: EthChainSpec<Header = B::Header> + EthereumHardforks,
 {
+    fn validate_block_supplemental_data(
+        &self,
+        block: &SealedBlock<B>,
+    ) -> Result<(), ConsensusError> {
+        validate_dependency_proof(block, self.chain_spec.as_ref(), &self.proofs, true)
+    }
+
     fn validate_body_against_header(
         &self,
         body: &B::Body,
@@ -183,7 +230,7 @@ where
 
     fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), ConsensusError> {
         validate_block_pre_execution(block, &self.chain_spec)?;
-        validate_dependency_proof(block, self.chain_spec.as_ref())
+        validate_dependency_proof(block, self.chain_spec.as_ref(), &self.proofs, false)
     }
 
     fn validate_block_pre_execution_with_tx_root(
@@ -192,7 +239,7 @@ where
         transaction_root: Option<TransactionRoot>,
     ) -> Result<(), ConsensusError> {
         validate_block_pre_execution_with_tx_root(block, &self.chain_spec, transaction_root)?;
-        validate_dependency_proof(block, self.chain_spec.as_ref())
+        validate_dependency_proof(block, self.chain_spec.as_ref(), &self.proofs, false)
     }
 }
 
@@ -204,21 +251,15 @@ where
     fn validate_header(&self, header: &SealedHeader<H>) -> Result<(), ConsensusError> {
         let header = header.header();
         let dependencies_active = self.chain_spec.is_bogota_active_at_timestamp(header.timestamp());
-        if !dependencies_active && header.recursive_stark().is_some() {
+        let proof_hash = header.dependency_proof_hash();
+        let deps_hash = header.block_deps_hash();
+        if !dependencies_active && (proof_hash.is_some() || deps_hash.is_some()) {
             return Err(ConsensusError::UnexpectedDependencyProof);
         }
-        if dependencies_active && header.recursive_stark().is_none() {
+        if dependencies_active && (proof_hash.is_none() || deps_hash.is_none()) {
             return Err(ConsensusError::MissingDependencyProof);
         }
-        #[cfg(feature = "std")]
-        if let Some(proof) = header.recursive_stark() &&
-            proof.stark_proof.len() > alloy_eips::eip8288::MAX_PROOF_BYTES
-        {
-            return Err(ConsensusError::DependencyProofTooLarge {
-                size: proof.stark_proof.len(),
-                limit: alloy_eips::eip8288::MAX_PROOF_BYTES,
-            });
-        }
+
         let is_post_merge = self.chain_spec.is_paris_active_at_block(header.number());
 
         if is_post_merge {
@@ -251,6 +292,7 @@ where
                 }
             }
         }
+
         validate_header_extra_data(header, self.max_extra_data_size)?;
         validate_header_gas(header)?;
         validate_header_base_fee(header, &self.chain_spec)?;
@@ -339,6 +381,25 @@ where
     }
 }
 
+// A bad local row is unavailable data, not evidence that the committed block is invalid.
+#[cfg(any(feature = "std", test))]
+fn read_dependency_proof(
+    proofs: &reth_storage_api::DependencyProofStore,
+    hash: B256,
+    commitment: B256,
+) -> Result<Bytes, ConsensusError> {
+    let proof = proofs
+        .get(hash)
+        .map_err(|err| ConsensusError::DependencyProofProcessing(Arc::new(err)))?
+        .ok_or(ConsensusError::DependencyProofUnavailable(hash))?;
+    if proof.len() > alloy_eips::eip8288::MAX_DEPENDENCY_PROOF_BYTES ||
+        alloy_primitives::keccak256(&proof) != commitment
+    {
+        return Err(ConsensusError::DependencyProofUnavailable(hash));
+    }
+    Ok(proof)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,14 +414,53 @@ mod tests {
         proofs,
     };
 
+    #[derive(Debug)]
+    struct StoredProof(Option<Bytes>);
+
+    impl reth_storage_api::DependencyProofProvider for StoredProof {
+        fn dependency_proof(
+            &self,
+            _hash: B256,
+        ) -> reth_storage_api::errors::provider::ProviderResult<Option<Bytes>> {
+            Ok(self.0.clone())
+        }
+        fn insert_dependency_proof(
+            &self,
+            _hash: B256,
+            _proof: Bytes,
+        ) -> reth_storage_api::errors::provider::ProviderResult<()> {
+            Err(reth_storage_api::errors::provider::ProviderError::UnsupportedProvider)
+        }
+    }
+
+    #[test]
+    fn missing_or_corrupt_local_proofs_do_not_invalidate_blocks() {
+        let hash = B256::repeat_byte(1);
+        let proof = Bytes::from_static(&[1, 2, 3]);
+        let commitment = alloy_primitives::keccak256(&proof);
+        for data in [
+            None,
+            Some(Bytes::new()),
+            Some(vec![0; alloy_eips::eip8288::MAX_DEPENDENCY_PROOF_BYTES + 1].into()),
+        ] {
+            let store = reth_storage_api::DependencyProofStore::new(StoredProof(data));
+            let error = read_dependency_proof(&store, hash, commitment).unwrap_err();
+            assert!(
+                matches!(error, ConsensusError::DependencyProofUnavailable(found) if found == hash)
+            );
+            assert!(error.is_dependency_proof_unavailable());
+        }
+        let store = reth_storage_api::DependencyProofStore::new(StoredProof(Some(proof.clone())));
+        assert_eq!(read_dependency_proof(&store, hash, commitment).unwrap(), proof);
+    }
+
     fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
         let header = reth_primitives_traits::Header { gas_limit, ..Default::default() };
         SealedHeader::new(header, B256::ZERO)
     }
 
-    #[cfg(feature = "std")]
     #[test]
-    fn empty_dependency_blocks_enforce_activation_and_presence() {
+    fn dependency_commitments_enforce_activation_presence_and_contents() {
         let spec = ChainSpecBuilder::mainnet()
             .bogota_activated()
             .with_fork(
@@ -368,37 +468,36 @@ mod tests {
                 reth_chainspec::ForkCondition::Timestamp(1),
             )
             .build();
-        let mut block = EthBlock::default();
-        block.header.recursive_stark =
-            Some(alloc::boxed::Box::new(alloy_eips::eip8288::prove(&[], &[]).unwrap()));
+        let consensus = EthBeaconConsensus::new(Arc::new(spec));
+        let mut header = valid_prague_header();
+        header.block_access_list_hash = Some(alloy_eips::eip7928::EMPTY_BLOCK_ACCESS_LIST_HASH);
+        header.slot_number = Some(1);
+        header.dependency_proof_hash = Some(alloy_primitives::keccak256([]));
+        header.block_deps_hash = Some(alloy_eips::eip8288::dependency_digest(&[]));
         assert!(matches!(
-            validate_dependency_proof(&SealedBlock::new_unhashed(block.clone()), &spec),
+            consensus.validate_header(&SealedHeader::seal_slow(header.clone())),
             Err(ConsensusError::UnexpectedDependencyProof)
         ));
-        block.header.timestamp = 1;
-        assert!(validate_dependency_proof(&SealedBlock::new_unhashed(block.clone()), &spec).is_ok());
-        block.header.recursive_stark = None;
+        header.timestamp = 1;
+        let block = SealedBlock::new_unhashed(EthBlock {
+            header: header.clone(),
+            body: Default::default(),
+        });
+        assert!(consensus.validate_block_supplemental_data(&block).is_ok());
+        header.block_deps_hash = Some(B256::ZERO);
+        let block = SealedBlock::new_unhashed(EthBlock {
+            header: header.clone(),
+            body: Default::default(),
+        });
         assert!(matches!(
-            validate_dependency_proof(&SealedBlock::new_unhashed(block), &spec),
+            consensus.validate_block_supplemental_data(&block),
+            Err(ConsensusError::DependencyCommitmentMismatch)
+        ));
+        header.block_deps_hash = None;
+        assert!(matches!(
+            consensus.validate_header(&SealedHeader::seal_slow(header)),
             Err(ConsensusError::MissingDependencyProof)
         ));
-        assert!(!spec.is_bogota_active_at_timestamp(0));
-    }
-
-    #[cfg(feature = "std")]
-    #[test]
-    fn oversized_dependency_proof_is_rejected_before_body_download() {
-        let spec = ChainSpecBuilder::mainnet().bogota_activated().build();
-        let mut header = Header::default();
-        header.recursive_stark =
-            Some(alloc::boxed::Box::new(alloy_eips::eip8288::RecursiveStark {
-                stark_proof: alloc::vec![0; alloy_eips::eip8288::MAX_PROOF_BYTES + 1].into(),
-                block_deps_hash: B256::ZERO,
-            }));
-        assert!(matches!(EthBeaconConsensus::new(Arc::new(spec)).validate_header(
-            &SealedHeader::seal_slow(header)), Err(ConsensusError::DependencyProofTooLarge {
-                size, limit,
-            }) if size == alloy_eips::eip8288::MAX_PROOF_BYTES + 1 && limit == alloy_eips::eip8288::MAX_PROOF_BYTES));
     }
 
     fn valid_prague_header() -> reth_primitives_traits::Header {

@@ -119,6 +119,9 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             // Change: https://github.com/ethereum/execution-apis/pull/761
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::PayloadAttributes(
+                    VersionSpecificValidationError::MissingInclusionLists |
+                    VersionSpecificValidationError::MissingTargetGasLimit |
+                    VersionSpecificValidationError::UnsupportedInclusionLists |
                     VersionSpecificValidationError::WithdrawalsNotSupportedInV1 |
                     VersionSpecificValidationError::NoWithdrawalsPostShanghai |
                     VersionSpecificValidationError::HasWithdrawalsPreShanghai |

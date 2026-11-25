@@ -10,9 +10,9 @@ use alloy_primitives::{Bytes, U256};
 use alloy_rpc_types_engine::{
     BlobsBundleV1, BlobsBundleV2, CancunPayloadFields, ExecutionData, ExecutionPayload,
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
-    ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, ExecutionPayloadFieldV2,
-    ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4,
-    PraguePayloadFields,
+    ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, ExecutionPayloadEnvelopeV7,
+    ExecutionPayloadFieldV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
+    ExecutionPayloadV4, ExecutionPayloadV5, PayloadExtras, PraguePayloadFields,
 };
 use reth_ethereum_primitives::EthPrimitives;
 use reth_payload_primitives::BuiltPayload;
@@ -40,6 +40,8 @@ pub struct EthBuiltPayload<N: NodePrimitives = EthPrimitives> {
     pub(crate) requests: Option<Requests>,
     /// The block access list of the payload
     pub(crate) block_access_list: Option<Bytes>,
+    /// Separately transported EIP-8288 dependency proof.
+    pub(crate) dependency_proof: Option<Bytes>,
 }
 
 // === impl BuiltPayload ===
@@ -54,7 +56,25 @@ impl<N: NodePrimitives> EthBuiltPayload<N> {
         requests: Option<Requests>,
         block_access_list: Option<Bytes>,
     ) -> Self {
-        Self { block, fees, requests, sidecars: BlobSidecars::Empty, block_access_list }
+        Self {
+            block,
+            fees,
+            requests,
+            sidecars: BlobSidecars::Empty,
+            block_access_list,
+            dependency_proof: None,
+        }
+    }
+
+    /// Attaches the separately transported proof, preserving available empty proofs.
+    pub fn with_dependency_proof(mut self, proof: Option<Bytes>) -> Self {
+        self.dependency_proof = proof;
+        self
+    }
+
+    /// Returns the separately transported dependency proof.
+    pub const fn dependency_proof(&self) -> Option<&Bytes> {
+        self.dependency_proof.as_ref()
     }
 
     /// Returns the built block(sealed)
@@ -207,17 +227,37 @@ impl EthBuiltPayload {
         })
     }
 
+    /// Converts a post-EIP-8288 payload, failing if its supplemental proof is unavailable.
+    pub fn try_into_v7(
+        mut self,
+    ) -> Result<ExecutionPayloadEnvelopeV7, BuiltPayloadConversionError> {
+        let dependency_proof = self
+            .dependency_proof
+            .take()
+            .ok_or(BuiltPayloadConversionError::MissingDependencyProof)?;
+        let envelope = self.try_into_v6()?;
+        Ok(ExecutionPayloadEnvelopeV7 {
+            execution_payload: ExecutionPayloadV5 {
+                payload_inner: envelope.execution_payload,
+                dependency_proof,
+            },
+            block_value: envelope.block_value,
+            blobs_bundle: envelope.blobs_bundle,
+            should_override_builder: envelope.should_override_builder,
+            execution_requests: envelope.execution_requests,
+        })
+    }
+
     /// Converts built payload into [`ExecutionData`].
     pub fn into_execution_data(self) -> ExecutionData {
-        let Self { block, requests, block_access_list, .. } = self;
+        let Self { block, requests, block_access_list, dependency_proof, .. } = self;
         let block_hash = block.hash();
         let block = Arc::unwrap_or_clone(block).into_block();
 
-        let (payload, sidecar) = ExecutionPayload::from_block_unchecked_with_extras(
-            block_hash,
-            &block,
-            block_access_list,
-        );
+        let mut extras = PayloadExtras::from(block_access_list);
+        extras.dependency_proof = dependency_proof;
+        let (payload, sidecar) =
+            ExecutionPayload::from_block_unchecked_with_extras(block_hash, &block, extras);
 
         let sidecar = if let Some(requests) = requests {
             block.header.parent_beacon_block_root.map_or(sidecar, |parent_beacon_block_root| {
@@ -415,6 +455,13 @@ impl From<alloc::vec::IntoIter<BlobTransactionSidecar>> for BlobSidecars {
 impl From<alloc::vec::IntoIter<BlobTransactionSidecarEip7594>> for BlobSidecars {
     fn from(value: alloc::vec::IntoIter<BlobTransactionSidecarEip7594>) -> Self {
         value.collect::<Vec<_>>().into()
+    }
+}
+
+impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV7 {
+    type Error = BuiltPayloadConversionError;
+    fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
+        value.try_into_v7()
     }
 }
 
