@@ -108,7 +108,10 @@ impl DedicatedThreadPool {
         let shared = Arc::clone(&self.shared);
         let handle = thread::Builder::new()
             .name(format!("{}-{index:02}", self.thread_name_prefix))
-            .spawn(move || shared.run())
+            .spawn(move || {
+                crate::utils::decrease_thread_priority();
+                shared.run()
+            })
             .unwrap_or_else(|err| {
                 panic!("failed to spawn {} thread: {err}", self.thread_name_prefix)
             });

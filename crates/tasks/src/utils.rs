@@ -34,6 +34,21 @@ pub fn increase_thread_priority() {
     }
 }
 
+/// Lowers the current thread's priority to nice 10 on Linux, so CPU-heavy background work
+/// (proof workers, the global rayon pool) yields to latency-sensitive threads such as the
+/// payload builder, the engine, RPC and transaction pool validation. No-op elsewhere.
+#[allow(clippy::missing_const_for_fn)]
+pub fn decrease_thread_priority() {
+    #[cfg(target_os = "linux")]
+    // SAFETY: setpriority on the calling thread's TID is always valid.
+    unsafe {
+        let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;
+        if libc::setpriority(libc::PRIO_PROCESS, tid, 10) != 0 {
+            tracing::debug!(err = %std::io::Error::last_os_error(), "failed to lower thread priority");
+        }
+    }
+}
+
 /// Deprioritizes known background threads spawned by third-party libraries (`tracing-appender`,
 /// `reqwest`) by scanning `/proc/<pid>/task/` for matching thread names and setting `SCHED_IDLE`
 /// scheduling policy on them.
