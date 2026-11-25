@@ -30,6 +30,7 @@ use reth_execution_types::BundleSource;
 use reth_primitives_traits::{BlockBody, BlockTy, Recovered, RecoveredBlock};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
+    block_overrides::ensure_no_post_merge_difficulty_override,
     cache::db::{
         apply_block_overrides, apply_state_overrides, apply_state_overrides_with_state,
         attach_bal_before_tx,
@@ -124,6 +125,23 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                     chain_id,
                     max_simulate_blocks,
                 )?;
+
+                // `sanitize_chain` set the number of every simulated block, and the fork rules of
+                // that number apply to the block, so a run can cross the merge.
+                let chain_spec = this.provider().chain_spec();
+                for block_overrides in
+                    block_state_calls.iter().filter_map(|block| block.block_overrides.as_ref())
+                {
+                    let number = block_overrides.number.map_or_else(
+                        || parent.number().saturating_add(1),
+                        |number| number.saturating_to(),
+                    );
+                    ensure_no_post_merge_difficulty_override(
+                        &*chain_spec,
+                        number,
+                        block_overrides,
+                    )?;
+                }
 
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());

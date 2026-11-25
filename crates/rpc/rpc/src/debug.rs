@@ -34,9 +34,13 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    AsEthApiError, CallManyRequest, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
+    AsEthApiError, CallManyRequest, DebugTraceCallOptions, FromEthApiError, FromEvmError,
+    RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::{utils::CallManyBudget, EthApiError, StateCacheDb};
+use reth_rpc_eth_types::{
+    block_overrides::ensure_no_post_merge_difficulty_override, utils::CallManyBudget, EthApiError,
+    StateCacheDb,
+};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
@@ -460,23 +464,37 @@ where
         let interrupt = JsTraceInterrupt::new(&tracing_options)?;
         let tracer_interrupt = interrupt.clone();
         let this = self.clone();
-        let trace =
-            self.eth_api().spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                let inspector =
-                    new_debug_inspector(tracing_options).map_err(Eth::Error::from_eth_err)?;
-                let limits = ResponseBudget::new(
-                    &inspector,
-                    this.eth_api().eth_api_settings().max_response_size,
-                )
-                .limit(this.eth_api().trace_limits());
-                let inspector = tracer_interrupt.attach(inspector.with_limits(limits));
-                let (mut inspector, res) =
-                    this.eth_api().inspect(&mut *db, evm_env.clone(), &tx_env, inspector)?;
-                let trace = inspector
-                    .get_trace(None, &tx_env, evm_env.block_env(), &res, db)
-                    .map_err(Eth::Error::from_eth_err)?;
-                Ok(trace)
-            });
+        let trace = async {
+            if let Some(block_overrides) = overrides.block.as_deref() &&
+                block_overrides.difficulty.is_some()
+            {
+                // The env before overrides is the block the call executes against.
+                let (evm_env, _) = self.eth_api().evm_env_at(at).await?;
+                ensure_no_post_merge_difficulty_override(
+                    &*self.provider().chain_spec(),
+                    evm_env.block_env().number.saturating_to(),
+                    block_overrides,
+                )?;
+            }
+            self.eth_api()
+                .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
+                    let inspector =
+                        new_debug_inspector(tracing_options).map_err(Eth::Error::from_eth_err)?;
+                    let limits = ResponseBudget::new(
+                        &inspector,
+                        this.eth_api().eth_api_settings().max_response_size,
+                    )
+                    .limit(this.eth_api().trace_limits());
+                    let inspector = tracer_interrupt.attach(inspector.with_limits(limits));
+                    let (mut inspector, res) =
+                        this.eth_api().inspect(&mut *db, evm_env.clone(), &tx_env, inspector)?;
+                    let trace = inspector
+                        .get_trace(None, &tx_env, evm_env.block_env(), &res, db)
+                        .map_err(Eth::Error::from_eth_err)?;
+                    Ok(trace)
+                })
+                .await
+        };
         interrupt.run(trace).await.map_err(|err| match err.as_err() {
             Some(EthApiError::HeaderNotFound(id)) if *id == at => {
                 // Unknown blocks use -32000: https://github.com/ethereum/execution-apis/pull/855
@@ -512,6 +530,14 @@ where
                 block.transaction_count()
             ))
             .into())
+        }
+
+        if let Some(block_overrides) = overrides.block.as_deref() {
+            ensure_no_post_merge_difficulty_override(
+                &*self.provider().chain_spec(),
+                block.number(),
+                block_overrides,
+            )?;
         }
 
         // state overrides commit changes to the database, which an attached BAL would take read
@@ -1303,12 +1329,12 @@ where
         &self,
         request: RpcTxReq<Eth::NetworkTypes>,
         block_id: Option<BlockId>,
-        opts: Option<GethDebugTracingCallOptions>,
+        opts: Option<DebugTraceCallOptions>,
     ) -> RpcResult<DebugTrace> {
+        // Malformed options are rejected without waiting for a tracing permit.
+        let opts = opts.map(DebugTraceCallOptions::into_inner).transpose()?.unwrap_or_default();
         let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_call(self, request, block_id, opts.unwrap_or_default())
-            .await
-            .map_err(Into::into)
+        Self::debug_trace_call(self, request, block_id, opts).await.map_err(Into::into)
     }
 
     async fn debug_trace_call_many(
@@ -1820,7 +1846,7 @@ mod tests {
                 &debug_api,
                 Default::default(),
                 Some(block_id),
-                Some(opts),
+                Some(opts.into()),
             )
             .await
             .unwrap_err();
