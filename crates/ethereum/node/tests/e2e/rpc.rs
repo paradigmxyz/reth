@@ -339,6 +339,9 @@ async fn test_debug_trace_block_exceeds_max_response_size() -> eyre::Result<()> 
     let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
         .with_rpc_modifier(|mut rpc| {
             rpc.rpc_max_response_size = 1.into();
+            // The trace byte limit defaults to twice the response limit, so turn it off to hit the
+            // response limit.
+            rpc.rpc_max_trace_bytes = Some(0);
             rpc
         })
         .build_single()
