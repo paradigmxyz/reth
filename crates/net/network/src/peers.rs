@@ -121,6 +121,9 @@ pub struct PeersManager {
     peer_rotation_mean: Option<Duration>,
     /// Discovered peers skipped because the peer set was full, oldest first.
     candidates: LruMap<PeerId, (PeerAddr, Option<ForkId>)>,
+    /// Whether the last dial of an untrusted peer went to a candidate, so the next one goes to a
+    /// tracked peer.
+    candidate_dialed_last: bool,
 }
 
 impl PeersManager {
@@ -261,6 +264,7 @@ impl PeersManager {
                 .map(|mean| Box::pin(tokio::time::sleep(jitter_rotation_interval(mean)))),
             peer_rotation_mean: peer_rotation_interval,
             candidates: LruMap::new(MAX_PEER_CANDIDATES),
+            candidate_dialed_last: false,
         }
     }
 
@@ -1374,18 +1378,32 @@ impl PeersManager {
             return
         }
 
-        // Candidates get one dial per fill, so tracked peers that keep failing cannot starve them.
-        if !self.trusted_nodes_only && self.connection_info.has_out_capacity() {
-            self.dial_candidate();
-        }
-
         // as long as there are slots available fill them with the best peers
         while self.connection_info.has_out_dial_capacity() {
             // Trusted peers are dialed even when all outbound slots are taken, so discovered
             // peers can never crowd them out; only the concurrent dial limit applies to them.
             let has_out_capacity = self.connection_info.has_out_capacity();
+            let best = self
+                .best_unconnected(!has_out_capacity)
+                .map(|(peer_id, peer)| (peer_id, peer.is_trusted() || peer.is_static()));
+            let prioritized = best.is_some_and(|(_, prioritized)| prioritized);
+            // After trusted and static peers, candidates and tracked peers take turns, so neither
+            // can starve the other.
+            if !prioritized &&
+                (!self.candidate_dialed_last || best.is_none()) &&
+                has_out_capacity &&
+                !self.trusted_nodes_only &&
+                self.dial_candidate()
+            {
+                self.candidate_dialed_last = true;
+                continue
+            }
+            let Some((peer_id, _)) = best else { break };
+            if !prioritized {
+                self.candidate_dialed_last = false;
+            }
             let action = {
-                let Some((peer_id, peer)) = self.best_unconnected(!has_out_capacity) else { break };
+                let Some(peer) = self.peers.get_mut(&peer_id) else { break };
 
                 trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "schedule outbound connection");
 
@@ -1400,7 +1418,9 @@ impl PeersManager {
     }
 
     /// Dials the oldest dial candidate, tracking it only until its session ends.
-    fn dial_candidate(&mut self) {
+    ///
+    /// Returns `false` if no candidate can be dialed.
+    fn dial_candidate(&mut self) -> bool {
         while let Some((peer_id, (addr, fork_id))) = self.candidates.pop_oldest() {
             // it may have been added, backed off or banned since it was queued
             if self.peers.contains_key(&peer_id) ||
@@ -1419,8 +1439,9 @@ impl PeersManager {
             self.connection_info.inc_pending_out();
             self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
             self.queued_actions.push_back(PeerAction::Connect { peer_id, remote_addr: addr.tcp() });
-            return
+            return true
         }
+        false
     }
 
     fn on_resolved_peer(&mut self, peer_id: PeerId, new_record: NodeRecord) {
@@ -4959,26 +4980,71 @@ mod tests {
         assert!(peers.candidates.contains(&first));
         peers.connection_info.num_outbound = 0;
 
-        // one candidate is dialed before tracked peers, skipping one banned since it was queued
+        // candidates are dialed, skipping one banned since it was queued
         assert_eq!(first_dial(&mut peers), Some(first));
-        assert!(!peers.candidates.contains(&banned));
-        assert!(peers.candidates.contains(&second));
+        assert!(!peers.peers.contains_key(&banned));
+        assert!(peers.candidates.is_empty());
         let peer = &peers.peers[&first];
         assert!(peer.state.is_pending_out());
         assert!(peer.remove_after_disconnect);
 
-        // a failed dial drops it, and the freed slot dials the next candidate
+        // a failed dial drops it
         peers.on_outgoing_pending_session_dropped(
             &addr.tcp(),
             &first,
             &PendingSessionHandshakeError::Timeout,
         );
         assert!(!peers.peers.contains_key(&first));
-        assert!(peers.peers[&second].state.is_pending_out());
 
         // the set is still full, so a session keeps it only until the session ends
         peers.on_active_outgoing_established(second);
         assert!(peers.peers[&second].remove_after_disconnect);
+    }
+
+    #[tokio::test]
+    async fn test_single_dial_slot_shared_by_candidates_and_tracked_peers() {
+        let mut peers = PeersManager::new(PeersConfig::test().with_max_concurrent_dials(1));
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        for _ in 0..MAX_TRACKED_PEERS {
+            peers.add_peer(PeerId::random(), addr, None);
+        }
+        let candidates = (0..4).map(|_| PeerId::random()).collect::<Vec<_>>();
+        for &candidate in &candidates {
+            peers.add_peer(candidate, addr, None);
+        }
+        // each refill gets the one dial slot, which is freed again once the dial ends
+        let dial_next = |peers: &mut PeersManager| {
+            peers.queued_actions.clear();
+            peers.fill_outbound_slots();
+            let peer_id = peers
+                .queued_actions
+                .iter()
+                .find_map(|action| match action {
+                    PeerAction::Connect { peer_id, .. } => Some(*peer_id),
+                    _ => None,
+                })
+                .unwrap();
+            peers.on_outgoing_pending_session_gracefully_closed(&peer_id);
+            peer_id
+        };
+
+        let dialed_candidates =
+            (0..4).map(|_| candidates.contains(&dial_next(&mut peers))).collect::<Vec<_>>();
+        assert_eq!(dialed_candidates, [true, false, true, false]);
+
+        // a trusted peer still goes first on a candidate's turn, and leaves the turn as it was
+        let trusted = PeerId::random();
+        peers.add_trusted_peer(trusted, addr);
+        assert_eq!(dial_next(&mut peers), trusted);
+        peers.peers.get_mut(&trusted).unwrap().backed_off = true;
+        assert!(candidates.contains(&dial_next(&mut peers)));
+
+        // likewise on a tracked peer's turn
+        let trusted = PeerId::random();
+        peers.add_trusted_peer(trusted, addr);
+        assert_eq!(dial_next(&mut peers), trusted);
+        peers.peers.get_mut(&trusted).unwrap().backed_off = true;
+        assert!(!candidates.contains(&dial_next(&mut peers)));
     }
 
     #[tokio::test]
