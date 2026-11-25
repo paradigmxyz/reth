@@ -52,6 +52,9 @@ const MAX_INCOMING_IP_THROTTLE_ENTRIES: u32 = 16_384;
 /// without bound.
 const MAX_TRACKED_PEERS: usize = 10_000;
 
+/// Maximum number of discovered peers kept as dial candidates while the peer set is full.
+const MAX_PEER_CANDIDATES: u32 = 1_024;
+
 /// Maintains the state of _all_ the peers known to the network.
 ///
 /// This is supposed to be owned by the network itself, but can be reached via the [`PeersHandle`].
@@ -116,6 +119,8 @@ pub struct PeersManager {
     peer_rotation_sleep: Option<Pin<Box<Sleep>>>,
     /// Mean duration for computing jittered rotation intervals. `None` when rotation is disabled.
     peer_rotation_mean: Option<Duration>,
+    /// Discovered peers skipped because the peer set was full, oldest first.
+    candidates: LruMap<PeerId, (PeerAddr, Option<ForkId>)>,
 }
 
 impl PeersManager {
@@ -255,6 +260,7 @@ impl PeersManager {
             peer_rotation_sleep: peer_rotation_interval
                 .map(|mean| Box::pin(tokio::time::sleep(jitter_rotation_interval(mean)))),
             peer_rotation_mean: peer_rotation_interval,
+            candidates: LruMap::new(MAX_PEER_CANDIDATES),
         }
     }
 
@@ -951,12 +957,16 @@ impl PeersManager {
 
     /// Called for a newly discovered peer.
     ///
-    /// If the peer already exists, then the address, kind and `fork_id` will be updated. A new
-    /// untrusted peer is skipped once [`MAX_TRACKED_PEERS`] peers are tracked, so it never pushes
-    /// out an existing one.
+    /// If the peer already exists, then the address, kind and `fork_id` will be updated. Once
+    /// [`MAX_TRACKED_PEERS`] peers are tracked, a new untrusted peer is queued as a dial candidate
+    /// instead, so it never pushes out an existing one.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId>) {
         if self.is_full_for(&peer_id) {
-            trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "Skipping discovered peer, peer set is full");
+            let ip = addr.tcp().ip();
+            if self.ip_filter.is_allowed(&ip) && !self.ban_list.is_banned(&peer_id, &ip) {
+                trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "Queueing discovered peer as a candidate, peer set is full");
+                self.candidates.insert(peer_id, (addr, fork_id));
+            }
             return
         }
         self.add_peer_kind(peer_id, None, addr, fork_id)
@@ -4827,6 +4837,38 @@ mod tests {
         assert_eq!(discover_inbound([5, 6, 7, 8]), (false, MAX_TRACKED_PEERS));
         // a full set leaves it tracked only for its session
         assert_eq!(discover_inbound([5, 6, 7, 9]), (true, MAX_TRACKED_PEERS + 1));
+    }
+
+    #[tokio::test]
+    async fn test_full_set_queues_discovered_peers() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        for _ in 0..MAX_TRACKED_PEERS {
+            peers.add_peer(PeerId::random(), addr, None);
+        }
+
+        let candidate = PeerId::random();
+        peers.add_peer(candidate, addr, None);
+        assert!(!peers.peers.contains_key(&candidate));
+        assert!(peers.candidates.contains(&candidate));
+
+        // banned and filtered peers are never queued
+        let banned = PeerId::random();
+        peers.ban_list.ban_peer(banned);
+        peers.add_peer(banned, addr, None);
+        assert!(!peers.candidates.contains(&banned));
+        peers.ip_filter = IpFilter::from_cidr_string("1.2.3.0/24").unwrap();
+        let filtered = PeerId::random();
+        peers.add_peer(filtered, PeerAddr::from_tcp("5.6.7.8:30303".parse().unwrap()), None);
+        assert!(!peers.candidates.contains(&filtered));
+
+        // the queue keeps the newest candidates
+        for _ in 0..MAX_PEER_CANDIDATES {
+            peers.add_peer(PeerId::random(), addr, None);
+        }
+        assert_eq!(peers.candidates.len(), MAX_PEER_CANDIDATES as usize);
+        assert!(!peers.candidates.contains(&candidate));
+        assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS);
     }
 
     #[tokio::test]
