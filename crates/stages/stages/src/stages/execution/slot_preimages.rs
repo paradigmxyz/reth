@@ -250,10 +250,11 @@ mod tests {
         models::{BlockNumberAddress, StoredBlockBodyIndices},
         transaction::DbTxMut,
     };
-    use reth_primitives_traits::StorageEntry;
+    use reth_primitives_traits::{SealedHeader, StorageEntry};
     use reth_provider::{
-        test_utils::create_test_provider_factory, OriginalValuesKnown, StateWriter,
-        StaticFileProviderFactory, StaticFileWriter, StorageSettings, StorageSettingsCache,
+        test_utils::{create_test_provider_factory, insert_headers},
+        OriginalValuesKnown, StateWriter, StaticFileProviderFactory, StaticFileWriter,
+        StorageSettings, StorageSettingsCache,
     };
     use reth_static_file_types::StaticFileSegment;
     use reth_storage_api::{StateWriteConfig, StorageChangeSetReader};
@@ -263,14 +264,14 @@ mod tests {
     fn inject_plain_wipe_slots_skips_missing_preimages() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
+        insert_headers(
+            &factory,
+            &[0, 1].map(|number| {
+                SealedHeader::seal_slow(alloy_consensus::Header { number, ..Default::default() })
+            }),
+        );
         {
             let sf = factory.static_file_provider();
-            let mut headers = sf.latest_writer(StaticFileSegment::Headers).unwrap();
-            for number in 0..=1 {
-                let header = alloy_consensus::Header { number, ..Default::default() };
-                headers.append_header(&header, &B256::ZERO).unwrap();
-            }
-            headers.commit().unwrap();
             let mut accounts = sf.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
             accounts.append_account_changeset(vec![], 0).unwrap();
             accounts.commit().unwrap();

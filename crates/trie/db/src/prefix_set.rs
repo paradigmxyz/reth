@@ -98,24 +98,22 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::U256;
     use reth_db_api::{models::StorageSettings, transaction::DbTxMut};
-    use reth_primitives_traits::StorageEntry;
+    use reth_primitives_traits::{SealedHeader, StorageEntry};
     use reth_provider::{
-        test_utils::create_test_provider_factory, StaticFileProviderFactory, StaticFileSegment,
-        StaticFileWriter, StorageSettingsCache,
+        test_utils::{create_test_provider_factory, insert_headers},
+        StaticFileProviderFactory, StaticFileSegment, StaticFileWriter, StorageSettingsCache,
     };
 
     #[test]
     fn load_prefix_sets_includes_storage_wipe_changesets() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
+        insert_headers(
+            &factory,
+            &[0, 1].map(|number| SealedHeader::seal_slow(Header { number, ..Default::default() })),
+        );
         {
             let sf = factory.static_file_provider();
-            let mut headers = sf.latest_writer(StaticFileSegment::Headers).unwrap();
-            for number in 0..=1 {
-                let header = Header { number, ..Default::default() };
-                headers.append_header(&header, &B256::ZERO).unwrap();
-            }
-            headers.commit().unwrap();
             let mut accounts = sf.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
             let mut storages = sf.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
             for block in 0..=1 {

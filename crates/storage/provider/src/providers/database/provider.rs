@@ -4493,7 +4493,7 @@ mod tests {
         test_utils::{
             blocks::BlockchainTestData, create_test_provider_factory,
             create_test_provider_factory_with_chain_spec_and_db_args,
-            create_test_provider_factory_with_in_memory_state_writer,
+            create_test_provider_factory_with_in_memory_state_writer, insert_headers,
         },
         BlockWriter,
     };
@@ -6800,14 +6800,12 @@ mod tests {
         let [k1, k2, k3] = [1u64, 2, 3].map(U256::from);
         let hashed_slot = |slot: U256| keccak256(B256::from(slot));
 
+        insert_headers(
+            &factory,
+            &[0, 1].map(|number| SealedHeader::seal_slow(Header { number, ..Default::default() })),
+        );
         {
             let sf = factory.static_file_provider();
-            let mut headers = sf.latest_writer(StaticFileSegment::Headers).unwrap();
-            for number in 0..=1 {
-                let header = Header { number, ..Default::default() };
-                headers.append_header(&header, &B256::ZERO).unwrap();
-            }
-            headers.commit().unwrap();
             let mut accounts = sf.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
             accounts.append_account_changeset(vec![], 0).unwrap();
             accounts.commit().unwrap();
@@ -6926,14 +6924,12 @@ mod tests {
         let address = Address::with_last_byte(1);
         let hashed_address = keccak256(address);
         let [k1, k2, k3] = [1, 2, 3].map(B256::with_last_byte);
+        insert_headers(
+            &factory,
+            &[0, 1].map(|number| SealedHeader::seal_slow(Header { number, ..Default::default() })),
+        );
         {
             let sf = factory.static_file_provider();
-            let mut headers = sf.latest_writer(StaticFileSegment::Headers).unwrap();
-            for number in 0..=1 {
-                let header = Header { number, ..Default::default() };
-                headers.append_header(&header, &B256::ZERO).unwrap();
-            }
-            headers.commit().unwrap();
             let mut storages = sf.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
             storages.append_storage_changeset(vec![], 0).unwrap();
             storages
