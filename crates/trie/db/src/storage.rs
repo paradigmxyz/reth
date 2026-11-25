@@ -1,6 +1,6 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, TrieTableAdapter};
 use alloy_primitives::{keccak256, map::hash_map, Address, BlockNumber, B256};
-use reth_db_api::{models::BlockNumberAddress, transaction::DbTx};
+use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StorageRootError;
 use reth_storage_api::{BlockNumReader, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
@@ -44,14 +44,24 @@ where
         return Ok(storage)
     }
 
-    for (BlockNumberAddress((_, storage_address)), storage_change) in
-        provider.storage_changesets_range(from..=tip)?
-    {
-        if storage_address == address {
-            let hashed_slot = keccak256(storage_change.key);
-            if let hash_map::Entry::Vacant(entry) = storage.storage.entry(hashed_slot) {
-                entry.insert(storage_change.value);
-            }
+    // Storage wipe changesets are keyed by hashed slot. A stable sort by block keeps the oldest
+    // value of each slot first.
+    let mut changesets = provider
+        .storage_changesets_range(from..=tip)?
+        .into_iter()
+        .map(|(key, entry)| (key, keccak256(entry.key), entry.value))
+        .chain(
+            provider
+                .storage_wipe_changesets_range(from..=tip)?
+                .into_iter()
+                .map(|(key, entry)| (key, entry.key, entry.value)),
+        )
+        .filter(|(key, _, _)| key.address() == address)
+        .collect::<Vec<_>>();
+    changesets.sort_by_key(|(key, _, _)| key.block_number());
+    for (_, hashed_slot, value) in changesets {
+        if let hash_map::Entry::Vacant(entry) = storage.storage.entry(hashed_slot) {
+            entry.insert(value);
         }
     }
 
@@ -233,5 +243,47 @@ mod tests {
         assert_eq!(result.storage.len(), 2);
         assert_eq!(result.storage.get(&hashed_slot1), Some(&U256::from(10)));
         assert_eq!(result.storage.get(&hashed_slot2), Some(&U256::from(20)));
+    }
+
+    #[test]
+    fn hashed_storage_from_reverts_includes_storage_wipe_changesets() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let provider = factory.provider_rw().unwrap();
+
+        let address = Address::with_last_byte(42);
+        let [slot1, slot2, slot3] = [1, 2, 3].map(B256::with_last_byte);
+        let [hashed_slot1, hashed_slot2, hashed_slot3] = [slot1, slot2, slot3].map(keccak256);
+
+        append_headers_to_static_files(&factory, 5);
+        append_storage_changesets_to_static_files(
+            &factory,
+            vec![
+                (0, vec![]),
+                (1, vec![StorageBeforeTx { address, key: slot1, value: U256::from(10) }]),
+                (2, vec![]),
+                (3, vec![StorageBeforeTx { address, key: slot2, value: U256::from(999) }]),
+            ],
+        );
+        // Block 2 wipes the storage. Its row for `slot1` is newer than the changeset of block 1.
+        for (key, value) in [(hashed_slot1, 77), (hashed_slot2, 20), (hashed_slot3, 30)] {
+            provider
+                .tx_ref()
+                .put::<tables::StorageWipeChangeSets>(
+                    BlockNumberAddress((2, address)),
+                    StorageEntry { key, value: U256::from(value) },
+                )
+                .unwrap();
+        }
+
+        let result = hashed_storage_from_reverts_with_provider(&*provider, address, 1).unwrap();
+
+        assert_eq!(
+            result.storage,
+            [(hashed_slot1, 10), (hashed_slot2, 20), (hashed_slot3, 30)]
+                .map(|(slot, value)| (slot, U256::from(value)))
+                .into_iter()
+                .collect()
+        );
     }
 }
