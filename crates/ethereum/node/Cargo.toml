@@ -62,7 +62,6 @@ tokio-util.workspace = true
 # misc
 eyre.workspace = true
 ethereum_ssz.workspace = true
-ethereum_ssz_derive.workspace = true
 futures.workspace = true
 http-body-util.workspace = true
 serde.workspace = true

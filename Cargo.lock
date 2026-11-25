@@ -132,8 +132,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "2.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14a6f58e6e1920e30ad8caa773640d83b46e6d721130ea8dd3a4b1a73f8e48a0"
+source = "git+https://github.com/alloy-rs/alloy?rev=9460a69371c1e461ebe9c1a2cf809758cd17874e#9460a69371c1e461ebe9c1a2cf809758cd17874e"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -292,8 +291,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "2.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a015a82258c0f2dc5f1ba674e5097c06c96e8a671c4844ff34d61cccdd56b3b2"
+source = "git+https://github.com/alloy-rs/alloy?rev=9460a69371c1e461ebe9c1a2cf809758cd17874e#9460a69371c1e461ebe9c1a2cf809758cd17874e"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -682,8 +680,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-engine"
 version = "2.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8043ac87b7bc19367bd62050c35ea488bf5fc726c870dcf5fcfbab6c1b365720"
+source = "git+https://github.com/alloy-rs/alloy?rev=9460a69371c1e461ebe9c1a2cf809758cd17874e#9460a69371c1e461ebe9c1a2cf809758cd17874e"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -767,8 +764,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "2.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0713ee2bdfe6b0cf6cbee80f064cc9568686bb44f4270d276743bc10df913903"
+source = "git+https://github.com/alloy-rs/alloy?rev=9460a69371c1e461ebe9c1a2cf809758cd17874e#9460a69371c1e461ebe9c1a2cf809758cd17874e"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -984,8 +980,7 @@ dependencies = [
 [[package]]
 name = "alloy-tx-macros"
 version = "2.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a89e6e72b2b5dfe1dada730f328fb19beac35e90955acb3fd2c3f194fff9d69d"
+source = "git+https://github.com/alloy-rs/alloy?rev=9460a69371c1e461ebe9c1a2cf809758cd17874e#9460a69371c1e461ebe9c1a2cf809758cd17874e"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -9799,7 +9794,6 @@ dependencies = [
  "alloy-sol-types",
  "enr",
  "ethereum_ssz",
- "ethereum_ssz_derive",
  "evm2",
  "eyre",
  "futures",

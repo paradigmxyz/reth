@@ -4,9 +4,7 @@
 //!
 //! [EIP-8178]: https://eips.ethereum.org/EIPS/eip-8178
 
-use crate::engine_ssz_witness::{
-    BuiltPayloadWithWitness, EngineSszWitness, PayloadStatusWithWitness,
-};
+use crate::engine_ssz_witness::EngineSszWitness;
 use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Bytes, B128, B256};
@@ -15,14 +13,15 @@ use alloy_rpc_types_engine::{
         BlobsV1Request, BlobsV1Response, BlobsV2Response, BlobsV3Response, BlobsV4Request,
         BlobsV4Response, BodiesByHashRequest, BodiesResponse, BuiltPayloadAmsterdam,
         BuiltPayloadOsaka, BuiltPayloadParis, BuiltPayloadPrague, BuiltPayloadShanghai,
-        ExecutionPayloadBodyAmsterdam, ExecutionPayloadBodyParis, ExecutionPayloadBodyShanghai,
-        ExecutionPayloadEnvelopeAmsterdam, ExecutionPayloadEnvelopeCancun,
-        ExecutionPayloadEnvelopeOsaka, ExecutionPayloadEnvelopeParis,
-        ExecutionPayloadEnvelopePrague, ExecutionPayloadEnvelopeShanghai,
-        ForkchoiceUpdateAmsterdam, ForkchoiceUpdateCancun, ForkchoiceUpdateOsaka,
-        ForkchoiceUpdateParis, ForkchoiceUpdatePrague, ForkchoiceUpdateResponse,
-        ForkchoiceUpdateShanghai, Optional, PayloadStatus as EngineSszPayloadStatus,
-        PayloadStatusKind, MAX_BLOBS_REQUEST, MAX_BODIES_REQUEST, MAX_ERROR_BYTES,
+        BuiltPayloadWithWitness, ExecutionPayloadBodyAmsterdam, ExecutionPayloadBodyParis,
+        ExecutionPayloadBodyShanghai, ExecutionPayloadEnvelopeAmsterdam,
+        ExecutionPayloadEnvelopeCancun, ExecutionPayloadEnvelopeOsaka,
+        ExecutionPayloadEnvelopeParis, ExecutionPayloadEnvelopePrague,
+        ExecutionPayloadEnvelopeShanghai, ForkchoiceUpdateAmsterdam, ForkchoiceUpdateCancun,
+        ForkchoiceUpdateOsaka, ForkchoiceUpdateParis, ForkchoiceUpdatePrague,
+        ForkchoiceUpdateResponse, ForkchoiceUpdateShanghai, Optional,
+        PayloadStatus as EngineSszPayloadStatus, PayloadStatusKind, PayloadStatusWithWitness,
+        MAX_BLOBS_REQUEST, MAX_BODIES_REQUEST, MAX_ERROR_BYTES,
     },
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadBodyV1,
     ExecutionPayloadFieldV2, ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes,
