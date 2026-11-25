@@ -982,11 +982,18 @@ impl PeersManager {
     ///
     /// If the peer already exists, then the address, kind and `fork_id` will be updated. Once
     /// [`MAX_TRACKED_PEERS`] peers are tracked, a new untrusted peer is queued as a dial candidate
-    /// instead, so it never pushes out an existing one.
+    /// instead, so it never pushes out an existing one. Only one candidate is queued per IP.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId>) {
         if self.is_full_for(&peer_id) {
             let ip = addr.tcp().ip();
-            if self.ip_filter.is_allowed(&ip) && !self.ban_list.is_banned(&peer_id, &ip) {
+            if self.ip_filter.is_allowed(&ip) &&
+                !self.ban_list.is_banned(&peer_id, &ip) &&
+                // One candidate per IP, so a single host announcing many identities cannot fill
+                // the queue and take the candidates' share of dials.
+                !self.candidates.iter().any(|(id, candidate)| {
+                    id != &peer_id && candidate.addr.tcp().ip() == ip
+                })
+            {
                 trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "Queueing discovered peer as a candidate, peer set is full");
                 self.candidates.insert(peer_id, PeerCandidate { addr, fork_id });
             }
@@ -1867,6 +1874,12 @@ mod tests {
     /// Polls the manager once without waiting for an action.
     fn poll_now(peers: &mut PeersManager) -> Poll<PeerAction> {
         peers.poll(&mut Context::from_waker(Waker::noop()))
+    }
+
+    /// Returns an address on its own IP for each `index`, as candidates are queued one per IP.
+    fn unique_ip_addr(index: u16) -> PeerAddr {
+        let [high, low] = index.to_be_bytes();
+        PeerAddr::from_tcp(SocketAddr::from(([10, 0, high, low], 30303)))
     }
 
     #[tokio::test]
@@ -5038,23 +5051,24 @@ mod tests {
 
         // removing it, as on a fork mismatch, drops it from the queue
         let removed = PeerId::random();
-        peers.add_peer(removed, addr, None);
+        peers.add_peer(removed, unique_ip_addr(0), None);
         peers.remove_peer(removed);
         assert!(!peers.candidates.contains(&removed));
 
         // banned and filtered peers are never queued
         let banned = PeerId::random();
         peers.ban_list.ban_peer(banned);
-        peers.add_peer(banned, addr, None);
+        peers.add_peer(banned, unique_ip_addr(1), None);
         assert!(!peers.candidates.contains(&banned));
         peers.ip_filter = IpFilter::from_cidr_string("1.2.3.0/24").unwrap();
         let filtered = PeerId::random();
         peers.add_peer(filtered, PeerAddr::from_tcp("5.6.7.8:30303".parse().unwrap()), None);
         assert!(!peers.candidates.contains(&filtered));
+        peers.ip_filter = IpFilter::allow_all();
 
         // the queue keeps the newest candidates
-        for _ in 0..MAX_PEER_CANDIDATES {
-            peers.add_peer(PeerId::random(), addr, None);
+        for index in 0..MAX_PEER_CANDIDATES as u16 {
+            peers.add_peer(PeerId::random(), unique_ip_addr(index), None);
         }
         assert_eq!(peers.candidates.len(), MAX_PEER_CANDIDATES as usize);
         assert!(!peers.candidates.contains(&candidate));
@@ -5068,8 +5082,8 @@ mod tests {
             peers.add_peer(PeerId::random(), addr, None);
         }
         let [banned, first, second] = [PeerId::random(), PeerId::random(), PeerId::random()];
-        for candidate in [banned, first, second] {
-            peers.add_peer(candidate, addr, None);
+        for (index, candidate) in (0..).zip([banned, first, second]) {
+            peers.add_peer(candidate, unique_ip_addr(index), None);
         }
         peers.ban_list.ban_peer(banned);
         let first_dial = |peers: &mut PeersManager| {
@@ -5103,7 +5117,7 @@ mod tests {
 
         // a failed dial drops it
         peers.on_outgoing_pending_session_dropped(
-            &addr.tcp(),
+            &unique_ip_addr(1).tcp(),
             &first,
             &PendingSessionHandshakeError::Timeout,
         );
@@ -5123,8 +5137,8 @@ mod tests {
             peers.add_peer(PeerId::random(), addr, None);
         }
         let candidates = (0..4).map(|_| PeerId::random()).collect::<Vec<_>>();
-        for &candidate in &candidates {
-            peers.add_peer(candidate, addr, None);
+        for (index, &candidate) in (0..).zip(&candidates) {
+            peers.add_peer(candidate, unique_ip_addr(index), None);
         }
         // each refill gets the one dial slot, which is freed again once the dial ends
         let dial_next = |peers: &mut PeersManager| {
@@ -5223,8 +5237,8 @@ mod tests {
             peers.add_peer(PeerId::random(), addr, None);
         }
         let [inbound, trusted] = [PeerId::random(), PeerId::random()];
-        peers.add_peer(inbound, addr, None);
-        peers.add_peer(trusted, addr, None);
+        peers.add_peer(inbound, unique_ip_addr(0), None);
+        peers.add_peer(trusted, unique_ip_addr(1), None);
 
         // connected since it was queued
         assert!(peers.on_incoming_pending_session(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8))).is_ok());
@@ -5251,8 +5265,8 @@ mod tests {
             peers.peers.get_mut(&peer_id).unwrap().backed_off = true;
         }
         let [first, second] = [PeerId::random(), PeerId::random()];
-        peers.add_peer(first, addr, None);
-        peers.add_peer(second, addr, None);
+        peers.add_peer(first, unique_ip_addr(0), None);
+        peers.add_peer(second, unique_ip_addr(1), None);
         let tracked = *peers.peers.keys().next().unwrap();
         peers.fill_outbound_slots();
         assert!(peers.peers[&first].state.is_pending_out());
@@ -5299,5 +5313,25 @@ mod tests {
         peers.backoff_peer_until(oldest, std::time::Instant::now() + Duration::from_secs(60));
         assert_eq!(peers.next_candidate().unwrap().0, ready);
         assert_eq!(peers.candidates.peek_oldest().unwrap().0, &oldest);
+    }
+
+    #[tokio::test]
+    async fn test_candidates_queued_once_per_ip() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        for _ in 0..MAX_TRACKED_PEERS {
+            peers.add_peer(PeerId::random(), addr, None);
+        }
+        let [first, same_ip, other_ip] = [PeerId::random(), PeerId::random(), PeerId::random()];
+        peers.add_peer(first, addr, None);
+        peers.add_peer(same_ip, PeerAddr::from_tcp("1.2.3.4:30304".parse().unwrap()), None);
+        peers.add_peer(other_ip, unique_ip_addr(0), None);
+        assert!(!peers.candidates.contains(&same_ip));
+        assert!(peers.candidates.contains(&other_ip));
+
+        // the queued identity can still update its own entry
+        let moved = PeerAddr::from_tcp("1.2.3.4:30305".parse().unwrap());
+        peers.add_peer(first, moved, None);
+        assert_eq!(peers.candidates.peek(&first).unwrap().addr, moved);
     }
 }
