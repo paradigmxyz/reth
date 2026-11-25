@@ -112,7 +112,7 @@ impl Testnet<NoopProvider, TestPool> {
 
 impl<C, Pool> Testnet<C, Pool>
 where
-    C: BlockReader + HeaderProvider + Clone + 'static,
+    C: BlockReader + Clone + 'static,
     Pool: TransactionPool,
 {
     /// Return a mutable slice of all peers.
@@ -328,7 +328,7 @@ pub struct Peer<C, Pool = TestPool> {
 
 impl<C, Pool> Peer<C, Pool>
 where
-    C: BlockReader + HeaderProvider + Clone + 'static,
+    C: BlockReader + Clone + 'static,
     Pool: TransactionPool,
 {
     /// Returns the number of connected peers.
@@ -382,8 +382,7 @@ where
     {
         let (tx, rx) = channel(ETH_REQUEST_CHANNEL_CAPACITY);
         self.network.set_eth_request_handler(tx);
-        let peers = self.network.peers_handle();
-        let request_handler = EthRequestHandler::new(self.client.clone(), peers, rx);
+        let request_handler = EthRequestHandler::new(self.client.clone(), rx);
         self.request_handler = Some(request_handler);
     }
 
@@ -678,10 +677,10 @@ pub trait TestnetProvider:
         Block = reth_ethereum_primitives::Block,
         Receipt = reth_ethereum_primitives::Receipt,
         Header = alloy_consensus::Header,
-    > + HeaderProvider
-    + BalProvider
+    > + BalProvider
     + StateProviderFactory
     + StateRangeProviderFactory
+    + Clone
     + Unpin
     + 'static
 {
@@ -692,10 +691,10 @@ impl<T> TestnetProvider for T where
             Block = reth_ethereum_primitives::Block,
             Receipt = reth_ethereum_primitives::Receipt,
             Header = alloy_consensus::Header,
-        > + HeaderProvider
-        + BalProvider
+        > + BalProvider
         + StateProviderFactory
         + StateRangeProviderFactory
+        + Clone
         + Unpin
         + 'static
 {

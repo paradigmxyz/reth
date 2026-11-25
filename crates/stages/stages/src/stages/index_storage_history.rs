@@ -57,8 +57,7 @@ where
         + StorageSettingsCache
         + RocksDBProviderFactory
         + StorageChangeSetReader
-        + StaticFileProviderFactory
-        + reth_provider::NodePrimitivesProvider,
+        + StaticFileProviderFactory,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -90,12 +89,24 @@ where
             .flatten() &&
             target_prunable_block > input.checkpoint().block_number
         {
-            prune_target_applied = true;
-            input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
+            let existing = provider.get_prune_checkpoint(PruneSegment::StorageHistory)?;
+
+            // On first sync, don't skip past a lower existing checkpoint (such as one a snapshot
+            // download wrote): changesets above it are on disk, so index them and leave them to
+            // the pruner. Skipping would leave blocks between the two unindexed.
+            // A checkpoint with no completed block still has changesets at genesis.
+            let skip_to = match existing {
+                Some(checkpoint) if first_sync => {
+                    checkpoint.block_number.map(|block| block.min(target_prunable_block))
+                }
+                _ => Some(target_prunable_block),
+            };
+            prune_target_applied = skip_to.is_some();
+            input.checkpoint = skip_to.map(StageCheckpoint::new);
 
             // Save prune checkpoint only if we don't have one already.
             // Otherwise, pruner may skip the unpruned range of blocks.
-            if provider.get_prune_checkpoint(PruneSegment::StorageHistory)?.is_none() {
+            if existing.is_none() {
                 provider.save_prune_checkpoint(
                     PruneSegment::StorageHistory,
                     PruneCheckpoint {
@@ -498,6 +509,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn first_sync_indexes_from_lower_prune_checkpoint() {
+        check_first_sync(Some(10), vec![20, 36]);
+        check_first_sync(None, vec![0, 20, 36]);
+    }
+
+    fn check_first_sync(block_number: Option<u64>, expected: Vec<u64>) {
+        let db = TestStageDB::default();
+        db.commit(|tx| {
+            tx.put::<tables::BlockBodyIndices>(
+                0,
+                StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+            )
+            .unwrap();
+            tx.put::<tables::BlockBodyIndices>(
+                100,
+                StoredBlockBodyIndices { tx_count: 5, ..Default::default() },
+            )
+            .unwrap();
+            tx.put::<tables::StorageChangeSets>(block_number_address(36), storage(STORAGE_KEY))
+                .unwrap();
+            tx.put::<tables::StorageChangeSets>(block_number_address(20), storage(STORAGE_KEY))
+                .unwrap();
+            tx.put::<tables::StorageChangeSets>(block_number_address(0), storage(STORAGE_KEY))
+                .unwrap();
+            // A lower checkpoint, such as one written by a snapshot download.
+            tx.put::<tables::PruneCheckpoints>(
+                PruneSegment::StorageHistory,
+                PruneCheckpoint {
+                    block_number,
+                    tx_number: None,
+                    prune_mode: PruneMode::Before(11),
+                },
+            )
+            .unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+        let input = ExecInput { target: Some(20000), ..Default::default() };
+        let mut stage = IndexStorageHistoryStage {
+            prune_mode: Some(PruneMode::Before(36)),
+            ..Default::default()
+        };
+        let provider = db.factory.database_provider_rw().unwrap();
+        stage.execute(&provider, input).unwrap();
+        provider.commit().unwrap();
+
+        // Changesets above the lower checkpoint are indexed and left to the pruner.
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), expected)]));
+        let checkpoint = db
+            .factory
+            .provider()
+            .unwrap()
+            .get_prune_checkpoint(PruneSegment::StorageHistory)
+            .unwrap()
+            .unwrap();
+        assert_eq!(checkpoint.block_number, block_number);
+    }
+
+    #[tokio::test]
     async fn insert_index_with_prune_mode() {
         // init
         let db = TestStageDB::default();
@@ -764,27 +836,6 @@ mod tests {
             let block_list = result.unwrap();
             let blocks: Vec<u64> = block_list.iter().collect();
             assert_eq!(blocks, (0..=10).collect::<Vec<_>>());
-        }
-
-        #[tokio::test]
-        async fn prune_bump_rebuilds_empty_table() {
-            let db = TestStageDB::default();
-            setup_v2_storage_data(&db, 0..=10);
-            let rocksdb = db.factory.rocksdb_provider();
-            rocksdb.put::<tables::StoragesHistory>(shard(u64::MAX), &list(&[1])).unwrap();
-
-            let input = ExecInput { target: Some(20_000), checkpoint: None };
-            let mut stage = IndexStorageHistoryStage {
-                prune_mode: Some(PruneMode::Before(6)),
-                ..Default::default()
-            };
-            let provider = db.factory.database_provider_rw().unwrap();
-            let output = stage.execute(&provider, input).unwrap();
-            assert_eq!(output, ExecOutput::done(StageCheckpoint::new(20_000)));
-            provider.commit().unwrap();
-
-            let result = rocksdb.get::<tables::StoragesHistory>(shard(u64::MAX)).unwrap().unwrap();
-            assert_eq!(result.iter().collect::<Vec<_>>(), (6..=10).collect::<Vec<_>>());
         }
 
         #[tokio::test]

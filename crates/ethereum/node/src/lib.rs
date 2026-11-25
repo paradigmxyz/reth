@@ -11,9 +11,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use reth_revm as _;
-use revm as _;
-
 pub use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadTypes};
 
 pub mod evm;

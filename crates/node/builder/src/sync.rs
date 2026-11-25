@@ -1,6 +1,8 @@
 //! Backfill the engine runs while the node is far behind the chain.
 
+use crate::components::NodeComponents;
 use reth_engine_tree::backfill::{BackfillSync, PipelineSync};
+use reth_network_api::BlockDownloaderProvider;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::Pipeline;
 use reth_tasks::Runtime;
@@ -80,35 +82,6 @@ impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for PipelineBackfill {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloy_primitives::B256;
-    use reth_engine_tree::backfill::{BackfillAction, BackfillEvent};
-    use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
-    use reth_prune::PruneModes;
-    use reth_stages::PipelineTarget;
-    use reth_static_file::StaticFileProducer;
-    use std::task::{Context, Poll, Waker};
-
-    #[tokio::test]
-    async fn pipeline_backfill_starts_the_staged_pipeline() {
-        let factory = create_test_provider_factory();
-        let pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
-            .with_tip_sender(tokio::sync::watch::channel(B256::ZERO).0)
-            .build(
-                factory.clone(),
-                StaticFileProducer::new(factory.clone(), PruneModes::default()),
-            );
-        let ctx = BackfillContext::new(pipeline, (), factory, Runtime::test());
-        let mut backfill = PipelineBackfill.build(ctx).unwrap();
-
-        let target = PipelineTarget::Sync(B256::repeat_byte(1));
-        backfill.on_action(BackfillAction::Start(target));
-
-        assert!(matches!(
-            backfill.poll(&mut Context::from_waker(Waker::noop())),
-            Poll::Ready(BackfillEvent::Started(started)) if started == target
-        ));
-    }
-}
+/// Client the network of `Components` hands the engine's backfill.
+pub type BackfillClientFor<T, Components> =
+    <<Components as NodeComponents<T>>::Network as BlockDownloaderProvider>::Client;

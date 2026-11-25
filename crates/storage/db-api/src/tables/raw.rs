@@ -1,6 +1,6 @@
 use crate::{
     table::{Compress, Decode, Decompress, DupSort, Encode, IntoVec, Key, Table, Value},
-    DatabaseError,
+    DatabaseError, Tables,
 };
 use reth_codecs::DecompressError;
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,7 @@ pub struct RawTable<T: Table> {
 impl<T: Table> Table for RawTable<T> {
     const NAME: &'static str = T::NAME;
     const DUPSORT: bool = false;
+    const TABLE: Option<Tables> = T::TABLE;
 
     type Key = RawKey<T::Key>;
     type Value = RawValue<T::Value>;
@@ -33,6 +34,7 @@ pub struct RawDupSort<T: DupSort> {
 impl<T: DupSort> Table for RawDupSort<T> {
     const NAME: &'static str = T::NAME;
     const DUPSORT: bool = true;
+    const TABLE: Option<Tables> = T::TABLE;
 
     type Key = RawKey<T::Key>;
     type Value = RawValue<T::Value>;

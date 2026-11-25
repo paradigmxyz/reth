@@ -470,28 +470,6 @@ mod tests {
     }
 
     #[test]
-    fn a_subrange_narrows_the_accounts_and_keeps_their_root() {
-        let accounts = vec![(key(1), account(7)), (key(2), account(8)), (key(3), account(9))];
-        let root_hash = root(&accounts);
-        let range = VerifiedAccountRange {
-            state_root: root_hash,
-            origin: B256::ZERO,
-            accounts: accounts.clone(),
-            has_more: false,
-            next: None,
-        };
-
-        let batch = range.batch();
-        let chunk = batch.range(1..3).expect("chunk is inside the batch");
-        let expected =
-            accounts[1..3].iter().map(|(hash, account)| (*hash, account)).collect::<Vec<_>>();
-        assert_eq!(chunk.accounts(), expected);
-        assert_eq!(chunk.state_root(), root_hash);
-
-        assert_eq!(batch.range(2..4), None);
-    }
-
-    #[test]
     fn code_hashes_are_listed_once_in_the_order_the_accounts_reference_them() {
         let shared = B256::repeat_byte(0x11);
         let mut first = account(1);
@@ -544,6 +522,9 @@ mod tests {
             vec![key(3)]
         );
         assert_eq!(chunk.state_root(), root_hash);
+
+        // The batch holds only the two accounts with storage, so this range is out of bounds.
+        assert_eq!(batch.range(1..3), None);
     }
 
     #[test]

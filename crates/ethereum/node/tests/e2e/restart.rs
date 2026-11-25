@@ -1,23 +1,29 @@
 //! Tests for stopping a node and starting it again on its datadir.
 
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, U256, U64};
 use alloy_provider::Provider;
+use alloy_rpc_types_engine::{
+    ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2,
+};
 use futures::TryStreamExt;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    node::DATABASE_RELEASE_TIMEOUT,
     wait::{poll_until, WAIT_TIMEOUT},
     E2ETestSetupExt,
 };
 use reth_exex::ExExEvent;
 use reth_network::PeersInfo;
 use reth_node_ethereum::EthereumNode;
+use reth_payload_primitives::BuiltPayload;
 use reth_provider::{BlockIdReader, BlockNumReader, DatabaseProviderFactory, HeaderProvider};
 use reth_transaction_pool::TransactionPool;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
 };
 use tokio::sync::mpsc;
 
@@ -137,13 +143,15 @@ async fn stop_fails_while_provider_is_held() -> eyre::Result<()> {
         .await?;
 
     let provider = node.inner.provider.clone();
-    let err = node.stop().await.unwrap_err();
+    // The held provider never releases the database, so a short timeout fails the same way.
+    let release_timeout = Duration::from_millis(100);
+    let err = node.stop_with_release_timeout(release_timeout).await.unwrap_err();
     assert_eq!(
         err.to_string(),
         format!(
-            "the database of the stopped node is still in use {DATABASE_RELEASE_TIMEOUT:?} after \
-             the node shut down: drop all handles that hold a provider of the node, e.g. a clone \
-             of `inner.provider`, before stopping it"
+            "the database of the stopped node is still in use {release_timeout:?} after the node \
+             shut down: drop all handles that hold a provider of the node, e.g. a clone of \
+             `inner.provider`, before stopping it"
         )
     );
     assert_eq!(provider.best_block_number()?, 0);
@@ -255,6 +263,59 @@ async fn restart_applies_node_factory_and_builder_modifiers() -> eyre::Result<()
         Err(eyre::eyre!("ExEx stopped before receiving block {hash}"))
     })
     .await??;
+
+    Ok(())
+}
+
+/// A restarted node serves the BALs it persisted from both Engine API V2 payload body endpoints.
+#[tokio::test]
+async fn restart_serves_persisted_bals() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    for storage_v2 in [false, true] {
+        let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Amsterdam)
+            .with_restartable_nodes()
+            .with_storage_v2(storage_v2)
+            .with_tree_config_modifier(|config| {
+                config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+            })
+            .build_single()
+            .await?;
+        let mut account = wallet.account(0);
+        let mut payloads = Vec::new();
+        for value in [U256::ONE, U256::from(2)] {
+            let tx = account.transfer(Address::with_last_byte(0x77), value).await;
+            payloads.push(node.mine([tx]).await?.ensure_success()?.payload);
+        }
+        node.wait_for_persisted_block(2).await?;
+        let hashes = payloads.iter().map(|payload| payload.block().hash()).collect::<Vec<_>>();
+        let expected = payloads
+            .iter()
+            .map(|payload| {
+                Some(ExecutionPayloadBodyV2 {
+                    block_access_list: Some(
+                        payload.block_access_list().expect("Amsterdam payload has a BAL").clone(),
+                    ),
+                    ..ExecutionPayloadBodyV1::from(payload.block().clone().into_block()).into()
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let node = node.restart().await?;
+
+        let client = node.auth_server_handle().http_client();
+        let by_hash = client
+            .request::<_, ExecutionPayloadBodiesV2>("engine_getPayloadBodiesByHashV2", (hashes,))
+            .await?;
+        assert_eq!(by_hash, expected);
+        let by_range = client
+            .request::<_, ExecutionPayloadBodiesV2>(
+                "engine_getPayloadBodiesByRangeV2",
+                (U64::from(1), U64::from(2)),
+            )
+            .await?;
+        assert_eq!(by_range, expected);
+    }
 
     Ok(())
 }

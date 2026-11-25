@@ -128,7 +128,9 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
         input: BuildNewPayload<T::PayloadAttributes>,
     ) -> Receiver<Result<PayloadId, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
-        let span = debug_span!(parent: Span::current(), "payload_job");
+        // Fall back to the caller's span so workers stay attached to the originating Engine API
+        // request when DEBUG spans are filtered out.
+        let span = debug_span!(parent: Span::current(), "payload_job").or_current();
         let _ =
             self.to_service.send(PayloadServiceCommand::BuildNewPayload(input.into(), span, tx));
         rx
@@ -331,7 +333,10 @@ where
         let Some(job) = self.payload_jobs.iter().position(|entry| entry.id == id) else {
             return (None, None)
         };
-        let (fut, keep_alive) = self.payload_jobs[job].job.resolve_kind(kind);
+        // Resolving may spawn empty or fallback build workers that inherit the current span, so
+        // enter the job's span instead of the service task's.
+        let span = self.payload_jobs[job].span.clone();
+        let (fut, keep_alive) = span.in_scope(|| self.payload_jobs[job].job.resolve_kind(kind));
         let payload_timestamp = self.payload_jobs[job].job.payload_timestamp();
 
         let mut resolved_job =
@@ -538,6 +543,10 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
     ///
     /// Carries the caller's [`Span`] so the service can parent payload-building work under the
     /// originating Engine API trace.
+    ///
+    /// The sender receives the id of the started payload job. Answering with
+    /// [`PayloadBuilderError::InvalidAttributes`] rejects the payload attributes; any other error,
+    /// or dropping the sender, is reported to the CL as an internal error.
     BuildNewPayload(
         Box<BuildNewPayload<T::PayloadAttributes>>,
         Span,

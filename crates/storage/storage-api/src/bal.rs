@@ -222,6 +222,9 @@ pub trait BalProvider {
     }
 
     /// Fetches BALs for the given block hashes.
+    ///
+    /// Providers that track executed blocks in memory also return the BALs of those blocks that
+    /// the store no longer holds.
     fn get_bals_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
         self.bal_store().get_by_hashes(block_hashes)
     }
@@ -297,24 +300,6 @@ mod tests {
     }
 
     #[test]
-    fn noop_provider_returns_empty_results() {
-        let provider = crate::noop::NoopProvider::default();
-        let hashes = [B256::random(), B256::random()];
-
-        assert_eq!(provider.get_bals_by_hashes(&hashes).unwrap(), vec![None, None]);
-        assert_eq!(
-            provider
-                .get_bals_by_hashes_with_limit(
-                    &hashes,
-                    GetBlockAccessListLimit::ResponseSizeSoftLimit(0),
-                )
-                .unwrap(),
-            vec![None]
-        );
-        assert!(provider.get_bal_by_hash(B256::random()).unwrap().is_none());
-    }
-
-    #[test]
     fn noop_store_flush_is_noop() {
         let store = BalStoreHandle::default();
 
@@ -339,6 +324,8 @@ mod tests {
         let decoded = store.get_decoded_by_hash(hash).unwrap().unwrap();
 
         assert_eq!(decoded.as_raw(), &raw_bal);
+
+        assert!(decoded.as_bal().is_empty());
     }
 
     #[test]

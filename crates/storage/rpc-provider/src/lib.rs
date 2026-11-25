@@ -30,7 +30,6 @@ use alloy_network::{primitives::HeaderResponse, BlockResponse};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256};
 use alloy_provider::{ext::DebugApi, network::Network, Provider};
 use alloy_rpc_types::BlockId;
-use alloy_rpc_types_engine::ForkchoiceState;
 use alloy_rpc_types_eth::AccountInfo;
 use dashmap::DashMap;
 use reth_chain_state::ExecutedBlock;
@@ -855,25 +854,8 @@ where
     N: Network,
     Node: NodeTypes,
 {
-    type Header = alloy_consensus::Header;
-    fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
-        // No-op for RPC provider
-    }
-
     fn last_received_update_timestamp(&self) -> Option<std::time::Instant> {
         None
-    }
-
-    fn set_canonical_head(&self, _header: SealedHeader<Self::Header>) {
-        // No-op for RPC provider
-    }
-
-    fn set_safe(&self, _header: SealedHeader<Self::Header>) {
-        // No-op for RPC provider
-    }
-
-    fn set_finalized(&self, _header: SealedHeader<Self::Header>) {
-        // No-op for RPC provider
     }
 }
 
@@ -1323,8 +1305,8 @@ where
 
     fn multiproof_v2(
         &self,
-        _input: TrieInput,
         _targets: reth_trie::MultiProofTargetsV2,
+        _requires_masks: bool,
     ) -> Result<reth_trie::DecodedMultiProofV2, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
@@ -1348,7 +1330,7 @@ where
 {
     fn hashed_post_state(
         &self,
-        bundle_state: &revm::database::BundleState,
+        bundle_state: &reth_trie::bundle_state::BundleState,
     ) -> ProviderResult<HashedPostState> {
         if bundle_state
             .state()
@@ -1812,7 +1794,7 @@ where
 impl<P, Node, N> StateProviderFactory for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static + Send + Sync,
-    Node: NodeTypes + 'static,
+    Node: NodeTypes,
     Node::ChainSpec: Send + Sync,
     N: Network,
     Self: Clone + 'static,

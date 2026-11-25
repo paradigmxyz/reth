@@ -33,7 +33,6 @@ alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types.workspace = true
-alloy-rpc-types-engine.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-eips.workspace = true
 
@@ -43,9 +42,6 @@ tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 # other
 tracing.workspace = true
 dashmap = { workspace = true, features = ["inline"] }
-
-# revm
-revm.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
@@ -57,5 +53,5 @@ account-ext = [
     "reth-provider/account-ext",
     "reth-stages-types/account-ext",
     "reth-trie/account-ext",
-    "revm/account-ext",
+    "reth-execution-types/account-ext",
 ]

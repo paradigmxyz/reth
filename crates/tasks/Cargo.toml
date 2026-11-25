@@ -37,8 +37,11 @@ pin-project = { workspace = true, optional = true }
 libc.workspace = true
 
 [dev-dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
 
 [features]
 rayon = ["dep:rayon", "dep:crossbeam-utils", "pin-project"]
-test-utils = []
+test-utils = [
+    "reth-concurrency/test-utils",
+]

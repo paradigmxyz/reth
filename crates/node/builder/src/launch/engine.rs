@@ -5,13 +5,14 @@ use crate::{
     hooks::NodeHooks,
     rpc::{EngineShutdown, EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
-    sync::{BackfillContext, BackfillSyncBuilder, PipelineBackfill},
+    sync::{BackfillClientFor, BackfillContext, BackfillSyncBuilder, PipelineBackfill},
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, Node, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
     RethFullAdapter,
 };
 use alloy_consensus::BlockHeader;
 use futures::{stream::FusedStream, stream_select, FutureExt, StreamExt};
+use reth_chain_state::{CanonicalInMemoryStateWriter, InMemoryState};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_tree::{
@@ -34,10 +35,12 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_node_events::node;
+use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
     BlockNumReader, StorageSettingsCache,
 };
+use reth_rpc_layer::JwtSecret;
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
@@ -94,10 +97,7 @@ impl<B> EngineNodeLauncher<B> {
         CB: NodeComponentsBuilder<T>,
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
             + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
-        B: BackfillSyncBuilder<
-            NodeTypesWithDBAdapter<N, DB>,
-            <<CB::Components as NodeComponents<T>>::Network as BlockDownloaderProvider>::Client,
-        >,
+        B: BackfillSyncBuilder<NodeTypesWithDBAdapter<N, DB>, BackfillClientFor<T, CB::Components>>,
     {
         let Self { ctx, engine_tree_config, mut backfill } = self;
         let NodeBuilderWithComponents {
@@ -109,8 +109,15 @@ impl<B> EngineNodeLauncher<B> {
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
-        // Create the overlay manager that will be shared across the provider and engine.
-        let overlay_manager = OverlayManager::<N::Primitives>::new(
+        // Install the recorder before creating anything that registers metrics: metrics registered
+        // earlier stay no-ops, and derived metrics cache their first instance for the process.
+        install_prometheus_recorder();
+
+        // Create the in-memory state of this node with the writer of its blocks, and the overlay
+        // manager that will be shared across the provider and engine.
+        let (in_memory_state, in_memory_state_writer) = InMemoryState::<N::Primitives>::new();
+        let overlay_manager = OverlayManager::with_worker_pool(
+            in_memory_state,
             ctx.task_executor.state_trie_overlay_worker_pool(),
         );
         let disabled_stages = N::disabled_stages();
@@ -150,13 +157,26 @@ impl<B> EngineNodeLauncher<B> {
                     PruneConfigKind::from_config(&this.prune_config(), this.chain_spec().as_ref()).as_str();
                 info!(target: "reth::cli", ?settings, ?pruning_mode, "Loaded storage settings");
             })
-            .with_metrics_task()
+            .with_metrics_task();
+
+        // Create the writer of the canonical in-memory state, starting from the headers stored in
+        // the database, and the blockchain provider that reads that state. The engine changes it
+        // through the writer.
+        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            ctx.provider_factory().chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let blockchain_db = BlockchainProvider::with_canonical_in_memory_state(
+            ctx.provider_factory().clone(),
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
+
+        let ctx = ctx
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
-            .with_blockchain_db::<T, _>(move |provider_factory| {
-                Ok(BlockchainProvider::new(provider_factory)?)
-            })?
-            .with_components(components_builder, on_component_initialized).await?;
+            .with_blockchain_db::<T, _>(move |_| Ok(blockchain_db))?
+            .with_components(components_builder, on_component_initialized)
+            .await?;
 
         // spawn exexs if any
         let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;
@@ -213,8 +233,13 @@ impl<B> EngineNodeLauncher<B> {
 
         let beacon_engine_handle = ConsensusEngineHandle::new(consensus_engine_tx.clone());
 
-        // extract the jwt secret from the args if possible
-        let jwt_secret = ctx.auth_jwt_secret()?;
+        // The JWT secret is only used by the auth server, so don't read or create it when the auth
+        // server is disabled.
+        let jwt_secret = if ctx.node_config().rpc.disable_auth_server {
+            JwtSecret::random()
+        } else {
+            ctx.auth_jwt_secret()?
+        };
 
         let add_ons_ctx = AddOnsContext {
             node: ctx.node_adapter().clone(),
@@ -275,6 +300,7 @@ impl<B> EngineNodeLauncher<B> {
             pipeline_task_spawner: ctx.task_executor().clone(),
             provider: ctx.provider_factory().clone(),
             blockchain_db: ctx.blockchain_db().clone(),
+            canonical_in_memory_state_writer,
             pruner,
             payload_builder: ctx.components().payload_builder_handle().clone(),
             payload_validator: engine_validator,
@@ -492,10 +518,8 @@ where
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
         + 'static,
-    B: BackfillSyncBuilder<
-            NodeTypesWithDBAdapter<N, DB>,
-            <<CB::Components as NodeComponents<T>>::Network as BlockDownloaderProvider>::Client,
-        > + 'static,
+    B: BackfillSyncBuilder<NodeTypesWithDBAdapter<N, DB>, BackfillClientFor<T, CB::Components>>
+        + 'static,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
     type Future = Pin<Box<dyn Future<Output = eyre::Result<Self::Node>> + Send>>;

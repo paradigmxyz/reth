@@ -9,6 +9,7 @@ use reth_db::{
     open_db_read_only, DatabaseEnv,
 };
 use reth_node_types::NodeTypesWithDBAdapter;
+use reth_storage_overlay::OverlayManager;
 use std::{
     marker::PhantomData,
     path::{Path, PathBuf},
@@ -109,9 +110,15 @@ impl<N> ProviderFactoryBuilder<N> {
             .with_default_tables()
             .with_read_only(true)
             .build()?;
-        let factory =
-            ProviderFactory::new(db, chainspec, static_file_provider, rocksdb_provider, runtime)?
-                .with_read_only_sync(watch);
+        let factory = ProviderFactory::new(
+            db,
+            chainspec,
+            static_file_provider,
+            rocksdb_provider,
+            OverlayManager::default(),
+            runtime,
+        )?
+        .with_read_only_sync(watch);
         Ok(factory)
     }
 }

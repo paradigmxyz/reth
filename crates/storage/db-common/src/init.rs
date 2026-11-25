@@ -11,13 +11,14 @@ use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
 use reth_db_api::{
-    cursor::{DbCursorRW, DbDupCursorRW},
+    cursor::{DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     models::{
-        storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress, IntegerList,
-        ShardedKey,
+        integer_list::IntegerListError, storage_sharded_key::StorageShardedKey, AccountBeforeTx,
+        BlockNumberAddress, IntegerList, ShardedKey,
     },
+    table::DupSort,
     tables,
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
 use reth_etl::Collector;
@@ -29,9 +30,9 @@ use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
     BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
     HashingWriter, HeaderProvider, HistoryWriter, MetadataProvider, MetadataWriter,
-    NodePrimitivesProvider, OriginalValuesKnown, ProviderError, RevertsInit,
-    RocksDBProviderFactory, StageCheckpointReader, StageCheckpointWriter, StateWriteConfig,
-    StateWriter, StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
+    OriginalValuesKnown, ProviderError, RevertsInit, RocksDBProviderFactory, StageCheckpointReader,
+    StageCheckpointWriter, StateWriteConfig, StateWriter, StaticFileProviderFactory,
+    StorageSettings, StorageSettingsCache, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -129,7 +130,6 @@ where
         + ChainSpecProvider
         + StorageSettingsCache
         + RocksDBProviderFactory
-        + NodePrimitivesProvider
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
@@ -160,7 +160,6 @@ where
         + ChainSpecProvider
         + StorageSettingsCache
         + RocksDBProviderFactory
-        + NodePrimitivesProvider
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
@@ -169,6 +168,9 @@ where
 
 /// Write the genesis block if it has not already been written with [`StorageSettings`],
 /// optionally validating the DB-resident genesis hash against the chainspec hash.
+///
+/// Retries interrupted genesis initialization when the Headers checkpoint is absent and the
+/// static files contain only the matching genesis block.
 pub fn init_genesis_with_settings_and_validate<PF>(
     factory: &PF,
     genesis_storage_settings: StorageSettings,
@@ -193,7 +195,6 @@ where
         + ChainSpecProvider
         + StorageSettingsCache
         + RocksDBProviderFactory
-        + NodePrimitivesProvider
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
@@ -210,29 +211,50 @@ where
         Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, _)) => {}
         Ok(Some(block_hash)) => {
             if block_hash == hash {
-                // Some users will at times attempt to re-sync from scratch by just deleting the
-                // database. Since `factory.block_hash` will only query the static files, we need to
-                // make sure that our database has been written to, and throw error if it's empty.
-                if factory.get_stage_checkpoint(StageId::Headers)?.is_none() {
+                if factory.get_stage_checkpoint(StageId::Headers)?.is_some() {
+                    let stored = factory.storage_settings()?.unwrap_or_else(StorageSettings::v1);
+                    if stored != genesis_storage_settings {
+                        warn!(
+                            target: "reth::storage",
+                            ?stored,
+                            requested = ?genesis_storage_settings,
+                            "Storage settings mismatch detected. Using the stored settings from the existing database."
+                        );
+                    }
+
+                    debug!("Genesis already written, skipping.");
+                    return Ok(hash)
+                }
+
+                // A static-first genesis commit can be interrupted before its MDBX transaction
+                // commits. The genesis MDBX writes are atomic, so an absent Headers checkpoint
+                // permits replay when static files contain only genesis. Reject static files
+                // from an already-synced node whose MDBX database was deleted.
+                let static_files = factory.static_file_provider();
+                let has_non_genesis_static_files = StaticFileSegment::iter().any(|segment| {
+                    static_files
+                        .get_highest_static_file_block(segment)
+                        .is_some_and(|block| block != genesis_block_number) ||
+                        static_files
+                            .get_lowest_range_start(segment)
+                            .is_some_and(|block| block != genesis_block_number) ||
+                        (segment.is_tx_based() &&
+                            static_files.get_highest_static_file_tx(segment).is_some())
+                });
+                if has_non_genesis_static_files {
                     error!(target: "reth::storage", "Genesis header found on static files, but database is uninitialized.");
                     return Err(InitStorageError::UninitializedDatabase)
                 }
 
-                let stored = factory.storage_settings()?.unwrap_or_else(StorageSettings::v1);
-                if stored != genesis_storage_settings {
-                    warn!(
-                        target: "reth::storage",
-                        ?stored,
-                        requested = ?genesis_storage_settings,
-                        "Storage settings mismatch detected. Using the stored settings from the existing database."
-                    );
+                // Genesis changesets may already have been published. Remove them before replay
+                // so storage v2 does not append the same genesis block twice after a restart.
+                for segment in
+                    [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
+                {
+                    static_files.delete_segment(segment)?;
                 }
-
-                debug!("Genesis already written, skipping.");
-                return Ok(hash)
-            }
-
-            if !validate_genesis_hash {
+                warn!(target: "reth::storage", "Resuming interrupted genesis initialization.");
+            } else if !validate_genesis_hash {
                 warn!(
                     target: "reth::storage",
                     chainspec_hash = %hash,
@@ -240,11 +262,12 @@ where
                     "Genesis hash mismatch with chainspec; trusting DB per --debug.skip-genesis-validation"
                 );
                 return Ok(block_hash)
+            } else {
+                return Err(InitStorageError::GenesisHashMismatch {
+                    chainspec_hash: hash,
+                    storage_hash: block_hash,
+                })
             }
-            return Err(InitStorageError::GenesisHashMismatch {
-                chainspec_hash: hash,
-                storage_hash: block_hash,
-            })
         }
         Err(e) => {
             debug!(?e);
@@ -323,8 +346,6 @@ where
             .set_block_range(genesis_block_number, genesis_block_number);
     }
 
-    // `commit_unwind`` will first commit the DB and then the static file provider, which is
-    // necessary on `init_genesis`.
     provider_rw.commit()?;
 
     Ok(hash)
@@ -522,7 +543,6 @@ where
         ProviderRW: StaticFileProviderFactory
                         + DBProvider<Tx: DbTxMut>
                         + BlockNumReader
-                        + BlockHashReader
                         + ChainSpecProvider
                         + StageCheckpointWriter
                         + HistoryWriter
@@ -532,7 +552,6 @@ where
                         + StateWriter
                         + StorageSettingsCache
                         + RocksDBProviderFactory
-                        + NodePrimitivesProvider
                         + AsRef<PF::ProviderRW>,
     >,
 {
@@ -673,6 +692,12 @@ fn parse_accounts(
 /// B-tree traversal). Commits happen every [`STORAGE_COMMIT_THRESHOLD`] storage units to
 /// bound MDBX dirty page accumulation.
 ///
+/// The dump is written over the state already in the database (e.g. the genesis alloc written by
+/// `init-state --without-evm`): each dump slot replaces the same existing slot, while existing
+/// accounts and slots the dump omits are left untouched. Replaced accounts and slots keep their
+/// history: the change sets record their previous values and `block` is appended to their existing
+/// history shards.
+///
 /// NOTE: This function is not idempotent. If the process crashes mid-import, the database
 /// must be wiped before retrying.
 fn dump_state<PF>(
@@ -682,10 +707,7 @@ fn dump_state<PF>(
 ) -> Result<(), eyre::Error>
 where
     PF: DatabaseProviderFactory<ProviderRW: DBProvider<Tx: DbTxMut>>,
-    PF::ProviderRW: StaticFileProviderFactory
-        + StorageSettingsCache
-        + RocksDBProviderFactory
-        + NodePrimitivesProvider,
+    PF::ProviderRW: StaticFileProviderFactory + StorageSettingsCache + RocksDBProviderFactory,
 {
     let storage_settings = provider_factory.database_provider_rw()?.cached_storage_settings();
     if storage_settings.storage_v2 {
@@ -761,8 +783,7 @@ where
         ProviderRW: StaticFileProviderFactory
                         + DBProvider<Tx: DbTxMut>
                         + StorageSettingsCache
-                        + RocksDBProviderFactory
-                        + NodePrimitivesProvider,
+                        + RocksDBProviderFactory,
     >,
 {
     let accounts_len = collector.len();
@@ -780,16 +801,7 @@ where
     let rocksdb_provider = provider_rw.rocksdb_provider();
     let mut history_batch = rocksdb_provider.batch_with_auto_commit();
     if snapshot_state_tables_empty(provider_rw.tx_ref())? {
-        reset_pre_snapshot_changeset_segment(
-            &static_file_provider,
-            StaticFileSegment::AccountChangeSets,
-            block,
-        )?;
-        reset_pre_snapshot_changeset_segment(
-            &static_file_provider,
-            StaticFileSegment::StorageChangeSets,
-            block,
-        )?;
+        reset_pre_snapshot_changesets(&static_file_provider, block)?;
     }
 
     {
@@ -797,6 +809,16 @@ where
             static_file_provider.get_writer(block, StaticFileSegment::AccountChangeSets)?;
         let mut storage_changeset_writer =
             static_file_provider.get_writer(block, StaticFileSegment::StorageChangeSets)?;
+        // A genesis file recreated by the reset above starts at genesis, as `init_genesis` makes
+        // it, instead of being padded with empty blocks from the start of its fixed range.
+        let genesis_block = static_file_provider.genesis_block_number();
+        for writer in [&mut account_changeset_writer, &mut storage_changeset_writer] {
+            if writer.user_header().block_range().is_none() &&
+                writer.user_header().expected_block_range().contains(genesis_block)
+            {
+                writer.user_header_mut().set_expected_block_start(genesis_block);
+            }
+        }
         prepare_account_changeset_writer(&mut account_changeset_writer, block)?;
         prepare_storage_changeset_writer(&mut storage_changeset_writer, block)?;
 
@@ -831,6 +853,7 @@ where
                 &mut history_batch,
                 &address,
                 &account,
+                block,
                 &history_list,
                 &mut seen_bytecodes,
             )?;
@@ -919,33 +942,52 @@ fn snapshot_state_tables_empty<TX: reth_db_api::transaction::DbTx>(
         tx.entries::<tables::Bytecodes>()? == 0)
 }
 
-fn reset_pre_snapshot_changeset_segment<N: NodePrimitives>(
+/// Resets changeset segments that end before the import block or consist of an empty genesis file.
+/// The caller has checked that the current state tables are empty. Validate both segments before
+/// removing either, since v2 history can exist even when those tables are empty.
+fn reset_pre_snapshot_changesets<N: NodePrimitives>(
     static_file_provider: &reth_provider::providers::StaticFileProvider<N>,
-    segment: StaticFileSegment,
     block: u64,
 ) -> ProviderResult<()> {
     if block == 0 {
         return Ok(())
     }
 
-    let Some(highest_block) = static_file_provider.get_highest_static_file_block(segment) else {
-        return Ok(())
-    };
-
-    if highest_block >= block {
-        return Ok(())
+    let mut segments_to_reset = Vec::new();
+    for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets] {
+        let Some(highest_block) = static_file_provider.get_highest_static_file_block(segment)
+        else {
+            continue;
+        };
+        if highest_block >= block {
+            let is_empty_genesis_file = highest_block == block &&
+                block == static_file_provider.genesis_block_number() &&
+                static_file_provider.get_lowest_range_end(segment) == Some(block) &&
+                static_file_provider
+                    .get_segment_provider_for_block(segment, block, None)?
+                    .rows() ==
+                    0;
+            if !is_empty_genesis_file {
+                return Err(ProviderError::UnexpectedStaticFileBlockNumber(
+                    segment,
+                    block,
+                    highest_block.saturating_add(1),
+                ));
+            }
+        }
+        segments_to_reset.push((segment, highest_block));
     }
 
-    let file_start = static_file_provider.find_fixed_range(segment, block).start();
-    info!(
-        target: "reth::cli",
-        ?segment,
-        highest_block,
-        import_block = block,
-        file_start,
-        "Resetting pre-snapshot changeset static files before state import"
-    );
-    static_file_provider.delete_segment(segment)?;
+    for (segment, highest_block) in segments_to_reset {
+        info!(
+            target: "reth::cli",
+            ?segment,
+            highest_block,
+            import_block = block,
+            "Resetting pre-snapshot changeset static files before state import"
+        );
+        static_file_provider.delete_segment(segment)?;
+    }
 
     Ok(())
 }
@@ -957,16 +999,62 @@ where
     reth_db_api::transaction::DbTx::commit(provider.into_tx()).map_err(ProviderError::from)
 }
 
+/// Writes one storage slot into a `DupSort` storage table, replacing any existing entry for the
+/// same slot, and returns the replaced value.
+///
+/// On `DupSort` tables `upsert`/`append_dup` add a new duplicate instead of replacing an entry with
+/// the same subkey, so a slot already written from the genesis alloc has to be deleted first. Only
+/// that slot is touched: a state dump may omit an account's slots that are unchanged since genesis,
+/// so the account's other existing slots must survive. A zero value deletes the slot.
+fn replace_storage_slot<T, C>(
+    cursor: &mut C,
+    key: T::Key,
+    entry: StorageEntry,
+) -> Result<Option<U256>, DatabaseError>
+where
+    T: DupSort<SubKey = B256, Value = StorageEntry>,
+    T::Key: Clone,
+    C: DbDupCursorRO<T> + DbCursorRW<T>,
+{
+    let previous = cursor
+        .seek_by_key_subkey(key.clone(), entry.key)?
+        .filter(|existing| existing.key == entry.key)
+        .map(|existing| existing.value);
+    if previous.is_some() {
+        cursor.delete_current()?;
+    }
+    if !entry.value.is_zero() {
+        cursor.upsert(key, &entry)?;
+    }
+    Ok(previous)
+}
+
+/// Returns the last history shard of an account or slot whose existing state the dump replaces,
+/// with `block` appended.
+///
+/// Existing state comes from the genesis alloc, so the shard holds at most the genesis block and
+/// never needs rechunking. `block` is not appended again when the dump is imported at the genesis
+/// block itself.
+fn history_shard_with_block(
+    shard: Option<IntegerList>,
+    block: u64,
+) -> Result<IntegerList, IntegerListError> {
+    let mut shard = shard.unwrap_or_else(IntegerList::empty);
+    if shard.max().is_none_or(|last| last < block) {
+        shard.push(block)?;
+    }
+    Ok(shard)
+}
+
 /// Writes a single account and all its storage to every required DB table directly,
 /// without building intermediary structures.
 ///
 /// Uses `append_dup` for `DupSort` tables where insertion order matches key order (the ETL
-/// collector sorts by address, so `AccountChangeSets`, `PlainStorageState`, and
-/// `StorageChangeSets` receive data in sorted order within each account). For `HashedAccounts`
-/// and `HashedStorages`, insertion order is unsorted (keccak scrambles address order), so we
-/// use `put`/`upsert` which do a full B-tree lookup.
+/// collector sorts by address, so `AccountChangeSets` and `StorageChangeSets` receive data in
+/// sorted order within each account). State tables use `put`/`upsert` to replace existing
+/// genesis entries, with storage slots deleted before replacement.
 #[allow(clippy::clone_on_copy)]
-fn write_account_to_db<TX: DbTxMut>(
+fn write_account_to_db<TX: DbTx + DbTxMut>(
     tx: &TX,
     address: &Address,
     genesis_account: &GenesisAccount,
@@ -989,6 +1077,8 @@ fn write_account_to_db<TX: DbTxMut>(
     let account = Account { bytecode_hash, ..Account::from(genesis_account) };
 
     let hashed_address = keccak256(address);
+    let previous_account = tx.get::<tables::PlainAccountState>(*address)?;
+    let replaces_account = previous_account.is_some();
 
     // plain state — sorted by address (ETL order), use append
     tx.put::<tables::PlainAccountState>(*address, account.clone())?;
@@ -998,12 +1088,20 @@ fn write_account_to_db<TX: DbTxMut>(
 
     // account changeset — DupSort keyed by block, subkey sorted by address (ETL order)
     let mut acct_cs_cursor = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
-    acct_cs_cursor.append_dup(block, AccountBeforeTx { address: *address, info: None })?;
+    acct_cs_cursor
+        .append_dup(block, AccountBeforeTx { address: *address, info: previous_account })?;
 
     // account history
-    tx.put::<tables::AccountsHistory>(ShardedKey::new(*address, u64::MAX), history_list.clone())?;
+    let history_key = ShardedKey::new(*address, u64::MAX);
+    let account_history = if replaces_account {
+        history_shard_with_block(tx.get::<tables::AccountsHistory>(history_key.clone())?, block)?
+    } else {
+        history_list.clone()
+    };
+    tx.put::<tables::AccountsHistory>(history_key, account_history)?;
 
-    // storage entries
+    // storage entries: each dump slot replaces the same slot from the genesis alloc, other existing
+    // slots of the account stay (see `replace_storage_slot`).
     if let Some(storage) = &genesis_account.storage {
         let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
         let mut plain_storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
@@ -1012,25 +1110,34 @@ fn write_account_to_db<TX: DbTxMut>(
         for (&key, &value) in storage {
             let value_u256 = U256::from_be_bytes(value.0);
 
-            // plain storage — sorted by (address, key), use append_dup
-            plain_storage_cursor.append_dup(*address, StorageEntry { key, value: value_u256 })?;
-
-            // hashed storage — unsorted keccak order, use upsert
-            let hashed_key = keccak256(key);
-            hashed_storage_cursor
-                .upsert(hashed_address, &StorageEntry { key: hashed_key, value: value_u256 })?;
+            let previous_value = replace_storage_slot(
+                &mut plain_storage_cursor,
+                *address,
+                StorageEntry { key, value: value_u256 },
+            )?;
+            replace_storage_slot(
+                &mut hashed_storage_cursor,
+                hashed_address,
+                StorageEntry { key: keccak256(key), value: value_u256 },
+            )?;
 
             // storage changeset — sorted by (block, address), then by key via append_dup
             storage_cs_cursor.append_dup(
                 BlockNumberAddress((block, *address)),
-                StorageEntry { key, value: U256::ZERO },
+                StorageEntry { key, value: previous_value.unwrap_or_default() },
             )?;
 
             // storage history
-            tx.put::<tables::StoragesHistory>(
-                StorageShardedKey::new(*address, key, u64::MAX),
-                history_list.clone(),
-            )?;
+            let history_key = StorageShardedKey::new(*address, key, u64::MAX);
+            let storage_history = if previous_value.is_some() {
+                history_shard_with_block(
+                    tx.get::<tables::StoragesHistory>(history_key.clone())?,
+                    block,
+                )?
+            } else {
+                history_list.clone()
+            };
+            tx.put::<tables::StoragesHistory>(history_key, storage_history)?;
         }
     }
 
@@ -1042,6 +1149,7 @@ fn write_account_to_db<TX: DbTxMut>(
 /// Storage v2 uses hashed state as the canonical state, static-file change sets, and `RocksDB`
 /// history indices. The ETL collector yields accounts sorted by address and genesis storage is a
 /// `BTreeMap`, so the streaming static-file writes preserve the required order.
+#[expect(clippy::too_many_arguments)]
 fn write_account_to_db_v2<TX, N>(
     tx: &TX,
     changeset_writers: (
@@ -1051,11 +1159,12 @@ fn write_account_to_db_v2<TX, N>(
     history_batch: &mut reth_provider::providers::RocksDBBatch<'_>,
     address: &Address,
     genesis_account: &GenesisAccount,
+    block: u64,
     history_list: &IntegerList,
     seen_bytecodes: &mut B256Set,
 ) -> Result<(), eyre::Error>
 where
-    TX: DbTxMut,
+    TX: DbTx + DbTxMut,
     N: NodePrimitives,
 {
     let bytecode_hash = if let Some(code) = &genesis_account.code {
@@ -1075,30 +1184,55 @@ where
     let hashed_address = keccak256(address);
     let (account_changeset_writer, storage_changeset_writer) = changeset_writers;
 
+    let previous_account = tx.get::<tables::HashedAccounts>(hashed_address)?;
+    let replaces_account = previous_account.is_some();
     tx.put::<tables::HashedAccounts>(hashed_address, account)?;
-    account_changeset_writer
-        .append_account_changeset_entry(AccountBeforeTx { address: *address, info: None })?;
-    history_batch
-        .put::<tables::AccountsHistory>(ShardedKey::new(*address, u64::MAX), history_list)?;
+    account_changeset_writer.append_account_changeset_entry(AccountBeforeTx {
+        address: *address,
+        info: previous_account,
+    })?;
+    let history_key = ShardedKey::new(*address, u64::MAX);
+    if replaces_account {
+        let account_history = history_shard_with_block(
+            history_batch.get::<tables::AccountsHistory>(history_key.clone())?,
+            block,
+        )?;
+        history_batch.put::<tables::AccountsHistory>(history_key, &account_history)?;
+    } else {
+        history_batch.put::<tables::AccountsHistory>(history_key, history_list)?;
+    }
 
     if let Some(storage) = &genesis_account.storage {
+        // Each dump slot replaces the same slot from the genesis alloc; see `replace_storage_slot`.
         let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
 
         for (&key, &value) in storage {
             let value_u256 = U256::from_be_bytes(value.0);
 
-            let hashed_key = keccak256(key);
-            hashed_storage_cursor
-                .upsert(hashed_address, &StorageEntry { key: hashed_key, value: value_u256 })?;
+            let previous_value = replace_storage_slot(
+                &mut hashed_storage_cursor,
+                hashed_address,
+                StorageEntry { key: keccak256(key), value: value_u256 },
+            )?;
 
             storage_changeset_writer.append_storage_changeset_entry(
-                reth_db_api::models::StorageBeforeTx { address: *address, key, value: U256::ZERO },
+                reth_db_api::models::StorageBeforeTx {
+                    address: *address,
+                    key,
+                    value: previous_value.unwrap_or_default(),
+                },
             )?;
 
-            history_batch.put::<tables::StoragesHistory>(
-                StorageShardedKey::new(*address, key, u64::MAX),
-                history_list,
-            )?;
+            let history_key = StorageShardedKey::new(*address, key, u64::MAX);
+            if previous_value.is_some() {
+                let storage_history = history_shard_with_block(
+                    history_batch.get::<tables::StoragesHistory>(history_key.clone())?,
+                    block,
+                )?;
+                history_batch.put::<tables::StoragesHistory>(history_key, &storage_history)?;
+            } else {
+                history_batch.put::<tables::StoragesHistory>(history_key, history_list)?;
+            }
         }
     }
 
@@ -1283,7 +1417,10 @@ mod tests {
     use reth_db::DatabaseEnv;
     use reth_db_api::{
         cursor::DbCursorRO,
-        models::{storage_sharded_key::StorageShardedKey, IntegerList, ShardedKey},
+        models::{
+            storage_sharded_key::StorageShardedKey, AccountBeforeTx, IntegerList, ShardedKey,
+            StorageBeforeTx,
+        },
         table::{Table, TableRow},
         transaction::DbTx,
         Database,
@@ -1292,6 +1429,7 @@ mod tests {
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
         ProviderFactory, RocksDBProviderFactory,
     };
+    use reth_storage_overlay::OverlayManager;
     use std::{collections::BTreeMap, sync::Arc};
 
     fn collect_table_entries<DB, T>(
@@ -1491,6 +1629,498 @@ mod tests {
         assert_eq!(storage_offsets.len() as u64, block - storage_file_start + 1);
     }
 
+    /// Imports a state dump over a database whose genesis alloc already holds state, as
+    /// `init-state --without-evm` does, and checks the result is the genesis state overlaid by the
+    /// dump: dump accounts replace their account fields, each dump slot replaces the same genesis
+    /// slot (a zero value deletes it), and genesis accounts and slots the dump omits survive.
+    /// Replaced genesis accounts and slots keep their history.
+    fn assert_dump_state_overlays_genesis_state(settings: StorageSettings) {
+        let dump_only = Address::with_last_byte(1);
+        let overlapping = Address::with_last_byte(2);
+        let no_dump_storage = Address::with_last_byte(3);
+        let genesis_only = Address::with_last_byte(4);
+        let slot = B256::with_last_byte;
+        let val = B256::with_last_byte;
+
+        let genesis_alloc = BTreeMap::from([
+            (
+                overlapping,
+                GenesisAccount {
+                    balance: U256::from(1),
+                    storage: Some(BTreeMap::from([
+                        // Overwritten by the dump.
+                        (slot(1), val(0x11)),
+                        // Omitted by the dump (unchanged since genesis): must survive.
+                        (slot(2), val(0x12)),
+                        // Present in the dump with the same value.
+                        (slot(4), val(0x14)),
+                        // Zeroed by the dump: must be deleted.
+                        (slot(6), val(0x16)),
+                    ])),
+                    ..Default::default()
+                },
+            ),
+            (
+                no_dump_storage,
+                GenesisAccount {
+                    storage: Some(BTreeMap::from([(slot(7), val(0x17))])),
+                    ..Default::default()
+                },
+            ),
+            (
+                genesis_only,
+                GenesisAccount {
+                    balance: U256::from(9),
+                    storage: Some(BTreeMap::from([(slot(8), val(0x18))])),
+                    ..Default::default()
+                },
+            ),
+        ]);
+        let dump_alloc = BTreeMap::from([
+            (
+                dump_only,
+                GenesisAccount {
+                    balance: U256::from(5),
+                    storage: Some(BTreeMap::from([(slot(5), val(0x25))])),
+                    ..Default::default()
+                },
+            ),
+            (
+                overlapping,
+                GenesisAccount {
+                    balance: U256::from(2),
+                    storage: Some(BTreeMap::from([
+                        (slot(1), val(0x21)),
+                        (slot(3), val(0x23)),
+                        (slot(4), val(0x14)),
+                        (slot(6), B256::ZERO),
+                    ])),
+                    ..Default::default()
+                },
+            ),
+            // In the dump without storage: its genesis slot is not listed, so it stays.
+            (no_dump_storage, GenesisAccount { balance: U256::from(3), ..Default::default() }),
+        ]);
+
+        // Genesis overlaid by the dump.
+        let mut expected_alloc = genesis_alloc.clone();
+        for (address, account) in &dump_alloc {
+            let mut storage =
+                genesis_alloc.get(address).and_then(|a| a.storage.clone()).unwrap_or_default();
+            for (key, value) in account.storage.iter().flatten() {
+                if value.is_zero() {
+                    storage.remove(key);
+                } else {
+                    storage.insert(*key, *value);
+                }
+            }
+            expected_alloc.insert(
+                *address,
+                GenesisAccount {
+                    storage: (!storage.is_empty()).then_some(storage),
+                    ..account.clone()
+                },
+            );
+        }
+        let expected_state_root = reth_trie::root::state_root_ref_unhashed(&expected_alloc);
+
+        let chain_spec = Arc::new(ChainSpec {
+            chain: Chain::from_id(1),
+            genesis: Genesis { alloc: genesis_alloc, ..Default::default() },
+            hardforks: Default::default(),
+            paris_block_and_final_difficulty: None,
+            deposit_contract: None,
+            ..Default::default()
+        });
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis_with_settings(&factory, settings).unwrap();
+        factory.set_storage_settings_cache(settings);
+
+        let input = dump_alloc
+            .iter()
+            .map(|(address, account)| {
+                serde_json::to_string(&GenesisAccountWithAddress {
+                    genesis_account: account.clone(),
+                    address: *address,
+                })
+                .unwrap()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let collector = parse_accounts(input.as_bytes(), EtlConfig::new(None, 128)).unwrap();
+        dump_state(collector, &factory, 10).unwrap();
+
+        let storage_of = |address: &Address| -> Vec<(B256, U256)> {
+            expected_alloc[address]
+                .storage
+                .iter()
+                .flatten()
+                .map(|(key, value)| (*key, U256::from_be_bytes(value.0)))
+                .collect()
+        };
+
+        {
+            let provider = factory.provider().unwrap();
+            let tx = provider.tx_ref();
+
+            let hashed_storage =
+                collect_table_entries::<DatabaseEnv, tables::HashedStorages>(tx).unwrap();
+            for address in expected_alloc.keys() {
+                let mut expected = storage_of(address)
+                    .into_iter()
+                    .map(|(key, value)| {
+                        (keccak256(address), StorageEntry { key: keccak256(key), value })
+                    })
+                    .collect::<Vec<_>>();
+                expected.sort_by_key(|(_, entry)| entry.key);
+                let actual = hashed_storage
+                    .iter()
+                    .filter(|(hashed_address, _)| *hashed_address == keccak256(address))
+                    .copied()
+                    .collect::<Vec<_>>();
+                assert_eq!(actual, expected, "hashed storage of {address}");
+            }
+            let expected_slots = expected_alloc.keys().map(|a| storage_of(a).len()).sum::<usize>();
+            assert_eq!(hashed_storage.len(), expected_slots);
+
+            let hashed_accounts =
+                collect_table_entries::<DatabaseEnv, tables::HashedAccounts>(tx).unwrap();
+            assert_eq!(hashed_accounts.len(), expected_alloc.len());
+
+            let plain_storage =
+                collect_table_entries::<DatabaseEnv, tables::PlainStorageState>(tx).unwrap();
+            if settings.storage_v2 {
+                assert!(plain_storage.is_empty());
+            } else {
+                let expected = expected_alloc
+                    .keys()
+                    .flat_map(|address| {
+                        storage_of(address)
+                            .into_iter()
+                            .map(|(key, value)| (*address, StorageEntry { key, value }))
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(plain_storage, expected);
+            }
+        }
+
+        // Replaced accounts and slots keep their genesis values as change set pre-images and their
+        // genesis block in history.
+        {
+            let provider = factory.provider().unwrap();
+            let genesis_account =
+                |balance| Some(Account { balance: U256::from(balance), ..Default::default() });
+            assert_eq!(
+                reth_provider::ChangeSetReader::account_block_changeset(&provider, 10).unwrap(),
+                vec![
+                    AccountBeforeTx { address: dump_only, info: None },
+                    AccountBeforeTx { address: overlapping, info: genesis_account(1) },
+                    AccountBeforeTx { address: no_dump_storage, info: genesis_account(0) },
+                ]
+            );
+            let pre_image = |address, key, value: B256| {
+                (
+                    BlockNumberAddress((10, address)),
+                    StorageEntry { key: slot(key), value: U256::from_be_bytes(value.0) },
+                )
+            };
+            assert_eq!(
+                reth_provider::StorageChangeSetReader::storage_changeset(&provider, 10).unwrap(),
+                vec![
+                    pre_image(dump_only, 5, B256::ZERO),
+                    pre_image(overlapping, 1, val(0x11)),
+                    pre_image(overlapping, 3, B256::ZERO),
+                    pre_image(overlapping, 4, val(0x14)),
+                    pre_image(overlapping, 6, val(0x16)),
+                ]
+            );
+
+            let (accounts_history, storages_history) = if settings.storage_v2 {
+                let rocksdb = factory.rocksdb_provider();
+                (
+                    rocksdb
+                        .iter::<tables::AccountsHistory>()
+                        .unwrap()
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap(),
+                    rocksdb
+                        .iter::<tables::StoragesHistory>()
+                        .unwrap()
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap(),
+                )
+            } else {
+                let tx = provider.tx_ref();
+                (
+                    collect_table_entries::<DatabaseEnv, tables::AccountsHistory>(tx).unwrap(),
+                    collect_table_entries::<DatabaseEnv, tables::StoragesHistory>(tx).unwrap(),
+                )
+            };
+            let blocks = |blocks: &[u64]| IntegerList::new(blocks.iter().copied()).unwrap();
+            assert_eq!(
+                accounts_history,
+                vec![
+                    (ShardedKey::new(dump_only, u64::MAX), blocks(&[10])),
+                    (ShardedKey::new(overlapping, u64::MAX), blocks(&[0, 10])),
+                    (ShardedKey::new(no_dump_storage, u64::MAX), blocks(&[0, 10])),
+                    (ShardedKey::new(genesis_only, u64::MAX), blocks(&[0])),
+                ]
+            );
+            let slot_history = |address, key, list: &[u64]| {
+                (StorageShardedKey::new(address, slot(key), u64::MAX), blocks(list))
+            };
+            assert_eq!(
+                storages_history,
+                vec![
+                    slot_history(dump_only, 5, &[10]),
+                    slot_history(overlapping, 1, &[0, 10]),
+                    slot_history(overlapping, 2, &[0]),
+                    slot_history(overlapping, 3, &[10]),
+                    slot_history(overlapping, 4, &[0, 10]),
+                    slot_history(overlapping, 6, &[0, 10]),
+                    slot_history(no_dump_storage, 7, &[0]),
+                    slot_history(genesis_only, 8, &[0]),
+                ]
+            );
+        }
+
+        {
+            let provider_rw = factory.database_provider_rw().unwrap();
+            provider_rw.tx_ref().clear::<tables::AccountsTrie>().unwrap();
+            provider_rw.tx_ref().clear::<tables::StoragesTrie>().unwrap();
+            provider_rw.commit().unwrap();
+        }
+        assert_eq!(compute_state_root_chunked(&factory).unwrap(), expected_state_root);
+    }
+
+    #[test]
+    fn dump_state_overlays_genesis_state_v1() {
+        assert_dump_state_overlays_genesis_state(StorageSettings::v1());
+    }
+
+    #[test]
+    fn dump_state_overlays_genesis_state_v2() {
+        assert_dump_state_overlays_genesis_state(StorageSettings::v2());
+    }
+
+    /// A genesis at a block that is not the start of a static file range, as on chains that
+    /// start from carried-over state.
+    const UNALIGNED_GENESIS: u64 = 500_010;
+
+    /// Initializes a v2 genesis at [`UNALIGNED_GENESIS`] with an empty alloc, as for a chain whose
+    /// state is imported with `init-state`.
+    fn init_unaligned_v2_genesis() -> ProviderFactory<MockNodeTypesWithDB> {
+        let genesis = Genesis {
+            number: Some(UNALIGNED_GENESIS),
+            alloc: Default::default(),
+            ..MAINNET.genesis.clone()
+        };
+        let factory = create_test_provider_factory_with_chain_spec(Arc::new(
+            reth_chainspec::ChainSpecBuilder::mainnet().genesis(genesis).build(),
+        ));
+        init_genesis_with_settings_and_validate(&factory, StorageSettings::v2(), false).unwrap();
+        factory
+    }
+
+    /// Reopens the factory's static files as a later process does: a fresh provider on the same
+    /// directory, with its index rebuilt from disk and no cached writers.
+    fn reopen_static_files(
+        factory: &ProviderFactory<MockNodeTypesWithDB>,
+    ) -> reth_provider::providers::StaticFileProvider<
+        <ProviderFactory<MockNodeTypesWithDB> as reth_provider::NodePrimitivesProvider>::Primitives,
+    > {
+        reth_provider::providers::StaticFileProviderBuilder::read_write(
+            factory.static_file_provider().directory(),
+        )
+        .with_genesis_block_number(UNALIGNED_GENESIS)
+        .build()
+        .unwrap()
+    }
+
+    #[test]
+    fn init_genesis_v2_unaligned_changeset_writers_resume_after_reopen() {
+        let factory = init_unaligned_v2_genesis();
+        let static_files = reopen_static_files(&factory);
+        for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
+        {
+            let writer = static_files.latest_writer(segment).unwrap();
+            assert_eq!(writer.next_block_number(), UNALIGNED_GENESIS + 1, "{segment}");
+        }
+    }
+
+    #[test]
+    fn dump_state_v2_at_unaligned_genesis_replaces_empty_genesis_changeset() {
+        let storage_key = B256::with_last_byte(3);
+        let input = br#"{"address":"0x0000000000000000000000000000000000000002","balance":"0x5","storage":{"0x0000000000000000000000000000000000000000000000000000000000000003":"0x0000000000000000000000000000000000000000000000000000000000000004"}}
+"#;
+        let factory = init_unaligned_v2_genesis();
+        let collector = parse_accounts(&input[..], EtlConfig::new(None, 128)).unwrap();
+        dump_state(collector, &factory, UNALIGNED_GENESIS).unwrap();
+
+        let static_files = factory.static_file_provider();
+        static_files.initialize_index().unwrap();
+        let provider = factory.provider().unwrap();
+        let address = Address::with_last_byte(2);
+        assert_eq!(
+            reth_provider::ChangeSetReader::account_block_changeset(&provider, UNALIGNED_GENESIS)
+                .unwrap(),
+            vec![AccountBeforeTx { address, info: None }]
+        );
+        assert_eq!(
+            reth_provider::StorageChangeSetReader::storage_changeset(&provider, UNALIGNED_GENESIS)
+                .unwrap(),
+            vec![(
+                BlockNumberAddress((UNALIGNED_GENESIS, address)),
+                StorageEntry { key: storage_key, value: U256::ZERO }
+            )]
+        );
+        for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
+        {
+            assert_eq!(
+                static_files.get_lowest_range_start(segment),
+                Some(UNALIGNED_GENESIS),
+                "{segment}"
+            );
+            let writer = static_files.latest_writer(segment).unwrap();
+            assert_eq!(writer.next_block_number(), UNALIGNED_GENESIS + 1, "{segment}");
+        }
+    }
+
+    #[test]
+    fn init_state_v2_rejects_import_at_existing_non_genesis_changeset_tip() {
+        let factory = init_unaligned_v2_genesis();
+        let block = UNALIGNED_GENESIS + 1;
+        let static_files = factory.static_file_provider();
+        let change = AccountBeforeTx {
+            address: Address::with_last_byte(7),
+            info: Some(Account { balance: U256::from(5), ..Default::default() }),
+        };
+        {
+            let mut writer =
+                static_files.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            writer.append_account_changeset(vec![change.clone()], block).unwrap();
+            writer.commit().unwrap();
+        }
+        let header = alloy_consensus::Header {
+            number: block,
+            state_root: alloy_consensus::EMPTY_ROOT_HASH,
+            ..Default::default()
+        };
+        {
+            let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
+            writer.append_header(&header, &header.hash_slow()).unwrap();
+            writer.commit().unwrap();
+        }
+
+        let dump = serde_json::to_vec(&StateRoot { root: header.state_root }).unwrap();
+        let result = init_from_state_dump(&dump[..], &factory, EtlConfig::new(None, 128));
+        assert!(matches!(
+            result.unwrap_err().downcast_ref::<ProviderError>(),
+            Some(ProviderError::UnexpectedStaticFileBlockNumber(
+                StaticFileSegment::AccountChangeSets,
+                _,
+                _
+            ))
+        ));
+        assert_eq!(
+            reth_provider::ChangeSetReader::account_block_changeset(&static_files, block).unwrap(),
+            vec![change]
+        );
+    }
+
+    #[test]
+    fn dump_state_v2_validates_both_genesis_changeset_segments_before_resetting() {
+        let factory = init_unaligned_v2_genesis();
+        let static_files = factory.static_file_provider();
+        let storage_segment = StaticFileSegment::StorageChangeSets;
+        static_files.delete_segment(storage_segment).unwrap();
+        let address = Address::with_last_byte(2);
+        let key = B256::with_last_byte(3);
+        let value = U256::from(4);
+        {
+            let mut writer = static_files.get_writer(UNALIGNED_GENESIS, storage_segment).unwrap();
+            writer.user_header_mut().set_expected_block_start(UNALIGNED_GENESIS);
+            writer
+                .append_storage_changeset(
+                    vec![StorageBeforeTx { address, key, value }],
+                    UNALIGNED_GENESIS,
+                )
+                .unwrap();
+            writer.commit().unwrap();
+        }
+
+        let collector = parse_accounts(&[][..], EtlConfig::new(None, 128)).unwrap();
+        let result = dump_state(collector, &factory, UNALIGNED_GENESIS);
+        assert!(matches!(
+            result.unwrap_err().downcast_ref::<ProviderError>(),
+            Some(ProviderError::UnexpectedStaticFileBlockNumber(
+                StaticFileSegment::StorageChangeSets,
+                _,
+                _
+            ))
+        ));
+        assert_eq!(
+            static_files.get_lowest_range_start(StaticFileSegment::AccountChangeSets),
+            Some(UNALIGNED_GENESIS)
+        );
+        assert_eq!(
+            reth_provider::StorageChangeSetReader::storage_changeset(
+                &static_files,
+                UNALIGNED_GENESIS
+            )
+            .unwrap(),
+            vec![(BlockNumberAddress((UNALIGNED_GENESIS, address)), StorageEntry { key, value })]
+        );
+    }
+
+    /// Rolls changesets back to the genesis block after a reopen, as a reorg does, through the
+    /// first file, whose start is the genesis block rather than its range start.
+    #[test]
+    fn init_genesis_v2_unaligned_changesets_unwind_to_genesis_after_reopen() {
+        let factory = init_unaligned_v2_genesis();
+        let segment = StaticFileSegment::AccountChangeSets;
+        let address = Address::with_last_byte(7);
+        {
+            let static_files = factory.static_file_provider();
+            let mut writer = static_files.latest_writer(segment).unwrap();
+            for block in UNALIGNED_GENESIS + 1..=UNALIGNED_GENESIS + 3 {
+                writer
+                    .append_account_changeset(vec![AccountBeforeTx { address, info: None }], block)
+                    .unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        let static_files = reopen_static_files(&factory);
+        assert_eq!(
+            static_files.get_highest_static_file_block(segment),
+            Some(UNALIGNED_GENESIS + 3)
+        );
+        {
+            let mut writer = static_files.latest_writer(segment).unwrap();
+            writer.prune_account_changesets(UNALIGNED_GENESIS).unwrap();
+            writer.commit().unwrap();
+        }
+        assert_eq!(static_files.get_highest_static_file_block(segment), Some(UNALIGNED_GENESIS));
+
+        // The chain continues from genesis as if the rolled-back blocks had never existed.
+        {
+            let mut writer = static_files.latest_writer(segment).unwrap();
+            assert_eq!(writer.next_block_number(), UNALIGNED_GENESIS + 1);
+            writer
+                .append_account_changeset(
+                    vec![AccountBeforeTx { address, info: None }],
+                    UNALIGNED_GENESIS + 1,
+                )
+                .unwrap();
+            writer.commit().unwrap();
+        }
+        assert_eq!(
+            static_files.get_highest_static_file_block(segment),
+            Some(UNALIGNED_GENESIS + 1)
+        );
+    }
+
     #[test]
     fn success_init_genesis_mainnet() {
         let genesis_hash =
@@ -1532,6 +2162,7 @@ mod tests {
                 MAINNET.clone(),
                 static_file_provider,
                 rocksdb_provider,
+                OverlayManager::default(),
                 reth_tasks::Runtime::test(),
             )
             .unwrap(),
@@ -1559,6 +2190,7 @@ mod tests {
                 MAINNET.clone(),
                 static_file_provider,
                 rocksdb_provider,
+                OverlayManager::default(),
                 reth_tasks::Runtime::test(),
             )
             .unwrap(),

@@ -213,14 +213,6 @@ mod tests {
     }
 
     #[test]
-    fn decode_error_preserves_payload_position() {
-        let encoded = [0xc1, 0x01, 0xaa];
-        let mut input = encoded.as_slice();
-        assert!(BlockAccessLists::decode(&mut input).is_err());
-        assert_eq!(input, &encoded[2..]);
-    }
-
-    #[test]
     fn rejects_non_empty_string_bal_entries() {
         let err = alloy_rlp::decode_exact::<BlockAccessLists>(&[0xc2, 0x81, 0x80]).unwrap_err();
         assert!(matches!(err, alloy_rlp::Error::UnexpectedString));

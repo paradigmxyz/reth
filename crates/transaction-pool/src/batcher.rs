@@ -6,6 +6,7 @@
 use crate::{
     error::PoolError, AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
 };
+use futures_util::FutureExt;
 use pin_project::pin_project;
 use std::{
     future::Future,
@@ -121,9 +122,12 @@ where
             if !this.buf.is_empty() {
                 let batch = std::mem::take(this.buf);
                 let pool = this.pool.clone();
-                tokio::spawn(async move {
-                    Self::process_batch(&pool, batch).await;
-                });
+                tokio::spawn(
+                    async move {
+                        Self::process_batch(&pool, batch).await;
+                    }
+                    .boxed(),
+                );
                 this.buf.reserve(1);
 
                 continue;

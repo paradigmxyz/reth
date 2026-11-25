@@ -6,8 +6,9 @@ use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
-    AccountProof, DecodedMultiProofV2, HashedPostStateSorted, HashedStorage, MultiProof,
-    MultiProofTargets, MultiProofTargetsV2, StorageMultiProof, TrieInput, TrieInputSorted,
+    updates::TrieUpdatesSorted,
+    AccountProof, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets,
+    StorageMultiProof, TrieInputSorted,
 };
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.
@@ -18,10 +19,10 @@ pub trait DatabaseProof<'a> {
     /// Create a new [`Proof`] instance from database transaction.
     fn from_tx(tx: &'a Self::Tx) -> Self;
 
-    /// Generates the state proof for target account based on [`TrieInput`].
+    /// Generates the state proof for target account based on [`TrieInputSorted`].
     fn overlay_account_proof(
         &self,
-        input: TrieInput,
+        input: TrieInputSorted,
         address: Address,
         slots: &[B256],
     ) -> Result<AccountProof, StateProofError>;
@@ -29,16 +30,9 @@ pub trait DatabaseProof<'a> {
     /// Generates the state [`MultiProof`] for target hashed account and storage keys.
     fn overlay_multiproof(
         &self,
-        input: TrieInput,
+        input: TrieInputSorted,
         targets: MultiProofTargets,
     ) -> Result<MultiProof, StateProofError>;
-
-    /// Generates a V2 decoded state multiproof for target hashed accounts and storage keys.
-    fn overlay_multiproof_v2(
-        &self,
-        input: TrieInput,
-        targets: MultiProofTargetsV2,
-    ) -> Result<DecodedMultiProofV2, StateProofError>;
 }
 
 impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
@@ -51,48 +45,19 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
     }
     fn overlay_account_proof(
         &self,
-        input: TrieInput,
+        input: TrieInputSorted,
         address: Address,
         slots: &[B256],
     ) -> Result<AccountProof, StateProofError> {
-        let nodes_sorted = input.nodes.into_sorted();
-        let state_sorted = input.state.into_sorted();
-        Proof::new(
-            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), &nodes_sorted),
-            HashedPostStateCursorFactory::new(self.hashed_cursor_factory().clone(), &state_sorted),
-        )
-        .with_prefix_sets_mut(input.prefix_sets)
-        .account_proof(address, slots)
+        with_overlay(self, input, |proof| proof.account_proof(address, slots))
     }
 
     fn overlay_multiproof(
         &self,
-        input: TrieInput,
+        input: TrieInputSorted,
         targets: MultiProofTargets,
     ) -> Result<MultiProof, StateProofError> {
-        let nodes_sorted = input.nodes.into_sorted();
-        let state_sorted = input.state.into_sorted();
-        Proof::new(
-            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), &nodes_sorted),
-            HashedPostStateCursorFactory::new(self.hashed_cursor_factory().clone(), &state_sorted),
-        )
-        .with_prefix_sets_mut(input.prefix_sets)
-        .multiproof(targets)
-    }
-
-    fn overlay_multiproof_v2(
-        &self,
-        input: TrieInput,
-        targets: MultiProofTargetsV2,
-    ) -> Result<DecodedMultiProofV2, StateProofError> {
-        let nodes_sorted = input.nodes.into_sorted();
-        let state_sorted = input.state.into_sorted();
-        Proof::new(
-            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), &nodes_sorted),
-            HashedPostStateCursorFactory::new(self.hashed_cursor_factory().clone(), &state_sorted),
-        )
-        .with_prefix_sets_mut(input.prefix_sets)
-        .multiproof_v2(targets)
+        with_overlay(self, input, |proof| proof.multiproof(targets))
     }
 }
 
@@ -101,7 +66,7 @@ pub trait DatabaseStorageProof<'a, TX> {
     /// Create a new [`StorageProof`] from database transaction and account address.
     fn from_tx(tx: &'a TX, address: Address) -> Self;
 
-    /// Generates the storage proof for target slot based on [`TrieInput`].
+    /// Generates the storage proof for target slot based on [`HashedStorage`].
     fn overlay_storage_proof(
         tx: &'a TX,
         address: Address,
@@ -109,7 +74,7 @@ pub trait DatabaseStorageProof<'a, TX> {
         storage: HashedStorage,
     ) -> Result<reth_trie::StorageProof, StateProofError>;
 
-    /// Generates the storage multiproof for target slots based on [`TrieInput`].
+    /// Generates the storage multiproof for target slots based on [`TrieInputSorted`].
     fn overlay_storage_multiproof(
         tx: &'a TX,
         address: Address,
@@ -119,11 +84,7 @@ pub trait DatabaseStorageProof<'a, TX> {
 }
 
 impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
-    for StorageProof<
-        'static,
-        DatabaseTrieCursorFactory<&'a TX, A>,
-        DatabaseHashedCursorFactory<&'a TX>,
-    >
+    for StorageProof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>
 {
     fn from_tx(tx: &'a TX, address: Address) -> Self {
         Self::new(
@@ -175,4 +136,25 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
         )
         .storage_multiproof(targets)
     }
+}
+
+// Keeps cursor layering and prefix invalidation identical across proof entrypoints.
+fn with_overlay<T: Clone, H: Clone, R>(
+    proof: &Proof<T, H>,
+    input: TrieInputSorted,
+    f: impl FnOnce(
+        Proof<
+            InMemoryTrieCursorFactory<T, &TrieUpdatesSorted>,
+            HashedPostStateCursorFactory<H, &HashedPostStateSorted>,
+        >,
+    ) -> R,
+) -> R {
+    f(Proof::new(
+        InMemoryTrieCursorFactory::new(proof.trie_cursor_factory().clone(), input.nodes.as_ref()),
+        HashedPostStateCursorFactory::new(
+            proof.hashed_cursor_factory().clone(),
+            input.state.as_ref(),
+        ),
+    )
+    .with_prefix_sets_mut(input.prefix_sets))
 }

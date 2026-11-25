@@ -238,6 +238,10 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        // Forward scans can reuse cursor positions; backward seeks and exhausted cursors cannot.
+        if self.last_key.is_none_or(|last| key < last) {
+            self.reset();
+        }
         let mem_entry = self.in_memory_cursor.seek(&key);
 
         if let Some((mem_key, entry_inner)) = mem_entry &&
@@ -281,6 +285,10 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        // Forward scans can reuse cursor positions; backward seeks and exhausted cursors cannot.
+        if self.last_key.is_none_or(|last| key < last) {
+            self.reset();
+        }
         let mem_entry = self.in_memory_cursor.seek(&key);
 
         if let Some((mem_key, Some(node))) = mem_entry &&
@@ -385,6 +393,7 @@ mod tests {
     use crate::trie_cursor::mock::MockTrieCursor;
     use parking_lot::Mutex;
     use std::{collections::BTreeMap, sync::Arc};
+    use tracing::debug;
 
     #[derive(Debug)]
     struct InMemoryTrieCursorTestCase {
@@ -424,7 +433,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_empty_db_and_memory() {
         let test_case = InMemoryTrieCursorTestCase {
             db_nodes: vec![],
@@ -434,7 +443,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_only_db_nodes() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
@@ -450,7 +459,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_only_in_memory_nodes() {
         let in_memory_nodes = vec![
             (
@@ -477,7 +486,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_in_memory_overwrites_db() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
@@ -505,7 +514,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_in_memory_deletes_db_nodes() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
@@ -524,7 +533,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_complex_interleaving() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
@@ -567,7 +576,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_exact() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
@@ -610,7 +619,7 @@ mod tests {
         assert_eq!(result, None);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_overlay_exact_hit_does_not_touch_db_until_next() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
@@ -651,7 +660,7 @@ mod tests {
         assert!(!visited_keys.lock().is_empty(), "next should lazily position the DB cursor");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_overlay_exact_hit_repositions_stale_db_on_next() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
@@ -701,7 +710,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_multiple_consecutive_deletes() {
         let db_nodes: Vec<(Nibbles, BranchNodeCompact)> = (1..=10)
             .map(|i| {
@@ -732,7 +741,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_empty_db_with_in_memory_deletes() {
         let in_memory_nodes = vec![
             (Nibbles::from_nibbles([0x1]), None),
@@ -753,7 +762,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_current_key_tracking() {
         let db_nodes = vec![(
             Nibbles::from_nibbles([0x2]),
@@ -791,9 +800,8 @@ mod tests {
         assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x3])));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_all_storage_nodes_deleted_exact_keys() {
-        use tracing::debug;
         reth_tracing::init_test_tracing();
 
         // This test reproduces an edge case where:
@@ -956,15 +964,13 @@ mod tests {
         proptest! {
             #![proptest_config(ProptestConfig::with_cases(10000))]
 
-            #[test]
+            #[reth_concurrency::test]
             fn proptest_in_memory_trie_cursor(
                 db_nodes in sorted_db_nodes_strategy(),
                 in_memory_nodes in sorted_in_memory_nodes_strategy(),
                 op_choices in prop::collection::vec(any::<u8>(), 10..500),
             ) {
                 reth_tracing::init_test_tracing();
-                use tracing::debug;
-
                 debug!(
                     db_paths=?db_nodes.iter().map(|(k, _)| k).collect::<Vec<_>>(),
                     in_mem_nodes=?in_memory_nodes.iter().map(|(k, v)| (k, v.is_some())).collect::<Vec<_>>(),

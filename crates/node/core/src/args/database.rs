@@ -57,6 +57,7 @@ pub struct DatabaseArgs {
     /// Controls how aggressively the database synchronizes data to disk.
     #[arg(
         long = "db.sync-mode",
+        env = "RETH_DB_SYNC_MODE",
         value_parser = value_parser!(SyncMode),
     )]
     pub sync_mode: Option<SyncMode>,

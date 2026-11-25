@@ -14,12 +14,11 @@ use reth_consensus::noop::NoopConsensus;
 use reth_db::DatabaseEnv;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::ConfigureEvm;
-use reth_exex::ExExManagerHandle;
 use reth_provider::{providers::ProviderNodeTypes, BlockNumReader, ProviderFactory};
 use reth_stages::{
     sets::{DefaultStages, OfflineStages},
-    stages::ExecutionStage,
-    ExecutionStageThresholds, Pipeline, StageSet,
+    stages::{EraImportSource, EraStage},
+    Pipeline, StageId, StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use std::sync::Arc;
@@ -110,23 +109,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     Arc::new(NoopConsensus::default()),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
-                    evm_config.clone(),
+                    evm_config,
                     stage_conf.clone(),
                     prune_modes.clone(),
                     None,
                 )
-                .set(ExecutionStage::new(
-                    evm_config,
-                    Arc::new(NoopConsensus::default()),
-                    ExecutionStageThresholds {
-                        max_blocks: None,
-                        max_changes: None,
-                        max_cumulative_gas: None,
-                        max_duration: None,
-                    },
-                    stage_conf.execution_external_clean_threshold(),
-                    ExExManagerHandle::empty(),
-                )),
+                .builder()
+                .add_before(
+                    EraStage::new(None::<EraImportSource>, stage_conf.etl.clone()),
+                    StageId::Headers,
+                ),
             )
         };
 

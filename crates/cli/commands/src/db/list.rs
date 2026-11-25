@@ -93,10 +93,14 @@ struct ListTableViewer<'a, N: NodeTypes> {
     args: &'a Command,
 }
 
-impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
-    type Error = eyre::Report;
-
-    fn view<T: Table>(&self) -> Result<(), Self::Error> {
+impl<N: NodeTypes> ListTableViewer<'_, N> {
+    /// Lists the viewed table, using `json` to dump a filtered list of rows as pretty JSON along
+    /// with the number of rows found, and `page` to fetch the rows of a TUI page as strings.
+    fn list(
+        &self,
+        json: &dyn Fn(&ListFilter) -> eyre::Result<(String, usize)>,
+        page: &dyn Fn(&ListFilter) -> Vec<(String, String)>,
+    ) -> eyre::Result<()> {
         self.tool.provider_factory.db_ref().view(|tx| {
             // We may be using the tui for a long time
             tx.disable_long_read_transaction_safety();
@@ -120,27 +124,68 @@ impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
             let list_filter = self.args.list_filter()?;
 
             if self.args.json || self.args.count {
-                let (list, count) = self.tool.list::<T>(&list_filter)?;
+                let (list, count) = json(&list_filter)?;
 
                 if self.args.count {
                     println!("{count} entries found.")
-                } else if self.args.raw {
-                    let list = list.into_iter().map(|row| (row.0, RawValue::new(row.1).into_value())).collect::<Vec<_>>();
-                    println!("{}", serde_json::to_string_pretty(&list)?);
                 } else {
-                    println!("{}", serde_json::to_string_pretty(&list)?);
+                    println!("{list}");
                 }
                 Ok(())
             } else {
                 let list_filter = RefCell::new(list_filter);
-                DbListTUI::<_, T>::new(|skip, len| {
+                DbListTUI::new(Box::new(|skip, len| {
                     list_filter.borrow_mut().update_page(skip, len);
-                    self.tool.list::<T>(&list_filter.borrow()).unwrap().0
-                }, self.args.skip, self.args.len, total_entries, self.args.raw).run()
+                    page(&list_filter.borrow())
+                }), self.args.skip, self.args.len, total_entries).run()
             }
         })??;
 
         Ok(())
+    }
+}
+
+impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
+    type Error = eyre::Report;
+
+    fn view<T: Table>(&self) -> Result<(), Self::Error> {
+        self.list(
+            &|filter| {
+                let (list, count) = self.tool.list::<T>(filter)?;
+
+                let list = if self.args.raw {
+                    let list = list
+                        .into_iter()
+                        .map(|row| (row.0, RawValue::new(row.1).into_value()))
+                        .collect::<Vec<_>>();
+                    serde_json::to_string_pretty(&list)?
+                } else {
+                    serde_json::to_string_pretty(&list)?
+                };
+                Ok((list, count))
+            },
+            &|filter| {
+                self.tool
+                    .list::<T>(filter)
+                    .unwrap()
+                    .0
+                    .into_iter()
+                    .map(|(key, value)| {
+                        let value = if self.args.raw {
+                            serde_json::to_string(RawValue::<T::Value>::from(value).raw_value())
+                        } else {
+                            serde_json::to_string_pretty(&value)
+                        };
+                        (
+                            format!("{key:?}"),
+                            value.unwrap_or_else(|error| {
+                                format!("Error serializing value: {error}")
+                            }),
+                        )
+                    })
+                    .collect()
+            },
+        )
     }
 }
 

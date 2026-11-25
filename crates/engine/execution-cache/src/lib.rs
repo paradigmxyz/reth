@@ -5,7 +5,6 @@
 //! - [`SavedCache`]: An execution cache snapshot associated with a specific block hash
 //! - [`PayloadExecutionCache`]: Thread-safe wrapper for sharing cached state across payload
 //!   processing tasks
-//! - [`precompile_cache`]: Cross-block cache of precompile results
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -20,8 +19,6 @@ pub use cached_state::*;
 
 mod txpool;
 pub use txpool::*;
-
-pub mod precompile_cache;
 
 use alloy_primitives::B256;
 use metrics::{Counter, Histogram};
@@ -55,11 +52,21 @@ pub struct PayloadExecutionCache {
 impl PayloadExecutionCache {
     /// Returns the cache for `parent_hash` if it's available for use.
     ///
-    /// A cache is considered available when:
-    /// - It exists and matches the requested parent hash
-    /// - No other tasks are currently using it (checked via Arc reference count)
-    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip(self))]
+    /// See [`Self::checkout`] for when a cache is available.
     pub fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
+        match self.checkout(parent_hash) {
+            CacheCheckout::Available(cache) => Some(cache),
+            CacheCheckout::Empty | CacheCheckout::InUse { .. } => None,
+        }
+    }
+
+    /// Checks out the stored cache for `parent_hash`.
+    ///
+    /// The stored cache is available when no other task holds a reference to it (checked via the
+    /// Arc reference count). If it was saved for another block, it is cleared and re-keyed to
+    /// `parent_hash` before it is returned.
+    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip(self))]
+    pub fn checkout(&self, parent_hash: B256) -> CacheCheckout {
         let start = Instant::now();
         let mut cache = self.inner.lock();
 
@@ -96,15 +103,14 @@ impl PayloadExecutionCache {
                     // and picking up polluted data if the fork block fails.
                     c.clear_with_hash(parent_hash);
                 }
-                return Some(c.clone())
-            } else if hash_matches {
-                self.metrics.execution_cache_in_use.increment(1);
+                return CacheCheckout::Available(c.clone())
             }
-        } else {
-            debug!(target: "engine::caching", %parent_hash, "No cache found");
+            self.metrics.execution_cache_in_use.increment(1);
+            return CacheCheckout::InUse { cached_hash }
         }
 
-        None
+        debug!(target: "engine::caching", %parent_hash, "No cache found");
+        CacheCheckout::Empty
     }
 
     /// Waits for the mutex protecting the stored `Option<SavedCache>` to be released.
@@ -156,6 +162,21 @@ impl PayloadExecutionCache {
     }
 }
 
+/// Outcome of [`PayloadExecutionCache::checkout`].
+#[derive(Debug)]
+pub enum CacheCheckout {
+    /// The stored cache, keyed to the requested parent hash.
+    Available(SavedCache),
+    /// No cache is stored yet.
+    Empty,
+    /// The stored cache is still held by another task, such as a prewarm task that has not saved
+    /// its block yet.
+    InUse {
+        /// Hash of the block whose post-state the stored cache holds.
+        cached_hash: B256,
+    },
+}
+
 /// Metrics for [`PayloadExecutionCache`] operations.
 #[derive(Metrics, Clone)]
 #[metrics(scope = "consensus.engine.beacon")]
@@ -171,7 +192,7 @@ struct PayloadExecutionCacheMetrics {
 mod tests {
     use super::*;
 
-    #[test]
+    #[reth_concurrency::test]
     fn single_checkout_blocks_second() {
         let cache = PayloadExecutionCache::default();
         let hash = B256::repeat_byte(1u8);
@@ -187,7 +208,7 @@ mod tests {
         assert!(second.is_none());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn checkout_available_after_drop() {
         let cache = PayloadExecutionCache::default();
         let hash = B256::repeat_byte(2u8);
@@ -204,7 +225,7 @@ mod tests {
         assert!(second.is_some());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn raw_cache_handle_blocks_checkout_until_drop() {
         let cache = PayloadExecutionCache::default();
         let hash = B256::repeat_byte(3u8);
@@ -226,7 +247,7 @@ mod tests {
         assert!(available.is_some(), "checkout should succeed after raw handle is dropped");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn hash_mismatch_clears_and_retags() {
         let cache = PayloadExecutionCache::default();
         let hash_a = B256::repeat_byte(0xAA);
@@ -241,9 +262,27 @@ mod tests {
         assert_eq!(checked_out.unwrap().executed_block_hash(), hash_b);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn empty_cache_returns_none() {
         let cache = PayloadExecutionCache::default();
         assert!(cache.get_cache_for(B256::ZERO).is_none());
+    }
+
+    #[reth_concurrency::test]
+    fn checkout_distinguishes_empty_from_in_use() {
+        let cache = PayloadExecutionCache::default();
+        let hash = B256::repeat_byte(7u8);
+        assert!(matches!(cache.checkout(hash), CacheCheckout::Empty));
+
+        cache.update_with_guard(|slot| {
+            *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
+        });
+        let held = cache.get_cache_for(hash).expect("checkout should succeed");
+
+        assert!(matches!(
+            cache.checkout(B256::repeat_byte(8u8)),
+            CacheCheckout::InUse { cached_hash } if cached_hash == hash
+        ));
+        drop(held);
     }
 }

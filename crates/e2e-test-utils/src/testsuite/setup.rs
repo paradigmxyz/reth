@@ -6,13 +6,14 @@ use crate::{
     E2ETestSetupExt, NodeBuilderHelper,
 };
 use alloy_eips::BlockNumberOrTag;
-use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
+use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadAttributes};
 use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_node_api::{EngineTypes, PayloadAttrTy, PayloadTypes, TreeConfig};
 use reth_node_core::args::StorageArgs;
-use reth_rpc_api::clients::EngineApiClient;
-use std::{marker::PhantomData, path::Path, sync::Arc, time::Duration};
+#[cfg(feature = "chain-import")]
+use std::path::Path;
+use std::{marker::PhantomData, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 use tracing::debug;
 
@@ -37,6 +38,7 @@ pub struct Setup<I> {
     _phantom: PhantomData<I>,
     /// Holds the import result to keep nodes alive when using imported chain
     /// This is stored as an option to avoid lifetime issues with `tokio::spawn`
+    #[cfg(feature = "chain-import")]
     import_result_holder: Option<crate::setup_import::ChainImportResult>,
     /// Path to RLP file to import during setup
     pub import_rlp_path: Option<std::path::PathBuf>,
@@ -52,6 +54,7 @@ impl<I> Default for Setup<I> {
             is_dev: true,
             storage_v2: StorageArgs::default().v2,
             _phantom: Default::default(),
+            #[cfg(feature = "chain-import")]
             import_result_holder: None,
             import_rlp_path: None,
         }
@@ -108,6 +111,7 @@ where
     /// Returns an error if a node does not accept it within [`WAIT_TIMEOUT`].
     ///
     /// [`WAIT_TIMEOUT`]: crate::wait::WAIT_TIMEOUT
+    #[cfg(feature = "chain-import")]
     pub async fn apply_with_import<N>(
         &mut self,
         env: &mut Environment<I>,
@@ -121,6 +125,7 @@ where
     }
 
     /// Apply setup using pre-imported chain data from RLP file
+    #[cfg(feature = "chain-import")]
     async fn apply_with_import_(
         &mut self,
         env: &mut Environment<I>,
@@ -168,7 +173,13 @@ where
     {
         // If import_rlp_path is set, use apply_with_import instead
         if let Some(rlp_path) = self.import_rlp_path.take() {
+            #[cfg(feature = "chain-import")]
             return self.apply_with_import::<N>(env, &rlp_path).await;
+            #[cfg(not(feature = "chain-import"))]
+            return Err(eyre!(
+                "importing {} requires the `chain-import` feature",
+                rlp_path.display()
+            ));
         }
         let chain_spec =
             self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
@@ -222,6 +233,7 @@ where
     /// Note: Currently this only supports `EthereumNode` due to the import process
     /// being Ethereum-specific. The generic parameter N is kept for consistency
     /// with other methods but is not used.
+    #[cfg(feature = "chain-import")]
     async fn create_nodes_with_import(
         &self,
         rlp_path: &Path,
@@ -340,8 +352,12 @@ where
                 PollOpts { interval: Duration::from_millis(100), ..Default::default() },
                 format!("node {idx} to stop syncing to block {}", state.head_block_hash),
                 || async {
-                    let response =
-                        EngineApiClient::<I>::fork_choice_updated_v3(&engine, state, None).await?;
+                    let response = engine
+                        .request::<_, ForkchoiceUpdated>(
+                            "engine_forkchoiceUpdatedV3",
+                            (state, None::<PayloadAttributes>),
+                        )
+                        .await?;
                     Ok((!response.is_syncing()).then_some(response))
                 },
             )

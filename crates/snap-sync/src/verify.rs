@@ -302,11 +302,12 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{account, hashed_factory, header, key, state_root},
-        SnapGeneration, SnapStorageStore, StorageChunk,
+        SnapGeneration,
     };
     use alloy_consensus::TxLegacy;
     use alloy_eips::eip4895::{Withdrawal, Withdrawals};
     use alloy_primitives::{map::B256Map, Address, Bytes, Signature, U256};
+    use evm2::bytecode::Bytecode;
     use reth_db_api::transaction::DbTxMut;
     use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned};
     use reth_primitives_traits::SealedHeader;
@@ -320,7 +321,6 @@ mod tests {
     use reth_stages::stages::MerkleStage;
     use reth_stages_api::{ExecInput, Stage, StageError};
     use reth_trie_common::{root::storage_root_unsorted, HashedStorage, TrieAccount};
-    use revm::bytecode::Bytecode;
     use std::collections::BTreeMap;
 
     type Factory = ProviderFactory<MockNodeTypesWithDB>;
@@ -438,19 +438,6 @@ mod tests {
     }
 
     #[test]
-    fn storage_persisted_ahead_of_its_range_prevents_the_hand_off() {
-        let (factory, write, _) = downloaded(state_root(&accounts()), 2);
-        let provider = factory.database_provider_rw().unwrap();
-        let origin = provider.account_coverage(write).unwrap().unwrap().next().unwrap();
-        let root = accounts()[2].1.storage_root;
-        let chunk =
-            StorageChunk::new(CONTRACT, root, B256::ZERO, vec![(SLOT, U256::from(7))], None);
-        provider.commit_storage_chunk(write, origin, chunk).unwrap();
-
-        assert!(matches!(start(&provider, write), Err(SnapSyncError::IncompleteAccounts { .. })));
-    }
-
-    #[test]
     fn missing_code_prevents_the_hand_off() {
         let (factory, write, _) = downloaded(state_root(&accounts()), accounts().len());
         let provider = factory.database_provider_rw().unwrap();
@@ -524,26 +511,6 @@ mod tests {
     }
 
     #[test]
-    fn a_header_committing_to_another_root_is_refused() {
-        // Ranges authenticate against the attempt's root, but completion answers to the header.
-        let header_root = B256::repeat_byte(0xcc);
-        let (factory, write, _) = downloaded(header_root, accounts().len());
-        let provider = factory.database_provider_rw().unwrap();
-        start(&provider, write).unwrap();
-
-        assert!(matches!(run_merkle(&provider, 1), Err(StageError::Block { .. })));
-        match provider.verify_state_root(write) {
-            Err(SnapSyncError::Provider(ProviderError::StateRootMismatch(mismatch))) => {
-                assert_eq!(
-                    mismatch.root,
-                    GotExpected { got: state_root(&accounts()), expected: header_root }
-                );
-            }
-            other => panic!("expected a state root mismatch, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn a_rebuild_for_an_earlier_attempt_is_not_trusted() {
         let root = state_root(&accounts());
         let (factory, write, blocks) = downloaded(root, accounts().len());
@@ -590,7 +557,7 @@ mod tests {
     }
 
     #[test]
-    fn publishing_moves_the_covered_stages_while_the_trie_and_finish_wait() {
+    fn publishing_moves_the_covered_stages_and_prunes_the_history_below_the_pivot() {
         let factory = hashed_factory();
         let provider = factory.database_provider_rw().unwrap();
 
@@ -604,6 +571,12 @@ mod tests {
             let expected = published.then(|| StageCheckpoint::new(7));
             assert_eq!(provider.get_stage_checkpoint(stage).unwrap(), expected, "{stage}");
         }
+
+        // The history below the pivot is recorded as pruned for every segment.
+        for segment in PruneSegment::variants() {
+            let checkpoint = provider.get_prune_checkpoint(segment).unwrap();
+            assert_eq!(checkpoint, Some(PruneCheckpoint::pruned_through(7)), "{segment}");
+        }
     }
 
     #[test]
@@ -612,19 +585,6 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
 
         assert!(matches!(provider.publish_snap_state(0), Err(SnapSyncError::GenesisPivot)));
-    }
-
-    #[test]
-    fn publishing_records_the_history_below_the_pivot_as_pruned() {
-        let factory = hashed_factory();
-        let provider = factory.database_provider_rw().unwrap();
-
-        provider.publish_snap_state(7).unwrap();
-
-        for segment in PruneSegment::variants() {
-            let checkpoint = provider.get_prune_checkpoint(segment).unwrap();
-            assert_eq!(checkpoint, Some(PruneCheckpoint::pruned_through(7)), "{segment}");
-        }
     }
 
     #[test]

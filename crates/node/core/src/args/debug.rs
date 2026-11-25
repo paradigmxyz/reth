@@ -124,6 +124,11 @@ pub struct DebugArgs {
     /// the backfill, but did not yet receive any new blocks.
     #[arg(long = "debug.startup-sync-state-idle", help_heading = "Debug")]
     pub startup_sync_state_idle: bool,
+
+    /// Load the KZG trusted setup when it is first needed instead of in the background on
+    /// startup.
+    #[arg(long = "debug.lazy-kzg-settings", help_heading = "Debug", hide = true)]
+    pub lazy_kzg_settings: bool,
 }
 
 impl Default for DebugArgs {
@@ -145,6 +150,7 @@ impl Default for DebugArgs {
             healthy_node_rpc_url: None,
             ethstats: None,
             startup_sync_state_idle: false,
+            lazy_kzg_settings: false,
         }
     }
 }

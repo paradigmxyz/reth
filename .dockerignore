@@ -4,6 +4,7 @@
 # include source files
 !/bin
 !/crates
+!/contrib
 !/pkg
 !/testing
 !/.github/scripts/install_llvm_ubuntu.sh

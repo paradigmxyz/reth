@@ -192,7 +192,7 @@ where
 
 impl<Provider, T> Future for ImportService<Provider, T>
 where
-    Provider: BlockNumReader + BlockHashReader + Sync + Clone + 'static + Unpin,
+    Provider: BlockNumReader + Sync + Clone + 'static + Unpin,
     T: PayloadTypes,
 {
     type Output = Result<(), Box<dyn std::error::Error>>;

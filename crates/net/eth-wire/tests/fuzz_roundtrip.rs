@@ -10,7 +10,7 @@ use std::fmt::Debug;
 /// The test will create a random instance of the type, encode it, and then decode it.
 fn roundtrip_encoding<T>(thing: T)
 where
-    T: Encodable + Decodable + Debug + PartialEq + Eq,
+    T: Encodable + Decodable + Debug + Eq,
 {
     let mut encoded = Vec::new();
     thing.encode(&mut encoded);
@@ -28,7 +28,7 @@ where
 /// Default, Clone, or Serialize, and fuzz the wrapper type instead.
 fn roundtrip_fuzz<T>(thing: T)
 where
-    T: Encodable + Decodable + Clone + Serialize + Debug + PartialEq + Eq,
+    T: Encodable + Decodable + Clone + Serialize + Debug + Eq,
 {
     roundtrip_encoding::<T>(thing)
 }

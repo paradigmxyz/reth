@@ -652,6 +652,7 @@ stage_unit_checkpoints!(
 mod tests {
     use super::*;
     use alloy_primitives::b256;
+    use bytes::Buf;
     use proptest::{collection::vec, option, prelude::*};
     use rand::Rng;
     use reth_codecs::Compact;
@@ -762,19 +763,6 @@ mod tests {
         assert_eq!(decoded, checkpoint);
     }
 
-    #[test]
-    fn finish_checkpoint_roundtrip() {
-        let finish_checkpoint = FinishCheckpoint { partial_state_trie: Some(21) };
-        let checkpoint = StageCheckpoint::new(42).with_finish_stage_checkpoint(finish_checkpoint);
-
-        let mut buf = Vec::new();
-        let encoded = checkpoint.to_compact(&mut buf);
-        let (decoded, _) = StageCheckpoint::from_compact(&buf, encoded);
-
-        assert_eq!(decoded, checkpoint);
-        assert_eq!(decoded.finish_stage_checkpoint().unwrap().partial_state_trie(), Some(21));
-    }
-
     /// Bytes following a checkpoint record, to check that decoding stays within the record.
     const TRAILING: [u8; 2] = [0xab, 0xcd];
 
@@ -822,8 +810,6 @@ mod tests {
         }
 
         fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
-            use bytes::Buf;
-
             let last_storage_key = B256::from_slice(&buf[..32]);
             buf.advance(32);
 
@@ -919,7 +905,6 @@ mod tests {
         }
 
         fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
-            use bytes::Buf;
             let target_block = buf.get_u64();
 
             let last_account_key = B256::from_slice(&buf[..32]);

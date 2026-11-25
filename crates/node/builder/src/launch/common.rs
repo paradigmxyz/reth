@@ -81,7 +81,7 @@ use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{
     sets::DefaultStages,
-    stages::{EraImportSource, MerkleStage},
+    stages::{EraImportSource, EraStage, MerkleStage},
     MetricEvent, PipelineBuilder, PipelineTarget, StageId, StageSet,
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
@@ -89,13 +89,14 @@ use reth_storage_overlay::OverlayManager;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
 use reth_transaction_pool::TransactionPool;
-use std::{num::NonZeroUsize, sync::Arc, thread::available_parallelism, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     oneshot, watch,
 };
 
 use futures::{future::Either, stream, Stream, StreamExt};
+use reth_engine_primitives::ConsensusEngineEvent;
 use reth_node_ethstats::EthStatsService;
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node::NodeEvent};
 
@@ -236,7 +237,7 @@ impl LaunchContext {
         // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
         // sizes doesn't actually reserve CPU cores for other processes.
         let _ = reserved_cpu_cores;
-        let num_threads = available_parallelism().map_or(1, NonZeroUsize::get);
+        let num_threads = self.task_executor.cpu_pool().current_num_threads();
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("rayon-{i:02}"))
@@ -551,18 +552,22 @@ where
             .map(|distance| {
                 RocksDBBalStore::with_buffer_retention_distance(rocksdb_provider.clone(), distance)
             })
-            .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()));
+            .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()))
+            .with_bodies_prune_mode(
+                prune_config.segments.bodies_history,
+                prune_config.minimum_pruning_distance,
+            );
         let bal_store = BalStoreHandle::new(bal_store);
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
             static_file_provider,
             rocksdb_provider,
+            overlay_manager,
             self.task_executor().clone(),
         )?
         .with_prune_modes(prune_config.segments)
         .with_minimum_pruning_distance(prune_config.minimum_pruning_distance)
-        .with_overlay_manager(overlay_manager)
         .with_bal_store(bal_store);
 
         recover(&factory)?;
@@ -576,6 +581,7 @@ where
         // resuming an interrupted partial trie unwind.
         let (partial_trie_unwind, has_persisted_partial_trie_unwind) =
             get_partial_trie_unwind_marker(&provider_ro)?;
+        let pending_pipeline_unwind = provider_ro.pipeline_unwind()?;
         drop(provider_ro);
         let persist_partial_trie_unwind =
             !has_persisted_partial_trie_unwind && partial_trie_unwind.is_some();
@@ -590,7 +596,10 @@ where
             partial_trie_unwind_target.is_none_or(|partial_trie| *unwind_block < partial_trie)
         });
 
-        if partial_trie_unwind_target.is_some() || storage_unwind.is_some() {
+        if partial_trie_unwind_target.is_some() ||
+            storage_unwind.is_some() ||
+            pending_pipeline_unwind.is_some()
+        {
             let build_unwind_pipeline = |walk_all_changed_branch_children| {
                 let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
                 let mut stages = DefaultStages::new(
@@ -605,6 +614,11 @@ where
                     None,
                 )
                 .builder()
+                // Recovery only moves the ERA checkpoint; it does not need an import source.
+                .add_before(
+                    EraStage::new(None::<EraImportSource>, self.toml_config().stages.etl.clone()),
+                    StageId::Headers,
+                )
                 .disable_all(disabled_stages);
 
                 if walk_all_changed_branch_children {
@@ -618,6 +632,10 @@ where
                     StaticFileProducer::new(factory.clone(), self.prune_modes()),
                 )
             };
+            let pending_unwind_target =
+                pending_pipeline_unwind.as_ref().map(|unwind| unwind.target);
+            let recovery_pipeline = pending_pipeline_unwind
+                .map(|_| build_unwind_pipeline(partial_trie_unwind_target.is_some()));
             let mut unwinds = Vec::with_capacity(2);
 
             if let Some(unwind_block) = partial_trie_unwind_target {
@@ -638,8 +656,8 @@ where
                     (None, Some(_)) => "static file",
                     (None, None) => unreachable!(),
                 };
-                assert_ne!(
-                    unwind_block, 0,
+                assert!(
+                    unwind_block != 0 || pending_unwind_target == Some(0),
                     "A {inconsistency_source} inconsistency was found that would trigger an unwind to block 0"
                 );
                 unwinds.push((
@@ -666,6 +684,9 @@ where
             // Pipeline should be run as blocking and panic if it fails.
             self.task_executor().spawn_critical_blocking_task("pipeline task", async move {
                 let result: Result<(), reth_stages::PipelineError> = async {
+                    if let Some(mut pipeline) = recovery_pipeline {
+                        pipeline.resume_unwind()?;
+                    }
                     for (unwind_target, inconsistency_source, pipeline, clear_partial_trie_unwind) in
                         unwinds
                     {
@@ -875,7 +896,7 @@ where
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
 {
     /// Returns the configured `ProviderFactory`.
-    const fn provider_factory(&self) -> &ProviderFactory<NodeTypesWithDBAdapter<N, DB>> {
+    pub const fn provider_factory(&self) -> &ProviderFactory<NodeTypesWithDBAdapter<N, DB>> {
         &self.right().provider_factory
     }
 
@@ -1299,7 +1320,6 @@ where
         let task_executor = self.task_executor().clone();
         task_executor.spawn_task(async move {
             while let Some(event) = engine_events.next().await {
-                use reth_engine_primitives::ConsensusEngineEvent;
                 match event {
                     ConsensusEngineEvent::ForkBlockAdded(executed, duration) |
                     ConsensusEngineEvent::CanonicalBlockAdded(executed, duration) => {

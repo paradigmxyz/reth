@@ -63,7 +63,7 @@ impl<T, N: NodeTypes> PayloadBuilderFor<N> for T where
 }
 
 /// Encapsulates all types and components of the node.
-pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
+pub trait FullNodeComponents: FullNodeTypes {
     /// The transaction pool of the node.
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Types>>> + Unpin;
 
@@ -114,6 +114,8 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     /// Notification channel for engine API events
     pub engine_events: EventSender<ConsensusEngineEvent<<N::Types as NodeTypes>::Primitives>>,
     /// JWT secret for the node.
+    ///
+    /// Random when the auth server is disabled, since the secret is only used by the auth server.
     pub jwt_secret: JwtSecret,
     /// Cache of recovered transaction senders shared by node components, if enabled.
     pub sender_recovery_cache: Option<SenderRecoveryCache>,

@@ -38,6 +38,7 @@ cargo docs --document-private-items
   `cargo nextest run -p reth-node-ethereum --test e2e -E 'test(=module::test_name)'`.
 - In e2e tests, wait on conditions instead of sleeping, assert exact errors, and add missing
   helpers to the harness instead of copying them into tests.
+- Before deleting a test as redundant, show that another test fails when the line it guards breaks.
 
 ## Commit and PR Style
 
@@ -63,7 +64,15 @@ for performance claims; omit templates and validation boilerplate.
 
 ## Code Style
 
-- Follow existing patterns and keep changes focused.
+- Before writing, changing, or reviewing Rust, load the `reth-rust-style` skill
+  (`.agents/skills/reth-rust-style/SKILL.md`) for the review feedback this file doesn't cover.
+- Follow existing patterns and keep changes focused: no drive-by fixes, renames, formatting-only
+  changes, or moved tests. Put unrelated work in its own PR.
+- Before adding a helper, type, or constant, search reth and alloy for an existing one.
+- Add code only with a caller in the same PR: no unused functions, parameters, variants, fields,
+  config knobs, CLI flags, RPC methods, or cargo features. When removing code, delete what it leaves
+  behind. Never commit commented-out code.
+- Keep one source of truth: no duplicate fields, flags, or counters for the same state.
 - Explain non-obvious behavior and safety requirements in comments, not PR history.
 - Comments end with periods, except URLs. Document safety requirements of unsafe code.
 - Files use LF and end with a newline.
@@ -91,3 +100,11 @@ for performance claims; omit templates and validation boilerplate.
 - When type hints are needed, prefer turbofish (`let x = Type::<X, Y>::new()`) over annotation (`let x: Type<X, Y> = Type::new()`).
 - In tests, avoid `.contains` assertions for error/output strings when the project has snapshot testing support such as `snapbox`. Prefer exact snapshot assertions (`stderr_eq`, `stdout_eq`, `assert_data_eq!`, etc.) and use redactions only for genuinely variable parts.
 - Always leave a blank line in between module doc-comments, items or item categories, unless in rare exceptions: it's a one-shot struct with one single impl block, or it's a list of impls that are all very similar. But in general blank line in between items is the norm but it's just unenforced. Items includes imports (together) too. The previous rules apply first.
+- Inline single-use locals and helpers. Don't add generics, `PhantomData`, or `'static` bounds that nothing requires.
+- Document new public traits, methods, and fields: when they are called, ordering guarantees, and what `None`, `false`, or an error means.
+- Use typed errors, never `Result<_, String>` or an early `.to_string()`. Use the error type the file already uses.
+- Don't `unwrap` or `expect` on paths reachable at runtime. Use `assert!` for invariants that must hold in release builds.
+- Use named constants (spec constants, `StatusCode`) instead of literals.
+- Use a named struct or newtype instead of tuples or `Option<u8>` plus casts in public or serialized types. Bump the version constant when a persisted shape changes.
+- Use names already imported (`b256!`, `B256`) instead of fully qualified paths.
+- Log local faults with `error!` and peer faults with `warn!`. Don't log at `info` inside polling loops. Spawned tasks enter the caller's span.

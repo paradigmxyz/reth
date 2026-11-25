@@ -5,7 +5,6 @@ use alloy_rpc_types_admin::{
     EthInfo, EthPeerInfo, EthProtocolInfo, NodeInfo, PeerInfo, PeerNetworkInfo, PeerProtocolInfo,
     Ports, ProtocolInfo,
 };
-use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_network_api::{NetworkInfo, Peers};
@@ -34,11 +33,10 @@ impl<N, ChainSpec, Pool> AdminApi<N, ChainSpec, Pool> {
     }
 }
 
-#[async_trait]
 impl<N, ChainSpec, Pool> AdminApiServer for AdminApi<N, ChainSpec, Pool>
 where
     N: NetworkInfo + Peers + 'static,
-    ChainSpec: EthChainSpec + EthereumHardforks + Send + Sync + 'static,
+    ChainSpec: EthChainSpec + EthereumHardforks + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Handler for `admin_addPeer`

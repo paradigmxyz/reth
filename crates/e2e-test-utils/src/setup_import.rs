@@ -12,6 +12,7 @@ use reth_cli_commands::import_core::{import_blocks_from_file, ImportConfig, Impo
 use reth_config::Config;
 use reth_db::DatabaseEnv;
 use reth_node_api::{NodeTypesWithDBAdapter, TreeConfig};
+use reth_node_builder::sync::PipelineBackfill;
 use reth_node_core::args::StorageArgs;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::{
@@ -19,6 +20,7 @@ use reth_provider::{
     DatabaseProviderFactory, ProviderFactory, StageCheckpointReader, StorageSettings,
 };
 use reth_stages_types::StageId;
+use reth_storage_overlay::OverlayManager;
 use reth_tasks::Runtime;
 use std::{path::Path, sync::Arc};
 use tempfile::TempDir;
@@ -108,7 +110,7 @@ pub async fn setup_engine_with_chain_import(
         debug!(target: "e2e::import", "Launching node with datadir: {:?}", datadir);
 
         let database = open_test_database(&datadir)?;
-        let node = launch_test_node::<EthereumNode>(
+        let node = launch_test_node(
             LaunchArgs {
                 idx,
                 node_factory: Arc::new(|_| EthereumNode::default()),
@@ -121,6 +123,7 @@ pub async fn setup_engine_with_chain_import(
                 dev_payload_attributes: None,
             },
             database,
+            PipelineBackfill,
         )
         .instrument(span)
         .await?;
@@ -184,6 +187,7 @@ async fn import_chain(
             chain_spec.clone(),
             StaticFileProvider::read_write(datadir.join("static_files"))?,
             RocksDBProvider::builder(datadir.join("rocksdb")).with_default_tables().build()?,
+            OverlayManager::default(),
             runtime.clone(),
         )?;
 
@@ -298,6 +302,7 @@ mod tests {
                 .with_default_tables()
                 .build()
                 .unwrap(),
+            OverlayManager::default(),
             runtime,
         )
         .expect("failed to create provider factory")

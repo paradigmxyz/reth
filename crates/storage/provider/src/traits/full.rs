@@ -2,8 +2,9 @@
 
 use crate::{
     BalProvider, BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader,
-    DatabaseProviderFactory, PruneCheckpointReader, RocksDBProviderFactory, StageCheckpointReader,
-    StateProviderFactory, StateRangeProviderFactory, StateReader, StaticFileProviderFactory,
+    DatabaseProviderFactory, DurableBlockReader, PruneCheckpointReader, RocksDBProviderFactory,
+    StageCheckpointReader, StateProviderFactory, StateRangeProviderFactory, StateReader,
+    StaticFileProviderFactory,
 };
 use reth_chain_state::{
     CanonStateSubscriptions, ForkChoiceSubscriptions, PersistedBlockSubscriptions,
@@ -12,7 +13,6 @@ use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_storage_api::{
     HistoryReader, NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache,
 };
-use std::fmt::Debug;
 
 /// Helper trait to unify all provider traits for simplicity.
 pub trait FullProvider<N: NodeTypesWithDB>:
@@ -45,9 +45,9 @@ pub trait FullProvider<N: NodeTypesWithDB>:
     + ForkChoiceSubscriptions<Header = HeaderTy<N>>
     + PersistedBlockSubscriptions
     + StageCheckpointReader
+    + DurableBlockReader
     + PruneCheckpointReader
     + Clone
-    + Debug
     + Unpin
     + 'static
 {
@@ -83,9 +83,9 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
         + ForkChoiceSubscriptions<Header = HeaderTy<N>>
         + PersistedBlockSubscriptions
         + StageCheckpointReader
+        + DurableBlockReader
         + PruneCheckpointReader
         + Clone
-        + Debug
         + Unpin
         + 'static
 {

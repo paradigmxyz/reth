@@ -36,6 +36,16 @@ pub trait DbTx: Debug + Send {
     /// Commit for read only transaction will consume and free transaction and allows
     /// freeing of memory pages
     fn commit(self) -> Result<(), DatabaseError>;
+    /// Commits the transaction and returns once the commit is durable on disk.
+    ///
+    /// The default calls [`DbTx::commit`]; backends with weak commits must override it. An error
+    /// after a successful commit means the commit may be visible but not durable.
+    fn commit_durable(self) -> Result<(), DatabaseError>
+    where
+        Self: Sized,
+    {
+        self.commit()
+    }
     /// Aborts transaction
     fn abort(self);
     /// Iterate over read only values in table.
@@ -46,6 +56,17 @@ pub trait DbTx: Debug + Send {
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError>;
     /// Disables long-lived read transaction safety guarantees.
     fn disable_long_read_transaction_safety(&mut self);
+
+    /// Enables or disables best-effort read-ahead for this transaction.
+    ///
+    /// Defaults to disabled and persists across operations until explicitly changed. Applies to
+    /// gets in every table. New read and write cursors inherit the setting; existing cursors keep
+    /// their own setting, configurable with [`DbCursorRO::prefetch`]. Returns the transaction for
+    /// chaining. Backends without support ignore the setting.
+    #[inline]
+    fn prefetch(&self, _enabled: bool) -> &Self {
+        self
+    }
 }
 
 /// Read write transaction that allows writing to database

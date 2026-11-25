@@ -15,8 +15,10 @@
 mod context;
 mod handoff;
 mod run;
+mod selection;
 
 pub use handoff::{HandoffOutcome, RebuildOutcome, SnapHandoff};
+pub use selection::{EthereumBackfill, EthereumBackfillSync};
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;

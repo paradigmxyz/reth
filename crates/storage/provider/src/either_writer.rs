@@ -99,7 +99,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         block_number: BlockNumber,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::Receipts<ReceiptTy<P::Primitives>>>>
     where
-        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P: DBProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTxMut,
         ReceiptTy<P::Primitives>: Value,
     {
@@ -120,7 +120,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         block_number: BlockNumber,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::TransactionSenders>>
     where
-        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P: DBProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTxMut,
     {
         if EitherWriterDestination::senders(provider).is_static_file() {
@@ -142,7 +142,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         block_number: BlockNumber,
     ) -> ProviderResult<DupEitherWriterTy<'a, P, tables::AccountChangeSets>>
     where
-        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P: DBProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTxMut,
     {
         if provider.cached_storage_settings().storage_v2 {
@@ -163,7 +163,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         block_number: BlockNumber,
     ) -> ProviderResult<DupEitherWriterTy<'a, P, tables::StorageChangeSets>>
     where
-        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P: DBProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTxMut,
     {
         if provider.cached_storage_settings().storage_v2 {
@@ -689,7 +689,7 @@ impl<'a, 'db> EitherReader<'a, 'db, (), ()> {
         provider: &P,
     ) -> ProviderResult<EitherReaderTy<'a, 'db, P, tables::TransactionSenders>>
     where
-        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P: DBProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTx,
     {
         if EitherWriterDestination::senders(provider).is_static_file() {
@@ -770,7 +770,7 @@ impl<'a, 'db> EitherReader<'a, 'db, (), ()> {
         provider: &P,
     ) -> ProviderResult<DupEitherReaderTy<'a, 'db, P, tables::AccountChangeSets>>
     where
-        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P: DBProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTx,
     {
         if EitherWriterDestination::account_changesets(provider).is_static_file() {

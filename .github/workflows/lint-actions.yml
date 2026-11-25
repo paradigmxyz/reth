@@ -24,7 +24,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
+          go-version: '1.26.10'
           cache: false
       - name: Install actionlint
         run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
@@ -33,6 +33,8 @@ jobs:
         shell: bash
       - name: Test benchmark CI helpers
         run: |
+          bash .github/scripts/install_llvm_ubuntu-test.sh
           bash .github/scripts/bench-state-test.sh
           bash .github/scripts/bench-upload-charts-test.sh
-          node --test .github/scripts/bench-job-summary-test.js
+          bash .github/scripts/bench-txgen-build-test.sh
+          node --test .github/scripts/bench-job-summary-test.js .github/scripts/bench-args-test.js

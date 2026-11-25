@@ -1,11 +1,11 @@
 //! Invalid block hook helpers for the node builder.
 
 use crate::AddOnsContext;
-use alloy_consensus::TxEnvelope;
-use alloy_rpc_types::{Block, Header, Receipt, Transaction, TransactionRequest};
-use eyre::OptionExt;
+use alloy_primitives::U64;
+use alloy_rpc_client::{ClientBuilder, RpcClient};
 use reth_chainspec::EthChainSpec;
-use reth_engine_primitives::InvalidBlockHook;
+use reth_engine_primitives::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
+use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_node_core::{
     args::InvalidBlockHookType,
@@ -14,7 +14,11 @@ use reth_node_core::{
 };
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::ChainSpecProvider;
-use reth_rpc_api::EthApiClient;
+use reth_tasks::Runtime;
+use std::time::Duration;
+
+/// Timeout for a request to the healthy node.
+const HEALTHY_NODE_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Extension trait for [`AddOnsContext`] to create invalid block hooks.
 pub trait InvalidBlockHookExt {
@@ -45,6 +49,7 @@ where
             self.node.provider().clone(),
             self.node.evm_config().clone(),
             self.node.provider().chain_spec().chain().id(),
+            self.node.task_executor().clone(),
         )
         .await
     }
@@ -63,26 +68,20 @@ where
 /// * `provider` - The blockchain database provider
 /// * `evm_config` - The EVM configuration
 /// * `chain_id` - The chain ID for verification
+/// * `runtime` - The runtime for background diagnostics and shutdown handling.
 pub async fn create_invalid_block_hook<N, P, E>(
     config: &NodeConfig<P::ChainSpec>,
     data_dir: &ChainPath<DataDirPath>,
     provider: P,
     evm_config: E,
     chain_id: u64,
+    runtime: Runtime,
 ) -> eyre::Result<Box<dyn InvalidBlockHook<N>>>
 where
     N: NodePrimitives,
-    P: reth_provider::StateProviderFactory
-        + reth_provider::ChainSpecProvider
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    E: reth_evm::ConfigureEvm<Primitives = N> + Clone + 'static,
+    P: reth_provider::StateProviderFactory + reth_provider::ChainSpecProvider + Clone + 'static,
+    E: reth_evm::ConfigureEvm<Primitives = N> + 'static,
 {
-    use reth_engine_primitives::{InvalidBlockHooks, NoopInvalidBlockHook};
-    use reth_invalid_block_hooks::InvalidBlockWitnessHook;
-
     let Some(ref hook) = config.debug.invalid_block_hook else {
         return Ok(Box::new(NoopInvalidBlockHook::default()))
     };
@@ -103,6 +102,7 @@ where
                     evm_config.clone(),
                     output_directory,
                     healthy_node_rpc_client.clone(),
+                    runtime.clone(),
                 )),
                 InvalidBlockHookType::PreState | InvalidBlockHookType::Opcode => {
                     eyre::bail!("invalid block hook {hook:?} is not implemented yet");
@@ -118,7 +118,7 @@ where
 async fn get_healthy_node_client<C>(
     config: &NodeConfig<C>,
     chain_id: u64,
-) -> eyre::Result<Option<jsonrpsee::http_client::HttpClient>>
+) -> eyre::Result<Option<RpcClient>>
 where
     C: EthChainSpec,
 {
@@ -126,19 +126,12 @@ where
         return Ok(None);
     };
 
-    let client = jsonrpsee::http_client::HttpClientBuilder::default().build(url)?;
+    // A healthy node that stops answering must not hang node launch or the invalid block hook.
+    let http = reqwest::Client::builder().timeout(HEALTHY_NODE_REQUEST_TIMEOUT).build()?;
+    let client = ClientBuilder::default().http_with_client(http, url.parse()?);
 
     // Verify that the healthy node is running the same chain as the current node.
-    let healthy_chain_id = EthApiClient::<
-        TransactionRequest,
-        Transaction,
-        Block,
-        Receipt,
-        Header,
-        TxEnvelope,
-    >::chain_id(&client)
-    .await?
-    .ok_or_eyre("healthy node rpc client didn't return a chain id")?;
+    let healthy_chain_id: U64 = client.request_noparams("eth_chainId").await?;
 
     if healthy_chain_id.to::<u64>() != chain_id {
         eyre::bail!("Invalid chain ID. Expected {}, got {}", chain_id, healthy_chain_id);

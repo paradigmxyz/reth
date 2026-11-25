@@ -92,6 +92,8 @@ Database:
       --db.sync-mode <SYNC_MODE>
           Controls how aggressively the database synchronizes data to disk
 
+          [env: RETH_DB_SYNC_MODE=]
+
       --db.rocksdb-block-cache-size <ROCKSDB_BLOCK_CACHE_SIZE>
           `RocksDB` block cache size (e.g., 512MB, 4GB).
 
@@ -200,7 +202,7 @@ Storage:
       --without-rocksdb
           Skip optional RocksDB indices even when archive components are selected.
 
-          This affects `--archive`/`--all` and TUI archive preset (`a`).
+          This affects `--archive`/`--all`, TUI archive preset (`a`), and the full preset when it includes RocksDB indices.
 
   -y, --non-interactive
           Skip interactive component selection. Downloads the minimal set (state + headers + transactions + changesets) unless explicit --with-* flags narrow it
@@ -345,9 +347,11 @@ Display:
 
 Tracing:
       --tracing-otlp[=<URL>]
-          Enable `Opentelemetry` tracing export to an OTLP endpoint.
+          Enable `Opentelemetry` tracing export to an OTLP endpoint or local file.
 
           If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/traces` - gRPC: `http://localhost:4317`
+
+          A `file:///absolute/path` endpoint appends length-delimited OTLP protobuf batches without a collector. Use a separate file per process. The network protocol is ignored for files.
 
           Example: --tracing-otlp=http://collector:4318/v1/traces
 

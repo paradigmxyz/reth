@@ -6,8 +6,7 @@ use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use std::future::Future;
 
 /// Rpc Interface for poll-based ethereum filter API.
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
+#[rpc(server, namespace = "eth")]
 pub trait EthFilterApi<T: RpcObject, L: RpcObject> {
     /// Creates a new filter and returns its id.
     #[method(name = "newFilter")]
@@ -48,6 +47,11 @@ pub struct QueryLimits {
     pub max_blocks_per_filter: Option<u64>,
     /// Maximum number of logs that can be returned in a response
     pub max_logs_per_response: Option<usize>,
+    /// Maximum JSON size in bytes of the logs a multi-block query collects, estimated from a lower
+    /// bound on each log's encoding.
+    ///
+    /// Like `max_logs_per_response`, this does not apply to single-block queries.
+    pub max_response_size: Option<usize>,
 }
 
 impl QueryLimits {

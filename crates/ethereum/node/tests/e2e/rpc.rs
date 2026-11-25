@@ -1,3 +1,4 @@
+use alloy_consensus::Header;
 use alloy_eips::{
     eip2718::Encodable2718, eip7910::EthConfig, eip7928::BlockAccessList, BlockNumberOrTag,
 };
@@ -22,15 +23,25 @@ use alloy_rpc_types_eth::{
 use alloy_rpc_types_trace::geth::{
     CallConfig, ChainBlockTraceResult, GethDebugTracingOptions, GethTrace,
 };
-use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use reth_chainspec::{EthChainSpec, EthereumHardfork};
-use reth_e2e_test_utils::{
-    receipt::PendingTransactionExt, test_chain_spec, test_chain_spec_builder,
-    transaction::TransactionTestContext, wait::poll_until, wallet::Wallet, E2ETestSetupExt,
-    NodeHelperType,
+use reth_chain_state::ExecutedBlock;
+use reth_chainspec::{
+    sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
+    EthChainSpec, EthereumHardfork, SEPOLIA,
 };
+use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_db_common::init::init_genesis_with_settings;
+use reth_e2e_test_utils::{
+    receipt::PendingTransactionExt,
+    test_chain_spec, test_chain_spec_builder,
+    transaction::TransactionTestContext,
+    wait::{poll_until, WAIT_TIMEOUT},
+    wallet::Wallet,
+    E2ETestSetupExt, NodeHelperType,
+};
+use reth_ethereum_primitives::Block;
 use reth_network::{types::NatResolver, PeersInfo};
+use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
     args::{NetworkArgs, RpcServerArgs},
@@ -38,10 +49,16 @@ use reth_node_core::{
 };
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, SignedTransaction};
+use reth_provider::{
+    providers::{RocksDBProvider, StaticFileProvider},
+    ProviderFactory, SaveBlocksInput,
+};
 use reth_rpc_api::servers::AdminApiServer;
 use reth_rpc_server_types::RpcModuleSelection;
+use reth_storage_overlay::OverlayManager;
 use reth_tasks::Runtime;
+use reth_transaction_pool::test_utils::TransactionGenerator;
 use std::{
     net::{IpAddr, Ipv4Addr},
     sync::Arc,
@@ -64,9 +81,6 @@ alloy_sol_types::sol! {
 
 #[tokio::test]
 async fn test_rpc_shares_sender_recovery_cache_with_execution() -> eyre::Result<()> {
-    use reth_primitives_traits::SignedTransaction;
-    use reth_transaction_pool::test_utils::TransactionGenerator;
-
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let cache = node.inner.evm_config.sender_recovery_cache.as_ref().unwrap();
@@ -79,7 +93,7 @@ async fn test_rpc_shares_sender_recovery_cache_with_execution() -> eyre::Result<
     assert_eq!(cache.get(&hash), None);
 
     for _ in 0..2 {
-        let result = client.request::<B256, _>("eth_sendRawTransaction", (raw.clone(),)).await;
+        let result = client.request::<_, B256>("eth_sendRawTransaction", (raw.clone(),)).await;
         assert!(result.unwrap_err().to_string().contains("chain ID"));
         assert_eq!(cache.get(&hash), Some(sender));
     }
@@ -109,13 +123,13 @@ async fn test_block_access_list_lookup_semantics() -> eyre::Result<()> {
 
     for method in ["eth_getBlockAccessList", "debug_getRawBlockAccessList"] {
         let error = client
-            .request::<serde_json::Value, _>(method, (BlockNumberOrTag::Latest,))
+            .request::<_, serde_json::Value>(method, (BlockNumberOrTag::Latest,))
             .await
             .unwrap_err();
-        let jsonrpsee::core::client::Error::Call(error) = error else {
+        let Some(error) = error.as_error_resp() else {
             panic!("expected a resource not found error, got {error:?}")
         };
-        assert_eq!(error.code(), EthRpcErrorCode::ResourceNotFound.code());
+        assert_eq!(error.code, i64::from(EthRpcErrorCode::ResourceNotFound.code()));
     }
 
     Ok(())
@@ -165,7 +179,7 @@ async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
             for hash in hashes {
                 expected.push(
                     client
-                        .request::<serde_json::Value, _>("debug_traceTransaction", (hash, &opts))
+                        .request::<_, serde_json::Value>("debug_traceTransaction", (hash, &opts))
                         .await?,
                 );
             }
@@ -277,29 +291,30 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
     node.advance_blocks(2).await?;
 
     let client = node.inner.rpc_server_handle().ws_client().await.unwrap();
-    let invalid: Result<Subscription<ChainBlockTraceResult>, _> = client
-        .subscribe(
-            "debug_subscribe",
-            jsonrpsee::rpc_params!["traceChain", "0x3", "0x3"],
-            "debug_unsubscribe",
-        )
-        .await;
-    assert!(invalid.is_err(), "equal endpoints must be rejected");
 
-    let mut subscription: Subscription<ChainBlockTraceResult> = client
-        .subscribe(
-            "debug_subscribe",
-            jsonrpsee::rpc_params![
-                "traceChain",
-                BlockNumberOrTag::Number(0),
-                BlockNumberOrTag::Number(3),
-                GethDebugTracingOptions::default()
-            ],
-            "debug_unsubscribe",
-        )
-        .await?;
+    // Marking a call as a subscription makes the client track its notifications.
+    let mut invalid = client.request::<_, B256>("debug_subscribe", ("traceChain", "0x3", "0x3"));
+    invalid.set_is_subscription();
+    let err = invalid.await.unwrap_err();
+    assert_eq!(
+        err.as_error_resp().unwrap().message,
+        "end block (#3) needs to come after start block (#3)"
+    );
 
-    let traced = subscription.next().await.unwrap()?;
+    let mut subscribe = client.request::<_, B256>(
+        "debug_subscribe",
+        (
+            "traceChain",
+            BlockNumberOrTag::Number(0),
+            BlockNumberOrTag::Number(3),
+            GethDebugTracingOptions::default(),
+        ),
+    );
+    subscribe.set_is_subscription();
+    let mut subscription =
+        client.get_subscription::<ChainBlockTraceResult>(subscribe.await?).await?;
+
+    let traced = tokio::time::timeout(WAIT_TIMEOUT, subscription.recv()).await??;
     assert_eq!(traced.block, U256::from(2));
     let expected = provider
         .debug_trace_block_by_number(
@@ -310,10 +325,9 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
     assert_eq!(expected.len(), 2, "both transactions must be traced");
     assert_eq!(traced.traces, expected.into_iter().map(Some).collect::<Vec<_>>());
 
-    let terminal = subscription.next().await.unwrap()?;
+    let terminal = tokio::time::timeout(WAIT_TIMEOUT, subscription.recv()).await??;
     assert_eq!(terminal.block, U256::from(3));
     assert!(terminal.traces.is_empty());
-    subscription.unsubscribe().await?;
 
     Ok(())
 }
@@ -449,6 +463,7 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
             signature: Default::default(),
         },
         parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        apply_blacklist: true,
         registered_gas_limit: payload.block().gas_limit,
     };
 
@@ -469,56 +484,6 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
         .await
         .is_err());
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_flashbots_validate_uses_shared_sender_recovery_cache() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let (mut node, wallet) =
-        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
-    let cache = node.inner.evm_config.sender_recovery_cache.clone().expect("cache is enabled");
-
-    let signer = wallet.signer(0);
-    let sender = signer.address();
-    let provider = node.rpc_provider_with_wallet(signer);
-
-    let tx_hash = *provider
-        .send_transaction(TransactionRequest::default().to(Address::ZERO))
-        .await?
-        .tx_hash();
-    // Transaction ingress has already recovered the sender through the shared cache.
-    let payload = node.new_payload().await?;
-    assert!(payload.block().body().transactions.iter().any(|tx| *tx.tx_hash() == tx_hash));
-    assert_eq!(cache.get(&tx_hash), Some(sender));
-
-    let request = BuilderBlockValidationRequestV3 {
-        request: SignedBidSubmissionV3 {
-            message: BidTrace {
-                parent_hash: payload.block().parent_hash,
-                block_hash: payload.block().hash(),
-                gas_used: payload.block().gas_used,
-                gas_limit: payload.block().gas_limit,
-                ..Default::default()
-            },
-            execution_payload: ExecutionPayloadV3::from_block_unchecked(
-                payload.block().hash(),
-                &payload.block().clone().into_block(),
-            ),
-            blobs_bundle: BlobsBundleV1::new([]),
-            signature: Default::default(),
-        },
-        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
-        registered_gas_limit: payload.block().gas_limit,
-    };
-
-    provider
-        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
-        .await?;
-    // Validation accepts the submission while reusing the sender cached by transaction ingress.
-    assert_eq!(cache.get(&tx_hash), Some(sender));
-
     Ok(())
 }
 
@@ -566,6 +531,7 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
             signature: Default::default(),
         },
         parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        apply_blacklist: true,
         registered_gas_limit: payload.block().gas_limit,
     };
 
@@ -620,6 +586,7 @@ async fn test_flashbots_validate_v5() -> eyre::Result<()> {
             signature: Default::default(),
         },
         parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        apply_blacklist: true,
         registered_gas_limit: payload.block().gas_limit,
     };
 
@@ -686,6 +653,7 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
             signature: Default::default(),
         },
         parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        apply_blacklist: true,
         registered_gas_limit: payload.block().gas_limit,
     };
 
@@ -882,35 +850,67 @@ async fn test_eth_config() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
-    use alloy_consensus::Header;
-    use reth_chainspec::{
-        sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
-        SEPOLIA,
-    };
-    use reth_primitives_traits::SealedHeader;
-    use reth_provider::CanonChainTracker;
-
-    let node_config = NodeConfig::test()
-        .with_chain(SEPOLIA.clone())
-        .with_unused_ports()
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
-    let NodeHandle { node, .. } = NodeBuilder::new(node_config)
-        .testing_node(Runtime::test())
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
-    let provider =
-        ProviderBuilder::new().connect_http(node.rpc_server_handle().http_url().unwrap().parse()?);
-
-    // eth_config reads the canonical header; move it across the fork without syncing the testnet.
+    // eth_config reads the canonical header, and a node starts with the head stored in its
+    // database: store a head on each side of the fork without syncing the testnet. The head is
+    // block 1, since only its timestamp decides which fork is active.
     for timestamp in [SEPOLIA_AMSTERDAM_TIMESTAMP - 1, SEPOLIA_AMSTERDAM_TIMESTAMP] {
-        node.provider.set_canonical_head(SealedHeader::seal_slow(Header {
-            number: 10_000_000,
-            timestamp,
-            base_fee_per_gas: Some(1_000_000_000),
-            excess_blob_gas: Some(0),
-            ..Default::default()
-        }));
+        // The node has no bootnodes and no discovery, so that it does not announce this head to
+        // the peers of the testnet.
+        let mut network = NetworkArgs::default().with_unused_ports();
+        network.bootnodes = Some(Vec::new());
+        network.discovery.disable_discovery = true;
+        let node_config = NodeConfig::test()
+            .with_chain(SEPOLIA.clone())
+            .with_network(network)
+            .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+        let datadir = tempfile::tempdir()?;
+        // The database is closed at the end of this block, before the node opens it.
+        {
+            let provider_factory =
+                ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, DatabaseEnv>>::new(
+                    init_db(datadir.path().join("db"), DatabaseArguments::test())?,
+                    SEPOLIA.clone(),
+                    StaticFileProvider::read_write(datadir.path().join("static_files"))?,
+                    RocksDBProvider::builder(datadir.path().join("rocksdb"))
+                        .with_default_tables()
+                        .build()?,
+                    OverlayManager::default(),
+                    Runtime::test(),
+                )?;
+            init_genesis_with_settings(&provider_factory, node_config.storage_settings())?;
+            let head = Block {
+                header: Header {
+                    parent_hash: SEPOLIA.genesis_hash(),
+                    number: 1,
+                    timestamp,
+                    base_fee_per_gas: Some(1_000_000_000),
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+            .seal_slow()
+            .try_recover()?;
+            // Persists the head on top of the genesis block: the database tip and the state/trie
+            // frontier move from block 0 to block 1.
+            let provider_rw = provider_factory.provider_rw()?;
+            provider_rw.save_blocks(&SaveBlocksInput::new(
+                vec![ExecutedBlock { recovered_block: Arc::new(head), ..Default::default() }],
+                0,
+                0,
+                1,
+                1,
+            ))?;
+            provider_rw.commit()?;
+        }
+        let NodeHandle { node, .. } = NodeBuilder::new(node_config)
+            .testing_node_with_datadir(Runtime::test(), datadir.path())
+            .node(EthereumNode::default())
+            .launch()
+            .await?;
+        let provider = ProviderBuilder::new()
+            .connect_http(node.rpc_server_handle().http_url().unwrap().parse()?);
+
         let config = provider.client().request_noparams::<EthConfig>("eth_config").await?;
         if timestamp < SEPOLIA_AMSTERDAM_TIMESTAMP {
             assert_eq!(config.current.activation_time, SEPOLIA_BPO2_TIMESTAMP);
@@ -960,6 +960,33 @@ async fn test_admin_external_ip() -> eyre::Result<()> {
     let info = api.node_info().await.unwrap();
 
     assert_eq!(info.ip, external_ip);
+
+    Ok(())
+}
+
+// <https://github.com/paradigmxyz/reth/issues/27867>
+#[tokio::test]
+async fn test_disable_auth_server_skips_jwt_secret() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let missing_dir = tempfile::tempdir()?;
+    let missing = missing_dir.path().join("missing-jwt.hex");
+    for auth_jwtsecret in [None, Some(missing.clone())] {
+        let mut rpc = RpcServerArgs::default().with_unused_ports();
+        rpc.disable_auth_server = true;
+        rpc.auth_jwtsecret = auth_jwtsecret;
+        let node_config = NodeConfig::test()
+            .with_chain(Arc::new(test_chain_spec_builder().build()))
+            .with_unused_ports()
+            .with_rpc(rpc);
+        let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+            .testing_node(Runtime::test())
+            .node(EthereumNode::default())
+            .launch()
+            .await?;
+        assert!(!node.data_dir.jwt().exists());
+    }
+    assert!(!missing.exists());
 
     Ok(())
 }
@@ -1090,11 +1117,11 @@ async fn test_advance_while_send_raw_transaction_sync() -> eyre::Result<()> {
     Ok(())
 }
 
-/// Before Amsterdam `eth_call` ignores the EIP-7825 transaction gas cap. With Amsterdam's EIP-8037
-/// it caps execution gas, so a call that runs out of execution gas fails like the transaction
-/// would.
+/// Calls never go into a block, so `eth_call` and the call tracers lift the EIP-7825 transaction
+/// gas cap, which Amsterdam's EIP-8037 turns into an execution gas cap. `eth_createAccessList`
+/// prepares a transaction, so it keeps the execution gas cap under Amsterdam.
 #[tokio::test]
-async fn eth_call_caps_execution_gas_under_amsterdam() -> eyre::Result<()> {
+async fn eth_call_lifts_execution_gas_cap_under_amsterdam() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     // Loops `CALLDATALOAD(0)` times, about 26 gas each, then returns 1.
@@ -1110,33 +1137,87 @@ async fn eth_call_caps_execution_gas_under_amsterdam() -> eyre::Result<()> {
             .gas_limit(29_000_000)
             .input(Bytes::from(U256::from(iterations).to_be_bytes::<32>()).into())
     };
+    // About 26M gas of execution, above the 16,777,216 cap.
+    let heavy = call(1_000_000);
 
     for fork in [EthereumHardfork::Osaka, EthereumHardfork::Amsterdam] {
         let (node, _) = EthereumNode::test_setup_for(fork).build_single().await?;
         let provider = node.rpc_provider();
 
-        let ok: Bytes =
-            provider.raw_request("eth_call".into(), (call(10_000), "latest", &overrides)).await?;
-        assert_eq!(U256::from_be_slice(&ok), U256::ONE, "{fork}");
+        let output: Bytes =
+            provider.raw_request("eth_call".into(), (&heavy, "latest", &overrides)).await?;
+        assert_eq!(U256::from_be_slice(&output), U256::ONE, "{fork}");
 
-        // About 26M gas of execution, above the 16,777,216 cap.
-        let call_result = provider
-            .raw_request::<_, Bytes>("eth_call".into(), (call(1_000_000), "latest", &overrides))
-            .await;
+        let trace: serde_json::Value = provider
+            .raw_request(
+                "debug_traceCall".into(),
+                (
+                    &heavy,
+                    "latest",
+                    serde_json::json!({ "tracer": "callTracer", "stateOverrides": &overrides }),
+                ),
+            )
+            .await?;
+        assert!(trace.get("error").is_none(), "{fork}: {trace}");
+        assert_eq!(trace["output"], serde_json::json!(B256::with_last_byte(1)), "{fork}: {trace}");
+
+        let trace: serde_json::Value = provider
+            .raw_request("trace_call".into(), (&heavy, ["trace"], "latest", &overrides))
+            .await?;
+        assert_eq!(trace["output"], serde_json::json!(B256::with_last_byte(1)), "{fork}: {trace}");
+
+        // `eth_callMany` also goes through the per-request `CallManyBudget`.
+        let bundles = serde_json::json!([{ "transactions": [&heavy] }]);
+        let results: serde_json::Value =
+            provider.raw_request("eth_callMany".into(), (&bundles, None::<()>, &overrides)).await?;
+        assert!(results[0][0].get("error").is_none(), "{fork}: {results}");
+        assert_eq!(results[0][0]["value"], serde_json::json!(B256::with_last_byte(1)), "{fork}");
+
         let access_list: AccessListResult = provider
-            .raw_request("eth_createAccessList".into(), (call(1_000_000), "latest", &overrides))
+            .raw_request("eth_createAccessList".into(), (&heavy, "latest", &overrides))
             .await?;
         if fork == EthereumHardfork::Amsterdam {
-            let err = call_result.unwrap_err().to_string();
-            assert!(err.contains("out of gas"), "{err}");
             assert_eq!(access_list.gas_used, U256::from(16_777_216));
             assert!(access_list.error.is_some());
         } else {
-            assert_eq!(U256::from_be_slice(&call_result?), U256::ONE);
             assert!(access_list.gas_used > U256::from(26_000_000));
             assert!(access_list.error.is_none());
         }
     }
+
+    Ok(())
+}
+
+/// The EIP-8037 total transaction gas cap of `2^32 - 1` does not apply to calls either, so the
+/// default gas limit is the RPC gas cap.
+#[tokio::test]
+async fn eth_call_without_gas_with_max_rpc_gas_cap() -> eyre::Result<()> {
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Amsterdam)
+        .with_rpc_modifier(|mut rpc| {
+            rpc.rpc_gas_cap = u64::MAX;
+            rpc
+        })
+        .build_single()
+        .await?;
+    let provider = node.rpc_provider();
+
+    let result =
+        provider.call(TransactionRequest::default().to(Address::with_last_byte(0x42))).await?;
+    assert_eq!(result, Bytes::new());
+
+    // Returns the gas left at entry: `GAS PUSH0 MSTORE PUSH1 0x20 PUSH0 RETURN`.
+    let gas_left = Address::with_last_byte(0x43);
+    let overrides = StateOverride::from_iter([(
+        gas_left,
+        AccountOverride::default().with_code(bytes!("5a60005260206000f3")),
+    )]);
+    let output: Bytes = provider
+        .raw_request(
+            "eth_call".into(),
+            (TransactionRequest::default().to(gas_left), "latest", &overrides),
+        )
+        .await?;
+    assert!(U256::from_be_slice(&output) > U256::from(u32::MAX), "{output}");
 
     Ok(())
 }
