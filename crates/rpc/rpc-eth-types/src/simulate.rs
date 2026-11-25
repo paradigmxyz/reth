@@ -312,12 +312,16 @@ pub fn apply_precompile_overrides(
 /// `call_nonce` returns the nonce for a call without one from the state before the call, or `None`
 /// to use the sender's account nonce.
 ///
+/// The calls run with at most `memory_limit` bytes of EVM memory per call frame, while the block's
+/// system calls keep the limit of the block's EVM configuration.
+///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
 #[expect(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn execute_transactions<S, T, EvmTypes>(
     mut builder: S,
     state_provider: impl StateProvider,
     calls: Vec<RpcTxReq<T::Network>>,
+    memory_limit: u64,
     remaining_call_gas_limit: &mut Option<u64>,
     chain_id: u64,
     simulation_state: Option<&mut SimulatedState>,
@@ -336,6 +340,9 @@ where
         return Err(EthApiError::InternalEthError)
     }
     builder.apply_pre_execution_changes()?;
+
+    let block_memory_limit = builder.evm_env().version().memory_limit;
+    builder.evm_mut().set_memory_limit(block_memory_limit.min(memory_limit));
 
     let mut results = Vec::with_capacity(calls.len());
     let mut cumulative_tx_gas_used: u64 = 0;
@@ -431,6 +438,7 @@ where
         block_state_gas_used = block_state_gas_used.saturating_add(gas_output.state_gas_used());
     }
 
+    builder.evm_mut().set_memory_limit(block_memory_limit);
     let result = if let Some(simulation_state) = simulation_state {
         builder.finish_with_state_root(&state_provider, |output| {
             simulation_state
