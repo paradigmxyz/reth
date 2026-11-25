@@ -1772,15 +1772,15 @@ struct ChainBlockTraces {
 mod tests {
     use super::*;
     use crate::{eth::helpers::types::EthRpcConverter, EthApi};
-    use alloy_consensus::Header;
+    use alloy_consensus::{Header, TxLegacy};
     use alloy_genesis::{Genesis, GenesisAccount};
-    use alloy_primitives::{bytes, keccak256, U256};
+    use alloy_primitives::{bytes, keccak256, TxKind, U256};
     use alloy_rpc_types_eth::TransactionRequest;
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_db_api::{tables, transaction::DbTxMut};
     use reth_db_common::init::init_genesis;
-    use reth_ethereum_primitives::{Block, BlockBody};
+    use reth_ethereum_primitives::{Block, BlockBody, Transaction};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::StorageEntry;
@@ -1789,6 +1789,7 @@ mod tests {
         ExtendedAccount, MockEthProvider, NoopProvider,
     };
     use reth_rpc_eth_api::EthApiServer;
+    use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
     use reth_transaction_pool::test_utils::testing_pool;
     use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState, StorageSlot};
 
@@ -1885,8 +1886,24 @@ mod tests {
             target,
             ExtendedAccount::new(0, U256::ZERO).with_bytecode(bytes!("5b600056")),
         );
+        // The block holds two transactions that call the loop.
+        let key = generate_key(&mut generators::rng());
+        let transactions = (0..2)
+            .map(|nonce| {
+                let tx = TxLegacy {
+                    nonce,
+                    gas_limit: 100_000,
+                    to: TxKind::Call(target),
+                    ..Default::default()
+                };
+                sign_tx_with_key_pair(key, Transaction::Legacy(tx))
+            })
+            .collect::<Vec<_>>();
+        let tx_hash = *transactions[1].tx_hash();
         let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
-        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        let block_hash = header.hash_slow();
+        let block = Block { header, body: BlockBody { transactions, ..Default::default() } };
+        provider.add_block(block_hash, block.clone());
         let call = TransactionRequest::default().to(target).gas_limit(100_000);
         let debug_api = |max_response_size| {
             let eth_api = EthApi::<_, EthRpcConverter<ChainSpec>>::builder(
@@ -1920,18 +1937,40 @@ mod tests {
             vec![Bundle { transactions: vec![call.clone(), call.clone()], block_override: None }];
         let err = api.debug_trace_call_many(bundles, None, None).await.unwrap_err();
         assert_eq!(err.to_string(), exceeded);
+        // Neither do those of the two transactions of the block, unless it is traced for a
+        // `traceChain` notification, which the response size limit does not bound.
+        let block_err =
+            format!("internal EVM error occurred when executing transaction {tx_hash}: {exceeded}");
+        let err = api.debug_trace_block(block_hash.into(), Default::default()).await.unwrap_err();
+        assert_eq!(err.to_string(), block_err);
+        let block = Arc::new(block.try_into_recovered().unwrap());
+        let traces = api.trace_chain_block(block, Default::default()).await.unwrap();
+        assert!(traces.iter().all(|trace| matches!(trace, Some(TraceResult::Success { .. }))));
 
         let api = debug_api(Some(logs_len / 2));
         let err = api.debug_trace_call(call.clone(), None, Default::default()).await.unwrap_err();
+        assert_eq!(err.to_string(), exceeded);
+        let err = api.debug_trace_transaction(tx_hash, Default::default()).await.unwrap_err();
+        assert_eq!(err.to_string(), block_err);
+        let opts = GethDebugTracingCallOptions { tx_index: Some(1), ..Default::default() };
+        let err = api.debug_trace_call(call.clone(), None, opts).await.unwrap_err();
         assert_eq!(err.to_string(), exceeded);
 
         // An empty tracer name selects the default struct logger too.
         let opts: GethDebugTracingCallOptions =
             serde_json::from_value(serde_json::json!({ "tracer": "" })).unwrap();
-        let err = api.debug_trace_call(call.clone(), None, opts).await.unwrap_err();
+        let err = api.debug_trace_call(call, None, opts).await.unwrap_err();
         assert_eq!(err.to_string(), exceeded);
 
-        // Other tracers record data of a different size than their JSON.
+        // Other tracers have no budget. The call tracer records the 32 bytes of input of the call
+        // this contract makes: PUSH1 0, 0, 32, 0, 0, 0x99, PUSH2 0x1000, CALL, STOP.
+        let caller = Address::with_last_byte(0x43);
+        provider.add_account(
+            caller,
+            ExtendedAccount::new(0, U256::ZERO)
+                .with_bytecode(bytes!("600060006020600060006099611000f100")),
+        );
+        let call = TransactionRequest::default().to(caller).gas_limit(100_000);
         let opts: GethDebugTracingCallOptions =
             serde_json::from_value(serde_json::json!({ "tracer": "callTracer" })).unwrap();
         debug_api(Some(1)).debug_trace_call(call, None, opts).await.unwrap();
