@@ -14,7 +14,8 @@ use crate::{
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{
-    map::AddressSet, Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256,
+    map::{hash_map, AddressSet},
+    Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256,
 };
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ExecutedBlock, ForkChoiceNotifications,
@@ -1140,12 +1141,28 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
             &provider,
             self.database.overlay_manager().overlay_builder(block_hash),
         );
-        let (state, reverts) = provider.populate_bundle_state(
+        let (mut state, mut reverts) = provider.populate_bundle_state(
             account_changeset,
             storage_changeset,
             |address| state_provider.basic_account(&address),
             |address, storage_key| state_provider.storage(address, storage_key),
         )?;
+        // The storage changeset lacks the slots a wipe destroyed without loading them, so the
+        // accounts with storage wipe changesets are marked as wiped. Otherwise persisting the
+        // block again, after an unwind restored those slots, would neither wipe nor record them.
+        let wiped = provider
+            .storage_wipe_changesets_range(block..=block)?
+            .into_iter()
+            .map(|(key, _)| key.address())
+            .collect::<AddressSet>();
+        // An account recreated with its old info and no storage changes has no other changeset.
+        for &address in &wiped {
+            if let hash_map::Entry::Vacant(entry) = state.entry(address) {
+                let account = state_provider.basic_account(&address)?;
+                entry.insert((account, account, Default::default()));
+                reverts.entry(block).or_default().insert(address, (None, Vec::new()));
+            }
+        }
         let receipts = provider.receipts_by_tx_range(block_body.tx_num_range())?;
 
         let mut outcome = ExecutionOutcome::new_init(
@@ -1157,14 +1174,6 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
             block,
             Vec::new(),
         );
-        // The storage changeset lacks the slots a wipe destroyed without loading them, so the
-        // accounts with storage wipe changesets are marked as wiped. Otherwise persisting the
-        // block again, after an unwind restored those slots, would neither wipe nor record them.
-        let wiped = provider
-            .storage_wipe_changesets_range(block..=block)?
-            .into_iter()
-            .map(|(key, _)| key.address())
-            .collect::<AddressSet>();
         for (address, account) in &mut outcome.bundle.state {
             if wiped.contains(address) {
                 account.status = if account.info.is_some() {

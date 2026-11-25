@@ -6799,6 +6799,66 @@ mod tests {
     }
 
     #[test]
+    fn get_state_keeps_storage_wipe_of_recreated_account() {
+        let (factory, _) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let slot = U256::from(1);
+        let account = Account { nonce: 1, ..Default::default() };
+        let hashed_state = |value: u64| {
+            HashedPostState::default()
+                .with_accounts([(hashed_address, Some(account))])
+                .with_storages([(
+                    hashed_address,
+                    HashedStorage::from_plain_storage([(&slot, &U256::from(value))]),
+                )])
+        };
+        let revert = |account, storage: Vec<_>, wipe_storage| AccountRevert {
+            account,
+            storage: storage.into_iter().collect(),
+            previous_status: Default::default(),
+            wipe_storage,
+        };
+
+        let genesis =
+            executed_block_with_reverts(0, B256::ZERO, vec![], HashedPostState::default());
+        let block1 = executed_block_with_reverts(
+            1,
+            genesis.recovered_block().hash(),
+            vec![(
+                address,
+                revert(
+                    AccountInfoRevert::DeleteIt,
+                    vec![(slot, RevertToSlot::Some(U256::ZERO))],
+                    false,
+                ),
+            )],
+            hashed_state(7),
+        );
+        // Block 2 destroys the account and recreates it with the same info, without touching
+        // the slot, so the wipe is its only change.
+        let block2 = executed_block_with_reverts(
+            2,
+            block1.recovered_block().hash(),
+            vec![(address, revert(AccountInfoRevert::DoNothing, vec![], true))],
+            hashed_state(0),
+        );
+
+        let provider_rw = factory.provider_rw().unwrap();
+        save_genesis(&provider_rw, &genesis).unwrap();
+        provider_rw.save_blocks(&SaveBlocksInput::new(vec![block1, block2], 0, 0, 2, 2)).unwrap();
+        provider_rw.commit().unwrap();
+
+        let outcome = BlockchainProvider::new(factory).unwrap().get_state(2).unwrap().unwrap();
+        assert!(outcome.bundle.state[&address].was_destroyed());
+        assert!(outcome.bundle.reverts[0]
+            .iter()
+            .any(|(revert_address, revert)| *revert_address == address && revert.wipe_storage));
+    }
+
+    #[test]
     fn write_state_and_take_state_above_handle_storage_wipe() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
