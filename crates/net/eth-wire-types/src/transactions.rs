@@ -1,4 +1,5 @@
-//! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
+//! Implements the `GetPooledTransactions` and `PooledTransactions` message types, including the
+//! eth/72 response without blobs, and the eth/72 `GetCells` and `Cells` message types.
 
 use crate::broadcast::decode_list_with_memory_budget;
 use alloc::vec::Vec;

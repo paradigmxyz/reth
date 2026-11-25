@@ -1,4 +1,4 @@
-//! Implements Ethereum wire protocol for versions 66 through 71.
+//! Implements Ethereum wire protocol for versions 66 through 72.
 //! Defines structs/enums for messages, request-response pairs, and broadcasts.
 //! Handles compatibility with [`EthVersion`].
 //!
