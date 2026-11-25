@@ -1164,13 +1164,14 @@ mod tests {
         // Finish down to it once the missing block is inserted again.
         let snapshot = manager.in_memory_state().snapshot();
         in_memory_state_writer.insert_executed(blocks[2].clone());
-        let expected = manager
-            .overlay_builder(parent_hash)
-            .build_state_trie_overlay(&provider, false)
-            .unwrap();
-
+        // Build from the snapshot first: a cached overlay for the same frontiers would skip the
+        // chain walk.
         let overlay = manager
             .overlay_builder_in(snapshot, parent_hash)
+            .build_state_trie_overlay(&provider, false)
+            .unwrap();
+        let expected = manager
+            .overlay_builder(parent_hash)
             .build_state_trie_overlay(&provider, false)
             .unwrap();
         assert!(!account_node_paths(&expected).is_empty());
