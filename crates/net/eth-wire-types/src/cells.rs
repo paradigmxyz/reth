@@ -577,7 +577,7 @@ mod tests {
         let request = request();
         let response = Cells {
             hashes: request.hashes.clone(),
-            cells: vec![vec![Cell::ZERO; 8], vec![Cell::repeat_byte(1); 8]],
+            cells: vec![vec![Cell::ZERO; 16], vec![Cell::repeat_byte(1); 16]],
             cell_mask: request.cell_mask.clone(),
         };
         assert_eq!(response.validate_response(&request), Ok(()));
