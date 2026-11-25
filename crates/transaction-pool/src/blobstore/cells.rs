@@ -184,10 +184,11 @@ impl BlobTxCellSidecar {
         )
     }
 
-    /// Returns the heap size of the cells, commitments and proofs, in bytes.
+    /// Returns the heap size of the cells, commitments and proofs, in bytes, including spare
+    /// capacity.
     pub const fn size(&self) -> usize {
-        self.cells.len() * size_of::<Cell>() +
-            (self.commitments.len() + self.proofs.len()) * size_of::<Bytes48>()
+        self.cells.capacity() * size_of::<Cell>() +
+            (self.commitments.capacity() + self.proofs.capacity()) * size_of::<Bytes48>()
     }
 }
 
@@ -317,6 +318,19 @@ mod tests {
             all.size(),
             2 * CELLS_PER_EXT_BLOB * size_of::<Cell>() +
                 (2 + 2 * CELLS_PER_EXT_BLOB) * size_of::<Bytes48>()
+        );
+
+        // Spare capacity is still allocated, so it is counted.
+        let mask = BlobCellMask::from_bits(1);
+        let mut cells = Vec::with_capacity(all.cells().len());
+        cells.extend(all.get_cells(mask).unwrap());
+        let capacity = cells.capacity();
+        let sparse =
+            BlobTxCellSidecar::new(all.commitments().to_vec(), all.proofs().to_vec(), cells, mask)
+                .unwrap();
+        assert_eq!(
+            sparse.size(),
+            capacity * size_of::<Cell>() + (2 + 2 * CELLS_PER_EXT_BLOB) * size_of::<Bytes48>()
         );
     }
 }
