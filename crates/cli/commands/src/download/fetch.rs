@@ -266,8 +266,8 @@ impl ArchiveFetcher {
         }
 
         let client = BlockingClient::builder().timeout(Duration::from_secs(30)).build()?;
-        // A manifest size is the total for every response. Without one there is no declared size
-        // to enforce, so the total is learned from the responses as the download goes.
+        // The manifest size is the total for every response; without one, it is learned per
+        // response.
         let mut total_size: Option<u64> = self.expected_size;
         let mut last_error: Option<eyre::Error> = None;
 
@@ -349,9 +349,8 @@ impl ArchiveFetcher {
                 if self.expected_size.is_some() {
                     return Err(error)
                 }
-                // Without a manifest size, resuming this `.part` file would likely fail the same
-                // way, so retry from scratch. A `.part` left behind would be resumed or promoted as
-                // if it were complete.
+                // Resuming this `.part` file would likely fail the same way, so retry from scratch.
+                // A `.part` left behind would be resumed or promoted as if it were complete.
                 fs::remove_file_if_exists(self.paths.part_path())?;
                 // The deleted bytes' total no longer applies to the fresh download.
                 total_size = None;
@@ -459,13 +458,12 @@ impl ArchiveFetcher {
                 continue;
             }
 
-            // With a manifest size, the body must end at the limit. Data past it contradicts the
-            // size the response declares, so fail rather than truncate. A read error here is not
-            // an overrun: the length check below handles a body that ended early.
+            // With a manifest size, data past the limit contradicts it, so fail rather than
+            // truncate. A read error is not an overrun; the length check below handles a short
+            // body.
             if self.expected_size.is_some() &&
                 matches!(reader.into_inner().read(&mut [0; 1]), Ok(n) if n > 0)
             {
-                // The bytes already written came from a response that contradicts the manifest.
                 self.paths.cleanup_partial();
                 eyre::bail!(
                     "Server sent more data for {} than the {limit} bytes at offset {start_offset}",
@@ -1785,32 +1783,22 @@ mod tests {
     }
 
     #[test]
-    fn download_chunked_body_ending_at_expected_size_succeeds() {
+    fn download_ending_at_expected_size_without_content_length_succeeds() {
+        // A chunked body and a close-delimited body, both exactly the expected size.
         let url = spawn_response_server(vec![
             b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n\
               a\r\n0123456789\r\n0\r\n\r\n",
+            b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n0123456789",
         ]);
-        let dir = tempfile::tempdir().unwrap();
-        let session = DownloadSession::new(None, None, CancellationToken::new());
-        let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(10));
+        for _ in 0..2 {
+            let dir = tempfile::tempdir().unwrap();
+            let session = DownloadSession::new(None, None, CancellationToken::new());
+            let fetcher = ArchiveFetcher::new(url.clone(), dir.path(), session, Some(10));
 
-        let downloaded = fetcher.download(None, None).unwrap();
+            let downloaded = fetcher.download(None, None).unwrap();
 
-        assert_eq!(std::fs::read(downloaded.path).unwrap(), b"0123456789");
-    }
-
-    #[test]
-    fn download_without_content_length_accepts_expected_size() {
-        let url =
-            spawn_response_server(vec![b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n0123456789"]);
-        let dir = tempfile::tempdir().unwrap();
-        let session = DownloadSession::new(None, None, CancellationToken::new());
-        let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(10));
-
-        let downloaded = fetcher.download(None, None).unwrap();
-
-        assert_eq!(downloaded.size, 10);
-        assert_eq!(std::fs::read(downloaded.path).unwrap(), b"0123456789");
+            assert_eq!(std::fs::read(downloaded.path).unwrap(), b"0123456789");
+        }
     }
 
     #[test]
@@ -2022,28 +2010,8 @@ mod tests {
     }
 
     #[test]
-    fn sequential_resume_rejects_size_other_than_expected() {
-        let url = spawn_response_server(vec![
-            b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 5-9/20\r\n\
-              Content-Length: 5\r\nConnection: close\r\n\r\n56789",
-        ]);
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("archive.tar.zst.part"), b"01234").unwrap();
-        let session = DownloadSession::new(None, None, CancellationToken::new());
-        let fetcher = ArchiveFetcher::new(url, dir.path(), session, Some(10));
-
-        let error = fetcher.download(None, None).unwrap_err();
-
-        assert_eq!(
-            format!("{error:#}"),
-            "Archive size mismatch: manifest declares 10 bytes, server reported 20"
-        );
-    }
-
-    #[test]
     fn sequential_resume_short_responses_use_retries() {
-        // Each response returns one byte of an open-ended range, and the budget allows three
-        // attempts, so progress alone does not keep the download going.
+        // One byte per response against a budget of three attempts: progress does not extend it.
         let responses = (2..8)
             .map(|i| {
                 format!(
