@@ -15,7 +15,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
-use evm2::interpreter::{Interpreter, Message, MessageResult};
+use evm2::interpreter::{Host, Interpreter, Message, MessageResult};
 use reth_execution_types::{BlockExecutionResult, StateUpdate};
 use reth_primitives_traits::{
     Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, SignedTransaction,
@@ -145,6 +145,10 @@ pub trait Evm {
         transaction: &Recovered<Self::Transaction>,
         observe: impl FnOnce(&evm2::ExecutedTx<'_, '_, Self::EvmTypes>) -> R,
     ) -> Result<R, BlockExecutionError>;
+
+    /// Sets the memory limit of subsequent transactions and system calls, keeping the rest of the
+    /// execution configuration.
+    fn set_memory_limit(&mut self, memory_limit: u64);
 }
 
 impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
@@ -251,6 +255,13 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         let observed = observe(&executed);
         drop(executed);
         Ok(observed)
+    }
+
+    fn set_memory_limit(&mut self, memory_limit: u64) {
+        let mut version = *self.version();
+        version.memory_limit = memory_limit;
+        let config = Host::execution_config(self).clone().with_version(version);
+        self.set_block_and_execution_config_within_spec(*self.block(), config);
     }
 }
 

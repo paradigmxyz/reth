@@ -1,6 +1,10 @@
 use alloy_consensus::Header;
 use alloy_eips::{
-    eip2718::Encodable2718, eip7910::EthConfig, eip7928::BlockAccessList, BlockNumberOrTag,
+    eip2718::Encodable2718,
+    eip7002::{MAX_WITHDRAWAL_REQUESTS_PER_BLOCK, WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS},
+    eip7910::EthConfig,
+    eip7928::BlockAccessList,
+    BlockNumberOrTag,
 };
 use alloy_primitives::{bytes, keccak256, Address, Bytes, B256, U256};
 use alloy_provider::{
@@ -1301,6 +1305,55 @@ async fn rpc_evm_memory_limit_applies_to_all_call_methods() -> eyre::Result<()> 
             provider.raw_request("eth_estimateGas".into(), (&tx, "latest", &overrides)).await;
         assert_eq!(estimate.is_ok(), fits, "eth_estimateGas to {to}: {estimate:?}");
     }
+
+    Ok(())
+}
+
+/// `eth_simulateV1` runs the block's system calls under the block's memory limit, not the RPC one.
+#[tokio::test]
+async fn simulate_system_calls_keep_block_evm_memory_limit() -> eyre::Result<()> {
+    // Dequeuing a withdrawal request takes 76 bytes of memory, so a full queue needs more.
+    const LIMIT: u64 = 1024;
+
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Osaka)
+        .with_rpc_modifier(|mut rpc| {
+            rpc.rpc_evm_memory_limit = LIMIT;
+            rpc
+        })
+        .build_single()
+        .await?;
+    let provider = node.rpc_provider();
+
+    // Writes one byte at offset `CALLDATALOAD(0)`: `PUSH0 CALLDATALOAD PUSH0 SWAP1 MSTORE8 STOP`.
+    let writer = Address::with_last_byte(0x42);
+    // A full queue of empty withdrawal requests: the queue tail is at slot 3.
+    let queue_tail =
+        (B256::with_last_byte(3), B256::with_last_byte(MAX_WITHDRAWAL_REQUESTS_PER_BLOCK as u8));
+    let overrides = StateOverride::from_iter([
+        (writer, AccountOverride::default().with_code(bytes!("5f355f905300"))),
+        (
+            WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
+            AccountOverride::default().with_state_diff([queue_tail]),
+        ),
+    ]);
+    let write_at = |offset: u64| {
+        TransactionRequest::default()
+            .to(writer)
+            .input(Bytes::from(U256::from(offset).to_be_bytes::<32>()).into())
+    };
+
+    // The simulated calls still run under the RPC limit.
+    let payload = serde_json::json!({
+        "blockStateCalls": [{
+            "stateOverrides": &overrides,
+            "calls": [write_at(LIMIT - 1), write_at(LIMIT)],
+        }],
+    });
+    let blocks: serde_json::Value =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+    let calls = &blocks[0]["calls"];
+    assert_eq!(calls[0]["status"], "0x1", "{blocks}");
+    assert_eq!(calls[1]["status"], "0x0", "{blocks}");
 
     Ok(())
 }
