@@ -461,10 +461,27 @@ impl DecodedMultiProofV2 {
     }
 
     /// Construct an account proof from the V2 multiproof.
+    ///
+    /// Same as [`Self::account_proof_with`] with `drop_excluded_branches` set.
     pub fn account_proof(
         &self,
         address: Address,
         slots: &[B256],
+    ) -> Result<AccountProof, alloy_rlp::Error> {
+        self.account_proof_with(address, slots, true)
+    }
+
+    /// Construct an account proof from the V2 multiproof.
+    ///
+    /// When `drop_excluded_branches` is `false`, an extension on a requested path is followed by
+    /// its child branch even when the path diverges within the extension key. This is the proof
+    /// shape from before extensions and branches were separate proof nodes. The branch is only
+    /// emitted if the multiproof holds it.
+    pub fn account_proof_with(
+        &self,
+        address: Address,
+        slots: &[B256],
+        drop_excluded_branches: bool,
     ) -> Result<AccountProof, alloy_rlp::Error> {
         let hashed_address = keccak256(address);
         let nibbles = Nibbles::unpack(hashed_address);
@@ -482,7 +499,7 @@ impl DecodedMultiProofV2 {
             (None, EMPTY_ROOT_HASH)
         };
 
-        let proof = encode_v2_proof_nodes(account_nodes);
+        let proof = encode_path_proof_nodes(&self.account_proofs, &nibbles, drop_excluded_branches);
         let storage_nodes = self.storage_proofs.get(&hashed_address);
         let mut storage_proofs = Vec::with_capacity(slots.len());
         for slot in slots {
@@ -501,7 +518,9 @@ impl DecodedMultiProofV2 {
                 key: *slot,
                 nibbles,
                 value,
-                proof: encode_v2_proof_nodes(nodes),
+                proof: storage_nodes
+                    .map(|nodes| encode_path_proof_nodes(nodes, &nibbles, drop_excluded_branches))
+                    .unwrap_or_default(),
             });
         }
 
@@ -645,6 +664,32 @@ fn matching_v2_proof_nodes<'a>(
     path: &'a Nibbles,
 ) -> impl Iterator<Item = &'a ProofTrieNode> + Clone {
     nodes.iter().rev().filter(move |node| path.starts_with(&node.path))
+}
+
+/// Encodes the proof nodes matching `path` in root-to-leaf order.
+///
+/// Unless `drop_excluded_branches` is set, a matching extension is followed by its child branch
+/// when `path` diverges within the extension key.
+fn encode_path_proof_nodes(
+    proof_nodes: &[ProofTrieNode],
+    path: &Nibbles,
+    drop_excluded_branches: bool,
+) -> Vec<Bytes> {
+    let nodes = matching_v2_proof_nodes(proof_nodes, path);
+    if drop_excluded_branches {
+        return encode_v2_proof_nodes(nodes)
+    }
+    encode_v2_proof_nodes(nodes.flat_map(|node| {
+        let branch = if let TrieNode::Extension(extension) = &node.node {
+            let branch_path = node.path.join(&extension.key);
+            proof_nodes
+                .iter()
+                .find(|node| node.path == branch_path && !path.starts_with(&node.path))
+        } else {
+            None
+        };
+        core::iter::once(node).chain(branch)
+    }))
 }
 
 /// Encodes V2 proof nodes as standard MPT proof nodes.
@@ -1226,6 +1271,46 @@ mod tests {
 
         assert_eq!(proof.proof, vec![Bytes::from(extension_rlp), Bytes::from(branch_rlp)]);
         assert!(proof.info.is_none());
+    }
+
+    #[test]
+    fn v2_proof_keeps_excluded_extension_branch_unless_dropped() {
+        // Returns proof nodes for an extension whose key diverges from `path` at its second
+        // nibble, with the extension and child branch encodings.
+        fn diverging_extension(path: &Nibbles) -> (Vec<ProofTrieNode>, Bytes, Bytes) {
+            let branch = BranchNode::new(
+                vec![RlpNode::word_rlp(&B256::repeat_byte(0x11))],
+                TrieMask::from(1),
+            );
+            let branch_rlp = alloy_rlp::encode(&branch);
+            let key = Nibbles::from_nibbles([path.get(0).unwrap(), path.get(1).unwrap() ^ 1]);
+            let extension =
+                TrieNode::Extension(ExtensionNode::new(key, RlpNode::from_rlp(&branch_rlp)));
+            let extension_rlp = alloy_rlp::encode(&extension);
+            let nodes = vec![
+                ProofTrieNode { path: key, node: TrieNode::Branch(branch), masks: None },
+                ProofTrieNode { path: Nibbles::default(), node: extension, masks: None },
+            ];
+            (nodes, Bytes::from(extension_rlp), Bytes::from(branch_rlp))
+        }
+
+        let hashed_address = keccak256(Address::ZERO);
+        let (account_proofs, account_extension, account_branch) =
+            diverging_extension(&Nibbles::unpack(hashed_address));
+        let (storage_nodes, storage_extension, storage_branch) =
+            diverging_extension(&Nibbles::unpack(keccak256(B256::ZERO)));
+        let multiproof = DecodedMultiProofV2 {
+            account_proofs,
+            storage_proofs: B256Map::from_iter([(hashed_address, storage_nodes)]),
+        };
+
+        let proof = multiproof.account_proof_with(Address::ZERO, &[B256::ZERO], true).unwrap();
+        assert_eq!(proof.proof, vec![account_extension.clone()]);
+        assert_eq!(proof.storage_proofs[0].proof, vec![storage_extension.clone()]);
+
+        let proof = multiproof.account_proof_with(Address::ZERO, &[B256::ZERO], false).unwrap();
+        assert_eq!(proof.proof, vec![account_extension, account_branch]);
+        assert_eq!(proof.storage_proofs[0].proof, vec![storage_extension, storage_branch]);
     }
 
     fn decode_witness(witness: &B256Map<impl AsRef<[u8]>>) -> B256Map<TrieNode> {

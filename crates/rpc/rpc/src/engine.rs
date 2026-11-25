@@ -176,8 +176,12 @@ where
         &self,
         targets: Vec<(Address, Vec<B256>)>,
         block_number: Option<BlockId>,
+        drop_excluded_branches: Option<bool>,
     ) -> Result<Vec<EIP1186AccountProofResponse>> {
-        self.eth.get_multi_proof(targets, block_number).instrument(engine_span!()).await
+        self.eth
+            .get_multi_proof(targets, block_number, drop_excluded_branches)
+            .instrument(engine_span!())
+            .await
     }
 
     /// Handler for `eth_getBlockAccessListByBlockHash`
