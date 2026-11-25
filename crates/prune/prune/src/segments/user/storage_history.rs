@@ -291,49 +291,41 @@ impl StorageHistory {
         let mut changesets_processed = 0usize;
         let mut done = true;
 
-        // Storage wipe changesets are pruned up to the same block as the storage changesets, so
-        // they take their share of the budget first and bound the storage changeset walk. Like
-        // the walk below, this stops on block boundaries only.
-        let mut wipe_range_end = range_end;
-        let mut last_wipe_block = None;
-        for row in provider
-            .tx_ref()
-            .cursor_read::<tables::StorageWipeChangeSets>()?
-            .walk_range(BlockNumberAddress::range(range))?
-        {
-            let block_number = row?.0.block_number();
-            if limiter.is_limit_reached() &&
-                last_wipe_block.is_some_and(|last| last != block_number)
-            {
-                wipe_range_end = block_number - 1;
-                done = false;
-                break;
-            }
-            last_wipe_block = Some(block_number);
-            limiter.increment_deleted_entries_count();
-        }
+        // Storage wipe changesets are pruned up to the same block as the storage changesets, so the
+        // wipe rows of a block count against the budget together with its storage changesets.
+        let mut wipe_cursor = provider.tx_ref().cursor_read::<tables::StorageWipeChangeSets>()?;
+        let mut wipe_rows = wipe_cursor.walk_range(BlockNumberAddress::range(range.clone()))?;
+        let mut next_wipe_block = wipe_rows.next().transpose()?.map(|(key, _)| key.block_number());
+        let mut checkpoint_block = range_end;
 
         // Walk storage changesets from static files using a streaming iterator.
         // For each changeset, track the highest block number seen for each (address, storage_key)
         // pair to determine which history shard entries need pruning.
-        let walker = provider
-            .static_file_provider()
-            .walk_storage_changeset_range(range_start..=wipe_range_end);
-        let mut walk_interrupted = false;
+        let walker = provider.static_file_provider().walk_storage_changeset_range(range);
         for result in walker {
             let (block_address, entry) = result?;
             let block_number = block_address.block_number();
             let address = block_address.address();
-            // Static file changesets are not deleted here, so an interrupted block cannot be
-            // resumed: giving up the budget inside block N reports checkpoint N-1 and the next run
-            // rereads the same entries, forever. Stop on block boundaries only, overshooting the
-            // budget by at most the rest of one block.
-            if limiter.is_limit_reached() &&
-                last_changeset_pruned_block.is_some_and(|last| last != block_number)
-            {
-                done = false;
-                walk_interrupted = true;
-                break;
+            if last_changeset_pruned_block != Some(block_number) {
+                // Static file changesets are not deleted here, so an interrupted block cannot be
+                // resumed: giving up the budget inside block N reports checkpoint N-1 and the next
+                // run rereads the same entries, forever. Stop on block boundaries only,
+                // overshooting the budget by at most the rest of one block.
+                if limiter.is_limit_reached() &&
+                    let Some(last) = last_changeset_pruned_block
+                {
+                    checkpoint_block = last;
+                    done = false;
+                    break;
+                }
+                // Charge the wipe rows of this block and of earlier blocks without changesets.
+                while let Some(wipe_block) = next_wipe_block &&
+                    wipe_block <= block_number
+                {
+                    limiter.increment_deleted_entries_count();
+                    next_wipe_block =
+                        wipe_rows.next().transpose()?.map(|(key, _)| key.block_number());
+                }
             }
             highest_deleted_storages.insert((address, entry.key), block_number);
             last_changeset_pruned_block = Some(block_number);
@@ -341,14 +333,21 @@ impl StorageHistory {
             limiter.increment_deleted_entries_count();
         }
 
-        trace!(target: "pruner", processed = %changesets_processed, %done, "Scanned storage changesets from static files");
+        // Blocks after the last storage changeset of the range can still hold wipe rows.
+        let mut last_block = last_changeset_pruned_block;
+        while done && let Some(wipe_block) = next_wipe_block {
+            if limiter.is_limit_reached() && last_block.is_some_and(|last| last != wipe_block) {
+                checkpoint_block = wipe_block - 1;
+                done = false;
+                break;
+            }
+            last_block = Some(wipe_block);
+            limiter.increment_deleted_entries_count();
+            next_wipe_block = wipe_rows.next().transpose()?.map(|(key, _)| key.block_number());
+        }
+        drop(wipe_cursor);
 
-        // A walk that was not interrupted scanned every block up to `wipe_range_end`, including the
-        // blocks after its last changeset that only hold storage wipe changesets.
-        let last_changeset_pruned_block = match last_changeset_pruned_block {
-            Some(last) if walk_interrupted => last,
-            _ => wipe_range_end,
-        };
+        trace!(target: "pruner", processed = %changesets_processed, %done, "Scanned storage changesets from static files");
 
         // Prune RocksDB history shards for affected storage slots
         let mut deleted_shards = 0usize;
@@ -361,9 +360,7 @@ impl StorageHistory {
         provider.with_rocksdb_batch(|mut batch| {
             let targets: Vec<_> = sorted_storages
                 .iter()
-                .map(|((addr, key), highest)| {
-                    ((*addr, *key), (*highest).min(last_changeset_pruned_block))
-                })
+                .map(|((addr, key), highest)| ((*addr, *key), (*highest).min(checkpoint_block)))
                 .collect();
 
             let outcomes = batch.prune_storage_history_batch(&targets)?;
@@ -378,8 +375,8 @@ impl StorageHistory {
         let mut highest_wipe_blocks = BTreeMap::<Address, BlockNumber>::new();
         let mut pruned_wipe_changesets = 0usize;
         let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StorageWipeChangeSets>()?;
-        let mut walker = cursor
-            .walk_range(BlockNumberAddress::range(range_start..=last_changeset_pruned_block))?;
+        let mut walker =
+            cursor.walk_range(BlockNumberAddress::range(range_start..=checkpoint_block))?;
         while let Some(row) = walker.next() {
             let (key, _) = row?;
             highest_wipe_blocks.insert(key.address(), key.block_number());
@@ -406,7 +403,7 @@ impl StorageHistory {
                 pruned_wipe_changesets +
                 wipe_outcomes.deleted,
             checkpoint: Some(SegmentOutputCheckpoint {
-                block_number: Some(last_changeset_pruned_block),
+                block_number: Some(checkpoint_block),
                 tx_number: None,
             }),
         })
@@ -1067,6 +1064,54 @@ mod tests {
         assert_eq!(output.checkpoint.unwrap().block_number, Some(2));
         assert!(rows.is_empty());
         assert_eq!(history, None);
+    }
+
+    #[test]
+    fn prune_rocksdb_charges_storage_wipe_changesets_with_their_block() {
+        let db = TestStageDB::default();
+        db.factory.set_storage_settings_cache(StorageSettings::v2());
+        let static_file_provider = db.factory.static_file_provider();
+        let address = Address::random();
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            for block in 0..=3 {
+                let changeset = if block == 0 {
+                    Vec::new()
+                } else {
+                    vec![StorageBeforeTx { address, key: B256::random(), value: U256::from(1) }]
+                };
+                writer.append_storage_changeset(changeset, block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        let row = StorageEntry { key: B256::random(), value: U256::from(1) };
+        let provider = db.factory.database_provider_rw().unwrap();
+        for wiped in [Address::random(), Address::random()] {
+            provider
+                .tx_ref()
+                .put::<tables::StorageWipeChangeSets>(BlockNumberAddress((3, wiped)), row)
+                .unwrap();
+        }
+        provider.commit().unwrap();
+
+        // The wipe rows of block 3 count only once the walk reaches block 3, so they do not use
+        // up the budget of blocks 1 and 2.
+        let input = PruneInput {
+            previous_checkpoint: None,
+            to_block: 3,
+            limiter: PruneLimiter::default().set_deleted_entries_limit(2),
+        };
+        let provider = db.factory.database_provider_rw().unwrap();
+        let output = StorageHistory::new(PruneMode::Before(4)).prune(&provider, input).unwrap();
+        assert!(!output.progress.is_finished());
+        assert_eq!(output.checkpoint.unwrap().block_number, Some(2));
+        provider.commit().unwrap();
+        assert_eq!(
+            db.factory.provider().unwrap().storage_wipe_changesets_range(..).unwrap().len(),
+            2
+        );
     }
 
     /// A block holding at least a whole run's budget of changesets must not stall pruning: the
