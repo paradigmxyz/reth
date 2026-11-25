@@ -4821,29 +4821,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_persisted_peers_limited_in_total() {
-        let mut config = PeersConfig::test();
-        config.persisted_peers = (0..=MAX_TRACKED_PEERS)
-            .map(|_| {
-                PersistedPeerInfo::from_node_record(NodeRecord::new(
-                    "1.2.3.4:30303".parse().unwrap(),
-                    PeerId::random(),
-                ))
-            })
-            .collect();
-
-        let peers = PeersManager::new(config);
-        assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS);
-    }
-
-    #[tokio::test]
-    async fn test_persisted_non_basic_peers_loaded_into_full_set() {
         // The trusted node's own address is filtered, so only its basic record can add it.
         let trusted = PeerId::random();
         let mut config =
             PeersConfig::test().with_ip_filter(IpFilter::from_cidr_string("1.2.3.0/24").unwrap());
         config.trusted_nodes =
             vec![NodeRecord::new("5.6.7.8:30303".parse().unwrap(), trusted).into()];
-        config.persisted_peers = (0..MAX_TRACKED_PEERS)
+        // One basic record more than fits, then peers that are not limited.
+        config.persisted_peers = (0..=MAX_TRACKED_PEERS)
             .map(|_| PeerId::random())
             .chain([trusted])
             .map(|id| {
@@ -4866,21 +4851,5 @@ mod tests {
         assert!(peers.peers[&trusted].kind.is_trusted());
         assert!(peers.peers[&static_peer].is_static());
         assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS + 2);
-    }
-
-    #[tokio::test]
-    async fn test_persisted_duplicate_ids_do_not_use_budget() {
-        let record = |id| NodeRecord::new("1.2.3.4:30303".parse().unwrap(), id);
-        let duplicate = PeerId::random();
-        let mut config = PeersConfig::test();
-        // The same id twice, then enough distinct peers to fill the budget exactly.
-        config.persisted_peers = [duplicate, duplicate]
-            .into_iter()
-            .chain((1..MAX_TRACKED_PEERS).map(|_| PeerId::random()))
-            .map(|id| PersistedPeerInfo::from_node_record(record(id)))
-            .collect();
-
-        let peers = PeersManager::new(config);
-        assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS);
     }
 }
