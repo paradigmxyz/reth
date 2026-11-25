@@ -127,8 +127,8 @@ impl SlotPreimagesReader {
 /// them in the auxiliary preimage database, then rewrites wipe reverts for self-destructed
 /// accounts to use plain slot keys instead of relying on the hashed-storage DB walk.
 ///
-/// This eliminates the need for the changeset writer to read from `HashedStorages` during
-/// storage wipes, keeping all changeset keys in plain format.
+/// Slots with a preimage get plain changeset keys. The changeset writer records the rest by
+/// hashed slot.
 pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     slot_preimages_path: &Path,
     provider: &P,
@@ -200,6 +200,9 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
 
 /// Looks up the plain-key preimage for a single hashed storage slot and inserts it
 /// into the account revert if not already present.
+///
+/// A slot without a preimage, such as one from imported state, is left to the changeset writer,
+/// which records it by hashed slot.
 fn inject_preimage_entry(
     reader: &SlotPreimagesReader,
     revert: &mut AccountRevert,
@@ -207,9 +210,10 @@ fn inject_preimage_entry(
     hashed_slot: B256,
     value: alloy_primitives::U256,
 ) -> Result<(), StageError> {
-    let plain_slot = reader.get(&hashed_slot).map_err(fatal)?.ok_or_else(|| {
-        fatal(eyre::eyre!("missing slot preimage for {hashed_slot:?} (addr={address:?})"))
-    })?;
+    let Some(plain_slot) = reader.get(&hashed_slot).map_err(fatal)? else {
+        trace!(target: "sync::stages::execution", ?address, ?hashed_slot, "Missing slot preimage");
+        return Ok(())
+    };
 
     // Convert B256 plain slot to U256 StorageKey for the revert map.
     let plain_key = alloy_primitives::U256::from_be_bytes(plain_slot.0);
@@ -236,4 +240,94 @@ where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     StageError::Fatal(err.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, U256};
+    use reth_db_api::{
+        models::{BlockNumberAddress, StoredBlockBodyIndices},
+        transaction::DbTxMut,
+    };
+    use reth_primitives_traits::StorageEntry;
+    use reth_provider::{
+        test_utils::create_test_provider_factory, OriginalValuesKnown, StateWriter,
+        StaticFileProviderFactory, StaticFileWriter, StorageSettings, StorageSettingsCache,
+    };
+    use reth_static_file_types::StaticFileSegment;
+    use reth_storage_api::{StateWriteConfig, StorageChangeSetReader};
+    use reth_trie::bundle_state::{AccountInfoRevert, BundleState, Reverts};
+
+    #[test]
+    fn inject_plain_wipe_slots_skips_missing_preimages() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        {
+            let sf = factory.static_file_provider();
+            let mut headers = sf.latest_writer(StaticFileSegment::Headers).unwrap();
+            for number in 0..=1 {
+                let header = alloy_consensus::Header { number, ..Default::default() };
+                headers.append_header(&header, &B256::ZERO).unwrap();
+            }
+            headers.commit().unwrap();
+            let mut accounts = sf.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            accounts.append_account_changeset(vec![], 0).unwrap();
+            accounts.commit().unwrap();
+            let mut storages = sf.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            storages.append_storage_changeset(vec![], 0).unwrap();
+            storages.commit().unwrap();
+        }
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::BlockBodyIndices>(1, StoredBlockBodyIndices::default())
+            .unwrap();
+        let address = Address::with_last_byte(1);
+        let hashed_slot = keccak256(B256::with_last_byte(1));
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                keccak256(address),
+                StorageEntry { key: hashed_slot, value: U256::from(7) },
+            )
+            .unwrap();
+
+        let revert = AccountRevert {
+            account: AccountInfoRevert::DoNothing,
+            storage: Default::default(),
+            previous_status: Default::default(),
+            wipe_storage: true,
+        };
+        let bundle = BundleState {
+            reverts: Reverts::new(vec![vec![(address, revert)]]),
+            ..Default::default()
+        };
+        let mut state = ExecutionOutcome::<reth_ethereum_primitives::Receipt>::new(
+            bundle,
+            vec![vec![]],
+            1,
+            Vec::new(),
+        );
+
+        let preimages = tempfile::tempdir().unwrap();
+        inject_plain_wipe_slots(preimages.path(), &*provider_rw, &mut state).unwrap();
+
+        // The slot stays out of the plain reverts, so the changeset writer records it by hash.
+        assert!(state.bundle.reverts[0][0].1.storage.is_empty());
+        provider_rw
+            .write_state(
+                &state,
+                OriginalValuesKnown::Yes,
+                StateWriteConfig { write_receipts: false, ..Default::default() },
+            )
+            .unwrap();
+        assert_eq!(
+            provider_rw.storage_wipe_changesets_range(..).unwrap(),
+            vec![(
+                BlockNumberAddress((1, address)),
+                StorageEntry { key: hashed_slot, value: U256::from(7) }
+            )]
+        );
+    }
 }
