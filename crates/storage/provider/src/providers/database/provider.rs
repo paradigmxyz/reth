@@ -1913,6 +1913,11 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        // Only storage v2 writes storage wipe changesets. A read-only database last opened by an
+        // older version lacks the table, so legacy storage must not open it.
+        if !self.cached_storage_settings().use_hashed_state() {
+            return Ok(Vec::new())
+        }
         self.tx
             .cursor_dup_read::<tables::StorageWipeChangeSets>()?
             .walk_range(BlockNumberAddressRange::from(range))?
