@@ -46,10 +46,22 @@ impl<T: CallManyCalls + DeserializeOwned> CallManyRequest<T> {
             Self::Parsed(calls) => return Ok(calls),
         };
         let calls = T::count_calls(&mut serde_json::Deserializer::from_str(raw.get()))
-            .map_err(|err| EthApiError::InvalidParams(err.to_string()))?;
+            .map_err(invalid_params)?;
         CallManyBudget::check_calls(calls)?;
-        serde_json::from_str(raw.get()).map_err(|err| EthApiError::InvalidParams(err.to_string()))
+        serde_json::from_str(raw.get()).map_err(invalid_params)
     }
+}
+
+/// Maximum length of a decode error message, which can quote request input. Matches the cap
+/// jsonrpsee applies to the params errors it reports itself.
+const MAX_INVALID_PARAMS_LEN: usize = 1024;
+
+/// Returns [`EthApiError::InvalidParams`] for a decode error, truncated to
+/// [`MAX_INVALID_PARAMS_LEN`].
+fn invalid_params(err: serde_json::Error) -> EthApiError {
+    let mut msg = err.to_string();
+    msg.truncate(msg.floor_char_boundary(MAX_INVALID_PARAMS_LEN));
+    EthApiError::InvalidParams(msg)
 }
 
 /// A list of calls whose number can be read from its JSON input without decoding the calls.
@@ -299,6 +311,13 @@ mod tests {
         let err = parse::<Vec<Bundle<TransactionRequest>>>(r#"{"transactions":[]}"#).unwrap_err();
         let err: ErrorObjectOwned = err.into();
         assert_eq!(err.code(), -32602);
+    }
+
+    #[test]
+    fn truncates_decode_errors() {
+        let input = format!(r#""{}""#, "a".repeat(4 * MAX_INVALID_PARAMS_LEN));
+        let err = parse::<Vec<Bundle<TransactionRequest>>>(&input).unwrap_err();
+        assert_eq!(err.to_string().len(), MAX_INVALID_PARAMS_LEN);
     }
 
     #[test]
