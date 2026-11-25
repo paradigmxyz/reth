@@ -133,7 +133,11 @@ impl DiskFileBlobStore {
         if !missing_tx_hashes.is_empty() {
             let blobs_from_disk = self.inner.read_many_decoded(missing_tx_hashes);
             for (tx, stored) in blobs_from_disk {
-                if let Some(blob_sidecar) = self.inner.full_sidecar(tx, stored) &&
+                let blob_sidecar = match stored {
+                    StoredSidecar::Full(blob_sidecar) => Some(Arc::new(blob_sidecar)),
+                    StoredSidecar::Cells(cells) => self.inner.rebuilt.get_or_rebuild(tx, &cells),
+                };
+                if let Some(blob_sidecar) = blob_sidecar &&
                     let Some(blob_sidecar) = blob_sidecar.as_eip7594()
                 {
                     for (hash_idx, match_result) in
@@ -1387,5 +1391,20 @@ mod tests {
         store.delete(tx).unwrap();
         store.cleanup();
         assert!(store.inner.cell_sidecars.read().is_empty());
+    }
+
+    #[test]
+    fn disk_get_blobs_v3_does_not_cache_disk_reads() {
+        let (store, _dir) = tmp_store();
+        let (sidecar, versioned_hash, expected) = eip7594_single_blob_sidecar();
+        let tx = TxHash::random();
+        store.insert(tx, sidecar.into()).unwrap();
+        store.clear_cache();
+
+        assert_eq!(
+            store.get_by_versioned_hashes_v3(&[versioned_hash]).unwrap(),
+            vec![Some(expected)]
+        );
+        assert!(!store.is_cached(&tx));
     }
 }
