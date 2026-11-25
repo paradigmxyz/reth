@@ -57,19 +57,14 @@ where
         skip(self, provider),
         ret(level = "trace")
     )]
-    fn prune(
-        &self,
-        provider: &Provider,
-        mut input: PruneInput,
-    ) -> Result<SegmentOutput, PrunerError> {
-        // The stored checkpoint, before it may be replaced with the static file starting point.
-        // It is restored once the range is computed, so an early return never saves that point.
-        let stored_checkpoint = input.previous_checkpoint;
-
+    fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         // It is not possible to prune TransactionLookup data for which we don't have transaction
         // data. If the TransactionLookup checkpoint is lagging behind (which can happen e.g. when
         // pre-merge history is dropped and then later tx lookup pruning is enabled) then we can
         // only prune from the lowest static file.
+        // Only the range starts from the static file, so `input` keeps the stored checkpoint and
+        // early returns never save the static file starting point.
+        let mut range_input = input.clone();
         if let Some(lowest_range) =
             provider.static_file_provider().get_lowest_range(StaticFileSegment::Transactions) &&
             input
@@ -80,19 +75,19 @@ where
             let Some(tx_number) = body_indices.next_tx_num().checked_sub(1)
         {
             // Only skip earlier transactions if any exist.
-            input.previous_checkpoint = Some(PruneCheckpoint {
+            range_input.previous_checkpoint = Some(PruneCheckpoint {
                 block_number: Some(previous_block),
                 tx_number: Some(tx_number),
                 prune_mode: self.mode,
             });
             debug!(
                 target: "pruner",
-                static_file_checkpoint = ?input.previous_checkpoint,
+                static_file_checkpoint = ?range_input.previous_checkpoint,
                 "Using static file transaction checkpoint as TransactionLookup starting point"
             );
         }
 
-        let (start, end) = match input.get_next_tx_num_range(provider)? {
+        let (start, end) = match range_input.get_next_tx_num_range(provider)? {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No transaction lookup entries to prune");
@@ -100,7 +95,6 @@ where
             }
         }
         .into_inner();
-        input.previous_checkpoint = stored_checkpoint;
 
         // Check where transaction hash numbers are stored
         if provider.cached_storage_settings().storage_v2 {
