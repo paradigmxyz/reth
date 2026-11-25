@@ -651,7 +651,7 @@ where
         self
     }
 
-    /// Sets the maximum memory the EVM can allocate per RPC request.
+    /// Sets the maximum memory the EVM can allocate per call frame in an RPC request.
     pub const fn evm_memory_limit(mut self, memory_limit: u64) -> Self {
         self.evm_memory_limit = memory_limit;
         self
