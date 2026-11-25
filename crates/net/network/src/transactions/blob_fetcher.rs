@@ -118,7 +118,11 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
         {
             let Some(pending) = self.pending.get_mut(&hash) else { continue };
             pending.inflight = false;
-            pending.providers.retain(|(id, _)| *id != peer);
+            let provider = pending
+                .providers
+                .iter()
+                .position(|(id, _)| *id == peer)
+                .map(|index| pending.providers.remove(index));
             let Some(response) = response else {
                 self.metrics.failed_requests.increment(1);
                 if pending.full == Some(true) {
@@ -157,6 +161,9 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                 }
                 if self.buffer.cells(hash, peer, response_mask, cells, Instant::now()) {
                     pending.received |= response_mask.bits();
+                    // A truncated reply still made progress, so keep the provider for the
+                    // remaining columns, behind the providers that have not been asked yet.
+                    pending.providers.extend(provider);
                 }
             }
         }
@@ -434,6 +441,53 @@ mod tests {
             .send(Ok(Cells {
                 hashes: vec![hash],
                 cells: vec![cells.get_cells(mask).unwrap()],
+                cell_mask: request.cell_mask,
+            }))
+            .unwrap();
+        let event = tokio::time::timeout(
+            Duration::from_secs(10),
+            std::future::poll_fn(|cx| fetcher.poll(cx, &peers)),
+        )
+        .await
+        .unwrap();
+        let BlobFetchEvent::Transaction(_, tx) = event else { panic!("valid cells must import") };
+        assert_eq!(tx.blob_cell_availability().unwrap().get().count(), 64);
+    }
+
+    #[tokio::test]
+    async fn full_fetch_requests_remainder_after_truncated_response() {
+        let (tx, cells) = super::super::blob_buffer::tests::fixture();
+        let hash = *tx.hash();
+        let provider = PeerId::random();
+        let (metadata, mut rx) = peer(provider);
+        let peers = HashMap::from_iter([(provider, metadata)]);
+        let mut fetcher = BlobFetcher::new(CellCustody::default(), 100);
+        fetcher.announce(hash, provider, BlobCellMask::from_bits(u128::MAX));
+        fetcher.body(provider, tx).unwrap();
+        let mut cx = Context::from_waker(noop_waker_ref());
+        assert!(fetcher.poll(&mut cx, &peers).is_pending());
+        let PeerRequest::GetCells { request, response } = rx.try_recv().unwrap() else {
+            panic!("expected cells")
+        };
+        assert_eq!(request.cell_mask, B128::from((u64::MAX as u128).to_le_bytes()));
+        let truncated = BlobCellMask::from_bits(1);
+        response
+            .send(Ok(Cells {
+                hashes: vec![hash],
+                cells: vec![cells.get_cells(truncated).unwrap()],
+                cell_mask: B128::from(truncated.bits().to_le_bytes()),
+            }))
+            .unwrap();
+        assert!(fetcher.poll(&mut cx, &peers).is_pending());
+        let PeerRequest::GetCells { request, response } = rx.try_recv().unwrap() else {
+            panic!("expected remainder")
+        };
+        let remainder = BlobCellMask::from_bits(u128::from_le_bytes(request.cell_mask.into()));
+        assert_eq!(remainder.bits(), u64::MAX as u128 & !1);
+        response
+            .send(Ok(Cells {
+                hashes: vec![hash],
+                cells: vec![cells.get_cells(remainder).unwrap()],
                 cell_mask: request.cell_mask,
             }))
             .unwrap();
