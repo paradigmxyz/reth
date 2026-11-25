@@ -1,7 +1,7 @@
 [workspace.package]
 version = "2.11.0"
 edition = "2024"
-rust-version = "1.96"
+rust-version = "1.100"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -446,9 +446,9 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "0a8a935c4ffe274a23cf8480f7a3a07015f3030e", default-features = false }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "0a8a935c4ffe274a23cf8480f7a3a07015f3030e", default-features = false }
-evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "0a8a935c4ffe274a23cf8480f7a3a07015f3030e", default-features = false }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "9f3af840472fa54c53ea8ae62afda645279edc18", default-features = false }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "9f3af840472fa54c53ea8ae62afda645279edc18", default-features = false }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "9f3af840472fa54c53ea8ae62afda645279edc18", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -691,9 +691,9 @@ ipnet = "2.11"
 # evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
 # rejects a patch from the same source.
 [patch."https://github.com/alloy-rs/evm2"]
-evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "0a8a935c4ffe274a23cf8480f7a3a07015f3030e" }
-evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "0a8a935c4ffe274a23cf8480f7a3a07015f3030e" }
-evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "0a8a935c4ffe274a23cf8480f7a3a07015f3030e" }
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "9f3af840472fa54c53ea8ae62afda645279edc18" }
+evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "9f3af840472fa54c53ea8ae62afda645279edc18" }
+evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "9f3af840472fa54c53ea8ae62afda645279edc18" }
 
 [patch.crates-io]
 # reth-core

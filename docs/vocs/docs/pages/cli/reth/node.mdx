@@ -505,9 +505,9 @@ RPC:
           [default: 50000000]
 
       --rpc.evm-memory-limit <MEMORY_LIMIT>
-          Maximum memory the EVM can allocate per RPC request
+          Maximum memory the EVM can allocate per call frame in an RPC request
 
-          [default: 4294967295]
+          [default: 104857600]
 
       --rpc.txfeecap <TX_FEE_CAP>
           Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
