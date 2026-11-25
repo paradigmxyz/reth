@@ -592,4 +592,28 @@ mod tests {
             assert_eq!(store.get_cells(tx, kept).unwrap(), None);
         }
     }
+
+    #[test]
+    fn stores_rebuild_blobs_from_a_later_cell_sidecar() {
+        let (full, all) = fixture();
+        let hash = all.versioned_hashes().next().unwrap();
+        let expected = BlobAndProofV2 {
+            blob: Box::new(full.blobs[0]),
+            proofs: full.cell_proofs[..CELLS_PER_EXT_BLOB].to_vec(),
+        };
+        let one_column = subset(BlobCellMask::from_bits(1));
+
+        for TestStore { store, _dir, .. } in stores(&one_column) {
+            store.insert_cells(B256::random(), one_column.clone()).unwrap();
+            store
+                .insert_cells(B256::random(), subset(BlobCellMask::from_bits(u128::MAX / 3)))
+                .unwrap();
+
+            assert_eq!(store.has_versioned_hashes(&[hash]).unwrap(), vec![true]);
+            assert_eq!(
+                store.get_by_versioned_hashes_v3(&[hash]).unwrap(),
+                vec![Some(expected.clone())]
+            );
+        }
+    }
 }

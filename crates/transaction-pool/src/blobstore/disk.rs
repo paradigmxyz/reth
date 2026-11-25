@@ -132,12 +132,8 @@ impl DiskFileBlobStore {
         // if we have missing blobs, try to read them from disk and try again
         if !missing_tx_hashes.is_empty() {
             let blobs_from_disk = self.inner.read_many_decoded(missing_tx_hashes);
-            for (tx, stored) in blobs_from_disk {
-                let blob_sidecar = match stored {
-                    StoredSidecar::Full(blob_sidecar) => Some(Arc::new(blob_sidecar)),
-                    StoredSidecar::Cells(cells) => self.inner.rebuilt.get_or_rebuild(tx, &cells),
-                };
-                if let Some(blob_sidecar) = blob_sidecar &&
+            for (_, stored) in blobs_from_disk {
+                if let StoredSidecar::Full(blob_sidecar) = stored &&
                     let Some(blob_sidecar) = blob_sidecar.as_eip7594()
                 {
                     for (hash_idx, match_result) in
@@ -147,6 +143,21 @@ impl DiskFileBlobStore {
                             result[hash_idx] = Some(match_result);
                         }
                     }
+                }
+            }
+        }
+
+        let missing = missing_hashes(versioned_hashes, &result);
+        let cell_txs = self.inner.cell_txs_matching(&missing, true);
+        for (tx, stored) in self.inner.read_many_decoded(cell_txs) {
+            if let StoredSidecar::Cells(cells) = stored &&
+                let Some(blob_sidecar) = self.inner.rebuilt.get_or_rebuild(tx, &cells) &&
+                let Some(blob_sidecar) = blob_sidecar.as_eip7594()
+            {
+                for (hash_idx, match_result) in
+                    blob_sidecar.match_versioned_hashes(versioned_hashes)
+                {
+                    result[hash_idx].get_or_insert(match_result);
                 }
             }
         }
@@ -208,26 +219,29 @@ impl DiskFileBlobStore {
         if !missing_tx_hashes.is_empty() {
             let blobs_from_disk = self.inner.read_many_decoded(missing_tx_hashes);
             for (_, stored) in blobs_from_disk {
-                match stored {
-                    StoredSidecar::Full(blob_sidecar) => {
-                        if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
-                            for (hash_idx, match_result) in blob_sidecar
-                                .match_versioned_hashes_cells(versioned_hashes, cell_mask)
-                                .map_err(|err| BlobStoreError::Other(Box::new(err)))?
-                            {
-                                if result[hash_idx].is_none() {
-                                    result[hash_idx] = Some(match_result);
-                                }
-                            }
+                if let StoredSidecar::Full(blob_sidecar) = stored &&
+                    let Some(blob_sidecar) = blob_sidecar.as_eip7594()
+                {
+                    for (hash_idx, match_result) in blob_sidecar
+                        .match_versioned_hashes_cells(versioned_hashes, cell_mask)
+                        .map_err(|err| BlobStoreError::Other(Box::new(err)))?
+                    {
+                        if result[hash_idx].is_none() {
+                            result[hash_idx] = Some(match_result);
                         }
                     }
-                    StoredSidecar::Cells(cells) => {
-                        for (hash_idx, match_result) in
-                            cells.match_versioned_hashes_cells(versioned_hashes, cell_mask)
-                        {
-                            result[hash_idx].get_or_insert(match_result);
-                        }
-                    }
+                }
+            }
+        }
+
+        let missing = missing_hashes(versioned_hashes, &result);
+        let cell_txs = self.inner.cell_txs_matching(&missing, false);
+        for (_, stored) in self.inner.read_many_decoded(cell_txs) {
+            if let StoredSidecar::Cells(cells) = stored {
+                for (hash_idx, match_result) in
+                    cells.match_versioned_hashes_cells(versioned_hashes, cell_mask)
+                {
+                    result[hash_idx].get_or_insert(match_result);
                 }
             }
         }
@@ -457,11 +471,17 @@ impl BlobStore for DiskFileBlobStore {
         }
 
         for (idx, tx_hash) in missing_tx_hashes {
-            // Only blobs that can be rebuilt from their cells count as available.
-            let recoverable = self.inner.cell_sidecars.read().get(&tx_hash).copied();
-            if recoverable.unwrap_or(true) && self.inner.contains(tx_hash)? {
+            if self.inner.contains(tx_hash)? {
                 result[idx] = true;
             }
+        }
+
+        // Only blobs that can be rebuilt from their cells count as available.
+        let cell_sidecars = self.inner.cell_sidecars.read();
+        for (available, requested_hash) in result.iter_mut().zip(versioned_hashes) {
+            *available |= cell_sidecars
+                .values()
+                .any(|cells| cells.recoverable && cells.versioned_hashes.contains(requested_hash));
         }
 
         Ok(result)
@@ -513,8 +533,9 @@ struct DiskFileBlobStoreInner {
     /// Note: It is possible that one blob can appear in multiple transactions but this only tracks
     /// the most recent one.
     versioned_hashes_to_txhash: Mutex<LruMap<B256, B256, FbBuildHasher<32>>>,
-    // Transactions stored as cell sidecars, and whether their blobs can be rebuilt.
-    cell_sidecars: RwLock<B256Map<bool>>,
+    // Transactions stored as cell sidecars. They are not in `versioned_hashes_to_txhash`, which
+    // only points to full sidecars.
+    cell_sidecars: RwLock<B256Map<CellSidecarFile>>,
     // Sidecars rebuilt from cell sidecars.
     rebuilt: RebuiltSidecars,
 }
@@ -664,23 +685,36 @@ impl DiskFileBlobStoreInner {
         buf.push(CELL_SIDECAR_TAG);
         data.encode(&mut buf);
 
+        let file = CellSidecarFile {
+            recoverable: data.is_recoverable(),
+            versioned_hashes: data.versioned_hashes().collect(),
+        };
         let size = self.write_one_encoded(tx, &buf)?;
         // Nothing was written if a full sidecar landed first.
         if size == 0 {
             return Ok(())
         }
-        self.cell_sidecars.write().insert(tx, data.is_recoverable());
+        self.cell_sidecars.write().insert(tx, file);
         self.size_tracker.add_size(size);
         self.size_tracker.inc_len(1);
-
-        // Keep the index on a transaction that may hold the full blob.
-        let mut map = self.versioned_hashes_to_txhash.lock();
-        for hash in data.versioned_hashes() {
-            if !map.contains(&hash) {
-                map.insert(hash, tx);
-            }
-        }
         Ok(())
+    }
+
+    // Returns the transactions stored as cells with a blob in `hashes`, only those whose blobs
+    // can be rebuilt if `recoverable`.
+    fn cell_txs_matching(&self, hashes: &B256Set, recoverable: bool) -> Vec<TxHash> {
+        if hashes.is_empty() {
+            return Vec::new()
+        }
+        self.cell_sidecars
+            .read()
+            .iter()
+            .filter(|(_, cells)| {
+                (cells.recoverable || !recoverable) &&
+                    cells.versioned_hashes.iter().any(|hash| hashes.contains(hash))
+            })
+            .map(|(tx, _)| *tx)
+            .collect()
     }
 
     /// Returns true if the blob for the given transaction hash is in the blob cache or on disk.
@@ -951,6 +985,23 @@ pub enum OpenDiskFileBlobStore {
     Clear,
     /// Keep the existing blob store and index
     ReIndex,
+}
+
+// What the disk store keeps in memory about a cell sidecar file.
+#[derive(Debug)]
+struct CellSidecarFile {
+    // Whether the blobs can be rebuilt from the kept cells.
+    recoverable: bool,
+    versioned_hashes: Vec<B256>,
+}
+
+// Returns the requested versioned hashes not found yet.
+fn missing_hashes<T>(versioned_hashes: &[B256], result: &[Option<T>]) -> B256Set {
+    versioned_hashes
+        .iter()
+        .zip(result)
+        .filter_map(|(hash, found)| found.is_none().then_some(*hash))
+        .collect()
 }
 
 // A sidecar decoded from its blob file.
