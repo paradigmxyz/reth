@@ -7,7 +7,7 @@
 //! - **Reorg support**: Quickly access changesets to revert blocks during chain reorganizations
 //! - **Memory efficiency**: Explicit eviction releases persisted changesets
 
-use crate::{database_state_frontiers, OverlayManager, OverlayStateProvider};
+use crate::{database_state_frontiers, OverlayBuilder, OverlayManager, OverlayStateProvider};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
@@ -417,15 +417,24 @@ impl ChangesetCache {
             "Changeset cache MISS in range, falling back to aggregate DB-based computation"
         );
 
-        let overlay = overlay_manager
-            .overlay_builder_in(in_memory.clone(), finish.hash)
-            .with_no_reverts()
-            .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish, true)?;
+        let finish_state = in_memory.state_reaching(finish.hash, partial_state_trie.hash);
+        let overlay = OverlayBuilder::new(
+            finish.hash,
+            finish_state.clone(),
+            in_memory.clone(),
+            overlay_manager.clone(),
+        )
+        .with_no_reverts()
+        .build_state_trie_overlay_at_frontiers(
+            provider,
+            partial_state_trie,
+            finish,
+            true,
+        )?;
 
         // Forward updates are a best-effort optimization to speed up compute_range_trie_changesets,
         // missing blocks do not affect correctness.
-        let mut forward_updates = in_memory
-            .state_by_hash(finish.hash)
+        let mut forward_updates = finish_state
             .iter()
             .flat_map(|state| state.chain())
             .take_while(|state| state.number() >= start_block)

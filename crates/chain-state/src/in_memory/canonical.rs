@@ -296,6 +296,25 @@ impl<N: NodePrimitives> InMemoryStateSnapshot<N> {
     pub fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
         self.blocks.get(&hash).cloned().or_else(|| self.live.state_by_hash(hash))
     }
+
+    /// Returns the state of the block with the given hash whose chain reaches `anchor`: the one
+    /// the snapshot holds, or else the one the live state tracks now. Without such a state, this
+    /// is [`Self::state_by_hash`].
+    ///
+    /// A hash names a block but not how far a state's parent links extend: after an unwind and
+    /// replay the live state can link a block further down than the snapshot's state of it.
+    pub fn state_reaching(&self, hash: B256, anchor: B256) -> Option<Arc<BlockState<N>>> {
+        let reaches = |state: &Arc<BlockState<N>>| state.chain_hashes().any(|h| h == anchor);
+        let frozen = self.blocks.get(&hash).cloned();
+        if frozen.as_ref().is_some_and(reaches) {
+            return frozen
+        }
+        let live = self.live.state_by_hash(hash);
+        if live.as_ref().is_some_and(reaches) {
+            return live
+        }
+        frozen.or(live)
+    }
 }
 
 /// The numbers of blocks an [`InMemoryState`] tracks.

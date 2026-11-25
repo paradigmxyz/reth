@@ -506,8 +506,10 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     // Revert prefixes describe changes since the anchor, not stale hashes in
                     // masked DB rows. Complete the trie at Finish before applying those prefixes.
                     let start = Instant::now();
-                    let finish_state =
-                        self.in_memory.state_by_hash(finish_tip_block.hash).ok_or_else(|| {
+                    let finish_state = self
+                        .in_memory
+                        .state_reaching(finish_tip_block.hash, state_trie_tip_block.hash)
+                        .ok_or_else(|| {
                             ProviderError::other(StateTrieOverlayError {
                                 tip_hash: finish_tip_block.hash,
                                 anchor_hash: state_trie_tip_block.hash,
@@ -1137,6 +1139,35 @@ mod tests {
             blocks[3].recovered_block().hash()
         );
         assert!(err.to_string().contains(&finish_missing), "unexpected error: {err}");
+
+        let overlay = manager
+            .overlay_builder_in(snapshot, parent_hash)
+            .build_state_trie_overlay(&provider, false)
+            .unwrap();
+        assert!(!account_node_paths(&expected).is_empty());
+        assert_eq!(account_keys(&overlay), account_keys(&expected));
+        assert_eq!(account_node_paths(&overlay), account_node_paths(&expected));
+    }
+
+    #[reth_concurrency::test]
+    fn finish_chain_resolves_from_live_state_when_snapshot_chain_stops_short() {
+        // The state trie tip lags Finish, so the overlay needs the chain from Finish down to it.
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
+        for block in &blocks[3..=4] {
+            in_memory_state_writer.insert_executed(block.clone());
+        }
+        let provider = factory.provider().unwrap();
+        let parent_hash = blocks[1].recovered_block().hash();
+
+        // The snapshot's state of Finish stops above the state trie tip. The live state links
+        // Finish down to it once the missing block is inserted again.
+        let snapshot = manager.in_memory_state().snapshot();
+        in_memory_state_writer.insert_executed(blocks[2].clone());
+        let expected = manager
+            .overlay_builder(parent_hash)
+            .build_state_trie_overlay(&provider, false)
+            .unwrap();
 
         let overlay = manager
             .overlay_builder_in(snapshot, parent_hash)
