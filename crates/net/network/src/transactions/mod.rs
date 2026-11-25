@@ -47,13 +47,16 @@ use crate::{
     transactions::config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
     NetworkHandle, TxTypesCounter,
 };
-use alloy_eips::eip2718::{Encodable2718, Typed2718};
+use alloy_eips::{
+    eip2718::{Encodable2718, Typed2718},
+    eip4844::BYTES_PER_BLOB,
+};
 use alloy_primitives::{
     bytes::BufMut,
     map::{hash_map::Entry, B256Map, B256Set, FbBuildHasher, HashMap, HashSet},
     TxHash, B256,
 };
-use alloy_rlp::Encodable;
+use alloy_rlp::{length_of_length, Encodable};
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
@@ -1798,13 +1801,15 @@ impl PropagationMode {
 #[derive(Debug, Clone)]
 struct PropagateTransaction {
     is_broadcastable_in_full: bool,
-    /// Size advertised in `NewPooledTransactionHashes` metadata and used for full broadcast
-    /// soft-limit accounting.
+    /// Size advertised in eth/68 to eth/71 `NewPooledTransactionHashes` metadata and used for full
+    /// broadcast soft-limit accounting.
     ///
     /// This is the network encoded transaction size. For pool-backed blob transactions, this is
     /// the pool's cached encoded length, which includes the sidecar returned by
     /// `PooledTransactions`.
     propagation_size: usize,
+    /// Size advertised to eth/72 peers, which receive blob transactions without their blobs.
+    propagation_size_without_blobs: usize,
     transaction: LazyEncodedTransaction,
 }
 
@@ -1821,6 +1826,7 @@ impl PropagateTransaction {
         Self {
             is_broadcastable_in_full,
             propagation_size,
+            propagation_size_without_blobs: propagation_size,
             transaction: LazyEncoded::new(transaction),
         }
     }
@@ -1833,9 +1839,14 @@ impl PropagateTransaction {
     fn pool_tx<P: PoolTransaction>(tx: Arc<ValidPoolTransaction<P>>) -> Self {
         let is_broadcastable_in_full = tx.transaction.consensus_ref().is_broadcastable_in_full();
         let propagation_size = tx.encoded_length();
+        let propagation_size_without_blobs =
+            tx.transaction.blob_versioned_hashes().map_or(propagation_size, |hashes| {
+                eip4844_length_without_blobs(propagation_size, hashes.len())
+            });
         Self {
             is_broadcastable_in_full,
             propagation_size,
+            propagation_size_without_blobs,
             transaction: LazyEncoded::new(PropagatePooledTransactionEncoder::new(tx)),
         }
     }
@@ -1849,6 +1860,11 @@ impl PropagateTransaction {
         self.propagation_size
     }
 
+    /// Returns the size advertised to eth/72 peers.
+    const fn propagation_size_without_blobs(&self) -> usize {
+        self.propagation_size_without_blobs
+    }
+
     fn tx_type(&self) -> u8 {
         self.transaction.ty()
     }
@@ -1860,6 +1876,20 @@ impl PropagateTransaction {
     fn shared(&self) -> LazyEncodedTransaction {
         self.transaction.clone()
     }
+}
+
+/// Returns the EIP-2718 length of a blob transaction without its blobs, from its full `length`.
+///
+/// The blob list becomes an empty list, which only shrinks the outer list header. Returns `length`
+/// if it can't hold `blobs` blobs.
+fn eip4844_length_without_blobs(length: usize, blobs: usize) -> usize {
+    let blobs_payload = blobs * (length_of_length(BYTES_PER_BLOB) + BYTES_PER_BLOB);
+    let removed = length_of_length(blobs_payload) + blobs_payload - 1;
+    // `length` is the type byte, then the list header, then the list payload.
+    (length.saturating_sub(9)..length)
+        .find(|&payload| 1 + length_of_length(payload) + payload == length)
+        .and_then(|payload| payload.checked_sub(removed))
+        .map_or(length, |payload| 1 + length_of_length(payload) + payload)
 }
 
 /// A pooled transaction encoder that avoids cloning into the consensus transaction for propagation.
@@ -2120,7 +2150,7 @@ impl PooledTransactionsHashesBuilder {
             }
             Self::Eth72(msg) => {
                 msg.hashes.push(*tx.tx_hash());
-                msg.sizes.push(tx.propagation_size());
+                msg.sizes.push(tx.propagation_size_without_blobs());
                 let ty = tx.tx_type();
                 msg.types.push(ty);
                 if ty == EIP4844_TX_TYPE_ID {
@@ -2402,9 +2432,16 @@ mod tests {
         transactions::config::RelaxedEthAnnouncementFilter,
         NetworkConfigBuilder, NetworkManager,
     };
-    use alloy_consensus::{Transaction as _, TxEip1559, TxLegacy};
-    use alloy_eips::{eip2718::Encodable2718, eip4844::BlobTransactionValidationError};
-    use alloy_primitives::{address, hex, Signature, TxKind, B256, U256};
+    use alloy_consensus::{
+        transaction::{Recovered, TxEip4844WithSidecar},
+        SignableTransaction, Transaction as _, TxEip1559, TxEip4844, TxLegacy,
+    };
+    use alloy_eips::{
+        eip2718::Encodable2718,
+        eip4844::{Blob, BlobTransactionValidationError, Bytes48},
+        eip7594::{BlobTransactionSidecarEip7594, CELLS_PER_EXT_BLOB},
+    };
+    use alloy_primitives::{address, hex, Address, Signature, TxKind, B256, U256};
     use alloy_rlp::Decodable;
     use futures::FutureExt;
     use reth_chainspec::MIN_TRANSACTION_GAS;
@@ -3238,6 +3275,42 @@ mod tests {
         let tx = PropagateTransaction::new(tx);
 
         assert_eq!(tx.propagation_size(), expected_size);
+    }
+
+    #[test]
+    fn test_blob_transaction_announced_size_matches_served_body() {
+        let sidecar = BlobTransactionSidecarEip7594::new(
+            vec![Blob::repeat_byte(1); 2],
+            vec![Bytes48::repeat_byte(2); 2],
+            vec![Bytes48::repeat_byte(3); 2 * CELLS_PER_EXT_BLOB],
+        );
+        let full = PooledTransactionVariant::Eip4844(
+            TxEip4844WithSidecar {
+                tx: TxEip4844 { blob_versioned_hashes: vec![B256::ZERO; 2], ..Default::default() },
+                sidecar: sidecar.into(),
+            }
+            .into_signed(Signature::test_signature()),
+        );
+        let mut without_blobs = full.clone();
+        without_blobs.clear_eip7594_blobs();
+        let tx = PropagateTransaction::pool_tx(valid_eth_pool_transaction(
+            EthPooledTransaction::from_pooled(Recovered::new_unchecked(
+                full.clone(),
+                Address::ZERO,
+            )),
+        ));
+
+        // eth/72 peers are served blob transactions without their blobs.
+        for (version, served) in [(EthVersion::Eth71, &full), (EthVersion::Eth72, &without_blobs)] {
+            let mut builder = PooledTransactionsHashesBuilder::new(version);
+            builder.push(&tx);
+            let sizes = match builder.build() {
+                NewPooledTransactionHashes::Eth68(msg) => msg.sizes,
+                NewPooledTransactionHashes::Eth72(msg) => msg.sizes,
+                msg => panic!("unexpected announcement {msg:?}"),
+            };
+            assert_eq!(sizes, vec![served.encode_2718_len()]);
+        }
     }
 
     #[test]
