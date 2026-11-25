@@ -664,21 +664,21 @@ impl DiskFileBlobStoreInner {
         buf.push(CELL_SIDECAR_TAG);
         data.encode(&mut buf);
 
-        {
-            // Keep the index on a transaction that may hold the full blob.
-            let mut map = self.versioned_hashes_to_txhash.lock();
-            for hash in data.versioned_hashes() {
-                if !map.contains(&hash) {
-                    map.insert(hash, tx);
-                }
-            }
+        let size = self.write_one_encoded(tx, &buf)?;
+        // Nothing was written if a full sidecar landed first.
+        if size == 0 {
+            return Ok(())
         }
         self.cell_sidecars.write().insert(tx, data.is_recoverable());
+        self.size_tracker.add_size(size);
+        self.size_tracker.inc_len(1);
 
-        let size = self.write_one_encoded(tx, &buf)?;
-        if size > 0 {
-            self.size_tracker.add_size(size);
-            self.size_tracker.inc_len(1);
+        // Keep the index on a transaction that may hold the full blob.
+        let mut map = self.versioned_hashes_to_txhash.lock();
+        for hash in data.versioned_hashes() {
+            if !map.contains(&hash) {
+                map.insert(hash, tx);
+            }
         }
         Ok(())
     }
@@ -1426,5 +1426,22 @@ mod tests {
             store.get_by_versioned_hashes_v3(&[versioned_hash]).unwrap(),
             vec![Some(expected)]
         );
+    }
+
+    #[test]
+    fn disk_failed_cell_write_is_not_recorded() {
+        let (store, dir) = tmp_store();
+        fs::remove_dir_all(dir.path()).unwrap();
+        let tx = TxHash::random();
+
+        let Err(BlobStoreError::Other(err)) = store.insert_cells(tx, single_cell_sidecar()) else {
+            panic!("expected a write error")
+        };
+        assert!(matches!(
+            err.downcast_ref::<DiskFileBlobStoreError>(),
+            Some(DiskFileBlobStoreError::WriteFile(failed, _, _)) if *failed == tx
+        ));
+        assert!(store.inner.cell_sidecars.read().is_empty());
+        assert_eq!(store.blobs_len(), 0);
     }
 }
