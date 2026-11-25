@@ -899,16 +899,11 @@ impl PeersManager {
                     peer.reputation = peer.reputation.saturating_add(reputation_change.as_i32());
                 };
 
-                // `Self::remove_peer` keeps a connected peer only until its session closes, like
-                // `Self::on_active_session_gracefully_closed` does. A reputation ban also
+                // A peer kept only until its session closes, such as an unknown inbound peer or
+                // one `Self::remove_peer` is disconnecting, is removed however the session ends,
+                // like `Self::on_active_session_gracefully_closed` does. A reputation ban also
                 // disconnects the peer, but doesn't mark it for removal.
-                remove_peer = peer.remove_after_disconnect &&
-                    matches!(
-                        peer.state,
-                        PeerConnectionState::DisconnectingIn |
-                            PeerConnectionState::DisconnectingOut
-                    ) &&
-                    !peer.is_trusted();
+                remove_peer = peer.remove_after_disconnect && !peer.is_trusted();
 
                 self.connection_info.decr_state(peer.state);
                 peer.state = PeerConnectionState::Idle;
@@ -4817,6 +4812,25 @@ mod tests {
         assert_eq!(discover_inbound([5, 6, 7, 8]), (false, MAX_TRACKED_PEERS));
         // a full set leaves it tracked only for its session
         assert_eq!(discover_inbound([5, 6, 7, 9]), (true, MAX_TRACKED_PEERS + 1));
+    }
+
+    #[tokio::test]
+    async fn test_temporary_peer_removed_after_dropped_session() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let inbound = PeerId::random();
+        let socket_addr = "5.6.7.8:40404".parse().unwrap();
+        assert!(peers.on_incoming_pending_session(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8))).is_ok());
+        peers.on_incoming_session_established(inbound, socket_addr);
+        assert!(peers.peers[&inbound].remove_after_disconnect);
+
+        peers.on_active_session_dropped(
+            &socket_addr,
+            &inbound,
+            &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
+                DisconnectReason::TooManyPeers,
+            )),
+        );
+        assert!(!peers.peers.contains_key(&inbound));
     }
 
     #[tokio::test]
