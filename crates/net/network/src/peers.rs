@@ -9,7 +9,6 @@ use crate::{
 };
 use alloy_primitives::map::{hash_map::Entry, FbBuildHasher, HashMap, HashSet};
 use futures::StreamExt;
-use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 
 use rand::Rng;
 use reth_eth_wire::{
@@ -49,12 +48,8 @@ use tracing::{trace, warn};
 /// Bound admission-time throttling independently of long-lived security bans.
 const MAX_INCOMING_IP_THROTTLE_ENTRIES: u32 = 16_384;
 
-/// Maximum number of basic peers tracked per IPv4 /24 or IPv6 /48 subnet, so a single host cannot
-/// add any number of discovered peers.
-const MAX_DISCOVERED_PEERS_PER_SUBNET: usize = 10;
-
-/// Maximum number of basic peers tracked in total, so hosts across many subnets cannot add any
-/// number of discovered peers either.
+/// Maximum number of basic peers tracked, so discovering fresh identities cannot grow the peer set
+/// without bound.
 const MAX_DISCOVERED_PEERS: usize = 10_000;
 
 /// Maintains the state of _all_ the peers known to the network.
@@ -178,7 +173,6 @@ impl PeersManager {
         }
 
         let mut persisted_basic_peers = 0;
-        let mut persisted_basic_per_subnet = HashMap::<IpNet, usize>::default();
         for PersistedPeerInfo { record, kind, fork_id, reputation } in persisted_peers {
             // When enforce_enr_fork_id is enabled, skip persisted peers that don't have a
             // confirmed fork ID. These were likely accumulated from a different network during
@@ -199,14 +193,6 @@ impl PeersManager {
                 if persisted_basic_peers == MAX_DISCOVERED_PEERS {
                     trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer over the discovered peer limit");
                     continue
-                }
-                if let Some(subnet) = discovery_subnet(address) {
-                    let count = persisted_basic_per_subnet.entry(subnet).or_default();
-                    if *count == MAX_DISCOVERED_PEERS_PER_SUBNET {
-                        trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer from full subnet");
-                        continue
-                    }
-                    *count += 1;
                 }
                 persisted_basic_peers += 1;
             }
@@ -985,18 +971,11 @@ impl PeersManager {
         self.add_peer_kind(peer_id, None, addr, fork_id)
     }
 
-    /// Returns whether a new basic peer at `ip` fits within the subnet and total limits, removing
-    /// an idle basic peer to make room, from the same subnet when that one is full. Banned or
-    /// filtered peers never cause a removal.
+    /// Returns whether a new basic peer at `ip` fits within [`MAX_DISCOVERED_PEERS`], removing an
+    /// idle basic peer to make room. Banned or filtered peers never cause a removal.
     fn make_room_for_discovered_peer(&mut self, peer_id: PeerId, ip: IpAddr) -> bool {
-        let subnet = discovery_subnet(ip);
-        let in_subnet =
-            |peer: &Peer| subnet.is_some() && discovery_subnet(peer.addr.tcp().ip()) == subnet;
         let basic_peers = || self.peers.iter().filter(|(_, peer)| peer.kind.is_basic());
-
-        let subnet_full = basic_peers().filter(|(_, peer)| in_subnet(peer)).count() >=
-            MAX_DISCOVERED_PEERS_PER_SUBNET;
-        if !subnet_full && basic_peers().count() < MAX_DISCOVERED_PEERS {
+        if basic_peers().count() < MAX_DISCOVERED_PEERS {
             return true
         }
         if !self.ip_filter.is_allowed(&ip) || self.ban_list.is_banned(&peer_id, &ip) {
@@ -1004,7 +983,7 @@ impl PeersManager {
         }
         // Backed off peers go first, since unreachable identities are what fills the set.
         let Some(evicted) = basic_peers()
-            .filter(|(_, peer)| peer.state.is_idle() && (!subnet_full || in_subnet(peer)))
+            .filter(|(_, peer)| peer.state.is_idle())
             .min_by_key(|(_, peer)| (!peer.backed_off, peer.reputation))
             .map(|(peer_id, _)| *peer_id)
         else {
@@ -1731,22 +1710,6 @@ fn jitter_rotation_interval(mean: Duration) -> Duration {
     let min_nanos = (mean * 3 / 5).as_nanos() as u64;
     let max_nanos = (mean * 7 / 5).as_nanos() as u64;
     Duration::from_nanos(rand::rng().random_range(min_nanos..=max_nanos))
-}
-
-/// Returns the IPv4 /24 or IPv6 /48 subnet that discovered peers are limited by, or `None` if the
-/// address is not globally routable so local networks and devnets are never limited.
-fn discovery_subnet(ip: IpAddr) -> Option<IpNet> {
-    let ip = ip.to_canonical();
-    // `is_global` treats every IPv6 address but loopback and unspecified as global.
-    let private_v6 =
-        matches!(ip, IpAddr::V6(ip) if ip.is_unique_local() || ip.is_unicast_link_local());
-    if !is_global(&ip) || private_v6 {
-        return None
-    }
-    Some(match ip {
-        IpAddr::V4(ip) => Ipv4Net::new_assert(ip, 24).trunc().into(),
-        IpAddr::V6(ip) => Ipv6Net::new_assert(ip, 48).trunc().into(),
-    })
 }
 
 #[cfg(test)]
@@ -4823,60 +4786,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_discovered_peers_limited_per_subnet() {
-        let mut peers = PeersManager::new(PeersConfig::test());
-        let addr = |ip: &str| PeerAddr::from_tcp(SocketAddr::new(ip.parse().unwrap(), 30303));
-        // a static peer does not take one of the subnet's slots
-        peers.add_peer_kind(PeerId::random(), Some(PeerKind::Static), addr("1.2.3.250"), None);
-        let subnet_peers =
-            (0..MAX_DISCOVERED_PEERS_PER_SUBNET).map(|_| PeerId::random()).collect::<Vec<_>>();
-        for (i, peer_id) in subnet_peers.iter().enumerate() {
-            peers.add_peer(*peer_id, addr(&format!("1.2.3.{i}")), None);
-            peers.peers.get_mut(peer_id).unwrap().state = PeerConnectionState::Out;
-        }
-
-        // another host in the full /24 is skipped, since no peer there is idle
-        let skipped = PeerId::random();
-        peers.add_peer(skipped, addr("1.2.3.200"), None);
-        assert!(!peers.peers.contains_key(&skipped));
-
-        // a known peer is still updated
-        peers.add_peer(subnet_peers[0], addr("1.2.3.100"), None);
-        assert_eq!(peers.peers[&subnet_peers[0]].addr, addr("1.2.3.100"));
-
-        // trusted ids and other subnets are still added
-        let trusted = PeerId::random();
-        peers.add_trusted_peer_id(trusted);
-        peers.add_peer(trusted, addr("1.2.3.201"), None);
-        let other = PeerId::random();
-        peers.add_peer(other, addr("1.2.4.1"), None);
-        assert!(peers.peers.contains_key(&trusted));
-        assert!(peers.peers.contains_key(&other));
-        assert_eq!(peers.peers.len(), MAX_DISCOVERED_PEERS_PER_SUBNET + 3);
-    }
-
-    #[tokio::test]
-    async fn test_persisted_peers_limited_per_subnet() {
-        let trusted = NodeRecord::new("1.2.3.250:30303".parse().unwrap(), PeerId::random());
-        let mut config = PeersConfig::test();
-        config.trusted_nodes = vec![trusted.into()];
-        // The trusted id's basic record comes first, so counting it would fill the subnet early.
-        config.persisted_peers = std::iter::once(trusted)
-            .chain((0..=MAX_DISCOVERED_PEERS_PER_SUBNET).map(|i| {
-                NodeRecord::new(format!("1.2.3.{i}:30303").parse().unwrap(), PeerId::random())
-            }))
-            .map(PersistedPeerInfo::from_node_record)
-            .collect();
-
-        let peers = PeersManager::new(config);
-        assert_eq!(
-            peers.peers.values().filter(|peer| peer.kind.is_basic()).count(),
-            MAX_DISCOVERED_PEERS_PER_SUBNET
-        );
-        assert!(peers.peers[&trusted.id].kind.is_trusted());
-    }
-
-    #[tokio::test]
     async fn test_discovered_peers_limited_in_total() {
         let mut peers = PeersManager::new(PeersConfig::test());
         // One peer per /24, so only the total limit applies.
@@ -4915,58 +4824,5 @@ mod tests {
 
         let peers = PeersManager::new(config);
         assert_eq!(peers.peers.len(), MAX_DISCOVERED_PEERS);
-    }
-
-    #[tokio::test]
-    async fn test_full_subnet_replaces_idle_peer() {
-        let mut peers = PeersManager::new(PeersConfig::test());
-        let addr = |ip: &str| PeerAddr::from_tcp(SocketAddr::new(ip.parse().unwrap(), 30303));
-        for i in 0..MAX_DISCOVERED_PEERS_PER_SUBNET {
-            peers.add_peer(PeerId::random(), addr(&format!("1.2.3.{i}")), None);
-        }
-        // Ties go to the first peer in iteration order, so back off the last one.
-        let backed_off = *peers.peers.keys().last().unwrap();
-        peers.peers.get_mut(&backed_off).unwrap().backed_off = true;
-        // a worse peer in another subnet is not replaced for this one
-        let elsewhere = PeerId::random();
-        peers.add_peer(elsewhere, addr("1.2.4.1"), None);
-        let peer = peers.peers.get_mut(&elsewhere).unwrap();
-        peer.backed_off = true;
-        peer.reputation = BANNED_REPUTATION;
-
-        // a banned peer does not cost an existing one
-        let banned = PeerId::random();
-        peers.ban_list.ban_peer(banned);
-        peers.add_peer(banned, addr("1.2.3.200"), None);
-        assert!(peers.peers.contains_key(&backed_off));
-
-        let discovered = PeerId::random();
-        peers.add_peer(discovered, addr("1.2.3.201"), None);
-        assert!(peers.peers.contains_key(&discovered));
-        assert!(!peers.peers.contains_key(&backed_off));
-        assert!(peers.peers.contains_key(&elsewhere));
-        assert_eq!(peers.peers.len(), MAX_DISCOVERED_PEERS_PER_SUBNET + 1);
-    }
-
-    #[test]
-    fn test_discovery_subnet() {
-        let subnet = |ip: &str| discovery_subnet(ip.parse().unwrap());
-        let net = |net: &str| Some(net.parse::<IpNet>().unwrap());
-
-        assert_eq!(subnet("1.2.3.4"), net("1.2.3.0/24"));
-        assert_eq!(subnet("::ffff:1.2.3.4"), net("1.2.3.0/24"));
-        assert_eq!(subnet("2a01:4f8:1:ffff::1"), net("2a01:4f8:1::/48"));
-        for local in [
-            "0.0.0.0",
-            "127.0.0.1",
-            "10.0.0.1",
-            "192.168.1.1",
-            "169.254.0.1",
-            "::1",
-            "fd00::1",
-            "fe80::1",
-        ] {
-            assert_eq!(subnet(local), None);
-        }
     }
 }
