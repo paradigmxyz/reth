@@ -394,6 +394,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         // `InMemoryState::snapshot`.
         let in_memory_snapshot = self.overlay_manager.in_memory_state().snapshot();
         let db_tx = self.db.tx()?;
+        let in_memory_snapshot = in_memory_snapshot.with_blocks_tracked_now();
 
         // Sync providers after opening the database transaction to make
         // sure that no data is pruned from rocksdb or static files.
@@ -1125,6 +1126,28 @@ mod tests {
         }));
         let provider = factory.provider().unwrap();
         factory.db_ref().set_post_transaction_hook(Box::new(|| ()));
+
+        assert!(!factory.overlay_manager().in_memory_state().contains(&persisted.hash));
+        assert!(provider.in_memory_snapshot().state_by_hash(persisted.hash).is_some());
+    }
+
+    #[test]
+    fn provider_keeps_blocks_inserted_before_its_transaction() {
+        let (factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::ZERO);
+        let persisted = block.recovered_block().num_hash();
+
+        // The engine inserts the block after the provider snapshots the in-memory blocks but
+        // before it opens its transaction, and removes it again while the provider is open.
+        let in_memory_state_writer = Arc::new(Mutex::new(in_memory_state_writer));
+        let hook_writer = Arc::clone(&in_memory_state_writer);
+        factory.db_ref().set_pre_transaction_hook(Box::new(move || {
+            hook_writer.lock().update_chain(NewCanonicalChain::Commit { new: vec![block.clone()] });
+        }));
+        let provider = factory.provider().unwrap();
+        factory.db_ref().set_pre_transaction_hook(Box::new(|| ()));
+        in_memory_state_writer.lock().on_blocks_persisted(persisted, persisted, None);
 
         assert!(!factory.overlay_manager().in_memory_state().contains(&persisted.hash));
         assert!(provider.in_memory_snapshot().state_by_hash(persisted.hash).is_some());

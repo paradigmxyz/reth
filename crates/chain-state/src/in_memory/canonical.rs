@@ -93,9 +93,14 @@ impl<N: NodePrimitives> InMemoryState<N> {
     /// Taking it is a read lock and three reference count increments. The writer removes blocks
     /// only after persistence has committed them, so a snapshot taken before a database
     /// transaction opens still holds every block that transaction's durable frontiers need and
-    /// the writer removed since. A block inserted after the snapshot is looked up in this state.
+    /// the writer removed since. Call [`InMemoryStateSnapshot::with_blocks_tracked_now`] right
+    /// after the transaction opens to also keep the blocks inserted in between.
     pub fn snapshot(&self) -> InMemoryStateSnapshot<N> {
-        InMemoryStateSnapshot { blocks: self.inner.blocks.read().snapshot(), live: self.clone() }
+        InMemoryStateSnapshot {
+            blocks: self.inner.blocks.read().snapshot(),
+            later: InMemoryBlocksSnapshot::empty(),
+            live: self.clone(),
+        }
     }
 
     /// Returns a snapshot that holds no blocks and looks every block up in this state.
@@ -103,7 +108,11 @@ impl<N: NodePrimitives> InMemoryState<N> {
     /// It pins no blocks, and suits callers that cannot race with the writer, such as the engine
     /// itself or a read-write provider.
     pub fn live_view(&self) -> InMemoryStateSnapshot<N> {
-        InMemoryStateSnapshot { blocks: InMemoryBlocksSnapshot::empty(), live: self.clone() }
+        InMemoryStateSnapshot {
+            blocks: InMemoryBlocksSnapshot::empty(),
+            later: InMemoryBlocksSnapshot::empty(),
+            live: self.clone(),
+        }
     }
 
     /// Returns the numbers of tracked canonical blocks and of tracked blocks that are not
@@ -281,20 +290,37 @@ struct InMemoryStateInner<N: NodePrimitives> {
 /// [`InMemoryState::snapshot`], over the live state it was taken from.
 ///
 /// Each state it holds keeps its whole in-memory chain, whatever the writer removes from the
-/// [`InMemoryState`] afterwards. Cloning it is three reference count increments.
+/// [`InMemoryState`] afterwards. Cloning it is five reference count increments.
 #[derive(Debug, Clone)]
 pub struct InMemoryStateSnapshot<N: NodePrimitives = EthPrimitives> {
+    /// The blocks tracked when the snapshot was taken.
     blocks: InMemoryBlocksSnapshot<N>,
+    /// The blocks tracked when [`Self::with_blocks_tracked_now`] was called, if it was.
+    later: InMemoryBlocksSnapshot<N>,
     live: InMemoryState<N>,
 }
 
 impl<N: NodePrimitives> InMemoryStateSnapshot<N> {
+    /// Also keeps the blocks the live state tracks now.
+    ///
+    /// Call it right after the database transaction opens: a block inserted between the snapshot
+    /// and the transaction can be one of the transaction's durable frontiers, and the writer can
+    /// remove it from the live state before the snapshot is read.
+    pub fn with_blocks_tracked_now(mut self) -> Self {
+        self.later = self.live.inner.blocks.read().snapshot();
+        self
+    }
+
     /// Returns the state of the block with the given hash, canonical or not: the one the
     /// snapshot holds, or else the one the live state tracks now.
     ///
-    /// Both lookups are safe to combine, because a hash names one block.
+    /// The lookups are safe to combine, because a hash names one block.
     pub fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
-        self.blocks.get(&hash).cloned().or_else(|| self.live.state_by_hash(hash))
+        self.blocks
+            .get(&hash)
+            .or_else(|| self.later.get(&hash))
+            .cloned()
+            .or_else(|| self.live.state_by_hash(hash))
     }
 
     /// Returns the state of the block with the given hash whose chain reaches `anchor`: the one
@@ -309,11 +335,15 @@ impl<N: NodePrimitives> InMemoryStateSnapshot<N> {
         if frozen.as_ref().is_some_and(reaches) {
             return frozen
         }
+        let later = self.later.get(&hash).cloned();
+        if later.as_ref().is_some_and(reaches) {
+            return later
+        }
         let live = self.live.state_by_hash(hash);
         if live.as_ref().is_some_and(reaches) {
             return live
         }
-        frozen.or(live)
+        frozen.or(later).or(live)
     }
 }
 

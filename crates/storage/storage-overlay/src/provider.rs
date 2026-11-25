@@ -149,6 +149,7 @@ where
             res
         };
 
+        let in_memory = in_memory.with_blocks_tracked_now();
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
         Ok(OverlayStateProvider::from_parts(
@@ -1257,6 +1258,42 @@ mod tests {
         }));
         let provider = state_provider_factory.database_provider_ro().unwrap();
         factory.db_ref().set_post_transaction_hook(Box::new(|| ()));
+        assert!(!manager.in_memory_state().contains(&persisted.hash));
+
+        let overlay = provider.state_trie_overlay(false).unwrap();
+        assert!(!account_node_paths(&expected).is_empty());
+        assert_eq!(account_keys(overlay), account_keys(&expected));
+        assert_eq!(account_node_paths(overlay), account_node_paths(&expected));
+    }
+
+    #[reth_concurrency::test]
+    fn provider_keeps_blocks_inserted_before_its_transaction() {
+        // The engine inserts the chain from Finish down to the state trie tip after the factory
+        // snapshots the in-memory blocks but before the provider opens its transaction, and
+        // removes it again before the overlay is built.
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let (manager, in_memory_state_writer) = overlay_manager_with_writer();
+        let parent_hash = blocks[1].recovered_block().hash();
+        let state_provider_factory =
+            OverlayStateProviderFactory::new(factory.clone(), manager.overlay_builder(parent_hash));
+        let in_memory_state_writer = Arc::new(Mutex::new(in_memory_state_writer));
+        let hook_writer = Arc::clone(&in_memory_state_writer);
+        let chain = blocks[2..=4].to_vec();
+        factory.db_ref().set_pre_transaction_hook(Box::new(move || {
+            hook_writer.lock().update_chain(NewCanonicalChain::Commit { new: chain.clone() });
+        }));
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+        factory.db_ref().set_pre_transaction_hook(Box::new(|| ()));
+        let expected =
+            OverlayStateProviderFactory::new(factory.clone(), manager.overlay_builder(parent_hash))
+                .database_provider_ro()
+                .unwrap()
+                .state_trie_overlay(false)
+                .unwrap()
+                .clone();
+
+        let persisted = blocks[3].recovered_block().num_hash();
+        in_memory_state_writer.lock().on_blocks_persisted(persisted, persisted, None);
         assert!(!manager.in_memory_state().contains(&persisted.hash));
 
         let overlay = provider.state_trie_overlay(false).unwrap();
