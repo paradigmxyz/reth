@@ -325,7 +325,7 @@ mod tests {
         parent.expect("nonempty chain")
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn deep_chain_drop_preserves_shared_tail() {
         const DEPTH: usize = 100_000;
 

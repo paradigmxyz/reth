@@ -270,31 +270,28 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
         self.reader_txn_tracker = Some(Arc::new(reader_txn_tracker));
         self
     }
-
-    /// Returns the manager of the in-memory blocks the engine tree holds.
-    pub(crate) const fn overlay_manager(&self) -> &OverlayManager<N::Primitives> {
-        &self.overlay_manager
-    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Commits unwind writes in MDBX -> `RocksDB` -> static-file order.
     ///
     /// This keeps MDBX as the first durable step so an interrupted unwind can be recovered by
-    /// truncating static files from checkpoints on the next startup.
+    /// truncating static files from checkpoints on the next startup. The MDBX commit is synced in
+    /// every sync mode, so power loss can't roll it back above the truncated static files.
     ///
     /// This waits after the MDBX commit so readers holding older MDBX-visible views cannot overlap
-    /// later cross-store unwind steps.
+    /// later cross-store unwind steps. If the wait fails because MDBX stopped answering queries,
+    /// the later steps are skipped and the same startup recovery applies.
     ///
     /// Historical `storage_v2` reads ignore `RocksDB` history entries above their MDBX-visible tip,
     /// so no additional post-`RocksDB` wait is needed before static-file commit.
     fn commit_unwind(self) -> ProviderResult<()> {
         let storage_v2 = self.cached_storage_settings().storage_v2;
         let reader_txn_tracker = self.reader_txn_tracker.clone();
-        self.tx.commit()?;
+        self.tx.commit_durable()?;
 
         if let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
-            reader_txn_tracker.wait_for_pre_commit_readers();
+            reader_txn_tracker.wait_for_pre_commit_readers()?;
         }
 
         if storage_v2 {
@@ -3086,8 +3083,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn take_state_above(
         &self,
         block: BlockNumber,
+        end: BlockNumber,
     ) -> ProviderResult<ExecutionOutcome<Self::Receipt>> {
-        let range = block + 1..=self.last_block_number()?;
+        let range = block + 1..=end;
 
         if range.is_empty() {
             return Ok(ExecutionOutcome::default())
@@ -3095,7 +3093,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let start_block_number = *range.start();
 
         // We are not removing block meta as it is used to get block changesets.
-        let block_bodies = self.block_body_indices_range(range.clone())?;
+        let block_bodies = self.block_body_indices_range(range)?;
 
         // get transaction receipts
         let from_transaction_num =
@@ -3103,7 +3101,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let to_transaction_num =
             block_bodies.last().expect("already checked if there are blocks").last_tx_num();
 
-        let storage_range = BlockNumberAddress::range(range.clone());
         let storage_changeset = if let Some(highest_block) = self
             .static_file_provider
             .get_highest_static_file_block(StaticFileSegment::StorageChangeSets) &&
@@ -3115,7 +3112,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             changeset_writer.prune_storage_changesets(block)?;
             changesets
         } else {
-            self.take::<tables::StorageChangeSets>(storage_range)?.into_iter().collect()
+            // Revert every changeset above `block`, including any above `end`.
+            self.take::<tables::StorageChangeSets>(
+                BlockNumberAddress((block + 1, Address::ZERO))..,
+            )?
+            .into_iter()
+            .collect()
         };
 
         // if there are static files for this segment, prune them.
@@ -3135,7 +3137,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         } else {
             // Have to remove from static files if they exist, otherwise remove using `take` for the
             // changeset tables
-            self.take::<tables::AccountChangeSets>(range)?
+            self.take::<tables::AccountChangeSets>(block + 1..)?
         };
 
         let (state, reverts) = if self.cached_storage_settings().use_hashed_state() {
@@ -3658,7 +3660,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         self.unwind_trie_state_from(block + 1)?;
 
         // get execution res
-        let execution_state = self.take_state_above(block)?;
+        let execution_state = self.take_state_above(block, *range.end())?;
 
         let blocks = self.recovered_block_range(range)?;
 
@@ -4208,9 +4210,11 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{
-            blocks::BlockchainTestData, create_test_provider_factory, MockNodeTypesWithDB,
+            blocks::BlockchainTestData, create_test_provider_factory,
+            create_test_provider_factory_with_chain_spec_and_db_args,
+            create_test_provider_factory_with_in_memory_state_writer,
         },
-        BlockWriter, ProviderFactory,
+        BlockWriter,
     };
     use alloy_consensus::Header;
     use alloy_eips::BlockNumHash;
@@ -4219,9 +4223,9 @@ mod tests {
         U256,
     };
     use evm2::evm::AccountInfo;
-    use reth_chain_state::{
-        test_utils::TestBlockBuilder, CanonicalInMemoryState, ChainInfoHeaders, ExecutedBlock,
-    };
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_chainspec::MAINNET;
+    use reth_db::mdbx::{DatabaseArguments, SyncMode};
     use reth_db_api::models::{SnapAttempt, StorageSettings};
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
@@ -4251,20 +4255,6 @@ mod tests {
             &[],
             None,
             SaveBlocksMode::Full,
-        )
-    }
-
-    /// Creates the canonical state that updates the in-memory blocks of `factory`.
-    fn canonical_state_for(
-        factory: &ProviderFactory<MockNodeTypesWithDB>,
-    ) -> CanonicalInMemoryState {
-        CanonicalInMemoryState::with_head(
-            ChainInfoHeaders {
-                canonical_head: SealedHeader::default(),
-                safe: None,
-                finalized: None,
-            },
-            factory.in_memory_state().clone(),
         )
     }
 
@@ -4446,6 +4436,32 @@ mod tests {
 
         done_rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn unwind_commit_syncs_non_durable_db() {
+        let factory = create_test_provider_factory_with_chain_spec_and_db_args(
+            MAINNET.clone(),
+            DatabaseArguments::test().with_sync_mode(Some(SyncMode::SafeNoSync)),
+        );
+        let info = || factory.db_ref().db().info().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.write_metadata("unwind-sync-test", vec![1]).unwrap();
+        provider_rw.commit().unwrap();
+        assert!(
+            info().last_steady_txnid() < Some(info().last_txnid() as u64),
+            "safe-no-sync commits must not be steady"
+        );
+
+        let provider_rw = factory.unwind_provider_rw().unwrap();
+        provider_rw.write_metadata("unwind-sync-test", vec![2]).unwrap();
+        provider_rw.commit().unwrap();
+        assert_eq!(
+            info().last_steady_txnid(),
+            Some(info().last_txnid() as u64),
+            "the unwind commit must be steady"
+        );
     }
 
     #[test]
@@ -5153,15 +5169,15 @@ mod tests {
 
     #[test]
     fn unwind_restores_trie_nodes_masked_above_the_frontier() {
-        let factory = create_test_provider_factory();
+        let (factory, mut in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let blocks = TestBlockBuilder::eth().get_executed_blocks(0..11).collect::<Vec<_>>();
         let provider = factory.provider_rw().unwrap();
         for block in &blocks {
             provider.insert_block(block.recovered_block()).unwrap();
         }
-        let canonical_state = canonical_state_for(&factory);
         for block in &blocks[6..] {
-            canonical_state.insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
         provider
             .save_stage_checkpoint(
@@ -5198,7 +5214,8 @@ mod tests {
 
     #[test]
     fn remove_block_and_execution_above_returns_persistence_frontiers() {
-        let factory = create_test_provider_factory();
+        let (factory, mut in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let mut test_block_builder = TestBlockBuilder::eth().with_state();
 
         let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
@@ -5208,9 +5225,8 @@ mod tests {
         save_genesis(&provider_rw, &genesis).unwrap();
         provider_rw.commit().unwrap();
 
-        let canonical_state = canonical_state_for(&factory);
         for block in &blocks[2..] {
-            canonical_state.insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
 
         let provider_rw = factory.provider_rw().unwrap();
@@ -6227,5 +6243,40 @@ mod tests {
             assert_eq!(provider.last_finalized_block_number().unwrap(), finalized);
             assert_eq!(provider.last_safe_block_number().unwrap(), safe);
         }
+    }
+
+    #[test]
+    fn take_state_outcome_stops_at_execution_tip() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        let provider = factory.database_provider_rw().unwrap();
+        let tx = provider.tx_ref();
+        for block in 0..=3 {
+            tx.put::<tables::BlockBodyIndices>(
+                block,
+                StoredBlockBodyIndices { first_tx_num: 0, tx_count: 0 },
+            )
+            .unwrap();
+        }
+        // State above the execution tip must still be reverted.
+        tx.put::<tables::AccountChangeSets>(
+            3,
+            AccountBeforeTx { address: Address::ZERO, info: None },
+        )
+        .unwrap();
+        tx.put::<tables::PlainAccountState>(Address::ZERO, Account::default()).unwrap();
+        let sf = factory.static_file_provider();
+        let mut headers = sf.latest_writer(StaticFileSegment::Headers).unwrap();
+        for number in 0..=3 {
+            let header = Header { number, ..Default::default() };
+            headers.append_header(&header, &header.hash_slow()).unwrap();
+        }
+        headers.commit().unwrap();
+        drop(headers);
+        assert_eq!(provider.last_block_number().unwrap(), 3);
+        let outcome = provider.take_state_above(1, 2).unwrap();
+        assert_eq!(outcome.first_block(), 2);
+        assert_eq!(outcome.len(), 1);
+        assert_eq!(tx.get::<tables::PlainAccountState>(Address::ZERO).unwrap(), None);
     }
 }

@@ -285,14 +285,14 @@ mod tests {
         assert!(Arc::ptr_eq(&lazy1.trie_updates(), &lazy2.trie_updates()));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_lazy_deferred() {
         let lazy = LazyTrieData::deferred(SortedTrieData::default);
         assert!(lazy.hashed_state().is_empty());
         assert!(lazy.trie_updates().is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn pending_wait_blocks_until_task_publishes() {
         let (deferred, task) = empty_pending();
 
@@ -307,7 +307,7 @@ mod tests {
         assert!(Arc::ptr_eq(&published.trie_updates, &result.trie_updates));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn concurrent_waits_share_published_result() {
         let (deferred, task) = empty_pending();
         let deferred2 = deferred.clone();
@@ -323,7 +323,7 @@ mod tests {
         assert!(Arc::ptr_eq(&result1.trie_updates, &result2.trie_updates));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn sorts_non_empty_inputs() {
         let hashed_address = B256::with_last_byte(1);
         let hashed_slot = B256::with_last_byte(2);
