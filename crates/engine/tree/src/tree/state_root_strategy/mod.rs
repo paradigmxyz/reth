@@ -1324,7 +1324,7 @@ mod tests {
         assert_eq!(DefaultStateRootStrategy::proof_worker_count(1, Some(0), None, None), 1);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn finish_publishes_only_accepted_sparse_trie() {
         let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
         let genesis_hash = init_genesis(&factory).unwrap();
@@ -1403,7 +1403,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn failed_parent_trie_closes_handoff_without_publishing() {
         let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
         let genesis_hash = init_genesis(&factory).unwrap();
@@ -1439,7 +1439,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn publication_does_not_wait_for_worker() {
         let (pending_trie_tx, pending_trie_rx) = mpsc::channel();
         let overlay_manager = OverlayManager::<EthPrimitives>::default();
@@ -1455,7 +1455,7 @@ mod tests {
         result.expect("publication should not wait for the root task");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn dropped_root_receiver_still_completes_pending_trie() {
         let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
         let genesis_hash = init_genesis(&factory).unwrap();
@@ -1601,7 +1601,7 @@ mod tests {
         updates
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn payload_builder_trie_matches_serial_root_and_can_be_reused() {
         reth_tracing::init_test_tracing();
 
@@ -1661,7 +1661,6 @@ mod tests {
             10,
             config.invalid_header_hit_eviction_threshold(),
             alloy_eips::BlockNumHash::new(0, genesis_hash),
-            crate::engine::EngineApiKind::Ethereum,
             overlay_manager.clone(),
         );
         let mut root_from_regular = state_root(accumulated_state.clone());

@@ -181,6 +181,11 @@ where
             .iter()
             .map(|block| block.recovered_block().num_hash())
             .collect::<Vec<_>>();
+        // BALs live outside the main database and have no startup recovery. Flush them before the
+        // main commit, so that a crash or a flush error never leaves a persisted block without
+        // its BAL. A BAL for a block that is not persisted afterwards is harmless.
+        self.provider.bal_store().flush(&canonical_blocks)?;
+
         let provider_rw = self.provider.database_provider_rw()?;
         let last_state_trie_block = if let Some(block) = input.state_trie_blocks().last() {
             // Newly written static-file headers are not readable until commit finalizes their
@@ -211,10 +216,6 @@ where
         }
 
         provider_rw.commit()?;
-        // BALs live outside the main database and are intentionally flushed last.
-        let _ = self.provider.bal_store().flush(&canonical_blocks).inspect_err(|err| {
-            warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
-        });
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
         let elapsed = start_time.elapsed();
@@ -421,8 +422,8 @@ mod tests {
     use reth_provider::{
         providers::{BlockchainProvider, ProviderFactoryBuilder, ReadOnlyConfig},
         test_utils::{create_test_provider_factory, MockNodeTypes},
-        AccountReader, BalConfig, BalStore, BalStoreHandle, ChainSpecProvider, HeaderProvider,
-        InMemoryBalStore, ProviderError, ProviderResult, RawBal, RocksDBBalStore,
+        AccountReader, BalConfig, BalStore, BalStoreHandle, BlockNumReader, ChainSpecProvider,
+        HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal, RocksDBBalStore,
         RocksDBProviderFactory, StateProviderFactory, StorageSettingsCache,
     };
     use reth_prune::Pruner;
@@ -455,7 +456,29 @@ mod tests {
         SaveBlocksInput::new(blocks, prev_tip, prev_tip, new_tip, new_tip)
     }
 
-    #[test]
+    /// A BAL store whose flush and prune both fail.
+    #[derive(Debug)]
+    struct FailingBalStore;
+
+    impl BalStore for FailingBalStore {
+        fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
+            Ok(())
+        }
+
+        fn flush(&self, _blocks: &[NumHash]) -> ProviderResult<()> {
+            Err(ProviderError::other(std::io::Error::other("BAL store flush failed")))
+        }
+
+        fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
+            Err(ProviderError::other(std::io::Error::other("BAL store prune failed")))
+        }
+
+        fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+            Ok(vec![None; block_hashes.len()])
+        }
+    }
+
+    #[reth_concurrency::test]
     fn test_pruner_prunes_bal_store() {
         reth_tracing::init_test_tracing();
 
@@ -489,12 +512,12 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_pruner_ignores_bal_store_prune_error() {
         reth_tracing::init_test_tracing();
 
-        let provider = create_test_provider_factory()
-            .with_bal_store(BalStoreHandle::new(FailingPruneBalStore));
+        let provider =
+            create_test_provider_factory().with_bal_store(BalStoreHandle::new(FailingBalStore));
         let (_finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
         let pruner =
@@ -506,7 +529,7 @@ mod tests {
         service.maybe_run_pruner(2).unwrap();
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_remove_blocks_above_requires_tip_header() {
         let provider = create_test_provider_factory();
         init_genesis(&provider).unwrap();
@@ -525,24 +548,7 @@ mod tests {
         ));
     }
 
-    #[derive(Debug)]
-    struct FailingPruneBalStore;
-
-    impl BalStore for FailingPruneBalStore {
-        fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
-            Ok(())
-        }
-
-        fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
-            Err(ProviderError::other(std::io::Error::other("BAL store prune failed")))
-        }
-
-        fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
-            Ok(vec![None; block_hashes.len()])
-        }
-    }
-
-    #[test]
+    #[reth_concurrency::test]
     fn test_save_blocks_single_block() {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
@@ -563,7 +569,7 @@ mod tests {
         assert_eq!(result.last_state_trie_block, result.last_block);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_save_blocks_flushes_bal_store() {
         reth_tracing::init_test_tracing();
         let provider = create_test_provider_factory();
@@ -598,7 +604,73 @@ mod tests {
         assert_eq!(persisted_store.get_by_hash(num_hash.hash).unwrap(), Some(raw_bal));
     }
 
-    #[test]
+    #[reth_concurrency::test]
+    fn test_save_blocks_does_not_commit_on_bal_flush_error() {
+        reth_tracing::init_test_tracing();
+        let provider =
+            create_test_provider_factory().with_bal_store(BalStoreHandle::new(FailingBalStore));
+        init_genesis(&provider).unwrap();
+
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let mut service =
+            PersistenceService::new(provider.clone(), db_service_rx, pruner, sync_metrics_tx);
+
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let executed = test_block_builder.get_executed_block_with_number(1, B256::random());
+
+        assert!(matches!(
+            service.on_save_blocks(full_save_input(vec![executed])),
+            Err(PersistenceError::ProviderError(_))
+        ));
+        assert_eq!(provider.last_block_number().unwrap(), 0);
+    }
+
+    #[reth_concurrency::test]
+    fn test_save_blocks_retries_after_commit_failure_with_flushed_bal() {
+        reth_tracing::init_test_tracing();
+        let provider = create_test_provider_factory();
+        let bal_store = BalStoreHandle::new(RocksDBBalStore::new(provider.rocksdb_provider()));
+        let provider = provider.with_bal_store(bal_store);
+
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let mut service =
+            PersistenceService::new(provider.clone(), db_service_rx, pruner, sync_metrics_tx);
+
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let executed = test_block_builder.get_executed_block_with_number(1, B256::random());
+        let num_hash = executed.recovered_block().num_hash();
+        let raw_bal = Bytes::from_static(&[0xc0]);
+        provider.bal_store().insert(num_hash, RawBal::new(raw_bal.clone())).unwrap();
+
+        // Without genesis, the unadvanced state/trie frontier at block 0 has no header, so the
+        // save fails after the BAL flush and before the commit, like a crash between the two.
+        assert!(matches!(
+            service.on_save_blocks(SaveBlocksInput::new(vec![executed.clone()], 0, 0, 1, 0)),
+            Err(PersistenceError::ProviderError(ProviderError::HeaderNotFound(_)))
+        ));
+        let persisted_store = RocksDBBalStore::new(provider.rocksdb_provider());
+        assert_eq!(persisted_store.get_by_hash(num_hash.hash).unwrap(), Some(raw_bal.clone()));
+        assert!(provider.header(num_hash.hash).unwrap().is_none());
+
+        // The leftover BAL does not get in the way of persisting the block again.
+        init_genesis(&provider).unwrap();
+        let result = service.on_save_blocks(full_save_input(vec![executed])).unwrap();
+        assert_eq!(result.last_block, num_hash);
+        assert_eq!(provider.last_block_number().unwrap(), 1);
+        assert_eq!(persisted_store.get_by_hash(num_hash.hash).unwrap(), Some(raw_bal));
+    }
+
+    #[reth_concurrency::test]
     fn test_save_blocks_multiple_blocks() {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
@@ -613,7 +685,7 @@ mod tests {
         assert_eq!(last_hash, result.last_block.hash);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_save_blocks_multiple_calls() {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
@@ -639,7 +711,7 @@ mod tests {
     /// a single commit. Both read committed state, so the pruner didn't see the
     /// new entries and its batch overwrote them. The fix commits `save_blocks`
     /// first, then runs the pruner against committed state in a separate provider.
-    #[test]
+    #[reth_concurrency::test]
     fn test_save_blocks_then_prune_preserves_new_history() {
         reth_tracing::init_test_tracing();
 

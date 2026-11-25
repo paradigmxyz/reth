@@ -261,6 +261,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             nat,
             handshake,
             eth_max_message_size,
+            p2p_max_payload_size,
             required_block_hashes,
         } = config;
 
@@ -318,6 +319,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             extra_protocols,
             handshake,
             eth_max_message_size,
+            p2p_max_payload_size,
             network_mode.is_stake(),
         );
 
