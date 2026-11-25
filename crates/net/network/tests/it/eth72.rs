@@ -210,6 +210,7 @@ async fn test_eth73_indexed_cells_and_response_form() {
         Testnet::from_configs([PeerConfig::new(provider).with_protocols([EthVersion::Eth73])])
             .await
             .with_eth_pool()
+            .with_request_handlers()
             .spawn();
     let [node] = net.peers_array();
     let mut events = node.event_stream();
