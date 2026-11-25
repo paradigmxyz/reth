@@ -1238,10 +1238,18 @@ async fn rpc_evm_memory_limit_applies_to_all_call_methods() -> eyre::Result<()> 
 
     // Writes one byte at offset `CALLDATALOAD(0)`: `PUSH0 CALLDATALOAD PUSH0 SWAP1 MSTORE8 STOP`.
     let writer = Address::with_last_byte(0x42);
-    let overrides = StateOverride::from_iter([(
-        writer,
-        AccountOverride::default().with_code(bytes!("5f355f905300")),
-    )]);
+    // Writes one byte past the limit: `PUSH1 0 PUSH3 0x100000 MSTORE8 STOP`.
+    let past_limit = Address::with_last_byte(0x43);
+    // Call `past_limit` with all gas, or with 100k gas, ignore the result and stop:
+    // `PUSH0 PUSH0 PUSH0 PUSH0 PUSH0 PUSH1 0x43 GAS CALL POP STOP`.
+    let parent = Address::with_last_byte(0x44);
+    let parent_100k = Address::with_last_byte(0x45);
+    let overrides = StateOverride::from_iter([
+        (writer, AccountOverride::default().with_code(bytes!("5f355f905300"))),
+        (past_limit, AccountOverride::default().with_code(bytes!("6000621000005300"))),
+        (parent, AccountOverride::default().with_code(bytes!("5f5f5f5f5f60435af15000"))),
+        (parent_100k, AccountOverride::default().with_code(bytes!("5f5f5f5f5f6043620186a0f15000"))),
+    ]);
     let write_at = |offset: u64| {
         TransactionRequest::default()
             .to(writer)
@@ -1271,6 +1279,16 @@ async fn rpc_evm_memory_limit_applies_to_all_call_methods() -> eyre::Result<()> 
             if fits { "0x1" } else { "0x0" },
             "eth_simulateV1 at {offset}: {blocks}"
         );
+    }
+
+    // With all the gas, `past_limit` could grow its memory past the limit in a mined transaction,
+    // so the estimate must not follow the path where the call fails. Growing past 1 MiB costs about
+    // 2.2M gas, so with 100k gas the call runs out of gas at the same point either way.
+    for (to, fits) in [(parent, false), (parent_100k, true)] {
+        let tx = TransactionRequest::default().to(to);
+        let estimate: Result<U256, _> =
+            provider.raw_request("eth_estimateGas".into(), (&tx, "latest", &overrides)).await;
+        assert_eq!(estimate.is_ok(), fits, "eth_estimateGas to {to}: {estimate:?}");
     }
 
     Ok(())
