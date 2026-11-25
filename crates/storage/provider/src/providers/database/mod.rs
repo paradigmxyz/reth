@@ -388,6 +388,10 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// data.
     #[track_caller]
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N>> {
+        // Snapshot the in-memory blocks before opening the transaction, so that the blocks its
+        // durable frontiers need are still there when an overlay is built over it. See
+        // [`InMemoryState::snapshot`](reth_chain_state::InMemoryState::snapshot).
+        let in_memory_snapshot = self.overlay_manager.in_memory_state().snapshot();
         let db_tx = self.db.tx()?;
 
         // Sync providers after opening the database transaction to make
@@ -410,6 +414,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.db.path(),
             self.database_provider_metrics.clone(),
         )
+        .with_in_memory_snapshot(in_memory_snapshot)
         .with_minimum_pruning_distance(self.minimum_pruning_distance))
     }
 

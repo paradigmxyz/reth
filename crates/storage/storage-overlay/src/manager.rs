@@ -15,7 +15,9 @@ use crate::{
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockNumber, B256};
 use parking_lot::Mutex;
-use reth_chain_state::{BlockState, ExecutedBlock, InMemoryState, PreservedSparseTrie};
+use reth_chain_state::{
+    BlockState, ExecutedBlock, InMemoryState, InMemoryStateSnapshot, PreservedSparseTrie,
+};
 use reth_errors::ProviderResult;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{
@@ -122,9 +124,24 @@ impl<N: NodePrimitives> OverlayManager<N> {
     /// This looks up the in-memory chain ending at `parent_hash`, canonical or not. Prefer
     /// [`Self::overlay_builder_for_state`] whenever the caller already holds the chain.
     pub fn overlay_builder(&self, parent_hash: B256) -> OverlayBuilder<N> {
+        self.overlay_builder_in(self.inner.in_memory_state.snapshot(), parent_hash)
+    }
+
+    /// Creates an overlay builder for `parent_hash` that resolves in-memory blocks from
+    /// `in_memory`.
+    ///
+    /// Pass the snapshot taken before the database transaction the builder will read was opened,
+    /// so that the blocks the transaction's durable frontiers need are still in it. See
+    /// [`InMemoryState::snapshot`].
+    pub fn overlay_builder_in(
+        &self,
+        in_memory: InMemoryStateSnapshot<N>,
+        parent_hash: B256,
+    ) -> OverlayBuilder<N> {
         OverlayBuilder::new(
             parent_hash,
-            self.inner.in_memory_state.state_by_hash(parent_hash),
+            in_memory.state_by_hash(parent_hash),
+            in_memory,
             self.clone(),
         )
     }
@@ -135,7 +152,12 @@ impl<N: NodePrimitives> OverlayManager<N> {
     /// only reads `state`, which makes it safe to share the same [`BlockState`] with other
     /// holders.
     pub fn overlay_builder_for_state(&self, state: Arc<BlockState<N>>) -> OverlayBuilder<N> {
-        OverlayBuilder::new(state.hash(), Some(state), self.clone())
+        OverlayBuilder::new(
+            state.hash(),
+            Some(state),
+            self.inner.in_memory_state.snapshot(),
+            self.clone(),
+        )
     }
 
     pub(crate) fn changeset_cache(&self) -> &ChangesetCache {
@@ -174,9 +196,11 @@ impl<N: NodePrimitives> OverlayManager<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
+        let in_memory = self.inner.in_memory_state.snapshot();
         let (partial_state_trie, finish) = database_state_frontiers(provider)?;
         self.get_or_compute_cached_changesets_range_at_frontiers(
             provider,
+            &in_memory,
             range,
             partial_state_trie,
             finish,
@@ -187,6 +211,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
     pub(crate) fn get_or_compute_cached_changesets_range_at_frontiers<P>(
         &self,
         provider: &P,
+        in_memory: &InMemoryStateSnapshot<N>,
         range: RangeInclusive<BlockNumber>,
         partial_state_trie: BlockNumHash,
         finish: BlockNumHash,
@@ -203,6 +228,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
     {
         self.inner.changeset_cache.get_or_compute_range(
             self,
+            in_memory,
             provider,
             range,
             partial_state_trie,

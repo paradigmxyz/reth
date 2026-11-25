@@ -9,7 +9,7 @@ use alloy_primitives::{
 };
 use evm2::{bytecode::Bytecode, evm::AccountInfo};
 use metrics::{Counter, Histogram};
-use reth_chain_state::{BlockState, ExecutedBlock};
+use reth_chain_state::{BlockState, ExecutedBlock, InMemoryStateSnapshot};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_metrics::Metrics;
@@ -191,6 +191,13 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     /// This is shared with the caller so that a chain the caller already holds (for example the
     /// canonical in-memory chain) can be reused instead of looked up again.
     parent_state: Option<Arc<BlockState<N>>>,
+    /// The in-memory blocks the durable frontiers are resolved against, such as the chain from
+    /// Finish down to the state trie tip.
+    ///
+    /// It must be taken before the database transaction this builder reads was opened: the
+    /// engine removes blocks once persistence commits them, which can happen while that
+    /// transaction still sees older frontiers that need them.
+    in_memory: InMemoryStateSnapshot<N>,
     /// Anchor hash of the reused sparse trie, if this task reused one.
     reused_sparse_trie_anchor_hash: Option<B256>,
     /// Whether building the overlay may query revert changesets.
@@ -206,17 +213,27 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     pub(crate) fn new(
         parent_hash: B256,
         parent_state: Option<Arc<BlockState<N>>>,
+        in_memory: InMemoryStateSnapshot<N>,
         overlay_manager: OverlayManager<N>,
     ) -> Self {
         Self {
             parent_hash,
             overlay_manager,
             parent_state,
+            in_memory,
             reused_sparse_trie_anchor_hash: None,
             no_reverts: false,
             overlay_cache_config: OverlayCacheConfig::default(),
             write_reverts_to_cache: true,
         }
+    }
+
+    /// Resolves the durable frontiers against `in_memory`, which must be taken before the
+    /// database transaction this builder will read is opened. See
+    /// [`InMemoryState::snapshot`](reth_chain_state::InMemoryState::snapshot).
+    pub fn with_in_memory_snapshot(mut self, in_memory: InMemoryStateSnapshot<N>) -> Self {
+        self.in_memory = in_memory;
+        self
     }
 
     /// Skips managed overlay construction when the sparse trie was reused and the DB tip is
@@ -474,6 +491,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     let accumulated_reverts =
                         self.overlay_manager.get_or_compute_cached_changesets_range_at_frontiers(
                             provider,
+                            &self.in_memory,
                             revert_blocks.clone(),
                             state_trie_tip_block,
                             finish_tip_block,
@@ -488,11 +506,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     // Revert prefixes describe changes since the anchor, not stale hashes in
                     // masked DB rows. Complete the trie at Finish before applying those prefixes.
                     let start = Instant::now();
-                    let finish_state = self
-                        .overlay_manager
-                        .in_memory_state()
-                        .state_by_hash(finish_tip_block.hash)
-                        .ok_or_else(|| {
+                    let finish_state =
+                        self.in_memory.state_by_hash(finish_tip_block.hash).ok_or_else(|| {
                             ProviderError::other(StateTrieOverlayError {
                                 tip_hash: finish_tip_block.hash,
                                 anchor_hash: state_trie_tip_block.hash,
@@ -1085,6 +1100,42 @@ mod tests {
                 "block {index}"
             );
         }
+    }
+
+    #[reth_concurrency::test]
+    fn finish_chain_resolves_from_snapshot_after_persistence_removes_it() {
+        // The state trie tip lags Finish and the parent is persisted at the state trie tip, so
+        // building the overlay without trie changesets needs the chain from Finish down to it.
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
+        in_memory_state_writer
+            .update_chain(NewCanonicalChain::Commit { new: blocks[2..=4].to_vec() });
+        let provider = factory.provider().unwrap();
+        let parent_hash = blocks[1].recovered_block().hash();
+        let snapshot = manager.in_memory_state().snapshot();
+        let expected = manager
+            .overlay_builder(parent_hash)
+            .build_state_trie_overlay(&provider, false)
+            .unwrap();
+
+        // Persistence commits the masked blocks and the engine removes them, while the provider
+        // still reads the frontiers it opened with.
+        let persisted = blocks[3].recovered_block().num_hash();
+        in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
+
+        let err = manager
+            .overlay_builder(parent_hash)
+            .build_state_trie_overlay(&provider, false)
+            .unwrap_err();
+        assert!(err.to_string().contains("cannot be anchored"), "unexpected error: {err}");
+
+        let overlay = manager
+            .overlay_builder_in(snapshot, parent_hash)
+            .build_state_trie_overlay(&provider, false)
+            .unwrap();
+        assert!(!account_node_paths(&expected).is_empty());
+        assert_eq!(account_keys(&overlay), account_keys(&expected));
+        assert_eq!(account_node_paths(&overlay), account_node_paths(&expected));
     }
 
     #[reth_concurrency::test]

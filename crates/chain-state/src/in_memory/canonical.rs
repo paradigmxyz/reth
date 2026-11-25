@@ -1,5 +1,5 @@
 use super::{
-    blocks::{InMemoryBlocks, InMemoryBlocksStats},
+    blocks::{InMemoryBlocks, InMemoryBlocksSnapshot, InMemoryBlocksStats},
     BlockState, ExecutedBlock, NewCanonicalChain,
 };
 use crate::{
@@ -85,6 +85,15 @@ impl<N: NodePrimitives> InMemoryState<N> {
     /// Returns `true` if a block with the given hash is tracked, canonical or not.
     pub fn contains(&self, hash: &B256) -> bool {
         self.inner.blocks.read().contains(hash)
+    }
+
+    /// Returns a frozen copy of the tracked blocks, canonical or not.
+    ///
+    /// Taking it is a read lock and two reference count increments. The writer removes blocks
+    /// only after persistence has committed them, so a snapshot taken before a database
+    /// transaction opens holds every in-memory block that transaction's durable frontiers need.
+    pub fn snapshot(&self) -> InMemoryStateSnapshot<N> {
+        InMemoryStateSnapshot { blocks: self.inner.blocks.read().snapshot() }
     }
 
     /// Returns the numbers of tracked canonical blocks and of tracked blocks that are not
@@ -256,6 +265,23 @@ struct InMemoryStateInner<N: NodePrimitives> {
     removal_generation: AtomicU64,
     /// Metrics for the in-memory state.
     metrics: InMemoryStateMetrics,
+}
+
+/// A frozen copy of the blocks an [`InMemoryState`] tracks, taken with
+/// [`InMemoryState::snapshot`].
+///
+/// Each state it holds keeps its whole in-memory chain, whatever the writer removes from the
+/// [`InMemoryState`] afterwards. Cloning it is two reference count increments.
+#[derive(Debug, Clone, Default)]
+pub struct InMemoryStateSnapshot<N: NodePrimitives = EthPrimitives> {
+    blocks: InMemoryBlocksSnapshot<N>,
+}
+
+impl<N: NodePrimitives> InMemoryStateSnapshot<N> {
+    /// Returns the state of the block with the given hash, canonical or not, as of the snapshot.
+    pub fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
+        self.blocks.get(&hash).cloned()
+    }
 }
 
 /// The numbers of blocks an [`InMemoryState`] tracks.

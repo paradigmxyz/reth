@@ -136,6 +136,11 @@ where
     ) -> ProviderResult<OverlayStateProvider<OwnedProvider<F::Provider>, N>> {
         let overall_start = Instant::now();
 
+        // Snapshot the in-memory blocks before the transaction opens, so that the blocks its
+        // durable frontiers need are still there when the overlay is built. See
+        // [`InMemoryState::snapshot`](reth_chain_state::InMemoryState::snapshot).
+        let in_memory = self.overlay_builder.overlay_manager().in_memory_state().snapshot();
+
         // Get a read-only provider
         let provider = {
             let start = Instant::now();
@@ -148,7 +153,7 @@ where
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
         Ok(OverlayStateProvider::from_parts(
             OwnedProvider(provider),
-            Some(self.overlay_builder.clone()),
+            Some(self.overlay_builder.clone().with_in_memory_snapshot(in_memory)),
             Some(Arc::clone(&self.state_trie_overlay_cache)),
             self.metrics.clone(),
             self.proof_cursor_metrics.clone(),
@@ -1133,7 +1138,7 @@ mod tests {
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{Address, U256};
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
-    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, NewCanonicalChain};
     use reth_db_api::{
         models::{
             storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress, ShardedKey,
@@ -1222,6 +1227,26 @@ mod tests {
 
     fn account_node_paths(overlay: &StateTrieOverlay) -> Vec<Nibbles> {
         overlay.input().nodes.account_nodes_ref().iter().map(|(path, _)| *path).collect()
+    }
+
+    #[reth_concurrency::test]
+    fn provider_snapshots_in_memory_blocks_when_it_opens() {
+        // The factory's builder exists before the engine inserts the chain from Finish down to
+        // the state trie tip, and the engine removes that chain again while the provider is open.
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            factory,
+            manager.overlay_builder(blocks[1].recovered_block().hash()),
+        );
+        in_memory_state_writer
+            .update_chain(NewCanonicalChain::Commit { new: blocks[2..=4].to_vec() });
+
+        let provider = state_provider_factory.database_provider_ro().unwrap();
+        let persisted = blocks[3].recovered_block().num_hash();
+        in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
+
+        provider.state_trie_overlay(false).unwrap();
     }
 
     #[reth_concurrency::test]

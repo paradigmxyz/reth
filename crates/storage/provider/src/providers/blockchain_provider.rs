@@ -161,13 +161,12 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             return Err(ProviderError::StateUnavailableDuringSync)
         }
 
-        Ok(Box::new(OverlayStateProvider::new(
-            provider,
-            self.database
-                .overlay_manager()
-                .overlay_builder(block_hash)
-                .without_trie_revert_caching(),
-        )))
+        let overlay_builder = self
+            .database
+            .overlay_manager()
+            .overlay_builder_in(provider.in_memory_snapshot().clone(), block_hash)
+            .without_trie_revert_caching();
+        Ok(Box::new(OverlayStateProvider::new(provider, overlay_builder)))
     }
 
     /// Checks the state tables' progress against `Finish` using the snapshot that will serve reads.
@@ -200,13 +199,13 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             return Err(ProviderError::StateUnavailableDuringSync)
         }
 
-        Ok(Box::new(OverlayStateProvider::new(
-            provider,
-            self.database
-                .overlay_manager()
-                .overlay_builder_for_state(state)
-                .without_trie_revert_caching(),
-        )))
+        let overlay_builder = self
+            .database
+            .overlay_manager()
+            .overlay_builder_for_state(state)
+            .with_in_memory_snapshot(provider.in_memory_snapshot().clone())
+            .without_trie_revert_caching();
+        Ok(Box::new(OverlayStateProvider::new(provider, overlay_builder)))
     }
 
     /// Returns the canonical in-memory block with `state_root`.
@@ -239,15 +238,18 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         }
 
         let overlay_manager = self.database.overlay_manager();
+        let in_memory = provider.in_memory_snapshot().clone();
         let overlay_builder = match block_state {
-            Some(state) => overlay_manager.overlay_builder_for_state(state),
+            Some(state) => {
+                overlay_manager.overlay_builder_for_state(state).with_in_memory_snapshot(in_memory)
+            }
             None => {
                 let Some(block_hash) =
                     retained_block_hash::<N>(&provider, finish.block_number, state_root)?
                 else {
                     return Ok(None)
                 };
-                overlay_manager.overlay_builder(block_hash)
+                overlay_manager.overlay_builder_in(in_memory, block_hash)
             }
         };
 
@@ -1128,7 +1130,9 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         let Some(block_hash) = provider.block_hash(block)? else { return Ok(None) };
         let state_provider = OverlayStateProvider::<&_, N::Primitives>::new_ref(
             &provider,
-            self.database.overlay_manager().overlay_builder(block_hash),
+            self.database
+                .overlay_manager()
+                .overlay_builder_in(provider.in_memory_snapshot().clone(), block_hash),
         );
         let (state, reverts) = provider.populate_bundle_state(
             account_changeset,
@@ -4245,6 +4249,38 @@ mod tests {
             let outcome = provider.get_state(number as u64)?.expect("persisted block state");
             assert_eq!(outcome.receipts, vec![receipts], "block {number}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn database_provider_snapshots_in_memory_blocks_before_its_transaction() -> eyre::Result<()> {
+        let (factory, in_memory_state_writer) = test_provider_factory_with_genesis()?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let genesis =
+            canonical_in_memory_state_writer.canonical_in_memory_state().get_canonical_head();
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, genesis.hash());
+        let persisted = block.recovered_block().num_hash();
+        canonical_in_memory_state_writer
+            .update_chain(NewCanonicalChain::Commit { new: vec![block] });
+
+        // The engine removes the block right after the provider opens its transaction, as it does
+        // once persistence commits it.
+        let hook_writer = Mutex::new(canonical_in_memory_state_writer);
+        factory.db_ref().set_post_transaction_hook(Box::new(move || {
+            hook_writer.lock().on_blocks_persisted(persisted, persisted, None);
+        }));
+        let provider = factory.provider()?;
+        factory.db_ref().set_post_transaction_hook(Box::new(|| ()));
+
+        assert!(factory
+            .overlay_manager()
+            .in_memory_state()
+            .state_by_hash(persisted.hash)
+            .is_none());
+        assert!(provider.in_memory_snapshot().state_by_hash(persisted.hash).is_some());
         Ok(())
     }
 

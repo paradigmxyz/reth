@@ -6,7 +6,12 @@ use alloy_primitives::{
     BlockNumber, B256,
 };
 use reth_primitives_traits::NodePrimitives;
+use rpds::HashTrieMapSync;
 use std::{cmp::Reverse, collections::BTreeMap, sync::Arc};
+
+/// Block states by hash, in a persistent map so that a snapshot of it is a reference count
+/// increment.
+pub(super) type BlockStates<N> = HashTrieMapSync<B256, Arc<BlockState<N>>>;
 
 /// All executed in-memory blocks, split into the canonical and the non-canonical section.
 ///
@@ -70,8 +75,8 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
     /// Returns the number of tracked blocks per section.
     pub(super) fn counts(&self) -> InMemoryStateBlockCounts {
         InMemoryStateBlockCounts {
-            canonical: self.canonical.blocks.len(),
-            non_canonical: self.non_canonical.blocks.len(),
+            canonical: self.canonical.blocks.size(),
+            non_canonical: self.non_canonical.blocks.size(),
         }
     }
 
@@ -82,6 +87,14 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
             count: numbers.len(),
             earliest: numbers.first_key_value().map(|(number, _)| *number),
             latest: numbers.last_key_value().map(|(number, _)| *number),
+        }
+    }
+
+    /// Returns a frozen copy of the blocks of both sections.
+    pub(super) fn snapshot(&self) -> InMemoryBlocksSnapshot<N> {
+        InMemoryBlocksSnapshot {
+            canonical: self.canonical.blocks.clone(),
+            non_canonical: self.non_canonical.blocks.clone(),
         }
     }
 
@@ -212,8 +225,8 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
         // Only the link of the oldest block can be stale: as a non-canonical block it links to a
         // non-canonical parent.
         self.relink_queue.extend(canonical.numbers.first_key_value().map(|(_, hash)| *hash));
-        for state in canonical.blocks.into_values() {
-            self.non_canonical.insert(state);
+        for state in canonical.blocks.values() {
+            self.non_canonical.insert(Arc::clone(state));
         }
         self.pending_hash = None;
         self.relink();
@@ -274,7 +287,7 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
     /// tracked.
     pub(super) fn clear(&mut self) -> Self {
         let removed_count = self.removed_count +
-            (self.canonical.blocks.len() + self.non_canonical.blocks.len()) as u64;
+            (self.canonical.blocks.size() + self.non_canonical.blocks.size()) as u64;
         std::mem::replace(self, Self { removed_count, ..Default::default() })
     }
 
@@ -284,7 +297,7 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
         let Self { canonical, non_canonical, pending_hash, relink_queue, removed_count: _ } = self;
 
         // I1 and I2.
-        assert_eq!(canonical.numbers.len(), canonical.blocks.len());
+        assert_eq!(canonical.numbers.len(), canonical.blocks.size());
         for (number, hash) in &canonical.numbers {
             assert_eq!(canonical.blocks[hash].number(), *number);
             assert!(!non_canonical.blocks.contains_key(hash), "block {hash} is in both sections");
@@ -305,7 +318,7 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
             non_canonical.numbers.values().map(B256Set::len).sum::<usize>(),
             non_canonical.children.values().map(B256Set::len).sum::<usize>(),
         ] {
-            assert_eq!(index, non_canonical.blocks.len(), "an index misses non-canonical blocks");
+            assert_eq!(index, non_canonical.blocks.size(), "an index misses non-canonical blocks");
         }
 
         // I3.
@@ -327,7 +340,7 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
         // I4.
         assert_eq!(
             canonical.head().map_or(0, |head| head.chain().count()),
-            canonical.blocks.len(),
+            canonical.blocks.size(),
             "the canonical section is not one chain"
         );
 
@@ -397,7 +410,7 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
             queue.extend(self.children_of(&relinked));
             let section =
                 if canonical { &mut self.canonical.blocks } else { &mut self.non_canonical.blocks };
-            section.insert(hash, relinked);
+            section.insert_mut(hash, relinked);
         }
         self.relink_queue = queue;
     }
@@ -420,7 +433,7 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
 #[derive(Debug, Default)]
 pub(super) struct InMemoryCanonicalBlocks<N: NodePrimitives> {
     /// Canonical blocks by hash.
-    blocks: B256Map<Arc<BlockState<N>>>,
+    blocks: BlockStates<N>,
     /// Canonical block hashes by number.
     numbers: BTreeMap<BlockNumber, B256>,
 }
@@ -449,7 +462,7 @@ impl<N: NodePrimitives> InMemoryCanonicalBlocks<N> {
     /// Returns the number of canonical blocks.
     #[cfg(test)]
     pub(super) fn len(&self) -> usize {
-        self.blocks.len()
+        self.blocks.size()
     }
 
     /// Returns `true` if `hash` is a canonical in-memory block or the block the chain builds on.
@@ -481,7 +494,7 @@ impl<N: NodePrimitives> InMemoryCanonicalBlocks<N> {
         let hash = state.hash();
         let displaced = self.numbers.insert(state.number(), hash);
         debug_assert!(displaced.is_none(), "canonical height {} is not vacant", state.number());
-        self.blocks.insert(hash, state);
+        self.blocks.insert_mut(hash, state);
     }
 
     /// Removes the canonical block with the given hash and returns its state.
@@ -490,7 +503,7 @@ impl<N: NodePrimitives> InMemoryCanonicalBlocks<N> {
     ///
     /// If the block is not canonical.
     fn remove(&mut self, hash: &B256) -> Arc<BlockState<N>> {
-        let Some(state) = self.blocks.remove(hash) else {
+        let Some(state) = take(&mut self.blocks, hash) else {
             unreachable!("block {hash} is not canonical")
         };
         let indexed = self.numbers.remove(&state.number());
@@ -506,7 +519,7 @@ impl<N: NodePrimitives> InMemoryCanonicalBlocks<N> {
             *first.key() <= number
         {
             let hash = first.remove();
-            let Some(state) = self.blocks.remove(&hash) else {
+            let Some(state) = take(&mut self.blocks, &hash) else {
                 unreachable!("canonical block {hash} is indexed by number but not tracked")
             };
             removed.push(state);
@@ -523,7 +536,7 @@ impl<N: NodePrimitives> InMemoryCanonicalBlocks<N> {
 #[derive(Debug, Default)]
 pub(super) struct InMemoryNonCanonicalBlocks<N: NodePrimitives> {
     /// Non-canonical blocks by hash.
-    blocks: B256Map<Arc<BlockState<N>>>,
+    blocks: BlockStates<N>,
     /// Non-canonical block hashes by number. Forks can put several blocks at the same height.
     numbers: BTreeMap<BlockNumber, B256Set>,
     /// Non-canonical block hashes by parent hash. The parent can be non-canonical, canonical or
@@ -542,8 +555,8 @@ impl<N: NodePrimitives> InMemoryNonCanonicalBlocks<N> {
         let hash = state.hash();
         self.numbers.entry(state.number()).or_default().insert(hash);
         self.children.entry(state.parent_hash()).or_default().insert(hash);
-        let replaced = self.blocks.insert(hash, state);
-        debug_assert!(replaced.is_none(), "block {hash} is already non-canonical");
+        debug_assert!(!self.blocks.contains_key(&hash), "block {hash} is already non-canonical");
+        self.blocks.insert_mut(hash, state);
     }
 
     /// Removes the non-canonical block with the given hash from the blocks and the indexes, and
@@ -553,7 +566,7 @@ impl<N: NodePrimitives> InMemoryNonCanonicalBlocks<N> {
     ///
     /// If the block is not non-canonical.
     fn remove(&mut self, hash: &B256) -> Arc<BlockState<N>> {
-        let Some(state) = self.blocks.remove(hash) else {
+        let Some(state) = take(&mut self.blocks, hash) else {
             unreachable!("block {hash} is not non-canonical")
         };
         if remove_indexed(self.numbers.get_mut(&state.number()), hash) {
@@ -629,6 +642,42 @@ pub(super) struct InMemoryBlocksStats {
     pub(super) latest: Option<BlockNumber>,
 }
 
+/// A frozen copy of the blocks of an [`InMemoryBlocks`].
+///
+/// Every state in it keeps its parent links, so the chain of a block it holds stays complete
+/// whatever is removed from the [`InMemoryBlocks`] afterwards.
+#[derive(Debug)]
+pub(super) struct InMemoryBlocksSnapshot<N: NodePrimitives> {
+    canonical: BlockStates<N>,
+    non_canonical: BlockStates<N>,
+}
+
+impl<N: NodePrimitives> InMemoryBlocksSnapshot<N> {
+    /// Returns the state of the block with the given hash, canonical or not.
+    pub(super) fn get(&self, hash: &B256) -> Option<&Arc<BlockState<N>>> {
+        self.canonical.get(hash).or_else(|| self.non_canonical.get(hash))
+    }
+}
+
+impl<N: NodePrimitives> Clone for InMemoryBlocksSnapshot<N> {
+    fn clone(&self) -> Self {
+        Self { canonical: self.canonical.clone(), non_canonical: self.non_canonical.clone() }
+    }
+}
+
+impl<N: NodePrimitives> Default for InMemoryBlocksSnapshot<N> {
+    fn default() -> Self {
+        Self { canonical: BlockStates::new_sync(), non_canonical: BlockStates::new_sync() }
+    }
+}
+
+/// Removes `hash` from `blocks` and returns its state.
+fn take<N: NodePrimitives>(blocks: &mut BlockStates<N>, hash: &B256) -> Option<Arc<BlockState<N>>> {
+    let state = blocks.get(hash).cloned()?;
+    blocks.remove_mut(hash);
+    Some(state)
+}
+
 /// Removes `hash` from `hashes`, the set an index of the non-canonical section holds for a block,
 /// and returns `true` if the set is empty afterwards and has to be removed from the index.
 fn remove_indexed(hashes: Option<&mut B256Set>, hash: &B256) -> bool {
@@ -661,7 +710,7 @@ mod tests {
 
     /// Returns the number of canonical and of non-canonical blocks.
     fn counts(blocks: &InMemoryBlocks<EthPrimitives>) -> (usize, usize) {
-        (blocks.canonical.blocks.len(), blocks.non_canonical.blocks.len())
+        (blocks.canonical.blocks.size(), blocks.non_canonical.blocks.size())
     }
 
     /// Returns the hashes both sections index at the given height, the canonical one first.

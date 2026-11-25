@@ -38,7 +38,7 @@ use alloy_primitives::{
 use itertools::Itertools;
 use parking_lot::RwLock;
 use rayon::slice::ParallelSliceMut;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{ExecutedBlock, InMemoryStateSnapshot};
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
@@ -214,6 +214,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     rocksdb_history_snapshot: OnceLock<Option<OwnedRocksReadSnapshot>>,
     /// Manager for state trie overlays and cached changesets.
     overlay_manager: OverlayManager<N::Primitives>,
+    /// The in-memory blocks this provider's overlays resolve their durable frontiers against.
+    in_memory_snapshot: InMemoryStateSnapshot<N::Primitives>,
     /// Task runtime for spawning parallel I/O work.
     runtime: reth_tasks::Runtime,
     /// Path to the database directory.
@@ -260,6 +262,26 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     pub const fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
         self.minimum_pruning_distance = distance;
         self
+    }
+
+    /// Resolves this provider's overlays against `in_memory_snapshot`, which must be taken before
+    /// its transaction was opened.
+    pub(crate) fn with_in_memory_snapshot(
+        mut self,
+        in_memory_snapshot: InMemoryStateSnapshot<N::Primitives>,
+    ) -> Self {
+        self.in_memory_snapshot = in_memory_snapshot;
+        self
+    }
+
+    /// Returns the in-memory blocks this provider's overlays resolve their durable frontiers
+    /// against.
+    ///
+    /// A read-only provider from [`ProviderFactory::provider`](crate::ProviderFactory::provider)
+    /// takes them before opening its transaction, so they hold every in-memory block its durable
+    /// frontiers need, whatever the engine removes while it is open.
+    pub const fn in_memory_snapshot(&self) -> &InMemoryStateSnapshot<N::Primitives> {
+        &self.in_memory_snapshot
     }
 
     /// Attaches reader tracking so unwind commits can wait on active readers.
@@ -391,6 +413,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            in_memory_snapshot: overlay_manager.in_memory_state().snapshot(),
             overlay_manager,
             runtime,
             db_path,
@@ -1036,6 +1059,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            in_memory_snapshot: overlay_manager.in_memory_state().snapshot(),
             overlay_manager,
             runtime,
             db_path,
