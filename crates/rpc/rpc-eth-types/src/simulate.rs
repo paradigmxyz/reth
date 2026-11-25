@@ -395,6 +395,16 @@ where
             builder.evm_mut(),
             converter,
         )?;
+        // Like geth, a zero blob fee cap without validation skips the blob fee cap check, even
+        // when the blob base fee is overridden. Zeroing the blob base fee for this call does that
+        // and charges no blob fee.
+        let block = (!builder.evm_env().version().feature(EvmFeatures::BASE_FEE_CHECK) &&
+            tx.max_fee_per_blob_gas() == Some(0))
+        .then(|| *builder.evm().block_env());
+        if let Some(mut zeroed) = block {
+            zeroed.blob_basefee = U256::ZERO;
+            builder.evm_mut().set_block_env(zeroed);
+        }
         // Create transaction with an empty envelope.
         // The effect for a layer-2 execution client is that it does not charge L1 cost.
         let tx = WithEncoded::new(Default::default(), tx);
@@ -405,6 +415,9 @@ where
             tx_regular_gas_used = output.execution_gas_spent();
             results.push(output.clone())
         })?;
+        if let Some(block) = block {
+            builder.evm_mut().set_block_env(block);
+        }
 
         // The transfer tracer keeps the transaction's logs, with the synthetic transfer logs
         // among them, outside the EVM's own logs.

@@ -545,17 +545,28 @@ async fn test_simulate_v1_blob_call_without_max_fee_per_blob_gas() -> eyre::Resu
     ]);
     let payload = SimulatePayload::default()
         .with_full_transactions()
-        .extend(SimBlock::default().with_state_overrides(state_overrides).call(tx));
+        .extend(SimBlock::default().with_state_overrides(state_overrides).call(tx.clone()))
+        // A blob base fee override still skips the blob fee cap check for a cap of 0.
+        .extend(
+            SimBlock::default()
+                .with_block_overrides(BlockOverrides {
+                    blob_base_fee: Some(U256::from(1_000_000_000)),
+                    ..Default::default()
+                })
+                .call(tx),
+        );
 
     let result: Vec<SimulatedBlock> =
         provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
 
-    assert!(result[0].calls[0].status);
-    let tx = &result[0].inner.transactions.as_transactions().unwrap()[0];
-    assert!(tx.inner.is_eip4844());
-    assert_eq!(tx.max_fee_per_blob_gas(), Some(0));
-    // No blob fee is charged.
-    assert_eq!(U256::from_be_slice(&result[0].calls[0].return_data), U256::from(u64::MAX));
+    for block in &result {
+        assert!(block.calls[0].status);
+        let tx = &block.inner.transactions.as_transactions().unwrap()[0];
+        assert!(tx.inner.is_eip4844());
+        assert_eq!(tx.max_fee_per_blob_gas(), Some(0));
+        // No blob fee is charged.
+        assert_eq!(U256::from_be_slice(&block.calls[0].return_data), U256::from(u64::MAX));
+    }
 
     Ok(())
 }

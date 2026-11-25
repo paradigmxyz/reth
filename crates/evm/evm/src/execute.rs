@@ -145,6 +145,14 @@ pub trait Evm {
         transaction: &Recovered<Self::Transaction>,
         observe: impl FnOnce(&evm2::ExecutedTx<'_, '_, Self::EvmTypes>) -> R,
     ) -> Result<R, BlockExecutionError>;
+
+    /// Returns the block environment seen by subsequent transactions.
+    fn block_env(&self) -> &evm2::env::BlockEnv<Self::EvmTypes>;
+
+    /// Replaces the block environment seen by subsequent transactions.
+    ///
+    /// The state, precompiles, and execution specification are unchanged.
+    fn set_block_env(&mut self, block: evm2::env::BlockEnv<Self::EvmTypes>);
 }
 
 impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
@@ -254,6 +262,14 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         let observed = observe(&executed);
         drop(executed);
         Ok(observed)
+    }
+
+    fn block_env(&self) -> &evm2::env::BlockEnv<T> {
+        self.block()
+    }
+
+    fn set_block_env(&mut self, block: evm2::env::BlockEnv<T>) {
+        self.set_block(block);
     }
 }
 
