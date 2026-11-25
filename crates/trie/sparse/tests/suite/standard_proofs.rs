@@ -475,3 +475,57 @@ pub(super) fn test_standalone_extension_boundary_hydration<T: SparseTrie>(new_tr
         assert_eq!(trie.root(epoch(1)), harness.get_root_with_updates(&changes).0);
     }
 }
+
+/// Hashing a collapsed opaque extension retains the epoch of the applied deletion.
+pub(super) fn test_standalone_extension_pending_update_collapse<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
+    for nonroot in [false, true] {
+        let first = B256::right_padding_from(&[0x10, 0x31]);
+        let second = B256::right_padding_from(&[0x10, 0x32]);
+        let sibling = B256::right_padding_from(&[0x11]);
+        let mut storage =
+            BTreeMap::from([(first, U256::ONE), (second, U256::from(2)), (sibling, U256::from(3))]);
+        if nonroot {
+            storage.insert(B256::right_padding_from(&[0x90]), U256::from(5));
+        }
+        let harness = SuiteTestHarness::new(storage);
+        let (mut proof, _) = harness.proof_v2(
+            &mut harness.storage().keys().copied().map(ProofV2Target::new).collect::<Vec<_>>(),
+        );
+        proof.retain(|node| node.path.len() < 3);
+        let mut trie = (new_trie)();
+        trie.set_root(&mut proof, true).unwrap();
+        trie.reveal_nodes(&mut proof).unwrap();
+        assert_eq!(trie.root(epoch(0)), harness.original_root());
+        let changes = BTreeMap::from([(first, U256::from(4)), (sibling, U256::ZERO)]);
+        let mut updates = SuiteTestHarness::leaf_updates(&changes);
+        trie.update_leaves(&mut updates, |_, _| {}).unwrap();
+        assert!(updates.contains_key(&first));
+        // Parallel processing may apply the deletion while the earlier update needs a proof.
+        let applied = changes
+            .iter()
+            .filter(|(key, _)| !updates.contains_key(*key))
+            .map(|(&key, &value)| (key, value))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(trie.root(epoch(1)), harness.get_root_with_updates(&applied).0);
+        assert_eq!(
+            trie.root_epoch(),
+            Some(if applied.is_empty() { TrieNodeEpoch::UNMODIFIED } else { epoch(1) })
+        );
+        trie.prune(epoch(1));
+        if !applied.is_empty() {
+            // The newly collapsed extension still proves exclusion after older nodes are pruned.
+            assert_eq!(
+                trie.find_leaf(&Nibbles::unpack(B256::right_padding_from(&[0x10, 0x40])), None),
+                Ok(LeafLookup::NonExistent)
+            );
+        }
+        harness.reveal_and_update(&mut trie, &mut updates);
+        assert!(updates.is_empty());
+        let mut reference = harness.init_trie_fully_revealed(true, new_trie);
+        harness.reveal_and_update(&mut reference, &mut SuiteTestHarness::leaf_updates(&changes));
+        assert_eq!(trie.root(epoch(2)), reference.root(epoch(2)));
+        assert_eq!(trie.take_updates(), reference.take_updates());
+    }
+}

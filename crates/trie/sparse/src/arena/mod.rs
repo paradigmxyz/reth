@@ -1263,7 +1263,7 @@ impl ArenaParallelSparseTrie {
         // Empty roots and leaves are encoded in place. Already-cached branches need no work.
         // Only dirty branches enter the main loop below.
         if has_blinded_branch(arena, root) {
-            Self::encode_blinded_extension(arena, root, rlp_buf);
+            Self::encode_blinded_extension(arena, root, rlp_buf, new_epoch);
             return node_state_ref(arena, root)
                 .and_then(ArenaSparseNodeState::cached_rlp_node)
                 .expect("extension was encoded")
@@ -1313,7 +1313,7 @@ impl ArenaParallelSparseTrie {
                 NextResult::Done => break,
                 NextResult::NonBranch => {
                     let idx = cursor.head().expect("cursor is non-empty").index;
-                    Self::encode_blinded_extension(arena, idx, rlp_buf);
+                    Self::encode_blinded_extension(arena, idx, rlp_buf, new_epoch);
                     continue;
                 }
                 NextResult::Branch => {}
@@ -1462,8 +1462,13 @@ impl ArenaParallelSparseTrie {
         rlp_node.clone()
     }
 
-    /// Caches an unmodified extension without decoding its backing branch.
-    fn encode_blinded_extension(arena: &mut NodeArena, idx: Index, rlp_buf: &mut Vec<u8>) {
+    /// Caches an extension without decoding its backing branch.
+    fn encode_blinded_extension(
+        arena: &mut NodeArena,
+        idx: Index,
+        rlp_buf: &mut Vec<u8>,
+        new_epoch: TrieNodeEpoch,
+    ) {
         let ArenaSparseNode::Extension { key, child: ExtensionChild::Blinded(rlp_node), state } =
             &mut arena[idx]
         else {
@@ -1472,7 +1477,13 @@ impl ArenaParallelSparseTrie {
         if !matches!(state, ArenaSparseNodeState::Cached { .. }) {
             rlp_buf.clear();
             let rlp_node = ExtensionNodeRef::new(key, rlp_node).rlp(rlp_buf);
-            *state = ArenaSparseNodeState::Cached { rlp_node, epoch: TrieNodeEpoch::UNMODIFIED };
+            // A deferred collapse can change the key while the backing branch remains opaque.
+            let epoch = if matches!(state, ArenaSparseNodeState::Dirty) {
+                new_epoch
+            } else {
+                TrieNodeEpoch::UNMODIFIED
+            };
+            *state = ArenaSparseNodeState::Cached { rlp_node, epoch };
         }
     }
 
