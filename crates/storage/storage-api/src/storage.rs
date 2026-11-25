@@ -84,4 +84,16 @@ pub trait StorageChangeSetReader: Send {
     fn lowest_storage_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
         Ok(None)
     }
+
+    /// Get the storage wipe changesets of a range of blocks, ordered by block and address.
+    ///
+    /// Each row holds the value a storage slot had before its block wiped the account's storage,
+    /// keyed by `keccak256(slot)`, for slots missing from that block's storage changeset. Only
+    /// storage v2 writes them, so the default returns no rows.
+    fn storage_wipe_changesets_range(
+        &self,
+        _range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
+        Ok(Vec::new())
+    }
 }

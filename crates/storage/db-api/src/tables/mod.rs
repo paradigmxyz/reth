@@ -547,6 +547,25 @@ tables! {
         type Key = String;
         type Value = Vec<u8>;
     }
+
+    /// Stores the value of each storage slot before a block wiped its account's storage, for
+    /// slots missing from that block's storage changeset, indexed by `keccak256(slot)`.
+    ///
+    /// Only written with storage v2, which keeps no plain storage table to recover the plain keys
+    /// of slots the block never loaded. A slot of the wiped account missing from both this table
+    /// and the storage changeset was zero before the block.
+    table StorageWipeChangeSets {
+        type Key = BlockNumberAddress;
+        type Value = StorageEntry;
+        type SubKey = B256;
+    }
+
+    /// Stores the blocks whose [`StorageWipeChangeSets`] hold rows for an account, sharded like
+    /// [`AccountsHistory`].
+    table StorageWipesHistory {
+        type Key = ShardedKey<Address>;
+        type Value = BlockNumberList;
+    }
 }
 
 /// Packed-encoding view of the [`AccountsTrie`] table.

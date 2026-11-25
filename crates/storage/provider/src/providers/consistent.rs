@@ -1318,6 +1318,20 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
             },
         )
     }
+
+    fn storage_wipe_changesets_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        // Wipe changesets are derived from the parent state when a block is persisted, so
+        // in-memory blocks have none yet.
+        self.changesets_range(
+            range,
+            PruneSegment::StorageHistory,
+            |db, range| db.storage_wipe_changesets_range(range),
+            |_, _| {},
+        )
+    }
 }
 
 impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {

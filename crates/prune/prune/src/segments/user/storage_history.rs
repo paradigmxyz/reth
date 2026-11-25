@@ -1,14 +1,15 @@
 use crate::{
     db_ext::DbTxPruneExt,
     segments::{
-        user::history::{finalize_history_prune, HistoryPruneResult},
+        user::history::{finalize_history_prune, prune_history_indices, HistoryPruneResult},
         PruneInput, Segment,
     },
     PrunerError,
 };
 use alloy_primitives::{map::HashMap, Address, BlockNumber, B256};
 use reth_db_api::{
-    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
+    cursor::DbCursorRO,
+    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress, ShardedKey},
     tables,
     transaction::DbTxMut,
 };
@@ -18,6 +19,7 @@ use reth_prune_types::{
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
+use std::collections::BTreeMap;
 use tracing::{instrument, trace};
 
 /// Number of storage history tables to prune in one step.
@@ -272,9 +274,10 @@ impl StorageHistory {
         range_end: BlockNumber,
     ) -> Result<SegmentOutput, PrunerError>
     where
-        Provider: DBProvider + StaticFileProviderFactory + RocksDBProviderFactory,
+        Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + RocksDBProviderFactory,
     {
         let mut limiter = input.limiter;
+        let range_start = *range.start();
 
         if limiter.is_limit_reached() {
             return Ok(SegmentOutput::not_done(
@@ -341,11 +344,38 @@ impl StorageHistory {
 
         trace!(target: "pruner", deleted = deleted_shards, updated = updated_shards, %done, "Pruned storage history (RocksDB indices)");
 
+        // Storage wipe changesets and their index live in MDBX, and are pruned up to the same
+        // block as the storage changesets.
+        let mut highest_wipe_blocks = BTreeMap::<Address, BlockNumber>::new();
+        let mut pruned_wipe_changesets = 0usize;
+        let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StorageWipeChangeSets>()?;
+        let mut walker = cursor
+            .walk_range(BlockNumberAddress::range(range_start..=last_changeset_pruned_block))?;
+        while let Some(row) = walker.next() {
+            let (key, _) = row?;
+            highest_wipe_blocks.insert(key.address(), key.block_number());
+            walker.delete_current()?;
+            pruned_wipe_changesets += 1;
+        }
+        let wipe_outcomes = prune_history_indices::<_, tables::StorageWipesHistory, _>(
+            provider,
+            highest_wipe_blocks
+                .into_iter()
+                .map(|(address, block_number)| ShardedKey::new(address, block_number)),
+            |a, b| a.key == b.key,
+        )?;
+
+        trace!(target: "pruner", pruned = pruned_wipe_changesets, deleted = wipe_outcomes.deleted, "Pruned storage wipe changesets");
+
         let progress = limiter.progress(done);
 
         Ok(SegmentOutput {
             progress,
-            pruned: changesets_processed + deleted_shards + updated_shards,
+            pruned: changesets_processed +
+                deleted_shards +
+                updated_shards +
+                pruned_wipe_changesets +
+                wipe_outcomes.deleted,
             checkpoint: Some(SegmentOutputCheckpoint {
                 block_number: Some(last_changeset_pruned_block),
                 tx_number: None,
@@ -361,8 +391,13 @@ mod tests {
     use alloy_primitives::{Address, BlockNumber, B256, U256};
     use assert_matches::assert_matches;
     use reth_db_api::{
-        models::{storage_sharded_key::StorageShardedKey, StorageBeforeTx, StorageSettings},
-        tables, BlockNumberList,
+        models::{
+            storage_sharded_key::StorageShardedKey, BlockNumberAddress, ShardedKey,
+            StorageBeforeTx, StorageSettings,
+        },
+        tables,
+        transaction::{DbTx, DbTxMut},
+        BlockNumberList,
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
@@ -374,7 +409,7 @@ mod tests {
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_static_file_types::{StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE};
-    use reth_storage_api::StorageSettingsCache;
+    use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
         ChangeSet,
@@ -877,6 +912,60 @@ mod tests {
 
         assert_eq!(lowest_jar_end(), Some(first_jar_end + 1));
         assert_eq!(shard_blocks(), [first_jar_end + 1]);
+    }
+
+    #[test]
+    fn prune_rocksdb_prunes_storage_wipe_changesets() {
+        let db = TestStageDB::default();
+        db.factory.set_storage_settings_cache(StorageSettings::v2());
+        let static_file_provider = db.factory.static_file_provider();
+        {
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            for block in 0..=3 {
+                writer.append_storage_changeset(Vec::new(), block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        let address = Address::random();
+        let row = StorageEntry { key: B256::random(), value: U256::from(1) };
+        let provider = db.factory.database_provider_rw().unwrap();
+        for block in [1, 3] {
+            provider
+                .tx_ref()
+                .put::<tables::StorageWipeChangeSets>(BlockNumberAddress((block, address)), row)
+                .unwrap();
+        }
+        provider
+            .tx_ref()
+            .put::<tables::StorageWipesHistory>(
+                ShardedKey::last(address),
+                BlockNumberList::new_pre_sorted([1, 3]),
+            )
+            .unwrap();
+        provider.commit().unwrap();
+
+        let prune_mode = PruneMode::Before(3);
+        let input =
+            PruneInput { previous_checkpoint: None, to_block: 2, limiter: PruneLimiter::default() };
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = StorageHistory::new(prune_mode).prune(&provider, input).unwrap();
+        assert!(result.progress.is_finished());
+        provider.commit().unwrap();
+
+        let provider = db.factory.provider().unwrap();
+        assert_eq!(
+            provider.storage_wipe_changesets_range(..).unwrap(),
+            vec![(BlockNumberAddress((3, address)), row)]
+        );
+        assert_eq!(
+            provider
+                .tx_ref()
+                .get::<tables::StorageWipesHistory>(ShardedKey::last(address))
+                .unwrap(),
+            Some(BlockNumberList::new_pre_sorted([3]))
+        );
     }
 
     /// A block holding at least a whole run's budget of changesets must not stall pruning: the

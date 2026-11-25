@@ -15,7 +15,11 @@ use alloy_consensus::{
     Header,
 };
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{b256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
+use alloy_primitives::{
+    b256, keccak256,
+    map::{AddressMap, B256Map},
+    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
+};
 
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlock;
@@ -54,6 +58,7 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
+use reth_trie::bundle_state::RevertToSlot;
 use std::{
     collections::BTreeMap,
     fmt::Debug,
@@ -580,26 +585,36 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     }
 
     /// Writes storage changesets for all blocks to the static file segment.
+    ///
+    /// A [`RevertToSlot::Destroyed`] slot takes its value from the block's entry in
+    /// `destroyed_storage`, and is zero if the block has none.
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_storage_changesets(
         w: &mut StaticFileProviderRWRefMut<'_, N>,
         blocks: &[ExecutedBlock<N>],
+        destroyed_storage: &[AddressMap<B256Map<U256>>],
     ) -> ProviderResult<()> {
-        for block in blocks {
+        for (index, block) in blocks.iter().enumerate() {
             let block_number = block.recovered_block().number();
             let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
+            let destroyed = destroyed_storage.get(index);
 
             let changeset: Vec<_> = reverts
                 .storage
                 .into_iter()
                 .flatten()
                 .flat_map(|revert| {
+                    let storage = destroyed.and_then(|destroyed| destroyed.get(&revert.address));
                     revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
-                        StorageBeforeTx {
-                            address: revert.address,
-                            key: key.into(),
-                            value: revert_to_slot.to_previous_value(),
-                        }
+                        let key = B256::from(key);
+                        let value = match revert_to_slot {
+                            RevertToSlot::Some(value) => value,
+                            RevertToSlot::Destroyed => storage
+                                .and_then(|storage| storage.get(&keccak256(key)))
+                                .copied()
+                                .unwrap_or_default(),
+                        };
+                        StorageBeforeTx { address: revert.address, key, value }
                     })
                 })
                 .collect();
@@ -630,12 +645,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Writes all static file data for multiple blocks in parallel per-segment.
     ///
     /// This spawns tasks on the storage thread pool for each segment type and each task calls
-    /// `sync_all()` on its writer when done.
+    /// `sync_all()` on its writer when done. `destroyed_storage` holds, per block, the storage of
+    /// each account the block destroyed as it was before the block, keyed by hashed slot.
     #[instrument(level = "debug", target = "providers::static_file", skip_all)]
     pub fn write_blocks_data(
         &self,
         blocks: &[ExecutedBlock<N>],
         tx_nums: &[TxNumber],
+        destroyed_storage: &[AddressMap<B256Map<U256>>],
         ctx: StaticFileWriteCtx,
         runtime: &reth_tasks::Runtime,
     ) -> ProviderResult<()> {
@@ -712,7 +729,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     r_storage_changesets = Some(self.write_segment(
                         StaticFileSegment::StorageChangeSets,
                         first_block_number,
-                        |w| Self::write_storage_changesets(w, blocks),
+                        |w| Self::write_storage_changesets(w, blocks, destroyed_storage),
                     ));
                 });
             }

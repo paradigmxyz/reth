@@ -65,6 +65,8 @@ There are many tables within the node, all used to store different types of data
 - VersionHistory
 - ChainState
 - Metadata
+- StorageWipeChangeSets
+- StorageWipesHistory
 
 <br>
 

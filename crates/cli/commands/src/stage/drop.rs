@@ -145,6 +145,8 @@ impl<C: ChainSpecParser> Command<C> {
                 }
                 tx.clear::<tables::AccountChangeSets>()?;
                 tx.clear::<tables::StorageChangeSets>()?;
+                tx.clear::<tables::StorageWipeChangeSets>()?;
+                tx.clear::<tables::StorageWipesHistory>()?;
                 tx.clear::<tables::Bytecodes>()?;
                 tx.clear::<tables::Receipts<ReceiptTy<N>>>()?;
 

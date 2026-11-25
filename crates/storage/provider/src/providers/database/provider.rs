@@ -32,8 +32,8 @@ use alloy_consensus::{
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, AddressSet, B256Map, HashMap},
-    Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber, B256,
+    map::{hash_map, AddressMap, AddressSet, B256Map, B256Set, HashMap},
+    Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -75,7 +75,9 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
 use reth_trie::{
-    bundle_state::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
+    bundle_state::{
+        PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, RevertToSlot, StateChangeset,
+    },
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     HashedPostStateSorted, SortedTrieData,
 };
@@ -623,6 +625,18 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let rocksdb_enabled =
             rocksdb_ctx.as_ref().is_some_and(|ctx| ctx.storage_settings.storage_v2);
 
+        // Storage v2 keeps no plain storage, so the storage a block destroys is read from the
+        // hashed state before any of this batch is written.
+        let destroyed_storage =
+            if save_mode.with_state() && self.cached_storage_settings().use_hashed_state() {
+                self.destroyed_storage_before_blocks(
+                    state_trie_blocks.iter().chain(state_trie_masking_blocks),
+                    blocks,
+                )?
+            } else {
+                Vec::new()
+            };
+
         let mut sf_result = None;
         let mut rocksdb_result = None;
 
@@ -641,7 +655,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                         sf_ctx.expect("static file context exists when blocks are persisted");
                     sf_result = Some(
                         sf_provider
-                            .write_blocks_data(blocks, &tx_nums, sf_ctx, runtime)
+                            .write_blocks_data(
+                                blocks,
+                                &tx_nums,
+                                &destroyed_storage,
+                                sf_ctx,
+                                runtime,
+                            )
                             .map(|()| start.elapsed()),
                     );
                 });
@@ -732,6 +752,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 }
             }
 
+            if !destroyed_storage.is_empty() {
+                self.write_storage_wipe_changesets(blocks, &destroyed_storage)?;
+            }
+
             // Write all hashed state and trie updates in single batches.
             // This reduces cursor open/close overhead from N calls to 1.
             if save_mode.with_state() && !state_trie_blocks.is_empty() {
@@ -808,6 +832,105 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         }
 
         Ok(())
+    }
+
+    /// Returns, for each of `blocks`, the storage of every account the block destroyed as it was
+    /// before the block, keyed by hashed slot.
+    ///
+    /// `state_blocks` must start right after the database hashed-state frontier and end with
+    /// `blocks`, so the parent state of each block is the database hashed storage overlaid with
+    /// the hashed state of the blocks before it.
+    fn destroyed_storage_before_blocks<'a>(
+        &self,
+        state_blocks: impl Iterator<Item = &'a ExecutedBlock<N::Primitives>>,
+        blocks: &[ExecutedBlock<N::Primitives>],
+    ) -> ProviderResult<Vec<AddressMap<B256Map<U256>>>> {
+        let state_blocks = state_blocks.collect::<Vec<_>>();
+        let first_block = state_blocks.len() - blocks.len();
+        let mut storage_cursor = self.tx.cursor_dup_read::<tables::HashedStorages>()?;
+
+        blocks
+            .iter()
+            .enumerate()
+            .map(|(index, block)| {
+                let mut destroyed = AddressMap::default();
+                for (address, revert) in block.execution_outcome().state.reverts.iter().flatten() {
+                    // A `Destroyed` slot was read as zero after an earlier wipe, so its previous
+                    // value is also in the parent storage.
+                    if !revert.wipe_storage &&
+                        !revert.storage.values().any(|slot| *slot == RevertToSlot::Destroyed)
+                    {
+                        continue
+                    }
+
+                    let hashed_address = keccak256(address);
+                    let mut storage = B256Map::default();
+                    for entry in storage_cursor.walk_dup(Some(hashed_address), None)? {
+                        let (_, entry) = entry?;
+                        storage.insert(entry.key, entry.value);
+                    }
+                    for parent in &state_blocks[..first_block + index] {
+                        let Some(parent_storage) =
+                            parent.hashed_state_ref().storages.get(&hashed_address)
+                        else {
+                            continue
+                        };
+                        for &(slot, value) in &parent_storage.storage_slots {
+                            if value.is_zero() {
+                                storage.remove(&slot);
+                            } else {
+                                storage.insert(slot, value);
+                            }
+                        }
+                    }
+                    destroyed.insert(*address, storage);
+                }
+                Ok(destroyed)
+            })
+            .collect()
+    }
+
+    /// Writes the storage wipe changesets and their history index for `blocks`.
+    ///
+    /// `destroyed_storage` holds the storage each block destroyed, as returned by
+    /// [`Self::destroyed_storage_before_blocks`]. Slots whose plain key the block's reverts carry
+    /// are recorded in the storage changeset instead.
+    fn write_storage_wipe_changesets(
+        &self,
+        blocks: &[ExecutedBlock<N::Primitives>],
+        destroyed_storage: &[AddressMap<B256Map<U256>>],
+    ) -> ProviderResult<()> {
+        let mut cursor = self.tx.cursor_dup_write::<tables::StorageWipeChangeSets>()?;
+        let mut wipe_blocks = BTreeMap::<Address, Vec<BlockNumber>>::new();
+        for (block, destroyed) in blocks.iter().zip(destroyed_storage) {
+            let block_number = block.recovered_block().number();
+            let reverts = &block.execution_outcome().state.reverts;
+            for (address, revert) in reverts.iter().flatten() {
+                let Some(storage) = destroyed.get(address) else { continue };
+                let recorded = revert
+                    .storage
+                    .keys()
+                    .map(|slot| keccak256(B256::from(*slot)))
+                    .collect::<B256Set>();
+                let mut rows = storage
+                    .iter()
+                    .filter(|(slot, _)| !recorded.contains(*slot))
+                    .map(|(&key, &value)| StorageEntry { key, value })
+                    .collect::<Vec<_>>();
+                if rows.is_empty() {
+                    continue
+                }
+                rows.sort_unstable_by_key(|entry| entry.key);
+
+                let key = BlockNumberAddress((block_number, *address));
+                for row in rows {
+                    cursor.upsert(key, &row)?;
+                }
+                wipe_blocks.entry(*address).or_default().push(block_number);
+            }
+        }
+
+        self.append_history_index::<_, tables::StorageWipesHistory>(wipe_blocks, ShardedKey::new)
     }
 
     /// Writes MDBX-only data for a block (indices, lookups, and senders if configured for MDBX).
@@ -902,6 +1025,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         // Unwind storage hashes.
         self.unwind_storage_hashing(changed_storages.iter().copied())?;
+        let wipe_changesets = self.oldest_storage_wipe_changesets(from.., &changed_storages)?;
+        self.restore_storage_wipe_changesets(&wipe_changesets)?;
 
         // Unwind storage history indices.
         self.unwind_storage_history_indices(changed_storages.iter().copied())?;
@@ -1460,6 +1585,93 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         static_files.set_earliest_history_height(pivot);
         Ok(())
     }
+
+    /// Returns the storage wipe changesets of `range` that hold the oldest value of their slot
+    /// in `range`, keyed by hashed address.
+    ///
+    /// `changesets` must be the storage changesets of the same range. Restoring the returned
+    /// rows after them leaves each slot with its value from before the range.
+    fn oldest_storage_wipe_changesets(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        changesets: &[(BlockNumberAddress, StorageEntry)],
+    ) -> ProviderResult<Vec<(B256, StorageEntry)>> {
+        let wipe_changesets = self.storage_wipe_changesets_range(range)?;
+        if wipe_changesets.is_empty() {
+            return Ok(Vec::new())
+        }
+
+        let wiped_addresses =
+            wipe_changesets.iter().map(|(key, _)| key.address()).collect::<AddressSet>();
+        // Changesets are ordered by block, so the first one of a slot is its oldest.
+        let mut oldest_blocks = HashMap::<(Address, B256), BlockNumber>::default();
+        for (BlockNumberAddress((block_number, address)), entry) in changesets {
+            if wiped_addresses.contains(address) {
+                oldest_blocks.entry((*address, keccak256(entry.key))).or_insert(*block_number);
+            }
+        }
+
+        // Rows are ordered by block, so a row is the oldest value of its slot unless an older
+        // changeset or row was seen for it.
+        Ok(wipe_changesets
+            .into_iter()
+            .filter(|(key, entry)| match oldest_blocks.entry((key.address(), entry.key)) {
+                hash_map::Entry::Occupied(mut oldest) => {
+                    if *oldest.get() < key.block_number() {
+                        return false
+                    }
+                    oldest.insert(key.block_number());
+                    true
+                }
+                hash_map::Entry::Vacant(oldest) => {
+                    oldest.insert(key.block_number());
+                    true
+                }
+            })
+            .map(|(key, entry)| (keccak256(key.address()), entry))
+            .collect())
+    }
+
+    /// Writes storage wipe changesets, keyed by hashed address, back to the hashed storage.
+    fn restore_storage_wipe_changesets(&self, rows: &[(B256, StorageEntry)]) -> ProviderResult<()> {
+        let mut hashed_storage = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
+        for (hashed_address, entry) in rows {
+            if hashed_storage
+                .seek_by_key_subkey(*hashed_address, entry.key)?
+                .is_some_and(|existing| existing.key == entry.key)
+            {
+                hashed_storage.delete_current()?;
+            }
+            // Rows are read from the hashed storage, which keeps no zero values.
+            hashed_storage.upsert(*hashed_address, entry)?;
+        }
+        Ok(())
+    }
+
+    /// Removes the storage wipe changesets above `block` and unwinds their history index.
+    fn remove_storage_wipe_changesets_above(&self, block: BlockNumber) -> ProviderResult<()> {
+        let rows = self.take::<tables::StorageWipeChangeSets>(
+            BlockNumberAddress((block + 1, Address::ZERO))..,
+        )?;
+        let addresses = rows.iter().map(|(key, _)| key.address()).collect::<BTreeSet<_>>();
+
+        let mut cursor = self.tx.cursor_write::<tables::StorageWipesHistory>()?;
+        for address in addresses {
+            let partial_shard = unwind_history_shards::<_, tables::StorageWipesHistory, _>(
+                &mut cursor,
+                ShardedKey::last(address),
+                block + 1,
+                |sharded_key| sharded_key.key == address,
+            )?;
+            if !partial_shard.is_empty() {
+                cursor.insert(
+                    ShardedKey::last(address),
+                    &BlockNumberList::new_pre_sorted(partial_shard),
+                )?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -1684,6 +1896,17 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
             .static_file_provider
             .get_lowest_range_start(StaticFileSegment::StorageChangeSets)
             .filter(|&block| block > 0))
+    }
+
+    fn storage_wipe_changesets_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        self.tx
+            .cursor_dup_read::<tables::StorageWipeChangeSets>()?
+            .walk_range(BlockNumberAddressRange::from(range))?
+            .map(|row| row.map_err(Into::into))
+            .collect()
     }
 }
 
@@ -2973,6 +3196,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         };
 
         if self.cached_storage_settings().use_hashed_state() {
+            let wipe_changesets =
+                self.oldest_storage_wipe_changesets(block + 1.., &storage_changeset)?;
             let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
             let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
 
@@ -3011,6 +3236,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     }
                 }
             }
+
+            self.restore_storage_wipe_changesets(&wipe_changesets)?;
+            self.remove_storage_wipe_changesets_above(block)?;
         } else {
             // This is not working for blocks that are not at tip. as plain state is not the last
             // state of end range. We should rename the functions or add support to access
@@ -3141,6 +3369,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         };
 
         let (state, reverts) = if self.cached_storage_settings().use_hashed_state() {
+            let wipe_changesets =
+                self.oldest_storage_wipe_changesets(block + 1.., &storage_changeset)?;
             let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
             let mut hashed_storage_cursor = self.tx.cursor_dup_write::<tables::HashedStorages>()?;
 
@@ -3179,6 +3409,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     }
                 }
             }
+
+            self.restore_storage_wipe_changesets(&wipe_changesets)?;
+            self.remove_storage_wipe_changesets_above(block)?;
 
             (state, reverts)
         } else {
@@ -3463,8 +3696,16 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<B256Map<BTreeSet<B256>>> {
+        let range = (range.start_bound().cloned(), range.end_bound().cloned());
         let changesets = self.storage_changesets_range(range)?;
-        self.unwind_storage_hashing(changesets.into_iter())
+        let wipe_changesets = self.oldest_storage_wipe_changesets(range, &changesets)?;
+        let mut hashed_storage_keys = self.unwind_storage_hashing(changesets.into_iter())?;
+
+        self.restore_storage_wipe_changesets(&wipe_changesets)?;
+        for (hashed_address, entry) in wipe_changesets {
+            hashed_storage_keys.entry(hashed_address).or_default().insert(entry.key);
+        }
+        Ok(hashed_storage_keys)
     }
 
     fn insert_storage_for_hashing(
@@ -4209,6 +4450,7 @@ impl<TX: Send, N: NodeTypes> StoragePath for DatabaseProvider<TX, N> {
 mod tests {
     use super::*;
     use crate::{
+        providers::BlockchainProvider,
         test_utils::{
             blocks::BlockchainTestData, create_test_provider_factory,
             create_test_provider_factory_with_chain_spec_and_db_args,
@@ -4230,12 +4472,16 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::{SealedBlock, SealedHeader};
-    use reth_storage_api::{DatabaseProviderFactory, DurableBlockReader, MetadataWriter};
+    use reth_storage_api::{
+        DatabaseProviderFactory, DurableBlockReader, MetadataWriter, StateProviderFactory,
+    };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
-        bundle_state::BundleState, HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData,
-        StoredNibbles, StoredNibblesSubKey,
+        bundle_state::{AccountInfoRevert, AccountRevert, BundleState, Reverts},
+        HashedPostState, HashedStorage, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
+        StoredNibblesSubKey,
     };
+    use reth_trie_db::DatabaseHashedPostState;
     use std::{sync::mpsc, time::Duration};
 
     /// Seeds block zero through the writer core because [`SaveBlocksInput`] only describes
@@ -4255,6 +4501,32 @@ mod tests {
             &[],
             None,
             SaveBlocksMode::Full,
+        )
+    }
+
+    /// Builds an executed block above `parent_hash` with the given reverts and hashed state.
+    fn executed_block_with_reverts(
+        number: BlockNumber,
+        parent_hash: B256,
+        reverts: Vec<(Address, AccountRevert)>,
+        hashed_state: HashedPostState,
+    ) -> ExecutedBlock {
+        let block = SealedBlock::<reth_ethereum_primitives::Block>::seal_parts(
+            Header { number, parent_hash, difficulty: U256::ONE, ..Default::default() },
+            Default::default(),
+        );
+        ExecutedBlock::new(
+            Arc::new(block.try_recover().unwrap()),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: BundleState { reverts: Reverts::new(vec![reverts]), ..Default::default() },
+            }),
+            SortedTrieData::new(Arc::new(hashed_state.into_sorted()), Default::default()),
         )
     }
 
@@ -6278,5 +6550,187 @@ mod tests {
         assert_eq!(outcome.first_block(), 2);
         assert_eq!(outcome.len(), 1);
         assert_eq!(tx.get::<tables::PlainAccountState>(Address::ZERO).unwrap(), None);
+    }
+
+    #[test]
+    fn save_blocks_records_storage_wiped_by_block() {
+        let (factory, mut in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let [k1, k2, k3] = [1u64, 2, 3].map(U256::from);
+        let hashed_slot = |slot: U256| keccak256(B256::from(slot));
+        let info = AccountInfo { nonce: 1, ..Default::default() };
+        let hashed_state = |storage: &[(U256, u64)]| {
+            let storage =
+                storage.iter().map(|(slot, value)| (*slot, U256::from(*value))).collect::<Vec<_>>();
+            HashedPostState::default()
+                .with_accounts([(hashed_address, Some(Account { nonce: 1, ..Default::default() }))])
+                .with_storages([(
+                    hashed_address,
+                    HashedStorage::from_plain_storage(storage.iter().map(|(k, v)| (k, v))),
+                )])
+        };
+        let revert = |account, storage: &[(U256, RevertToSlot)], wipe_storage| AccountRevert {
+            account,
+            storage: storage.iter().copied().collect(),
+            previous_status: Default::default(),
+            wipe_storage,
+        };
+
+        let genesis =
+            executed_block_with_reverts(0, B256::ZERO, vec![], HashedPostState::default());
+        // Block 1 creates the account with three slots and block 2 changes `k1` from 7 to 9.
+        let block1 = executed_block_with_reverts(
+            1,
+            genesis.recovered_block().hash(),
+            vec![(
+                address,
+                revert(
+                    AccountInfoRevert::DeleteIt,
+                    &[
+                        (k1, RevertToSlot::Some(U256::ZERO)),
+                        (k2, RevertToSlot::Some(U256::ZERO)),
+                        (k3, RevertToSlot::Some(U256::ZERO)),
+                    ],
+                    false,
+                ),
+            )],
+            hashed_state(&[(k1, 7), (k2, 5), (k3, 3)]),
+        );
+        let block2 = executed_block_with_reverts(
+            2,
+            block1.recovered_block().hash(),
+            vec![(
+                address,
+                revert(
+                    AccountInfoRevert::DoNothing,
+                    &[(k1, RevertToSlot::Some(U256::from(7)))],
+                    false,
+                ),
+            )],
+            hashed_state(&[(k1, 9)]),
+        );
+        // Block 3 wipes the storage after loading only `k2`, and writes `k3` after the wipe.
+        let block3 = executed_block_with_reverts(
+            3,
+            block2.recovered_block().hash(),
+            vec![(
+                address,
+                revert(
+                    AccountInfoRevert::RevertTo(info),
+                    &[(k2, RevertToSlot::Some(U256::from(5))), (k3, RevertToSlot::Destroyed)],
+                    true,
+                ),
+            )],
+            hashed_state(&[(k1, 0), (k2, 0), (k3, 4)]),
+        );
+        // Block 4 writes `k1` again, so its changeset holds the zero left by the wipe.
+        let block4 = executed_block_with_reverts(
+            4,
+            block3.recovered_block().hash(),
+            vec![(
+                address,
+                revert(
+                    AccountInfoRevert::DoNothing,
+                    &[(k1, RevertToSlot::Some(U256::ZERO))],
+                    false,
+                ),
+            )],
+            hashed_state(&[(k1, 1)]),
+        );
+
+        let provider_rw = factory.provider_rw().unwrap();
+        save_genesis(&provider_rw, &genesis).unwrap();
+        provider_rw.commit().unwrap();
+
+        // Block 2 stays in the masking suffix, so block 3 reads its `k1` from memory.
+        in_memory_state_writer.insert_executed(block2.clone());
+        in_memory_state_writer.insert_executed(block3.clone());
+        in_memory_state_writer.insert_executed(block4.clone());
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(vec![block1, block2.clone()], 0, 0, 2, 1);
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+        let provider_rw = factory.provider_rw().unwrap();
+        let input = SaveBlocksInput::new(vec![block2, block3, block4], 2, 1, 4, 4);
+        provider_rw.save_blocks(&input).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let mut changeset = provider.storage_changeset(3).unwrap();
+        changeset.sort_unstable_by_key(|(_, entry)| entry.key);
+        let key = BlockNumberAddress((3, address));
+        assert_eq!(
+            changeset,
+            vec![
+                (key, StorageEntry { key: k2.into(), value: U256::from(5) }),
+                (key, StorageEntry { key: k3.into(), value: U256::from(3) }),
+            ]
+        );
+        assert_eq!(
+            provider.storage_wipe_changesets_range(..).unwrap(),
+            vec![(key, StorageEntry { key: hashed_slot(k1), value: U256::from(9) })]
+        );
+        assert_eq!(
+            provider
+                .tx_ref()
+                .get::<tables::StorageWipesHistory>(ShardedKey::last(address))
+                .unwrap(),
+            Some(BlockNumberList::new_pre_sorted([3]))
+        );
+
+        // The oldest record of each slot wins, so `k1` comes from block 2's changeset when it is
+        // in range and from the wipe changeset, not block 4's changeset, otherwise.
+        for (range, k1_value) in [(3..=4, 9), (2..=4, 7)] {
+            let reverts = HashedPostStateSorted::from_reverts(&provider, range).unwrap();
+            let mut expected = vec![
+                (hashed_slot(k1), U256::from(k1_value)),
+                (hashed_slot(k2), U256::from(5)),
+                (hashed_slot(k3), U256::from(3)),
+            ];
+            expected.sort_unstable();
+            assert_eq!(reverts.storages[&hashed_address].storage_slots, expected);
+        }
+
+        let blockchain_provider = BlockchainProvider::new(factory.clone()).unwrap();
+        for (block, expected) in [(1, [7, 5, 3]), (2, [9, 5, 3]), (3, [0, 0, 4])] {
+            let state = blockchain_provider.history_by_block_number(block).unwrap();
+            for (slot, value) in [k1, k2, k3].into_iter().zip(expected) {
+                assert_eq!(
+                    state.storage(address, slot.into()).unwrap(),
+                    Some(U256::from(value)),
+                    "slot {slot} at block {block}"
+                );
+            }
+        }
+        drop(blockchain_provider);
+        drop(provider);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.remove_block_and_execution_above(2).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let mut storage = provider
+            .tx_ref()
+            .cursor_dup_read::<tables::HashedStorages>()
+            .unwrap()
+            .walk_dup(Some(hashed_address), None)
+            .unwrap()
+            .map(|entry| entry.map(|(_, entry)| (entry.key, entry.value)))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        storage.sort_unstable();
+        let mut expected = vec![
+            (hashed_slot(k1), U256::from(9)),
+            (hashed_slot(k2), U256::from(5)),
+            (hashed_slot(k3), U256::from(3)),
+        ];
+        expected.sort_unstable();
+        assert_eq!(storage, expected);
+        assert!(provider.storage_wipe_changesets_range(..).unwrap().is_empty());
+        assert_eq!(provider.tx_ref().entries::<tables::StorageWipesHistory>().unwrap(), 0);
     }
 }

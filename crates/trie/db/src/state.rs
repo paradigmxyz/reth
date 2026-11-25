@@ -267,7 +267,8 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
     ///
     /// - Reads the first occurrence of each changed account/storage slot in the range.
     /// - Addresses are always keccak256-hashed.
-    /// - Storage keys are always plain and are hashed via `keccak256`.
+    /// - Storage keys are always plain and are hashed via `keccak256`, except in storage wipe
+    ///   changesets, which are already hashed.
     /// - Returns keys already ordered for trie iteration.
     #[instrument(target = "trie::db", skip(provider))]
     fn from_reverts(
@@ -282,6 +283,11 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
         // Rows of a block are ordered by address, so all slots of one account arrive
         // consecutively and the address hash can be reused across them.
         let mut last_address: Option<(Address, B256)> = None;
+        // Storage wipe changesets are rare, so they are read for the whole range at once. Their
+        // slots are tracked by hash to skip plain rows of the same slot in later blocks.
+        let mut wipe_changesets =
+            provider.storage_wipe_changesets_range(range.clone())?.into_iter().peekable();
+        let mut wiped_slots = HashSet::new();
 
         // Blocks are visited oldest first, so the first occurrence of a key holds its value
         // before the range.
@@ -302,10 +308,33 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
                             hashed
                         }
                     };
-                    storages
-                        .entry(hashed_address)
-                        .or_default()
-                        .push((keccak256(storage.key), storage.value));
+                    let hashed_slot = keccak256(storage.key);
+                    if !wiped_slots.contains(&(hashed_address, hashed_slot)) {
+                        storages
+                            .entry(hashed_address)
+                            .or_default()
+                            .push((hashed_slot, storage.value));
+                    }
+                }
+            }
+
+            // Rows of one account arrive consecutively, so the slots it holds from earlier blocks
+            // are collected once per account.
+            let mut seen_slots = None::<(B256, HashSet<B256>)>;
+            while let Some((key, storage)) =
+                wipe_changesets.next_if(|(key, _)| key.block_number() == block)
+            {
+                let hashed_address = keccak256(key.address());
+                let slots = storages.entry(hashed_address).or_default();
+                if seen_slots.as_ref().is_none_or(|(address, _)| *address != hashed_address) {
+                    seen_slots =
+                        Some((hashed_address, slots.iter().map(|(slot, _)| *slot).collect()));
+                }
+                if let Some((_, seen)) = &seen_slots &&
+                    !seen.contains(&storage.key) &&
+                    wiped_slots.insert((hashed_address, storage.key))
+                {
+                    slots.push((storage.key, storage.value));
                 }
             }
         }

@@ -48,6 +48,18 @@ where
         }
     }
 
+    // Storage wipe changesets are keyed by hashed slot.
+    for (BlockNumberAddress((_, address)), storage_entry) in
+        provider.storage_wipe_changesets_range(range.clone())?
+    {
+        let hashed_address = keccak256(address);
+        account_prefix_set.insert(Nibbles::unpack(hashed_address));
+        storage_prefix_sets
+            .entry(hashed_address)
+            .or_default()
+            .insert(Nibbles::unpack(storage_entry.key));
+    }
+
     // Walk storage changesets using the provider (handles static files + database)
     let storage_changesets = provider.storage_changesets_range(range)?;
     // Rows are ordered by `BlockNumberAddress`, so all slots of one account arrive consecutively.

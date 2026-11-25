@@ -4,7 +4,13 @@ use crate::{
 };
 use alloy_primitives::{map::B256Map, Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
-use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx, DatabaseError};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    models::{BlockNumberAddress, ShardedKey},
+    tables,
+    transaction::DbTx,
+    DatabaseError,
+};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_metrics::Metrics;
@@ -903,12 +909,22 @@ where
             return Ok(Some(value));
         }
         if let Some(historical_fallback) = historical_fallback {
-            return match self.provider().storage_history_info(
+            let history_info = self.provider().storage_history_info(
                 address,
                 storage_key,
                 historical_fallback.block_number,
                 historical_fallback.storage_history_block_number,
-            )? {
+            )?;
+            // The history index has no entry for wiped slots the wiping block never loaded, so
+            // a wipe before the next indexed change holds the slot's value.
+            if !matches!(history_info, HistoryInfo::NotYetWritten) &&
+                let Some(wipe_block) =
+                    self.next_storage_wipe_block(address, historical_fallback.block_number)? &&
+                !matches!(history_info, HistoryInfo::InChangeset(block) if block <= wipe_block)
+            {
+                return self.storage_before_wipe(wipe_block, address, storage_key).map(Some)
+            }
+            return match history_info {
                 HistoryInfo::NotYetWritten => Ok(None),
                 HistoryInfo::InChangeset(changeset_block_number) => self
                     .provider()
@@ -933,6 +949,40 @@ where
     Provider: Deref,
     Provider::Target: DBProvider + StorageSettingsCache,
 {
+    /// Returns the first block at or above `block_number` that wiped the storage of `address`
+    /// and recorded storage wipe changesets for it.
+    fn next_storage_wipe_block(
+        &self,
+        address: Address,
+        block_number: BlockNumber,
+    ) -> ProviderResult<Option<BlockNumber>> {
+        // Only storage v2 writes storage wipe changesets.
+        if !self.provider().cached_storage_settings().use_hashed_state() {
+            return Ok(None)
+        }
+        let mut cursor = self.provider().tx().cursor_read::<tables::StorageWipesHistory>()?;
+        Ok(cursor
+            .seek(ShardedKey::new(address, block_number))?
+            .filter(|(key, _)| key.key == address)
+            .and_then(|(_, blocks)| blocks.iter().find(|block| *block >= block_number)))
+    }
+
+    /// Returns the value `storage_key` of `address` had before `wipe_block` wiped its storage.
+    fn storage_before_wipe(
+        &self,
+        wipe_block: BlockNumber,
+        address: Address,
+        storage_key: alloy_primitives::StorageKey,
+    ) -> ProviderResult<alloy_primitives::StorageValue> {
+        let hashed_slot = alloy_primitives::keccak256(storage_key);
+        let mut cursor = self.provider().tx().cursor_dup_read::<tables::StorageWipeChangeSets>()?;
+        Ok(cursor
+            .seek_by_key_subkey(BlockNumberAddress((wipe_block, address)), hashed_slot)?
+            .filter(|entry| entry.key == hashed_slot)
+            .map(|entry| entry.value)
+            .unwrap_or_default())
+    }
+
     fn storage_from_db(
         &self,
         address: Address,
