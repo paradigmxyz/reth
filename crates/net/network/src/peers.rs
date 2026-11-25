@@ -694,6 +694,10 @@ impl PeersManager {
             self.connection_info.decr_state(peer.state);
             peer.state = PeerConnectionState::Idle;
             peer.mark_disconnected();
+            if peer.remove_after_disconnect && !peer.is_trusted() {
+                self.peers.remove(peer_id);
+                self.queued_actions.push_back(PeerAction::PeerRemoved(*peer_id));
+            }
         }
     }
 
@@ -774,8 +778,14 @@ impl PeersManager {
     /// Called when a _pending_ outbound connection is successful.
     pub(crate) fn on_active_outgoing_established(&mut self, peer_id: PeerId) {
         let at_capacity = self.connection_info.is_outbound_at_capacity();
+        let has_room = self.peers.len() <= MAX_TRACKED_PEERS;
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             trace!(target: "net::peers", ?peer_id, "established active outgoing connection");
+            // `Self::remove_peer` drops pending dials outright, so only a dialed candidate is
+            // temporary here, and it is kept once its session succeeds if the peer set has room.
+            if has_room {
+                peer.remove_after_disconnect = false;
+            }
             self.connection_info.decr_state(peer.state);
             self.connection_info.inc_out();
             peer.state = PeerConnectionState::Out;
@@ -1354,6 +1364,11 @@ impl PeersManager {
             return
         }
 
+        // Candidates get one dial per fill, so tracked peers that keep failing cannot starve them.
+        if !self.trusted_nodes_only && self.connection_info.has_out_capacity() {
+            self.dial_candidate();
+        }
+
         // as long as there are slots available fill them with the best peers
         while self.connection_info.has_out_dial_capacity() {
             // Trusted peers are dialed even when all outbound slots are taken, so discovered
@@ -1371,6 +1386,30 @@ impl PeersManager {
             self.connection_info.inc_pending_out();
 
             self.queued_actions.push_back(action);
+        }
+    }
+
+    /// Dials the oldest dial candidate, tracking it only until its session ends.
+    fn dial_candidate(&mut self) {
+        while let Some((peer_id, (addr, fork_id))) = self.candidates.pop_oldest() {
+            // it may have been added, trusted or banned since it was queued
+            if self.peers.contains_key(&peer_id) ||
+                self.trusted_peer_ids.contains(&peer_id) ||
+                self.ban_list.is_banned(&peer_id, &addr.tcp().ip())
+            {
+                continue
+            }
+            trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "schedule outbound connection to candidate");
+            let mut peer = Peer::new(addr);
+            peer.fork_id = fork_id.map(Box::new);
+            // kept only once its session succeeds, see `Self::on_active_outgoing_established`
+            peer.remove_after_disconnect = true;
+            peer.state = PeerConnectionState::PendingOut;
+            self.peers.insert(peer_id, peer);
+            self.connection_info.inc_pending_out();
+            self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
+            self.queued_actions.push_back(PeerAction::Connect { peer_id, remote_addr: addr.tcp() });
+            return
         }
     }
 
@@ -4869,6 +4908,103 @@ mod tests {
         assert_eq!(peers.candidates.len(), MAX_PEER_CANDIDATES as usize);
         assert!(!peers.candidates.contains(&candidate));
         assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS);
+    }
+
+    #[tokio::test]
+    async fn test_candidate_dialed_for_session_while_set_is_full() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        for _ in 0..MAX_TRACKED_PEERS {
+            peers.add_peer(PeerId::random(), addr, None);
+        }
+        let [banned, first, second] = [PeerId::random(), PeerId::random(), PeerId::random()];
+        for candidate in [banned, first, second] {
+            peers.add_peer(candidate, addr, None);
+        }
+        peers.ban_list.ban_peer(banned);
+        let first_dial = |peers: &mut PeersManager| {
+            peers.queued_actions.clear();
+            peers.fill_outbound_slots();
+            peers.queued_actions.iter().find_map(|action| match action {
+                PeerAction::Connect { peer_id, .. } => Some(*peer_id),
+                _ => None,
+            })
+        };
+
+        // only trusted peers are dialed in trusted-only mode
+        peers.trusted_nodes_only = true;
+        first_dial(&mut peers);
+        assert!(peers.candidates.contains(&first));
+        peers.trusted_nodes_only = false;
+
+        // nor without a free outbound slot
+        peers.connection_info.num_outbound = peers.connection_info.config.max_outbound;
+        first_dial(&mut peers);
+        assert!(peers.candidates.contains(&first));
+        peers.connection_info.num_outbound = 0;
+
+        // one candidate is dialed before tracked peers, skipping one banned since it was queued
+        assert_eq!(first_dial(&mut peers), Some(first));
+        assert!(!peers.candidates.contains(&banned));
+        assert!(peers.candidates.contains(&second));
+        let peer = &peers.peers[&first];
+        assert!(peer.state.is_pending_out());
+        assert!(peer.remove_after_disconnect);
+
+        // a failed dial drops it, and the freed slot dials the next candidate
+        peers.on_outgoing_pending_session_dropped(
+            &addr.tcp(),
+            &first,
+            &PendingSessionHandshakeError::Timeout,
+        );
+        assert!(!peers.peers.contains_key(&first));
+        assert!(peers.peers[&second].state.is_pending_out());
+
+        // the set is still full, so a session keeps it only until the session ends
+        peers.on_active_outgoing_established(second);
+        assert!(peers.peers[&second].remove_after_disconnect);
+    }
+
+    #[tokio::test]
+    async fn test_candidate_not_dialed_once_tracked_or_trusted() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        for _ in 0..MAX_TRACKED_PEERS {
+            peers.add_peer(PeerId::random(), addr, None);
+        }
+        let [inbound, trusted] = [PeerId::random(), PeerId::random()];
+        peers.add_peer(inbound, addr, None);
+        peers.add_peer(trusted, addr, None);
+
+        // connected since it was queued
+        assert!(peers.on_incoming_pending_session(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8))).is_ok());
+        peers.on_incoming_session_established(inbound, "5.6.7.8:40404".parse().unwrap());
+        // trusted since it was queued, so it is dialed as a trusted peer once known
+        peers.add_trusted_peer_id(trusted);
+
+        peers.fill_outbound_slots();
+        assert!(peers.peers[&inbound].state.is_incoming());
+        assert!(!peers.peers.contains_key(&trusted));
+        assert!(peers.candidates.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_candidate_kept_after_session_once_set_has_room() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        for _ in 0..MAX_TRACKED_PEERS {
+            peers.add_peer(PeerId::random(), addr, None);
+        }
+        let candidate = PeerId::random();
+        peers.add_peer(candidate, addr, None);
+        let tracked = *peers.peers.keys().next().unwrap();
+        peers.remove_peer(tracked);
+
+        // kept only once its session succeeds
+        peers.fill_outbound_slots();
+        assert!(peers.peers[&candidate].remove_after_disconnect);
+        peers.on_active_outgoing_established(candidate);
+        assert!(!peers.peers[&candidate].remove_after_disconnect);
     }
 
     #[tokio::test]
