@@ -539,7 +539,7 @@ impl TestBlockFactory {
     }
 }
 
-#[test]
+#[reth_concurrency::test]
 fn test_tree_persist_block_batch() {
     let tree_config = TreeConfig::default();
     let chain_spec = MAINNET.clone();
@@ -579,7 +579,7 @@ fn test_tree_persist_block_batch() {
     }
 }
 
-#[test]
+#[reth_concurrency::test]
 fn block_access_list_decode_returns_invalid_with_null_latest_valid_hash() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     let parent_hash = test_harness.tree.state.tree_state.canonical_block_hash();
@@ -595,7 +595,7 @@ fn block_access_list_decode_returns_invalid_with_null_latest_valid_hash() {
     assert_eq!(status.latest_valid_hash, None);
 }
 
-#[test]
+#[reth_concurrency::test]
 fn payload_decode_error_returns_invalid_with_null_latest_valid_hash() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..2).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks);
@@ -622,7 +622,7 @@ fn payload_decode_error_returns_invalid_with_null_latest_valid_hash() {
     assert_eq!(status.latest_valid_hash, Some(parent_hash));
 }
 
-#[test]
+#[reth_concurrency::test]
 fn block_access_list_decode_resend_returns_null_latest_valid_hash() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..2).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks);
@@ -709,7 +709,7 @@ async fn test_tree_persist_blocks() {
     }
 }
 
-#[test]
+#[reth_concurrency::test]
 fn on_new_persisted_block_queues_sparse_trie_prune_request() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
@@ -721,7 +721,7 @@ fn on_new_persisted_block_queues_sparse_trie_prune_request() {
     assert!(test_harness.tree.state.pending_sparse_trie_prune());
 }
 
-#[test]
+#[reth_concurrency::test]
 fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let configs = [
@@ -758,7 +758,7 @@ fn payload_build_tracker_notifies_after_last_lease_drops() {
     assert_eq!(finished.try_recv(), Ok(()));
 }
 
-#[test]
+#[reth_concurrency::test]
 fn persistence_completion_does_not_wait_for_active_payload_jobs() {
     let config = TreeConfig::default()
         .with_has_enough_parallelism(true)
@@ -790,7 +790,7 @@ fn persistence_completion_does_not_wait_for_active_payload_jobs() {
     assert!(test_harness.tree.canonical_in_memory_state().state_by_hash(persisted_hash).is_none());
 }
 
-#[test]
+#[reth_concurrency::test]
 fn backfill_action_waits_while_payload_build_is_active() {
     let (mut test_harness, _, action) = deferred_backfill_harness();
     let payload_build = test_harness.tree.payload_builds.acquire();
@@ -813,7 +813,7 @@ fn backfill_action_waits_while_payload_build_is_active() {
     assert_eq!(emitted_action, action);
 }
 
-#[test]
+#[reth_concurrency::test]
 fn forkchoice_notifies_active_backfill_of_a_new_head() {
     let mut harness = TestHarness::with_config(MAINNET.clone(), TreeConfig::default());
     harness.tree.backfill_sync_state = BackfillSyncState::Active;
@@ -836,7 +836,7 @@ fn forkchoice_notifies_active_backfill_of_a_new_head() {
     assert!(harness.tree.backfill_sync_state.is_active());
 }
 
-#[test]
+#[reth_concurrency::test]
 fn forkchoice_does_not_notify_a_backfill_awaiting_revalidation() {
     let mut harness = TestHarness::with_config(MAINNET.clone(), TreeConfig::default());
     harness.tree.backfill_sync_state = BackfillSyncState::PendingRevalidation;
@@ -870,7 +870,7 @@ fn deferred_backfill_harness() -> (TestHarness, Vec<ExecutedBlock>, BackfillActi
     (test_harness, canonical_blocks, BackfillAction::Start(target_hash.into()))
 }
 
-#[test]
+#[reth_concurrency::test]
 fn backfill_action_catches_up_state_trie_before_starting_pipeline() {
     let (mut test_harness, blocks, action) = deferred_backfill_harness();
     let state_trie_tip = blocks[2].recovered_block().num_hash();
@@ -924,7 +924,7 @@ fn backfill_action_catches_up_state_trie_before_starting_pipeline() {
     assert_eq!(emitted_action, action);
 }
 
-#[test]
+#[reth_concurrency::test]
 fn deferred_backfill_is_dropped_when_target_becomes_local() {
     let (mut test_harness, blocks, action) = deferred_backfill_harness();
     let state_trie_tip = blocks[2].recovered_block().num_hash();
@@ -954,7 +954,7 @@ fn deferred_backfill_is_dropped_when_target_becomes_local() {
     assert!(test_harness.from_tree_rx.try_recv().is_err());
 }
 
-#[test]
+#[reth_concurrency::test]
 fn deferred_backfill_uses_latest_sync_target() {
     let (mut test_harness, blocks, original_action) = deferred_backfill_harness();
     let database_tip = blocks[4].recovered_block().num_hash();
@@ -990,7 +990,7 @@ fn deferred_backfill_uses_latest_sync_target() {
     assert_ne!(BackfillAction::Start(target), original_action);
 }
 
-#[test]
+#[reth_concurrency::test]
 fn backfill_request_is_preserved_while_persistence_is_in_flight() {
     let (mut test_harness, blocks, action) = deferred_backfill_harness();
     let state_trie_tip = blocks[2].recovered_block().num_hash();
@@ -1037,7 +1037,7 @@ fn backfill_request_is_preserved_while_persistence_is_in_flight() {
     assert_eq!(emitted_action, action);
 }
 
-#[test]
+#[reth_concurrency::test]
 fn a_backfill_starts_with_the_latest_finalized_block() {
     let mut harness = TestHarness::with_config(MAINNET.clone(), TreeConfig::default());
     let finalized = B256::repeat_byte(0x41);
@@ -1060,7 +1060,7 @@ fn a_backfill_starts_with_the_latest_finalized_block() {
     ));
 }
 
-#[test]
+#[reth_concurrency::test]
 fn configured_persistence_suppression_tracks_payload_job_lifetime() {
     let config = TreeConfig::default()
         .with_has_enough_parallelism(true)
@@ -1077,7 +1077,7 @@ fn configured_persistence_suppression_tracks_payload_job_lifetime() {
     assert!(test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).is_some());
 }
 
-#[test]
+#[reth_concurrency::test]
 fn remove_blocks_clears_pending_sparse_trie_prune_request() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     test_harness.tree.persistence_state.last_persisted_block =
@@ -1187,7 +1187,7 @@ async fn test_engine_request_during_backfill() {
     assert!(resp.payload_status.is_syncing());
 }
 
-#[test]
+#[reth_concurrency::test]
 fn test_disconnected_payload() {
     let s = include_str!("../../test-data/holesky/2.rlp");
     let data = Bytes::from_str(s).unwrap();
@@ -1214,7 +1214,7 @@ fn test_disconnected_payload() {
     assert_eq!(*buffered, sealed_clone);
 }
 
-#[test]
+#[reth_concurrency::test]
 fn test_disconnected_block() {
     let s = include_str!("../../test-data/holesky/2.rlp");
     let data = Bytes::from_str(s).unwrap();
@@ -1236,7 +1236,7 @@ fn test_disconnected_block() {
     );
 }
 
-#[test]
+#[reth_concurrency::test]
 fn test_validated_payload_bal_is_inserted_into_store() {
     let mut block_builder = TestBlockBuilder::eth();
     let parent = block_builder.get_executed_block_with_number(1, B256::ZERO);
@@ -1306,7 +1306,7 @@ async fn test_holesky_payload() {
     assert!(resp.is_syncing());
 }
 
-#[test]
+#[reth_concurrency::test]
 fn test_backpressure_waits_for_persistence_before_reading_incoming() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
@@ -1377,7 +1377,7 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
     assert_eq!(test_harness.tree.incoming.len(), 0);
 }
 
-#[test]
+#[reth_concurrency::test]
 fn test_backpressure_excludes_in_memory_buffer() {
     for (canonical_tip, expected_backpressure) in [(14_u64, false), (15, true)] {
         let blocks: Vec<_> =
@@ -1531,7 +1531,7 @@ async fn test_tree_state_on_new_head_reorg() {
     );
 }
 
-#[test]
+#[reth_concurrency::test]
 fn test_tree_state_on_new_head_deep_fork() {
     reth_tracing::init_test_tracing();
 
@@ -1598,7 +1598,7 @@ fn test_tree_state_on_new_head_deep_fork() {
     }
 }
 
-#[test]
+#[reth_concurrency::test]
 fn test_tree_state_on_new_head_genesis() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     let genesis = TestBlockBuilder::eth().get_executed_block_with_number(0, B256::ZERO);
@@ -1679,7 +1679,7 @@ async fn test_get_canonical_blocks_to_persist() {
     );
 }
 
-#[test]
+#[reth_concurrency::test]
 fn threshold_persistence_uses_canonical_in_memory_chain_length() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..10).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
@@ -1698,7 +1698,7 @@ fn threshold_persistence_uses_canonical_in_memory_chain_length() {
     assert!(test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).is_some());
 }
 
-#[test]
+#[reth_concurrency::test]
 fn test_threshold_persistence_with_state_masking_blocks() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..9).collect();
@@ -1852,7 +1852,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     }
 }
 
-#[test]
+#[reth_concurrency::test]
 fn backfill_finish_drops_in_memory_blocks_through_the_backfill_height() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..5).collect();
@@ -1884,7 +1884,7 @@ fn backfill_finish_drops_in_memory_blocks_through_the_backfill_height() {
     }
 }
 
-#[test]
+#[reth_concurrency::test]
 fn backfill_finish_drops_in_memory_blocks_below_the_backfill_height_off_the_persisted_chain() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..5).collect();
@@ -2141,7 +2141,7 @@ async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build()
 }
 
 /// Test that verifies the happy path where a new payload extends the canonical chain
-#[test]
+#[reth_concurrency::test]
 fn test_on_new_payload_canonical_insertion() {
     reth_tracing::init_test_tracing();
 
@@ -2178,7 +2178,7 @@ fn test_on_new_payload_canonical_insertion() {
 }
 
 /// Test that ensures payloads are rejected when linking to a known-invalid ancestor
-#[test]
+#[reth_concurrency::test]
 fn test_on_new_payload_invalid_ancestor() {
     reth_tracing::init_test_tracing();
 
@@ -2238,7 +2238,7 @@ fn test_on_new_payload_invalid_ancestor() {
 }
 
 /// Test that confirms payloads received during backfill sync are buffered and reported as syncing
-#[test]
+#[reth_concurrency::test]
 fn test_on_new_payload_backfill_buffering() {
     reth_tracing::init_test_tracing();
 
@@ -2281,7 +2281,7 @@ fn test_on_new_payload_backfill_buffering() {
 }
 
 /// Test that captures the Engine-API rule where malformed payloads report latestValidHash = None
-#[test]
+#[reth_concurrency::test]
 fn test_on_new_payload_malformed_payload() {
     reth_tracing::init_test_tracing();
 
@@ -2328,7 +2328,7 @@ fn test_on_new_payload_malformed_payload() {
 }
 
 /// Test different state-root job paths: the sparse-trie job and the synchronous fallback.
-#[test]
+#[reth_concurrency::test]
 fn test_state_root_strategy_paths() {
     reth_tracing::init_test_tracing();
 
@@ -2396,7 +2396,7 @@ fn test_state_root_strategy_paths() {
 // - Different validation scenarios (valid, invalid consensus, invalid execution blocks)
 
 /// Test `Synchronous` strategy when persistence is active
-#[test]
+#[reth_concurrency::test]
 fn test_validate_block_synchronous_strategy_during_persistence() {
     reth_tracing::init_test_tracing();
 
@@ -2422,7 +2422,7 @@ fn test_validate_block_synchronous_strategy_during_persistence() {
 
 /// Test multiple validation scenarios including valid, consensus-invalid, and execution-invalid
 /// blocks with proper result validation
-#[test]
+#[reth_concurrency::test]
 fn test_validate_block_multiple_scenarios() {
     reth_tracing::init_test_tracing();
 
@@ -2460,7 +2460,7 @@ mod check_invalid_ancestors_tests {
     use super::*;
 
     /// Test that `find_invalid_ancestor` returns None when no invalid ancestors exist
-    #[test]
+    #[reth_concurrency::test]
     fn test_find_invalid_ancestor_no_invalid() {
         reth_tracing::init_test_tracing();
 
@@ -2483,7 +2483,7 @@ mod check_invalid_ancestors_tests {
     }
 
     /// Test that `find_invalid_ancestor` detects an invalid parent
-    #[test]
+    #[reth_concurrency::test]
     fn test_find_invalid_ancestor_with_invalid_parent() {
         reth_tracing::init_test_tracing();
 
@@ -2533,7 +2533,7 @@ mod check_invalid_ancestors_tests {
     }
 
     /// Test genesis block handling (`parent_hash` = `B256::ZERO`)
-    #[test]
+    #[reth_concurrency::test]
     fn test_genesis_block_handling() {
         reth_tracing::init_test_tracing();
 
@@ -2557,7 +2557,7 @@ mod check_invalid_ancestors_tests {
     }
 
     /// Test malformed payload with invalid ancestor scenario
-    #[test]
+    #[reth_concurrency::test]
     fn test_malformed_payload_with_invalid_ancestor() {
         reth_tracing::init_test_tracing();
 
@@ -2588,7 +2588,7 @@ mod check_invalid_ancestors_tests {
     }
 
     /// Test that `find_invalid_ancestor` detects the block itself in the invalid cache
-    #[test]
+    #[reth_concurrency::test]
     fn test_find_invalid_ancestor_detects_block_itself() {
         reth_tracing::init_test_tracing();
 
@@ -2647,7 +2647,7 @@ mod payload_execution_tests {
     use super::*;
 
     /// Test `try_insert_payload` with different `InsertPayloadOk` variants
-    #[test]
+    #[reth_concurrency::test]
     fn test_try_insert_payload_variants() {
         reth_tracing::init_test_tracing();
 
@@ -2669,7 +2669,7 @@ mod payload_execution_tests {
     }
 
     /// Test `try_buffer_payload` with validation errors
-    #[test]
+    #[reth_concurrency::test]
     fn test_buffer_payload_validation_errors() {
         reth_tracing::init_test_tracing();
 
@@ -2689,7 +2689,7 @@ mod payload_execution_tests {
     }
 
     /// Test `try_buffer_payload` with valid payload
-    #[test]
+    #[reth_concurrency::test]
     fn test_buffer_payload_valid_payload() {
         reth_tracing::init_test_tracing();
 
@@ -2992,7 +2992,7 @@ mod forkchoice_updated_tests {
         assert!(result.is_some(), "OpStack should handle canonical head");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_update_reorg_metrics() {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
@@ -3016,7 +3016,7 @@ mod forkchoice_updated_tests {
     }
 
     /// Test that engine termination persists all blocks and signals completion.
-    #[test]
+    #[reth_concurrency::test]
     fn test_engine_termination_with_everything_persisted() {
         let chain_spec = MAINNET.clone();
         let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
@@ -3118,7 +3118,7 @@ mod forkchoice_updated_tests {
 /// Reproduces the hive test failure:
 ///   "Sync after 2 blocks - Withdrawals on Block 2 - Multiple Withdrawal Accounts -
 ///    No Transactions: Timeout while waiting for secondary client to sync"
-#[test]
+#[reth_concurrency::test]
 fn test_on_valid_downloaded_non_head_sync_target_continues_to_head() {
     reth_tracing::init_test_tracing();
 
@@ -3186,7 +3186,7 @@ fn test_on_valid_downloaded_non_head_sync_target_continues_to_head() {
 
 /// Tests that `on_valid_downloaded_block` returns `MakeCanonical` when the downloaded block
 /// IS the sync target head (the normal non-buggy path).
-#[test]
+#[reth_concurrency::test]
 fn test_on_valid_downloaded_head_sync_target_returns_make_canonical() {
     reth_tracing::init_test_tracing();
 
@@ -3231,7 +3231,7 @@ fn test_on_valid_downloaded_head_sync_target_returns_make_canonical() {
 
 /// Tests that canonicalizing a downloaded sync target head also applies the tracked finalized
 /// block from the original `SYNCING` forkchoice state.
-#[test]
+#[reth_concurrency::test]
 fn test_canonicalizing_downloaded_sync_target_head_updates_finalized() {
     reth_tracing::init_test_tracing();
 
@@ -3293,7 +3293,7 @@ fn test_canonicalizing_downloaded_sync_target_head_updates_finalized() {
 
 /// Tests that pipeline backfill reaching a syncing FCU with `head == finalized` applies the
 /// finalized block without waiting for another FCU.
-#[test]
+#[reth_concurrency::test]
 fn test_backfill_reaching_sync_target_head_updates_finalized() {
     reth_tracing::init_test_tracing();
 
@@ -3346,7 +3346,7 @@ fn test_backfill_reaching_sync_target_head_updates_finalized() {
 // branch targets finalized. When the CL has no finalized hash yet, the optimistic fallback to
 // head is handled by `backfill_sync_target`.
 
-#[test]
+#[reth_concurrency::test]
 fn test_backfill_target_hash_eth_returns_finalized() {
     let test_harness = TestHarness::new(MAINNET.clone());
     let head = B256::repeat_byte(0xAA);
@@ -3360,7 +3360,7 @@ fn test_backfill_target_hash_eth_returns_finalized() {
     assert_eq!(test_harness.tree.backfill_target_hash(state), finalized);
 }
 
-#[test]
+#[reth_concurrency::test]
 fn test_backfill_target_hash_eth_returns_zero_finalized() {
     let test_harness = TestHarness::new(MAINNET.clone());
     let head = B256::repeat_byte(0xAA);
@@ -3373,7 +3373,7 @@ fn test_backfill_target_hash_eth_returns_zero_finalized() {
     assert_eq!(test_harness.tree.backfill_target_hash(state), B256::ZERO);
 }
 
-#[test]
+#[reth_concurrency::test]
 fn test_backfill_target_hash_opstack_returns_head() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     test_harness.tree.engine_kind = EngineApiKind::OpStack;
@@ -3389,7 +3389,7 @@ fn test_backfill_target_hash_opstack_returns_head() {
     assert_eq!(test_harness.tree.backfill_target_hash(state), head);
 }
 
-#[test]
+#[reth_concurrency::test]
 fn test_exceeds_backfill_run_threshold_uses_configured_value() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     let default_threshold = DEFAULT_BACKFILL_RUN_THRESHOLD;
@@ -3402,7 +3402,7 @@ fn test_exceeds_backfill_run_threshold_uses_configured_value() {
     assert!(!test_harness.tree.exceeds_backfill_run_threshold(10, 9));
 }
 
-#[test]
+#[reth_concurrency::test]
 fn test_backfill_sync_target_without_sync_state_returns_none() {
     let test_harness = TestHarness::new(MAINNET.clone());
     assert_eq!(
@@ -3413,7 +3413,7 @@ fn test_backfill_sync_target_without_sync_state_returns_none() {
 
 /// On OP Stack, a disconnected downloaded block whose missing parent is far ahead of the
 /// canonical tip should trigger a backfill targeting `head_block_hash`, not finalized.
-#[test]
+#[reth_concurrency::test]
 fn test_on_disconnected_downloaded_block_opstack_targets_head() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     test_harness.tree.engine_kind = EngineApiKind::OpStack;
@@ -3455,7 +3455,7 @@ fn test_on_disconnected_downloaded_block_opstack_targets_head() {
 
 /// On Ethereum, a disconnected downloaded block whose missing parent is far ahead of the
 /// canonical tip should trigger a backfill targeting `finalized_block_hash`.
-#[test]
+#[reth_concurrency::test]
 fn test_on_disconnected_downloaded_block_eth_targets_finalized() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
 
@@ -3496,7 +3496,7 @@ fn test_on_disconnected_downloaded_block_eth_targets_finalized() {
 
 /// On Ethereum, a zero finalized hash means optimistic sync. The helper still selects finalized,
 /// but the sync-target builder falls back to `head_block_hash`.
-#[test]
+#[reth_concurrency::test]
 fn test_on_disconnected_downloaded_block_eth_zero_finalized_targets_head() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
 
@@ -3633,7 +3633,7 @@ async fn test_on_backfill_sync_finished_resumes_live_sync_with_higher_threshold(
     }
 }
 
-#[test]
+#[reth_concurrency::test]
 fn test_backfill_threshold_above_header_limit_triggers_backfill() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     let target_hash = B256::repeat_byte(0xAA);
@@ -3672,7 +3672,7 @@ fn test_backfill_threshold_above_header_limit_triggers_backfill() {
 }
 
 /// A stale persisted hash must not count as an ancestor after an in-memory reorg.
-#[test]
+#[reth_concurrency::test]
 fn test_forkchoice_rejects_stale_persisted_prefix_hash() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     let old: Vec<_> = test_harness.block_builder.get_executed_blocks(0..3).collect();
