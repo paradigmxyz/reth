@@ -158,6 +158,8 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                     // <https://github.com/ethereum/execution-apis/blob/main/docs-api/docs/ethsimulatev1-notes.mdx>.
                     evm_env.version_mut().tx_total_gas_cap = u64::MAX;
 
+                    evm_env.version_mut().memory_limit = this.evm_memory_limit();
+
                     if !validation {
                         // If not explicitly required, we disable nonce check <https://github.com/paradigmxyz/reth/issues/16108>
                         evm_env.version_mut().features.remove(evm2::EvmFeatures::NONCE_CHECK);

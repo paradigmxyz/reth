@@ -1222,6 +1222,60 @@ async fn eth_call_without_gas_with_max_rpc_gas_cap() -> eyre::Result<()> {
     Ok(())
 }
 
+/// `--rpc.evm-memory-limit` applies to `eth_call`, `eth_estimateGas` and `eth_simulateV1` alike.
+#[tokio::test]
+async fn rpc_evm_memory_limit_applies_to_all_call_methods() -> eyre::Result<()> {
+    const LIMIT: u64 = 1 << 20;
+
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Osaka)
+        .with_rpc_modifier(|mut rpc| {
+            rpc.rpc_evm_memory_limit = LIMIT;
+            rpc
+        })
+        .build_single()
+        .await?;
+    let provider = node.rpc_provider();
+
+    // Writes one byte at offset `CALLDATALOAD(0)`: `PUSH0 CALLDATALOAD PUSH0 SWAP1 MSTORE8 STOP`.
+    let writer = Address::with_last_byte(0x42);
+    let overrides = StateOverride::from_iter([(
+        writer,
+        AccountOverride::default().with_code(bytes!("5f355f905300")),
+    )]);
+    let write_at = |offset: u64| {
+        TransactionRequest::default()
+            .to(writer)
+            .input(Bytes::from(U256::from(offset).to_be_bytes::<32>()).into())
+    };
+
+    // The last byte that fits in the limit, then the first one past it.
+    for (offset, fits) in [(LIMIT - 1, true), (LIMIT, false)] {
+        let tx = write_at(offset);
+
+        let call: Result<Bytes, _> =
+            provider.raw_request("eth_call".into(), (&tx, "latest", &overrides)).await;
+        assert_eq!(call.is_ok(), fits, "eth_call at {offset}: {call:?}");
+
+        let estimate: Result<U256, _> =
+            provider.raw_request("eth_estimateGas".into(), (&tx, "latest", &overrides)).await;
+        assert_eq!(estimate.is_ok(), fits, "eth_estimateGas at {offset}: {estimate:?}");
+
+        let payload = serde_json::json!({
+            "blockStateCalls": [{ "stateOverrides": &overrides, "calls": [&tx] }],
+        });
+        let blocks: serde_json::Value =
+            provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+        let status = &blocks[0]["calls"][0]["status"];
+        assert_eq!(
+            status,
+            if fits { "0x1" } else { "0x0" },
+            "eth_simulateV1 at {offset}: {blocks}"
+        );
+    }
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_test_account_tx_builder() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
