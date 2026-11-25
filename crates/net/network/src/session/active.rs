@@ -34,7 +34,7 @@ use reth_eth_wire::{
 };
 use reth_eth_wire_types::{
     message::RequestPair, snap::SnapProtocolMessage, NewPooledTransactionHashes,
-    PooledTransactions, PooledTransactionsEth72, RawCapabilityMessage,
+    RawCapabilityMessage,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::{PeerRequest, RequestMessage};
@@ -362,11 +362,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::PooledTransactions(resp) => {
                 on_response!(resp, GetPooledTransactions)
             }
-            EthMessage::PooledTransactionsEth72(resp) => {
-                // The eth/72 type only selects the wire encoding, so requests stay version-neutral.
-                let resp = resp.map(PooledTransactions::from);
-                on_response!(resp, GetPooledTransactions)
-            }
             EthMessage::GetNodeData(req) => {
                 on_request!(req, NodeData, GetNodeData)
             }
@@ -597,15 +592,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     fn handle_outgoing_response(&mut self, id: u64, resp: PeerResponseResult<N>) {
         match resp.try_into_message(id) {
             Ok(RequestMessage::Eth(msg)) => {
-                // eth/72 peers fetch blobs with `GetCells`, so their responses carry no blobs.
-                let msg = match msg {
-                    EthMessage::PooledTransactions(response) if self.conn.version().is_eth72() => {
-                        EthMessage::PooledTransactionsEth72(
-                            response.map(PooledTransactionsEth72::from),
-                        )
-                    }
-                    msg => msg,
-                };
                 self.queued_outgoing.push_back(msg.into());
             }
             Ok(RequestMessage::Snap(msg)) => {

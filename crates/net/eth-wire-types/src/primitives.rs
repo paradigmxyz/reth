@@ -1,6 +1,6 @@
 //! Abstraction over primitive types in network messages.
 
-use crate::{EncodableEth72PooledTransaction, NewBlockPayload};
+use crate::NewBlockPayload;
 use alloy_consensus::{RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt};
 use alloy_rlp::{Decodable, Encodable};
 use core::fmt::Debug;
@@ -53,10 +53,7 @@ pub trait NetworkPrimitives: Send + Sync + Unpin + Clone + Debug + 'static {
     /// For EIP-4844 blob transactions, this includes the full blob sidecar with
     /// KZG commitments and proofs that are needed for validation but are not
     /// included in the consensus block format.
-    type PooledTransaction: SignedTransaction
-        + TryFrom<Self::BroadcastedTransaction>
-        + EncodableEth72PooledTransaction
-        + 'static;
+    type PooledTransaction: SignedTransaction + TryFrom<Self::BroadcastedTransaction> + 'static;
 
     /// The transaction type which peers return in `GetReceipts` messages.
     type Receipt: TxReceipt
@@ -105,7 +102,7 @@ pub struct BasicNetworkPrimitives<N: NodePrimitives, Pooled, NewBlock = crate::N
 impl<N, Pooled, NewBlock> NetworkPrimitives for BasicNetworkPrimitives<N, Pooled, NewBlock>
 where
     N: NodePrimitives,
-    Pooled: SignedTransaction + TryFrom<N::SignedTx> + EncodableEth72PooledTransaction + 'static,
+    Pooled: SignedTransaction + TryFrom<N::SignedTx> + 'static,
     NewBlock: NewBlockPayload<Block = N::Block>,
 {
     type BlockHeader = N::BlockHeader;
@@ -119,3 +116,19 @@ where
 
 /// Network primitive types used by Ethereum networks.
 pub type EthNetworkPrimitives = BasicNetworkPrimitives<EthPrimitives, PooledTransactionVariant>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::transaction::PooledTransaction;
+    use reth_ethereum_primitives::TransactionSigned;
+
+    /// eth/72 support must not narrow the pooled transaction types downstream networks can use.
+    #[test]
+    fn basic_network_primitives_accept_any_pooled_transaction() {
+        fn assert_network_primitives<N: NetworkPrimitives>() {}
+        assert_network_primitives::<BasicNetworkPrimitives<EthPrimitives, TransactionSigned>>();
+        assert_network_primitives::<BasicNetworkPrimitives<EthPrimitives, PooledTransaction>>();
+        assert_network_primitives::<EthNetworkPrimitives>();
+    }
+}

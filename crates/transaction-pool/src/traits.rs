@@ -60,7 +60,11 @@ use crate::{
     validate::{TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction},
     AddedTransactionOutcome, AllTransactionsEvents, PriceBumpConfig,
 };
-use alloy_consensus::{error::ValueError, transaction::TxHashRef, BlockHeader, Signed, Typed2718};
+use alloy_consensus::{
+    error::ValueError,
+    transaction::{RlpEcdsaEncodableTx, TxEip4844WithSidecar, TxHashRef},
+    BlockHeader, Signed, Typed2718,
+};
 use alloy_eips::{
     eip2718::{Decodable2718, Encodable2718, WithEncoded},
     eip2930::AccessList,
@@ -68,15 +72,16 @@ use alloy_eips::{
         env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1,
         BlobTransactionValidationError,
     },
-    eip7594::{BlobCellMask, BlobTransactionSidecarVariant},
+    eip7594::{BlobCellMask, BlobSidecarEncoding, BlobTransactionSidecarVariant, Encodable7594},
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
     map::{AddressSet, B256Map},
     Address, Bytes, TxHash, TxKind, B256, U256,
 };
+use alloy_rlp::Header;
 use futures_util::{ready, Stream};
-use reth_eth_wire_types::{EncodableEth72PooledTransaction, HandleMempoolData};
+use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{Block, InMemorySize, Recovered, SealedBlock, SignedTransaction};
@@ -381,7 +386,9 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// transactions served without their blobs, since eth/72 peers fetch them with `GetCells`.
     ///
     /// The size limit counts the transactions without their blobs. Blob transactions whose
-    /// sidecar has no cell proofs can be left out. The default implementation keeps the blobs.
+    /// sidecar has no cell proofs are left out. The default implementation leaves out every blob
+    /// transaction, matching [`PoolTransaction::encoded_length_eth72`], which doesn't announce
+    /// them.
     ///
     /// Consumer: P2P
     fn get_pooled_transaction_elements_without_blobs(
@@ -389,7 +396,9 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
     ) -> Vec<<Self::Transaction as PoolTransaction>::Pooled> {
-        self.get_pooled_transaction_elements(tx_hashes, limit)
+        let mut transactions = self.get_pooled_transaction_elements(tx_hashes, limit);
+        transactions.retain(|tx| !tx.is_eip4844());
+        transactions
     }
 
     /// Returns the pooled transaction variant for the given transaction hash.
@@ -1730,7 +1739,7 @@ impl PoolTransaction for EthPooledTransaction {
     fn from_pooled(tx: Recovered<Self::Pooled>) -> Self {
         let encoded_length = tx.encode_2718_len();
         let blobless_encoded_length =
-            tx.as_eip4844().and_then(|_| tx.eth72_2718_len()).and_then(NonZeroUsize::new);
+            tx.as_eip4844().and_then(eip4844_length_without_blobs).and_then(NonZeroUsize::new);
         let (tx, signer) = tx.into_parts();
         match tx {
             PooledTransactionVariant::Eip4844(tx) => {
@@ -2088,6 +2097,18 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
             }
         }
     }
+}
+
+/// Returns the EIP-2718 length of a blob transaction without its blobs, as served to eth/72 peers.
+///
+/// Returns `None` for a legacy sidecar, which eth/72 can't carry since it has no cell proofs.
+fn eip4844_length_without_blobs(
+    tx: &Signed<TxEip4844WithSidecar<BlobTransactionSidecarVariant>>,
+) -> Option<usize> {
+    let sidecar = tx.tx().sidecar.as_eip7594()?;
+    let payload_length = tx.tx().tx.rlp_encoded_length_with_signature(tx.signature()) +
+        sidecar.encode_7594_len_with(BlobSidecarEncoding::WithoutBlobs);
+    Some(1 + Header { list: true, payload_length }.length_with_payload())
 }
 
 #[cfg(test)]

@@ -10,7 +10,7 @@ use super::{
     broadcast::NewBlockHashes, BlockAccessLists, BlockBodies, BlockHeaders, GetBlockAccessLists,
     GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
     GetReceipts70, NewPooledTransactionHashes66, NewPooledTransactionHashes68, NodeData,
-    PooledTransactions, PooledTransactionsEth72, Receipts, Status, StatusEth69, Transactions,
+    PooledTransactions, Receipts, Status, StatusEth69, Transactions,
 };
 use crate::{
     status::StatusMessage, BlockRangeUpdate, BroadcastPoolTransactions, Cells,
@@ -152,15 +152,13 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 EthMessage::GetPooledTransactions(RequestPair::decode(buf)?)
             }
             EthMessageID::PooledTransactions => {
-                if version >= EthVersion::Eth72 {
-                    EthMessage::PooledTransactionsEth72(RequestPair::decode_with(buf, |buf| {
-                        PooledTransactionsEth72::decode_with_memory_budget(buf, tx_memory_budget)
-                    })?)
-                } else {
-                    EthMessage::PooledTransactions(RequestPair::decode_with(buf, |buf| {
+                EthMessage::PooledTransactions(RequestPair::decode_with(buf, |buf| {
+                    if version >= EthVersion::Eth72 {
+                        PooledTransactions::decode_eth72_with_memory_budget(buf, tx_memory_budget)
+                    } else {
                         PooledTransactions::decode_with_memory_budget(buf, tx_memory_budget)
-                    })?)
-                }
+                    }
+                })?)
             }
             EthMessageID::GetNodeData => {
                 if version >= EthVersion::Eth67 {
@@ -414,11 +412,6 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     BlockRangeUpdate(BlockRangeUpdate),
     /// Represents an encoded message that doesn't match any other variant
     Other(RawCapabilityMessage),
-    /// Represents an eth/72 `PooledTransactions` response, whose blob transactions carry no blobs.
-    ///
-    /// It shares the message ID of [`Self::PooledTransactions`] and only selects the eth/72
-    /// encoding.
-    PooledTransactionsEth72(RequestPair<PooledTransactionsEth72<N::PooledTransaction>>),
 }
 
 impl<N: NetworkPrimitives> EthMessage<N> {
@@ -437,9 +430,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
             Self::BlockBodies(_) => EthMessageID::BlockBodies,
             Self::GetPooledTransactions(_) => EthMessageID::GetPooledTransactions,
-            Self::PooledTransactions(_) | Self::PooledTransactionsEth72(_) => {
-                EthMessageID::PooledTransactions
-            }
+            Self::PooledTransactions(_) => EthMessageID::PooledTransactions,
             Self::GetNodeData(_) => EthMessageID::GetNodeData,
             Self::NodeData(_) => EthMessageID::NodeData,
             Self::GetReceipts(_) | Self::GetReceipts70(_) => EthMessageID::GetReceipts,
@@ -473,7 +464,6 @@ impl<N: NetworkPrimitives> EthMessage<N> {
         matches!(
             self,
             Self::PooledTransactions(_) |
-                Self::PooledTransactionsEth72(_) |
                 Self::Receipts(_) |
                 Self::Receipts69(_) |
                 Self::Receipts70(_) |
@@ -502,7 +492,6 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::BlockBodies(bodies) => bodies.encode(out),
             Self::GetPooledTransactions(request) => request.encode(out),
             Self::PooledTransactions(transactions) => transactions.encode(out),
-            Self::PooledTransactionsEth72(transactions) => transactions.encode(out),
             Self::GetNodeData(request) => request.encode(out),
             Self::NodeData(data) => data.encode(out),
             Self::GetReceipts(request) => request.encode(out),
@@ -533,7 +522,6 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::BlockBodies(bodies) => bodies.length(),
             Self::GetPooledTransactions(request) => request.length(),
             Self::PooledTransactions(transactions) => transactions.length(),
-            Self::PooledTransactionsEth72(transactions) => transactions.length(),
             Self::GetNodeData(request) => request.length(),
             Self::NodeData(data) => data.length(),
             Self::GetReceipts(request) => request.length(),
@@ -884,14 +872,17 @@ mod tests {
     use crate::{
         message::RequestPair, BlockAccessLists, Cells, EthMessage, EthMessageID,
         EthNetworkPrimitives, EthVersion, GetBlockAccessLists, GetCells, GetNodeData, NodeData,
-        PooledTransactions, PooledTransactionsEth72, ProtocolMessage, RawCapabilityMessage, Status,
-        StatusMessage,
+        PooledTransactions, ProtocolMessage, RawCapabilityMessage, Status, StatusMessage,
     };
-    use alloy_eips::eip7594::Cell;
+    use alloy_consensus::{SignableTransaction, TxEip4844, TxEip4844WithSidecar};
+    use alloy_eips::{
+        eip4844::{Blob, Bytes48},
+        eip7594::{BlobTransactionSidecarEip7594, Cell},
+    };
     use alloy_hardforks::{ForkHash, ForkId};
-    use alloy_primitives::{hex, keccak256, B128, B256, U256};
+    use alloy_primitives::{hex, keccak256, Signature, B128, B256, U256};
     use alloy_rlp::{Decodable, Encodable, Error, Header};
-    use reth_ethereum_primitives::BlockBody;
+    use reth_ethereum_primitives::{BlockBody, PooledTransactionVariant};
 
     fn encode<T: Encodable>(value: T) -> Vec<u8> {
         let mut buf = vec![];
@@ -1063,22 +1054,48 @@ mod tests {
 
     #[test]
     fn pooled_transactions_decode_by_eth_version() {
-        let response = RequestPair { request_id: 7, message: PooledTransactions(Vec::new()) };
-        let mut packet = vec![EthMessageID::PooledTransactions.to_u8()];
-        packet.extend(alloy_rlp::encode(&response));
-        let decode = |version| {
-            ProtocolMessage::<EthNetworkPrimitives>::decode_message(version, &mut packet.as_slice())
-                .unwrap()
-                .message
-        };
-        assert_eq!(decode(EthVersion::Eth71), EthMessage::PooledTransactions(response));
-        assert_eq!(
-            decode(EthVersion::Eth72),
-            EthMessage::PooledTransactionsEth72(RequestPair {
-                request_id: 7,
-                message: PooledTransactionsEth72(Vec::new()),
-            })
+        let sidecar = BlobTransactionSidecarEip7594::new(
+            vec![Blob::repeat_byte(1)],
+            vec![Bytes48::repeat_byte(2)],
+            vec![Bytes48::repeat_byte(3); 128],
         );
+        let full = PooledTransactionVariant::Eip4844(
+            TxEip4844WithSidecar {
+                tx: TxEip4844 { blob_versioned_hashes: vec![B256::ZERO], ..Default::default() },
+                sidecar: sidecar.into(),
+            }
+            .into_signed(Signature::test_signature()),
+        );
+        let mut without_blobs = full.clone();
+        without_blobs.clear_eip7594_blobs();
+        let decode = |version, tx: &PooledTransactionVariant| {
+            let response =
+                RequestPair { request_id: 7, message: PooledTransactions(vec![tx.clone()]) };
+            let mut packet = vec![EthMessageID::PooledTransactions.to_u8()];
+            packet.extend(alloy_rlp::encode(&response));
+            let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+                version,
+                &mut packet.as_slice(),
+            );
+            (decoded.map(|message| message.message), EthMessage::PooledTransactions(response))
+        };
+
+        for (version, tx) in [
+            (EthVersion::Eth71, &full),
+            (EthVersion::Eth71, &without_blobs),
+            (EthVersion::Eth72, &without_blobs),
+        ] {
+            let (decoded, expected) = decode(version, tx);
+            assert_eq!(decoded.unwrap(), expected);
+        }
+        // eth/72 peers fetch blobs with `GetCells`, so a body with blobs is invalid.
+        let (decoded, _) = decode(EthVersion::Eth72, &full);
+        assert!(matches!(
+            decoded,
+            Err(MessageError::RlpError(Error::Custom(
+                "expected a blobless eth/72 pooled transaction"
+            )))
+        ));
     }
 
     #[test]
