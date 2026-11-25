@@ -423,21 +423,7 @@ pub trait LoadState:
             };
 
             self.spawn_blocking_io(move |this| {
-                let state = match pending {
-                    Some(PendingStateSource::Block(pending)) => this
-                        .provider()
-                        .state_with_block_appended(
-                            pending.block().parent_hash(),
-                            pending.executed_block,
-                        )
-                        .or_else(|_| this.provider().state_by_block_id(BlockId::pending()))
-                        .map_err(Self::Error::from_eth_err)?,
-                    Some(PendingStateSource::State(state)) => state,
-                    None if at.is_latest() => this.latest_state()?,
-                    None => {
-                        this.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)?
-                    }
-                };
+                let state = open_state_at(&this, at, pending)?;
                 f(this, state)
             })
             .await
@@ -446,17 +432,23 @@ pub trait LoadState:
 
     /// Executes `f` with the state at the given [`BlockId`], on the calling task if possible.
     ///
-    /// For reads at the latest block, `f` runs directly on the calling task while a permit from
-    /// [`SpawnBlocking::try_acquire_inline_io`] is held. This skips the round trip through the
-    /// blocking pool, which costs more than a short read. When no permit is available, or for any
-    /// other block, this falls back to [`Self::spawn_blocking_io_with_state`].
+    /// For reads at the latest or pending block, `f` runs through
+    /// [`SpawnBlocking::spawn_point_read`], so it runs directly on the calling task while a permit
+    /// from [`SpawnBlocking::try_acquire_inline_io`] is held. This skips the round trip through
+    /// the blocking pool, which costs more than a short read. When no permit is available, or for
+    /// any other block, this falls back to the blocking pool.
+    ///
+    /// For pending reads, the pending-state source is resolved first, as in
+    /// [`Self::spawn_blocking_io_with_state`], so building a local pending block stays on the
+    /// blocking pool. Only opening its state runs inline.
     ///
     /// Inline reads run on an async worker thread and block it for their whole duration. That
-    /// covers more than the lookups in `f`: opening the latest state can wait for another thread,
-    /// for example while the overlay of the in-memory blocks is rebuilt after a new block, and a
-    /// lookup that the in-memory blocks do not cover reads the database, which can wait for disk.
-    /// The permit only bounds how many workers are blocked at once, so only use this for reads
-    /// that do a small, bounded number of state lookups.
+    /// covers more than the lookups in `f`: opening the state can wait for another thread, for
+    /// example while the overlay of the in-memory blocks is rebuilt after a new block, it can
+    /// compute the overlay of a new pending block, and a lookup that the in-memory blocks do not
+    /// cover reads the database, which can wait for disk. The permit only bounds how many workers
+    /// are blocked at once, so only use this for reads that do a small, bounded number of state
+    /// lookups.
     fn spawn_point_read_with_state<F, R>(
         &self,
         at: BlockId,
@@ -468,14 +460,19 @@ pub trait LoadState:
         R: Send + 'static,
     {
         async move {
-            if at.is_latest() &&
-                let Some(_permit) = self.try_acquire_inline_io()
-            {
-                let state = self.latest_state()?;
-                return f(self.clone(), state)
-            }
+            let pending = if at.is_pending() {
+                self.local_pending_block_or_state().await.ok().flatten()
+            } else if at.is_latest() {
+                None
+            } else {
+                return self.spawn_blocking_io_with_state(at, f).await
+            };
 
-            self.spawn_blocking_io_with_state(at, f).await
+            self.spawn_point_read(move |this| {
+                let state = open_state_at(&this, at, pending)?;
+                f(this, state)
+            })
+            .await
         }
     }
 
@@ -681,5 +678,26 @@ pub trait LoadState:
                 .unwrap_or_default()
                 .original_bytes())
         })
+    }
+}
+
+/// Opens the state at `at`, using the resolved local `pending` source for pending reads.
+///
+/// `pending` is ignored unless `at` is pending. A pending block whose state cannot be opened, or a
+/// missing pending source, falls back to the provider's pending state.
+fn open_state_at<T: LoadState>(
+    this: &T,
+    at: BlockId,
+    pending: Option<PendingStateSource<T::Primitives>>,
+) -> Result<StateProviderBox, T::Error> {
+    match pending {
+        Some(PendingStateSource::Block(pending)) => this
+            .provider()
+            .state_with_block_appended(pending.block().parent_hash(), pending.executed_block)
+            .or_else(|_| this.provider().state_by_block_id(BlockId::pending()))
+            .map_err(T::Error::from_eth_err),
+        Some(PendingStateSource::State(state)) => Ok(state),
+        None if at.is_latest() => this.latest_state(),
+        None => this.provider().state_by_block_id(at).map_err(T::Error::from_eth_err),
     }
 }

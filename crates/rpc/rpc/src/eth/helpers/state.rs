@@ -41,7 +41,7 @@ where
         let at = block_id.unwrap_or_default();
         async move {
             if at.is_pending() {
-                self.spawn_blocking_io(move |this| {
+                self.spawn_point_read(move |this| {
                     let state =
                         this.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)?;
                     this.transaction_count_with_state(address, at, &state)
@@ -432,11 +432,35 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn point_read_at_pending_runs_inline() {
+        let address = Address::random();
+        let accounts =
+            AddressMap::from_iter([(address, ExtendedAccount::new(0, U256::from(1337)))]);
+        let eth_api = mock_eth_api(accounts);
+        let mut block = Block::default();
+        block.header.number = 13_000_000;
+        block.header.timestamp = 1_629_000_000;
+        block.header.gas_limit = 30_000_000;
+        block.header.base_fee_per_gas = Some(1_000_000_000);
+        eth_api.provider().add_block(B256::ZERO, block);
+
+        assert_eq!(point_read_thread(&eth_api, BlockId::pending()).await, thread::current().id());
+        // The local pending block was built on the blocking pool, only its state opened inline.
+        assert!(eth_api.pending_block().lock().await.is_some());
+        assert_eq!(eth_api.inline_io_request_semaphore().available_permits(), 1);
+        assert_eq!(
+            eth_api.balance(address, Some(BlockId::pending())).await.unwrap(),
+            U256::from(1337)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn point_read_without_inline_permit_uses_blocking_pool() {
         let eth_api = mock_eth_api(AddressMap::default());
         let _permit = eth_api.inline_io_request_semaphore().try_acquire().unwrap();
 
         assert_ne!(point_read_thread(&eth_api, BlockId::latest()).await, thread::current().id());
+        assert_ne!(point_read_thread(&eth_api, BlockId::pending()).await, thread::current().id());
     }
 
     #[tokio::test]

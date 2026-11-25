@@ -152,7 +152,7 @@ pub trait SpawnBlocking: EthApiTypes + 'static {
         guard.clone().acquire_many_owned(permits_to_acquire)
     }
 
-    /// Tries to acquire a permit to run a short state read at the latest block on the calling task.
+    /// Tries to acquire a permit to run a short state read on the calling task.
     ///
     /// This is called before such a read. `Some` means the read may run directly on the calling
     /// task while the permit is held. `None` means the read must go to the blocking pool, either
@@ -193,6 +193,26 @@ pub trait SpawnBlocking: EthApiTypes + 'static {
             // cancels the blocking task once the request is dropped
             let _request = request;
             rx.await.map_err(|_| EthApiError::InternalEthError)?
+        }
+    }
+
+    /// Executes a short state read on the calling task if possible, else on a blocking IO task.
+    ///
+    /// `f` runs directly on the calling task while a permit from [`Self::try_acquire_inline_io`]
+    /// is held, and goes through [`Self::spawn_blocking_io`] when no permit is available. Only use
+    /// this for reads that do a small, bounded number of state lookups, since an inline read
+    /// blocks its worker thread for its whole duration.
+    fn spawn_point_read<F, R>(&self, f: F) -> impl Future<Output = Result<R, Self::Error>> + Send
+    where
+        F: FnOnce(Self) -> Result<R, Self::Error> + Send + 'static,
+        R: Send + 'static,
+    {
+        async move {
+            if let Some(_permit) = self.try_acquire_inline_io() {
+                return f(self.clone())
+            }
+
+            self.spawn_blocking_io(f).await
         }
     }
 
