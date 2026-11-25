@@ -961,8 +961,9 @@ impl PeersManager {
     /// If the peer already exists, then the address, kind and `fork_id` will be updated. A new
     /// untrusted peer is skipped if [`Self::make_room_for_discovered_peer`] finds no room.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId>) {
-        let is_new =
-            !self.peers.contains_key(&peer_id) && !self.trusted_peer_ids.contains(&peer_id);
+        // A peer tracked only until its session ends starts counting once discovery keeps it.
+        let is_new = self.peers.get(&peer_id).is_none_or(|peer| peer.remove_after_disconnect) &&
+            !self.trusted_peer_ids.contains(&peer_id);
         if is_new && !self.make_room_for_discovered_peer(peer_id, addr.tcp().ip()) {
             trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "Skipping discovered peer, no room for it");
             return
@@ -973,7 +974,8 @@ impl PeersManager {
     /// Returns whether a new basic peer at `ip` fits within [`MAX_TRACKED_PEERS`], removing an
     /// idle basic peer to make room. Banned or filtered peers never cause a removal.
     fn make_room_for_discovered_peer(&mut self, peer_id: PeerId, ip: IpAddr) -> bool {
-        if self.peers.len() < MAX_TRACKED_PEERS {
+        let tracked = self.peers.len() - usize::from(self.peers.contains_key(&peer_id));
+        if tracked < MAX_TRACKED_PEERS {
             return true
         }
         if !self.ip_filter.is_allowed(&ip) || self.ban_list.is_banned(&peer_id, &ip) {
@@ -4815,6 +4817,31 @@ mod tests {
         peers.add_peer(trusted, addr, None);
         assert!(peers.peers.contains_key(&trusted));
         assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS + 1);
+    }
+
+    #[tokio::test]
+    async fn test_discovered_inbound_peer_kept_within_budget() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        for _ in 1..MAX_TRACKED_PEERS {
+            peers.add_peer(PeerId::random(), addr, None);
+        }
+        // an unknown inbound peer is tracked only until it disconnects, and discovering it keeps it
+        // past the session, so it must fit within the budget
+        let mut promote_inbound = |ip: [u8; 4]| {
+            let inbound = PeerId::random();
+            assert!(peers.on_incoming_pending_session(IpAddr::from(ip)).is_ok());
+            peers.on_incoming_session_established(inbound, SocketAddr::from((ip, 40404)));
+            assert!(peers.peers[&inbound].remove_after_disconnect);
+            peers.add_peer(inbound, PeerAddr::from_tcp(SocketAddr::from((ip, 30303))), None);
+            assert!(!peers.peers[&inbound].remove_after_disconnect);
+            peers.peers.len()
+        };
+
+        // the entry already counts, so a free slot is enough without evicting another peer
+        assert_eq!(promote_inbound([5, 6, 7, 8]), MAX_TRACKED_PEERS);
+        // a full set evicts an idle peer for it
+        assert_eq!(promote_inbound([5, 6, 7, 9]), MAX_TRACKED_PEERS);
     }
 
     #[tokio::test]
