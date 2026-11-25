@@ -1327,7 +1327,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
         if range.is_empty() {
             return Ok(Vec::new())
         }
-        // Wipe changesets are only written to disk, when a block is persisted. Persisted blocks
+        // Wipe changesets are only written to disk when a block is persisted. Persisted blocks
         // above the state/trie frontier stay in memory, so read the disk for the whole range.
         self.ensure_changesets_available(PruneSegment::StorageHistory, *range.start())?;
         self.storage_provider.storage_wipe_changesets_range(range)
