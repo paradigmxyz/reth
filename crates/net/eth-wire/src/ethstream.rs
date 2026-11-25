@@ -483,11 +483,9 @@ fn response_exceeds_items(
         EthMessageID::Receipts if version >= EthVersion::Eth70 => {
             bool::decode(&mut payload)?;
         }
-        // Cells wraps the per-transaction hashes and cell lists in a struct.
         EthMessageID::Cells => {
-            let mut cells = Header::decode_bytes(&mut payload, true)?;
-            return Ok(list_exceeds_items(&mut cells, max_items)? ||
-                list_exceeds_items(&mut cells, max_items)?)
+            return Ok(list_exceeds_items(&mut payload, max_items)? ||
+                list_exceeds_items(&mut payload, max_items)?)
         }
         _ => {}
     }
@@ -1137,7 +1135,7 @@ mod tests {
         let request = |request_id| {
             EthMessage::GetCells(RequestPair {
                 request_id,
-                message: GetCells { hashes: vec![B256::ZERO], cell_mask: B128::ZERO },
+                message: GetCells { hashes: vec![B256::ZERO], cell_mask: B128::ZERO.into() },
             })
         };
         let response = |request_id, hashes, cells| {
@@ -1146,7 +1144,7 @@ mod tests {
                 message: Cells {
                     hashes: vec![B256::ZERO; hashes],
                     cells: vec![Vec::new(); cells],
-                    cell_mask: B128::ZERO,
+                    cell_mask: B128::ZERO.into(),
                 },
             })
         };

@@ -1,4 +1,4 @@
-//! Implements Ethereum wire protocol for versions 66 through 71.
+//! Implements Ethereum wire protocol for versions 66 through 73.
 //! Defines structs/enums for messages, request-response pairs, and broadcasts.
 //! Handles compatibility with [`EthVersion`].
 //!
@@ -215,13 +215,21 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 if version < EthVersion::Eth72 {
                     return Err(MessageError::Invalid(version, EthMessageID::Cells))
                 }
-                EthMessage::Cells(RequestPair::decode(buf)?)
+                let response: RequestPair<Cells> = RequestPair::decode(buf)?;
+                if response.message.cell_mask.is_indexed() && version < EthVersion::Eth73 {
+                    return Err(MessageError::Invalid(version, EthMessageID::Cells))
+                }
+                EthMessage::Cells(response)
             }
             EthMessageID::GetCells => {
                 if version < EthVersion::Eth72 {
                     return Err(MessageError::Invalid(version, EthMessageID::GetCells))
                 }
-                EthMessage::GetCells(RequestPair::decode(buf)?)
+                let request: RequestPair<GetCells> = RequestPair::decode(buf)?;
+                if request.message.cell_mask.is_indexed() && version < EthVersion::Eth73 {
+                    return Err(MessageError::Invalid(version, EthMessageID::GetCells))
+                }
+                EthMessage::GetCells(request)
             }
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
@@ -396,9 +404,9 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     Receipts70(RequestPair<Receipts70<N::Receipt>>),
     /// Represents a `BlockAccessLists` request-response pair for eth/71.
     BlockAccessLists(RequestPair<BlockAccessLists>),
-    /// Represents a `Cells` request-response pair for eth/72.
+    /// Represents shared (eth/72+) or indexed (eth/73+) cells.
     Cells(RequestPair<Cells>),
-    /// Represents a `GetCells` request-response pair for eth/72.
+    /// Represents a shared (eth/72+) or indexed (eth/73+) cell request.
     GetCells(RequestPair<GetCells>),
     /// Represents a `BlockRangeUpdate` message broadcast to the network.
     #[cfg_attr(
@@ -679,7 +687,7 @@ impl EthMessageID {
 
     /// Returns the max value for the given version.
     pub const fn max(version: EthVersion) -> u8 {
-        if version.is_eth72() {
+        if version.is_eth72() || version.is_eth73() {
             Self::Cells.to_u8()
         } else if version.is_eth71() {
             Self::BlockAccessLists.to_u8()
@@ -803,15 +811,14 @@ impl<T> RequestPair<T> {
             return Err(alloy_rlp::Error::UnexpectedString)
         }
 
-        let initial_length = buf.len();
-        let request_id = u64::decode(buf)?;
-        let message = decode_msg(buf)?;
-
-        let consumed_len = initial_length - buf.len();
-        if consumed_len != header.payload_length {
+        let (mut payload, remaining) = buf.split_at(header.payload_length);
+        let request_id = u64::decode(&mut payload)?;
+        let message = decode_msg(&mut payload)?;
+        if !payload.is_empty() {
             return Err(alloy_rlp::Error::UnexpectedLength)
         }
 
+        *buf = remaining;
         Ok(Self { request_id, message })
     }
 }
@@ -842,23 +849,7 @@ where
     T: Decodable,
 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let header = Header::decode(buf)?;
-        if !header.list {
-            return Err(alloy_rlp::Error::UnexpectedString)
-        }
-
-        let initial_length = buf.len();
-        let request_id = u64::decode(buf)?;
-        let message = T::decode(buf)?;
-
-        // Check that the buffer consumed exactly payload_length bytes after decoding the
-        // RequestPair
-        let consumed_len = initial_length - buf.len();
-        if consumed_len != header.payload_length {
-            return Err(alloy_rlp::Error::UnexpectedLength)
-        }
-
-        Ok(Self { request_id, message })
+        Self::decode_with(buf, T::decode)
     }
 }
 
@@ -1004,7 +995,8 @@ mod tests {
         let raw_pair = &hex!("c5820539c20505")[..];
 
         let result = RequestPair::<Vec<u8>>::decode(&mut &*raw_pair);
-        assert!(matches!(result, Err(Error::UnexpectedLength)));
+        // The inner decoder is bounded by the outer list and cannot consume the extra byte.
+        assert_eq!(result, Err(Error::InputTooShort));
     }
 
     #[test]

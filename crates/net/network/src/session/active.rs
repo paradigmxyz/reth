@@ -394,6 +394,19 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 on_response!(resp, GetBlockAccessLists)
             }
             EthMessage::Cells(resp) => {
+                if let Some(req) = self.inflight_requests.get(&resp.request_id) &&
+                    let RequestState::Waiting(PeerRequest::GetCells { request, .. }) =
+                        &req.request &&
+                    resp.message.validate_response(request).is_err()
+                {
+                    if let Some(req) = self.inflight_requests.remove(&resp.request_id) &&
+                        let RequestState::Waiting(request) = req.request
+                    {
+                        request.send_bad_response();
+                    }
+                    self.on_bad_message();
+                    return OnIncomingMessageOutcome::Ok
+                }
                 on_response!(resp, GetCells)
             }
             EthMessage::BlockRangeUpdate(msg) => {
