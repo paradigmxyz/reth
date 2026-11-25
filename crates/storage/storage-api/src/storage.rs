@@ -90,6 +90,8 @@ pub trait StorageChangeSetReader: Send {
     /// Each row holds the value a storage slot had before its block wiped the account's storage,
     /// keyed by `keccak256(slot)`, for slots missing from that block's storage changeset. Only
     /// storage v2 writes them, so the default returns no rows.
+    ///
+    /// Rows are written when a block is persisted, so blocks that are still in memory have none.
     fn storage_wipe_changesets_range(
         &self,
         _range: impl core::ops::RangeBounds<BlockNumber>,
