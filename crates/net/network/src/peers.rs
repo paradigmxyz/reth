@@ -48,9 +48,9 @@ use tracing::{trace, warn};
 /// Bound admission-time throttling independently of long-lived security bans.
 const MAX_INCOMING_IP_THROTTLE_ENTRIES: u32 = 16_384;
 
-/// Maximum number of basic peers tracked, so discovering fresh identities cannot grow the peer set
+/// Maximum number of tracked peers, so discovering fresh identities cannot grow the peer set
 /// without bound.
-const MAX_DISCOVERED_PEERS: usize = 10_000;
+const MAX_TRACKED_PEERS: usize = 10_000;
 
 /// Maintains the state of _all_ the peers known to the network.
 ///
@@ -172,7 +172,6 @@ impl PeersManager {
             }
         }
 
-        let mut persisted_basic_peers = 0;
         for PersistedPeerInfo { record, kind, fork_id, reputation } in persisted_peers {
             // When enforce_enr_fork_id is enabled, skip persisted peers that don't have a
             // confirmed fork ID. These were likely accumulated from a different network during
@@ -189,12 +188,12 @@ impl PeersManager {
                 trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer from IP not in allowed ranges");
                 continue
             }
-            if kind.is_basic() && !trusted_peer_ids.contains(&id) {
-                if persisted_basic_peers == MAX_DISCOVERED_PEERS {
-                    trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer over the discovered peer limit");
-                    continue
-                }
-                persisted_basic_peers += 1;
+            if kind.is_basic() &&
+                !trusted_peer_ids.contains(&id) &&
+                peers.len() >= MAX_TRACKED_PEERS
+            {
+                trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer, peer set is full");
+                continue
             }
             peers.entry(id).or_insert_with(|| {
                 let mut peer = Peer::with_kind(
@@ -971,19 +970,20 @@ impl PeersManager {
         self.add_peer_kind(peer_id, None, addr, fork_id)
     }
 
-    /// Returns whether a new basic peer at `ip` fits within [`MAX_DISCOVERED_PEERS`], removing an
+    /// Returns whether a new basic peer at `ip` fits within [`MAX_TRACKED_PEERS`], removing an
     /// idle basic peer to make room. Banned or filtered peers never cause a removal.
     fn make_room_for_discovered_peer(&mut self, peer_id: PeerId, ip: IpAddr) -> bool {
-        let basic_peers = || self.peers.iter().filter(|(_, peer)| peer.kind.is_basic());
-        if basic_peers().count() < MAX_DISCOVERED_PEERS {
+        if self.peers.len() < MAX_TRACKED_PEERS {
             return true
         }
         if !self.ip_filter.is_allowed(&ip) || self.ban_list.is_banned(&peer_id, &ip) {
             return false
         }
         // Backed off peers go first, since unreachable identities are what fills the set.
-        let Some(evicted) = basic_peers()
-            .filter(|(_, peer)| peer.state.is_idle())
+        let Some(evicted) = self
+            .peers
+            .iter()
+            .filter(|(_, peer)| peer.kind.is_basic() && peer.state.is_idle())
             .min_by_key(|(_, peer)| (!peer.backed_off, peer.reputation))
             .map(|(peer_id, _)| *peer_id)
         else {
@@ -4788,13 +4788,10 @@ mod tests {
     #[tokio::test]
     async fn test_discovered_peers_limited_in_total() {
         let mut peers = PeersManager::new(PeersConfig::test());
-        // One peer per /24, so only the total limit applies.
-        let addr = |i: usize| {
-            let ip = Ipv4Addr::from_bits(0x0100_0000 + ((i as u32) << 8));
-            PeerAddr::from_tcp(SocketAddr::new(ip.into(), 30303))
-        };
-        for i in 0..MAX_DISCOVERED_PEERS {
-            peers.add_peer(PeerId::random(), addr(i), None);
+        // One host announcing fresh identities.
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        for _ in 0..MAX_TRACKED_PEERS {
+            peers.add_peer(PeerId::random(), addr, None);
         }
         // Ties go to the first peer in iteration order, so back off the last one.
         let backed_off = *peers.peers.keys().last().unwrap();
@@ -4802,27 +4799,77 @@ mod tests {
 
         // The backed off peer makes room for the newly discovered one.
         let discovered = PeerId::random();
-        peers.add_peer(discovered, addr(MAX_DISCOVERED_PEERS), None);
+        peers.add_peer(discovered, addr, None);
         assert!(peers.peers.contains_key(&discovered));
         assert!(!peers.peers.contains_key(&backed_off));
-        assert_eq!(peers.peers.len(), MAX_DISCOVERED_PEERS);
+        assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS);
+
+        // a known peer is still updated
+        let new_addr = PeerAddr::from_tcp("5.6.7.8:30303".parse().unwrap());
+        peers.add_peer(discovered, new_addr, None);
+        assert_eq!(peers.peers[&discovered].addr, new_addr);
+
+        // a trusted id is still added
+        let trusted = PeerId::random();
+        peers.add_trusted_peer_id(trusted);
+        peers.add_peer(trusted, addr, None);
+        assert!(peers.peers.contains_key(&trusted));
+        assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS + 1);
     }
 
     #[tokio::test]
     async fn test_persisted_peers_limited_in_total() {
         let mut config = PeersConfig::test();
-        // One peer per /24, so only the total limit applies.
-        config.persisted_peers = (0..=MAX_DISCOVERED_PEERS)
-            .map(|i| {
-                let ip = Ipv4Addr::from_bits(0x0100_0000 + ((i as u32) << 8));
+        config.persisted_peers = (0..=MAX_TRACKED_PEERS)
+            .map(|_| {
                 PersistedPeerInfo::from_node_record(NodeRecord::new(
-                    SocketAddr::new(ip.into(), 30303),
+                    "1.2.3.4:30303".parse().unwrap(),
                     PeerId::random(),
                 ))
             })
             .collect();
 
         let peers = PeersManager::new(config);
-        assert_eq!(peers.peers.len(), MAX_DISCOVERED_PEERS);
+        assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS);
+    }
+
+    #[tokio::test]
+    async fn test_persisted_trusted_id_loaded_into_full_set() {
+        // The trusted node's own address is filtered, so only its basic record can add it.
+        let trusted = PeerId::random();
+        let mut config =
+            PeersConfig::test().with_ip_filter(IpFilter::from_cidr_string("1.2.3.0/24").unwrap());
+        config.trusted_nodes =
+            vec![NodeRecord::new("5.6.7.8:30303".parse().unwrap(), trusted).into()];
+        config.persisted_peers = (0..MAX_TRACKED_PEERS)
+            .map(|_| PeerId::random())
+            .chain([trusted])
+            .map(|id| {
+                PersistedPeerInfo::from_node_record(NodeRecord::new(
+                    "1.2.3.4:30303".parse().unwrap(),
+                    id,
+                ))
+            })
+            .collect();
+
+        let peers = PeersManager::new(config);
+        assert!(peers.peers[&trusted].kind.is_trusted());
+        assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS + 1);
+    }
+
+    #[tokio::test]
+    async fn test_persisted_duplicate_ids_do_not_use_budget() {
+        let record = |id| NodeRecord::new("1.2.3.4:30303".parse().unwrap(), id);
+        let duplicate = PeerId::random();
+        let mut config = PeersConfig::test();
+        // The same id twice, then enough distinct peers to fill the budget exactly.
+        config.persisted_peers = [duplicate, duplicate]
+            .into_iter()
+            .chain((1..MAX_TRACKED_PEERS).map(|_| PeerId::random()))
+            .map(|id| PersistedPeerInfo::from_node_record(record(id)))
+            .collect();
+
+        let peers = PeersManager::new(config);
+        assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS);
     }
 }
