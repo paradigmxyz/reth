@@ -8,11 +8,11 @@ use alloy_eips::{
     eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
 };
 use alloy_primitives::{
-    map::{B256Map, B256Set},
+    map::{B256Map, B256Set, FbBuildHasher},
     TxHash, B256,
 };
 use parking_lot::{Mutex, RwLock};
-use schnellru::{Limiter, LruMap};
+use reth_lru::LruMap;
 use std::{
     fs,
     io::{self, Write},
@@ -52,10 +52,7 @@ impl DiskFileBlobStore {
         let store = Self {
             inner: Arc::new(DiskFileBlobStoreInner {
                 blob_dir: blob_dir.clone(),
-                blob_cache: Mutex::new(LruMap::new(SidecarCacheLimit {
-                    max_entries: opts.max_cached_entries,
-                    bytes: 0,
-                })),
+                blob_cache: Mutex::new(SidecarCache::new(opts.max_cached_entries)),
                 size_tracker: Default::default(),
                 file_lock: Default::default(),
                 txs_to_delete: Default::default(),
@@ -94,7 +91,7 @@ impl DiskFileBlobStore {
 
     #[cfg(test)]
     fn is_cached(&self, tx: &B256) -> bool {
-        self.inner.blob_cache.lock().get(tx).is_some()
+        self.inner.blob_cache.lock().entries.get(tx).is_some()
     }
     #[cfg(test)]
     fn clear_cache(&self) {
@@ -150,6 +147,7 @@ impl BlobStore for DiskFileBlobStore {
                 .inner
                 .blob_cache
                 .lock()
+                .entries
                 .peek(&tx)
                 .is_some_and(|current| Arc::ptr_eq(current, &sidecar))
             {
@@ -161,9 +159,9 @@ impl BlobStore for DiskFileBlobStore {
             let used: usize = pinned
                 .iter()
                 .filter(|(hash, _)| **hash != tx)
-                .map(|(_, (_, sidecar))| SidecarCacheLimit::cost(sidecar))
+                .map(|(_, (_, sidecar))| SidecarCache::cost(sidecar))
                 .sum();
-            if used + SidecarCacheLimit::cost(&sidecar) <= SidecarCacheLimit::MAX_BYTES {
+            if used + SidecarCache::cost(&sidecar) <= SidecarCache::MAX_BYTES {
                 pinned.insert(tx, (now + std::time::Duration::from_secs(1), sidecar));
             }
         }
@@ -270,7 +268,7 @@ impl BlobStore for DiskFileBlobStore {
         {
             return Ok(Some(sidecar.clone()))
         }
-        if let Some(sidecar) = self.inner.blob_cache.lock().get(&tx).cloned() {
+        if let Some(sidecar) = self.inner.blob_cache.lock().entries.get(&tx).cloned() {
             return Ok(Some(sidecar))
         }
         let path = self.inner.blob_disk_file(tx);
@@ -391,7 +389,7 @@ impl BlobStore for DiskFileBlobStore {
 struct DiskFileBlobStoreInner {
     cell_mode: std::sync::atomic::AtomicBool,
     blob_dir: PathBuf,
-    blob_cache: Mutex<LruMap<TxHash, Arc<PooledBlobSidecar>, SidecarCacheLimit>>,
+    blob_cache: Mutex<SidecarCache>,
     size_tracker: BlobStoreSize,
     file_lock: RwLock<()>,
     txs_to_delete: RwLock<B256Set>,
@@ -475,15 +473,20 @@ pub enum OpenDiskFileBlobStore {
     ReIndex,
 }
 
-/// Charges the worst-case reconstructed representation up front, including heap allocations.
+/// LRU cache of decoded sidecars, bounded by entry count and by the worst-case reconstructed size
+/// of its sidecars, including heap allocations.
 #[derive(Debug)]
-struct SidecarCacheLimit {
-    max_entries: u32,
+struct SidecarCache {
+    entries: LruMap<TxHash, Arc<PooledBlobSidecar>, FbBuildHasher<32>>,
     bytes: usize,
 }
 
-impl SidecarCacheLimit {
+impl SidecarCache {
     const MAX_BYTES: usize = 16 * 1024 * 1024;
+
+    fn new(max_entries: u32) -> Self {
+        Self { entries: LruMap::with_hasher(max_entries, Default::default()), bytes: 0 }
+    }
 
     fn cost(sidecar: &PooledBlobSidecar) -> usize {
         let blobs = sidecar.versioned_hashes().count();
@@ -491,56 +494,36 @@ impl SidecarCacheLimit {
             sidecar.sidecar().size() +
             blobs * (alloy_eips::eip4844::BYTES_PER_BLOB + 129 * 48)
     }
-}
 
-impl Limiter<TxHash, Arc<PooledBlobSidecar>> for SidecarCacheLimit {
-    type KeyToInsert<'a> = TxHash;
-    type LinkType = u32;
-
-    fn is_over_the_limit(&self, length: usize) -> bool {
-        length > self.max_entries as usize || self.bytes > Self::MAX_BYTES
-    }
-
-    fn on_insert(
-        &mut self,
-        _: usize,
-        key: TxHash,
-        value: Arc<PooledBlobSidecar>,
-    ) -> Option<(TxHash, Arc<PooledBlobSidecar>)> {
-        let bytes = Self::cost(&value);
-        if self.max_entries == 0 || bytes > Self::MAX_BYTES {
-            return None
+    /// Inserts `sidecar` as the most recently used entry, evicting the oldest entries until the
+    /// cache fits its byte limit. A sidecar larger than the whole limit is not cached.
+    fn insert(&mut self, tx: TxHash, sidecar: Arc<PooledBlobSidecar>) {
+        self.remove(&tx);
+        let bytes = Self::cost(&sidecar);
+        if bytes > Self::MAX_BYTES {
+            return
         }
         self.bytes += bytes;
-        Some((key, value))
-    }
-
-    fn on_replace(
-        &mut self,
-        _: usize,
-        _: &mut TxHash,
-        _: TxHash,
-        old: &mut Arc<PooledBlobSidecar>,
-        new: &mut Arc<PooledBlobSidecar>,
-    ) -> bool {
-        let bytes = Self::cost(new);
-        if bytes > Self::MAX_BYTES {
-            return false
+        if let Some((_, evicted)) = self.entries.insert(tx, sidecar) {
+            self.bytes -= Self::cost(&evicted);
         }
-        self.bytes = self.bytes - Self::cost(old) + bytes;
-        true
+        while self.bytes > Self::MAX_BYTES &&
+            let Some((_, oldest)) = self.entries.pop_oldest()
+        {
+            self.bytes -= Self::cost(&oldest);
+        }
     }
 
-    fn on_removed(&mut self, _: &mut TxHash, value: &mut Arc<PooledBlobSidecar>) {
-        self.bytes -= Self::cost(value);
+    fn remove(&mut self, tx: &TxHash) {
+        if let Some(sidecar) = self.entries.remove(tx) {
+            self.bytes -= Self::cost(&sidecar);
+        }
     }
 
-    fn on_cleared(&mut self) {
+    #[cfg(test)]
+    fn clear(&mut self) {
+        self.entries.clear();
         self.bytes = 0;
-    }
-
-    fn on_grow(&mut self, _: usize) -> bool {
-        true
     }
 }
 
@@ -929,5 +912,21 @@ mod tests {
         let stat2 = store.cleanup();
         assert_eq!(stat2.delete_succeed, 5);
         assert_eq!(stat2.delete_failed, 0);
+    }
+
+    #[test]
+    fn sidecar_cache_evicts_oldest_over_byte_limit() {
+        let sidecar = Arc::new(PooledBlobSidecar::from(eip7594_single_blob_sidecar().0));
+        let cost = SidecarCache::cost(&sidecar);
+        let fits = SidecarCache::MAX_BYTES / cost;
+        let mut cache = SidecarCache::new(u32::MAX);
+        let txs = (0..=fits).map(|_| TxHash::random()).collect::<Vec<_>>();
+        for tx in &txs {
+            cache.insert(*tx, sidecar.clone());
+        }
+        assert!(cache.entries.peek(&txs[0]).is_none());
+        assert!(cache.entries.peek(&txs[fits]).is_some());
+        assert_eq!(cache.entries.len(), fits);
+        assert_eq!(cache.bytes, fits * cost);
     }
 }

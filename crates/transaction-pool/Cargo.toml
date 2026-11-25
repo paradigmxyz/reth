@@ -24,6 +24,7 @@ reth-execution-types.workspace = true
 reth-fs-util.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
+reth-lru.workspace = true
 
 # ethereum
 alloy-eips = { workspace = true, features = ["kzg"] }
@@ -53,7 +54,6 @@ bitflags.workspace = true
 auto_impl.workspace = true
 imbl.workspace = true
 smallvec.workspace = true
-schnellru = { workspace = true, features = ["runtime-rng"] }
 
 # testing
 rand = { workspace = true, optional = true }
