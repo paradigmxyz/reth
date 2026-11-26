@@ -244,14 +244,11 @@ where
 
         // Load the canonical ancestor's block
         let executed_block = self.canonical_block_by_hash(new_head_hash)?;
-        // Perform the reorg to properly handle the unwind
+        // Perform the reorg to properly handle the unwind, which also makes the canonical ancestor
+        // the canonical head.
         self.canonical_in_memory_state_writer
             .update_chain(NewCanonicalChain::Reorg { new: vec![executed_block], old: old_blocks });
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
-
-        // CRITICAL: Update the canonical head after the reorg
-        // This ensures get_canonical_head() returns the correct block
-        self.canonical_in_memory_state_writer.set_canonical_head(canonical_header.clone());
 
         debug!(
             target: "engine::tree",
@@ -271,7 +268,8 @@ where
         // Load the block into memory if it's not already present
         self.ensure_block_in_memory(canonical_header.number(), canonical_header.hash())?;
 
-        // Update the canonical head header
+        // Update the canonical head header, which loading the block did, but a block that was
+        // already in memory did not.
         self.canonical_in_memory_state_writer.set_canonical_head(canonical_header.clone());
 
         Ok(())
@@ -435,10 +433,9 @@ where
         }
 
         // update the tracked in-memory state with the new chain, which also tracks the blocks of a
-        // reorg that are missing from it.
+        // reorg that are missing from it, and makes the tip the canonical head in the same update.
         self.canonical_in_memory_state_writer.update_chain(chain_update);
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
-        self.canonical_in_memory_state_writer.set_canonical_head(tip.clone());
         self.payload_validator.on_canonical_head_changed(tip.hash(), &self.state);
 
         // Update metrics based on new tip

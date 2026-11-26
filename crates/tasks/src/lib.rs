@@ -257,7 +257,7 @@ mod tests {
         time::Duration,
     };
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_critical() {
         let rt = Runtime::test();
         let handle = rt.take_task_manager_handle().unwrap();
@@ -274,7 +274,7 @@ mod tests {
         })
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_manager_shutdown_critical() {
         let rt = Runtime::test();
 
@@ -290,7 +290,7 @@ mod tests {
         rt.handle().block_on(shutdown);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_manager_shutdown() {
         let rt = Runtime::test();
 
@@ -306,7 +306,7 @@ mod tests {
         rt.handle().block_on(shutdown);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_manager_graceful_shutdown() {
         let rt = Runtime::test();
 
@@ -322,7 +322,7 @@ mod tests {
         assert!(val.load(Ordering::Relaxed));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_manager_graceful_shutdown_many() {
         let rt = Runtime::test();
 
@@ -341,7 +341,7 @@ mod tests {
         assert_eq!(counter.load(Ordering::Relaxed), num);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_manager_graceful_shutdown_timeout() {
         let rt = Runtime::test();
 
@@ -359,13 +359,13 @@ mod tests {
         assert!(!val.load(Ordering::Relaxed));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn can_build_runtime() {
         let rt = Runtime::test();
         let _handle = rt.handle();
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_graceful_shutdown_triggered_by_executor() {
         let rt = Runtime::test();
         let task_manager_handle = rt.take_task_manager_handle().unwrap();

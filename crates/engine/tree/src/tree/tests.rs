@@ -18,8 +18,8 @@ use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_primitives::{map::B256Set, Bytes, B256};
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
-    ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
-    ForkchoiceUpdateError,
+    ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV4,
+    ForkchoiceState, ForkchoiceUpdateError, PayloadError, PayloadValidationError,
 };
 use assert_matches::assert_matches;
 use evm2::evm::Bal as EvmBal;
@@ -39,6 +39,7 @@ use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::PayloadServiceCommand;
+use reth_payload_primitives::NewPayloadError;
 use reth_primitives_traits::{Block as _, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
     test_utils::MockEthProvider, BalStoreHandle, BlockExecutionOutput, HeaderProvider,
@@ -229,8 +230,9 @@ impl TestHarness {
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
         let runtime = reth_tasks::Runtime::test();
+        let (in_memory_state, in_memory_state_writer) = InMemoryState::new();
         let overlay_manager = OverlayManager::with_worker_pool(
-            InMemoryState::default(),
+            in_memory_state,
             runtime.state_trie_overlay_worker_pool(),
         );
 
@@ -245,7 +247,7 @@ impl TestHarness {
         );
         let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
             ChainInfoHeaders { canonical_head: header, safe: None, finalized: None },
-            overlay_manager.in_memory_state().clone(),
+            in_memory_state_writer,
         );
 
         let (to_payload_service, payload_command_rx) = unbounded_channel();
@@ -297,21 +299,11 @@ impl TestHarness {
     }
 
     fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
-        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
-            ChainInfoHeaders {
-                canonical_head: blocks.last().unwrap().recovered_block().clone_sealed_header(),
-                safe: None,
-                finalized: None,
-            },
-            self.tree.state.tree_state.overlay_manager.in_memory_state().clone(),
-        );
-
         self.tree
             .state
             .tree_state
             .set_canonical_head(blocks.last().unwrap().recovered_block().num_hash());
 
-        self.tree.canonical_in_memory_state_writer = canonical_in_memory_state_writer;
         self.tree
             .canonical_in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
@@ -607,6 +599,85 @@ fn block_access_list_decode_returns_invalid_with_null_latest_valid_hash() {
     assert_eq!(status.latest_valid_hash, None);
 }
 
+#[test]
+fn payload_decode_error_returns_invalid_with_null_latest_valid_hash() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..2).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks);
+    let parent_hash = test_harness.tree.state.tree_state.canonical_block_hash();
+    let num_hash = NumHash::new(2, B256::random());
+
+    let decode_error = NewPayloadError::Eth(PayloadError::Decode(alloy_rlp::Error::Custom(
+        "Unexpected type flag",
+    )));
+    let status =
+        test_harness.tree.on_new_payload_error(decode_error, num_hash, parent_hash).unwrap();
+    assert_eq!(
+        status,
+        PayloadStatus::new(
+            PayloadStatusEnum::Invalid { validation_error: "Unexpected type flag".to_string() },
+            None,
+        )
+    );
+
+    // Other malformed payloads still report the known parent.
+    let extra_data_error = NewPayloadError::Eth(PayloadError::ExtraData(Bytes::new()));
+    let status =
+        test_harness.tree.on_new_payload_error(extra_data_error, num_hash, parent_hash).unwrap();
+    assert_eq!(status.latest_valid_hash, Some(parent_hash));
+}
+
+#[test]
+fn block_access_list_decode_resend_returns_null_latest_valid_hash() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..2).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks);
+    let parent_hash = test_harness.tree.state.tree_state.canonical_block_hash();
+    let block = test_harness.block_builder.generate_random_block(2, parent_hash).into_block();
+
+    // A list header without its payload, so the access list bytes do not decode.
+    let invalid_bal = Bytes::from_static(&[0xc1]);
+    let empty_bal = Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]);
+    let mut statuses = Vec::new();
+    for bal in [invalid_bal, empty_bal] {
+        let payload =
+            ExecutionPayloadV4::from_block_unchecked_with_bal(B256::random(), &block, bal);
+        // The first delivery of the payload marked its block as invalid.
+        test_harness.tree.state.invalid_headers.insert(BlockWithParent {
+            block: NumHash::new(2, payload.payload_inner.payload_inner.payload_inner.block_hash),
+            parent: parent_hash,
+        });
+
+        let outcome = test_harness
+            .tree
+            .on_new_payload(ExecutionData {
+                payload: payload.into(),
+                sidecar: ExecutionPayloadSidecar::none(),
+            })
+            .unwrap();
+        statuses.push(outcome.outcome);
+    }
+
+    assert_eq!(
+        statuses[0],
+        PayloadStatus::new(
+            PayloadStatusEnum::Invalid {
+                validation_error: "failed to decode block access list: input too short".to_string(),
+            },
+            None,
+        )
+    );
+    // A cached block with a decodable access list is still answered from the invalid header
+    // cache.
+    assert_eq!(
+        statuses[1],
+        PayloadStatus::new(
+            PayloadStatusEnum::Invalid {
+                validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
+            },
+            Some(parent_hash),
+        )
+    );
+}
+
 #[tokio::test]
 async fn test_tree_persist_blocks() {
     let tree_config = TreeConfig::default();
@@ -675,7 +746,7 @@ fn on_new_persisted_block_skips_sparse_trie_prune_when_state_root_task_disabled(
     }
 }
 
-#[test]
+#[reth_concurrency::test]
 fn payload_build_tracker_notifies_after_last_lease_drops() {
     let (tracker, finished) = PayloadBuildTracker::new();
     let first = tracker.acquire();
@@ -1621,14 +1692,11 @@ fn threshold_persistence_uses_canonical_in_memory_chain_length() {
         .with_persistence_threshold(3)
         .with_memory_block_buffer_target(0)
         .with_num_state_masking_blocks(2);
-    test_harness.tree.persistence_state.last_persisted_block =
-        blocks[7].recovered_block().num_hash();
-    test_harness.tree.persistence_state.last_state_trie_persisted_block =
-        blocks[5].recovered_block().num_hash();
-    test_harness.tree.canonical_in_memory_state().remove_persisted_blocks_until(
-        blocks[7].recovered_block().num_hash(),
-        blocks[5].recovered_block().number(),
-    );
+    test_harness
+        .tree
+        .persistence_state
+        .finish(blocks[7].recovered_block().num_hash(), blocks[5].recovered_block().num_hash());
+    test_harness.tree.on_new_persisted_block().unwrap();
 
     assert_eq!(test_harness.tree.canonical_in_memory_state().canonical_chain().count(), 4);
     assert!(test_harness.tree.get_save_blocks_input(PersistTarget::Threshold).is_some());
@@ -1744,6 +1812,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     let backfill_tip_block = main_chain[(backfill_finished_block_number - 1) as usize].clone();
     // add block to mock provider to enable persistence clean up.
     test_harness.provider.add_block(backfill_tip_block.hash(), backfill_tip_block.into_block());
+    test_harness.provider.enable_database_provider();
     let _ = test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished)).unwrap();
 
     let event = test_harness.from_tree_rx.recv().await.unwrap();
@@ -1799,6 +1868,7 @@ fn backfill_finish_drops_in_memory_blocks_through_the_backfill_height() {
     // Backfill finishes at block 2, which the tree still holds in memory.
     let backfill_tip = blocks[2].recovered_block();
     test_harness.provider.add_block(backfill_tip.hash(), backfill_tip.clone().into_block());
+    test_harness.provider.enable_database_provider();
     test_harness
         .tree
         .on_backfill_sync_finished(ControlFlow::Continue { block_number: backfill_tip.number })
@@ -1832,6 +1902,7 @@ fn backfill_finish_drops_in_memory_blocks_below_the_backfill_height_off_the_pers
     // Backfill finishes at block 2, which the tree still holds in memory.
     let backfill_tip = blocks[2].recovered_block();
     test_harness.provider.add_block(backfill_tip.hash(), backfill_tip.clone().into_block());
+    test_harness.provider.enable_database_provider();
     test_harness
         .tree
         .on_backfill_sync_finished(ControlFlow::Continue { block_number: backfill_tip.number })
@@ -2163,12 +2234,8 @@ fn test_on_new_payload_invalid_ancestor() {
         "Payload should be invalid when parent is marked invalid"
     );
 
-    // For invalid ancestors, the latest_valid_hash behavior varies
-    // We just verify it's marked as invalid
-    assert!(
-        outcome.outcome.latest_valid_hash.is_some() || outcome.outcome.latest_valid_hash.is_none(),
-        "Latest valid hash should be set appropriately for invalid ancestor"
-    );
+    // The parent of the invalid block is unknown, so no valid ancestor can be determined.
+    assert_eq!(outcome.outcome.latest_valid_hash, None);
 
     // Verify block 2 is now also marked as invalid
     assert!(
@@ -2896,8 +2963,13 @@ mod forkchoice_updated_tests {
         // Test FCU that points to a descendant of the invalid block
         // This is a bit tricky to test directly, but we can verify the check_invalid_ancestor
         // method
-        let result = test_harness.tree.check_invalid_ancestor(invalid_block_hash).unwrap();
-        assert!(result.is_some(), "Should detect invalid ancestor");
+        let status = test_harness
+            .tree
+            .check_invalid_ancestor(invalid_block_hash)
+            .unwrap()
+            .expect("Should detect invalid ancestor");
+        assert!(status.is_invalid());
+        assert_eq!(status.latest_valid_hash, None);
     }
 
     /// Test `OpStack` specific behavior with canonical head
@@ -3252,6 +3324,7 @@ fn test_backfill_reaching_sync_target_head_updates_finalized() {
         .forkchoice_state_tracker
         .set_latest(fcu_state, ForkchoiceStatus::Syncing);
 
+    test_harness.provider.enable_database_provider();
     test_harness
         .tree
         .on_backfill_sync_finished(ControlFlow::Continue { block_number: sync_target.number })
@@ -3517,6 +3590,7 @@ async fn assert_post_backfill_recheck_uses_threshold(
     let backfill_finished_block_number = DEFAULT_BACKFILL_RUN_THRESHOLD + 1;
     let backfill_tip_block = main_chain[(backfill_finished_block_number - 1) as usize].clone();
     test_harness.provider.add_block(backfill_tip_block.hash(), backfill_tip_block.into_block());
+    test_harness.provider.enable_database_provider();
     let backfill_finished = FromOrchestrator::BackfillSyncFinished(ControlFlow::Continue {
         block_number: backfill_finished_block_number,
     });

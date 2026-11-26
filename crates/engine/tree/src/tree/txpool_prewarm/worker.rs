@@ -540,7 +540,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn warms_pool_transactions_into_a_published_snapshot() {
         let harness = Harness::spawn();
         let parent_hash = B256::repeat_byte(0x01);
@@ -557,7 +557,7 @@ mod tests {
         assert!(accounts >= 1, "speculative execution should cache account reads");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn records_results_of_pool_transactions() {
         let harness = Harness::spawn();
         let parent_hash = B256::repeat_byte(0x01);
@@ -567,7 +567,7 @@ mod tests {
         wait_until("the result is recorded", || results.get(&B256::repeat_byte(0xB0)).is_some());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn overlapping_pauses_require_matching_resumes() {
         let harness = Harness::spawn();
         let parent_hash = B256::repeat_byte(0x01);
@@ -590,7 +590,7 @@ mod tests {
         harness.published(|snapshot| snapshot.entry_counts() != before);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn reuses_the_iterator_per_head_and_reopens_on_switch() {
         let harness = Harness::spawn();
         let first = B256::repeat_byte(0x01);
@@ -609,7 +609,7 @@ mod tests {
         assert_eq!(harness.pool.opened.load(Ordering::Relaxed), 2);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn shuts_down_when_control_is_dropped() {
         let harness = Harness::spawn();
         let parent_hash = B256::repeat_byte(0x01);

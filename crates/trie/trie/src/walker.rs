@@ -505,7 +505,7 @@ mod tests {
             .with_walk_all_changed_branch_children(walk_all_changed_branch_children)
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn branch_siblings_remain_skippable_by_default() {
         let mut walker = walker_for_matching_branch_children_test(false);
 
@@ -526,7 +526,7 @@ mod tests {
         assert!(walker.can_skip_current_node);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn matching_branch_path_can_make_all_children_unskippable() {
         let mut walker = walker_for_matching_branch_children_test(true);
 
@@ -537,7 +537,7 @@ mod tests {
         assert!(!walker.can_skip_current_node);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn changed_branch_children_remove_orphans() {
         for regenerate_branch in [false, true] {
             let mut storage = BTreeMap::from([
@@ -662,7 +662,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn orphan_cleanup_skips_live_subtrees() {
         let parent = Nibbles::from_nibbles([0x3]);
         let tree_mask = TrieMask::from_nibble(0xa);

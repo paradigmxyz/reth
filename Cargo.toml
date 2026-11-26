@@ -1,7 +1,7 @@
 [workspace.package]
 version = "2.11.0"
 edition = "2024"
-rust-version = "1.96"
+rust-version = "1.100"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -19,6 +19,7 @@ members = [
     "crates/cli/runner/",
     "crates/cli/util/",
     "crates/concurrency/",
+    "crates/concurrency/macros/",
     "crates/config/",
     "crates/consensus/common/",
     "crates/consensus/consensus/",
@@ -340,6 +341,7 @@ reth-cli-util = { path = "crates/cli/util" }
 reth-codecs = { version = "0.8.2", default-features = false }
 reth-codecs-derive = "0.8.2"
 reth-concurrency = { path = "crates/concurrency", default-features = false }
+reth-concurrency-macros = { path = "crates/concurrency/macros" }
 reth-config = { path = "crates/config", default-features = false }
 reth-consensus = { path = "crates/consensus/consensus", default-features = false }
 reth-consensus-common = { path = "crates/consensus/common", default-features = false }
@@ -444,9 +446,9 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f", default-features = false }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f", default-features = false }
-evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f", default-features = false }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "7c9f3b6deb23005fc84596ba1b13a6492d942014", default-features = false }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "7c9f3b6deb23005fc84596ba1b13a6492d942014", default-features = false }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "7c9f3b6deb23005fc84596ba1b13a6492d942014", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -556,6 +558,11 @@ tokio = { version = "1.52.3", default-features = false }
 tokio-stream = "0.1.11"
 tokio-tungstenite = "0.29.0"
 tokio-util = { version = "0.7.11", features = ["codec"] }
+
+# proc-macros
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", default-features = false }
 
 # async
 async-compression = { version = "0.4", default-features = false }
@@ -684,14 +691,14 @@ ipnet = "2.11"
 # evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
 # rejects a patch from the same source.
 [patch."https://github.com/alloy-rs/evm2"]
-evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f" }
-evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f" }
-evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "35aa32800b147b00e616d4e1869a3835aa86701f" }
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "7c9f3b6deb23005fc84596ba1b13a6492d942014" }
+evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "7c9f3b6deb23005fc84596ba1b13a6492d942014" }
+evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "7c9f3b6deb23005fc84596ba1b13a6492d942014" }
 
 [patch.crates-io]
 # reth-core
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }

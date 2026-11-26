@@ -2,7 +2,7 @@ use blake3::Hasher;
 use eyre::{Result, WrapErr};
 use rayon::prelude::*;
 use reqwest::Client;
-use reth_db::static_file::iter_static_files;
+use reth_db::static_file::{iter_static_files, StaticFileEntry};
 use reth_static_file_types::StaticFileSegment;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -752,9 +752,11 @@ pub fn generate_manifest(
     ] {
         let key = ty.key();
         let segment = static_segment(*ty).expect("chunked components have a static file segment");
-        let Some((last_range, _)) = static_files.get(segment).and_then(|ranges| {
-            ranges.iter().rfind(|(_, header)| header.expected_block_range().start() <= block)
-        }) else {
+        let Some(StaticFileEntry { block_range: last_range, .. }) =
+            static_files.get(segment).and_then(|files| {
+                files.iter().rfind(|file| file.header.expected_block_range().start() <= block)
+            })
+        else {
             continue;
         };
 
@@ -1284,7 +1286,7 @@ impl<R: Read> Read for HashingReader<R> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_primitives::B256;
@@ -1345,7 +1347,7 @@ mod tests {
         source
     }
 
-    fn write_test_static_files(source: &Path, segment: StaticFileSegment, tip: u64) {
+    pub(crate) fn write_test_static_files(source: &Path, segment: StaticFileSegment, tip: u64) {
         let static_files = source.join("static_files");
         reth_fs_util::create_dir_all(&static_files).unwrap();
 

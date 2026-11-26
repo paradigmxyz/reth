@@ -111,7 +111,9 @@ The configuration of the WebSocket server follows the same pattern as the HTTP s
 
 -   Enable it using `--ws`
 -   Configure the server address by passing `--ws.addr` and `--ws.port` (default `8546`)
--   Configure cross-origin requests using `--ws.origins`
+-   By default, browser connections are allowed from HTTP or HTTPS pages on `localhost`, `127.0.0.1`, or `[::1]` at any port. Clients that omit the `Origin` header are also accepted.
+-   To allow a web app on another host, set its exact origin, for example `--ws.origins https://app.example`. Use `--ws.origins '*'` to accept any origin.
+-   When HTTP and WebSocket listen on the same IP address and port, either `--http.corsdomain` or `--ws.origins` configures both HTTP CORS and WebSocket upgrades. Setting either flag to `*` allows all origins on both transports. If you set both flags, their values must match.
 -   Enable APIs using `--ws.api`
 
 ### IPC
