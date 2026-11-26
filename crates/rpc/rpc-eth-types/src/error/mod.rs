@@ -566,36 +566,38 @@ impl From<BlockExecutionError> for EthApiError {
             BlockExecutionError::Internal(internal_error) => {
                 // Execution must not hide a provider's unavailable-history error, which reaches
                 // here directly or wrapped in evm2's database and handler errors.
-                let mut source = internal_error
+                let provider = internal_error
                     .as_other()
                     .or_else(|| internal_error.as_evm().map(|(_, error)| error))
-                    .map(|error| error as &(dyn core::error::Error + 'static));
-                while let Some(error) = source {
-                    // evm2's DatabaseError does not expose the provider error through source().
-                    let provider =
-                        error.downcast_ref::<reth_errors::ProviderError>().or_else(|| {
-                            error
-                                .downcast_ref::<evm2::DatabaseError>()?
-                                .downcast_ref::<reth_errors::ProviderError>()
-                        });
-                    if let Some(provider) = provider {
-                        let mapped = Self::from(provider.clone());
-                        if matches!(
-                            mapped,
-                            Self::PrunedHistoryUnavailable { .. } |
-                                Self::Internal(RethError::Provider(
-                                    reth_errors::ProviderError::StateAtBlockPruned(_)
-                                ))
-                        ) {
-                            return mapped;
-                        }
+                    .and_then(provider_error_in);
+                if let Some(provider) = provider {
+                    let mapped = Self::from(provider.clone());
+                    if matches!(
+                        mapped,
+                        Self::PrunedHistoryUnavailable { .. } |
+                            Self::Internal(RethError::Provider(
+                                reth_errors::ProviderError::StateAtBlockPruned(_)
+                            ))
+                    ) {
+                        return mapped;
                     }
-                    source = error.source();
                 }
                 Self::Internal(RethError::Execution(BlockExecutionError::Internal(internal_error)))
             }
         }
     }
+}
+
+/// Returns the provider error an execution error carries: directly, inside evm2's
+/// [`evm2::DatabaseError`], or inside a [`HandlerError::Database`].
+fn provider_error_in(error: &evm2::AnyError) -> Option<&ProviderError> {
+    error
+        .downcast_ref::<ProviderError>()
+        .or_else(|| error.downcast_ref::<evm2::DatabaseError>()?.downcast_ref::<ProviderError>())
+        .or_else(|| match error.downcast_ref::<HandlerError>()? {
+            HandlerError::Database(error) => error.downcast_ref::<ProviderError>(),
+            _ => None,
+        })
 }
 
 impl From<evm2::DatabaseError> for EthApiError {
@@ -1312,7 +1314,7 @@ mod tests {
                 // A database failure in a block transaction.
                 BlockExecutionError::Internal(InternalBlockExecutionError::EVM {
                     hash: B256::ZERO,
-                    error: Box::new(HandlerError::Database(database_error())),
+                    error: evm2::AnyError::new(HandlerError::Database(database_error())),
                 }),
             ] {
                 let message = execution.to_string();
