@@ -117,10 +117,14 @@ struct InMemoryBlobStoreInner {
 impl InMemoryBlobStoreInner {
     // Returns the sidecar of `tx`, rebuilding it from cells if needed.
     fn get(&self, tx: &B256) -> Option<Arc<BlobTransactionSidecarVariant>> {
-        if let Some(sidecar) = self.store.read().get(tx) {
-            return Some(Arc::clone(sidecar))
-        }
-        let cells = self.cells.read().get(tx).cloned()?;
+        let cells = {
+            // Held across both lookups, so a move from cells to full is not missed.
+            let store = self.store.read();
+            if let Some(sidecar) = store.get(tx) {
+                return Some(Arc::clone(sidecar))
+            }
+            self.cells.read().get(tx).cloned()?
+        };
         self.rebuilt.get_or_rebuild(*tx, &cells)
     }
 
