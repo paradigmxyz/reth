@@ -1465,8 +1465,13 @@ impl Discv4Service {
                 self.pending_lookup.insert(node.id, (Instant::now(), ctx));
             }
             PingReason::AtCapacity => {
-                trace!(target: "discv4", ?node, "discovered proven record but bucket is full");
-                self.notify(DiscoveryUpdate::DiscoveredAtCapacity(node));
+                if self.on_entry(node.id, |_| ()).is_some() {
+                    // Inserted while the ping was pending, so this pong is its endpoint proof.
+                    self.update_on_pong(node, pong.enr_sq);
+                } else {
+                    trace!(target: "discv4", ?node, "discovered proven record but bucket is full");
+                    self.notify(DiscoveryUpdate::DiscoveredAtCapacity(node));
+                }
             }
         }
     }
@@ -2758,6 +2763,17 @@ mod tests {
         }
     }
 
+    /// Removes a node from the farthest bucket, so that bucket has room for one more.
+    fn free_farthest_bucket_slot(service: &mut Discv4Service) {
+        let id = service
+            .kbuckets
+            .iter_ref()
+            .map(|entry| entry.node.value.record.id)
+            .find(|id| service.kbuckets.get_index(&kad_key(*id)) == Some(u8::MAX as usize))
+            .unwrap();
+        assert!(service.remove_node(id));
+    }
+
     #[tokio::test]
     async fn test_duplicate_packet_rejected_without_decoding() {
         let secret_key = SecretKey::new(&mut rand::rng());
@@ -3824,6 +3840,29 @@ mod tests {
             updates.try_recv(),
             Ok(DiscoveryUpdate::DiscoveredAtCapacity(announced)) if announced == record
         ));
+    }
+
+    #[tokio::test]
+    async fn test_at_capacity_pong_proves_node_inserted_meanwhile() {
+        let (_discv4, mut service) = create_discv4().await;
+        let record =
+            NodeRecord::new("10.1.0.1:30303".parse().unwrap(), full_bucket_peer(&mut service));
+        let ping = Ping {
+            from: record.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping.clone(), record.udp_addr(), record.id, B256::random());
+        let echo_hash = service.pending_pings[&record.id].echo_hash;
+
+        // The next ping inserts the node, and the pending ping stands in for its initial ping.
+        free_farthest_bucket_slot(&mut service);
+        service.on_ping(ping, record.udp_addr(), record.id, B256::random());
+        assert_eq!(service.on_entry(record.id, |entry| entry.has_endpoint_proof), Some(false));
+
+        service.on_pong(make_pong(&service, echo_hash), record.udp_addr(), record.id);
+        assert_eq!(service.on_entry(record.id, |entry| entry.has_endpoint_proof), Some(true));
     }
 
     #[tokio::test]
