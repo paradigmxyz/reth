@@ -991,10 +991,7 @@ fn decode_pooled_transaction_hashes_payload(
     let mut sizes_payload = Header::decode_bytes(payload, true)?;
     while !sizes_payload.is_empty() {
         if sizes.len() == types.len() {
-            return Err(alloy_rlp::Error::ListLengthMismatch {
-                expected: types.len(),
-                got: types.len() + 1,
-            })
+            return Err(alloy_rlp::Error::Custom("more sizes than transaction types"))
         }
         sizes.push(usize::decode(&mut sizes_payload)?);
     }
@@ -1498,7 +1495,7 @@ mod tests {
 
         let result = NewPooledTransactionHashes68::decode(&mut encoded.as_slice());
 
-        assert_eq!(result, Err(alloy_rlp::Error::ListLengthMismatch { expected: 1, got: 2 }));
+        assert_eq!(result, Err(alloy_rlp::Error::Custom("more sizes than transaction types")));
     }
 
     #[test]
