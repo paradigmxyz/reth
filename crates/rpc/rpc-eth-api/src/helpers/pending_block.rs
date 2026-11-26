@@ -561,9 +561,7 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
             gas_limit: parent.gas_limit(),
             parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| B256::ZERO),
             withdrawals: parent.withdrawals_root().map(|_| Default::default()),
-            // Leave empty: eth_simulateV1 (and other clients) expect `0x` unless overridden.
-            // Copying the parent's builder tag into simulated blocks breaks execution-apis
-            // fixtures and mainnet simulations on top of tagged blocks.
+            // The parent's extra data (e.g. a builder tag) doesn't belong to the next block.
             extra_data: Default::default(),
             slot_number: parent.slot_number().map(|slot| slot.saturating_add(1)),
         };
@@ -599,10 +597,7 @@ mod tests {
 
     #[test]
     fn pending_env_does_not_copy_parent_extra_data() {
-        let header = Header {
-            extra_data: alloy_primitives::Bytes::from_static(b"builder"),
-            ..Default::default()
-        };
+        let header = Header { extra_data: b"builder".into(), ..Default::default() };
         let sealed = SealedHeader::new(header, B256::ZERO);
 
         let attrs = NextBlockEnvAttributes::build_pending_env(&sealed, None);
