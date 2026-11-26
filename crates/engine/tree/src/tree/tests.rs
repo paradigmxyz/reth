@@ -3836,3 +3836,166 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for EngineSpanParents {
         }
     }
 }
+
+#[tokio::test]
+async fn test_downloaded_invalid_ancestor_reports_latest_valid_hash() {
+    for invalid_timestamp in [false, true] {
+        let mut harness = TestHarness::new(MAINNET.clone());
+        let blocks = harness.block_builder.get_executed_blocks(0..8).collect();
+        harness = harness.with_blocks(blocks);
+        let parent = harness.blocks.last().unwrap().sealed_block().clone();
+        let mut invalid =
+            harness.block_builder.generate_random_block(8, parent.hash()).into_block();
+        if invalid_timestamp {
+            invalid.header.timestamp = parent.timestamp;
+        } else {
+            invalid.header.gas_limit = parent.gas_limit * 2;
+        }
+        let invalid = invalid.seal_slow();
+        let error = harness
+            .tree
+            .consensus
+            .validate_header_against_parent(invalid.sealed_header(), parent.sealed_header())
+            .unwrap_err();
+        if invalid_timestamp {
+            assert_matches!(error, ConsensusError::TimestampIsInPast { .. });
+        } else {
+            assert_matches!(error, ConsensusError::GasLimitInvalidIncrease { .. });
+        }
+        let head = harness.block_builder.generate_random_block(9, invalid.hash());
+        let head_hash = head.hash();
+        let payload = ExecutionData::from_block_unchecked(head_hash, &head.into_block());
+        assert!(harness.tree.on_new_payload(payload.clone()).unwrap().outcome.is_syncing());
+        let state = ForkchoiceState {
+            head_block_hash: head_hash,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
+        };
+        assert!(harness
+            .tree
+            .on_forkchoice_updated(state, None)
+            .unwrap()
+            .outcome
+            .await
+            .unwrap()
+            .payload_status
+            .is_syncing());
+
+        // This harness has a nonexecuting EVM. Pass the consensus failure through the
+        // same error handler used when inserting a downloaded block fails validation.
+        let status = harness
+            .tree
+            .on_insert_block_error(InsertBlockError::consensus_error(error, invalid))
+            .unwrap();
+        assert!(status.is_invalid());
+        assert_eq!(status.latest_valid_hash, Some(parent.hash()));
+
+        let status = harness.tree.on_new_payload(payload).unwrap().outcome;
+        assert!(status.is_invalid());
+        assert_eq!(status.latest_valid_hash, Some(parent.hash()));
+        let status = harness
+            .tree
+            .on_forkchoice_updated(state, None)
+            .unwrap()
+            .outcome
+            .await
+            .unwrap()
+            .payload_status;
+        assert!(status.is_invalid());
+        assert_eq!(status.latest_valid_hash, Some(parent.hash()));
+    }
+}
+
+#[test]
+fn test_backfill_downloads_only_missing_parent_gap() {
+    let mut harness = TestHarness::new(MAINNET.clone());
+    let blocks: Vec<_> = harness.block_builder.get_executed_blocks(0..6).collect();
+    harness = harness.with_blocks(vec![blocks[0].clone()]);
+    let backfill_tip = blocks[2].sealed_block();
+    harness.provider.add_block(backfill_tip.hash(), backfill_tip.clone().into_block());
+    for block in &blocks[4..] {
+        harness.tree.state.buffer.insert_block(block.sealed_block().clone().into());
+    }
+    harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: blocks[5].sealed_block().hash(),
+            safe_block_hash: blocks[4].sealed_block().hash(),
+            finalized_block_hash: backfill_tip.hash(),
+        },
+        ForkchoiceStatus::Syncing,
+    );
+
+    harness.tree.on_backfill_sync_finished(ControlFlow::Continue { block_number: 2 }).unwrap();
+
+    assert_matches!(
+        harness.from_tree_rx.try_recv().unwrap(),
+        EngineApiEvent::Download(DownloadRequest::BlockRange { hash, count: 1, .. })
+            if hash == blocks[3].sealed_block().hash()
+    );
+}
+
+#[test]
+fn test_backfill_downloads_fork_parent_at_tip_height() {
+    for engine_kind in [EngineApiKind::Ethereum, EngineApiKind::OpStack] {
+        let mut harness = TestHarness::new(MAINNET.clone());
+        harness.tree.engine_kind = engine_kind;
+        let blocks: Vec<_> = harness.block_builder.get_executed_blocks(0..3).collect();
+        harness = harness.with_blocks(vec![blocks[0].clone()]);
+        let backfill_tip = blocks[2].sealed_block();
+        harness.provider.add_block(backfill_tip.hash(), backfill_tip.clone().into_block());
+
+        let mut fork_parent = backfill_tip.clone().into_block();
+        fork_parent.header.extra_data = Bytes::from_static(b"fork");
+        let fork_parent = fork_parent.seal_slow();
+        assert_ne!(fork_parent.hash(), backfill_tip.hash());
+        let buffered_head = harness.block_builder.generate_random_block(3, fork_parent.hash());
+        harness.tree.state.buffer.insert_block(buffered_head.clone().into());
+        harness.tree.state.forkchoice_state_tracker.set_latest(
+            ForkchoiceState {
+                head_block_hash: buffered_head.hash(),
+                safe_block_hash: B256::ZERO,
+                finalized_block_hash: if engine_kind.is_opstack() {
+                    B256::ZERO
+                } else {
+                    blocks[1].sealed_block().hash()
+                },
+            },
+            ForkchoiceStatus::Syncing,
+        );
+
+        harness.tree.on_backfill_sync_finished(ControlFlow::Continue { block_number: 2 }).unwrap();
+
+        assert_matches!(
+            harness.from_tree_rx.try_recv().unwrap(),
+            EngineApiEvent::Download(DownloadRequest::BlockSet { hashes, .. })
+                if hashes == B256Set::from_iter([fork_parent.hash()])
+        );
+    }
+}
+
+#[test]
+fn test_future_timestamp_error_does_not_cache_invalid_header() {
+    let mut harness = TestHarness::new(MAINNET.clone());
+    let parent_hash = harness.tree.state.tree_state.canonical_block_hash();
+    let block = harness.block_builder.generate_random_block(1, parent_hash);
+    let block_hash = block.hash();
+    let block_with_parent = block.block_with_parent();
+    let error = ConsensusError::TimestampIsInFuture { timestamp: u64::MAX, present_timestamp: 0 };
+
+    let status = harness
+        .tree
+        .on_insert_block_error(InsertBlockError::consensus_error(error, block.clone()))
+        .unwrap();
+    assert!(status.is_invalid());
+    assert!(harness.tree.state.invalid_headers.get(&block_hash).is_none());
+
+    // A permanent failure on the same block must still be cached.
+    harness
+        .tree
+        .on_insert_block_error(InsertBlockError::consensus_error(
+            ConsensusError::BaseFeeMissing,
+            block,
+        ))
+        .unwrap();
+    assert_eq!(harness.tree.state.invalid_headers.get(&block_hash), Some(block_with_parent));
+}

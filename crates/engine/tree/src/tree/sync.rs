@@ -211,21 +211,32 @@ where
             self.state.buffer.lowest_ancestor(&sync_target_state.head_block_hash)
         {
             let current_head_num = self.state.tree_state.current_canonical_head.number;
-            let target_head_num = lowest_buffered.number();
+            // The buffered block is already available; only its missing ancestors need downloading.
+            let missing_parent_num = lowest_buffered.number().saturating_sub(1);
 
-            if let Some(distance) = self.distance_from_local_tip(current_head_num, target_head_num)
+            if let Some(distance) =
+                self.distance_from_local_tip(current_head_num, missing_parent_num)
             {
                 // There are blocks between current head and FCU target, download them
                 debug!(
                     target: "engine::tree",
                     %current_head_num,
-                    %target_head_num,
+                    %missing_parent_num,
                     %distance,
                     "Backfill complete, downloading remaining blocks to reach FCU target"
                 );
 
                 self.emit_event(EngineApiEvent::Download(
                     DownloadRequest::block_range(lowest_buffered.parent_hash(), distance)
+                        .with_access_lists(self.should_download_access_lists()),
+                ));
+                return Ok(());
+            }
+
+            // Equal heights do not identify the same parent on a fork.
+            if lowest_buffered.parent_hash() != self.state.tree_state.current_canonical_head.hash {
+                self.emit_event(EngineApiEvent::Download(
+                    DownloadRequest::single_block(lowest_buffered.parent_hash())
                         .with_access_lists(self.should_download_access_lists()),
                 ));
                 return Ok(());

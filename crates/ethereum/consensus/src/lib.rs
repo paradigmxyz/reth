@@ -158,6 +158,10 @@ where
     ) -> Result<(), ConsensusError> {
         validate_block_pre_execution_with_tx_root(block, &self.chain_spec, transaction_root)
     }
+
+    fn is_transient_error(&self, error: &ConsensusError) -> bool {
+        matches!(error, ConsensusError::TimestampIsInFuture { .. })
+    }
 }
 
 impl<H, ChainSpec> HeaderValidator<H> for EthBeaconConsensus<ChainSpec>
@@ -587,5 +591,21 @@ mod tests {
             Some(B256::ZERO),
         )
         .is_ok());
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn future_header_timestamp_is_transient() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().build());
+        let consensus = EthBeaconConsensus::new(chain_spec);
+        let header = SealedHeader::seal_slow(Header { timestamp: u64::MAX, ..Default::default() });
+        let error = consensus.validate_header(&header).unwrap_err();
+
+        assert!(matches!(error, ConsensusError::TimestampIsInFuture { timestamp: u64::MAX, .. }));
+        assert!(Consensus::<EthBlock>::is_transient_error(&consensus, &error));
+        assert!(!Consensus::<EthBlock>::is_transient_error(
+            &consensus,
+            &ConsensusError::BaseFeeMissing
+        ));
     }
 }

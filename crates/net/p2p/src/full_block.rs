@@ -14,6 +14,7 @@ use alloy_primitives::{Bytes, Sealable, B256};
 use core::marker::PhantomData;
 use futures::FutureExt;
 use reth_consensus::Consensus;
+use reth_consensus_common::validation::validate_against_parent_hash_number;
 use reth_eth_wire_types::{BlockAccessLists, EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{Block, SealedBlock, SealedBlockWith, SealedHeader};
@@ -77,8 +78,9 @@ where
     /// Note: this future is cancel safe.
     ///
     /// Caution: This does no validation of body (transactions) responses but guarantees that
-    /// the headers form a valid range starting at the requested hash, and that the number of
-    /// headers and bodies received matches the requested limit.
+    /// the headers form a hash-linked range with consecutive block numbers starting at the
+    /// requested hash, and that the number of headers and bodies received matches the requested
+    /// limit. Consensus validation of the headers is left to the caller.
     ///
     /// The returned future yields bodies in falling order, i.e. with descending block numbers.
     pub fn get_full_block_range(
@@ -824,9 +826,12 @@ where
 
             // check the starting hash
             if headers_falling[0].hash() == self.start_hash {
-                let headers_rising = headers_falling.iter().rev().cloned().collect::<Vec<_>>();
-                // check if the downloaded headers are valid
-                if let Err(err) = self.consensus.validate_header_range(&headers_rising) {
+                // Only verify ancestry here. The engine must receive consensus-invalid
+                // ancestors to reject the chain and determine its latest valid hash.
+                if let Err(err) = headers_falling
+                    .windows(2)
+                    .try_for_each(|pair| validate_against_parent_hash_number(&*pair[0], &pair[1]))
+                {
                     debug!(target: "downloaders", %err, ?self.start_hash, "Received bad header response");
                     self.client.report_bad_message(peer);
                     return
@@ -1230,9 +1235,10 @@ mod tests {
             Arc,
         },
     };
+    use test_case::test_case;
+    use tokio::time::{timeout, Duration};
 
     const EMPTY_LIST_CODE: u8 = 0xc0;
-    use tokio::time::{timeout, Duration};
 
     fn sealed_header_with_access_list_hash(bal: &Bytes) -> SealedHeader {
         let header =
@@ -2022,11 +2028,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn download_full_block_range_rejects_invalid_headers() {
+    async fn download_full_block_range_defers_consensus_validation() {
         let client = TestFullBlockClient::default();
         let (header, _) = insert_headers_into_client(&client, 0..3);
         let consensus = reth_consensus::test_utils::TestConsensus::default();
-        consensus.set_fail_validation(true);
+        consensus.set_fail_header_against_parent(true);
         let client = FullBlockClient::new(client, Arc::new(consensus));
         let mut request = client.get_full_block_range(header.hash(), 3);
         let headers = client
@@ -2036,6 +2042,39 @@ mod tests {
             .unwrap();
 
         request.on_headers_response(headers);
+
+        // Hash-linked ancestors must reach the engine so it can reject the invalid chain
+        // and report the last valid ancestor instead of retrying the download forever.
+        assert!(request.headers.is_some());
+        let blocks = timeout(Duration::from_secs(1), request).await.unwrap();
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[0].hash(), header.hash());
+    }
+
+    #[test_case(false; "unlinked headers")]
+    #[test_case(true; "nonconsecutive numbers")]
+    #[tokio::test]
+    async fn download_full_block_range_rejects_invalid_ancestry(number_gap: bool) {
+        let parent = SealedHeader::seal_slow(Header { number: 1, ..Default::default() });
+        let child = SealedHeader::seal_slow(Header {
+            number: if number_gap { 3 } else { 2 },
+            parent_hash: if number_gap { parent.hash() } else { B256::random() },
+            ..Default::default()
+        });
+        let head = SealedHeader::seal_slow(Header {
+            number: child.number + 1,
+            parent_hash: child.hash(),
+            ..Default::default()
+        });
+        let client = TestFullBlockClient::default();
+        for header in [&parent, &child, &head] {
+            client.insert(header.clone(), BlockBody::default());
+        }
+        let client = FullBlockClient::test_client(client);
+        let mut request = client.get_full_block_range(head.hash(), 3);
+        let headers = vec![head.unseal(), child.unseal(), parent.unseal()];
+
+        request.on_headers_response(WithPeerId::new(PeerId::random(), headers));
 
         assert!(request.headers.is_none());
         assert!(request.pending_headers.is_empty());
