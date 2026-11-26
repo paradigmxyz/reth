@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{map::B256Set, Bytes, B256};
 use alloy_rlp::{length_of_length, Encodable};
 use futures::StreamExt;
 use reth_eth_wire::{
@@ -74,6 +74,12 @@ pub const MAX_BLOCK_ACCESS_LISTS_SERVE: usize = 1024;
 ///
 /// Used to limit lookups.
 pub const MAX_CELLS_SERVE: usize = 1024;
+
+/// Maximum number of blobs to serve cells for in a single response.
+///
+/// A blob stored in full has all its cells computed, whatever the mask selects, so the response
+/// size alone doesn't bound the work.
+pub const MAX_CELL_BLOBS_SERVE: usize = 128;
 
 /// Maximum number of bytecode lookups to serve.
 ///
@@ -462,14 +468,22 @@ where
         let mut total_bytes = cells_response.length();
         let mut response_ids = Vec::new();
         let shared_mask = if request.cell_mask.is_indexed() { None } else { request.cell_mask(0) };
+        // Indexed requests are validated to have unique hashes, shared ones are not.
+        let mut seen = B256Set::default();
+        let mut blobs = 0;
 
         for (index, &hash) in request.hashes.iter().take(MAX_CELLS_SERVE).enumerate() {
             // Indexed tables were validated before any blob-store lookup or cell allocation.
             let Some(cell_mask) = shared_mask.or_else(|| request.cell_mask(index)) else { break };
+            // An empty mask selects no cells, and a repeated hash adds nothing to the response.
+            if cell_mask.count() == 0 || (shared_mask.is_some() && !seen.insert(hash)) {
+                continue
+            }
             let Some(cells) = self.blob_store.get_cells(hash, cell_mask).unwrap_or_default() else {
                 continue;
             };
 
+            blobs += cells.len() / cell_mask.count();
             total_bytes += hash.length() + cells.length();
             if let CellMasks::Indexed { masks, .. } = &mut cells_response.cell_mask {
                 let Some(mask) = request.cell_mask.mask_at(index) else { break };
@@ -485,7 +499,7 @@ where
             cells_response.hashes.push(hash);
             cells_response.cells.push(cells);
 
-            if total_bytes > SOFT_RESPONSE_LIMIT {
+            if total_bytes > SOFT_RESPONSE_LIMIT || blobs >= MAX_CELL_BLOBS_SERVE {
                 break
             }
         }
@@ -1314,8 +1328,8 @@ mod tests {
             .with_blob_store(Box::new(blob_store));
         let (response, rx) = oneshot::channel();
         let request = GetCells {
-            hashes: vec![B256::ZERO; MAX_CELLS_SERVE + 1],
-            cell_mask: B128::default().into(),
+            hashes: (0..=MAX_CELLS_SERVE).map(|i| B256::from(U256::from(i))).collect(),
+            cell_mask: B128::from(1u128.to_le_bytes()).into(),
         };
 
         handler.on_cells_request(PeerId::default(), request, response);
@@ -1323,6 +1337,57 @@ mod tests {
         let cells = rx.await.unwrap().unwrap();
         assert!(cells.hashes.is_empty());
         assert_eq!(get_cells_calls.load(Ordering::Relaxed), MAX_CELLS_SERVE);
+    }
+
+    #[test_case(B128::ZERO, 0; "empty_mask")]
+    #[test_case(B128::from(1u128.to_le_bytes()), 1; "duplicate_hashes")]
+    #[tokio::test]
+    async fn get_cells_request_skips_work_that_adds_no_cells(mask: B128, lookups: usize) {
+        let (_incoming_tx, incoming_rx) = mpsc::channel(1);
+        let get_cells_calls = Arc::new(AtomicUsize::new(0));
+        let blob_store = CountingBlobStore {
+            get_cells_calls: Arc::clone(&get_cells_calls),
+            expected_cell_mask: Some(BlobCellMask::new(mask)),
+            ..Default::default()
+        };
+        let handler = EthRequestHandler::<NoopProvider>::new(NoopProvider::default(), incoming_rx)
+            .with_blob_store(Box::new(blob_store));
+        let (response, rx) = oneshot::channel();
+        let request =
+            GetCells { hashes: vec![B256::ZERO; MAX_CELLS_SERVE], cell_mask: mask.into() };
+
+        handler.on_cells_request(PeerId::default(), request, response);
+
+        let cells = rx.await.unwrap().unwrap();
+        assert_eq!(cells.hashes, vec![B256::ZERO; lookups]);
+        assert_eq!(get_cells_calls.load(Ordering::Relaxed), lookups);
+    }
+
+    #[tokio::test]
+    async fn get_cells_request_limits_served_blobs() {
+        let (_incoming_tx, incoming_rx) = mpsc::channel(1);
+        let get_cells_calls = Arc::new(AtomicUsize::new(0));
+        let mask = B128::from(1u128.to_le_bytes());
+        let blob_store = CountingBlobStore {
+            get_cells_calls: Arc::clone(&get_cells_calls),
+            expected_cell_mask: Some(BlobCellMask::new(mask)),
+            ..Default::default()
+        };
+        let handler = EthRequestHandler::<NoopProvider>::new(NoopProvider::default(), incoming_rx)
+            .with_blob_store(Box::new(blob_store));
+        let (response, rx) = oneshot::channel();
+        // Each transaction has one blob, so its single cell keeps the response far below the
+        // size limit.
+        let request = GetCells {
+            hashes: (0..=MAX_CELL_BLOBS_SERVE).map(|i| B256::from(U256::from(i))).collect(),
+            cell_mask: mask.into(),
+        };
+
+        handler.on_cells_request(PeerId::default(), request, response);
+
+        let cells = rx.await.unwrap().unwrap();
+        assert_eq!(cells.hashes.len(), MAX_CELL_BLOBS_SERVE);
+        assert_eq!(get_cells_calls.load(Ordering::Relaxed), MAX_CELL_BLOBS_SERVE);
     }
 
     #[test_case(0)]
