@@ -1273,7 +1273,8 @@ where
                     }
                 };
                 // Notifications are not bound by the response size limit. A stream waits for the
-                // memory it needs instead of failing, and holds it until its notification is sent.
+                // memory it needs instead of failing, and holds it until its notification is
+                // serialized, but not while a slow client drains it.
                 let weight = geth_trace_weight_mib(
                     &opts,
                     block.header().gas_used(),
@@ -1296,7 +1297,7 @@ where
                         None => break None,
                     }
                 };
-                let Some(_admission) = admission else { break };
+                let Some(admission) = admission else { break };
                 if sink.is_closed() {
                     break
                 }
@@ -1324,6 +1325,7 @@ where
                         break
                     }
                 };
+                drop((result, admission));
                 if sink.send(message).await.is_err() {
                     break
                 }
