@@ -1464,15 +1464,18 @@ impl Discv4Service {
                 // timer than the ping_request timer.
                 self.pending_lookup.insert(node.id, (Instant::now(), ctx));
             }
-            PingReason::AtCapacity => {
-                if self.on_entry(node.id, |_| ()).is_some() {
-                    // Inserted while the ping was pending, so this pong is its endpoint proof.
-                    self.update_on_pong(node, pong.enr_sq);
-                } else {
+            PingReason::AtCapacity => match self.on_entry(node.id, |entry| entry.record) {
+                // Inserted while the ping was pending, so this pong is its endpoint proof.
+                Some(stored) if stored.udp_addr() == node.udp_addr() => {
+                    self.update_on_pong(node, pong.enr_sq)
+                }
+                // Inserted at another endpoint, whose own proof ping this ping displaced.
+                Some(stored) => self.try_ping(stored, PingReason::InitialInsert),
+                None => {
                     trace!(target: "discv4", ?node, "discovered proven record but bucket is full");
                     self.notify(DiscoveryUpdate::DiscoveredAtCapacity(node));
                 }
-            }
+            },
         }
     }
 
@@ -4175,6 +4178,38 @@ mod tests {
         service.evict_expired_requests(Instant::now() + service.config.ping_expiration * 2);
         assert!(!service.pending_pings.contains_key(&id));
         assert!(service.on_entry(id, |_| ()).is_some());
+    }
+
+    #[tokio::test]
+    async fn test_at_capacity_pong_does_not_prove_node_at_other_endpoint() {
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let (mut service, record) = pending_find_node_service(node_addr).await;
+        let pinged = NodeRecord::new(
+            SocketAddr::from(([10, 0, 0, 50], 30303)),
+            full_bucket_peer(&mut service),
+        );
+        let ping = Ping {
+            from: pinged.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping, pinged.udp_addr(), pinged.id, B256::random());
+        let echo_hash = service.pending_pings[&pinged.id].echo_hash;
+
+        // A referral inserts the node at another endpoint while the ping is pending.
+        free_farthest_bucket_slot(&mut service);
+        let referral = NodeRecord::new(SocketAddr::from(([10, 0, 0, 9], 30303)), pinged.id);
+        let msg =
+            Neighbours { nodes: vec![referral], expire: service.find_node_expiration() + 1000 };
+        service.on_neighbours(msg, node_addr, record.id);
+        assert_eq!(service.pending_pings[&pinged.id].node, pinged);
+
+        service.on_pong(make_pong(&service, echo_hash), pinged.udp_addr(), pinged.id);
+        assert_eq!(service.on_entry(pinged.id, |entry| entry.has_endpoint_proof), Some(false));
+        let request = &service.pending_pings[&pinged.id];
+        assert_eq!(request.node, referral);
+        assert!(matches!(request.reason, PingReason::InitialInsert));
     }
 
     #[tokio::test]
