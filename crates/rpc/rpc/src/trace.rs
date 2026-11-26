@@ -1,5 +1,5 @@
 use alloy_consensus::{constants::ETH_TO_WEI, BlockHeader as _};
-use alloy_eips::{BlockId, BlockNumHash};
+use alloy_eips::{BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Address, BlockHash, Bytes, B256, U256,
@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{
     BlockOverrides, Index,
 };
 use alloy_rpc_types_trace::{
-    filter::{TraceFilter, TraceFilterBlockOption},
+    filter::{TraceFilter, TraceFilterBlockConflict, TraceFilterBlockOption},
     opcode::{BlockOpcodeGas, TransactionOpcodeGas},
     parity::*,
     tracerequest::TraceCallRequest,
@@ -24,14 +24,14 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, BlockHeader};
-use reth_rpc_api::TraceApiServer;
+use reth_rpc_api::{TraceApiServer, TraceFilterRequest};
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{LoadTransaction, RequestTraceBudget, Trace, TraceExt},
     CallManyRequest, FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::EthApiError, utils::CallManyBudget, EthConfig};
-use reth_storage_api::{BlockNumReader, BlockReader};
+use reth_storage_api::{BlockIdReader, BlockNumReader, BlockReader};
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use serde::{Deserialize, Serialize};
@@ -803,7 +803,34 @@ where
     ///
     /// # Limitations
     /// This currently requires block filter fields, since reth does not have address indices yet.
-    async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>> {
+    async fn trace_filter(
+        &self,
+        request: TraceFilterRequest,
+    ) -> RpcResult<Vec<LocalizedTransactionTrace>> {
+        let TraceFilterRequest { mut filter, from_tag, to_tag } = request;
+        if filter.block_hash.is_some() && (from_tag.is_some() || to_tag.is_some()) {
+            return Err(EthApiError::InvalidParams(TraceFilterBlockConflict.to_string()).into())
+        }
+        if from_tag.is_some_and(|tag| tag.is_pending()) ||
+            to_tag.is_some_and(|tag| tag.is_pending())
+        {
+            return Err(EthApiError::InvalidParams(
+                "fromBlock and toBlock cannot be pending".to_string(),
+            )
+            .into())
+        }
+        let resolve = |tag: BlockNumberOrTag| -> Result<u64, EthApiError> {
+            self.provider()
+                .convert_block_number(tag)
+                .map_err(EthApiError::from)?
+                .ok_or(EthApiError::HeaderNotFound(tag.into()))
+        };
+        if let Some(tag) = from_tag {
+            filter.from_block = Some(resolve(tag)?);
+        }
+        if let Some(tag) = to_tag {
+            filter.to_block = Some(resolve(tag)?);
+        }
         Self::trace_filter(self, filter).await.map_err(Into::into)
     }
 
@@ -1201,6 +1228,66 @@ mod tests {
                 "code": -32602,
                 "message": "invalid parameters: fromBlock cannot be greater than toBlock",
             })
+        );
+    }
+
+    #[tokio::test]
+    async fn trace_filter_resolves_block_tags() {
+        let provider = MockEthProvider::default();
+        let mut hashes = Vec::new();
+        for number in [1, 2] {
+            let header = Header { number, gas_limit: 30_000_000, ..Default::default() };
+            hashes.push(header.hash_slow());
+            provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        }
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let module =
+            TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default()).into_rpc();
+        let response = async |filter: serde_json::Value| {
+            let request = serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "trace_filter", "params": [filter],
+            });
+            let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+            serde_json::from_str::<serde_json::Value>(&response).unwrap()
+        };
+
+        for (tags, numbers) in [
+            (
+                serde_json::json!({ "fromBlock": "latest", "toBlock": "latest" }),
+                serde_json::json!({ "fromBlock": "0x2", "toBlock": "0x2" }),
+            ),
+            (
+                serde_json::json!({ "fromBlock": "earliest", "toBlock": "0x2" }),
+                serde_json::json!({ "fromBlock": "0x0", "toBlock": "0x2" }),
+            ),
+        ] {
+            let tagged = response(tags).await;
+            assert!(tagged.get("error").is_none(), "{tagged}");
+            assert_eq!(tagged, response(numbers).await);
+        }
+        assert_eq!(
+            response(serde_json::json!({ "fromBlock": "0x1", "toBlock": "pending" })).await
+                ["error"],
+            serde_json::json!({
+                "code": -32602,
+                "message": "fromBlock and toBlock cannot be pending",
+            })
+        );
+        assert_eq!(
+            response(serde_json::json!({ "blockHash": hashes[1], "fromBlock": "latest" })).await
+                ["error"]["code"],
+            -32602
+        );
+        // Tags are matched exactly; anything else is still parsed as a number.
+        assert_eq!(
+            response(serde_json::json!({ "fromBlock": "LATEST" })).await["error"]["code"],
+            -32602
         );
     }
 

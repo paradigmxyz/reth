@@ -38,6 +38,8 @@ pub use testing::{
     TESTING_COMMIT_BLOCK_V1,
 };
 
+pub use trace::TraceFilterRequest;
+
 /// re-export of all server traits
 pub use servers::*;
 

@@ -1,4 +1,4 @@
-use alloy_eips::BlockId;
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{map::HashSet, Bytes, B256};
 use alloy_rpc_types_eth::{state::StateOverride, BlockOverrides, Index};
 use alloy_rpc_types_trace::{
@@ -8,6 +8,8 @@ use alloy_rpc_types_trace::{
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_rpc_eth_api::CallManyRequest;
+use serde::{de, Deserialize, Deserializer};
+use serde_json::{Map, Value};
 
 /// Ethereum trace API
 #[rpc(server, namespace = "trace")]
@@ -69,9 +71,13 @@ pub trait TraceApi<TxReq> {
 
     /// Returns traces matching given filter.
     ///
-    /// This is similar to `eth_getLogs` but for traces. Omitted range bounds default to latest.
+    /// This is similar to `eth_getLogs` but for traces. Omitted range bounds default to latest,
+    /// and a bound may also be one of the `earliest`, `latest`, `safe` and `finalized` tags.
     #[method(name = "filter")]
-    async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>>;
+    async fn trace_filter(
+        &self,
+        filter: TraceFilterRequest,
+    ) -> RpcResult<Vec<LocalizedTransactionTrace>>;
 
     /// Returns the transaction trace at the given `traceAddress` path.
     ///
@@ -105,4 +111,49 @@ pub trait TraceApi<TxReq> {
     /// This is the same as `trace_transactionOpcodeGas` but for all transactions in a block.
     #[method(name = "blockOpcodeGas")]
     async fn trace_block_opcode_gas(&self, block_id: BlockId) -> RpcResult<Option<BlockOpcodeGas>>;
+}
+
+/// The parameter of `trace_filter`: a [`TraceFilter`] whose `fromBlock` and `toBlock` may also be
+/// a block tag.
+///
+/// [`TraceFilter`] types its bounds as block numbers, so a bound given as one of the tags
+/// `earliest`, `latest`, `safe`, `finalized` or `pending` is taken out before the rest is parsed as
+/// a [`TraceFilter`], and its `from_block` or `to_block` is then `None`. Numeric bounds are parsed
+/// by [`TraceFilter`] as before. The server resolves the tags; it rejects `pending`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TraceFilterRequest {
+    /// The filter, without the bounds given as tags.
+    pub filter: TraceFilter,
+    /// The `fromBlock` bound, when given as a tag.
+    pub from_tag: Option<BlockNumberOrTag>,
+    /// The `toBlock` bound, when given as a tag.
+    pub to_tag: Option<BlockNumberOrTag>,
+}
+
+impl From<TraceFilter> for TraceFilterRequest {
+    fn from(filter: TraceFilter) -> Self {
+        Self { filter, from_tag: None, to_tag: None }
+    }
+}
+
+impl<'de> Deserialize<'de> for TraceFilterRequest {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut filter = Map::<String, Value>::deserialize(deserializer)?;
+        let mut take_tag = |key: &str| {
+            let tag = match filter.get(key)?.as_str()? {
+                "earliest" => BlockNumberOrTag::Earliest,
+                "latest" => BlockNumberOrTag::Latest,
+                "safe" => BlockNumberOrTag::Safe,
+                "finalized" => BlockNumberOrTag::Finalized,
+                "pending" => BlockNumberOrTag::Pending,
+                _ => return None,
+            };
+            filter.remove(key);
+            Some(tag)
+        };
+        let from_tag = take_tag("fromBlock");
+        let to_tag = take_tag("toBlock");
+        let filter = TraceFilter::deserialize(Value::Object(filter)).map_err(de::Error::custom)?;
+        Ok(Self { filter, from_tag, to_tag })
+    }
 }
