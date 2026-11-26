@@ -14,7 +14,9 @@ use alloy_rpc_types_eth::{
     state::StateOverride,
     BlockId, BlockOverrides, BlockTransactionsKind,
 };
-use evm2::{interpreter::InstrStop, precompiles::MovePrecompileError, EvmFeatures, TxResult};
+use evm2::{
+    interpreter::InstrStop, precompiles::MovePrecompileError, EvmFeatures, SpecId, TxResult,
+};
 use evm2_inspectors::transfer::TransferInspector;
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_errors::ProviderResult;
@@ -344,6 +346,7 @@ where
     let block_gas_limit = builder.evm_env().block_env().gas_limit.to::<u64>();
     let is_amsterdam = builder.evm_env().version().feature(EvmFeatures::EIP8037);
     let tx_gas_limit_cap = builder.evm_env().version().tx_gas_limit_cap;
+    let is_london = Into::<SpecId>::into(builder.evm_env().spec_id()).enables(SpecId::LONDON);
     for mut call in calls {
         if is_cancelled() {
             return Err(EthApiError::InternalEthError)
@@ -382,6 +385,10 @@ where
             let Some(nonce) = call_nonce(&call, builder.evm_mut().state_db_mut())?
         {
             call.as_mut().set_nonce(nonce);
+        }
+
+        if !is_london {
+            default_to_legacy_before_london(call.as_mut());
         }
 
         // Resolve transaction, populate missing fields and enforce calls
@@ -446,6 +453,16 @@ where
     };
 
     Ok((result, results))
+}
+
+/// Makes a call without fee fields a legacy transaction, or an EIP-2930 transaction when it has an
+/// access list, because EIP-1559 transactions are not valid before London.
+///
+/// <https://github.com/ethereum/execution-apis/pull/999>
+const fn default_to_legacy_before_london(tx: &mut alloy_rpc_types_eth::TransactionRequest) {
+    if tx.preferred_type().is_eip1559() && !tx.has_eip1559_fields() {
+        tx.gas_price = Some(0);
+    }
 }
 
 /// Goes over the list of [`TransactionRequest`]s and populates missing fields trying to resolve
@@ -726,12 +743,13 @@ impl SimulatedState {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_precompile_overrides, sanitize_chain, EthSimulateError, ProviderResult,
-        SimulatedState, INTERNAL_ERROR_CODE,
+        apply_precompile_overrides, default_to_legacy_before_london, sanitize_chain,
+        EthSimulateError, ProviderResult, SimulatedState, INTERNAL_ERROR_CODE,
     };
     use crate::{cache::db::apply_state_overrides_with_state, error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
-    use alloy_consensus::Header;
+    use alloy_consensus::{Header, TxType};
+    use alloy_eips::eip2930::{AccessList, AccessListItem};
     use alloy_primitives::{
         address, keccak256,
         map::{AddressMap, B256Map},
@@ -809,6 +827,54 @@ mod tests {
             }
             Ok(hashed)
         }
+    }
+
+    /// Applies the pre-London default and the fields that `resolve_transaction` fills in, then
+    /// returns the type of the transaction that the request builds.
+    fn pre_london_tx_type(mut tx: TransactionRequest) -> TxType {
+        default_to_legacy_before_london(&mut tx);
+        tx.to = Some(Address::ZERO.into());
+        tx.nonce = Some(0);
+        tx.gas = Some(21_000);
+        tx.chain_id = Some(1);
+        tx.build_typed_simulate_transaction().unwrap().tx_type()
+    }
+
+    #[test]
+    fn call_without_fee_fields_is_legacy_before_london() {
+        assert_eq!(pre_london_tx_type(TransactionRequest::default()), TxType::Legacy);
+    }
+
+    #[test]
+    fn call_with_access_list_is_eip2930_before_london() {
+        let tx = TransactionRequest {
+            access_list: Some(AccessList(vec![AccessListItem {
+                address: Address::ZERO,
+                storage_keys: vec![],
+            }])),
+            ..Default::default()
+        };
+        assert_eq!(pre_london_tx_type(tx), TxType::Eip2930);
+    }
+
+    #[test]
+    fn call_with_eip1559_fee_fields_keeps_its_type_before_london() {
+        let mut tx = TransactionRequest {
+            max_fee_per_gas: Some(1),
+            max_priority_fee_per_gas: Some(0),
+            ..Default::default()
+        };
+        default_to_legacy_before_london(&mut tx);
+        assert_eq!(tx.gas_price, None);
+        assert_eq!(tx.preferred_type(), TxType::Eip1559);
+    }
+
+    #[test]
+    fn call_with_authorization_list_keeps_its_type_before_london() {
+        let mut tx = TransactionRequest { authorization_list: Some(vec![]), ..Default::default() };
+        default_to_legacy_before_london(&mut tx);
+        assert_eq!(tx.gas_price, None);
+        assert_eq!(tx.preferred_type(), TxType::Eip7702);
     }
 
     #[test]
