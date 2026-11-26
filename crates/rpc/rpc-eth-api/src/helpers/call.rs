@@ -478,6 +478,18 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
         Self: Trace,
     {
         self.spawn_with_state_at_block(at, |this, mut db| {
+            let mut request = request;
+            // The access list is for a transaction to send, so like geth's setDefaults fill an
+            // omitted fee cap from a supplied priority fee instead of running at a zero cap.
+            let fees = request.as_ref();
+            if fees.gas_price.is_none() &&
+                fees.max_fee_per_gas.is_none() &&
+                let Some(tip) = fees.max_priority_fee_per_gas.filter(|tip| *tip > 0)
+            {
+                let base_fee = evm_env.block_base_fee() as u128;
+                request.as_mut().max_fee_per_gas =
+                    Some(base_fee.saturating_mul(2).saturating_add(tip));
+            }
             let initial = request.as_ref().access_list().cloned().unwrap_or_default();
             let tx_gas_limit_cap = evm_env.version().tx_gas_limit_cap;
             let (mut evm_env, mut tx_env) = this.prepare_call_env(
