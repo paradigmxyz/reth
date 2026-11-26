@@ -1142,15 +1142,18 @@ mod tests {
     }
 
     fn eth68_hash_fields_strategy() -> impl Strategy<Value = NewPooledTransactionHashes68Fields> {
-        (0usize..128, 0usize..128, 0usize..128).prop_flat_map(
-            |(types_len, sizes_len, hashes_len)| {
-                (
-                    proptest::collection::vec(any::<u8>(), types_len),
-                    proptest::collection::vec(0usize..131_072, sizes_len),
-                    proptest::collection::vec(any::<B256>(), hashes_len),
-                )
-            },
-        )
+        // Independent lengths almost never match, so half the cases share one length.
+        prop_oneof![
+            (0usize..128).prop_map(|len| (len, len, len)),
+            (0usize..128, 0usize..128, 0usize..128),
+        ]
+        .prop_flat_map(|(types_len, sizes_len, hashes_len)| {
+            (
+                proptest::collection::vec(any::<u8>(), types_len),
+                proptest::collection::vec(0usize..131_072, sizes_len),
+                proptest::collection::vec(any::<B256>(), hashes_len),
+            )
+        })
     }
 
     proptest! {
@@ -1195,6 +1198,7 @@ mod tests {
         fn eth_68_handrolled_decode_matches_derived_implementation(
             (types, sizes, hashes) in eth68_hash_fields_strategy()
         ) {
+            let lengths_match = types.len() == sizes.len() && sizes.len() == hashes.len();
             let encodable = EncodableNewPooledTransactionHashes68 {
                 types: Bytes::from(types),
                 sizes,
@@ -1210,6 +1214,7 @@ mod tests {
 
             // The hand-rolled decoder stops early on malformed lengths, so only success must match.
             prop_assert_eq!(handrolled.as_ref().ok(), derived.as_ref().ok());
+            prop_assert_eq!(handrolled.is_ok(), lengths_match);
             if handrolled.is_ok() {
                 prop_assert!(derived_buf.is_empty());
                 prop_assert!(handrolled_buf.is_empty());
