@@ -780,11 +780,7 @@ where
                 }
             });
 
-        // Execution is done, so release our handle on the input before taking the block out of
-        // its `Arc`: when the converted block shares its allocation with the payload, the block the
-        // engine keeps is then the one execution used, along with anything its transactions
-        // cached, such as recovery results. If another handle is still alive the block is cloned,
-        // which copies those caches as well.
+        // Release the payload's handle so the block can be unwrapped instead of cloned.
         drop(input);
         let block = validated_block.try_into_inner().expect("sole handle")?;
         let block = Arc::unwrap_or_clone(block).with_senders(senders);
@@ -939,11 +935,8 @@ where
         Ok(ValidationOutput::new(executed_block, timing_stats))
     }
 
-    /// Spawns a background task to convert a [`BlockOrPayload`] into a shared [`SealedBlock`] and
-    /// perform basic consensus validations on it.
-    ///
-    /// The block is returned behind an [`Arc`] so that a payload which already holds its block in
-    /// an [`Arc`] is not cloned here, see [`PayloadValidator::convert_payload_to_block`].
+    /// Spawns a background task to convert a [`BlockOrPayload`] into a [`SealedBlock`] and perform
+    /// basic consensus validations on it.
     #[expect(clippy::type_complexity)]
     pub fn spawn_convert_and_validate<T>(
         &self,

@@ -187,11 +187,7 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// This function validates the payload and converts it into a [`SealedBlock`] which contains
     /// the block hash but does not perform signature recovery on transactions.
     ///
-    /// The block is returned behind an [`Arc`]. The engine tree converts a payload while it
-    /// executes it and takes the block out of the [`Arc`] after execution, so an implementation
-    /// whose payload already holds its block in an [`Arc`] can return that [`Arc`]: the block the
-    /// engine keeps is then the one execution used, with anything its transactions cached during
-    /// execution (such as recovery results), and is not cloned.
+    /// Returns an [`Arc`] so a payload that already shares its block can hand it over uncloned.
     ///
     /// This is more efficient than [`Self::ensure_well_formed_payload`] when signature recovery
     /// is not needed immediately or will be performed later.
