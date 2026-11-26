@@ -1143,7 +1143,7 @@ where
     fn on_get_pooled_transactions(
         &mut self,
         peer_id: PeerId,
-        request: GetPooledTransactions,
+        mut request: GetPooledTransactions,
         response: oneshot::Sender<RequestResult<PooledTransactions<N::PooledTransaction>>>,
     ) {
         // fast exit if gossip is disabled
@@ -1163,6 +1163,8 @@ where
                     .transaction_fetcher_config
                     .soft_limit_byte_size_pooled_transactions_response,
             );
+            // serve at most the soft limit of hashes, partial responses are allowed
+            request.0.truncate(SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST);
             // eth/72 peers fetch blobs with `GetCells`.
             let transactions = if peer.version.is_eth72_or_newer() {
                 self.pool.get_pooled_transaction_elements_without_blobs(request.0, limit)
@@ -3087,6 +3089,30 @@ mod tests {
                 panic!("error: {e:?}");
             }
         }
+
+        // requests above the hash count soft limit are served up to the limit
+        let mut hashes = vec![*tx.get_hash()];
+        for _ in 0..SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST {
+            let tx = MockTransaction::eip1559();
+            hashes.push(*tx.get_hash());
+            transactions
+                .pool
+                .add_transaction(reth_transaction_pool::TransactionOrigin::External, tx)
+                .await
+                .unwrap();
+        }
+
+        let (send, receive) =
+            oneshot::channel::<RequestResult<PooledTransactions<PooledTransactionVariant>>>();
+        transactions.on_network_tx_event(NetworkTransactionEvent::GetPooledTransactions {
+            peer_id: *peer1.peer_id(),
+            request: GetPooledTransactions(hashes.clone()),
+            response: send,
+        });
+
+        let PooledTransactions(served) = receive.await.unwrap().unwrap();
+        let served = served.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
+        assert_eq!(served, hashes[..SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST]);
     }
 
     // Ensure that when the remote peer only returns part of the requested transactions, the
