@@ -152,6 +152,20 @@ impl ToRpcError for EthSimulateError {
     }
 }
 
+/// Returns how many blocks [`sanitize_chain`] expands `blocks` on top of the block numbered
+/// `parent_number` to, gaps filled with empty blocks included, without validating them.
+pub fn simulated_block_count<TxReq>(blocks: &[SimBlock<TxReq>], parent_number: u64) -> u64 {
+    let last_number = blocks.iter().fold(parent_number, |prev, block| {
+        let next = prev.saturating_add(1);
+        block
+            .block_overrides
+            .as_ref()
+            .and_then(|overrides| overrides.number)
+            .map_or(next, |number| u64::try_from(number).unwrap_or(u64::MAX).max(next))
+    });
+    last_number - parent_number
+}
+
 /// Sanitizes and gap-fills the chain of [`SimBlock`]s for `eth_simulateV1`.
 ///
 /// Walks the provided block-state calls in order and:
@@ -726,8 +740,8 @@ impl SimulatedState {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_precompile_overrides, sanitize_chain, EthSimulateError, ProviderResult,
-        SimulatedState, INTERNAL_ERROR_CODE,
+        apply_precompile_overrides, sanitize_chain, simulated_block_count, EthSimulateError,
+        ProviderResult, SimulatedState, INTERNAL_ERROR_CODE,
     };
     use crate::{cache::db::apply_state_overrides_with_state, error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
@@ -912,6 +926,18 @@ mod tests {
         let times: Vec<u64> =
             out.iter().map(|b| b.block_overrides.as_ref().unwrap().time.unwrap()).collect();
         assert_eq!(times, vec![112, 124, 136]);
+    }
+
+    #[test]
+    fn simulated_block_count_matches_sanitized_chain() {
+        // An explicit gap followed by unnumbered blocks, which continue after the gap.
+        let parent = parent_at(5, 100);
+        let blocks = vec![block_with_number(8), SimBlock::default(), SimBlock::default()];
+        let count = simulated_block_count(&blocks, 5);
+
+        let out = sanitize_chain(blocks, &parent, Chain::mainnet().id(), 256).unwrap();
+        assert_eq!(out.len(), 5);
+        assert_eq!(count, 5);
     }
 
     #[test]

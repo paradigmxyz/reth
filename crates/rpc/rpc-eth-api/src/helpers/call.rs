@@ -91,11 +91,6 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
             let calls = block_state_calls.iter().map(|block| block.calls.len()).sum::<usize>();
             let gas =
                 calls_gas(self.call_gas_limit(), block_state_calls.iter().flat_map(|b| &b.calls));
-            let permit = self
-                .acquire_owned_blocking_io()
-                .await
-                .map_err(|_| EthApiError::InternalEthError)?;
-
             let base_block = self
                 .recovered_block(block)
                 .await?
@@ -106,16 +101,16 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
             // could return a newer block than `parent`.
             let state_at = if block.is_pending() { block } else { parent.hash().into() };
 
-            // Gaps between the requested block numbers are filled with empty blocks, which count
-            // like any other simulated block.
-            let blocks = block_state_calls
-                .iter()
-                .filter_map(|block| block.block_overrides.as_ref()?.number)
-                .map(|number| number.saturating_to::<u64>().saturating_sub(parent.number()))
-                .fold(block_state_calls.len() as u64, u64::max)
+            let blocks = simulate::simulated_block_count(&block_state_calls, parent.number())
                 .min(max_simulate_blocks);
+            // The memory budget is taken before the blocking IO permit, as every other request
+            // that takes both does, so that neither waits for the other while holding its own.
             let memory =
                 self.acquire_memory_budget(execution_weight_mib(calls as u64, gas, blocks)).await?;
+            let permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
 
             self.spawn_with_state_at_block(state_at, move |this, db| {
                 let _permit = permit;
