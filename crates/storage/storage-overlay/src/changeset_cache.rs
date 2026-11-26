@@ -1035,7 +1035,7 @@ mod tests {
         })
         .collect::<Vec<_>>();
         in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new: executed });
-        let ((), snapshot) = manager.in_memory_state().snapshot_during(|| ());
+        let snapshot = manager.in_memory_state().snapshot_during(|| ()).into_parts().1;
         let provider = factory.provider().unwrap();
         let cache = manager.changeset_cache();
         let (frontier, finish) = database_state_frontiers(&provider).unwrap();

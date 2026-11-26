@@ -1,6 +1,6 @@
 use crate::{
     manager::{OverlayCacheConfig, StateTrieOverlayError},
-    OverlayManager,
+    OverlayManager, OverlayStateProvider, OwnedProvider,
 };
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
@@ -9,7 +9,9 @@ use alloy_primitives::{
 };
 use evm2::{bytecode::Bytecode, evm::AccountInfo};
 use metrics::{Counter, Histogram};
-use reth_chain_state::{BlockState, ExecutedBlock, InMemoryState, InMemoryStateSnapshot};
+use reth_chain_state::{
+    BlockState, ExecutedBlock, InMemoryState, InMemoryStateSnapshot, Snapshotted,
+};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_metrics::Metrics;
@@ -264,6 +266,28 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         }
         builder.blocks = InMemoryBlockSource::Pinned(snapshot);
         builder
+    }
+
+    /// Returns an overlay state provider over `provider`, resolving in-memory blocks against the
+    /// blocks tracked while its database view was opened.
+    pub fn into_provider<P>(
+        self,
+        provider: Snapshotted<P, N>,
+    ) -> OverlayStateProvider<OwnedProvider<P>, N>
+    where
+        P: DBProvider + StorageSettingsCache,
+    {
+        let (provider, snapshot) = provider.into_parts();
+        OverlayStateProvider::new(provider, self.pinned(snapshot))
+    }
+
+    /// Returns an overlay state provider borrowing `provider`, resolving in-memory blocks against
+    /// the blocks tracked while its database view was opened.
+    pub fn into_provider_ref<P>(self, provider: &Snapshotted<P, N>) -> OverlayStateProvider<&P, N>
+    where
+        P: DBProvider + StorageSettingsCache,
+    {
+        OverlayStateProvider::new_ref(provider, self.pinned(provider.snapshot().clone()))
     }
 
     /// Returns the in-memory chain ending at the parent, if the parent is an in-memory block.
@@ -882,7 +906,7 @@ enum AnchorForParent {
 
 /// The in-memory blocks an [`OverlayBuilder`] resolves block hashes against.
 #[derive(Debug, Clone)]
-pub enum InMemoryBlockSource<N: NodePrimitives = EthPrimitives> {
+pub(crate) enum InMemoryBlockSource<N: NodePrimitives = EthPrimitives> {
     /// The manager's in-memory state as it is when a block is looked up.
     ///
     /// Use it only where no block the database view needs can be removed while the overlay is
@@ -1157,7 +1181,7 @@ mod tests {
         let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
         in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: blocks[2..=4].to_vec() });
-        let ((), snapshot) = manager.in_memory_state().snapshot_during(|| ());
+        let snapshot = manager.in_memory_state().snapshot_during(|| ()).into_parts().1;
         let provider = factory.provider().unwrap();
         let parent_hash = blocks[1].recovered_block().hash();
         let expected = manager
@@ -1199,7 +1223,7 @@ mod tests {
 
         in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: blocks[2..=4].to_vec() });
-        let ((), snapshot) = manager.in_memory_state().snapshot_during(|| ());
+        let snapshot = manager.in_memory_state().snapshot_during(|| ()).into_parts().1;
 
         let pinned = looked_up.pinned(snapshot.clone());
         assert_eq!(pinned.parent_state(), snapshot.state_by_hash(parent_hash).as_ref());

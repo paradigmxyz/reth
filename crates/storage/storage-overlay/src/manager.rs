@@ -129,7 +129,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
     /// `blocks`.
     ///
     /// This looks up the in-memory chain ending at `parent_hash`, canonical or not, in `blocks`.
-    pub fn overlay_builder_from(
+    pub(crate) fn overlay_builder_from(
         &self,
         blocks: InMemoryBlockSource<N>,
         parent_hash: B256,
@@ -1499,7 +1499,7 @@ mod tests {
         let blocks = test_blocks();
         in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
         let anchor_hash = blocks[0].recovered_block().parent_hash();
-        let ((), snapshot) = manager.in_memory_state().snapshot_during(|| ());
+        let snapshot = manager.in_memory_state().snapshot_during(|| ()).into_parts().1;
         let tip = snapshot.state_by_hash(blocks[2].recovered_block().hash()).unwrap();
 
         // Persistence removes the oldest block, so the live chain of the tip no longer reaches

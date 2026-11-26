@@ -9,7 +9,7 @@ pub use blocks::InMemoryStateSnapshot;
 mod canonical;
 pub use canonical::{
     CanonicalInMemoryState, CanonicalInMemoryStateWriter, InMemoryState, InMemoryStateBlockCounts,
-    InMemoryStateWriter,
+    InMemoryStateWriter, Snapshotted, SNAPSHOT_DURING_ATTEMPTS,
 };
 
 mod executed_block;

@@ -136,16 +136,16 @@ where
     ) -> ProviderResult<OverlayStateProvider<OwnedProvider<F::Provider>, N>> {
         let overall_start = Instant::now();
 
-        // Get a read-only provider. Its transaction opens while no in-memory block can be inserted
-        // or removed, so the builder resolves in-memory blocks against exactly the blocks tracked
-        // when it opened.
+        // Get a read-only provider, with the in-memory blocks tracked while its transaction opened,
+        // which the builder resolves in-memory blocks against.
         let start = Instant::now();
         let (provider, in_memory) = self
             .overlay_builder
             .overlay_manager()
             .in_memory_state()
-            .snapshot_during(|| self.factory.database_provider_ro());
-        let provider = provider?;
+            .snapshot_during(|| self.factory.database_provider_ro())
+            .transpose()?
+            .into_parts();
         self.metrics.create_provider_duration.record(start.elapsed());
 
         let is_v2 = provider.cached_storage_settings().is_v2();
@@ -191,7 +191,10 @@ where
 
 impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, N> {
     /// Creates an overlay state provider over an already-open database provider.
-    pub fn new(provider: Provider, overlay_builder: OverlayBuilder<N>) -> Self
+    ///
+    /// The builder must resolve in-memory blocks against blocks that belong to `provider`'s
+    /// database view, see [`OverlayBuilder::into_provider`].
+    pub(crate) fn new(provider: Provider, overlay_builder: OverlayBuilder<N>) -> Self
     where
         Provider: StorageSettingsCache,
     {
@@ -235,7 +238,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
 
 impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
     /// Creates an overlay state provider over a borrowed database provider.
-    pub fn new_ref(provider: &'a Provider, overlay_builder: OverlayBuilder<N>) -> Self
+    pub(crate) fn new_ref(provider: &'a Provider, overlay_builder: OverlayBuilder<N>) -> Self
     where
         Provider: StorageSettingsCache,
     {

@@ -1,4 +1,4 @@
-use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes, ProviderWithInMemorySnapshot};
+use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes, SnapshottedProvider};
 use crate::{
     changeset_walker::changeset_block_range,
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
@@ -13,7 +13,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
-use reth_chain_state::{BlockState, CanonicalInMemoryState, InMemoryStateSnapshot};
+use reth_chain_state::{BlockState, CanonicalInMemoryState};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::RecoveredBlockAndExecutionOutput;
@@ -24,10 +24,7 @@ use reth_primitives_traits::{
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider,
-    StorageChangeSetReader,
-};
+use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::bundle_state::PlainStorageRevert;
 use std::{
@@ -45,10 +42,8 @@ use std::{
 #[derive(Debug)]
 #[doc(hidden)] // triggers ICE for `cargo docs`
 pub struct ConsistentProvider<N: ProviderNodeTypes> {
-    /// Storage provider.
-    storage_provider: <ProviderFactory<N> as DatabaseProviderFactory>::Provider,
-    /// The in-memory blocks tracked when the storage provider's transaction opened.
-    in_memory: InMemoryStateSnapshot<N::Primitives>,
+    /// Storage provider, with the in-memory blocks tracked while its transaction opened.
+    storage_provider: SnapshottedProvider<N>,
     /// In-memory canonical state. This is not a snapshot, and can change! Use with caution.
     canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
 }
@@ -56,32 +51,29 @@ pub struct ConsistentProvider<N: ProviderNodeTypes> {
 impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     /// Create a new provider using [`ProviderFactory`] and [`CanonicalInMemoryState`],
     ///
-    /// Underneath it opens [`ProviderFactory::database_provider_ro`] while no in-memory block can
-    /// be inserted or removed, and takes the in-memory head from the blocks tracked at that moment,
-    /// effectively maintaining one single snapshotted view of memory and database.
+    /// Underneath it opens [`ProviderFactory::provider_with_in_memory_snapshot`] and takes the
+    /// in-memory head from the blocks tracked while its transaction opened, effectively maintaining
+    /// one single snapshotted view of memory and database.
     pub fn new(
         storage_provider_factory: ProviderFactory<N>,
         state: CanonicalInMemoryState<N::Primitives>,
     ) -> ProviderResult<Self> {
-        // Blocks leave memory only after their persistence committed, and none leaves while the
-        // transaction opens, so every block is either in the in-memory chain or visible to the
-        // transaction, and there are no gaps in the range.
-        let (storage_provider, in_memory) = state
-            .in_memory_state()
-            .snapshot_during(|| storage_provider_factory.database_provider_ro());
-        let storage_provider = storage_provider?;
-        Ok(Self { storage_provider, in_memory, canonical_in_memory_state: state })
+        // Blocks leave memory only after their persistence committed, so every block is either in
+        // the snapshot's in-memory chain or visible to the transaction, and there are no gaps in
+        // the range.
+        let storage_provider = storage_provider_factory.provider_with_in_memory_snapshot()?;
+        Ok(Self { storage_provider, canonical_in_memory_state: state })
     }
 
     /// Returns the in-memory canonical head when this view was created.
     const fn head_block(&self) -> Option<&Arc<BlockState<N::Primitives>>> {
-        self.in_memory.canonical_head()
+        self.storage_provider.snapshot().canonical_head()
     }
 
-    /// Consumes this consistent view and returns its database provider and the in-memory blocks
-    /// tracked when its transaction opened.
-    pub(crate) fn into_parts(self) -> ProviderWithInMemorySnapshot<N> {
-        ProviderWithInMemorySnapshot { provider: self.storage_provider, in_memory: self.in_memory }
+    /// Consumes this consistent view and returns its database provider, with the in-memory blocks
+    /// tracked while its transaction opened.
+    pub(crate) fn into_snapshotted_provider(self) -> SnapshottedProvider<N> {
+        self.storage_provider
     }
 
     // Helper function to convert range bounds
@@ -1133,7 +1125,7 @@ impl<N: ProviderNodeTypes> ChainSpecProvider for ConsistentProvider<N> {
     type ChainSpec = N::ChainSpec;
 
     fn chain_spec(&self) -> Arc<N::ChainSpec> {
-        ChainSpecProvider::chain_spec(&self.storage_provider)
+        ChainSpecProvider::chain_spec(&*self.storage_provider)
     }
 }
 
