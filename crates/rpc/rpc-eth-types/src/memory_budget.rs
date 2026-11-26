@@ -13,7 +13,7 @@ use crate::EthApiError;
 use alloy_rpc_types_eth::{state::StateOverride, TransactionRequest};
 use std::{num::NonZeroU32, sync::Arc, time::Duration};
 use tokio::{
-    sync::{OwnedSemaphorePermit, Semaphore},
+    sync::{Notify, OwnedSemaphorePermit, Semaphore},
     time::Instant,
 };
 
@@ -51,6 +51,8 @@ const SLOT_OVERRIDE_BYTES: u64 = 128;
 #[derive(Debug, Clone)]
 pub struct RpcMemoryBudget {
     units: Arc<Semaphore>,
+    /// Wakes the requests waiting for units whenever a request returns its units.
+    released: Arc<Notify>,
     total_mib: u32,
 }
 
@@ -58,7 +60,11 @@ impl RpcMemoryBudget {
     /// Creates a budget of `total_mib` MiB.
     pub fn new(total_mib: NonZeroU32) -> Self {
         let total_mib = total_mib.get();
-        Self { units: Arc::new(Semaphore::new(total_mib as usize)), total_mib }
+        Self {
+            units: Arc::new(Semaphore::new(total_mib as usize)),
+            released: Arc::new(Notify::new()),
+            total_mib,
+        }
     }
 
     /// Returns the size of the budget in MiB.
@@ -76,7 +82,7 @@ impl RpcMemoryBudget {
     /// The permit holds the units until it is dropped. Returns
     /// [`EthApiError::MemoryBudgetExhausted`] if the units are not available within
     /// [`MEMORY_BUDGET_WAIT`].
-    pub async fn acquire(&self, weight_mib: u64) -> Result<OwnedSemaphorePermit, EthApiError> {
+    pub async fn acquire(&self, weight_mib: u64) -> Result<MemoryPermit, EthApiError> {
         self.acquire_until(weight_mib, Instant::now() + MEMORY_BUDGET_WAIT).await
     }
 
@@ -96,7 +102,7 @@ impl RpcMemoryBudget {
         loop {
             let permit =
                 permits.clone().acquire_owned().await.map_err(|_| EthApiError::InternalEthError)?;
-            if let Ok(memory) = self.units.clone().try_acquire_many_owned(self.units(weight_mib)) {
+            if let Some(memory) = self.try_acquire(weight_mib) {
                 return Ok(Admission { _permit: permit, _memory: Some(memory) })
             }
             drop(permit);
@@ -114,22 +120,47 @@ impl RpcMemoryBudget {
         u32::try_from(weight_mib).unwrap_or(u32::MAX).clamp(1, self.total_mib)
     }
 
+    /// Takes `weight_mib` MiB of the budget if they are free now.
+    fn try_acquire(&self, weight_mib: u64) -> Option<MemoryPermit> {
+        let units = self.units.clone().try_acquire_many_owned(self.units(weight_mib)).ok()?;
+        Some(MemoryPermit { units: Some(units), released: self.released.clone() })
+    }
+
     /// Takes `weight_mib` MiB of the budget, waiting for it until `deadline`.
+    ///
+    /// A waiting request takes no units until all of them are free, so that it never holds part
+    /// of the budget that smaller requests could run with.
     async fn acquire_until(
         &self,
         weight_mib: u64,
         deadline: Instant,
-    ) -> Result<OwnedSemaphorePermit, EthApiError> {
-        match tokio::time::timeout_at(
-            deadline,
-            self.units.clone().acquire_many_owned(self.units(weight_mib)),
-        )
-        .await
-        {
-            Ok(Ok(permit)) => Ok(permit),
-            Ok(Err(_)) => Err(EthApiError::InternalEthError),
-            Err(_) => Err(EthApiError::MemoryBudgetExhausted { weight_mib }),
+    ) -> Result<MemoryPermit, EthApiError> {
+        loop {
+            let released = self.released.notified();
+            tokio::pin!(released);
+            // Registered before trying, so that a release between the two is not missed.
+            released.as_mut().enable();
+            if let Some(permit) = self.try_acquire(weight_mib) {
+                return Ok(permit)
+            }
+            tokio::time::timeout_at(deadline, released)
+                .await
+                .map_err(|_| EthApiError::MemoryBudgetExhausted { weight_mib })?;
         }
+    }
+}
+
+/// Units of the memory budget a request holds until it is dropped.
+#[derive(Debug)]
+pub struct MemoryPermit {
+    units: Option<OwnedSemaphorePermit>,
+    released: Arc<Notify>,
+}
+
+impl Drop for MemoryPermit {
+    fn drop(&mut self) {
+        drop(self.units.take());
+        self.released.notify_waiters();
     }
 }
 
@@ -137,7 +168,7 @@ impl RpcMemoryBudget {
 #[derive(Debug)]
 pub struct Admission {
     _permit: OwnedSemaphorePermit,
-    _memory: Option<OwnedSemaphorePermit>,
+    _memory: Option<MemoryPermit>,
 }
 
 /// Takes a permit of `permits` and, if memory is budgeted, `weight_mib` MiB of `budget`, see
@@ -186,9 +217,15 @@ pub const fn execution_weight_mib(calls: u64, gas: u64, blocks: u64) -> u64 {
     )
 }
 
-/// Returns the memory, in bytes, that applying `overrides` holds: every overridden account, its
-/// code and its storage slots.
-pub fn state_override_bytes(overrides: &StateOverride) -> u64 {
+/// Returns the memory, in MiB, that applying `overrides` may hold: the parsed overrides and the
+/// state they are copied into.
+pub fn state_override_weight_mib(overrides: Option<&StateOverride>) -> u64 {
+    overrides.map_or(0, |overrides| bytes_to_mib(state_override_bytes(overrides).saturating_mul(2)))
+}
+
+/// Returns the memory, in bytes, that `overrides` hold: every overridden account, its code and its
+/// storage slots.
+fn state_override_bytes(overrides: &StateOverride) -> u64 {
     overrides.values().fold(0, |bytes, account| {
         let slots = account.state.as_ref().map_or(0, |state| state.len()) +
             account.state_diff.as_ref().map_or(0, |state| state.len());
@@ -295,6 +332,23 @@ mod tests {
         assert!(!queued.is_finished());
         drop(running);
         queued.await.unwrap().unwrap();
+        assert_eq!(budget.available_mib(), 100);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn waiting_request_holds_no_units() {
+        let budget = budget(100);
+        let held = budget.acquire(60).await.unwrap();
+        let waiting = tokio::spawn({
+            let budget = budget.clone();
+            async move { budget.acquire(50).await.map(drop) }
+        });
+        tokio::time::sleep(MEMORY_BUDGET_WAIT / 4).await;
+        // A smaller request that fits runs past the waiting one.
+        assert_eq!(budget.available_mib(), 40);
+        drop(budget.acquire(40).await.unwrap());
+        drop(held);
+        waiting.await.unwrap().unwrap();
         assert_eq!(budget.available_mib(), 100);
     }
 

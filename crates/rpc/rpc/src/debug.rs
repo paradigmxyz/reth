@@ -42,8 +42,8 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{
     memory_budget::{
-        bytes_to_mib, calls_gas, execution_weight_mib, proof_weight_mib, traced_calls_bytes,
-        Admission,
+        bytes_to_mib, calls_gas, execution_weight_mib, proof_weight_mib, state_override_weight_mib,
+        traced_calls_bytes, Admission,
     },
     utils::CallManyBudget,
     EthApiError, StateCacheDb, TransactionSource,
@@ -494,7 +494,8 @@ where
             1,
             self.eth_api().eth_api_settings().max_trace_bytes,
             self.eth_api().eth_api_settings().max_response_size,
-        );
+        )
+        .saturating_add(state_override_weight_mib(overrides.state.as_ref()));
         let admission = self.admit_trace(weight).await?;
 
         // Check if we need to replay transactions for a specific tx_index
@@ -646,7 +647,8 @@ where
             calls as u64,
             self.eth_api().eth_api_settings().max_trace_bytes,
             self.eth_api().eth_api_settings().max_response_size,
-        );
+        )
+        .saturating_add(state_override_weight_mib(state_overrides.as_ref()));
         let admission = self.admit_trace(weight).await?;
 
         // we're essentially replaying the transactions in the block here, hence we need the state

@@ -33,7 +33,10 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{
     cache::db::apply_block_overrides,
     error::EthApiError,
-    memory_budget::{bytes_to_mib, calls_gas, execution_weight_mib, traced_calls_bytes, Admission},
+    memory_budget::{
+        bytes_to_mib, calls_gas, execution_weight_mib, state_override_weight_mib,
+        traced_calls_bytes, Admission,
+    },
     utils::CallManyBudget,
     EthConfig, TransactionSource,
 };
@@ -121,7 +124,8 @@ where
             calls_gas(self.eth_api().call_gas_limit(), [&trace_request.call]),
             self.eth_api().eth_api_settings().max_trace_bytes,
             self.eth_api().eth_api_settings().max_response_size,
-        );
+        )
+        .saturating_add(state_override_weight_mib(trace_request.state_overrides.as_ref()));
         let admission = self.admit_trace(weight).await?;
         let overrides =
             EvmOverrides::new(trace_request.state_overrides, trace_request.block_overrides);
@@ -198,7 +202,8 @@ where
             calls_gas(self.eth_api().call_gas_limit(), calls.iter().map(|(call, _)| call)),
             self.eth_api().eth_api_settings().max_trace_bytes,
             self.eth_api().eth_api_settings().max_response_size,
-        );
+        )
+        .saturating_add(state_override_weight_mib(overrides.state.as_ref()));
         let admission = self.admit_trace(weight).await?;
         let at = block_id.unwrap_or_default();
         let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
