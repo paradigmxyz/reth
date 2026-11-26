@@ -7,14 +7,14 @@ use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
     transaction::{PooledTransaction, TxHashRef},
 };
-use alloy_eips::eip7594::{BlobCellMask, Cell, EIP_7594_WRAPPER_VERSION};
-use alloy_primitives::{B128, B256};
-use alloy_rlp::{
-    BufMut, Decodable, Encodable, Header, RlpDecodableWrapper, RlpEncodableWrapper, EMPTY_LIST_CODE,
-};
+use alloy_eips::eip7594::EIP_7594_WRAPPER_VERSION;
+use alloy_primitives::B256;
+use alloy_rlp::{Decodable, Header, RlpDecodableWrapper, RlpEncodableWrapper, EMPTY_LIST_CODE};
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
 use reth_primitives_traits::InMemorySize;
+
+pub use crate::cells::{Cells, GetCells};
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive(
@@ -154,90 +154,6 @@ fn is_eth72_pooled_transaction(mut buf: &[u8]) -> alloy_rlp::Result<bool> {
     // Skip the transaction body.
     Header::decode_bytes(&mut fields, true)?;
     Ok(fields.starts_with(&[EIP_7594_WRAPPER_VERSION, EMPTY_LIST_CODE]))
-}
-
-/// A list of transaction hashes and the cell indices requested for each transaction.
-///
-/// This encodes as the fields of the eth/72 packet, which [`RequestPair`] wraps in a single list
-/// with the request ID: `[request_id, hashes, cell_mask]`. See [EIP-8070]: Sparse Blobpool
-///
-/// [`RequestPair`]: crate::message::RequestPair
-/// [EIP-8070]: https://eips.ethereum.org/EIPS/eip-8070
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct GetCells {
-    /// Transaction hashes to request cells for.
-    pub hashes: Vec<B256>,
-    /// Requested cell indices, encoded with the same syntax as the `cell_mask` in
-    /// `NewPooledTransactionHashes`.
-    pub cell_mask: B128,
-}
-
-impl GetCells {
-    /// Returns the requested cell indices, decoded from the little-endian wire bitvector.
-    pub fn cell_mask(&self) -> BlobCellMask {
-        BlobCellMask::from_bits(u128::from_le_bytes(self.cell_mask.into()))
-    }
-}
-
-impl InMemorySize for GetCells {
-    fn size(&self) -> usize {
-        self.hashes.len() * core::mem::size_of::<B256>() + core::mem::size_of::<B128>()
-    }
-}
-
-impl Encodable for GetCells {
-    fn encode(&self, out: &mut dyn BufMut) {
-        self.hashes.encode(out);
-        self.cell_mask.encode(out);
-    }
-
-    fn length(&self) -> usize {
-        self.hashes.length() + self.cell_mask.length()
-    }
-}
-
-impl Decodable for GetCells {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        Ok(Self { hashes: Decodable::decode(buf)?, cell_mask: Decodable::decode(buf)? })
-    }
-}
-
-/// The response to [`GetCells`], containing requested cells for each transaction hash.
-///
-/// Like [`GetCells`], this encodes as the packet fields after the request ID:
-/// `[request_id, hashes, cells, cell_mask]`.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Cells {
-    /// Transaction hashes corresponding to the returned cell lists.
-    pub hashes: Vec<B256>,
-    /// Requested cells for each transaction hash.
-    pub cells: Vec<Vec<Cell>>,
-    /// Cell indices included in each cell list.
-    pub cell_mask: B128,
-}
-
-impl Encodable for Cells {
-    fn encode(&self, out: &mut dyn BufMut) {
-        self.hashes.encode(out);
-        self.cells.encode(out);
-        self.cell_mask.encode(out);
-    }
-
-    fn length(&self) -> usize {
-        self.hashes.length() + self.cells.length() + self.cell_mask.length()
-    }
-}
-
-impl Decodable for Cells {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        Ok(Self {
-            hashes: Decodable::decode(buf)?,
-            cells: Decodable::decode(buf)?,
-            cell_mask: Decodable::decode(buf)?,
-        })
-    }
 }
 
 #[cfg(test)]

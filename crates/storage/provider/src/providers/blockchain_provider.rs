@@ -1168,7 +1168,7 @@ mod tests {
         );
         let mut blocks = Vec::<ExecutedBlock>::new();
         let mut storage_roots = Vec::new();
-        for number in 0..=2 {
+        for number in 0..=3 {
             let mut output = (*ExecutedBlock::<reth_ethereum_primitives::EthPrimitives>::default()
                 .execution_output)
                 .clone();
@@ -1255,7 +1255,7 @@ mod tests {
             .append_storage_changeset(vec![], 0)?;
         static_files.commit()?;
         let writer = factory.provider_rw()?;
-        writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 2, 1))?;
+        writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 3, 1))?;
         writer.commit()?;
         let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
             factory.chain_info_headers()?,
@@ -1265,10 +1265,34 @@ mod tests {
             factory,
             canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
         );
-        canonical_in_memory_state_writer.insert_executed(blocks[2].clone());
+        canonical_in_memory_state_writer
+            .update_chain(NewCanonicalChain::Commit { new: blocks[2..].to_vec() });
 
-        for number in [1, 2] {
-            let state = provider.history_by_block_hash(blocks[number].recovered_block().hash())?;
+        // Persistence can remove blocks 2 and 3, which mask Finish, from the live in-memory state
+        // after the providers opened their snapshots. Block 2 is below Finish, so its by-number
+        // provider also needs block 3.
+        let states = [1, 2, 3]
+            .map(|number| {
+                (number, provider.history_by_block_hash(blocks[number].recovered_block().hash()))
+            })
+            .into_iter()
+            .chain([2, 3].map(|number| {
+                let number_or_tag = BlockNumberOrTag::Number(number as u64);
+                (number, provider.state_by_block_number_or_tag(number_or_tag))
+            }))
+            .collect::<Vec<_>>();
+        let range_view = provider
+            .state_range_provider(blocks[2].recovered_block().state_root)?
+            .expect("in-memory root must resolve");
+        canonical_in_memory_state_writer
+            .clear_state(blocks[3].recovered_block().clone_sealed_header());
+
+        // The first node of a boundary proof is the trie root.
+        let proof = range_view.account_range_proof(&[keccak256(other_address)])?;
+        assert_eq!(keccak256(&proof[0]), blocks[2].recovered_block().state_root);
+
+        for (number, state) in states {
+            let state = state?;
             let root = blocks[number].recovered_block().state_root;
             state
                 .multiproof_v2(

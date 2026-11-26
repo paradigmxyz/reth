@@ -18,7 +18,7 @@ use reth_node_types::NodeTypes;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::{MetadataProvider, MetadataWriter, StorageSettingsCache};
+use reth_storage_api::{metadata::keys, MetadataProvider, MetadataWriter, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
 use tracing::instrument;
 
@@ -196,6 +196,52 @@ impl<TX: DbTxMut + DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
     }
 }
 
+impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Only a checkpoint the downloader verified against the restored files bounds reads. Older
+    /// downloads could record their tip as pruned with its bodies retained, so without that
+    /// marker a checkpoint inside the transaction files is reported where the files start.
+    /// The original pruning progress is kept for writes.
+    fn bodies_checkpoint_for_reads(
+        &self,
+        mut checkpoint: PruneCheckpoint,
+    ) -> ProviderResult<PruneCheckpoint> {
+        let first = self.static_file_provider.earliest_history_height();
+        // Snap sync has no body indices at its pivot, which stays unavailable.
+        if let Some(block) = checkpoint.block_number &&
+            block >= first &&
+            self.tx.get::<tables::Metadata>(keys::VERIFIED_SNAPSHOT_BODIES.to_owned())?.is_none() &&
+            self.tx.get::<tables::BlockBodyIndices>(block)?.is_some()
+        {
+            checkpoint.block_number = first.checked_sub(1);
+            checkpoint.tx_number = self
+                .tx
+                .get::<tables::BlockBodyIndices>(first)?
+                .and_then(|indices| indices.first_tx_num().checked_sub(1));
+        }
+        Ok(checkpoint)
+    }
+
+    /// Returns the first block with an available body, given the stored Bodies checkpoint.
+    pub(super) fn earliest_body_block(
+        &self,
+        checkpoint: Option<PruneCheckpoint>,
+    ) -> ProviderResult<BlockNumber> {
+        let first_file_block = self.static_file_provider.earliest_history_height();
+        // A download keeps body indices at the pruned tip and anchors its transaction file
+        // there for the next append. Snap sync has no body indices at its pivot.
+        let earliest = if let Some(checkpoint) = checkpoint &&
+            let Some(pruned) = self.bodies_checkpoint_for_reads(checkpoint)?.block_number &&
+            pruned >= first_file_block &&
+            self.tx.get::<tables::BlockBodyIndices>(pruned)?.is_some()
+        {
+            pruned.saturating_add(1)
+        } else {
+            first_file_block
+        };
+        Ok(earliest)
+    }
+}
+
 impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvider<TX, N> {
     fn get_prune_checkpoint(
         &self,
@@ -219,6 +265,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
         &self,
     ) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
         let mut checkpoints = self.get_prune_checkpoints()?;
+        if let Some((_, bodies)) =
+            checkpoints.iter_mut().find(|(segment, _)| *segment == PruneSegment::Bodies)
+        {
+            *bodies = self.bodies_checkpoint_for_reads(*bodies)?;
+        }
         if !EitherWriter::receipts_destination(self).is_static_file() ||
             !checkpoints.iter().any(|(segment, checkpoint)| {
                 matches!(segment, PruneSegment::Receipts | PruneSegment::ContractLogs) &&

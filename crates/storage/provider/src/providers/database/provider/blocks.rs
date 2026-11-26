@@ -6,8 +6,9 @@ use crate::{
     to_range,
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, DBProvider, EitherReader,
-    EitherWriterDestination, HeaderProvider, ProviderError, RocksDBProviderFactory,
-    StageCheckpointReader, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    EitherWriterDestination, HeaderProvider, ProviderError, PruneCheckpointReader,
+    RocksDBProviderFactory, StageCheckpointReader, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
@@ -20,6 +21,7 @@ use reth_db_api::{cursor::DbCursorRO, models::StoredBlockBodyIndices, tables, tr
 use reth_execution_types::RecoveredBlockAndExecutionOutput;
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{Block as _, BlockBody as _, RecoveredBlock, SealedHeader};
+use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{BlockBodyIndicesProvider, BlockBodyReader};
@@ -43,10 +45,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         BF: FnOnce(H, BodyTy<N>, Vec<Address>) -> ProviderResult<Option<B>>,
     {
         let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
-        let earliest_available = self.static_file_provider.earliest_history_height();
-        if block_number < earliest_available {
-            return Err(ProviderError::BlockExpired { requested: block_number, earliest_available })
-        }
+        self.ensure_body_available(block_number)?;
         let Some(header) = header_by_number(block_number)? else { return Ok(None) };
 
         // Get the block body
@@ -118,15 +117,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             return Ok(Vec::new())
         }
 
-        // like the single block lookups, reject ranges that reach into expired history instead
-        // of assembling blocks whose bodies are no longer available
-        let earliest_available = self.static_file_provider.earliest_history_height();
-        if *range.start() < earliest_available {
-            return Err(ProviderError::BlockExpired {
-                requested: *range.start(),
-                earliest_available,
-            })
-        }
+        self.ensure_body_available(*range.start())?;
 
         let len = range.end().saturating_sub(*range.start()) as usize + 1;
         let mut blocks = Vec::with_capacity(len);
@@ -211,6 +202,24 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             assemble_block(header, body, senders)
         })
     }
+
+    /// The snapshot Bodies checkpoint can expire a block whose state and receipts still exist.
+    fn ensure_body_available(&self, requested: BlockNumber) -> ProviderResult<()> {
+        let checkpoint = self.get_prune_checkpoint(PruneSegment::Bodies)?;
+        // Reconciling an older download's checkpoint only lowers it, so later blocks skip that.
+        if requested >= self.static_file_provider.earliest_history_height() &&
+            checkpoint
+                .and_then(|checkpoint| checkpoint.block_number)
+                .is_none_or(|pruned| pruned < requested)
+        {
+            return Ok(())
+        }
+        let earliest_available = self.earliest_body_block(checkpoint)?;
+        if requested < earliest_available {
+            return Err(ProviderError::BlockExpired { requested, earliest_available })
+        }
+        Ok(())
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabaseProvider<TX, N> {
@@ -290,6 +299,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N
         self.static_file_provider.last_block_number()
     }
 
+    fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
+        self.earliest_body_block(self.get_prune_checkpoint(PruneSegment::Bodies)?)
+    }
+
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
         Ok(self.tx.get::<tables::HeaderNumbers>(hash)?)
     }
@@ -319,10 +332,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
     /// Returns an error if the requested block is below the earliest available history.
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
-            let earliest_available = self.static_file_provider.earliest_history_height();
-            if number < earliest_available {
-                return Err(ProviderError::BlockExpired { requested: number, earliest_available })
-            }
+            self.ensure_body_available(number)?;
 
             let Some(header) = self.header_by_number(number)? else { return Ok(None) };
 

@@ -545,7 +545,7 @@ mod tests {
     use alloy_rpc_types_eth::{
         simulate::{SimBlock, SimulatePayload},
         state::{AccountOverride, EvmOverrides, StateOverride},
-        BlockOverrides, Bundle, TransactionRequest,
+        AccessListResult, BlockOverrides, Bundle, TransactionRequest,
     };
     use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
     use evm2::{evm::CacheDB, AccountInfo};
@@ -1708,6 +1708,71 @@ mod tests {
         drop(permit);
         let estimated = EthApiServer::estimate_gas(&api, request, None, None, None).await.unwrap();
         assert_eq!(estimated, U256::from(21_000));
+    }
+
+    /// `eth_createAccessList` takes a blocking IO permit before it spawns its blocking task and
+    /// moves it into that task, so dropping the request does not free the permit.
+    #[test]
+    fn create_access_list_permit_stays_with_blocking_task() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let provider = MockEthProvider::default();
+            // Access-list transactions need a post-Berlin block.
+            provider.add_block(
+                B256::repeat_byte(0x42),
+                Block {
+                    header: Header {
+                        number: 13_000_000,
+                        timestamp: 1_629_000_000,
+                        base_fee_per_gas: Some(1_000_000_000),
+                        gas_limit: 30_000_000,
+                        ..Default::default()
+                    },
+                    body: BlockBody::default(),
+                },
+            );
+            let api = EthApiBuilder::new(
+                provider.clone(),
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(provider.chain_spec()),
+            )
+            .max_blocking_io_requests(1)
+            .build();
+            let request = TransactionRequest {
+                gas_price: Some(0),
+                ..TransactionRequest::default().with_to(Address::repeat_byte(0xaa))
+            };
+
+            // Keep the only blocking thread busy so the request's task stays queued.
+            let (release, blocked) = std::sync::mpsc::channel::<()>();
+            let blocker = tokio::task::spawn_blocking(move || blocked.recv());
+            // Polls once, which spawns the blocking task, then drops the request.
+            assert!(futures::FutureExt::now_or_never(EthApiServer::create_access_list(
+                &api,
+                request.clone(),
+                None,
+                None
+            ))
+            .is_none());
+            assert_eq!(api.blocking_io_task_guard().available_permits(), 0);
+
+            release.send(()).unwrap();
+            blocker.await.unwrap().unwrap();
+            let result = EthApiServer::create_access_list(&api, request, None, None).await.unwrap();
+            assert_eq!(
+                result,
+                AccessListResult {
+                    access_list: Default::default(),
+                    gas_used: U256::from(21_000),
+                    error: None
+                }
+            );
+        });
     }
 
     #[tokio::test]

@@ -51,7 +51,7 @@ use alloy_eips::eip2718::{Encodable2718, Typed2718};
 use alloy_primitives::{
     bytes::BufMut,
     map::{hash_map::Entry, B256Map, B256Set, FbBuildHasher, HashMap, HashSet},
-    TxHash, B256,
+    TxHash, B128, B256,
 };
 use alloy_rlp::Encodable;
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
@@ -245,19 +245,40 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
         &self,
         peer_id: PeerId,
         hashes: Vec<B256>,
-        cell_mask: alloy_primitives::B128,
+        cell_mask: B128,
     ) -> Result<Option<Cells>, RequestError> {
         if hashes.is_empty() {
-            return Ok(Some(Cells { cell_mask, ..Default::default() }))
+            return Ok(Some(Cells { cell_mask: cell_mask.into(), ..Default::default() }))
         }
 
-        let Some(peer) = self.peer_handle(peer_id).await? else { return Ok(None) };
+        self.request_cells_from(peer_id, GetCells { hashes, cell_mask: cell_mask.into() }).await
+    }
 
-        let (tx, rx) = oneshot::channel();
+    /// Requests cells with one little-endian mask per transaction hash.
+    /// Uniform batches use shared encoding; heterogeneous batches require an eth/73 peer and
+    /// contain at most 64 unique hashes. Invalid batches return `InvalidRequest` without sending.
+    /// Returns `None` if the peer disconnected. Callers must verify returned cells against the
+    /// transaction commitments and proofs before using them, as with `get_cells_from`.
+    pub async fn get_cells_with_masks_from(
+        &self,
+        peer_id: PeerId,
+        hashes: Vec<B256>,
+        masks: Vec<B128>,
+    ) -> Result<Option<Cells>, RequestError> {
         let request =
-            PeerRequest::GetCells { request: GetCells { hashes, cell_mask }, response: tx };
-        peer.try_send(request).map_err(|_| RequestError::ChannelClosed)?;
+            GetCells::from_masks(hashes, masks).map_err(|_| RequestError::InvalidRequest)?;
+        self.request_cells_from(peer_id, request).await
+    }
 
+    async fn request_cells_from(
+        &self,
+        peer_id: PeerId,
+        request: GetCells,
+    ) -> Result<Option<Cells>, RequestError> {
+        let Some(peer) = self.peer_handle(peer_id).await? else { return Ok(None) };
+        let (tx, rx) = oneshot::channel();
+        peer.try_send(PeerRequest::GetCells { request, response: tx })
+            .map_err(|_| RequestError::ChannelClosed)?;
         rx.await?.map(Some)
     }
 }
@@ -626,6 +647,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
                 return
             }
             RequestError::BadResponse => return self.report_peer_bad_transactions(peer_id),
+            RequestError::InvalidRequest => return,
         };
         self.report_peer(peer_id, kind);
     }
@@ -1422,11 +1444,11 @@ where
             }
         }
 
-        // Eth/72 `PooledTransactions` responses elide blob payloads from type 3 transactions per
-        // EIP-8070, so their sidecars can never validate. Drop them before touching the pool;
-        // geth equivalently diverts these bodies into a buffer that is completed with cells
-        // fetched via `GetCells`, which is not implemented yet.
-        if version.is_eth72() {
+        // Eth/72 and later `PooledTransactions` responses elide blob payloads from type 3
+        // transactions per EIP-8070, so their sidecars can never validate. Drop them before
+        // touching the pool; geth equivalently diverts these bodies into a buffer that is
+        // completed with cells fetched via `GetCells`, which is not implemented yet.
+        if version >= EthVersion::Eth72 {
             let len_before = transactions.len();
             transactions.retain(|tx| !tx.is_eip4844());
             let dropped = len_before - transactions.len();
@@ -1434,7 +1456,7 @@ where
                 trace!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
                     dropped,
-                    "dropped blob transactions from eth72 response, cell fetching not implemented"
+                    "dropped blob transactions from sparse blobpool response, cell fetching not implemented"
                 );
             }
         }
@@ -2143,7 +2165,7 @@ impl PooledTransactionsHashesBuilder {
             EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70 | EthVersion::Eth71 => {
                 Self::Eth68(Default::default())
             }
-            EthVersion::Eth72 => Self::Eth72(Default::default()),
+            EthVersion::Eth72 | EthVersion::Eth73 => Self::Eth72(Default::default()),
         }
     }
 
@@ -2157,7 +2179,9 @@ impl PooledTransactionsHashesBuilder {
             EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70 | EthVersion::Eth71 => {
                 Self::Eth68(NewPooledTransactionHashes68::with_capacity(capacity))
             }
-            EthVersion::Eth72 => Self::Eth72(NewPooledTransactionHashes72::with_capacity(capacity)),
+            EthVersion::Eth72 | EthVersion::Eth73 => {
+                Self::Eth72(NewPooledTransactionHashes72::with_capacity(capacity))
+            }
         }
     }
 
@@ -2452,6 +2476,26 @@ mod tests {
         CoinbaseTipOrdering<EthPooledTransaction>,
         InMemoryBlobStore,
     >;
+
+    #[tokio::test]
+    async fn invalid_cell_batches_do_not_query_a_peer() {
+        let (manager_tx, mut manager_rx) = mpsc::unbounded_channel();
+        let handle = TransactionsHandle::<EthNetworkPrimitives> { manager_tx };
+        for (hashes, masks) in [
+            (vec![], vec![]),
+            (vec![B256::ZERO], vec![]),
+            (vec![B256::ZERO; 2], vec![B128::ZERO, B128::repeat_byte(1)]),
+        ] {
+            let result = tokio::time::timeout(
+                Duration::from_secs(1),
+                handle.get_cells_with_masks_from(PeerId::default(), hashes, masks),
+            )
+            .await
+            .expect("invalid request should be rejected before looking up a peer");
+            assert_eq!(result, Err(RequestError::InvalidRequest));
+            assert!(matches!(manager_rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)));
+        }
+    }
 
     #[tokio::test]
     async fn announcement_policy_preserves_order_and_skips_pending_and_bad_imports() {
@@ -3275,7 +3319,11 @@ mod tests {
 
         // eth/72 peers are served blob transactions without their blobs, both in gossip and in the
         // announcement sent when a session is established.
-        for (version, served) in [(EthVersion::Eth71, &full), (EthVersion::Eth72, &without_blobs)] {
+        for (version, served) in [
+            (EthVersion::Eth71, &full),
+            (EthVersion::Eth72, &without_blobs),
+            (EthVersion::Eth73, &without_blobs),
+        ] {
             let mut builder = PooledTransactionsHashesBuilder::new(version);
             builder.push(&tx);
             builder.push_pooled(pool_tx.clone());

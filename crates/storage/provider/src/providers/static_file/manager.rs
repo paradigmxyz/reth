@@ -43,14 +43,14 @@ use reth_primitives_traits::{
     dashmap::DashMap, AlloyBlockHeader as _, BlockBody as _, RecoveredBlock, SealedHeader,
     SignedTransaction, StorageEntry,
 };
-use reth_prune_types::PruneSegment;
+use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::PipelineTarget;
 use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileMap,
     StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
 use reth_storage_api::{
-    BlockBodyIndicesProvider, ChangeSetReader, DBProvider, PruneCheckpointReader,
+    metadata::keys, BlockBodyIndicesProvider, ChangeSetReader, DBProvider, PruneCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
@@ -1412,7 +1412,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             // Make sure the last transaction matches the last block from its indices, since a heal
             // from a pruning interruption might have decreased the number of transactions without
             // being able to update the last block of the static file segment.
-            let highest_tx = self.get_highest_static_file_tx(segment);
+            let highest_tx = if segment == StaticFileSegment::Transactions {
+                self.highest_transaction_for_consistency(provider.tx_ref(), highest_block)?
+            } else {
+                self.get_highest_static_file_tx(segment)
+            };
             span.record("highest_tx", highest_tx);
             debug!(target: "reth::providers::static_file", "Checking tx index segment");
 
@@ -2098,6 +2102,85 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             .get(segment)
             .and_then(|index| index.available_block_ranges_by_max_tx.as_ref())
             .and_then(|index| index.last_key_value().map(|(last_tx, _)| *last_tx))
+    }
+
+    /// Reconciles an older downloader's tip checkpoint with a continuous transaction-file suffix.
+    /// The caller supplies the first selected block and the tip those files cover. Verified
+    /// checkpoints, incomplete transaction coverage and ambiguous pruning progress are preserved.
+    pub fn snapshot_bodies_checkpoint(
+        &self,
+        tx: &impl DbTx,
+        mut checkpoint: PruneCheckpoint,
+        first: BlockNumber,
+        tip: BlockNumber,
+    ) -> ProviderResult<PruneCheckpoint> {
+        if let Some(block) = checkpoint.block_number &&
+            (first..=tip).contains(&block) &&
+            !checkpoint.prune_mode.should_prune(block, tip) &&
+            tx.get::<tables::Metadata>(keys::VERIFIED_SNAPSHOT_BODIES.to_owned())?.is_none() &&
+            let Some(last) = tx.get::<tables::BlockBodyIndices>(block)? &&
+            checkpoint.tx_number == Some(last.last_tx_num()) &&
+            let Some(indices) = tx.get::<tables::BlockBodyIndices>(first)?
+        {
+            // After the chain advances, require another checkpoint written at the old download
+            // tip. A retained jar can legitimately overlap a stricter source checkpoint.
+            if block != tip &&
+                !tx.get::<tables::PruneCheckpoints>(PruneSegment::SenderRecovery)?.is_some_and(
+                    |sender| {
+                        sender.block_number == Some(block) &&
+                            sender.tx_number == checkpoint.tx_number
+                    },
+                )
+            {
+                return Ok(checkpoint)
+            }
+            // A tip-only empty anchor cannot establish that the tip body was restored.
+            let mut next = indices.first_tx_num();
+            let end = last.next_tx_num();
+            if next > end || (first == block && next == end) {
+                return Ok(checkpoint)
+            }
+            while next < end {
+                let Some(file) =
+                    self.get_maybe_segment_provider(StaticFileSegment::Transactions, next)?
+                else {
+                    return Ok(checkpoint)
+                };
+                let header = file.user_header();
+                let Some(range) = header.tx_range() else { return Ok(checkpoint) };
+                if !range.contains(next) ||
+                    range.len() != file.rows() as u64 ||
+                    !header
+                        .block_range()
+                        .is_some_and(|blocks| blocks.end() >= first && blocks.start() <= block)
+                {
+                    return Ok(checkpoint)
+                }
+                next = range.end().saturating_add(1);
+            }
+            checkpoint.block_number = first.checked_sub(1);
+            checkpoint.tx_number = indices.first_tx_num().checked_sub(1);
+        }
+        Ok(checkpoint)
+    }
+
+    /// Returns the last transaction accounted for by the files or the verified snapshot prefix.
+    /// Used during startup and staged sync. An empty suffix may follow older, disconnected jars.
+    pub fn highest_transaction_for_consistency(
+        &self,
+        tx: &impl DbTx,
+        highest_block: Option<BlockNumber>,
+    ) -> ProviderResult<Option<TxNumber>> {
+        let stored = self.get_highest_static_file_tx(StaticFileSegment::Transactions);
+        if let Some(highest) = highest_block &&
+            let Some(pruned) = tx.get::<tables::PruneCheckpoints>(PruneSegment::Bodies)? &&
+            pruned.block_number.is_some_and(|block| block <= highest) &&
+            pruned.tx_number > stored &&
+            tx.get::<tables::Metadata>(keys::VERIFIED_SNAPSHOT_BODIES.to_owned())?.is_some()
+        {
+            return Ok(pruned.tx_number)
+        }
+        Ok(stored)
     }
 
     /// Gets the highest static file block for all segments.

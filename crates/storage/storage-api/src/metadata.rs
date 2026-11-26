@@ -10,6 +10,10 @@ pub mod keys {
     /// Storage configuration settings for this node.
     pub const STORAGE_SETTINGS: &str = "storage_settings";
 
+    /// Presence means the downloader verified the Bodies checkpoint against the selected jars.
+    /// Older downloads could checkpoint the snapshot tip even with its transactions present.
+    pub const VERIFIED_SNAPSHOT_BODIES: &str = "verified_snapshot_bodies";
+
     /// A pipeline unwind that has not completed.
     pub const PIPELINE_UNWIND: &str = "pipeline_unwind";
 

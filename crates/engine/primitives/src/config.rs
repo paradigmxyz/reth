@@ -28,8 +28,6 @@ pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 5;
 pub const DEFAULT_BACKFILL_RUN_THRESHOLD: u64 = EPOCH_SLOTS;
 
 /// Largest supported live-sync gap, matching the peer header response limit of 1024.
-///
-/// The range downloader requires a complete response and cannot yet split larger requests.
 pub const MAX_BACKFILL_RUN_THRESHOLD: u64 = 1024;
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
@@ -880,7 +878,10 @@ impl TreeConfig {
     }
 }
 
-/// Keep live-sync requests within a single peer header response until chunking is supported.
+/// Clamps the threshold to [`MAX_BACKFILL_RUN_THRESHOLD`].
+///
+/// The live-sync range downloader holds every header and body of a gap in memory until the whole
+/// range is complete, so the clamp bounds that memory.
 const fn clamp_backfill_run_threshold(threshold: u64) -> u64 {
     if threshold > MAX_BACKFILL_RUN_THRESHOLD {
         MAX_BACKFILL_RUN_THRESHOLD
