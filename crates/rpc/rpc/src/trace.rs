@@ -30,7 +30,9 @@ use reth_rpc_eth_api::{
     helpers::{LoadTransaction, RequestTraceBudget, Trace, TraceExt},
     CallManyRequest, FromEthApiError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{error::EthApiError, utils::CallManyBudget, EthConfig};
+use reth_rpc_eth_types::{
+    cache::db::apply_block_overrides, error::EthApiError, utils::CallManyBudget, EthConfig,
+};
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -165,13 +167,17 @@ where
         // execute all transactions on top of each other and record the traces
         self.eth_api()
             .spawn_with_state_at_block(at, move |eth_api, mut db| {
+                let mut evm_env = evm_env;
                 // The calls share one trace byte budget, since they share one response.
                 let trace_budget = RequestTraceBudget::new(eth_api.trace_limits());
                 let mut results = Vec::with_capacity(calls.len());
                 let mut calls = calls.into_iter().peekable();
-                // The state override applies once, before the first call; the block override
-                // applies to every call.
+                // Both overrides apply once, before the first call: the block override to the
+                // environment every call starts from, the state override to the shared state.
                 let EvmOverrides { state: mut state_overrides, block: block_overrides } = overrides;
+                if let Some(block_overrides) = block_overrides {
+                    apply_block_overrides(*block_overrides, &mut db, &mut evm_env);
+                }
 
                 while let Some((call, trace_types)) = calls.next() {
                     if is_cancelled() {
@@ -181,7 +187,7 @@ where
                         evm_env.clone(),
                         call,
                         &mut db,
-                        EvmOverrides::new(state_overrides.take(), block_overrides.clone()),
+                        EvmOverrides::state(state_overrides.take()),
                     )?;
                     budget.admit(&mut tx_env)?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);

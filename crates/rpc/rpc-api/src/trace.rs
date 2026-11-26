@@ -27,7 +27,8 @@ pub trait TraceApi<TxReq> {
     /// is specified. Each call is executed with the preceding calls applied first, allowing
     /// dependent transactions to be traced.
     ///
-    /// A state override applies once before the first call, and a block override to every call.
+    /// State and block overrides apply once, before the first call, and the block override holds
+    /// for every call.
     #[method(name = "callMany")]
     async fn trace_call_many(
         &self,
