@@ -834,13 +834,20 @@ where
             return
         }
 
-        // validate the new headers together with the lowest already accepted header, so the
-        // boundary between responses is validated too
-        let headers_rising =
-            headers_falling.iter().rev().chain(self.headers.last()).cloned().collect::<Vec<_>>();
+        let headers_rising = headers_falling.iter().rev().cloned().collect::<Vec<_>>();
         if let Err(err) = self.consensus.validate_header_range(&headers_rising) {
             debug!(target: "downloaders", %err, ?self.start_hash, "Received bad header response");
             self.client.report_bad_message(peer);
+            return
+        }
+
+        // The lowest accepted header commits to the hash of the first new header, so a failing
+        // boundary means the requested chain is invalid, not that this peer misbehaved.
+        if let Some(child) = self.headers.last() &&
+            let Err(err) =
+                self.consensus.validate_header_against_parent(child, &headers_falling[0])
+        {
+            debug!(target: "downloaders", %err, ?self.start_hash, "Requested header range is invalid");
             return
         }
 
@@ -2164,6 +2171,8 @@ mod tests {
         request
             .on_headers_response(client.client.get_headers(parent_request.clone()).await.unwrap());
         assert_eq!(request.headers.len(), 1);
+        // the peer served the requested parent, so it is not penalized for the invalid chain.
+        assert_eq!(client.client.bad_messages(), 0);
 
         consensus.set_fail_header_against_parent(false);
         request.on_headers_response(client.client.get_headers(parent_request).await.unwrap());
