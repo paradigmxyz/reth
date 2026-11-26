@@ -50,9 +50,10 @@ pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 160;
 
 /// Default trace byte limit per byte of the response limit.
 ///
-/// Struct logs and `vmTrace` record about 1.5-5x their JSON size, since a 32-byte stack word
-/// serializes as short hex. Twice the response limit passes every mainnet block whose traces fit
-/// in the response, while keeping a block trace's memory bounded.
+/// `vmTrace` records about 1.5-5x its JSON size, since a 32-byte stack word serializes as short
+/// hex. Twice the response limit passes every mainnet block whose traces fit in the response, while
+/// keeping a block trace's memory bounded. The default struct logger records its JSON, so the
+/// response limit itself bounds it.
 const RPC_TRACE_BYTES_PER_RESPONSE_BYTE: u64 = 2;
 
 /// Default number of incoming connections.
@@ -454,7 +455,7 @@ impl Default for DefaultRpcServerArgs {
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
             rpc_max_active_filters: (constants::DEFAULT_MAX_ACTIVE_FILTERS as u64).into(),
             rpc_gas_cap: constants::gas_oracle::RPC_DEFAULT_GAS_CAP,
-            rpc_evm_memory_limit: (1 << 32) - 1,
+            rpc_evm_memory_limit: 100 * 1024 * 1024,
             rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
             rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
             rpc_max_trace_bytes: None,
@@ -550,7 +551,11 @@ pub struct RpcServerArgs {
     #[arg(long = "ws.port", default_value_t = DefaultRpcServerArgs::get_global().ws_port)]
     pub ws_port: u16,
 
-    /// Origins from which to accept `WebSocket` requests
+    /// Allowed `WebSocket` origins. Defaults to HTTP(S) origins on `localhost`, `127.0.0.1`, or
+    /// `[::1]` at any port. Use `*` to allow any origin.
+    ///
+    /// When HTTP and `WebSocket` share a listener, either `--http.corsdomain` or `--ws.origins`
+    /// sets the allowed origins for both. If both flags are set, their values must match.
     #[arg(id = "ws.origins", long = "ws.origins", alias = "ws.corsdomain", default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_allowed_origins.as_ref().map(|v| v.to_string().into())))]
     pub ws_allowed_origins: Option<String>,
 
@@ -723,7 +728,7 @@ pub struct RpcServerArgs {
     )]
     pub rpc_gas_cap: u64,
 
-    /// Maximum memory the EVM can allocate per RPC request.
+    /// Maximum memory the EVM can allocate per call frame in an RPC request.
     #[arg(
         long = "rpc.evm-memory-limit",
         alias = "rpc-evm-memory-limit",
@@ -752,6 +757,9 @@ pub struct RpcServerArgs {
     pub rpc_max_simulate_blocks: u64,
 
     /// Max bytes a traced tx may record, defaults to 2x `--rpc.max-response-size`, 0 is unlimited.
+    ///
+    /// The default struct logs of a debug trace response are limited to `--rpc.max-response-size`
+    /// as well, whatever this value is.
     #[arg(
         long = "rpc.max-trace-bytes",
         value_name = "BYTES",

@@ -12,8 +12,8 @@ use crate::transactions::constants::{
         DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
     },
     tx_manager::{
-        DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS, DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
-        DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
+        DEFAULT_BLOB_FETCH_PROBABILITY, DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS,
+        DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
     },
 };
 use alloy_eips::eip2718::IsTyped2718;
@@ -39,8 +39,9 @@ pub struct TransactionsManagerConfig {
     /// response message; broadcasts are truncated to fit.
     #[cfg_attr(feature = "serde", serde(default = "default_max_pending_pool_imports_bytes"))]
     pub max_pending_pool_imports_bytes: usize,
-    /// Percentage of blob transactions fetched in full, with a minimum of 15; 100 disables
-    /// sampling.
+    /// Percentage of blob transactions received from eth/72 peers that are fetched with enough
+    /// cells to rebuild their blobs, at least 15. The others only fetch the custody columns, and
+    /// 100 disables this sampling.
     #[cfg_attr(feature = "serde", serde(default = "default_blob_fetch_probability"))]
     pub blob_fetch_probability: u8,
     /// How new pending transactions are propagated.
@@ -72,8 +73,9 @@ const fn default_tx_channel_memory_limit_bytes() -> usize {
     DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES
 }
 
+#[cfg(feature = "serde")]
 const fn default_blob_fetch_probability() -> u8 {
-    15
+    DEFAULT_BLOB_FETCH_PROBABILITY
 }
 
 impl Default for TransactionsManagerConfig {
@@ -83,7 +85,7 @@ impl Default for TransactionsManagerConfig {
             max_transactions_seen_by_peer_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             max_pending_pool_imports: DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
             max_pending_pool_imports_bytes: DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS,
-            blob_fetch_probability: default_blob_fetch_probability(),
+            blob_fetch_probability: DEFAULT_BLOB_FETCH_PROBABILITY,
             propagation_mode: TransactionPropagationMode::default(),
             ingress_policy: TransactionIngressPolicy::default(),
             tx_channel_memory_limit_bytes: DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,

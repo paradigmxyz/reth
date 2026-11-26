@@ -10,20 +10,19 @@ use alloy_consensus::{
     TxEip4844,
 };
 use alloy_eips::{
+    eip2718::Encodable2718,
     eip4844::{env_settings::EnvKzgSettings, Blob},
     eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
 };
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B128, B256, U256};
 use futures::{SinkExt, StreamExt};
 use reth_chainspec::MAINNET;
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
-    Cells, EthMessage, EthNetworkPrimitives, EthStream, EthVersion, HelloMessageWithProtocols,
+    EthMessage, EthNetworkPrimitives, EthStream, EthVersion, HelloMessageWithProtocols,
     NewPooledTransactionHashes72, P2PStream, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_eth_wire_types::{
-    message::RequestPair, EncodableEth72PooledTransaction, PooledTransactionsEth72,
-};
+use reth_eth_wire_types::{message::RequestPair, CellMasks, Cells, GetCells, PooledTransactions};
 use reth_ethereum_forks::EthereumHardfork;
 use reth_ethereum_primitives::{Block, PooledTransactionVariant};
 use reth_network::{
@@ -32,11 +31,13 @@ use reth_network::{
     transactions::config::{TransactionPropagationMode, TransactionsManagerConfig},
     PeersInfo,
 };
+use reth_network_p2p::error::RequestError;
 use reth_network_peers::pk2id;
 use reth_primitives_traits::{crypto::secp256k1::sign_message, SignerRecoverable};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{blobstore::BlobTxCellSidecar, TransactionPool};
 use std::time::Duration;
+use test_case::test_case;
 use tokio::net::TcpStream;
 
 type RawEthStream = EthStream<P2PStream<ECIESStream<TcpStream>>, EthNetworkPrimitives>;
@@ -77,7 +78,7 @@ fn blob_tx_without_blobs() -> (PooledTransactionVariant, BlobTxCellSidecar) {
     };
 
     let signature = sign_message(B256::random(), tx.signature_hash()).unwrap();
-    let sidecar = BlobTransactionSidecarVariant::Eip7594(cells.elided());
+    let sidecar = BlobTransactionSidecarVariant::Eip7594(cells.without_blobs());
     (
         PooledTransactionVariant::Eip4844(
             TxEip4844WithSidecar::from_tx_and_sidecar(tx, sidecar).into_signed(signature),
@@ -86,23 +87,20 @@ fn blob_tx_without_blobs() -> (PooledTransactionVariant, BlobTxCellSidecar) {
     )
 }
 
+#[test_case(EthVersion::Eth72, false; "eth72_body_first")]
+#[test_case(EthVersion::Eth72, true; "eth72_cells_first")]
+#[test_case(EthVersion::Eth73, false; "eth73_body_first")]
 #[tokio::test(flavor = "multi_thread")]
-async fn test_eth72_body_before_cells() {
-    run_eth72_blob_receive(false).await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_eth72_cells_before_body() {
-    run_eth72_blob_receive(true).await;
-}
-
-async fn run_eth72_blob_receive(cells_first: bool) {
+async fn test_eth72_blob_announcements_and_elided_pooled_response(
+    eth_version: EthVersion,
+    cells_first: bool,
+) {
     reth_tracing::init_test_tracing();
 
     let provider = MockEthProvider::default().with_genesis_block();
 
-    // A recent tip so the pool validator activates the blob fork checks; the network status
-    // itself stays at the genesis head.
+    // A tip after Osaka so the pool accepts EIP-7594 sidecars; the network status itself stays at
+    // the genesis head.
     let tip = Header {
         number: 1,
         parent_hash: MAINNET.genesis_hash(),
@@ -121,12 +119,11 @@ async fn run_eth72_blob_receive(cells_first: bool) {
         propagation_mode: TransactionPropagationMode::Max(0),
         ..Default::default()
     };
-    let net = Testnet::from_configs([
-        PeerConfig::new(provider.clone()).with_protocols([EthVersion::Eth72])
-    ])
-    .await
-    .with_eth_pool_config(tx_manager_config)
-    .spawn();
+    let net =
+        Testnet::from_configs([PeerConfig::new(provider.clone()).with_protocols([eth_version])])
+            .await
+            .with_eth_pool_config(tx_manager_config)
+            .spawn();
     let [node] = net.peers_array();
     let node_id = *node.peer_id();
     let node_pool = node.pool().unwrap();
@@ -138,12 +135,11 @@ async fn run_eth72_blob_receive(cells_first: bool) {
 
     let tcp = TcpStream::connect(node.local_addr()).await.unwrap();
     let ecies = ECIESStream::connect(tcp, raw_key, node_id).await.unwrap();
-    let hello = HelloMessageWithProtocols::builder(raw_id)
-        .protocols(vec![EthVersion::Eth72.into()])
-        .build();
+    let hello =
+        HelloMessageWithProtocols::builder(raw_id).protocols(vec![eth_version.into()]).build();
     let (p2p, _their_hello) = UnauthedP2PStream::new(ecies).handshake(hello).await.unwrap();
     let version = p2p.shared_capabilities().eth_version().unwrap();
-    assert_eq!(version, EthVersion::Eth72);
+    assert_eq!(version, eth_version);
 
     let mut status = StatusBuilder::default().build();
     status.set_eth_version(version);
@@ -168,21 +164,24 @@ async fn run_eth72_blob_receive(cells_first: bool) {
     // no blob transactions were announced: the zero cell mask on the wire decodes to `None`
     assert_eq!(announcement.cell_mask, None);
 
-    // 2) raw peer -> node: an ETH/72 blob announcement carrying the custody mask
+    // 2) raw peer -> node: a geth style blob announcement carrying the custody mask
     let (pooled, cells) = blob_tx_without_blobs();
     let blob_tx_hash = *pooled.tx_hash();
     let sender = pooled.recover_signer().unwrap();
     provider.add_account(sender, ExtendedAccount::new(0, U256::from(10u128.pow(19))));
+    let mut without_blobs = pooled.clone();
+    without_blobs.clear_eip7594_blobs();
 
     let announcement = NewPooledTransactionHashes72 {
         types: vec![EIP4844_TX_TYPE_ID],
-        sizes: vec![pooled.eth72_length()],
+        sizes: vec![without_blobs.encode_2718_len()],
         hashes: vec![blob_tx_hash],
         cell_mask: Some(NewPooledTransactionHashes72::ALL_CELLS_MASK),
     };
+    let mut added = node_pool.new_transactions_listener();
     eth_stream.send(EthMessage::NewPooledTransactionHashes72(announcement)).await.unwrap();
 
-    // Body fetching may wait for more announcements while cell fetching starts immediately.
+    // The node fetches the body and, independently, the cells of the announced transaction.
     let mut body_request = None;
     let mut cell_request = None;
     for _ in 0..2 {
@@ -192,46 +191,137 @@ async fn run_eth72_blob_receive(cells_first: bool) {
             message => panic!("unexpected message {message:?}"),
         }
     }
-    let request = body_request.expect("node must request the body");
-    assert_eq!(request.message.0, vec![blob_tx_hash]);
-    let body = EthMessage::PooledTransactionsEth72(RequestPair {
-        request_id: request.request_id,
-        message: PooledTransactionsEth72(vec![pooled]),
-    });
-    if !cells_first {
-        eth_stream.send(body.clone()).await.unwrap();
-    }
-    let request = cell_request.expect("node must request the cells");
-    assert_eq!(request.message.hashes, vec![blob_tx_hash]);
-    let mask = alloy_eips::eip7594::BlobCellMask::from_bits(u128::from_le_bytes(
-        request.message.cell_mask.into(),
-    ));
-    // 64 data cells are sufficient for reconstruction.
+    let body_request = body_request.expect("node must request the body");
+    assert_eq!(body_request.message.0, vec![blob_tx_hash]);
+    let cell_request = cell_request.expect("node must request the cells");
+    assert_eq!(cell_request.message.hashes, vec![blob_tx_hash]);
+    // Without custody columns the node fetches the 64 cells needed to rebuild the blob.
+    let mask = cell_request.message.cell_mask(0).unwrap();
     assert_eq!(mask.count(), 64);
-    eth_stream
-        .send(EthMessage::Cells(RequestPair {
-            request_id: request.request_id,
-            message: Cells {
-                hashes: vec![blob_tx_hash],
-                cells: vec![cells.get_cells(mask).unwrap()],
-                cell_mask: request.message.cell_mask,
-            },
-        }))
+
+    // 3) raw peer -> node: the eth/72 body without blobs and the cells, in either order
+    let body = EthMessage::PooledTransactions(RequestPair {
+        request_id: body_request.request_id,
+        message: PooledTransactions(vec![pooled]),
+    });
+    let cells = EthMessage::Cells(RequestPair {
+        request_id: cell_request.request_id,
+        message: Cells {
+            hashes: vec![blob_tx_hash],
+            cells: vec![cells.get_cells(mask).unwrap()],
+            cell_mask: cell_request.message.cell_mask,
+        },
+    });
+    let (first, second) = if cells_first { (cells, body) } else { (body, cells) };
+    eth_stream.send(first).await.unwrap();
+    eth_stream.send(second).await.unwrap();
+
+    let event = tokio::time::timeout(Duration::from_secs(10), added.recv())
         .await
+        .expect("verified body and cells must be admitted")
         .unwrap();
-    if cells_first {
-        eth_stream.send(body).await.unwrap();
-    }
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while !node_pool.contains(&blob_tx_hash) {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("verified body and cells must be admitted");
+    assert_eq!(*event.transaction.hash(), blob_tx_hash);
+    // Half of the cells are enough to rebuild the blob.
     assert!(node_pool.get_blob(blob_tx_hash).unwrap().is_some());
     let reputation = node.peer_handle().peer_by_id(raw_id).await.unwrap().reputation();
     assert_eq!(reputation, baseline_reputation);
-    // The valid independent body and cell responses do not penalize their provider.
+    // the session survives serving the blob-elided response
     assert_eq!(node.network().num_connected_peers(), 1);
+}
+
+#[test_case(EthVersion::Eth72, false; "eth72_shared")]
+#[test_case(EthVersion::Eth73, false; "eth73_shared")]
+#[test_case(EthVersion::Eth73, true; "eth73_indexed")]
+#[tokio::test(flavor = "multi_thread")]
+async fn test_cells_and_response_form(eth_version: EthVersion, indexed: bool) {
+    let provider = MockEthProvider::default().with_genesis_block();
+    let net = Testnet::from_configs([PeerConfig::new(provider).with_protocols([eth_version])])
+        .await
+        .with_eth_pool()
+        .with_request_handlers()
+        .spawn();
+    let [node] = net.peers_array();
+    let mut events = node.event_stream();
+    let raw_key = rng_secret_key();
+    let raw_id = pk2id(&raw_key.public_key());
+    let tcp = TcpStream::connect(node.local_addr()).await.unwrap();
+    let ecies = ECIESStream::connect(tcp, raw_key, *node.peer_id()).await.unwrap();
+    let hello =
+        HelloMessageWithProtocols::builder(raw_id).protocols(vec![eth_version.into()]).build();
+    let (p2p, _) = UnauthedP2PStream::new(ecies).handshake(hello).await.unwrap();
+    assert_eq!(p2p.shared_capabilities().eth_version().unwrap(), eth_version);
+    let mut status = StatusBuilder::default().build();
+    status.set_eth_version(eth_version);
+    let filter = MAINNET.hardfork_fork_filter(EthereumHardfork::Frontier).unwrap();
+    let (mut stream, _) = UnauthedEthStream::new(p2p)
+        .handshake::<EthNetworkPrimitives>(status, filter)
+        .await
+        .unwrap();
+    assert_eq!(events.next_session_established().await.unwrap(), raw_id);
+    let hashes = vec![B256::ZERO, B256::repeat_byte(1)];
+    let masks = vec![
+        B128::from(1u128.to_le_bytes()),
+        B128::from(if indexed { 2u128 } else { 1u128 }.to_le_bytes()),
+    ];
+    let request = GetCells::from_masks(hashes.clone(), masks.clone()).unwrap();
+    stream
+        .send(EthMessage::GetCells(RequestPair { request_id: 7, message: request.clone() }))
+        .await
+        .unwrap();
+    let EthMessage::Cells(response) = next_message(&mut stream).await else {
+        panic!("expected cells")
+    };
+    assert_eq!(response.request_id, 7);
+    assert_eq!(
+        response.message,
+        Cells {
+            cell_mask: if indexed {
+                CellMasks::Indexed { masks: vec![], mask_ids: Default::default() }
+            } else {
+                masks[0].into()
+            },
+            ..Default::default()
+        }
+    );
+    assert_eq!(response.message.validate_response(&request), Ok(()));
+
+    // An indexed response is a protocol error on eth/72 before session correlation runs.
+    let forms: &[_] = if eth_version == EthVersion::Eth72 { &[true] } else { &[true, false] };
+    for &valid_form in forms {
+        let handle = node.transactions().unwrap().clone();
+        let hashes = hashes.clone();
+        let masks = masks.clone();
+        let fetch =
+            tokio::spawn(
+                async move { handle.get_cells_with_masks_from(raw_id, hashes, masks).await },
+            );
+        let EthMessage::GetCells(outgoing) = next_message(&mut stream).await else {
+            panic!("expected get cells")
+        };
+        assert_eq!(outgoing.message, request);
+        let reply = if valid_form {
+            response.message.clone()
+        } else {
+            Cells {
+                cell_mask: if indexed {
+                    CellMasks::Shared(B128::ZERO)
+                } else {
+                    CellMasks::Indexed { masks: vec![], mask_ids: Default::default() }
+                },
+                ..Default::default()
+            }
+        };
+        stream
+            .send(EthMessage::Cells(RequestPair {
+                request_id: outgoing.request_id,
+                message: reply.clone(),
+            }))
+            .await
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(30), fetch).await.unwrap().unwrap();
+        assert_eq!(
+            result,
+            if valid_form { Ok(Some(reply)) } else { Err(RequestError::BadResponse) }
+        );
+    }
 }

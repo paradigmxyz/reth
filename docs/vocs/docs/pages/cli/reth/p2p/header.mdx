@@ -169,8 +169,8 @@ Networking:
 
           [default: 4096]
 
-      --blob-fetch-probability <BLOB_FETCH_PROBABILITY>
-          Percentage of blob transactions fetched in full. Use 100 to disable sparse sampling
+      --blob-fetch-probability <PERCENT>
+          Percentage of blob transactions received from eth/72 peers that are fetched with enough cells to rebuild their blobs. The others only fetch the custody columns of the consensus client. Use 100 to disable sampling
 
           [default: 15]
 

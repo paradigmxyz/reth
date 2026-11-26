@@ -45,8 +45,7 @@ impl<T> std::fmt::Debug for BlobFetcher<T> {
     }
 }
 
-type RequestFuture =
-    Pin<Box<dyn Future<Output = (B256, PeerId, BlobCellMask, Option<Cells>)> + Send>>;
+type RequestFuture = Pin<Box<dyn Future<Output = (B256, PeerId, Option<Cells>)> + Send>>;
 type VerifyFuture<T> =
     Pin<Box<dyn Future<Output = (B256, Result<(PeerId, T), Option<Rejected>>)> + Send>>;
 const MAX_PENDING: usize = 4096;
@@ -142,9 +141,7 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
             };
             return Poll::Ready(event)
         }
-        while let Poll::Ready(Some((hash, peer, requested, response))) =
-            self.requests.poll_next_unpin(cx)
-        {
+        while let Poll::Ready(Some((hash, peer, response))) = self.requests.poll_next_unpin(cx) {
             let Some(pending) = self.pending.get_mut(&hash) else { continue };
             pending.inflight = false;
             let provider = pending
@@ -159,41 +156,24 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                 }
                 continue
             };
+            // The session checked the response against the request: it only holds requested
+            // hashes and columns, with whole cells per blob. EIP-8070 permits a provider to
+            // truncate a `Cells` response under load, so the remaining columns are scheduled from
+            // other providers.
             let response_mask =
-                BlobCellMask::from_bits(u128::from_le_bytes(response.cell_mask.into()));
-            // EIP-8070 permits a provider to truncate a Cells response under load. Accept any
-            // non-overclaiming subset of the requested columns and schedule the remainder from
-            // other providers; only masks outside the request are malformed.
-            if response_mask.bits() & !requested.bits() != 0 ||
-                response.hashes.len() != response.cells.len() ||
-                response.hashes.len() > 1 ||
-                response.hashes.first().is_some_and(|h| *h != hash)
-            {
-                if pending.full == Some(true) {
-                    pending.target = None;
-                }
-                return Poll::Ready(BlobFetchEvent::BadPeers(vec![peer]))
-            }
-            if response.cells.is_empty() && pending.full == Some(true) {
-                pending.target = None;
-            }
-            if let Some(cells) = response.cells.into_iter().next() {
-                if response_mask.count() == 0 ||
-                    cells.is_empty() ||
-                    !cells.len().is_multiple_of(response_mask.count()) ||
-                    cells.len() / response_mask.count() > 128
-                {
-                    if pending.full == Some(true) {
-                        pending.target = None;
+                response.cell_mask.mask_at(0).map_or(0, |mask| u128::from_le_bytes(mask.into()));
+            let response_mask = BlobCellMask::from_bits(response_mask);
+            match response.cells.into_iter().next() {
+                Some(cells) if response_mask.count() > 0 => {
+                    if self.buffer.cells(hash, peer, response_mask, cells, Instant::now()) {
+                        pending.received |= response_mask.bits();
+                        // A truncated reply still made progress, so keep the provider for the
+                        // remaining columns, behind the providers that have not been asked yet.
+                        pending.providers.extend(provider);
                     }
-                    return Poll::Ready(BlobFetchEvent::BadPeers(vec![peer]))
                 }
-                if self.buffer.cells(hash, peer, response_mask, cells, Instant::now()) {
-                    pending.received |= response_mask.bits();
-                    // A truncated reply still made progress, so keep the provider for the
-                    // remaining columns, behind the providers that have not been asked yet.
-                    pending.providers.extend(provider);
-                }
+                _ if pending.full == Some(true) => pending.target = None,
+                _ => {}
             }
         }
         let now = Instant::now();
@@ -321,7 +301,7 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                 let request = PeerRequest::GetCells {
                     request: GetCells {
                         hashes: vec![hash],
-                        cell_mask: B128::from(requested.bits().to_le_bytes()),
+                        cell_mask: B128::from(requested.bits().to_le_bytes()).into(),
                     },
                     response: tx,
                 };
@@ -338,7 +318,7 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                         .ok()
                         .and_then(Result::ok)
                         .and_then(Result::ok);
-                    (hash, peer, requested, response)
+                    (hash, peer, response)
                 }));
                 break
             }
@@ -423,7 +403,7 @@ mod tests {
     use futures::task::noop_waker_ref;
     use reth_eth_wire::{EthNetworkPrimitives, EthVersion};
     use reth_network_api::{PeerKind, PeerRequestSender};
-    use reth_transaction_pool::EthPooledTransaction;
+    use reth_transaction_pool::{blobstore::BlobTxCellSidecar, EthPooledTransaction};
 
     fn peer(
         id: PeerId,
@@ -460,13 +440,13 @@ mod tests {
         let PeerRequest::GetCells { request, response } = rx1.try_recv().unwrap() else {
             panic!("expected cells")
         };
-        assert_eq!(request.cell_mask, B128::from((u64::MAX as u128).to_le_bytes()));
+        assert_eq!(request.cell_mask(0), Some(BlobCellMask::from_bits(u64::MAX as u128)));
         response.send(Ok(Cells { cell_mask: request.cell_mask, ..Default::default() })).unwrap();
         assert!(fetcher.poll(&mut cx, &peers).is_pending());
         let PeerRequest::GetCells { request, response } = rx2.try_recv().unwrap() else {
             panic!("expected fallback")
         };
-        let mask = BlobCellMask::from_bits(u128::from_le_bytes(request.cell_mask.into()));
+        let mask = request.cell_mask(0).unwrap();
         response
             .send(Ok(Cells {
                 hashes: vec![hash],
@@ -499,20 +479,20 @@ mod tests {
         let PeerRequest::GetCells { request, response } = rx.try_recv().unwrap() else {
             panic!("expected cells")
         };
-        assert_eq!(request.cell_mask, B128::from((u64::MAX as u128).to_le_bytes()));
+        assert_eq!(request.cell_mask(0), Some(BlobCellMask::from_bits(u64::MAX as u128)));
         let truncated = BlobCellMask::from_bits(1);
         response
             .send(Ok(Cells {
                 hashes: vec![hash],
                 cells: vec![cells.get_cells(truncated).unwrap()],
-                cell_mask: B128::from(truncated.bits().to_le_bytes()),
+                cell_mask: B128::from(truncated.bits().to_le_bytes()).into(),
             }))
             .unwrap();
         assert!(fetcher.poll(&mut cx, &peers).is_pending());
         let PeerRequest::GetCells { request, response } = rx.try_recv().unwrap() else {
             panic!("expected remainder")
         };
-        let remainder = BlobCellMask::from_bits(u128::from_le_bytes(request.cell_mask.into()));
+        let remainder = request.cell_mask(0).unwrap();
         assert_eq!(remainder.bits(), u64::MAX as u128 & !1);
         response
             .send(Ok(Cells {
@@ -555,14 +535,14 @@ mod tests {
             .send(Ok(Cells {
                 hashes: vec![hash],
                 cells: vec![cells.get_cells(low).unwrap()],
-                cell_mask: B128::from(low.bits().to_le_bytes()),
+                cell_mask: B128::from(low.bits().to_le_bytes()).into(),
             }))
             .unwrap();
         assert!(fetcher.poll(&mut cx, &peers).is_pending());
         let PeerRequest::GetCells { request, response } = rx2.try_recv().unwrap() else {
             panic!("expected remainder from the second provider")
         };
-        let high = BlobCellMask::from_bits(u128::from_le_bytes(request.cell_mask.into()));
+        let high = request.cell_mask(0).unwrap();
         let mut corrupted = cells.get_cells(high).unwrap();
         corrupted[0][31] ^= 1;
         response
@@ -586,7 +566,7 @@ mod tests {
         let PeerRequest::GetCells { request, response } = rx1.try_recv().unwrap() else {
             panic!("expected refetch of the rejected columns")
         };
-        assert_eq!(request.cell_mask, B128::from(high.bits().to_le_bytes()));
+        assert_eq!(request.cell_mask(0), Some(high));
         response
             .send(Ok(Cells {
                 hashes: vec![hash],
@@ -615,8 +595,15 @@ mod tests {
         let hash = *tx.hash();
         // The proofs are not bound by the transaction hash, so a body with a corrupted proof
         // keeps the hash but fails the honest cells checked against it.
-        let mut poisoned = cells.clone();
-        poisoned.proofs[0] = Bytes48::ZERO;
+        let mut proofs = cells.proofs().to_vec();
+        proofs[0] = Bytes48::ZERO;
+        let poisoned = BlobTxCellSidecar::new(
+            cells.commitments().to_vec(),
+            proofs,
+            cells.cells().to_vec(),
+            cells.mask(),
+        )
+        .unwrap();
         let poisoned = super::super::blob_buffer::tests::transaction(&poisoned);
         assert_eq!(*poisoned.hash(), hash);
         let low_provider = PeerId::random();
@@ -639,14 +626,14 @@ mod tests {
             .send(Ok(Cells {
                 hashes: vec![hash],
                 cells: vec![cells.get_cells(low).unwrap()],
-                cell_mask: B128::from(low.bits().to_le_bytes()),
+                cell_mask: B128::from(low.bits().to_le_bytes()).into(),
             }))
             .unwrap();
         assert!(fetcher.poll(&mut cx, &peers).is_pending());
         let PeerRequest::GetCells { request, response } = rx2.try_recv().unwrap() else {
             panic!("expected remainder from the second provider")
         };
-        let high = BlobCellMask::from_bits(u128::from_le_bytes(request.cell_mask.into()));
+        let high = request.cell_mask(0).unwrap();
         response
             .send(Ok(Cells {
                 hashes: vec![hash],
@@ -670,7 +657,7 @@ mod tests {
         let PeerRequest::GetCells { request, response } = rx2.try_recv().unwrap() else {
             panic!("expected refetch of the rejected columns")
         };
-        assert_eq!(request.cell_mask, B128::from(low.bits().to_le_bytes()));
+        assert_eq!(request.cell_mask(0), Some(low));
         response
             .send(Ok(Cells {
                 hashes: vec![hash],
@@ -708,7 +695,7 @@ mod tests {
         let PeerRequest::GetCells { request, .. } = rx1.try_recv().unwrap() else {
             panic!("expected sample")
         };
-        let requested = u128::from_le_bytes(request.cell_mask.into());
+        let requested = request.cell_mask(0).unwrap().bits();
         assert_eq!(requested & bits, bits);
         assert_eq!(requested.count_ones(), bits.count_ones() + 1);
     }

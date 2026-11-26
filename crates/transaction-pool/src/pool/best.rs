@@ -229,6 +229,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
                 self.independent.insert(unlocked.clone());
             }
 
+            // A blob transaction that keeps too few cells to rebuild its blobs can't be included.
             if (self.skip_blobs && best.transaction.is_eip4844()) ||
                 best.transaction
                     .transaction
@@ -490,10 +491,67 @@ where
 mod tests {
     use super::*;
     use crate::{
+        blobstore::BlobCellAvailability,
         pool::pending::PendingPool,
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
-        BestTransactions, Priority,
+        BestTransactions, CoinbaseTipOrdering, EthPooledTransaction, Priority, TransactionOrigin,
     };
+    use alloy_consensus::{SignableTransaction, TxEip4844};
+    use alloy_eips::{eip2718::Encodable2718, eip7594::BlobCellMask};
+    use alloy_primitives::{Address, Signature, B256};
+    use reth_ethereum_primitives::TransactionSigned;
+    use reth_primitives_traits::Recovered;
+    use std::time::Instant;
+
+    // A blob transaction of `sender` that keeps the cells in `mask`.
+    fn blob_tx_with_cells(
+        sender: u8,
+        nonce: u64,
+        mask: u128,
+    ) -> Arc<ValidPoolTransaction<EthPooledTransaction>> {
+        let tx: TransactionSigned = TxEip4844 {
+            chain_id: sender.into(),
+            nonce,
+            gas_limit: 21_000,
+            max_fee_per_gas: 100,
+            max_priority_fee_per_gas: 10,
+            max_fee_per_blob_gas: 100,
+            blob_versioned_hashes: vec![B256::ZERO],
+            ..Default::default()
+        }
+        .into_signed(Signature::test_signature())
+        .into();
+        let length = tx.encode_2718_len();
+        let mut transaction = EthPooledTransaction::new(
+            Recovered::new_unchecked(tx, Address::repeat_byte(sender)),
+            length,
+        );
+        transaction.blob_cell_availability =
+            Some(BlobCellAvailability::new(BlobCellMask::from_bits(mask)));
+        Arc::new(ValidPoolTransaction {
+            transaction,
+            transaction_id: TransactionId::new(u64::from(sender).into(), nonce),
+            propagate: true,
+            timestamp: Instant::now(),
+            origin: TransactionOrigin::External,
+            authority_ids: None,
+        })
+    }
+
+    #[test]
+    fn test_best_skips_blob_txs_that_cannot_be_rebuilt() {
+        let mut pool = PendingPool::new(CoinbaseTipOrdering::default());
+        // The second transaction of sender 0 keeps one column, so it and its descendant are
+        // skipped, while sender 1 keeps the 64 columns needed to rebuild its blob.
+        for (sender, nonce, mask) in
+            [(0, 0, u128::MAX), (0, 1, 1), (0, 2, u128::MAX), (1, 0, u64::MAX.into())]
+        {
+            pool.add_transaction(blob_tx_with_cells(sender, nonce, mask), 0);
+        }
+        let mut best: Vec<_> = pool.best().map(|tx| *tx.id()).collect();
+        best.sort_unstable();
+        assert_eq!(best, [TransactionId::new(0.into(), 0), TransactionId::new(1.into(), 0)]);
+    }
 
     #[test]
     fn test_best_iter() {

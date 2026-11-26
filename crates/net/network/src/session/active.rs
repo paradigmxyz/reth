@@ -34,7 +34,7 @@ use reth_eth_wire::{
 };
 use reth_eth_wire_types::{
     message::RequestPair, snap::SnapProtocolMessage, NewPooledTransactionHashes,
-    PooledTransactions, PooledTransactionsEth72, RawCapabilityMessage,
+    RawCapabilityMessage,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::{PeerRequest, RequestMessage};
@@ -49,7 +49,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 
 /// The recommended interval at which to check if a new range update should be sent to the remote
 /// peer.
@@ -150,7 +150,6 @@ impl BroadcastItemCounter {
 ///    - responses for handled ETH requests received from the remote peer.
 #[expect(dead_code)]
 pub(crate) struct ActiveSession<N: NetworkPrimitives> {
-    pub(crate) pooled_rlp_cache: super::PooledRlpCache,
     /// Keeps track of request ids.
     pub(crate) next_id: u64,
     /// The underlying connection.
@@ -249,20 +248,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             progress = true;
             let res = match msg {
                 OutgoingMessage::Snap(msg) => self.conn.start_send_snap(msg),
-                OutgoingMessage::Eth(EthMessage::PooledTransactions(response)) => {
-                    self.conn.start_send_raw(self.pooled_rlp_cache.response(
-                        response.request_id,
-                        &response.message.0,
-                        false,
-                    ))
-                }
-                OutgoingMessage::Eth(EthMessage::PooledTransactionsEth72(response)) => {
-                    self.conn.start_send_raw(self.pooled_rlp_cache.response(
-                        response.request_id,
-                        &response.message.0,
-                        true,
-                    ))
-                }
                 OutgoingMessage::Eth(msg) => self.conn.start_send_unpin(msg),
                 OutgoingMessage::Broadcast(msg) => self.conn.start_send_broadcast(msg),
                 OutgoingMessage::Raw(msg) => self.conn.start_send_raw(msg),
@@ -377,12 +362,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::PooledTransactions(resp) => {
                 on_response!(resp, GetPooledTransactions)
             }
-            EthMessage::PooledTransactionsEth72(resp) => {
-                // Keep the existing transaction fetcher and request correlation version-neutral;
-                // the eth/72 wrapper only describes how this response was encoded on the wire.
-                let resp = resp.map(PooledTransactions::from);
-                on_response!(resp, GetPooledTransactions)
-            }
             EthMessage::GetNodeData(req) => {
                 on_request!(req, NodeData, GetNodeData)
             }
@@ -415,6 +394,20 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 on_response!(resp, GetBlockAccessLists)
             }
             EthMessage::Cells(resp) => {
+                if let Some(req) = self.inflight_requests.get(&resp.request_id) &&
+                    let RequestState::Waiting(PeerRequest::GetCells { request, .. }) =
+                        &req.request &&
+                    let Err(err) = resp.message.validate_response(request)
+                {
+                    debug!(target: "net::session", request_id=?resp.request_id, %err, remote_peer_id=?self.remote_peer_id, "received invalid cells response");
+                    if let Some(req) = self.inflight_requests.remove(&resp.request_id) &&
+                        let RequestState::Waiting(request) = req.request
+                    {
+                        request.send_bad_response();
+                    }
+                    self.on_bad_message();
+                    return OnIncomingMessageOutcome::Ok
+                }
                 on_response!(resp, GetCells)
             }
             EthMessage::BlockRangeUpdate(msg) => {
@@ -542,6 +535,14 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             return;
         }
 
+        if let PeerRequest::GetCells { request: cells, .. } = &request &&
+            let Err(err) = cells.cell_mask.validate(&cells.hashes, false)
+        {
+            error!(target: "net", peer_id=?self.remote_peer_id, %err, "Rejected invalid local cell request");
+            request.send_err_response(RequestError::InvalidRequest);
+            return
+        }
+
         let request_id = self.next_id();
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
         let msg = match request.create_request_message(request_id) {
@@ -613,15 +614,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     fn handle_outgoing_response(&mut self, id: u64, resp: PeerResponseResult<N>) {
         match resp.try_into_message(id) {
             Ok(RequestMessage::Eth(msg)) => {
-                let msg = match msg {
-                    EthMessage::PooledTransactions(pair) if self.conn.version().is_eth72() => {
-                        EthMessage::PooledTransactionsEth72(RequestPair {
-                            request_id: pair.request_id,
-                            message: PooledTransactionsEth72::from_transactions(pair.message),
-                        })
-                    }
-                    other => other,
-                };
                 self.queued_outgoing.push_back(msg.into());
             }
             Ok(RequestMessage::Snap(msg)) => {
@@ -1374,7 +1366,7 @@ mod tests {
             AccountRangeMessage, BlockAccessListsMessage, GetAccountRangeMessage,
             GetBlockAccessListsMessage,
         },
-        BlockAccessLists, EthMessageID, NewPooledTransactionHashes72,
+        BlockAccessLists, CellMasks, Cells, EthMessageID, GetCells, NewPooledTransactionHashes72,
     };
     use reth_ethereum_forks::EthereumHardfork;
     use reth_network_p2p::error::RequestResult;
@@ -1485,7 +1477,6 @@ mod tests {
                     self.to_sessions.push(commands_to_session);
 
                     ActiveSession {
-                        pooled_rlp_cache: Default::default(),
                         next_id: 0,
                         remote_peer_id: peer_id,
                         remote_addr,
@@ -1666,7 +1657,7 @@ mod tests {
         let local_addr = listener.local_addr().unwrap();
 
         let fut = builder.with_client_stream(local_addr, async move |mut client_stream| {
-            assert_eq!(client_stream.version(), EthVersion::LATEST);
+            assert_eq!(client_stream.version(), EthVersion::Eth71);
             client_stream
                 .send(EthMessage::BlockAccessLists(RequestPair {
                     request_id: 7,
@@ -2012,6 +2003,106 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn invalid_local_cells_requests_do_not_affect_session() {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            let mut builder = SessionBuilder::default();
+            builder.hello = HelloMessageWithProtocols::builder(builder.local_peer_id)
+                .protocols(vec![EthVersion::Eth73.into()])
+                .build();
+            builder.status.set_eth_version(EthVersion::Eth73);
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let valid = GetCells::from_masks(
+                vec![B256::ZERO, B256::repeat_byte(1)],
+                vec![B128::repeat_byte(1), B128::repeat_byte(2)],
+            )
+            .unwrap();
+            let expected = valid.clone();
+            let reply = Cells {
+                cell_mask: CellMasks::Indexed { masks: vec![], mask_ids: Default::default() },
+                ..Default::default()
+            };
+            let client_reply = reply.clone();
+            let client = tokio::spawn(builder.with_client_stream(
+                listener.local_addr().unwrap(),
+                async move |mut stream| {
+                    let EthMessage::GetCells(request) = stream.next().await.unwrap().unwrap()
+                    else {
+                        panic!("expected the valid cell request")
+                    };
+                    assert_eq!(request.message, expected);
+                    stream
+                        .send(EthMessage::Cells(RequestPair {
+                            request_id: request.request_id,
+                            message: client_reply,
+                        }))
+                        .await
+                        .unwrap();
+                },
+            ));
+            let (incoming, _) = listener.accept().await.unwrap();
+            let mut session = builder.connect_incoming(incoming).await;
+            assert_eq!(session.conn.version(), EthVersion::Eth73);
+            let mut invalid = Vec::new();
+            for ids in [vec![0], vec![0, 2], vec![1, 0], vec![0, 0]] {
+                invalid.push(GetCells {
+                    hashes: valid.hashes.clone(),
+                    cell_mask: CellMasks::Indexed {
+                        masks: vec![B128::repeat_byte(1), B128::repeat_byte(2)],
+                        mask_ids: ids.into(),
+                    },
+                });
+            }
+            invalid
+                .push(GetCells { hashes: vec![B256::ZERO; 2], cell_mask: valid.cell_mask.clone() });
+            invalid.push(GetCells {
+                hashes: valid.hashes.clone(),
+                cell_mask: CellMasks::Indexed {
+                    masks: vec![B128::ZERO; 2],
+                    mask_ids: vec![0, 1].into(),
+                },
+            });
+            invalid.push(GetCells {
+                hashes: vec![],
+                cell_mask: CellMasks::Indexed { masks: vec![], mask_ids: Default::default() },
+            });
+            invalid.push(GetCells {
+                hashes: valid.hashes.clone(),
+                cell_mask: CellMasks::Indexed {
+                    masks: vec![B128::ZERO],
+                    mask_ids: vec![0, 0].into(),
+                },
+            });
+            for request in invalid {
+                let (response, rx) = oneshot::channel();
+                let deadline = session.request_deadline();
+                session.on_internal_peer_request(
+                    PeerRequest::GetCells { request, response },
+                    deadline,
+                );
+                assert_eq!(rx.await.unwrap(), Err(RequestError::InvalidRequest));
+                assert!(session.inflight_requests.is_empty());
+                assert!(session.queued_outgoing.is_empty());
+                assert_eq!(session.next_id, 0);
+                assert!(!session.is_disconnecting());
+            }
+            assert!(futures::FutureExt::now_or_never(builder.active_session_rx.next()).is_none());
+            let (response, rx) = oneshot::channel();
+            let deadline = session.request_deadline();
+            session.on_internal_peer_request(
+                PeerRequest::GetCells { request: valid, response },
+                deadline,
+            );
+            assert_eq!(session.next_id, 1);
+            let session_task = tokio::spawn(session);
+            assert_eq!(rx.await.unwrap(), Ok(reply));
+            client.await.unwrap();
+            session_task.await.unwrap();
+        })
+        .await
+        .expect("cell request rejection and subsequent round trip timed out");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn get_snap_request_rejected_without_negotiated_snap() {
         // A plain `eth`-only session: no `snap/2` was negotiated.
         let mut builder = SessionBuilder::default();
@@ -2210,7 +2301,7 @@ mod tests {
 
         let fut = builder.with_client_stream(local_addr, async move |mut client_stream| {
             client_stream
-                .send(EthMessage::NewPooledTransactionHashes72(Default::default()))
+                .send(EthMessage::NewPooledTransactionHashes68(Default::default()))
                 .await
                 .unwrap();
             let _ = tokio::time::timeout(Duration::from_secs(100), client_stream.next()).await;

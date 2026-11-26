@@ -4,7 +4,7 @@ use alloy_eips::{
     eip4844::env_settings::EnvKzgSettings,
     eip7594::{BlobCellMask, Cell},
 };
-use alloy_primitives::{map::B256Map, B128, B256};
+use alloy_primitives::{map::B256Map, B256};
 use reth_network_peers::PeerId;
 use reth_transaction_pool::{
     blobstore::{BlobTxCellSidecar, PooledBlobSidecar},
@@ -157,29 +157,26 @@ impl<T: PoolTransaction> BufferedBlob<T> {
     /// On failure, returns the peers whose cells failed verification and the deliveries that
     /// passed, or `None` if the failure is local.
     pub(super) fn verify(mut self) -> Result<(PeerId, T), Option<Rejected>> {
-        let metadata = self
-            .transaction
-            .blob_sidecar()
-            .and_then(|s| s.as_eip7594())
-            .expect("buffer validates metadata");
-        let hashes = self.transaction.blob_versioned_hashes().expect("blob transaction");
+        // `BlobBuffer::body` only buffers blob transactions with an EIP-7594 sidecar.
+        let Some(metadata) = self.transaction.blob_sidecar().and_then(|s| s.as_eip7594()) else {
+            return Err(None)
+        };
+        let Some(hashes) = self.transaction.blob_versioned_hashes() else { return Err(None) };
+        let settings = EnvKzgSettings::Default.get();
         let mut bad = Vec::new();
         let mut verified = Vec::new();
-        let mut mask = 0;
         for delivery in self.deliveries {
-            let sidecar = BlobTxCellSidecar {
-                commitments: metadata.commitments.clone(),
-                proofs: metadata.cell_proofs.clone(),
-                cells: delivery.cells,
-                cell_mask: B128::from(delivery.mask.bits()),
-            };
-            if sidecar.validate(hashes, EnvKzgSettings::Default.get()).is_err() {
-                if !bad.contains(&delivery.peer) {
-                    bad.push(delivery.peer);
-                }
-            } else {
-                mask |= delivery.mask.bits();
-                verified.push((delivery.peer, sidecar));
+            let sidecar = BlobTxCellSidecar::new(
+                metadata.commitments.clone(),
+                metadata.cell_proofs.clone(),
+                delivery.cells,
+                delivery.mask,
+            )
+            .filter(|sidecar| sidecar.validate(hashes, settings).is_ok());
+            match sidecar {
+                Some(sidecar) => verified.push((delivery.peer, sidecar)),
+                None if !bad.contains(&delivery.peer) => bad.push(delivery.peer),
+                None => {}
             }
         }
         if !bad.is_empty() {
@@ -191,28 +188,34 @@ impl<T: PoolTransaction> BufferedBlob<T> {
                 .map(|(peer, sidecar)| Delivery {
                     peer,
                     mask: sidecar.mask(),
-                    cells: sidecar.cells,
+                    cells: sidecar.cells().to_vec(),
                 })
                 .collect();
             return Err(Some(Rejected { body_peer: self.peer, peers: bad, verified }))
         }
-        let mask = BlobCellMask::from_bits(mask);
+        // Deliveries have disjoint masks, see `BlobBuffer::cells`, so each column has one source.
+        let mask = BlobCellMask::from_bits(
+            verified.iter().fold(0, |mask, (_, sidecar)| mask | sidecar.mask().bits()),
+        );
         let mut cells = Vec::with_capacity(metadata.commitments.len() * mask.count());
         for blob in 0..metadata.commitments.len() {
             for column in mask.selected_indices() {
-                let (_, source) = verified
-                    .iter()
-                    .find(|(_, s)| s.mask().contains(column))
-                    .expect("union of verified masks");
-                let offset = source.mask().selected_indices().position(|i| i == column).unwrap();
-                cells.push(source.cells[blob * source.mask().count() + offset]);
+                for (_, source) in &verified {
+                    let kept = source.mask();
+                    if let Some(position) = kept.selected_indices().position(|i| i == column) {
+                        cells.push(source.cells()[blob * kept.count() + position]);
+                        break
+                    }
+                }
             }
         }
-        let sidecar = BlobTxCellSidecar {
-            commitments: metadata.commitments.clone(),
-            proofs: metadata.cell_proofs.clone(),
+        let Some(sidecar) = BlobTxCellSidecar::new(
+            metadata.commitments.clone(),
+            metadata.cell_proofs.clone(),
             cells,
-            cell_mask: B128::from(mask.bits()),
+            mask,
+        ) else {
+            return Err(None)
         };
         if !self.transaction.set_blob_sidecar(PooledBlobSidecar::from_cells(sidecar)) {
             return Err(None)
@@ -276,7 +279,7 @@ pub(super) mod tests {
             ..Default::default()
         };
         let tx = Signed::new_unhashed(
-            TxEip4844WithSidecar { tx, sidecar: cells.elided().into() },
+            TxEip4844WithSidecar { tx, sidecar: cells.without_blobs().into() },
             Signature::test_signature(),
         );
         let pooled = PooledTransactionVariant::Eip4844(tx);

@@ -1,8 +1,6 @@
 //! Support for handling peer sessions.
 
 mod active;
-mod pooled_rlp;
-use pooled_rlp::PooledRlpCache;
 mod conn;
 mod counter;
 mod handle;
@@ -76,7 +74,6 @@ pub struct SessionId(usize);
 #[must_use = "Session Manager must be polled to process session events."]
 #[derive(Debug)]
 pub struct SessionManager<N: NetworkPrimitives> {
-    pooled_rlp_cache: PooledRlpCache,
     /// Tracks the identifier for the next session.
     next_id: usize,
     /// Keeps track of all sessions
@@ -174,7 +171,6 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         );
 
         Self {
-            pooled_rlp_cache: Default::default(),
             next_id: 0,
             counter: SessionCounter::new(config.limits),
             initial_internal_request_timeout: config.initial_internal_request_timeout,
@@ -699,7 +695,6 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 }
 
                 let session = ActiveSession {
-                    pooled_rlp_cache: self.pooled_rlp_cache.clone(),
                     next_id: 0,
                     remote_peer_id: peer_id,
                     remote_addr,
