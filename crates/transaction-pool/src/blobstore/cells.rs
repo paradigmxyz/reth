@@ -11,7 +11,7 @@ use alloy_eips::{
         CELLS_PER_EXT_BLOB,
     },
 };
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Set, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header};
 use std::borrow::Cow;
 
@@ -293,6 +293,15 @@ pub(crate) fn merge_cells(slot: &mut Option<BlobCellsAndProofsV1>, found: BlobCe
             *proof = found_proof;
         }
     }
+}
+
+// Returns the requested versioned hashes not found yet.
+pub(crate) fn missing_hashes<T>(versioned_hashes: &[B256], result: &[Option<T>]) -> B256Set {
+    versioned_hashes
+        .iter()
+        .zip(result)
+        .filter_map(|(hash, found)| found.is_none().then_some(*hash))
+        .collect()
 }
 
 #[cfg(test)]

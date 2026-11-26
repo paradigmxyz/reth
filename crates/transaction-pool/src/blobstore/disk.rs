@@ -1,8 +1,9 @@
 //! A simple diskstore for blobs
 
 use crate::blobstore::{
-    cells::merge_cells, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
-    BlobTxCellSidecar, PooledBlobSidecar, RebuiltSidecars,
+    cells::{merge_cells, missing_hashes},
+    BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize, BlobTxCellSidecar,
+    PooledBlobSidecar, RebuiltSidecars,
 };
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
@@ -151,16 +152,19 @@ impl DiskFileBlobStore {
             }
         }
 
-        let missing = missing_hashes(versioned_hashes, &result);
+        let mut missing = missing_hashes(versioned_hashes, &result);
         let cell_txs = self.inner.cell_txs_matching(&missing, true);
         for (tx, stored) in self.inner.read_many_decoded(cell_txs) {
+            // Sidecars sharing a blob are rebuilt only while it is missing.
             if let StoredSidecar::Cells(cells) = stored &&
+                cells.versioned_hashes().any(|hash| missing.contains(&hash)) &&
                 let Some(blob_sidecar) = self.inner.rebuilt.get_or_rebuild(tx, &cells) &&
                 let Some(blob_sidecar) = blob_sidecar.as_eip7594()
             {
                 for (hash_idx, match_result) in
                     blob_sidecar.match_versioned_hashes(versioned_hashes)
                 {
+                    missing.remove(&versioned_hashes[hash_idx]);
                     result[hash_idx].get_or_insert(match_result);
                 }
             }
@@ -1021,15 +1025,6 @@ struct CellSidecarFile {
     versioned_hashes: Vec<B256>,
 }
 
-// Returns the requested versioned hashes not found yet.
-fn missing_hashes<T>(versioned_hashes: &[B256], result: &[Option<T>]) -> B256Set {
-    versioned_hashes
-        .iter()
-        .zip(result)
-        .filter_map(|(hash, found)| found.is_none().then_some(*hash))
-        .collect()
-}
-
 // A sidecar decoded from its blob file.
 enum StoredSidecar {
     Full(BlobTransactionSidecarVariant),
@@ -1058,6 +1053,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::blobstore::cells::tests::{fixture, subset};
     use std::sync::atomic::Ordering;
 
     fn tmp_store() -> (DiskFileBlobStore, tempfile::TempDir) {
@@ -1582,5 +1578,18 @@ mod tests {
 
         assert_eq!(store.get_by_versioned_hashes_v3(&[versioned_hash]).unwrap(), vec![None]);
         assert_eq!(store.has_versioned_hashes(&[versioned_hash]).unwrap(), vec![false]);
+    }
+
+    #[test]
+    fn disk_get_blobs_v3_rebuilds_a_shared_blob_once() {
+        let (store, _dir) = tmp_store();
+        let (_, all) = fixture();
+        let hash = all.versioned_hashes().next().unwrap();
+        let half = subset(BlobCellMask::from_bits(u128::MAX / 3));
+        store.insert_cells(B256::random(), half.clone()).unwrap();
+        store.insert_cells(B256::random(), half).unwrap();
+
+        assert!(store.get_by_versioned_hashes_v3(&[hash]).unwrap()[0].is_some());
+        assert_eq!(store.inner.rebuilt.cache.lock().sidecars.len(), 1);
     }
 }

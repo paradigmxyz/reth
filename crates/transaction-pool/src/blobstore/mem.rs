@@ -1,6 +1,7 @@
 use crate::blobstore::{
-    cells::merge_cells, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
-    BlobTxCellSidecar, PooledBlobSidecar, RebuiltSidecars,
+    cells::{merge_cells, missing_hashes},
+    BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize, BlobTxCellSidecar,
+    PooledBlobSidecar, RebuiltSidecars,
 };
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
@@ -52,11 +53,15 @@ impl InMemoryBlobStore {
                 }
             }
         }
-        for (tx, cells) in self.inner.cells_matching(versioned_hashes, &result) {
-            if let Some(sidecar) = self.inner.rebuilt.get_or_rebuild(tx, &cells) &&
+        let mut missing = missing_hashes(versioned_hashes, &result);
+        for (tx, cells) in self.inner.cells_matching(&missing) {
+            // Sidecars sharing a blob are rebuilt only while it is missing.
+            if cells.versioned_hashes().any(|hash| missing.contains(&hash)) &&
+                let Some(sidecar) = self.inner.rebuilt.get_or_rebuild(tx, &cells) &&
                 let Some(sidecar) = sidecar.as_eip7594()
             {
                 for (hash_idx, match_result) in sidecar.match_versioned_hashes(versioned_hashes) {
+                    missing.remove(&versioned_hashes[hash_idx]);
                     result[hash_idx].get_or_insert(match_result);
                 }
             }
@@ -91,7 +96,7 @@ impl InMemoryBlobStore {
                 return Ok(result)
             }
         }
-        for (_, cells) in self.inner.cells_matching(versioned_hashes, &result) {
+        for (_, cells) in self.inner.cells_matching(&missing_hashes(versioned_hashes, &result)) {
             for (hash_idx, match_result) in
                 cells.match_versioned_hashes_cells(versioned_hashes, cell_mask)
             {
@@ -128,21 +133,12 @@ impl InMemoryBlobStoreInner {
         self.rebuilt.get_or_rebuild(*tx, &cells)
     }
 
-    // Returns the cell sidecars with a blob at a `None` slot of `result`.
-    fn cells_matching<T>(
-        &self,
-        versioned_hashes: &[B256],
-        result: &[Option<T>],
-    ) -> Vec<(B256, Arc<BlobTxCellSidecar>)> {
-        let missing: B256Set = versioned_hashes
-            .iter()
-            .zip(result)
-            .filter_map(|(hash, found)| found.is_none().then_some(*hash))
-            .collect();
+    // Returns the cell sidecars with a blob in `hashes`.
+    fn cells_matching(&self, hashes: &B256Set) -> Vec<(B256, Arc<BlobTxCellSidecar>)> {
         self.cells
             .read()
             .iter()
-            .filter(|(_, cells)| cells.versioned_hashes().any(|hash| missing.contains(&hash)))
+            .filter(|(_, cells)| cells.versioned_hashes().any(|hash| hashes.contains(&hash)))
             .map(|(tx, cells)| (*tx, Arc::clone(cells)))
             .collect()
     }
@@ -385,6 +381,7 @@ fn insert_size(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blobstore::cells::tests::{fixture, subset};
     use alloy_consensus::BlobTransactionSidecar;
     use alloy_eips::{
         eip4844::{kzg_to_versioned_hash, Blob, BlobAndProofV2, Bytes48},
@@ -493,5 +490,18 @@ mod tests {
             .unwrap();
 
         assert_eq!(store.get_cells(tx_hash, cell_mask).unwrap(), Some(expected));
+    }
+
+    #[test]
+    fn mem_get_blobs_v3_rebuilds_a_shared_blob_once() {
+        let store = InMemoryBlobStore::default();
+        let (_, all) = fixture();
+        let hash = all.versioned_hashes().next().unwrap();
+        let half = subset(BlobCellMask::from_bits(u128::MAX / 3));
+        store.insert_cells(B256::random(), half.clone()).unwrap();
+        store.insert_cells(B256::random(), half).unwrap();
+
+        assert!(store.get_by_versioned_hashes_v3(&[hash]).unwrap()[0].is_some());
+        assert_eq!(store.inner.rebuilt.cache.lock().sidecars.len(), 1);
     }
 }
