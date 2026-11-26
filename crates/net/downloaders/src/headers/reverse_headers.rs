@@ -526,6 +526,10 @@ where
                     .into())
                 }
 
+                if missing_headers > 0 {
+                    self.metrics.partial_responses.increment(1);
+                }
+
                 // check if the response is the next expected
                 if highest.number() == self.next_chain_tip_block_number {
                     // is next response, validate it
@@ -544,17 +548,26 @@ where
                         .transpose()?;
                 } else if highest.number() > self.existing_local_block_number() {
                     self.metrics.buffered_responses.increment(1.);
-                    // can't validate yet
+                    // can't validate yet. The missing headers are requested right away unless this
+                    // response fills the buffer, otherwise only once it is validated, so partial
+                    // responses can't keep growing the buffer past `max_buffered_responses`.
+                    let deferred_missing_headers =
+                        if self.buffered_responses.len() + 1 < self.max_buffered_responses {
+                            self.requeue_missing_headers(
+                                requested_block_number,
+                                received_headers,
+                                missing_headers,
+                            );
+                            0
+                        } else {
+                            missing_headers
+                        };
                     self.buffered_responses.push(OrderedHeadersResponse {
                         headers,
                         request,
                         peer_id,
+                        deferred_missing_headers,
                     });
-                    self.requeue_missing_headers(
-                        requested_block_number,
-                        received_headers,
-                        missing_headers,
-                    );
                 }
 
                 Ok(())
@@ -602,13 +615,23 @@ where
             match next_block_number.cmp(&self.next_chain_tip_block_number) {
                 Ordering::Less => return None,
                 Ordering::Equal => {
-                    let OrderedHeadersResponse { headers, request, peer_id } =
-                        PeekMut::pop(next_response);
+                    let OrderedHeadersResponse {
+                        headers,
+                        request,
+                        peer_id,
+                        deferred_missing_headers,
+                    } = PeekMut::pop(next_response);
                     self.metrics.buffered_responses.decrement(1.);
 
+                    let received_headers = headers.len() as u64;
                     if let Err(err) = self.process_next_headers(request, headers, peer_id) {
                         return Some(err)
                     }
+                    self.requeue_missing_headers(
+                        next_block_number,
+                        received_headers,
+                        deferred_missing_headers,
+                    );
                 }
                 Ordering::Greater => {
                     self.metrics.buffered_responses.decrement(1.);
@@ -642,7 +665,6 @@ where
         missing_headers: u64,
     ) {
         if missing_headers > 0 {
-            self.metrics.partial_responses.increment(1);
             self.submit_request(
                 HeadersRequest::falling(
                     (requested_block_number - received_headers).into(),
@@ -1009,6 +1031,9 @@ struct OrderedHeadersResponse<H> {
     headers: Vec<H>,
     request: HeadersRequest,
     peer_id: PeerId,
+    /// Number of missing headers below a partial response that were not requested yet because
+    /// the response filled the buffer. They are requested once the response is validated.
+    deferred_missing_headers: u64,
 }
 
 // === impl OrderedHeadersResponse ===
@@ -1375,6 +1400,46 @@ mod tests {
         }
     }
 
+    /// Never answers requests starting at `stalled_start` and answers every other request with
+    /// only its first header.
+    #[derive(Clone, Debug)]
+    struct StallingHeadersClient {
+        stalled_start: u64,
+    }
+
+    impl DownloadClient for StallingHeadersClient {
+        fn report_bad_message(&self, _peer_id: PeerId) {}
+
+        fn num_connected_peers(&self) -> usize {
+            1
+        }
+    }
+
+    impl HeadersClient for StallingHeadersClient {
+        type Header = Header;
+        type Output = futures::future::Either<
+            futures::future::Pending<PeerRequestResult<Vec<Header>>>,
+            futures::future::Ready<PeerRequestResult<Vec<Header>>>,
+        >;
+
+        fn get_headers_with_priority(
+            &self,
+            request: HeadersRequest,
+            _priority: Priority,
+        ) -> Self::Output {
+            let start = request.start.as_number().unwrap();
+            if start == self.stalled_start {
+                return futures::future::Either::Left(futures::future::pending())
+            }
+
+            let response = vec![Header { number: start, ..Default::default() }];
+            futures::future::Either::Right(futures::future::ready(Ok(WithPeerId::new(
+                PeerId::default(),
+                response,
+            ))))
+        }
+    }
+
     /// Tests that `replace_number` works the same way as `Option::replace`
     #[test]
     fn test_replace_number_semantics() {
@@ -1545,6 +1610,7 @@ mod tests {
             headers: vec![],
             request: HeadersRequest { start: hi.into(), limit: 0, direction: Default::default() },
             peer_id: Default::default(),
+            deferred_missing_headers: 0,
         });
 
         let lo = 0u64;
@@ -1552,6 +1618,7 @@ mod tests {
             headers: vec![],
             request: HeadersRequest { start: lo.into(), limit: 0, direction: Default::default() },
             peer_id: Default::default(),
+            deferred_missing_headers: 0,
         });
 
         assert_eq!(heap.pop().unwrap().block_number(), hi);
@@ -1755,6 +1822,65 @@ mod tests {
         assert_eq!(downloader.buffered_responses.len(), 1);
         assert_eq!(client.numeric_requests(), vec![(4, 2)]);
         assert_eq!(client.bad_message_count(), 0);
+    }
+
+    #[test]
+    fn defers_missing_headers_of_partial_response_that_fills_buffer() {
+        let client = CappedHeadersClient::new(Vec::new(), 0);
+        let mut downloader = ReverseHeadersDownloaderBuilder::default()
+            .max_buffered_responses(1)
+            .build(client.clone(), Arc::new(TestConsensus::default()));
+        downloader.local_head = Some(SealedHeader::default());
+        downloader.sync_target = Some(SyncTargetBlock::from_number(10));
+        downloader.next_chain_tip_block_number = 10;
+
+        // a partial response that fills the buffer is buffered without requesting the missing
+        // suffix.
+        let request = HeadersRequest::falling(5u64.into(), 3);
+        let response = vec![Header { number: 5, ..Default::default() }];
+        let outcome = downloader.on_headers_outcome(HeadersRequestOutcome {
+            request,
+            outcome: Ok(WithPeerId::new(PeerId::default(), response)),
+        });
+
+        assert!(outcome.is_ok());
+        assert_eq!(downloader.buffered_responses.len(), 1);
+        assert!(client.numeric_requests().is_empty());
+
+        // the next expected response validates the buffered one, which requests the suffix.
+        let request = HeadersRequest::falling(10u64.into(), 5);
+        let response =
+            (6..=10).rev().map(|number| Header { number, ..Default::default() }).collect();
+        let outcome = downloader.on_headers_outcome(HeadersRequestOutcome {
+            request,
+            outcome: Ok(WithPeerId::new(PeerId::default(), response)),
+        });
+
+        assert!(outcome.is_ok());
+        assert!(downloader.buffered_responses.is_empty());
+        assert_eq!(downloader.next_chain_tip_block_number, 4);
+        assert_eq!(client.numeric_requests(), vec![(4, 2)]);
+        assert_eq!(client.bad_message_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn partial_responses_keep_buffer_bounded() {
+        let mut downloader = ReverseHeadersDownloaderBuilder::default()
+            .request_limit(10)
+            .max_buffered_responses(2)
+            .build(StallingHeadersClient { stalled_start: 30 }, Arc::new(TestConsensus::default()));
+        downloader.local_head = Some(SealedHeader::default());
+        downloader.sync_target = Some(SyncTargetBlock::from_number(31));
+        downloader.next_request_block_number = 30;
+        downloader.next_chain_tip_block_number = 30;
+
+        // The next expected range never arrives and every other request gets a one-header
+        // response, so nothing buffered can be validated.
+        assert!(futures::poll!(downloader.next()).is_pending());
+
+        // The buffer may exceed `max_buffered_responses` by the requests already in flight: the two
+        // lower ranges plus the one suffix requested while the buffer had room.
+        assert_eq!(downloader.buffered_responses.len(), 3);
     }
 
     #[test]

@@ -173,39 +173,6 @@ impl<N: NodePrimitives> InMemoryStateWriter<N> {
         self.update(|blocks| blocks.update_chain(new_chain));
     }
 
-    /// Applies a backfill sync that finished at `backfill_block` without unwinding, in one
-    /// update.
-    ///
-    /// Removes the canonical blocks up to and including its height if `last_persisted_hash` is a
-    /// canonical in-memory block or the block the in-memory canonical chain builds on. Then makes
-    /// every remaining canonical block an executed block that is not canonical, and removes the
-    /// executed blocks that conflict with `backfill_block`: the ones below its height, the other
-    /// ones at its height, and every block built on such a block at its height. Afterwards there
-    /// is no pending block.
-    ///
-    /// If the canonical block at the height of `backfill_block` is another block, the canonical
-    /// blocks are only removed as conflicting blocks, together with the blocks built on that
-    /// block.
-    pub fn on_backfill_finished(
-        &mut self,
-        last_persisted_hash: B256,
-        backfill_block: BlockNumHash,
-    ) {
-        self.update(|blocks| {
-            let removed = if blocks
-                .canonical()
-                .hash_by_number(backfill_block.number)
-                .is_none_or(|hash| hash == backfill_block.hash)
-            {
-                blocks.remove_canonical_until(last_persisted_hash, backfill_block.number)
-            } else {
-                Vec::new()
-            };
-            blocks.demote_canonical_chain();
-            (removed, blocks.prune_conflicting_with_finalized(backfill_block))
-        });
-    }
-
     /// Applies the persistence of blocks up to `last_persisted_block`, removing blocks in one
     /// update:
     ///
@@ -321,6 +288,13 @@ struct CanonicalInMemoryStateInner<N: NodePrimitives> {
 /// which is the only way to change its chain info and to send its notifications, or by
 /// [`Self::without_writer`], and then they never change. Its blocks are those of an
 /// [`InMemoryState`] and change with them in both cases.
+///
+/// # Reading the canonical head and the blocks
+///
+/// The writer changes the canonical blocks and the canonical head of the chain info in one
+/// update. Whoever reads blocks and then the canonical head gets the head of the update those
+/// blocks are from, or the head of a later update. Reading the canonical head first gives no such
+/// guarantee: the blocks read afterwards can be from a later update.
 #[derive(Debug, Clone)]
 pub struct CanonicalInMemoryState<N: NodePrimitives = EthPrimitives> {
     inner: Arc<CanonicalInMemoryStateInner<N>>,
@@ -552,6 +526,10 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 /// A writer cannot be cloned and its methods take `&mut self`, so only its owner changes the
 /// state. It holds the only [`InMemoryStateWriter`] of the [`InMemoryState`] the state was
 /// created over, so nothing else changes its blocks, its chain info or sends its notifications.
+///
+/// [`Self::update_chain`], [`Self::on_backfill_finished`] and [`Self::clear_state`] change the
+/// canonical blocks and the canonical head of the chain info in one update, which is what
+/// [`CanonicalInMemoryState`] promises its readers.
 #[derive(Debug)]
 pub struct CanonicalInMemoryStateWriter<N: NodePrimitives = EthPrimitives> {
     canonical_in_memory_state: CanonicalInMemoryState<N>,
@@ -584,12 +562,14 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
         &self.canonical_in_memory_state
     }
 
-    /// Removes all blocks, canonical or not, and clears the pending block, see
-    /// [`InMemoryStateWriter::clear_state`].
+    /// Removes all blocks, canonical or not, clears the pending block, and makes
+    /// `canonical_head` the canonical head of the chain info in the same update.
     ///
-    /// The chain info is unchanged and no notification is sent.
-    pub fn clear_state(&mut self) {
-        self.in_memory_state_writer.clear_state();
+    /// `canonical_head` has to be a block on disk, because no block in memory is canonical
+    /// afterwards. The blocks are removed for every handle of the [`InMemoryState`] this state was
+    /// created over. No notification is sent.
+    pub fn clear_state(&mut self, canonical_head: SealedHeader<N::BlockHeader>) {
+        self.update_with_canonical_head(canonical_head, InMemoryBlocks::clear);
     }
 
     /// Tracks an executed block that is not canonical, see
@@ -604,24 +584,51 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
         self.in_memory_state_writer.set_pending_block(pending);
     }
 
-    /// Update the in memory state with the given chain update, see
-    /// [`InMemoryStateWriter::update_chain`].
+    /// Updates the in memory state with the given chain update like
+    /// [`InMemoryStateWriter::update_chain`], and makes the tip of the new blocks the canonical
+    /// head of the chain info in the same update.
     ///
-    /// The chain info is unchanged and no notification is sent.
+    /// No notification is sent.
     pub fn update_chain(&mut self, new_chain: NewCanonicalChain<N>) {
-        self.in_memory_state_writer.update_chain(new_chain);
+        let canonical_head = new_chain.tip().clone_sealed_header();
+        self.update_with_canonical_head(canonical_head, |blocks| blocks.update_chain(new_chain));
     }
 
-    /// Applies a backfill sync that finished at `backfill_block` without unwinding, see
-    /// [`InMemoryStateWriter::on_backfill_finished`].
+    /// Applies a backfill sync that finished at `backfill_head` without unwinding, in one
+    /// update that also makes `backfill_head` the canonical head of the chain info.
     ///
-    /// The chain info is unchanged and no notification is sent.
+    /// `backfill_head` has to be a block on disk, because no block in memory is canonical
+    /// afterwards.
+    ///
+    /// Removes the canonical blocks up to and including its height if `last_persisted_hash` is a
+    /// canonical in-memory block or the block the in-memory canonical chain builds on. Then makes
+    /// every remaining canonical block an executed block that is not canonical, and removes the
+    /// executed blocks that conflict with `backfill_head`: the ones below its height, the other
+    /// ones at its height, and every block built on such a block at its height. Afterwards there
+    /// is no pending block.
+    ///
+    /// If the canonical block at the height of `backfill_head` is another block, the canonical
+    /// blocks are only removed as conflicting blocks, together with the blocks built on that
+    /// block.
     pub fn on_backfill_finished(
         &mut self,
         last_persisted_hash: B256,
-        backfill_block: BlockNumHash,
+        backfill_head: SealedHeader<N::BlockHeader>,
     ) {
-        self.in_memory_state_writer.on_backfill_finished(last_persisted_hash, backfill_block);
+        let backfill_block = backfill_head.num_hash();
+        self.update_with_canonical_head(backfill_head, |blocks| {
+            let removed = if blocks
+                .canonical()
+                .hash_by_number(backfill_block.number)
+                .is_none_or(|hash| hash == backfill_block.hash)
+            {
+                blocks.remove_canonical_until(last_persisted_hash, backfill_block.number)
+            } else {
+                Vec::new()
+            };
+            blocks.demote_canonical_chain();
+            (removed, blocks.prune_conflicting_with_finalized(backfill_block))
+        });
     }
 
     /// Applies the persistence of blocks.
@@ -647,11 +654,11 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
         self.inner().chain_info_tracker.on_forkchoice_update_received();
     }
 
-    /// Sets the canonical head of the chain info.
+    /// Sets the canonical head of the chain info without changing the blocks.
     ///
-    /// The blocks are unchanged and no notification is sent: the canonical blocks are changed
-    /// with [`Self::update_chain`], and the canonical state notifications are sent with
-    /// [`Self::notify_canon_state`].
+    /// This is for a head that changes while the canonical blocks stay as they are.
+    /// [`Self::update_chain`], [`Self::on_backfill_finished`] and [`Self::clear_state`], which
+    /// change the canonical blocks, set the canonical head themselves. No notification is sent.
     pub fn set_canonical_head(&mut self, header: SealedHeader<N::BlockHeader>) {
         self.inner().chain_info_tracker.set_canonical_head(header);
     }
@@ -677,6 +684,25 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
     /// Returns what the state this changes shares with its clones.
     fn inner(&self) -> &CanonicalInMemoryStateInner<N> {
         &self.canonical_in_memory_state.inner
+    }
+
+    /// Applies `f` to the blocks and makes `canonical_head` the canonical head of the chain info
+    /// in the same update, and returns what `f` returns.
+    ///
+    /// The canonical head is set while the write lock of the blocks is held. This is the only
+    /// place that takes both locks, and the lock of the canonical head is never held while the
+    /// lock of the blocks is taken.
+    fn update_with_canonical_head<R>(
+        &mut self,
+        canonical_head: SealedHeader<N::BlockHeader>,
+        f: impl FnOnce(&mut InMemoryBlocks<N>) -> R,
+    ) -> R {
+        let chain_info_tracker = &self.canonical_in_memory_state.inner.chain_info_tracker;
+        self.in_memory_state_writer.update(|blocks| {
+            let result = f(blocks);
+            chain_info_tracker.set_canonical_head(canonical_head);
+            result
+        })
     }
 }
 
@@ -781,6 +807,7 @@ mod tests {
             state.state_by_number(0).unwrap().block_ref().recovered_block().hash(),
             block1.recovered_block().hash()
         );
+        assert_eq!(state.get_canonical_head(), block1.recovered_block().clone_sealed_header());
 
         let chain = NewCanonicalChain::Reorg { new: vec![block2.clone()], old: vec![block1] };
         canonical_in_memory_state_writer.update_chain(chain);
@@ -792,6 +819,7 @@ mod tests {
             state.state_by_number(0).unwrap().block_ref().recovered_block().hash(),
             block2.recovered_block().hash()
         );
+        assert_eq!(state.get_canonical_head(), block2.recovered_block().clone_sealed_header());
 
         assert_eq!(state.inner.in_memory_state.block_count(), 1);
     }
@@ -1018,7 +1046,7 @@ mod tests {
         assert_eq!(state.inner.in_memory_state.block_count(), 0);
         assert_eq!(chain(&state.pending_state().unwrap()), [5]);
 
-        canonical_in_memory_state_writer.clear_state();
+        canonical_in_memory_state_writer.clear_state(state.get_canonical_head());
         assert_eq!(state.pending_state(), None);
     }
 
@@ -1079,7 +1107,7 @@ mod tests {
         assert!(after_fork > after_chain_base);
         assert_eq!(in_memory_state.state_by_hash(fork_hash), None);
 
-        canonical_in_memory_state_writer.clear_state();
+        canonical_in_memory_state_writer.clear_state(state.get_canonical_head());
         assert!(in_memory_state.removal_generation() > after_fork);
         assert_eq!(in_memory_state.state_by_hash(hash(3)), None);
     }
@@ -1102,9 +1130,10 @@ mod tests {
         // Backfill finishes at block 2: the canonical blocks through it and the fork are removed
         // in one update, and block 3 stays tracked but is no longer canonical.
         let generation = in_memory_state.removal_generation();
-        canonical_in_memory_state_writer
-            .on_backfill_finished(hash(1), blocks[1].recovered_block().num_hash());
+        let backfill_head = blocks[1].recovered_block().clone_sealed_header();
+        canonical_in_memory_state_writer.on_backfill_finished(hash(1), backfill_head.clone());
         assert_eq!(in_memory_state.removal_generation(), generation + 1);
+        assert_eq!(state.get_canonical_head(), backfill_head);
         assert_eq!(state.canonical_chain().count(), 0);
         for removed in [hash(1), hash(2), fork_hash] {
             assert_eq!(in_memory_state.state_by_hash(removed), None);
@@ -1133,9 +1162,10 @@ mod tests {
         // Backfill finishes at the fork block of height 2: canonical block 2 conflicts with it
         // and is removed together with block 3 built on it, and the fork stays tracked.
         let generation = in_memory_state.removal_generation();
-        canonical_in_memory_state_writer
-            .on_backfill_finished(hash(1), fork.recovered_block().num_hash());
+        let backfill_head = fork.recovered_block().clone_sealed_header();
+        canonical_in_memory_state_writer.on_backfill_finished(hash(1), backfill_head.clone());
         assert_eq!(in_memory_state.removal_generation(), generation + 1);
+        assert_eq!(state.get_canonical_head(), backfill_head);
         assert_eq!(state.canonical_chain().count(), 0);
         for removed in [hash(1), hash(2), hash(3)] {
             assert_eq!(in_memory_state.state_by_hash(removed), None);
@@ -1318,13 +1348,18 @@ mod tests {
         canonical_in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: vec![blocks[2].clone()] });
         assert_eq!(state.canonical_chain().count(), 1);
-        canonical_in_memory_state_writer.on_backfill_finished(hash(2), num_hash(2));
+        assert_eq!(state.get_canonical_head().num_hash(), num_hash(3));
+        let backfill_head = blocks[1].recovered_block().clone_sealed_header();
+        canonical_in_memory_state_writer.on_backfill_finished(hash(2), backfill_head.clone());
+        assert_eq!(state.get_canonical_head(), backfill_head);
         assert_eq!(
             in_memory_state.block_counts(),
             InMemoryStateBlockCounts { canonical: 0, non_canonical: 1 }
         );
 
-        canonical_in_memory_state_writer.clear_state();
+        let disk_head = blocks[0].recovered_block().clone_sealed_header();
+        canonical_in_memory_state_writer.clear_state(disk_head.clone());
+        assert_eq!(state.get_canonical_head(), disk_head);
         assert_eq!(
             in_memory_state.block_counts(),
             InMemoryStateBlockCounts { canonical: 0, non_canonical: 0 }

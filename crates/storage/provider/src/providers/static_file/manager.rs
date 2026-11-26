@@ -2563,8 +2563,24 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
         &self,
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx)>> {
+        let mut changesets = Vec::new();
+        self.for_each_account_changeset(range, |block_number, changeset| {
+            changesets.push((block_number, changeset))
+        })?;
+        Ok(changesets)
+    }
+
+    fn for_each_account_changeset(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        mut f: impl FnMut(BlockNumber, AccountBeforeTx),
+    ) -> ProviderResult<()> {
         let range = self.bound_range(range, StaticFileSegment::AccountChangeSets);
-        self.walk_account_changeset_range(range).collect()
+        for entry in self.walk_account_changeset_range(range) {
+            let (block_number, changeset) = entry?;
+            f(block_number, changeset);
+        }
+        Ok(())
     }
 }
 
@@ -2664,8 +2680,24 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        let mut changesets = Vec::new();
+        self.for_each_storage_changeset(range, |block_address, entry| {
+            changesets.push((block_address, entry))
+        })?;
+        Ok(changesets)
+    }
+
+    fn for_each_storage_changeset(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        mut f: impl FnMut(BlockNumberAddress, StorageEntry),
+    ) -> ProviderResult<()> {
         let range = self.bound_range(range, StaticFileSegment::StorageChangeSets);
-        self.walk_storage_changeset_range(range).collect()
+        for entry in self.walk_storage_changeset_range(range) {
+            let (block_address, storage_entry) = entry?;
+            f(block_address, storage_entry);
+        }
+        Ok(())
     }
 }
 
