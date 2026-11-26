@@ -523,6 +523,10 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                     });
                 }
 
+                if is_cancelled() {
+                    return Err(EthApiError::InternalEthError.into())
+                }
+
                 tx_env.inner_mut().set_access_list(access_list.clone());
 
                 // Transact again to get the exact gas used with the returned access list.
