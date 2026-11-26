@@ -478,17 +478,16 @@ impl BlobStore for DiskFileBlobStore {
             }
         }
 
+        // Held for both checks, so a promotion from cells to full in between is not missed.
+        let cell_sidecars = self.inner.cell_sidecars.read();
         for (idx, tx_hash) in missing_tx_hashes {
             // The index can point to a transaction now stored as cells, which only count below.
-            if !self.inner.cell_sidecars.read().contains_key(&tx_hash) &&
-                self.inner.contains(tx_hash)?
-            {
+            if !cell_sidecars.contains_key(&tx_hash) && self.inner.contains(tx_hash)? {
                 result[idx] = true;
             }
         }
 
         // Only blobs that can be rebuilt from their cells count as available.
-        let cell_sidecars = self.inner.cell_sidecars.read();
         for (available, requested_hash) in result.iter_mut().zip(versioned_hashes) {
             *available |= cell_sidecars
                 .values()
