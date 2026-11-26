@@ -131,10 +131,24 @@ impl Discv5 {
     ///
     /// This will prevent any future inclusion in the table
     pub fn ban(&self, peer_id: PeerId, ip: IpAddr) {
+        self.ban_with(peer_id, ip, None)
+    }
+
+    /// Adds the ip to the ban list.
+    ///
+    /// This will prevent any future inclusion in the table
+    pub fn ban_ip(&self, ip: IpAddr) {
+        self.ban_ip_with(ip, None)
+    }
+
+    /// Adds the peer and ip to the ban list for the given duration, or indefinitely if `None`.
+    ///
+    /// This replaces any existing ban of the peer or ip, including an indefinite one.
+    pub fn ban_with(&self, peer_id: PeerId, ip: IpAddr, duration: Option<Duration>) {
         match discv4_id_to_discv5_id(peer_id) {
             Ok(node_id) => {
-                self.discv5.ban_node(&node_id, None);
-                self.ban_ip(ip);
+                self.discv5.ban_node(&node_id, duration);
+                self.ban_ip_with(ip, duration);
             }
             Err(err) => error!(target: "net::discv5",
                 %err,
@@ -143,11 +157,11 @@ impl Discv5 {
         }
     }
 
-    /// Adds the ip to the ban list.
+    /// Adds the ip to the ban list for the given duration, or indefinitely if `None`.
     ///
-    /// This will prevent any future inclusion in the table
-    pub fn ban_ip(&self, ip: IpAddr) {
-        self.discv5.ban_ip(ip, None);
+    /// This replaces any existing ban of the ip, including an indefinite one.
+    pub fn ban_ip_with(&self, ip: IpAddr, duration: Option<Duration>) {
+        self.discv5.ban_ip(ip, duration);
     }
 
     /// Returns the [`NodeRecord`] of the local node.

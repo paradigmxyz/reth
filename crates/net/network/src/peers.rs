@@ -1383,6 +1383,11 @@ impl PeersManager {
         self.net_connection_state = NetworkConnectionState::ShuttingDown;
     }
 
+    /// Returns how long a peer or ip is banned for.
+    pub(crate) const fn ban_duration(&self) -> Duration {
+        self.ban_duration
+    }
+
     /// Advances the state.
     ///
     /// Event hooks invoked externally may trigger a new [`PeerAction`] that are buffered until

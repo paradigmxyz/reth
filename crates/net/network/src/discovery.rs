@@ -24,7 +24,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{net::UdpSocket, sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
@@ -328,23 +328,23 @@ impl Discovery {
         }
     }
 
-    /// Bans the [`IpAddr`] in the discovery service.
-    pub(crate) fn ban_ip(&self, ip: IpAddr) {
+    /// Bans the [`IpAddr`] in the discovery service for the given duration.
+    pub(crate) fn ban_ip(&self, ip: IpAddr, duration: Duration) {
         if let Some(discv4) = &self.discv4 {
-            discv4.ban_ip(ip)
+            discv4.ban_ip_until(ip, Instant::now() + duration)
         }
         if let Some(discv5) = &self.discv5 {
-            discv5.ban_ip(ip)
+            discv5.ban_ip_with(ip, Some(duration))
         }
     }
 
-    /// Bans the [`PeerId`] and [`IpAddr`] in the discovery service.
-    pub(crate) fn ban(&self, peer_id: PeerId, ip: IpAddr) {
+    /// Bans the [`PeerId`] and [`IpAddr`] in the discovery service for the given duration.
+    pub(crate) fn ban(&self, peer_id: PeerId, ip: IpAddr, duration: Duration) {
         if let Some(discv4) = &self.discv4 {
-            discv4.ban(peer_id, ip)
+            discv4.ban_until(peer_id, ip, Instant::now() + duration)
         }
         if let Some(discv5) = &self.discv5 {
-            discv5.ban(peer_id, ip)
+            discv5.ban_with(peer_id, ip, Some(duration))
         }
     }
 

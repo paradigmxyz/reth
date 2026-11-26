@@ -410,7 +410,7 @@ impl Discv4 {
     ///
     /// This will prevent any future inclusion in the table
     pub fn ban(&self, node_id: PeerId, ip: IpAddr) {
-        let cmd = Discv4Command::Ban(node_id, ip);
+        let cmd = Discv4Command::Ban(node_id, ip, None);
         self.send_to_service(cmd);
     }
 
@@ -418,7 +418,25 @@ impl Discv4 {
     ///
     /// This will prevent any future inclusion in the table
     pub fn ban_ip(&self, ip: IpAddr) {
-        let cmd = Discv4Command::BanIp(ip);
+        let cmd = Discv4Command::BanIp(ip, None);
+        self.send_to_service(cmd);
+    }
+
+    /// Adds the peer and ip to the ban list until the given timestamp.
+    ///
+    /// An existing ban is only extended. Expired bans are evicted periodically, so they may outlast
+    /// `until` by up to an hour.
+    pub fn ban_until(&self, node_id: PeerId, ip: IpAddr, until: Instant) {
+        let cmd = Discv4Command::Ban(node_id, ip, Some(until));
+        self.send_to_service(cmd);
+    }
+
+    /// Adds the ip to the ban list until the given timestamp.
+    ///
+    /// An existing ban is only extended. Expired bans are evicted periodically, so they may outlast
+    /// `until` by up to an hour.
+    pub fn ban_ip_until(&self, ip: IpAddr, until: Instant) {
+        let cmd = Discv4Command::BanIp(ip, Some(until));
         self.send_to_service(cmd);
     }
 
@@ -1969,12 +1987,13 @@ impl Discv4Service {
                     Discv4Command::Remove(node_id) => {
                         self.remove_node(node_id);
                     }
-                    Discv4Command::Ban(node_id, ip) => {
-                        self.ban_node(node_id);
-                        self.ban_ip(ip);
+                    Discv4Command::Ban(node_id, ip, until) => {
+                        self.remove_node(node_id);
+                        self.config.ban_list.ban_peer_with(node_id, until);
+                        self.config.ban_list.ban_ip_with(ip, until);
                     }
-                    Discv4Command::BanIp(ip) => {
-                        self.ban_ip(ip);
+                    Discv4Command::BanIp(ip, until) => {
+                        self.config.ban_list.ban_ip_with(ip, until);
                     }
                     Discv4Command::SetEIP868RLPPair { key, rlp } => {
                         debug!(target: "discv4", key=%String::from_utf8_lossy(&key), "Update EIP-868 extension pair");
@@ -2070,9 +2089,11 @@ impl Discv4Service {
                 self.evict_expired_requests(Instant::now());
             }
 
-            // evict expired nodes
+            // evict expired nodes and bans
             while self.expire_interval.poll_tick(cx).is_ready() {
-                self.received_pongs.evict_expired(Instant::now(), EXPIRE_DURATION);
+                let now = Instant::now();
+                self.received_pongs.evict_expired(now, EXPIRE_DURATION);
+                self.config.ban_list.evict(now);
             }
 
             if self.queued_events.is_empty() {
@@ -2330,9 +2351,9 @@ enum Discv4Command {
     AddBootNode(NodeRecord),
     SetTcpPort(u16),
     SetEIP868RLPPair { key: Vec<u8>, rlp: Bytes },
-    Ban(PeerId, IpAddr),
+    Ban(PeerId, IpAddr, Option<Instant>),
     BanPeer(PeerId),
-    BanIp(IpAddr),
+    BanIp(IpAddr, Option<Instant>),
     Remove(PeerId),
     Lookup { node_id: Option<PeerId>, tx: Option<NodeRecordSender> },
     SetLookupInterval(Duration),
@@ -2752,6 +2773,7 @@ mod tests {
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
     use reth_ethereum_forks::{EnrForkIdEntry, ForkHash};
+    use reth_net_banlist::BanList;
     use reth_network_peers::mainnet_nodes;
     use std::{future::poll_fn, net::Ipv6Addr};
 
@@ -4316,5 +4338,45 @@ mod tests {
         let mapped = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 1).to_ipv6_mapped(), 40404));
         handler.handle_packet(&packet, mapped).await;
         assert_matches::assert_matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+    }
+
+    #[tokio::test]
+    async fn test_ban_until_is_evicted() {
+        let permanent_ip: IpAddr = [1, 1, 1, 1].into();
+        let expired_ip: IpAddr = [2, 2, 2, 2].into();
+        let expired_peer_ip: IpAddr = [3, 3, 3, 3].into();
+        let active_ip: IpAddr = [4, 4, 4, 4].into();
+        let expired_peer = PeerId::random();
+
+        let config = Discv4Config::builder().ban_list(BanList::new([], [permanent_ip])).build();
+        let (discv4, mut service) = create_discv4_with_config(config).await;
+
+        let expired = Instant::now() - Duration::from_millis(1);
+        discv4.ban_ip_until(permanent_ip, expired);
+        discv4.ban_ip_until(expired_ip, expired);
+        discv4.ban_until(expired_peer, expired_peer_ip, expired);
+        discv4.ban_ip_until(active_ip, Instant::now() + Duration::from_secs(3600));
+
+        // Drains the commands, then waits for the first expire interval tick to evict.
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            poll_fn(|cx| {
+                while service.poll(cx).is_ready() {}
+                if service.config.ban_list.is_banned_ip(&expired_ip) {
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            }),
+        )
+        .await
+        .expect("expired ban was not evicted");
+
+        let bans = &service.config.ban_list;
+        assert!(bans.is_banned_ip(&permanent_ip));
+        assert!(bans.is_banned_ip(&active_ip));
+        assert!(!bans.is_banned_ip(&expired_ip));
+        assert!(!bans.is_banned_ip(&expired_peer_ip));
+        assert!(!bans.is_banned_peer(&expired_peer));
     }
 }
