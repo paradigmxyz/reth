@@ -23,6 +23,10 @@ use reth_primitives_traits::{sync::OnceLock, Block, InMemorySize, SignedTransact
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>
 pub const SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE: usize = 4096;
 
+/// Smallest encoding of one announcement after its type: a one-byte size and an RLP string
+/// holding its hash.
+const MIN_ENCODED_ANNOUNCEMENT_LEN: usize = 1 + 1 + B256::len_bytes();
+
 /// This informs peers of new blocks that have appeared on the network.
 #[derive(
     Clone,
@@ -967,15 +971,33 @@ impl Decodable for NewPooledTransactionHashes72 {
 const NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP: usize =
     2 * SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 
+/// Decodes the `types`, `sizes` and `hashes` fields of a `NewPooledTransactionHashes` payload.
+///
+/// Rejects a payload too short to hold one size and one hash per type, and stops decoding
+/// `sizes` at the first entry beyond the number of types.
 #[inline]
 fn decode_pooled_transaction_hashes_payload(
     payload: &mut &[u8],
 ) -> alloy_rlp::Result<(Vec<u8>, Vec<usize>, Vec<B256>)> {
     let types = Bytes::decode(payload)?;
+    if types.len().saturating_mul(MIN_ENCODED_ANNOUNCEMENT_LEN) > payload.len() {
+        return Err(alloy_rlp::Error::InputTooShort)
+    }
     let capacity = types.len().min(NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP);
 
+    // Each size takes at least one byte but eight in memory, so decoding stops at the first
+    // extra entry instead of reading a list longer than `types`.
     let mut sizes = Vec::with_capacity(capacity);
-    decode_append(payload, &mut sizes)?;
+    let mut sizes_payload = Header::decode_bytes(payload, true)?;
+    while !sizes_payload.is_empty() {
+        if sizes.len() == types.len() {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: types.len(),
+                got: types.len() + 1,
+            })
+        }
+        sizes.push(usize::decode(&mut sizes_payload)?);
+    }
 
     let mut hashes = Vec::with_capacity(capacity);
     decode_append(payload, &mut hashes)?;
@@ -1186,9 +1208,9 @@ mod tests {
             let mut handrolled_buf = encoded.as_slice();
             let handrolled = NewPooledTransactionHashes68::decode(&mut handrolled_buf);
 
-            let handrolled_is_ok = handrolled.is_ok();
-            prop_assert_eq!(&handrolled, &derived);
-            if handrolled_is_ok {
+            // The hand-rolled decoder stops early on malformed lengths, so only success must match.
+            prop_assert_eq!(handrolled.as_ref().ok(), derived.as_ref().ok());
+            if handrolled.is_ok() {
                 prop_assert!(derived_buf.is_empty());
                 prop_assert!(handrolled_buf.is_empty());
             }
@@ -1459,5 +1481,31 @@ mod tests {
         assert_eq!(tx_hashes.types[1], tx.ty());
         assert_eq!(tx_hashes.sizes[1], tx.encode_2718_len());
         assert_eq!(tx_hashes.hashes[1], *tx.tx_hash());
+    }
+
+    #[test]
+    fn eth_68_stops_decoding_sizes_beyond_types() {
+        let encoded = encoded(&EncodableNewPooledTransactionHashes68 {
+            types: Bytes::from_static(&[0x02]),
+            sizes: vec![0; 1024],
+            hashes: vec![B256::ZERO],
+        });
+
+        let result = NewPooledTransactionHashes68::decode(&mut encoded.as_slice());
+
+        assert_eq!(result, Err(alloy_rlp::Error::ListLengthMismatch { expected: 1, got: 2 }));
+    }
+
+    #[test]
+    fn eth_68_rejects_types_without_room_for_sizes_and_hashes() {
+        let encoded = encoded(&EncodableNewPooledTransactionHashes68 {
+            types: Bytes::from_static(&[0x02; 4]),
+            sizes: vec![],
+            hashes: vec![],
+        });
+
+        let result = NewPooledTransactionHashes68::decode(&mut encoded.as_slice());
+
+        assert_eq!(result, Err(alloy_rlp::Error::InputTooShort));
     }
 }
