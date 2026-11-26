@@ -995,6 +995,9 @@ impl PeersManager {
         if self.is_full_for(&peer_id) {
             let ip = addr.tcp().ip();
             if !self.candidate_cooldowns.peek(&peer_id).is_some_and(|until| *until > now) &&
+                // A temporary row, such as a candidate being dialed, is removed without a backoff
+                // when its session closes, so a queued copy would be redialed right away.
+                !self.peers.contains_key(&peer_id) &&
                 self.ip_filter.is_allowed(&ip) &&
                 !self.ban_list.is_banned(&peer_id, &ip) &&
                 // A full queue keeps its oldest candidates, so a flood of new identities cannot
@@ -5144,6 +5147,9 @@ mod tests {
         let peer = &peers.peers[&first];
         assert!(peer.state.is_pending_out());
         assert!(peer.remove_after_disconnect);
+        // rediscovered while being dialed, it is not queued again.
+        peers.add_peer(first, unique_ip_addr(1), None);
+        assert!(peers.candidates.is_empty());
 
         // a failed dial drops it
         peers.on_outgoing_pending_session_dropped(
