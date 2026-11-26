@@ -20,6 +20,7 @@ use jsonrpsee::{
     types::{Response, ResponsePayload},
     RpcModule,
 };
+use reth_chain_state::{CanonicalInMemoryStateWriter, InMemoryState};
 use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_db::{
     init_db,
@@ -281,7 +282,8 @@ fn run_fixture(
         &mut outcome,
         &mut remains,
     ));
-    runtime.shutdown_timeout(Duration::ZERO);
+    // Join Tokio workers before the next fixture starts, even while `remains` retains a clone.
+    runtime.shutdown_timeout(ENGINE_SHUTDOWN_TIMEOUT);
     let mut result = FixtureResult::new(name, fork, result).with_rejections(outcome.rejections);
     result.last_block_hash = outcome.last_block_hash;
     result.last_payload_status = outcome.last_payload_status;
@@ -365,8 +367,9 @@ impl Engine {
             .with_default_tables()
             .build()
             .map_err(|err| Error::engine("failed to set up the engine", err))?;
+        let (in_memory_state, in_memory_state_writer) = InMemoryState::new();
         let overlay_manager = OverlayManager::with_worker_pool(
-            Default::default(),
+            in_memory_state,
             runtime.state_trie_overlay_worker_pool(),
         );
         let factory = ProviderFactory::<FixtureNode>::new(
@@ -381,9 +384,16 @@ impl Engine {
         .map_err(|err| Error::engine("failed to set up the engine", err))?;
         init_genesis_with_settings(&factory, storage_settings)
             .map_err(|err| Error::engine("failed to set up the engine", err))?;
-        let (provider, canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(factory.clone())
-                .map_err(|err| Error::engine("failed to set up the engine", err))?;
+        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory
+                .chain_info_headers()
+                .map_err(|err| Error::engine("failed to set up the engine", err))?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory.clone(),
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
         let evm_config = EthEvmConfig::new(chain_spec.clone());
@@ -764,7 +774,7 @@ mod tests {
                 shutdown.unwrap();
                 databases
             });
-            runtime.clone().shutdown_timeout(Duration::ZERO);
+            runtime.clone().shutdown_timeout(ENGINE_SHUTDOWN_TIMEOUT);
             let mut cleanup = Cleanup::default();
             cleanup.remains.push(Remains {
                 runtime,

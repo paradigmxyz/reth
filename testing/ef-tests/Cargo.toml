@@ -28,6 +28,7 @@ bn254-mcl = [
 ]
 
 [dependencies]
+reth-chain-state.workspace = true
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
 reth-db = { workspace = true, features = ["mdbx", "test-utils", "disable-lock"] }

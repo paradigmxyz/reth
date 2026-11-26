@@ -96,7 +96,11 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 
-use alloy_eips::{eip7594::BlobTransactionSidecarVariant, Typed2718};
+use alloy_eips::{
+    eip2718::Encodable2718,
+    eip7594::{BlobSidecarEncoding, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
+    Typed2718,
+};
 use reth_primitives_traits::Recovered;
 use rustc_hash::FxHashMap;
 use std::{
@@ -419,6 +423,7 @@ where
         &self,
         tx_hashes: &[TxHash],
         limit: GetPooledTransactionLimit,
+        encoding: BlobSidecarEncoding,
         out: &mut Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>,
     ) where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
@@ -427,11 +432,14 @@ where
         let mut size = 0;
         for transaction in transactions {
             let encoded_len = transaction.encoded_length();
-            let Some(pooled) = self.to_pooled_transaction(transaction) else {
+            let Some(pooled) = self.to_pooled_transaction(transaction, encoding) else {
                 continue;
             };
 
-            size += encoded_len;
+            size += match encoding {
+                BlobSidecarEncoding::WithBlobs => encoded_len,
+                BlobSidecarEncoding::WithoutBlobs => pooled.encode_2718_len(),
+            };
             out.push(pooled.into_inner());
 
             if limit.exceeds(size) {
@@ -486,16 +494,32 @@ where
     /// Converts the internally tracked transaction to the pooled format.
     ///
     /// If the transaction is an EIP-4844 transaction, the blob sidecar is fetched from the blob
-    /// store and attached to the transaction.
+    /// store and attached to the transaction. Without blobs, only the commitments and cell proofs
+    /// are copied, and legacy sidecars are skipped since `GetCells` can't serve their cells.
     fn to_pooled_transaction(
         &self,
         transaction: Arc<ValidPoolTransaction<T::Transaction>>,
+        encoding: BlobSidecarEncoding,
     ) -> Option<Recovered<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>>
     where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
         if transaction.is_eip4844() {
             let sidecar = self.blob_store.get(*transaction.hash()).ok()??;
+            let sidecar = match encoding {
+                BlobSidecarEncoding::WithBlobs => sidecar,
+                BlobSidecarEncoding::WithoutBlobs => {
+                    let sidecar = sidecar.as_eip7594()?;
+                    Arc::new(
+                        BlobTransactionSidecarEip7594::new(
+                            Vec::new(),
+                            sidecar.commitments.clone(),
+                            sidecar.cell_proofs.clone(),
+                        )
+                        .into(),
+                    )
+                }
+            };
             transaction.transaction.clone().try_into_pooled_eip4844(sidecar)
         } else {
             transaction
@@ -517,12 +541,13 @@ where
         &self,
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
+        encoding: BlobSidecarEncoding,
     ) -> Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>
     where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
         let mut elements = Vec::new();
-        self.append_pooled_transaction_elements(&tx_hashes, limit, &mut elements);
+        self.append_pooled_transaction_elements(&tx_hashes, limit, encoding, &mut elements);
         elements.shrink_to_fit();
         elements
     }
@@ -535,7 +560,8 @@ where
     where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
-        self.get(&tx_hash).and_then(|tx| self.to_pooled_transaction(tx))
+        self.get(&tx_hash)
+            .and_then(|tx| self.to_pooled_transaction(tx, BlobSidecarEncoding::WithBlobs))
     }
 
     /// Updates the entire pool after a new block was executed.
@@ -1749,14 +1775,19 @@ mod tests {
             testing_pool, MockTransaction, MockTransactionFactory, TestPool, TestPoolBuilder,
         },
         validate::ValidTransaction,
-        BlockInfo, FullTransactionEvent, PoolConfig, SubPool, SubPoolLimit, TransactionEvent,
-        TransactionListenerKind, TransactionOrigin, TransactionPool, TransactionPoolExt,
-        TransactionValidationOutcome, ValidPoolTransaction, U256,
+        BlockInfo, FullTransactionEvent, GetPooledTransactionLimit, PoolConfig, SubPool,
+        SubPoolLimit, TransactionEvent, TransactionListenerKind, TransactionOrigin,
+        TransactionPool, TransactionPoolExt, TransactionValidationOutcome, ValidPoolTransaction,
+        U256,
     };
     use alloy_consensus::Transaction;
     use alloy_eips::{
-        eip4844::{Blob, BlobTransactionSidecar, Bytes48},
-        eip7594::BlobTransactionSidecarVariant,
+        eip2718::Encodable2718,
+        eip4844::{Blob, BlobTransactionSidecar, Bytes48, BYTES_PER_BLOB},
+        eip7594::{
+            BlobSidecarEncoding, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant,
+            CELLS_PER_EXT_BLOB,
+        },
     };
     use alloy_primitives::{Address, B256};
     use futures_util::{FutureExt, StreamExt};
@@ -2120,5 +2151,74 @@ mod tests {
         assert!(test_pool.get_highest_consecutive_transaction_by_sender(sender, 0).is_none());
         assert!(test_pool.remove_transactions_by_sender(sender).is_empty());
         assert_eq!(test_pool.sender_id(&sender), None);
+    }
+
+    #[test]
+    fn test_pooled_transaction_elements_without_blobs() {
+        let sidecar = BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::new(
+            vec![Blob::repeat_byte(1)],
+            vec![Bytes48::repeat_byte(2)],
+            vec![Bytes48::repeat_byte(3); CELLS_PER_EXT_BLOB],
+        ));
+        let legacy = BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::new(
+            vec![Blob::repeat_byte(1)],
+            vec![Bytes48::repeat_byte(2)],
+            vec![Bytes48::repeat_byte(3)],
+        ));
+        let test_pool = &TestPoolBuilder::default().pool;
+        let mut hashes = Vec::new();
+        for sidecar in [sidecar.clone(), sidecar, legacy] {
+            let mut tx = MockTransaction::eip4844_with_sidecar(sidecar.clone());
+            // The pool caches the length with blobs.
+            tx.set_size(BYTES_PER_BLOB);
+            hashes.push(*tx.get_hash());
+            test_pool.add_transactions(
+                TransactionOrigin::External,
+                [TransactionValidationOutcome::Valid {
+                    balance: U256::from(1_000),
+                    state_nonce: 0,
+                    bytecode_hash: None,
+                    transaction: ValidTransaction::ValidWithSidecar {
+                        transaction: tx,
+                        sidecar: PooledBlobSidecar::from(sidecar),
+                    },
+                    propagate: true,
+                    authorities: None,
+                }],
+            );
+        }
+
+        let full = test_pool.get_pooled_transaction_elements(
+            hashes.clone(),
+            GetPooledTransactionLimit::None,
+            BlobSidecarEncoding::WithBlobs,
+        );
+        assert_eq!(full.len(), 3);
+        // The legacy sidecar has no cell proofs, so it is left out.
+        let mut expected = full[..2].to_vec();
+        for transaction in &mut expected {
+            transaction.clear_eip7594_blobs();
+        }
+
+        // The limit counts the transactions as served, so both fit without their blobs.
+        let limit = GetPooledTransactionLimit::ResponseSizeSoftLimit(
+            expected.iter().map(Encodable2718::encode_2718_len).sum(),
+        );
+        assert_eq!(
+            test_pool.get_pooled_transaction_elements(
+                hashes.clone(),
+                limit,
+                BlobSidecarEncoding::WithoutBlobs
+            ),
+            expected
+        );
+        assert_eq!(
+            test_pool.get_pooled_transaction_elements(
+                hashes,
+                limit,
+                BlobSidecarEncoding::WithBlobs
+            ),
+            full[..1]
+        );
     }
 }

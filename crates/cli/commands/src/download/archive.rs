@@ -90,7 +90,10 @@ impl ModularDownloadJob {
         let progress_handle = spawn_progress_display(Arc::clone(&shared));
         for reused in &planned_downloads.reused {
             info!(target: "reth::cli", file = %reused.archive.file_name, component = %reused.component, "Skipping already verified plain files");
-            shared.record_reused_archive(reused.archive.size, reused.archive.output_size());
+            shared.record_reused_archive(
+                reused.archive.size.unwrap_or_default(),
+                reused.archive.output_size(),
+            );
         }
         let ctx = self.ctx.clone();
         let results: Vec<Result<()>> = stream::iter(planned_downloads.pending)
@@ -263,8 +266,12 @@ impl ArchiveProcessor {
     fn run_cached_attempt(&self, format: CompressionFormat) -> Result<Option<ExtractedHashes>> {
         let cache_dir =
             self.ctx.cache_dir().ok_or_else(|| eyre::eyre!("Missing download cache directory"))?;
-        let fetcher =
-            ArchiveFetcher::new(self.archive().url.clone(), cache_dir, self.ctx.session().clone());
+        let fetcher = ArchiveFetcher::new(
+            self.archive().url.clone(),
+            cache_dir,
+            self.ctx.session().clone(),
+            self.archive().size,
+        );
 
         if self.archive.ty == super::manifest::SnapshotComponentType::State {
             debug!(target: "reth::cli", url = %self.archive().url, "Downloading state snapshot archive");
@@ -273,9 +280,14 @@ impl ArchiveProcessor {
         let availability = ArchiveAvailability::default();
         let (download_result, extraction) = thread::scope(|scope| {
             let extraction = scope.spawn(|| {
+                // Stops the download, which no longer has a reader. An unpack failure stops it
+                // before extraction waits for the decoder, which may be waiting on the download.
+                let mut stopped_download = false;
                 // A panic must also stop the download instead of letting it run to completion.
                 let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                    self.extract_cached_archive(&availability, format)
+                    self.extract_cached_archive(&availability, format, || {
+                        stopped_download = availability.abort()
+                    })
                 }))
                 .unwrap_or_else(|payload| {
                     Err(eyre::eyre!(
@@ -283,8 +295,8 @@ impl ArchiveProcessor {
                         panic_payload_message(payload)
                     ))
                 });
-                // Stops the download, which no longer has a reader.
-                let stopped_download = result.is_err() && availability.abort();
+                let stopped_download =
+                    stopped_download || (result.is_err() && availability.abort());
                 (result, stopped_download)
             });
 
@@ -336,11 +348,13 @@ impl ArchiveProcessor {
     }
 
     /// Extracts the cached archive as its download publishes it, while updating shared extraction
-    /// activity, and returns the hashes of the regular files it wrote.
+    /// activity, and returns the hashes of the regular files it wrote. `on_unpack_error` runs as
+    /// described by [`extract_archive_hashed`].
     fn extract_cached_archive(
         &self,
         availability: &ArchiveAvailability,
         format: CompressionFormat,
+        on_unpack_error: impl FnOnce(),
     ) -> Result<ExtractedHashes> {
         let verifier = self.output_verifier();
         let outputs = self
@@ -361,6 +375,7 @@ impl ArchiveProcessor {
             self.ctx.static_files_dir(),
             outputs,
             Some(&mut extraction_progress),
+            on_unpack_error,
         );
         extraction_progress.finish();
         result
