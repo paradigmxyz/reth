@@ -1,6 +1,8 @@
-use super::{manifest::*, verify::OutputVerifier};
+use super::{extract::static_file_relative_path, manifest::*, verify::OutputVerifier};
 use eyre::Result;
 use rayon::prelude::*;
+use reth_db::static_file::{read_static_file_header, CONFIG_FILE_EXTENSION};
+use reth_static_file_types::StaticFileSegment;
 use serde::Serialize;
 use std::{collections::BTreeMap, io::Write, path::Path};
 use tracing::info;
@@ -199,6 +201,78 @@ fn selection_archive_distance(
     }
 }
 
+/// Returns the last block before the continuous range of restored bodies through the tip.
+/// A range starting at genesis has no preceding block.
+pub(super) fn restored_bodies_boundary(
+    manifest: &SnapshotManifest,
+    selection: Option<&ComponentSelection>,
+    verifier: &OutputVerifier<'_>,
+) -> Result<Option<u64>> {
+    let tip = manifest.block;
+    let (Some(component), Some(distance)) = (
+        manifest.component(SnapshotComponentType::Transactions),
+        selection.and_then(|selection| selection_archive_distance(selection, tip)),
+    ) else {
+        return Ok(Some(tip))
+    };
+    let archives = match component {
+        ComponentManifest::Chunked(chunked) => {
+            let first = manifest.start_chunk_for_distance(chunked, distance);
+            let tip_chunk = tip / chunked.blocks_per_file;
+            if first > tip_chunk || tip_chunk >= chunked.num_chunks() || chunked.total_blocks < tip
+            {
+                return Ok(Some(tip))
+            }
+            // At equality the last file can end at tip (legacy height) or tip - 1 (block count).
+            if chunked.total_blocks == tip {
+                let outputs =
+                    chunked.chunk_output_files.get(tip_chunk as usize).into_iter().flatten();
+                let boundary = transaction_file_boundary(tip, outputs, verifier)?;
+                if boundary != (tip_chunk * chunked.blocks_per_file).checked_sub(1) {
+                    return Ok(boundary)
+                }
+            }
+            return Ok((first * chunked.blocks_per_file).checked_sub(1))
+        }
+        ComponentManifest::Single(archive) => std::slice::from_ref(archive),
+        ComponentManifest::Files(set) => &set.archives,
+    };
+    transaction_file_boundary(
+        tip,
+        archives.iter().flat_map(|archive| &archive.output_files),
+        verifier,
+    )
+}
+
+/// Finds the continuous suffix when the manifest does not give an exact range.
+fn transaction_file_boundary<'a>(
+    tip: u64,
+    outputs: impl IntoIterator<Item = &'a OutputFileChecksum>,
+    verifier: &OutputVerifier<'_>,
+) -> Result<Option<u64>> {
+    let mut ranges = Vec::new();
+    for output in outputs {
+        if let Some(path) = static_file_relative_path(output.relative_path()?) &&
+            path.extension().is_some_and(|ext| ext == CONFIG_FILE_EXTENSION)
+        {
+            let header = read_static_file_header(&verifier.output_path(output)?)?;
+            if header.segment() == StaticFileSegment::Transactions &&
+                let Some(range) = header.block_range()
+            {
+                ranges.push(range);
+            }
+        }
+    }
+    ranges.sort_unstable_by_key(|range| std::cmp::Reverse(range.end()));
+    let mut boundary = Some(tip);
+    for range in ranges {
+        if boundary.is_some_and(|block| range.contains(block)) {
+            boundary = range.start().checked_sub(1);
+        }
+    }
+    Ok(boundary)
+}
+
 /// Sorts planned archives into a stable processing order.
 fn sort_planned_archives(all_downloads: &mut [PlannedArchive]) {
     all_downloads.sort_by(|a, b| {
@@ -274,6 +348,7 @@ pub(crate) fn collect_planned_archives(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::download::manifest::tests::{snapshot_source, write_test_static_files};
     use tempfile::tempdir;
 
     fn test_manifest_with_component_tip(block: u64, total_blocks: u64) -> SnapshotManifest {
@@ -760,5 +835,48 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn transaction_archives_with_ambiguous_coverage() -> Result<()> {
+        let archives = tempdir()?;
+        let txs = SnapshotComponentType::Transactions;
+        for actual_tip in [24, 25] {
+            let files = snapshot_source();
+            write_test_static_files(files.path(), StaticFileSegment::Transactions, actual_tip);
+            let mut manifest =
+                generate_manifest(files.path(), archives.path(), None, 25, 1, 10, None, false)?;
+            let Some(ComponentManifest::Chunked(chunked)) = manifest.components.get_mut(txs.key())
+            else {
+                panic!("missing transaction chunks")
+            };
+            chunked.total_blocks = 25;
+            // A non-chunked archive can omit the middle file even if it exists on disk.
+            let archive = SingleArchive {
+                file: "transactions.tar.zst".into(),
+                size: 0,
+                decompressed_size: 0,
+                blake3: None,
+                output_files: [0, 2]
+                    .into_iter()
+                    .flat_map(|i| chunked.chunk_output_files[i].clone())
+                    .collect(),
+            };
+            let target = tempdir()?;
+            let static_files = files.path().join("static_files");
+            let verifier = OutputVerifier::new(target.path(), Some(&static_files));
+            let boundary = |manifest: &SnapshotManifest| {
+                restored_bodies_boundary(manifest, Some(&ComponentSelection::Since(13)), &verifier)
+            };
+            assert_eq!(boundary(&manifest)?, Some(if actual_tip == 25 { 9 } else { 25 }));
+            for component in [
+                ComponentManifest::Single(archive.clone()),
+                ComponentManifest::Files(ArchiveSet { archives: vec![archive] }),
+            ] {
+                manifest.components.insert(txs.key().to_owned(), component);
+                assert_eq!(boundary(&manifest)?, Some(if actual_tip == 25 { 19 } else { 25 }));
+            }
+        }
+        Ok(())
     }
 }

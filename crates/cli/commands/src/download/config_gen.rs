@@ -47,14 +47,14 @@ pub(super) fn write_prune_checkpoints_tx<Tx>(
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
     manifest: &SnapshotManifest,
     is_v2: bool,
+    bodies_boundary: Option<u64>,
 ) -> eyre::Result<()>
 where
     Tx: DbTx + DbTxMut,
 {
     let segments = &config.prune.segments;
 
-    let last_tx =
-        tx.get::<tables::BlockBodyIndices>(manifest.block)?.map(|body| body.last_tx_num());
+    let tip_indices = tx.get::<tables::BlockBodyIndices>(manifest.block)?;
     for (segment, mode) in [
         (PruneSegment::SenderRecovery, segments.sender_recovery),
         (PruneSegment::TransactionLookup, segments.transaction_lookup),
@@ -63,7 +63,7 @@ where
         (PruneSegment::StorageHistory, segments.storage_history),
         (PruneSegment::Bodies, segments.bodies_history),
     ] {
-        let checkpoint = match segment {
+        let (block_number, tx_number) = match segment {
             // V1 bundles the changesets and indices in MDBX. Their original checkpoints
             // also identify interrupted pruning when the node resumes.
             PruneSegment::AccountHistory |
@@ -97,28 +97,45 @@ where
                     }
                 };
                 let source = tx.get::<tables::PruneCheckpoints>(segment)?;
-                let (block_number, tx_number) = match (target, source) {
+                match (target, source) {
                     (Some(target), source) => {
                         (Some(target).max(source.and_then(|cp| cp.block_number)), None)
                     }
                     (None, Some(source)) => (source.block_number, source.tx_number),
                     (None, None) => continue,
-                };
-                // Unlimited retention still records the earliest available history.
-                let prune_mode = mode.unwrap_or_else(|| {
-                    PruneMode::Before(block_number.map_or(0, |block| block.saturating_add(1)))
-                });
-                PruneCheckpoint { block_number, tx_number, prune_mode }
-            }
-            _ => {
-                let Some(prune_mode) = mode else { continue };
-                PruneCheckpoint {
-                    block_number: Some(manifest.block),
-                    tx_number: last_tx,
-                    prune_mode,
                 }
             }
+            PruneSegment::Bodies => {
+                let source = tx.get::<tables::PruneCheckpoints>(segment)?;
+                let source_block = source.and_then(|checkpoint| checkpoint.block_number);
+                let block_number = bodies_boundary.max(source_block);
+                if block_number.is_none() && mode.is_none() && source.is_none() {
+                    continue
+                }
+                let mut tx_number = source.and_then(|checkpoint| checkpoint.tx_number);
+                if let Some(block) = bodies_boundary &&
+                    Some(block) > source_block
+                {
+                    let indices = if block == manifest.block {
+                        tip_indices
+                    } else {
+                        tx.get::<tables::BlockBodyIndices>(block)?
+                    };
+                    tx_number =
+                        tx_number.max(indices.and_then(|body| body.next_tx_num().checked_sub(1)));
+                }
+                (block_number, tx_number)
+            }
+            _ if mode.is_some() => {
+                (Some(manifest.block), tip_indices.map(|body| body.last_tx_num()))
+            }
+            _ => continue,
         };
+        // Unlimited retention still records the earliest available data.
+        let prune_mode = mode.unwrap_or_else(|| {
+            PruneMode::Before(block_number.map_or(0, |block| block.saturating_add(1)))
+        });
+        let checkpoint = PruneCheckpoint { block_number, tx_number, prune_mode };
         tx.put::<tables::PruneCheckpoints>(segment, checkpoint)?;
 
         info!(target: "reth::cli",
@@ -386,7 +403,7 @@ mod tests {
     use crate::download::tests::{
         empty_manifest, history_checkpoints, set_history_checkpoints, set_layout,
     };
-    use reth_db::{test_utils::create_test_rw_db, Database};
+    use reth_db::{models::StoredBlockBodyIndices, test_utils::create_test_rw_db, Database};
     use reth_prune_types::UnwindTargetPrunedError;
 
     #[test]
@@ -397,7 +414,14 @@ mod tests {
         let selections = BTreeMap::new();
         let config =
             config_for_selections(&selections, &manifest, None, None::<&reth_chainspec::ChainSpec>);
-        write_prune_checkpoints_tx(&tx, &config, &selections, &manifest, true)?;
+        write_prune_checkpoints_tx(
+            &tx,
+            &config,
+            &selections,
+            &manifest,
+            true,
+            Some(manifest.block),
+        )?;
         for segment in [
             PruneSegment::SenderRecovery,
             PruneSegment::TransactionLookup,
@@ -636,7 +660,7 @@ mod tests {
                 None::<&reth_chainspec::ChainSpec>,
             );
             let tx = db.tx_mut()?;
-            write_prune_checkpoints_tx(&tx, &config, &selections, &manifest, true)?;
+            write_prune_checkpoints_tx(&tx, &config, &selections, &manifest, true, Some(tip))?;
             for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
                 let checkpoint = tx.get::<tables::PruneCheckpoints>(segment)?;
                 assert_eq!(checkpoint.map(|cp| cp.block_number), expected.map(Some), "{segment}");
@@ -686,7 +710,14 @@ mod tests {
                 prune_mode: PruneMode::Full,
             };
             set_history_checkpoints(&tx, source, source);
-            write_prune_checkpoints_tx(&tx, &config, &selections, &manifest, true)?;
+            write_prune_checkpoints_tx(
+                &tx,
+                &config,
+                &selections,
+                &manifest,
+                true,
+                Some(snapshot_block),
+            )?;
             let boundary = PruneCheckpoint::pruned_through(expected);
             assert_eq!(
                 history_checkpoints(&tx)?,
@@ -724,6 +755,48 @@ mod tests {
             assert_eq!(
                 snapshot_uses_v2(&tx, &selections).unwrap_err().to_string(),
                 format!("Unsupported legacy snapshot setting for this download: {flag}=true")
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn bodies_checkpoint_preserves_transaction_progress() -> eyre::Result<()> {
+        let db = create_test_rw_db();
+        let manifest = SnapshotManifest { block: 24, ..empty_manifest() };
+        let selections =
+            BTreeMap::from([(SnapshotComponentType::Transactions, ComponentSelection::Since(13))]);
+        let config =
+            config_for_selections(&selections, &manifest, None, None::<&reth_chainspec::ChainSpec>);
+        for (first_tx_num, source, expected_block, expected_tx) in [
+            (0, None, 9, None),
+            (8, None, 9, Some(7)),
+            (
+                8,
+                Some(PruneCheckpoint {
+                    tx_number: Some(16),
+                    ..PruneCheckpoint::pruned_through(15)
+                }),
+                15,
+                Some(16),
+            ),
+        ] {
+            let tx = db.tx_mut()?;
+            tx.put::<tables::BlockBodyIndices>(
+                9,
+                StoredBlockBodyIndices { first_tx_num, tx_count: 0 },
+            )?;
+            if let Some(source) = source {
+                tx.put::<tables::PruneCheckpoints>(PruneSegment::Bodies, source)?;
+            }
+            write_prune_checkpoints_tx(&tx, &config, &selections, &manifest, true, Some(9))?;
+            assert_eq!(
+                tx.get::<tables::PruneCheckpoints>(PruneSegment::Bodies)?,
+                Some(PruneCheckpoint {
+                    block_number: Some(expected_block),
+                    tx_number: expected_tx,
+                    prune_mode: PruneMode::Before(13),
+                })
             );
         }
         Ok(())

@@ -690,10 +690,22 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         config: &Config,
         target_dir: &Path,
     ) -> Result<()> {
+        let bodies_boundary = planning::restored_bodies_boundary(
+            manifest,
+            selections.get(&SnapshotComponentType::Transactions),
+            &verify::OutputVerifier::new(target_dir, self.env.datadir.static_files_path.as_deref()),
+        )?;
         let db = init_db(target_dir.join("db"), self.env.db.database_args())?;
         let tx = db.tx_mut()?;
         let is_v2 = config_gen::snapshot_uses_v2(&tx, selections)?;
-        config_gen::write_prune_checkpoints_tx(&tx, config, selections, manifest, is_v2)?;
+        config_gen::write_prune_checkpoints_tx(
+            &tx,
+            config,
+            selections,
+            manifest,
+            is_v2,
+            bodies_boundary,
+        )?;
         if is_v2 && rocksdb_indices_missing(selections) {
             config_gen::reset_index_stage_checkpoints_tx(&tx)?;
         }
@@ -1767,18 +1779,22 @@ mod tests {
         expected_mode: Option<PruneMode>,
     ) -> Result<TempDir> {
         let target = tempdir()?;
-        restore_snapshot(source, &target, flag).await?;
+        restore_snapshot(source, &target, SNAPSHOT_TIP, flag).await?;
         let modes = Config::from_path(target.path().join("reth.toml"))?.prune.segments;
         assert_eq!(modes.account_history, expected_mode);
         assert_eq!(modes.storage_history, expected_mode);
         Ok(target)
     }
 
-    async fn restore_snapshot(source: &TempDir, target: &TempDir, flag: &str) -> Result<()> {
+    async fn restore_snapshot(
+        source: &TempDir,
+        target: &TempDir,
+        tip: u64,
+        flag: &str,
+    ) -> Result<()> {
         let archives = tempdir()?;
         let output = archives.path();
-        let manifest =
-            generate_manifest(source.path(), output, None, SNAPSHOT_TIP, 1, 10, None, false)?;
+        let manifest = generate_manifest(source.path(), output, None, tip, 1, 10, None, false)?;
         let path = output.join("manifest.json");
         fs::write(&path, serde_json::to_vec(&manifest)?)?;
         DownloadCommand::<EthereumChainSpecParser>::parse_from([
@@ -1935,6 +1951,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn restore_partial_transaction_bodies() -> Result<()> {
+        let source = tempdir()?;
+        snapshot_db(&source)?;
+        manifest::tests::write_test_static_files(
+            source.path(),
+            StaticFileSegment::Transactions,
+            24,
+        );
+        for (flag, expected) in [
+            (
+                "--with-txs-since=13",
+                Some(PruneCheckpoint {
+                    prune_mode: PruneMode::Before(13),
+                    ..PruneCheckpoint::pruned_through(9)
+                }),
+            ),
+            ("--with-txs", None),
+        ] {
+            let target = tempdir()?;
+            restore_snapshot(&source, &target, 24, flag).await?;
+            assert_eq!(
+                snapshot_db(&target)?
+                    .tx()?
+                    .get::<tables::PruneCheckpoints>(PruneSegment::Bodies)?,
+                expected,
+                "{flag}"
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn minimal_restore_with_existing_archive_config() -> Result<()> {
         let source = tempdir()?;
         snapshot_db(&source)?.update(|tx| set_layout(tx, StorageSettings::v2()))?;
@@ -1943,7 +1991,7 @@ mod tests {
         let archive_config = "[prune.segments]\n";
         fs::write(&config_path, archive_config)?;
 
-        restore_snapshot(&source, &target, "--minimal").await?;
+        restore_snapshot(&source, &target, SNAPSHOT_TIP, "--minimal").await?;
 
         assert_eq!(fs::read_to_string(config_path)?, archive_config);
         let db = snapshot_db(&target)?;

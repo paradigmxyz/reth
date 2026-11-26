@@ -62,6 +62,11 @@ reth download \
     -y
 ```
 
+Transaction ranges download whole static files. For example, if a selected file
+starts at block 10, `--with-txs-since 13` restores bodies from block 10. The
+Bodies checkpoint records the block before the continuous range through the
+snapshot tip, or a later boundary inherited from the source database.
+
 `--with-state-history-since N` configures the node to retain state history
 from block `N` onward. If `N` is above the snapshot height, the download skips
 changeset archives and writes that future boundary to the generated `reth.toml`.
