@@ -120,7 +120,7 @@ impl Command {
         Ok(())
     }
 
-    /// The first block whose `segment` history the migration moves to static files: the block
+    /// The first block expected to have complete `segment` history: the block
     /// after the prune checkpoint, and no earlier than the genesis block, which is not block 0 on
     /// every chain.
     fn history_start(
@@ -131,7 +131,7 @@ impl Command {
         Ok(provider
             .get_prune_checkpoint(segment)?
             .and_then(|cp| cp.block_number)
-            .map_or(0, |b| b + 1)
+            .map_or(0, |b| b.saturating_add(1))
             .max(genesis_block))
     }
 
@@ -146,8 +146,12 @@ impl Command {
         let mut cursor = provider.tx_ref().cursor_read::<tables::AccountChangeSets>()?;
 
         let genesis_block = sf_provider.genesis_block_number();
+        // Preserve rows from older restores. The first surviving block may be incomplete,
+        // so its rows cannot establish a new prune checkpoint.
+        let first_row = cursor.first()?.map_or(tip, |(block, _)| block);
         let first_block =
-            Self::history_start(&provider, PruneSegment::AccountHistory, genesis_block)?;
+            Self::history_start(&provider, PruneSegment::AccountHistory, genesis_block)?
+                .min(first_row.max(genesis_block));
 
         let mut writer = sf_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
         // Start an empty genesis file at genesis, as `init_genesis` does, instead of padding
@@ -202,8 +206,11 @@ impl Command {
         let mut cursor = provider.tx_ref().cursor_read::<tables::StorageChangeSets>()?;
 
         let genesis_block = sf_provider.genesis_block_number();
+        // Preserve surviving storage rows under the original read boundary, as for accounts.
+        let first_row = cursor.first()?.map_or(tip, |(key, _)| key.block_number());
         let first_block =
-            Self::history_start(&provider, PruneSegment::StorageHistory, genesis_block)?;
+            Self::history_start(&provider, PruneSegment::StorageHistory, genesis_block)?
+                .min(first_row.max(genesis_block));
 
         let mut writer = sf_provider.latest_writer(StaticFileSegment::StorageChangeSets)?;
         // Start an empty genesis file at genesis, as `init_genesis` does, instead of padding
@@ -491,12 +498,16 @@ impl Command {
 mod tests {
     use super::*;
     use alloy_primitives::{B256, U256};
-    use reth_db::models::{AccountBeforeTx, BlockNumberAddress};
+    use reth_db::models::AccountBeforeTx;
+    use reth_db_common::init::insert_genesis_header;
     use reth_primitives_traits::StorageEntry;
     use reth_provider::{
-        test_utils::create_test_provider_factory_with_genesis_block_number, ChangeSetReader,
-        StorageChangeSetReader, StorageSettingsCache,
+        providers::BlockchainProvider,
+        test_utils::create_test_provider_factory_with_genesis_block_number, ChainSpecProvider,
+        ChangeSetReader, ProviderError, StorageChangeSetReader, StorageSettingsCache,
     };
+    use reth_prune_types::PruneCheckpoint;
+    use reth_storage_api::PruneCheckpointWriter;
 
     /// A genesis at a block that is not the start of a static file range, as on chains that
     /// start from carried-over state.
@@ -519,27 +530,29 @@ mod tests {
         let address = Address::with_last_byte(7);
         let key = B256::with_last_byte(3);
 
-        // v1 history in MDBX: one account and one storage change per block, from genesis on.
+        // An older restore could leave MDBX rows below the prune checkpoints and a gap above
+        // those rows. Only storage has a readable row after its checkpoint.
+        let accounts =
+            [genesis, genesis + 1].map(|block| (block, AccountBeforeTx { address, info: None }));
+        let storage = [genesis, genesis + 1, tip]
+            .map(|block| ((block, address).into(), StorageEntry::new(key, U256::from(block))));
+        let provider_rw = factory.database_provider_rw().unwrap();
+        insert_genesis_header(&provider_rw, factory.chain_spec().as_ref()).unwrap();
+        provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(genesis)).unwrap();
+        for (segment, boundary) in
+            [(PruneSegment::AccountHistory, tip), (PruneSegment::StorageHistory, tip - 1)]
         {
-            let provider_rw = factory.provider_rw().unwrap();
-            for block in genesis..=tip {
-                provider_rw
-                    .tx_ref()
-                    .put::<tables::AccountChangeSets>(
-                        block,
-                        AccountBeforeTx { address, info: None },
-                    )
-                    .unwrap();
-                provider_rw
-                    .tx_ref()
-                    .put::<tables::StorageChangeSets>(
-                        BlockNumberAddress((block, address)),
-                        StorageEntry { key, value: U256::from(block) },
-                    )
-                    .unwrap();
-            }
-            provider_rw.commit().unwrap();
+            provider_rw
+                .save_prune_checkpoint(segment, PruneCheckpoint::pruned_through(boundary))
+                .unwrap();
         }
+        for (block, row) in &accounts {
+            provider_rw.tx_ref().put::<tables::AccountChangeSets>(*block, row.clone()).unwrap();
+        }
+        for (key, row) in storage {
+            provider_rw.tx_ref().put::<tables::StorageChangeSets>(key, row).unwrap();
+        }
+        provider_rw.commit().unwrap();
 
         Command::migrate_account_changesets(&factory, tip).unwrap();
         Command::migrate_storage_changesets(&factory, tip).unwrap();
@@ -552,23 +565,23 @@ mod tests {
             assert_eq!(static_files.get_lowest_range_start(segment), Some(genesis), "{segment}");
             assert_eq!(static_files.get_highest_static_file_block(segment), Some(tip), "{segment}");
         }
-        // Changesets are read from static files only with v2 settings.
+        assert_eq!(static_files.account_changesets_range(genesis..=tip).unwrap(), accounts);
+        assert_eq!(static_files.storage_changesets_range(genesis..=tip).unwrap(), storage);
+
         factory.set_storage_settings_cache(StorageSettings::v2());
-        let provider = factory.provider().unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+        let assert_pruned = |error, block| {
+            assert!(matches!(error, ProviderError::StateAtBlockPruned(n) if n == block), "{error}");
+        };
         for block in genesis..=tip {
-            assert_eq!(
-                provider.account_block_changeset(block).unwrap(),
-                vec![AccountBeforeTx { address, info: None }],
-                "block {block}"
-            );
-            assert_eq!(
-                provider.storage_changeset(block).unwrap(),
-                vec![(
-                    BlockNumberAddress((block, address)),
-                    StorageEntry { key, value: U256::from(block) }
-                )],
-                "block {block}"
-            );
+            assert_pruned(provider.account_block_changeset(block).unwrap_err(), block);
         }
+        for block in genesis..tip {
+            assert_pruned(provider.storage_changeset(block).unwrap_err(), block);
+        }
+        assert_eq!(
+            provider.storage_changeset(tip).unwrap(),
+            static_files.storage_changeset(tip).unwrap()
+        );
     }
 }

@@ -213,11 +213,27 @@ jobs:
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"
 
-          sudo apt-get update -qq
+          # Other apt processes on the runner can hold the apt locks. Wait up to 120s
+          # for the dpkg locks in every apt-get call, including install_llvm.sh. The
+          # lists and archives locks ignore this timeout, so apt_get also retries.
+          echo 'DPkg::Lock::Timeout "120";' | sudo tee /etc/apt/apt.conf.d/90-lock-timeout >/dev/null
+          apt_get() {
+            local attempt
+            for attempt in 1 2 3 4; do
+              sudo apt-get "$@" && return 0
+              echo "::warning::apt-get $* failed (attempt $attempt/5), retrying in $((attempt * 30))s"
+              sleep $((attempt * 30))
+            done
+            sudo apt-get "$@"
+          }
+
+          apt_get update -qq
+          apt_get install -y --no-install-recommends \
+            python3 make jq zstd curl dmsetup m4
+          # Try the kernel-specific package once (it may not exist), then fall back.
           sudo apt-get install -y --no-install-recommends \
-            python3 make jq zstd curl dmsetup m4 \
             linux-tools-"$(uname -r)" || \
-            sudo apt-get install -y --no-install-recommends linux-tools-generic
+            apt_get install -y --no-install-recommends linux-tools-generic
 
           if ! command -v mc &>/dev/null; then
             curl -sSfL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$HOME/.local/bin/mc"
