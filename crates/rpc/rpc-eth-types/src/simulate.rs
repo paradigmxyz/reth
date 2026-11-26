@@ -458,6 +458,9 @@ where
 /// Makes a call without fee fields a legacy transaction, or an EIP-2930 transaction when it has an
 /// access list, because EIP-1559 transactions are not valid before London.
 ///
+/// An empty `authorizationList` still counts as present and keeps the call an EIP-7702
+/// transaction, so callers that want it unset should omit the field instead of passing `[]`.
+///
 /// <https://github.com/ethereum/execution-apis/pull/999>
 const fn default_to_legacy_before_london(tx: &mut alloy_rpc_types_eth::TransactionRequest) {
     if tx.preferred_type().is_eip1559() && !tx.has_eip1559_fields() {
