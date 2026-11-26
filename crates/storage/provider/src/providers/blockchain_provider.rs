@@ -131,6 +131,12 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         ConsistentProvider::new(self.database.clone(), self.canonical_in_memory_state())
     }
 
+    /// Returns a consistent provider like [`Self::consistent_provider`] whose database transaction
+    /// has no timeout, see [`ConsistentProvider::new_long_read`].
+    pub fn long_read_consistent_provider(&self) -> ProviderResult<ConsistentProvider<N>> {
+        ConsistentProvider::new_long_read(self.database.clone(), self.canonical_in_memory_state())
+    }
+
     /// Resolves `state_root` into a range view over `provider`'s snapshot and the in-memory blocks
     /// tracked when its transaction opened, preferring a canonical block of that snapshot with that
     /// root over the persisted-history fallback.

@@ -17,10 +17,7 @@ use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ExecutedBlock, InMemoryStateSnapshot, Snapshotted,
 };
 use reth_chainspec::ChainInfo;
-use reth_db_api::{
-    models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices},
-    transaction::DbTx,
-};
+use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::RecoveredBlockAndExecutionOutput;
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives_traits::{
@@ -30,7 +27,8 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, NodePrimitivesProvider, StateProviderBox, StorageChangeSetReader,
+    BlockBodyIndicesProvider, DBProvider, NodePrimitivesProvider, StateProviderBox,
+    StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::{OverlayBuilder, OverlayManager, OverlayStateProvider, OwnedProvider};
@@ -68,22 +66,36 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         storage_provider_factory: ProviderFactory<N>,
         state: CanonicalInMemoryState<N::Primitives>,
     ) -> ProviderResult<Self> {
+        Self::open(storage_provider_factory, state, |provider| provider)
+    }
+
+    /// Creates a provider like [`Self::new`] whose database transaction has no timeout and records
+    /// no backtrace, for views held longer than a long-read transaction is allowed to live.
+    pub fn new_long_read(
+        storage_provider_factory: ProviderFactory<N>,
+        state: CanonicalInMemoryState<N::Primitives>,
+    ) -> ProviderResult<Self> {
+        Self::open(storage_provider_factory, state, |provider| {
+            provider.disable_long_read_transaction_safety()
+        })
+    }
+
+    /// Opens the view, applying `configure` to the database provider before it is paired with its
+    /// in-memory blocks.
+    fn open(
+        storage_provider_factory: ProviderFactory<N>,
+        state: CanonicalInMemoryState<N::Primitives>,
+        configure: impl Fn(DatabaseProviderRO<N::DB, N>) -> DatabaseProviderRO<N::DB, N>,
+    ) -> ProviderResult<Self> {
         // Blocks leave memory only after their persistence committed, so every block is either in
         // the snapshot's in-memory chain or visible to the transaction, and there are no gaps in
         // the range.
         let storage_provider = state
             .in_memory_state()
-            .snapshot_during(|| storage_provider_factory.provider())
+            .snapshot_during(|| storage_provider_factory.provider().map(&configure))
             .transpose()?;
         let overlay_manager = storage_provider_factory.overlay_manager().clone();
         Ok(Self { storage_provider, overlay_manager, canonical_in_memory_state: state })
-    }
-
-    /// Disables the timeout and backtrace recording of the database transaction, for views held
-    /// longer than a long-read transaction is allowed to live.
-    pub fn disable_long_read_transaction_safety(mut self) -> Self {
-        self.storage_provider.tx_mut().disable_long_read_transaction_safety();
-        self
     }
 
     /// Returns the in-memory canonical head when this view was created.
