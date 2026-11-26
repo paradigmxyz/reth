@@ -331,6 +331,10 @@ where
         rlp_block: Bytes,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult<DebugTrace, String>>, Eth::Error> {
+        // Decoding and recovering the senders take a tracing permit of their own, which is
+        // released before the trace is admitted with the memory its block needs.
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let block: ProviderBlock<Eth::Provider> = Decodable::decode(&mut rlp_block.as_ref())
             .map_err(BlockError::RlpDecodeRawBlock)
             .map_err(Eth::Error::from_eth_err)?;
@@ -351,6 +355,7 @@ where
             }
             .map_err(Eth::Error::from_eth_err)?;
 
+        drop(permit);
         let block = block.into_recovered_with_signers(senders);
         let gas = unvalidated_block_gas(&block);
         // Dropping the replay cancels it before its next transaction.
