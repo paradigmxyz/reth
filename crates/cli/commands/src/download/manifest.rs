@@ -852,6 +852,23 @@ pub fn generate_manifest(
                 .collect::<Result<Vec<_>>>()?;
 
             packaged_chunks.sort_unstable_by_key(|chunk| chunk.chunk_idx);
+            // Chunked manifests index their arrays from block zero. An explicitly listed
+            // archive set can represent the transaction files left after pruning that prefix.
+            if *ty == SnapshotComponentType::Transactions && packaged_chunks[0].chunk_idx != 0 {
+                let archives = packaged_chunks
+                    .into_iter()
+                    .map(|chunk| SingleArchive {
+                        file: chunk.file,
+                        size: chunk.size,
+                        decompressed_size: chunk.output_files.iter().map(|file| file.size).sum(),
+                        blake3: None,
+                        output_files: chunk.output_files,
+                    })
+                    .collect();
+                components
+                    .insert(key.to_string(), ComponentManifest::Files(ArchiveSet { archives }));
+                continue
+            }
             let chunk_files = packaged_chunks.iter().map(|chunk| chunk.file.clone()).collect();
             let chunk_sizes = packaged_chunks.iter().map(|chunk| chunk.size).collect::<Vec<_>>();
             let chunk_output_files =
