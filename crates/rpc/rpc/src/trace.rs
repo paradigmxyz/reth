@@ -844,10 +844,14 @@ where
             if tag.is_latest() {
                 return Ok(latest)
             }
-            self.provider()
+            // A safe or finalized block read after the head never lies above it, so a head update
+            // in between can't reverse a range that ends at latest.
+            let number = self
+                .provider()
                 .convert_block_number(tag)
                 .map_err(EthApiError::from)?
-                .ok_or(EthApiError::HeaderNotFound(tag.into()))
+                .ok_or(EthApiError::HeaderNotFound(tag.into()))?;
+            Ok(number.min(latest))
         };
         if let Some(tag) = from_tag {
             filter.from_block = Some(resolve(tag)?);
