@@ -30,7 +30,9 @@ use reth_rpc_eth_api::{
     helpers::{LoadTransaction, RequestTraceBudget, Trace, TraceExt},
     CallManyRequest, FromEthApiError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{error::EthApiError, utils::CallManyBudget, EthConfig};
+use reth_rpc_eth_types::{
+    cache::db::apply_block_overrides, error::EthApiError, utils::CallManyBudget, EthConfig,
+};
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -156,6 +158,7 @@ where
         &self,
         calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
+        overrides: EvmOverrides,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
         let mut budget = CallManyBudget::new(calls.len(), self.eth_api().call_gas_limit())?;
         let at = block_id.unwrap_or_default();
@@ -164,10 +167,17 @@ where
         // execute all transactions on top of each other and record the traces
         self.eth_api()
             .spawn_with_state_at_block(at, move |eth_api, mut db| {
+                let mut evm_env = evm_env;
                 // The calls share one trace byte budget, since they share one response.
                 let trace_budget = RequestTraceBudget::new(eth_api.trace_limits());
                 let mut results = Vec::with_capacity(calls.len());
                 let mut calls = calls.into_iter().peekable();
+                // Both overrides apply once, before the first call: the block override to the
+                // environment every call starts from, the state override to the shared state.
+                let EvmOverrides { state: mut state_overrides, block: block_overrides } = overrides;
+                if let Some(block_overrides) = block_overrides {
+                    apply_block_overrides(*block_overrides, &mut db, &mut evm_env);
+                }
 
                 while let Some((call, trace_types)) = calls.next() {
                     if is_cancelled() {
@@ -177,7 +187,7 @@ where
                         evm_env.clone(),
                         call,
                         &mut db,
-                        Default::default(),
+                        EvmOverrides::state(state_overrides.take()),
                     )?;
                     budget.admit(&mut tx_env)?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
@@ -199,7 +209,7 @@ where
                     // need to apply the state changes of this call before executing the
                     // next call
                     if calls.peek().is_some() {
-                        db.commit_source(&res.pending_state)
+                        db.commit_pending(&res.pending_state)
                     }
                 }
 
@@ -749,12 +759,21 @@ where
         &self,
         calls: CallManyRequest<Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>>,
         block_id: Option<BlockId>,
+        state_overrides: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<Vec<TraceResults>> {
         // Decoding is bounded by the call limit, so malformed input is rejected without waiting
         // for a tracing permit.
         let calls = calls.into_inner()?;
         let _permit = self.acquire_trace_permit().await;
-        Self::trace_call_many(self, calls, block_id).await.map_err(Into::into)
+        Self::trace_call_many(
+            self,
+            calls,
+            block_id,
+            EvmOverrides::new(state_overrides, block_overrides),
+        )
+        .await
+        .map_err(Into::into)
     }
 
     /// Handler for `trace_rawTransaction`
@@ -967,12 +986,16 @@ mod tests {
         let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
         let calls = vec![(TransactionRequest::default().to(target), HashSet::default())];
 
-        let omitted = api.trace_call_many(calls.clone(), None).await.unwrap();
-        let latest = api.trace_call_many(calls.clone(), Some(BlockId::latest())).await.unwrap();
+        let omitted = api.trace_call_many(calls.clone(), None, Default::default()).await.unwrap();
+        let latest = api
+            .trace_call_many(calls.clone(), Some(BlockId::latest()), Default::default())
+            .await
+            .unwrap();
         let request = serde_json::json!({
             "jsonrpc": "2.0", "id": 1, "method": "trace_callMany", "params": [calls.clone()],
         });
-        let pending = api.trace_call_many(calls, Some(BlockId::pending())).await.unwrap();
+        let pending =
+            api.trace_call_many(calls, Some(BlockId::pending()), Default::default()).await.unwrap();
         assert_eq!(omitted, latest);
         assert_ne!(omitted, pending);
         assert_eq!(U256::from_be_slice(&omitted[0].output), U256::ONE);
@@ -982,6 +1005,111 @@ mod tests {
         let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(response["result"], serde_json::to_value(latest).unwrap());
+    }
+
+    #[tokio::test]
+    async fn trace_call_many_applies_overrides() {
+        let provider = MockEthProvider::default();
+        let number = Address::with_last_byte(0x42);
+        // Return NUMBER as a 32-byte word.
+        provider.add_account(
+            number,
+            ExtendedAccount::new(0, U256::ZERO).with_bytecode(bytes!("4360005260206000f3")),
+        );
+        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let module =
+            TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default()).into_rpc();
+        let outputs = async |params: serde_json::Value| {
+            let request = serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "trace_callMany", "params": params,
+            });
+            let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+            let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+            response["result"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{response}"))
+                .iter()
+                .map(|result| {
+                    U256::from_be_slice(
+                        &result["output"].as_str().unwrap().parse::<Bytes>().unwrap(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+
+        // Increments slot 0 and returns it. The state override applies once, before the first
+        // call, so the second call sees the first call's write.
+        let counter = Address::with_last_byte(0x43);
+        let call = serde_json::json!([{ "to": counter }, []]);
+        let state = serde_json::json!({
+            counter.to_string(): {
+                "code": "0x6000546001018060005560005260206000f3",
+                "stateDiff": { B256::ZERO.to_string(): B256::with_last_byte(41).to_string() },
+            },
+        });
+        assert_eq!(
+            outputs(serde_json::json!([[call.clone(), call], "latest", state])).await,
+            [U256::from(42), U256::from(43)]
+        );
+
+        // The block override applies to every call.
+        let call = serde_json::json!([{ "to": number }, []]);
+        assert_eq!(
+            outputs(
+                serde_json::json!([[call.clone(), call], "latest", null, { "number": "0x1234" }])
+            )
+            .await,
+            [U256::from(0x1234); 2]
+        );
+    }
+
+    #[tokio::test]
+    async fn trace_call_many_created_account_ignores_seeded_storage() {
+        let provider = MockEthProvider::default();
+        let sender = Address::with_last_byte(0x11);
+        provider.add_account(sender, ExtendedAccount::new(0, U256::from(10u128.pow(18))));
+        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
+
+        // The first call creates a contract that returns slot 0, at an address whose slot 0 the
+        // state override seeds; the created account's storage starts empty for the second call.
+        let created = sender.create(0);
+        let create = TransactionRequest::default()
+            .from(sender)
+            .input(bytes!("6a60005460005260206000f3600052600b6015f3").into());
+        let read = TransactionRequest::default().from(sender).to(created);
+        let state = StateOverride::from_iter([(
+            created,
+            alloy_rpc_types_eth::state::AccountOverride {
+                state_diff: Some(std::iter::once((B256::ZERO, B256::with_last_byte(42))).collect()),
+                ..Default::default()
+            },
+        )]);
+        let results = api
+            .trace_call_many(
+                vec![(create, HashSet::default()), (read, HashSet::default())],
+                None,
+                EvmOverrides::state(Some(state)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(U256::from_be_slice(&results[1].output), U256::ZERO);
     }
 
     #[tokio::test]
@@ -1055,17 +1183,19 @@ mod tests {
 
         // One call fits within the limit, but more than half of it.
         let limit = smallest_passing_limit(async |limit| {
-            api(limit).trace_call_many(vec![(call.clone(), vm_trace.clone())], None).await
+            api(limit)
+                .trace_call_many(vec![(call.clone(), vm_trace.clone())], None, Default::default())
+                .await
         })
         .await;
         api(limit / 2)
-            .trace_call_many(vec![(call.clone(), vm_trace.clone())], None)
+            .trace_call_many(vec![(call.clone(), vm_trace.clone())], None, Default::default())
             .await
             .unwrap_err();
 
         // Two such calls in one request do not fit.
         let err = api(limit)
-            .trace_call_many(vec![(call.clone(), vm_trace.clone()); 2], None)
+            .trace_call_many(vec![(call.clone(), vm_trace.clone()); 2], None, Default::default())
             .await
             .unwrap_err();
         assert_eq!(err.to_string(), "fatal error: trace recorded byte limit exceeded");

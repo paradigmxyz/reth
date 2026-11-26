@@ -224,9 +224,13 @@ The first parameter is a list of call traces, where each call trace is of the fo
 
 The second and optional parameter is a block number, block hash, or a block tag (`latest`, `finalized`, `safe`, `earliest`, `pending`).
 
-| Client | Method invocation                                          |
-| ------ | ---------------------------------------------------------- |
-| RPC    | `{"method": "trace_callMany", "params": [[[tx, type[]], ...], block]}` |
+The third and optional parameter is a `stateOverrides` object, applied once before the first call.
+
+The fourth and optional parameter is a `blockOverrides` object, applied to every call.
+
+| Client | Method invocation                                                                                   |
+| ------ | --------------------------------------------------------------------------------------------------- |
+| RPC    | `{"method": "trace_callMany", "params": [[[tx, type[]], ...], block, stateOverrides, blockOverrides]}` |
 
 ### Example
 
