@@ -998,15 +998,14 @@ pub trait Call:
             evm_env.block_env_mut().basefee = U256::ZERO;
             // An unpriced call pays no fees, including additional ones such as the opstack
             // operator fee: <https://github.com/paradigmxyz/reth/issues/18470>. It keeps the
-            // caller's actual balance, so value transfers still fail during execution when it is
-            // insufficient, without topping up the account. A call pricing its gas or its blobs
-            // is funded and charged like a transaction.
+            // caller's actual balance without topping up the account, and its upfront cost is
+            // only its value, so a sender that can't cover the value is rejected, as in geth. A
+            // call pricing its gas or its blobs is funded and charged like a transaction.
             if !blob_fee_priced {
-                evm_env.version_mut().features.remove(
-                    evm2::EvmFeatures::FEE_CHARGE |
-                        evm2::EvmFeatures::BALANCE_CHECK |
-                        evm2::EvmFeatures::BALANCE_TOP_UP,
-                );
+                evm_env
+                    .version_mut()
+                    .features
+                    .remove(evm2::EvmFeatures::FEE_CHARGE | evm2::EvmFeatures::BALANCE_TOP_UP);
             }
         }
 

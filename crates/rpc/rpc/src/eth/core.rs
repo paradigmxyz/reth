@@ -1478,6 +1478,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unpriced_call_must_fund_its_value() {
+        let sender = Address::repeat_byte(0x11);
+        let recipient = Address::repeat_byte(0x22);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header { number: 1, gas_limit: 30_000_000, ..Default::default() },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api(provider);
+        let call = |value: u64| {
+            EthCall::call(
+                &api,
+                TransactionRequest {
+                    gas: Some(30_000),
+                    value: Some(U256::from(value)),
+                    ..TransactionRequest::default().with_from(sender).with_to(recipient)
+                },
+                Some(BlockId::latest()),
+                EvmOverrides::state(Some(StateOverride::from_iter([(
+                    sender,
+                    AccountOverride { balance: Some(U256::from(1_000)), ..Default::default() },
+                )]))),
+            )
+        };
+
+        call(1_000).await.unwrap();
+        let err = call(1_001).await.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                EthApiError::InvalidTransaction(RpcInvalidTransactionError::InsufficientFunds {
+                    cost,
+                    balance,
+                }) if cost == U256::from(1_001) && balance == U256::from(1_000)
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn priced_call_is_funded_at_its_fee_cap() {
         let sender = Address::repeat_byte(0x11);
         let recipient = Address::repeat_byte(0x22);
