@@ -575,12 +575,13 @@ mod tests {
         assert_eq!(nonces, [0, 1, 2, 3, 4]);
     }
 
-    /// `eth_sendTransaction` waits for a blocking IO permit, like `eth_estimateGas`, since it may
-    /// estimate gas.
+    /// `eth_sendTransaction` waits for a blocking IO permit to estimate gas, like
+    /// `eth_estimateGas`, but holds none while queued on the signer's nonce lock.
     #[tokio::test]
     async fn send_transaction_takes_blocking_io_permit() {
         let signers = DevSigner::random_signers(1);
         let address = signers[0].accounts()[0];
+        let nonce_lock = signers[0].nonce_lock().unwrap();
         let accounts = AddressMap::from_iter([(
             address,
             ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)),
@@ -605,10 +606,20 @@ mod tests {
         .is_err());
 
         drop(permit);
-        let hash =
-            reth_rpc_eth_api::EthApiServer::send_transaction(&eth_api, tx_req).await.unwrap();
+        let hash = reth_rpc_eth_api::EthApiServer::send_transaction(&eth_api, tx_req.clone())
+            .await
+            .unwrap();
         let pooled = eth_api.pool().get(&hash).expect("transaction should be in the pool");
         assert_eq!(pooled.transaction.gas_limit(), 21_000);
+
+        let nonce_guard = nonce_lock.lock().await;
+        let mut queued =
+            std::pin::pin!(reth_rpc_eth_api::EthApiServer::send_transaction(&eth_api, tx_req));
+        assert!(futures::poll!(&mut queued).is_pending());
+        assert_eq!(eth_api.blocking_io_task_guard().available_permits(), 1);
+
+        drop(nonce_guard);
+        queued.await.unwrap();
     }
 
     #[tokio::test]
