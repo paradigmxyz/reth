@@ -779,6 +779,7 @@ async fn test_engine_ssz_proxy_returns_built_payload_with_witness() -> eyre::Res
         .send()
         .await?;
     assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(response.headers()[reqwest::header::CACHE_CONTROL], "no-store");
     assert_eq!(response.problem_type().await?, "/engine-api/errors/unknown-payload");
     Ok(())
 }

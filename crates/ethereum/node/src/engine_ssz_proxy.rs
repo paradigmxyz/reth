@@ -685,19 +685,27 @@ where
             engine_api.get_payload(fork, payload_id).await
         }
         EngineSszEndpoint::GetPayloadWithWitness(payload_id) => {
-            let Ok(payload_id) = payload_id else {
-                return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
-            };
-            if request_fork(&request) != Some(EngineSszFork::Amsterdam) {
-                return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
+            // Error responses from this polling endpoint must not be cached either.
+            let mut response = async move {
+                let Ok(payload_id) = payload_id else {
+                    return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
+                };
+                if request_fork(&request) != Some(EngineSszFork::Amsterdam) {
+                    return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
+                }
+                let Some(engine_api) = handle.engine_api().await else {
+                    return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
+                };
+                let Some(witness_handler) = handle.witness_handler().await else {
+                    return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
+                };
+                engine_api.get_payload_with_witness(payload_id, witness_handler).await
             }
-            let Some(engine_api) = handle.engine_api().await else {
-                return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
-            };
-            let Some(witness_handler) = handle.witness_handler().await else {
-                return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
-            };
-            engine_api.get_payload_with_witness(payload_id, witness_handler).await
+            .await;
+            response
+                .headers_mut()
+                .insert(CACHE_CONTROL, "no-store".parse().expect("valid cache control"));
+            response
         }
         EngineSszEndpoint::Forkchoice => {
             let Some(fork) = request_fork(&request) else {
@@ -1322,7 +1330,7 @@ async fn built_payload_witness_response(
 ) -> HttpResponse {
     // Re-executing the selected block avoids including accesses from excluded transactions.
     match witness_handler.generate_witness(execution_data).await {
-        Ok(witness) => get_payload_response(BuiltPayloadWithWitness { built_payload, witness }),
+        Ok(witness) => ssz_response(BuiltPayloadWithWitness { built_payload, witness }),
         Err(error) => {
             problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", Some(error.to_string()))
         }
@@ -1884,6 +1892,9 @@ mod tests {
                 handle_engine_ssz_request(handle.clone(), request.body(HttpBody::empty()).unwrap())
                     .await;
             assert_eq!(response.status(), status);
+            if method == "GET" && path.ends_with("/witness") {
+                assert_eq!(response.headers()[CACHE_CONTROL], "no-store");
+            }
             let body = response.into_body().collect().await.unwrap().to_bytes();
             assert_eq!(
                 serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
@@ -1914,6 +1925,27 @@ mod tests {
                 Box::pin(async move { Err(error) })
             }
         }
+
+        #[derive(Clone)]
+        struct Api {
+            built_payload: BuiltPayloadAmsterdam,
+            execution_data: ExecutionData,
+        }
+
+        impl EngineSszApi for Api {
+            async fn get_payload_with_witness(
+                &self,
+                _: PayloadId,
+                witness_handler: Arc<dyn EngineSszWitness>,
+            ) -> HttpResponse {
+                built_payload_witness_response(
+                    self.built_payload.clone(),
+                    self.execution_data.clone(),
+                    witness_handler,
+                )
+                .await
+            }
+        }
         let payload = EthBuiltPayload::new(
             Arc::new(reth_primitives_traits::Block::try_into_recovered(Block::default()).unwrap()),
             Default::default(),
@@ -1923,13 +1955,23 @@ mod tests {
         let execution_data = payload.clone().into_execution_data();
         let built_payload = BuiltPayloadAmsterdam::from(payload.try_into_v6().unwrap());
         for missing_parent in [false, true] {
-            let response = built_payload_witness_response(
-                built_payload.clone(),
-                execution_data.clone(),
-                Arc::new(Witness(missing_parent)),
+            let handle = EngineSszProxyHandle::with_engine_api(Api {
+                built_payload: built_payload.clone(),
+                execution_data: execution_data.clone(),
+            });
+            handle.set_witness_handler_sync(Arc::new(Witness(missing_parent)));
+            let response = handle_engine_ssz_request(
+                handle,
+                HttpRequest::builder()
+                    .method("GET")
+                    .uri("/engine/v1/payloads/0x0123456789abcdef/witness")
+                    .header(ETH_EXECUTION_VERSION, "amsterdam")
+                    .body(HttpBody::empty())
+                    .unwrap(),
             )
             .await;
             assert_eq!(response.status(), STATUS_INTERNAL_SERVER_ERROR);
+            assert_eq!(response.headers()[CACHE_CONTROL], "no-store");
             let body = response.into_body().collect().await.unwrap().to_bytes();
             let detail = if missing_parent {
                 format!("parent state {} is unavailable through the provider: test", B256::ZERO)
