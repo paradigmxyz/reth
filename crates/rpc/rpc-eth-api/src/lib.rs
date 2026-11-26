@@ -13,6 +13,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod bundle;
+mod call_many;
 pub mod core;
 pub mod ext;
 pub mod filter;
@@ -23,6 +24,7 @@ mod simulate;
 pub mod types;
 
 pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
+pub use call_many::{CallManyCalls, CallManyRequest};
 pub use core::{EthApiServer, FullEthApiServer};
 pub use ext::L2EthApiExtServer;
 pub use filter::{EngineEthFilter, EthFilterApiServer, QueryLimits};

@@ -554,7 +554,7 @@ pub trait Call:
         self.eth_api_settings().compute_state_root_for_eth_simulate
     }
 
-    /// Returns the maximum memory the EVM can allocate per RPC request.
+    /// Returns the maximum memory the EVM can allocate per call frame in an RPC request.
     fn evm_memory_limit(&self) -> u64 {
         self.eth_api_settings().evm_memory_limit
     }

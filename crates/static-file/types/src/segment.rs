@@ -427,7 +427,8 @@ impl SegmentHeader {
     /// This is useful for non-zero genesis blocks where the actual starting block
     /// differs from the file range start determined by `find_fixed_range`.
     /// For example, if `blocks_per_file` is 500 and genesis is at 502, the range
-    /// becomes 502..=999 (start at genesis, end at file boundary).
+    /// becomes 502..=999 (start at genesis, end at file boundary). The file keeps the name of
+    /// its fixed range (500..=999), and its provider indexes it by that name.
     pub const fn set_expected_block_start(&mut self, block: BlockNumber) {
         let blocks_per_file =
             self.expected_block_range.end() - self.expected_block_range.start() + 1;

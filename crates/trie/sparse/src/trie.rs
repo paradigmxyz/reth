@@ -5,7 +5,7 @@ use crate::{
 use alloc::boxed::Box;
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
-use reth_trie_common::{BranchNodeMasks, ProofTrieNodeV2, ProofV2TargetParent, TrieNodeV2};
+use reth_trie_common::{ProofTrieNode, ProofV2TargetParent};
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
 /// unknown) or in a "revealed" state (root node has been revealed and the trie can be updated).
@@ -49,11 +49,10 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
         Self::Revealed(Box::default())
     }
 
-    /// Reveals the root node, converting a blind trie into a revealed one.
+    /// Reveals the root from a V2 calculator batch, converting a blind trie into a revealed one.
     ///
-    /// If the trie is blinded, its root node is replaced with `root`.
-    ///
-    /// The `masks` are used to determine how the node's children are stored.
+    /// `nodes` must contain the root and, for an extension root, its separate branch child.
+    /// The root and its branch may be consumed; other proof nodes are left for revelation.
     /// The retention flag controls whether trie updates should be tracked.
     ///
     /// # Returns
@@ -61,11 +60,10 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     /// A mutable reference to the underlying [`RevealableSparseTrie`](SparseTrieTrait).
     pub fn reveal_root(
         &mut self,
-        root: TrieNodeV2,
-        masks: Option<BranchNodeMasks>,
+        nodes: &mut [ProofTrieNode],
         retain_updates: bool,
     ) -> SparseTrieResult<&mut T> {
-        // if `Blind`, we initialize the revealed trie with the given root node, using a
+        // If `Blind`, initialize the revealed trie from the root batch, using a
         // pre-allocated trie if available.
         if self.is_blind() {
             let mut revealed_trie = if let Self::Blind(Some(cleared_trie)) = core::mem::take(self) {
@@ -74,7 +72,7 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
                 Box::default()
             };
 
-            revealed_trie.set_root(root, masks, retain_updates)?;
+            revealed_trie.set_root(nodes, retain_updates)?;
             *self = Self::Revealed(revealed_trie);
         }
 
@@ -87,11 +85,11 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     /// the trie from blind to revealed). Otherwise the trie must already be revealed.
     pub fn reveal_v2_proof_nodes(
         &mut self,
-        nodes: &mut [ProofTrieNodeV2],
+        nodes: &mut [ProofTrieNode],
         retain_updates: bool,
     ) -> SparseTrieResult<()> {
-        let trie = if let Some(root_node) = nodes.iter().find(|n| n.path.is_empty()) {
-            self.reveal_root(root_node.node.clone(), root_node.masks, retain_updates)?
+        let trie = if self.is_blind() && nodes.iter().any(|node| node.path.is_empty()) {
+            self.reveal_root(nodes, retain_updates)?
         } else {
             self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
         };

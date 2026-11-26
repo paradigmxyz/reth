@@ -55,7 +55,6 @@ serde.workspace = true
 strum = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 url.workspace = true
-ipnet.workspace = true
 # io
 dirs-next.workspace = true
 
