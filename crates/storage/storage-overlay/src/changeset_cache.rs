@@ -426,7 +426,7 @@ impl ChangesetCache {
         let state_trie_provider = OverlayStateProvider::<&P, N>::new_with_state_trie(
             provider,
             overlay,
-            provider.cached_storage_settings().is_v2(),
+            provider.cached_storage_settings().trie_key_encoding(),
         );
 
         let accumulated_reverts = Arc::new(reth_trie_db::compute_range_trie_changesets(
@@ -1105,7 +1105,7 @@ mod tests {
                     Arc::default(),
                     Default::default(),
                 )),
-                provider.cached_storage_settings().is_v2(),
+                provider.cached_storage_settings().trie_key_encoding(),
             );
 
         let end = 2;
@@ -1163,7 +1163,7 @@ mod tests {
             OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
                 &*provider,
                 empty_overlay(),
-                provider.cached_storage_settings().is_v2(),
+                provider.cached_storage_settings().trie_key_encoding(),
             );
         let result = reth_trie_db::compute_range_trie_changesets(
             &*provider,
@@ -1220,7 +1220,7 @@ mod tests {
                 Arc::new(HashedPostStateSorted::from_reverts(&*provider, 2..=2).unwrap()),
                 Default::default(),
             )),
-            provider.cached_storage_settings().is_v2(),
+            provider.cached_storage_settings().trie_key_encoding(),
         );
         let at_first =
             reth_trie_db::compute_range_trie_changesets(&*provider, &at_first, &[], 1..=1, 1)
@@ -1347,7 +1347,7 @@ mod tests {
             OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
                 &*provider,
                 overlay,
-                provider.cached_storage_settings().is_v2(),
+                provider.cached_storage_settings().trie_key_encoding(),
             );
         let actual = reth_trie_db::compute_range_trie_changesets(
             &*provider,
@@ -1451,7 +1451,7 @@ mod tests {
             OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
                 &*provider,
                 overlay,
-                provider.cached_storage_settings().is_v2(),
+                provider.cached_storage_settings().trie_key_encoding(),
             );
         let actual = reth_trie_db::compute_range_trie_changesets(
             &*provider,

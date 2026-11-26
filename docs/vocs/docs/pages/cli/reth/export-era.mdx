@@ -133,6 +133,11 @@ Storage:
           [default: true]
           [possible values: true, false]
 
+      --storage.memcmp-trie-keys
+          Use memcmp trie keys in the trie tables of new databases.
+
+          Trie keys take 5 bytes for most paths instead of 33, which makes the trie tables about 15% smaller. Older reth versions refuse to open databases created with this flag. Existing databases always keep the trie key encoding they were created with.
+
       --file-type <FILE_TYPE>
           The ERA file format to export: `era1` writes `.era1` files, `ere` writes `.ere` files.
 

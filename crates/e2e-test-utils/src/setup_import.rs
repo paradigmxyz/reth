@@ -92,7 +92,7 @@ pub async fn setup_engine_with_chain_import(
         let span = span!(Level::INFO, "node", idx);
         let node_config = test_node_config(chain_spec.clone())
             .set_dev(is_dev)
-            .with_storage(StorageArgs { v2: storage_v2 });
+            .with_storage(StorageArgs { v2: storage_v2, ..Default::default() });
 
         // First, import the chain data into this datadir.
         import_chain(
@@ -321,7 +321,8 @@ mod tests {
 
         let datadir = temp_dir.path().join("datadir");
         std::fs::create_dir_all(&datadir).unwrap();
-        let storage_settings = StorageSettings { storage_v2: StorageArgs::default().v2 };
+        let storage_settings =
+            StorageSettings { storage_v2: StorageArgs::default().v2, ..Default::default() };
         let result = import_chain(
             &datadir,
             chain_spec.clone(),
@@ -386,7 +387,7 @@ mod tests {
                 .expect("Failed to open database provider")
                 .storage_settings()
                 .expect("Failed to read storage settings");
-            assert_eq!(settings, Some(StorageSettings { storage_v2 }));
+            assert_eq!(settings, Some(StorageSettings { storage_v2, ..Default::default() }));
 
             // Send forkchoice update to make the imported chain canonical.
             node.update_forkchoice(fcu_state.finalized_block_hash, fcu_state.head_block_hash)

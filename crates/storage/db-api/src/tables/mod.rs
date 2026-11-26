@@ -34,8 +34,9 @@ use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{
-    BranchNodeCompact, PackedStorageTrieEntry, PackedStoredNibbles, PackedStoredNibblesSubKey,
-    StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
+    BranchNodeCompact, MemcmpStorageTrieEntry, MemcmpStoredNibbles, MemcmpStoredNibblesSubKey,
+    PackedStorageTrieEntry, PackedStoredNibbles, PackedStoredNibblesSubKey, StorageTrieEntry,
+    StoredNibbles, StoredNibblesSubKey,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -581,6 +582,42 @@ impl Table for PackedStoragesTrie {
 
 impl DupSort for PackedStoragesTrie {
     type SubKey = PackedStoredNibblesSubKey;
+}
+
+/// Memcmp-encoding view of the [`AccountsTrie`] table.
+///
+/// Uses variable-length [`MemcmpStoredNibbles`] keys (5 bytes for paths up to 8 nibbles, at most
+/// 40 bytes). Shares the same underlying MDBX table — this is a type-level view for databases
+/// with `StorageSettings::memcmp_trie_keys`.
+#[derive(Debug)]
+pub struct MemcmpAccountsTrie;
+
+impl Table for MemcmpAccountsTrie {
+    const NAME: &'static str = <AccountsTrie as Table>::NAME;
+    const DUPSORT: bool = false;
+    const TABLE: Option<Tables> = <AccountsTrie as Table>::TABLE;
+    type Key = MemcmpStoredNibbles;
+    type Value = BranchNodeCompact;
+}
+
+/// Memcmp-encoding view of the [`StoragesTrie`] table.
+///
+/// Uses variable-length [`MemcmpStoredNibblesSubKey`] subkeys (5 bytes for paths up to 8 nibbles,
+/// at most 40 bytes). Shares the same underlying MDBX table — this is a type-level view for
+/// databases with `StorageSettings::memcmp_trie_keys`.
+#[derive(Debug)]
+pub struct MemcmpStoragesTrie;
+
+impl Table for MemcmpStoragesTrie {
+    const NAME: &'static str = <StoragesTrie as Table>::NAME;
+    const DUPSORT: bool = true;
+    const TABLE: Option<Tables> = <StoragesTrie as Table>::TABLE;
+    type Key = B256;
+    type Value = MemcmpStorageTrieEntry;
+}
+
+impl DupSort for MemcmpStoragesTrie {
+    type SubKey = MemcmpStoredNibblesSubKey;
 }
 
 /// Keys for the `ChainState` table.

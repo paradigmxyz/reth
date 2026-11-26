@@ -3,7 +3,9 @@ use clap::{Parser, Subcommand};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
-use reth_db::version::{get_db_version, DatabaseVersionError, DB_VERSION};
+use reth_db::version::{
+    get_db_version, DatabaseVersionError, DB_VERSION, MEMCMP_TRIE_KEYS_DB_VERSION,
+};
 use reth_db_common::DbTool;
 use std::{
     io::{self, Write},
@@ -208,7 +210,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     Err(err) => return Err(err.into()),
                 };
 
-                println!("Current database version: {DB_VERSION}");
+                println!(
+                    "Current database version: {DB_VERSION} ({MEMCMP_TRIE_KEYS_DB_VERSION} with memcmp trie keys)"
+                );
 
                 if let Some(version) = local_db_version {
                     println!("Local database version: {version}");

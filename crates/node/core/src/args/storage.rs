@@ -59,12 +59,20 @@ pub struct StorageArgs {
         default_missing_value = "true",
     )]
     pub v2: bool,
+
+    /// Use memcmp trie keys in the trie tables of new databases.
+    ///
+    /// Trie keys take 5 bytes for most paths instead of 33, which makes the trie tables about 15%
+    /// smaller. Older reth versions refuse to open databases created with this flag. Existing
+    /// databases always keep the trie key encoding they were created with.
+    #[arg(long = "storage.memcmp-trie-keys")]
+    pub memcmp_trie_keys: bool,
 }
 
 impl Default for StorageArgs {
     fn default() -> Self {
         let defaults = DefaultStorageValues::get_global();
-        Self { v2: defaults.v2 }
+        Self { v2: defaults.v2, memcmp_trie_keys: false }
     }
 }
 
@@ -84,6 +92,7 @@ mod tests {
     fn test_default_storage_args() {
         let args = CommandParser::<StorageArgs>::parse_from(["reth"]).args;
         assert!(args.v2);
+        assert!(!args.memcmp_trie_keys);
     }
 
     #[test]
@@ -102,5 +111,13 @@ mod tests {
     fn test_storage_v2_explicit_false() {
         let args = CommandParser::<StorageArgs>::parse_from(["reth", "--storage.v2=false"]).args;
         assert!(!args.v2);
+    }
+
+    #[test]
+    fn test_storage_memcmp_trie_keys() {
+        let args =
+            CommandParser::<StorageArgs>::parse_from(["reth", "--storage.memcmp-trie-keys"]).args;
+        assert!(args.v2);
+        assert!(args.memcmp_trie_keys);
     }
 }

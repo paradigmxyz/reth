@@ -81,15 +81,12 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
 impl<C: ChainSpecParser> EnvironmentArgs<C> {
     /// Returns the storage settings for new database initialization.
     ///
-    /// Determined by the `--storage.v2` flag (defaults to `true`).
-    /// Existing databases retain whatever settings are persisted in their
+    /// Determined by the `--storage.v2` (defaults to `true`) and `--storage.memcmp-trie-keys`
+    /// flags. Existing databases retain whatever settings are persisted in their
     /// metadata (checked during genesis init).
     pub fn storage_settings(&self) -> StorageSettings {
-        if self.storage.v2 {
-            StorageSettings::v2()
-        } else {
-            StorageSettings::v1()
-        }
+        let settings = if self.storage.v2 { StorageSettings::v2() } else { StorageSettings::v1() };
+        settings.with_memcmp_trie_keys(self.storage.memcmp_trie_keys)
     }
 
     /// Initializes environment according to [`AccessRights`] and returns an instance of

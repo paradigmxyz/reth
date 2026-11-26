@@ -100,11 +100,8 @@ struct EngineTestArgs {
 
 /// Returns the storage settings a node writes with the genesis of a new database.
 const fn storage_settings(storage: StorageArgs) -> StorageSettings {
-    if storage.v2 {
-        StorageSettings::v2()
-    } else {
-        StorageSettings::v1()
-    }
+    let settings = if storage.v2 { StorageSettings::v2() } else { StorageSettings::v1() };
+    settings.with_memcmp_trie_keys(storage.memcmp_trie_keys)
 }
 
 fn default_workers() -> usize {
@@ -244,5 +241,9 @@ mod tests {
         assert_eq!(settings(&[]), StorageSettings::v2());
         assert_eq!(settings(&["--storage.v2"]), StorageSettings::v2());
         assert_eq!(settings(&["--storage.v2=false"]), StorageSettings::v1());
+        assert_eq!(
+            settings(&["--storage.memcmp-trie-keys"]),
+            StorageSettings::v2().with_memcmp_trie_keys(true)
+        );
     }
 }

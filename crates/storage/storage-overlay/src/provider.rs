@@ -40,8 +40,8 @@ use reth_trie::{
 use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot,
     DatabaseStorageProof, DatabaseStorageRoot, DatabaseStorageTrieCursor,
-    DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
-    PackedStoragesTrie,
+    DatabaseTrieCursorFactory, LegacyKeyAdapter, MemcmpAccountsTrie, MemcmpKeyAdapter,
+    MemcmpStoragesTrie, PackedAccountsTrie, PackedKeyAdapter, PackedStoragesTrie, TrieKeyEncoding,
 };
 use std::{
     cell::{OnceCell, RefCell},
@@ -153,7 +153,7 @@ where
             .into_parts();
         self.metrics.create_provider_duration.record(start.elapsed());
 
-        let is_v2 = provider.cached_storage_settings().is_v2();
+        let trie_key_encoding = provider.cached_storage_settings().trie_key_encoding();
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
         Ok(OverlayStateProvider::from_parts(
             OwnedProvider(provider),
@@ -162,7 +162,7 @@ where
             self.metrics.clone(),
             self.proof_cursor_metrics.clone(),
             self.known_storage_roots.clone(),
-            is_v2,
+            trie_key_encoding,
         ))
     }
 }
@@ -191,7 +191,7 @@ where
     state_trie_overlay: OnceCell<StateTrieOverlay>,
     state_trie_overlay_with_trie_changesets: OnceCell<StateTrieOverlay>,
     execution_overlay: OnceCell<CachedExecutionOverlay>,
-    is_v2: bool,
+    trie_key_encoding: TrieKeyEncoding,
 }
 
 impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, N> {
@@ -203,7 +203,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
     where
         Provider: StorageSettingsCache,
     {
-        let is_v2 = provider.cached_storage_settings().is_v2();
+        let trie_key_encoding = provider.cached_storage_settings().trie_key_encoding();
         let manager = overlay_builder.overlay_manager();
         let metrics = manager.provider_metrics().clone();
         let proof_cursor_metrics = manager.proof_cursor_metrics().clone();
@@ -214,7 +214,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
             metrics,
             proof_cursor_metrics,
             Default::default(),
-            is_v2,
+            trie_key_encoding,
         )
     }
 
@@ -222,7 +222,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
     fn new_with_execution(
         provider: Provider,
         execution_overlay: Arc<ExecutionOverlay>,
-        is_v2: bool,
+        trie_key_encoding: TrieKeyEncoding,
     ) -> Self {
         let mut provider = Self::from_parts(
             OwnedProvider(provider),
@@ -231,7 +231,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
             Default::default(),
             Default::default(),
             Default::default(),
-            is_v2,
+            trie_key_encoding,
         );
         provider.execution_overlay = OnceCell::from(CachedExecutionOverlay {
             overlay: execution_overlay,
@@ -247,7 +247,7 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
     where
         Provider: StorageSettingsCache,
     {
-        let is_v2 = provider.cached_storage_settings().is_v2();
+        let trie_key_encoding = provider.cached_storage_settings().trie_key_encoding();
         let manager = overlay_builder.overlay_manager();
         let metrics = manager.provider_metrics().clone();
         let proof_cursor_metrics = manager.proof_cursor_metrics().clone();
@@ -258,14 +258,14 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
             metrics,
             proof_cursor_metrics,
             Default::default(),
-            is_v2,
+            trie_key_encoding,
         )
     }
 
     pub(crate) fn new_with_state_trie(
         provider: &'a Provider,
         state_trie_overlay: StateTrieOverlay,
-        is_v2: bool,
+        trie_key_encoding: TrieKeyEncoding,
     ) -> Self {
         let mut provider = Self::from_parts(
             provider,
@@ -274,7 +274,7 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
             Default::default(),
             Default::default(),
             Default::default(),
-            is_v2,
+            trie_key_encoding,
         );
         provider.state_trie_overlay = OnceCell::from(state_trie_overlay.clone());
         provider.state_trie_overlay_with_trie_changesets = OnceCell::from(state_trie_overlay);
@@ -296,7 +296,7 @@ where
         metrics: OverlayStateProviderFactoryMetrics,
         proof_cursor_metrics: ProofCursorMetrics,
         known_storage_roots: Arc<B256Map<B256>>,
-        is_v2: bool,
+        trie_key_encoding: TrieKeyEncoding,
     ) -> Self {
         Self {
             multiproof_calculator: RefCell::new(None),
@@ -309,7 +309,7 @@ where
             state_trie_overlay: OnceCell::new(),
             state_trie_overlay_with_trie_changesets: OnceCell::new(),
             execution_overlay: OnceCell::new(),
-            is_v2,
+            trie_key_encoding,
         }
     }
 
@@ -495,7 +495,7 @@ where
             .field("provider", self.provider())
             .field("state_trie_overlay", &self.state_trie_overlay.get())
             .field("execution_overlay", &self.execution_overlay.get())
-            .field("is_v2", &self.is_v2)
+            .field("trie_key_encoding", &self.trie_key_encoding)
             .finish()
     }
 }
@@ -812,7 +812,7 @@ where
                     OverlayMultiProofCalculator::new(
                         self.provider().tx(),
                         input,
-                        self.is_v2,
+                        self.trie_key_encoding,
                         self.proof_cursor_metrics.clone(),
                         self.known_storage_roots.clone(),
                     )
@@ -995,14 +995,23 @@ where
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
-        let cursor: Box<dyn TrieCursor + Send> = if self.is_v2 {
-            Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
-                self.provider().tx().cursor_read::<PackedAccountsTrie>()?,
-            ))
-        } else {
-            Box::new(DatabaseAccountTrieCursor::<_, LegacyKeyAdapter>::new(
-                self.provider().tx().cursor_read::<tables::AccountsTrie>()?,
-            ))
+        let tx = self.provider().tx();
+        let cursor: Box<dyn TrieCursor + Send> = match self.trie_key_encoding {
+            TrieKeyEncoding::Legacy => {
+                Box::new(DatabaseAccountTrieCursor::<_, LegacyKeyAdapter>::new(
+                    tx.cursor_read::<tables::AccountsTrie>()?,
+                ))
+            }
+            TrieKeyEncoding::Packed => {
+                Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
+                    tx.cursor_read::<PackedAccountsTrie>()?,
+                ))
+            }
+            TrieKeyEncoding::Memcmp => {
+                Box::new(DatabaseAccountTrieCursor::<_, MemcmpKeyAdapter>::new(
+                    tx.cursor_read::<MemcmpAccountsTrie>()?,
+                ))
+            }
         };
         Ok(InMemoryTrieCursor::new_account(cursor, &overlay.input().nodes))
     }
@@ -1012,16 +1021,26 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
-        let cursor: Box<dyn TrieStorageCursor + Send> = if self.is_v2 {
-            Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
-                self.provider().tx().cursor_dup_read::<PackedStoragesTrie>()?,
-                hashed_address,
-            ))
-        } else {
-            Box::new(DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(
-                self.provider().tx().cursor_dup_read::<tables::StoragesTrie>()?,
-                hashed_address,
-            ))
+        let tx = self.provider().tx();
+        let cursor: Box<dyn TrieStorageCursor + Send> = match self.trie_key_encoding {
+            TrieKeyEncoding::Legacy => {
+                Box::new(DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(
+                    tx.cursor_dup_read::<tables::StoragesTrie>()?,
+                    hashed_address,
+                ))
+            }
+            TrieKeyEncoding::Packed => {
+                Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
+                    tx.cursor_dup_read::<PackedStoragesTrie>()?,
+                    hashed_address,
+                ))
+            }
+            TrieKeyEncoding::Memcmp => {
+                Box::new(DatabaseStorageTrieCursor::<_, MemcmpKeyAdapter>::new(
+                    tx.cursor_dup_read::<MemcmpStoragesTrie>()?,
+                    hashed_address,
+                ))
+            }
         };
         Ok(InMemoryTrieCursor::new_storage(cursor, &overlay.input().nodes, hashed_address))
     }
@@ -1146,7 +1165,7 @@ mod tests {
         ExecutionOverlay, OverlayManager,
     };
     use alloy_eips::BlockNumHash;
-    use alloy_primitives::{Address, U256};
+    use alloy_primitives::{keccak256, Address, U256};
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, NewCanonicalChain};
     use reth_db_api::{
@@ -1165,10 +1184,10 @@ mod tests {
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
-    use reth_storage_api::{PruneCheckpointWriter, StageCheckpointWriter};
+    use reth_storage_api::{PruneCheckpointWriter, StageCheckpointWriter, TrieWriter};
     use reth_trie::{
         updates::TrieUpdatesSorted, BranchNodeCompact, HashedPostState, HashedStorage, Nibbles,
-        SortedTrieData,
+        ProofV2Target, SortedTrieData,
     };
 
     fn with_unique_trie_data(
@@ -1353,7 +1372,7 @@ mod tests {
         let provider = OverlayStateProvider::<&_, EthPrimitives>::new_with_state_trie(
             &provider,
             StateTrieOverlay::new(TrieInputSorted::default()),
-            false,
+            TrieKeyEncoding::Legacy,
         );
 
         assert!(provider.state_trie_overlay(false).is_ok());
@@ -1434,7 +1453,7 @@ mod tests {
         let provider = OverlayStateProvider::<_, EthPrimitives>::new_with_execution(
             factory.provider().unwrap(),
             Arc::new(execution_overlay),
-            false,
+            TrieKeyEncoding::Legacy,
         );
 
         assert_eq!(provider.basic_account(&address).unwrap(), Some(Account::from(&account_info)));
@@ -1615,5 +1634,78 @@ mod tests {
         assert_eq!(provider.basic_account(&address)?.map(|account| account.balance), Some(balance));
         assert_eq!(provider.storage(address, slot)?, Some(storage));
         Ok(())
+    }
+
+    /// The trie cursors and the multiproof calculator of the overlay read the trie tables with
+    /// the key encoding of the settings, and return the same nodes and proofs for every encoding.
+    /// Node tests miss a wrong encoding here, because the engine falls back to the sequential
+    /// state root when the proof workers fail.
+    #[test]
+    fn trie_reads_match_across_trie_key_encodings() {
+        // Enough accounts and slots for branch nodes below the roots of both tries.
+        let keys = (0..300u64).map(|i| keccak256(B256::from(U256::from(i)))).collect::<Vec<_>>();
+        let address = keys[0];
+        let targets = || MultiProofTargetsV2 {
+            account_targets: keys[..10].iter().copied().map(ProofV2Target::new).collect(),
+            storage_targets: B256Map::from_iter([(
+                address,
+                keys[..10].iter().copied().map(ProofV2Target::new).collect(),
+            )]),
+        };
+
+        let results = [
+            StorageSettings::v1(),
+            StorageSettings::v2(),
+            StorageSettings::v2().with_memcmp_trie_keys(true),
+        ]
+        .map(|settings| {
+            let factory = create_test_provider_factory();
+            factory.set_storage_settings_cache(settings);
+            let provider_rw = factory.provider_rw().unwrap();
+            for (nonce, &key) in (0..).zip(&keys) {
+                let account = Account { nonce, ..Default::default() };
+                provider_rw.tx_ref().put::<tables::HashedAccounts>(key, account).unwrap();
+                let slot = StorageEntry::new(key, U256::from(nonce + 1));
+                provider_rw.tx_ref().put::<tables::HashedStorages>(address, slot).unwrap();
+            }
+            let (_, updates) = reth_trie_db::with_adapter!(provider_rw, |A| {
+                StateRoot::new(
+                    DatabaseTrieCursorFactory::<_, A>::new(provider_rw.tx_ref()),
+                    DatabaseHashedCursorFactory::new(provider_rw.tx_ref()),
+                )
+                .root_with_updates()
+                .unwrap()
+            });
+            provider_rw.write_trie_updates(updates).unwrap();
+            provider_rw.commit().unwrap();
+
+            let provider = factory.provider().unwrap();
+            let overlay = OverlayStateProvider::<&_, EthPrimitives>::new_with_state_trie(
+                &provider,
+                StateTrieOverlay::new(TrieInputSorted::default()),
+                settings.trie_key_encoding(),
+            );
+            (
+                trie_nodes(overlay.account_trie_cursor().unwrap()),
+                trie_nodes(overlay.storage_trie_cursor(address).unwrap()),
+                overlay.multiproof_v2(targets(), true).unwrap(),
+            )
+        });
+
+        let (account_nodes, storage_nodes, _) = &results[0];
+        assert!(account_nodes.iter().any(|(path, _)| !path.is_empty()));
+        assert!(storage_nodes.iter().any(|(path, _)| !path.is_empty()));
+        assert_eq!(results[0], results[1]);
+        assert_eq!(results[1], results[2]);
+    }
+
+    fn trie_nodes(mut cursor: impl TrieCursor) -> Vec<(Nibbles, BranchNodeCompact)> {
+        let mut nodes = Vec::new();
+        let mut entry = cursor.seek(Nibbles::default()).unwrap();
+        while let Some(node) = entry {
+            nodes.push(node);
+            entry = cursor.next().unwrap();
+        }
+        nodes
     }
 }
