@@ -1715,6 +1715,11 @@ mod tests {
         assert_eq!(factory.earliest_block_number()?, 0);
         assert_eq!(factory.block(3.into())?.unwrap().body.transactions.len(), 1);
 
+        // A file before a gap stays readable.
+        files.delete_jar(StaticFileSegment::Transactions, 2)?;
+        assert_eq!(factory.earliest_block_number()?, 0);
+        assert_eq!(factory.block(1.into())?.unwrap().body.transactions.len(), 1);
+
         // Snap sync stores no body indices at its pivot, which stays unavailable.
         let provider = factory.provider_rw()?;
         provider.tx_ref().delete::<tables::BlockBodyIndices>(6, None)?;

@@ -23,8 +23,8 @@ use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, NamedChain};
 use reth_db::{
     lockfile::StorageLock,
     static_file::{
-        iter_static_files, last_missing_block, BlockHashMask, HeaderMask, HeaderWithHashMask,
-        ReceiptMask, StaticFileCursor, StaticFileEntry, StorageChangesetMask, TransactionMask,
+        iter_static_files, BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask,
+        StaticFileCursor, StaticFileEntry, StorageChangesetMask, TransactionMask,
         TransactionSenderMask,
     },
 };
@@ -1253,8 +1253,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let mut indexes = self.indexes.write();
         indexes.clear();
 
-        let files_by_segment = iter_static_files(&self.path).map_err(ProviderError::other)?;
-        for (segment, files) in &*files_by_segment {
+        for (segment, files) in &*iter_static_files(&self.path).map_err(ProviderError::other)? {
             // Update first and last block for each segment
             //
             // It's safe to call `expect` here, because every segment has at least one file
@@ -1300,13 +1299,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.cache_generation.fetch_add(1, Ordering::AcqRel);
         self.map.clear();
 
-        // A partial restore can leave older transaction jars separated from the tip by a gap.
-        if let Some(files) = files_by_segment.get(StaticFileSegment::Transactions) &&
-            let Some(last) = files.last()
+        // initialize the expired history height to the lowest static file block
+        if let Some(lowest_range) =
+            indexes.get(StaticFileSegment::Transactions).and_then(|index| index.min_block_range)
         {
-            let ranges = files.iter().rev().map(|file| file.block_range);
-            let missing = last_missing_block(last.block_range.end(), ranges);
-            self.set_earliest_history_height(missing.map_or(0, |n| n.saturating_add(1)));
+            // the earliest height is the lowest available block number
+            self.earliest_history_height
+                .store(lowest_range.start(), std::sync::atomic::Ordering::Relaxed);
         }
 
         Ok(())
@@ -3617,28 +3616,6 @@ mod tests {
             SegmentRangeInclusive::new(550, 649)
         );
 
-        Ok(())
-    }
-
-    #[test]
-    fn earliest_history_starts_after_a_transaction_file_gap() -> eyre::Result<()> {
-        let (static_dir, _) = create_test_static_files_dir();
-        let segment = StaticFileSegment::Transactions;
-        let static_files: StaticFileProvider<EthPrimitives> =
-            StaticFileProviderBuilder::read_write(&static_dir).with_blocks_per_file(10).build()?;
-        {
-            let mut writer = static_files.latest_writer(segment)?;
-            for block in 0..=24 {
-                writer.increment_block(block)?;
-            }
-            writer.commit()?;
-        }
-        static_files.initialize_index()?;
-        assert_eq!(static_files.earliest_history_height(), 0);
-
-        // An older file separated from the tip by a gap does not extend the available history.
-        static_files.delete_jar(segment, 10)?;
-        assert_eq!(static_files.earliest_history_height(), 20);
         Ok(())
     }
 }
