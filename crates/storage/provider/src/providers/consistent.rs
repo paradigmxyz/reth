@@ -485,17 +485,6 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         }
         Ok(changesets)
     }
-
-    /// Resolves the earliest retained state and its hash in this view.
-    pub(super) fn earliest_state_block_hash(&self) -> ProviderResult<BlockHash> {
-        let earliest = self.storage_provider.earliest_snapshot_history_block(&[
-            PruneSegment::AccountHistory,
-            PruneSegment::StorageHistory,
-        ])?;
-        // The head's state is available even when every historical changeset was omitted.
-        let number = earliest.min(self.best_block_number()?);
-        self.block_hash(number)?.ok_or(ProviderError::HeaderNotFound(number.into()))
-    }
 }
 
 impl<N: ProviderNodeTypes> NodePrimitivesProvider for ConsistentProvider<N> {
@@ -625,6 +614,10 @@ impl<N: ProviderNodeTypes> BlockNumReader for ConsistentProvider<N> {
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
         self.storage_provider.last_block_number()
+    }
+
+    fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
+        self.storage_provider.earliest_block_number()
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
@@ -1059,11 +1052,6 @@ impl<N: ProviderNodeTypes> ReceiptProviderIdExt for ConsistentProvider<N> {
                 }
             },
         }
-    }
-
-    fn earliest_log_block_number(&self) -> ProviderResult<BlockNumber> {
-        // Contract-log pruning can retain matching receipts below its checkpoint.
-        self.storage_provider.earliest_snapshot_history_block(&[PruneSegment::Receipts])
     }
 }
 

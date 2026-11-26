@@ -114,12 +114,12 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_config::config::Config;
 use reth_db::{init_db, Database};
-use reth_db_api::transaction::DbTx;
+use reth_db_api::{tables, transaction::DbTx};
 use reth_fs_util as fs;
 use reth_node_api::NodeTypes;
 use reth_node_core::args::DefaultPruningValues;
 use reth_provider::{StaticFileProviderBuilder, StaticFileWriter};
-use reth_prune_types::{PruneMode, PruneModes, MINIMUM_UNWIND_SAFE_DISTANCE};
+use reth_prune_types::{PruneMode, PruneModes, PruneSegment, MINIMUM_UNWIND_SAFE_DISTANCE};
 use reth_static_file_types::StaticFileSegment;
 use source::{
     discover_manifest_url, fetch_manifest_from_source, fetch_snapshot_api_entries,
@@ -734,14 +734,33 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let boundary =
             planning::restored_bodies_boundary(&static_files, transaction_jars, manifest.block)?;
         if config_path.try_exists()? {
-            config.prune.segments.bodies_history =
-                Config::from_path(config_path)?.prune.segments.bodies_history;
+            let retained = Config::from_path(config_path)?;
+            retained.static_files.validate()?;
+            config.prune.segments.bodies_history = retained.prune.segments.bodies_history;
+            config.static_files = retained.static_files;
         }
         let db = init_db(target_dir.join("db"), self.env.db.database_args())?;
         let tx = db.tx_mut()?;
         let is_v2 = config_gen::snapshot_uses_v2(&tx, selections)?;
+        let mut source_bodies = tx.get::<tables::PruneCheckpoints>(PruneSegment::Bodies)?;
+        if let Some(source) = source_bodies &&
+            boundary < source.block_number &&
+            source.block_number <= Some(manifest.block)
+        {
+            let files =
+                StaticFileProviderBuilder::read_only(&static_files).build::<N::Primitives>()?;
+            let first = boundary.map_or(0, |block| block + 1);
+            source_bodies =
+                Some(files.snapshot_bodies_checkpoint(&tx, source, first, manifest.block)?);
+        }
         config_gen::write_prune_checkpoints_tx(
-            &tx, &config, selections, manifest, is_v2, boundary,
+            &tx,
+            &config,
+            selections,
+            manifest,
+            is_v2,
+            boundary,
+            source_bodies,
         )?;
         if is_v2 && rocksdb_indices_missing(selections) {
             config_gen::reset_index_stage_checkpoints_tx(&tx)?;
@@ -1279,7 +1298,7 @@ const RETRY_BACKOFF_SECS: u64 = 5;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{SignableTransaction, TxLegacy};
+    use alloy_consensus::{Block, Header, SignableTransaction, TxLegacy};
     use alloy_primitives::Signature;
     use clap::{Args, Parser};
     use extract::CompressionFormat;
@@ -1291,10 +1310,16 @@ mod tests {
         static_file::{iter_static_files, CONFIG_FILE_EXTENSION, OFFSETS_FILE_EXTENSION},
         DatabaseEnv,
     };
-    use reth_db_api::{tables, transaction::DbTxMut};
+    use reth_db_api::transaction::DbTxMut;
     use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
-    use reth_provider::test_utils::MockNodeTypes;
-    use reth_prune_types::{PruneCheckpoint, PruneSegment};
+    use reth_node_builder::NodeTypesWithDBAdapter;
+    use reth_primitives_traits::Block as _;
+    use reth_provider::{
+        providers::RocksDBProvider, test_utils::MockNodeTypes, BlockNumReader, BlockReader,
+        BlockWriter, ProviderError, ProviderFactory, PruneCheckpointReader,
+    };
+    use reth_prune::PrunerBuilder;
+    use reth_prune_types::PruneCheckpoint;
     use reth_stages_types::{StageCheckpoint, StageId};
     use reth_storage_api::metadata::keys;
     use std::ops::RangeInclusive;
@@ -2110,6 +2135,128 @@ mod tests {
         PruneCheckpoint { prune_mode: mode.unwrap_or(checkpoint.prune_mode), ..checkpoint }
     }
 
+    fn open_snapshot(
+        dir: &TempDir,
+    ) -> Result<ProviderFactory<NodeTypesWithDBAdapter<MockNodeTypes, DatabaseEnv>>> {
+        Ok(ProviderFactory::new(
+            snapshot_db(dir)?,
+            MAINNET.clone(),
+            StaticFileProviderBuilder::read_write(dir.path().join("static_files"))
+                .with_blocks_per_file(10)
+                .build()?,
+            RocksDBProvider::builder(dir.path().join("rocksdb")).with_default_tables().build()?,
+            Default::default(),
+            reth_tasks::Runtime::test(),
+        )?)
+    }
+
+    fn source_with_transactions() -> Result<TempDir> {
+        let source = tempdir()?;
+        {
+            let factory = open_snapshot(&source)?;
+            let provider = factory.provider_rw()?;
+            for number in 0..=24 {
+                let mut block =
+                    Block { header: Header { number, ..Default::default() }, ..Default::default() };
+                let tx = TxLegacy { nonce: number, ..Default::default() };
+                block.body.transactions.push(tx.into_signed(Signature::test_signature()).into());
+                provider.insert_block(&block.try_into_recovered()?)?;
+            }
+            provider.commit()?;
+        }
+        Ok(source)
+    }
+
+    #[tokio::test]
+    async fn restore_repackaged_bodies_checkpoint() -> Result<()> {
+        let source = source_with_transactions()?;
+        for (block, tx_number, cutoff, verified, old_tip, expected_block, expected_tx) in [
+            (24, 24, 13, false, false, 9, 9),
+            (24, 23, 13, false, false, 24, 23),
+            (24, 24, 25, false, false, 24, 24),
+            (15, 15, 13, false, false, 15, 15),
+            (15, 15, 13, false, true, 9, 9),
+            (24, 24, 13, true, false, 24, 24),
+        ] {
+            let checkpoint = PruneCheckpoint {
+                block_number: Some(block),
+                tx_number: Some(tx_number),
+                prune_mode: PruneMode::Before(cutoff),
+            };
+            let db = snapshot_db(&source)?;
+            let tx = db.tx_mut()?;
+            tx.put::<tables::PruneCheckpoints>(PruneSegment::Bodies, checkpoint)?;
+            if old_tip {
+                tx.put::<tables::PruneCheckpoints>(
+                    PruneSegment::SenderRecovery,
+                    PruneCheckpoint { prune_mode: PruneMode::Full, ..checkpoint },
+                )?;
+            } else {
+                tx.delete::<tables::PruneCheckpoints>(PruneSegment::SenderRecovery, None)?;
+            }
+            if verified {
+                tx.put::<tables::Metadata>(keys::VERIFIED_SNAPSHOT_BODIES.to_owned(), Vec::new())?;
+            }
+            tx.commit()?;
+            drop(db);
+            let target = tempdir()?;
+            restore_snapshot(&source, &target, 24, &["--with-txs-since=13"]).await?;
+            let factory = open_snapshot(&target)?;
+            let stored = factory.get_prune_checkpoint(PruneSegment::Bodies)?.unwrap();
+            assert_eq!(stored.block_number, Some(expected_block));
+            assert_eq!(stored.tx_number, Some(expected_tx));
+            assert_eq!(factory.earliest_block_number()?, expected_block + 1);
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn restored_bodies_survive_pruning_and_reopen() -> Result<()> {
+        let source = source_with_transactions()?;
+        let target = tempdir()?;
+        restore_snapshot(&source, &target, 24, &["--with-txs"]).await?;
+        restore_snapshot(&source, &target, 24, &["--with-txs-since=21"]).await?;
+        let files = target.path().join("static_files");
+        for ext in ["", CONFIG_FILE_EXTENSION, OFFSETS_FILE_EXTENSION] {
+            fs::remove_file(files.join("static_file_transactions_10_19").with_extension(ext))?;
+        }
+        let factory = open_snapshot(&target)?;
+        let mode = PruneMode::Before(20);
+        PrunerBuilder::default()
+            .segments(PruneModes { bodies_history: Some(mode), ..Default::default() })
+            .build_with_provider_factory(factory)
+            .with_minimum_pruning_distance(0)
+            .run(24)?;
+        assert!(!files.join("static_file_transactions_0_9").exists());
+        let factory = open_snapshot(&target)?;
+        let advertised = factory
+            .get_prune_checkpoints_for_availability()?
+            .into_iter()
+            .find(|(segment, _)| *segment == PruneSegment::Bodies)
+            .unwrap()
+            .1;
+        assert_eq!(
+            advertised,
+            PruneCheckpoint { block_number: Some(19), tx_number: Some(19), prune_mode: mode }
+        );
+        assert_eq!(factory.earliest_block_number()?, 20);
+        assert!(matches!(
+            factory.block(19.into()),
+            Err(ProviderError::BlockExpired { requested: 19, earliest_available: 20 })
+        ));
+        assert_eq!(factory.block(20.into())?.unwrap().body.transactions.len(), 1);
+        drop(factory);
+
+        let repackaged = tempdir()?;
+        restore_snapshot(&target, &repackaged, 24, &["--with-txs"]).await?;
+        let factory = open_snapshot(&repackaged)?;
+        assert_eq!(factory.earliest_block_number()?, 20);
+        let progress = factory.get_prune_checkpoint(PruneSegment::Bodies)?.unwrap();
+        assert_eq!((progress.block_number, progress.tx_number), (Some(19), Some(19)));
+        assert_eq!(factory.block(20.into())?.unwrap().body.transactions.len(), 1);
+        Ok(())
+    }
+
     #[tokio::test]
     async fn restore_transaction_bodies_and_retention() -> Result<()> {
         for (start, tip, flag, mode, boundary) in [
@@ -2163,7 +2310,7 @@ mod tests {
             Some(PruneMode::Before(30))
         );
 
-        let retained = "[prune.segments]\nbodies_history = { distance = 30000 }\n";
+        let retained = "[prune.segments]\nbodies_history = { distance = 30000 }\n[static_files.blocks_per_file]\ntransactions = 10\n";
         let expected = Some(checkpoint(24, Some(PruneMode::Distance(30000))));
         fs::write(&path, retained)?;
         restore(&flags).await?;
@@ -2182,8 +2329,16 @@ mod tests {
             assert_eq!(restore(&flags).await.unwrap_err().to_string(), error);
             assert_eq!(fs::read_to_string(&marker)?, "local");
 
+            fs::write(&path, "[static_files.blocks_per_file]\ntransactions = 0")?;
+            assert_eq!(
+                restore(&flags).await.unwrap_err().to_string(),
+                "Transactions segment blocks per file must be greater than 0"
+            );
+            assert_eq!(fs::read_to_string(&marker)?, "local");
+
             fs::write(&path, retained)?;
             restore(&flags).await?;
+            assert!(target.path().join("static_files/static_file_transactions_20_29").exists());
             assert_eq!(bodies_checkpoint(&target)?, expected);
             assert!(!subdir.exists());
         }

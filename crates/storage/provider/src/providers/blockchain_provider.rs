@@ -756,10 +756,6 @@ impl<N: ProviderNodeTypes> ReceiptProviderIdExt for BlockchainProvider<N> {
     fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Self::Receipt>>> {
         self.consistent_provider()?.receipts_by_block_id(block)
     }
-
-    fn earliest_log_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.consistent_provider()?.earliest_log_block_number()
-    }
 }
 
 impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for BlockchainProvider<N> {
@@ -873,9 +869,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
                 self.state_by_block_hash(hash)
             }
             BlockNumberOrTag::Earliest => {
-                let provider = self.consistent_provider()?;
-                let hash = provider.earliest_state_block_hash()?;
-                self.state_provider_from_consistent_view(provider, hash)
+                self.history_by_block_number(self.earliest_block_number()?)
             }
             BlockNumberOrTag::Pending => self.pending(),
             BlockNumberOrTag::Number(num) => {

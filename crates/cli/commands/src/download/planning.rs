@@ -232,7 +232,7 @@ impl PlannedDownloads {
                 return Ok(resolved)
             }
         }
-        Config::from_path(&resolved)?;
+        Config::from_path(&resolved)?.static_files.validate()?;
         Ok(resolved)
     }
 

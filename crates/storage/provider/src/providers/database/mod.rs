@@ -745,7 +745,7 @@ impl<N: ProviderNodeTypes> BlockNumReader for ProviderFactory<N> {
     }
 
     fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
-        Ok(self.caught_up_static_file_provider()?.earliest_history_height())
+        self.provider()?.earliest_block_number()
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
@@ -1630,7 +1630,11 @@ mod tests {
         }
         // The fixture imports blocks without executing transactions or writing receipts.
         provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::default())?;
-        let legacy = PruneCheckpoint { tx_number: Some(1), ..PruneCheckpoint::pruned_through(5) };
+        let legacy = PruneCheckpoint {
+            block_number: Some(5),
+            tx_number: Some(1),
+            prune_mode: PruneMode::Before(3),
+        };
         provider.save_prune_checkpoint(PruneSegment::Bodies, legacy)?;
         provider.commit()?;
 
@@ -1650,7 +1654,8 @@ mod tests {
         let pruned = PruneCheckpoint { tx_number: Some(1), ..PruneCheckpoint::pruned_through(3) };
         provider.save_prune_checkpoint(PruneSegment::Bodies, pruned)?;
         provider.commit()?;
-        assert_eq!(factory.earliest_block_number()?, 0);
+        assert_eq!(factory.earliest_block_number()?, 4);
+        assert!(factory.block(factory.earliest_block_number()?.into())?.is_some());
         assert_matches!(
             factory.block(3.into()),
             Err(ProviderError::BlockExpired { requested: 3, earliest_available: 4 })

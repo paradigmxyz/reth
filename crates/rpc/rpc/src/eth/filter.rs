@@ -29,7 +29,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
-    ProviderReceipt, ReceiptProvider, ReceiptProviderIdExt, TransactionsProvider,
+    ProviderReceipt, ReceiptProvider, TransactionsProvider,
 };
 use reth_tasks::Runtime;
 use reth_transaction_pool::{PoolTransaction, TransactionPool, ValidPoolTransaction};
@@ -726,14 +726,16 @@ where
                 let start_block = info.best_number;
                 // Without a pending block to serve, a `pending` bound resolves to the head on both
                 // ends instead of to whatever payload the engine currently holds
-                let earliest_block = self.provider().earliest_log_block_number()?;
-                let resolve = |tag| match tag {
-                    BlockNumberOrTag::Earliest => Ok(Some(earliest_block)),
-                    BlockNumberOrTag::Pending => Ok(None),
-                    tag => self.provider().convert_block_number(tag),
-                };
-                let from = from_block.map(resolve).transpose()?.flatten();
-                let to = to_block.map(resolve).transpose()?.flatten();
+                let from = from_block
+                    .filter(|num| !num.is_pending())
+                    .map(|num| self.provider().convert_block_number(num))
+                    .transpose()?
+                    .flatten();
+                let to = to_block
+                    .filter(|num| !num.is_pending())
+                    .map(|num| self.provider().convert_block_number(num))
+                    .transpose()?
+                    .flatten();
 
                 // Return error if toBlock exceeds current head
                 if let Some(t) = to &&
@@ -749,6 +751,7 @@ where
                     logs_utils::get_filter_block_range(from, to, start_block, info)?;
 
                 // Check if the requested range overlaps with pruned history (EIP-4444)
+                let earliest_block = self.provider().earliest_block_number()?;
                 if from_block_number < earliest_block {
                     return Err(EthApiError::PrunedHistoryUnavailable {
                         requested: from_block_number,
@@ -1099,7 +1102,7 @@ where
         filter: &Filter,
         header: &SealedHeader<<Eth::Provider as HeaderProvider>::Header>,
     ) -> Result<bool, EthFilterError> {
-        let earliest_block = provider.earliest_log_block_number()?;
+        let earliest_block = provider.earliest_block_number()?;
         if header.number() < earliest_block {
             return Err(EthApiError::PrunedHistoryUnavailable {
                 requested: header.number(),

@@ -68,8 +68,8 @@ use reth_prune_types::{
 use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    metadata::keys, BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo, HistoryReader,
-    MetadataProvider, MetadataWriter, NodePrimitivesProvider, StateProvider, StateWriteConfig,
+    BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo, HistoryReader, MetadataProvider,
+    MetadataWriter, NodePrimitivesProvider, StateProvider, StateWriteConfig,
     StorageChangeSetReader, StoragePath, StorageSettingsCache, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
@@ -1365,41 +1365,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 
     /// The snapshot Bodies checkpoint can expire a block whose state and receipts still exist.
     fn ensure_body_available(&self, requested: BlockNumber) -> ProviderResult<()> {
-        let first_file_block = self.static_file_provider.earliest_history_height();
-        // A download keeps body indices at the pruned tip and anchors its transaction file
-        // there for the next append. Snap sync has no body indices at its pivot.
-        let earliest_available = if let Some(checkpoint) =
-            self.get_prune_checkpoint(PruneSegment::Bodies)? &&
-            let Some(pruned) = self.bodies_checkpoint_for_reads(checkpoint)?.block_number &&
-            pruned >= first_file_block &&
-            self.tx.get::<tables::BlockBodyIndices>(pruned)?.is_some()
-        {
-            pruned.saturating_add(1)
-        } else {
-            first_file_block
-        };
+        let earliest_available = self.earliest_block_number()?;
         if requested < earliest_available {
             return Err(ProviderError::BlockExpired { requested, earliest_available })
         }
         Ok(())
-    }
-
-    /// Verified downloads record each resource's boundary in its prune checkpoints.
-    /// Other databases use the existing history-expiry boundary.
-    pub(crate) fn earliest_snapshot_history_block(
-        &self,
-        segments: &[PruneSegment],
-    ) -> ProviderResult<BlockNumber> {
-        if self.get_metadata(keys::VERIFIED_SNAPSHOT_BODIES)?.is_none() {
-            return self.earliest_block_number()
-        }
-        let genesis = self.chain_spec().genesis_header().number();
-        Ok(self
-            .available_prune_checkpoints(segments.iter().copied())?
-            .into_iter()
-            .filter_map(|(_, checkpoint)| checkpoint.block_number)
-            .map(|block| block.saturating_add(1))
-            .fold(genesis, BlockNumber::max))
     }
 }
 
@@ -1975,35 +1945,13 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Keep the original pruning progress for writes, but report the history actually retained.
     fn bodies_checkpoint_for_reads(
         &self,
-        mut checkpoint: PruneCheckpoint,
+        checkpoint: PruneCheckpoint,
     ) -> ProviderResult<PruneCheckpoint> {
         let files = &self.static_file_provider;
-        let first = files.earliest_history_height();
-        if let Some(block) = checkpoint.block_number &&
-            first <= block &&
-            files.get_highest_static_file_block(StaticFileSegment::Transactions) >= Some(block) &&
-            self.get_metadata(keys::VERIFIED_SNAPSHOT_BODIES)?.is_none() &&
-            let Some(tip) = self.tx.get::<tables::BlockBodyIndices>(block)? &&
-            checkpoint.tx_number == Some(tip.last_tx_num()) &&
-            let Some(indices) = self.tx.get::<tables::BlockBodyIndices>(first)?
-        {
-            // An empty anchor also has a block range. Do not advertise missing rows as bodies.
-            let required = indices.first_tx_num()..tip.next_tx_num();
-            if !required.is_empty() {
-                for tx in [required.start, required.end - 1] {
-                    if !files
-                        .get_maybe_segment_provider(StaticFileSegment::Transactions, tx)?
-                        .and_then(|file| file.user_header().tx_range())
-                        .is_some_and(|range| range.contains(tx))
-                    {
-                        return Ok(checkpoint)
-                    }
-                }
-            }
-            checkpoint.block_number = first.checked_sub(1);
-            checkpoint.tx_number = indices.first_tx_num().checked_sub(1);
-        }
-        Ok(checkpoint)
+        let Some(tip) = files.get_highest_static_file_block(StaticFileSegment::Transactions) else {
+            return Ok(checkpoint)
+        };
+        files.snapshot_bodies_checkpoint(&self.tx, checkpoint, files.earliest_history_height(), tip)
     }
 }
 
@@ -2028,7 +1976,19 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N
     }
 
     fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
-        Ok(self.static_file_provider.earliest_history_height())
+        let first_file_block = self.static_file_provider.earliest_history_height();
+        // A download keeps body indices at the pruned tip and anchors its transaction file
+        // there for the next append. Snap sync has no body indices at its pivot.
+        let earliest = if let Some(checkpoint) = self.get_prune_checkpoint(PruneSegment::Bodies)? &&
+            let Some(pruned) = self.bodies_checkpoint_for_reads(checkpoint)?.block_number &&
+            pruned >= first_file_block &&
+            self.tx.get::<tables::BlockBodyIndices>(pruned)?.is_some()
+        {
+            pruned.saturating_add(1)
+        } else {
+            first_file_block
+        };
+        Ok(earliest)
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
@@ -4075,22 +4035,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
     }
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        self.prune_checkpoints_for_segments(PruneSegment::variants())
-    }
-
-    fn get_prune_checkpoints_for_availability(
-        &self,
-    ) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        self.available_prune_checkpoints(PruneSegment::variants())
-    }
-}
-
-impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
-    fn prune_checkpoints_for_segments(
-        &self,
-        segments: impl Iterator<Item = PruneSegment>,
-    ) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        Ok(segments
+        Ok(PruneSegment::variants()
             .filter_map(|segment| {
                 self.tx
                     .get::<tables::PruneCheckpoints>(segment)
@@ -4100,11 +4045,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             .collect::<Result<_, _>>()?)
     }
 
-    fn available_prune_checkpoints(
+    fn get_prune_checkpoints_for_availability(
         &self,
-        segments: impl Iterator<Item = PruneSegment>,
     ) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        let mut checkpoints = self.prune_checkpoints_for_segments(segments)?;
+        let mut checkpoints = self.get_prune_checkpoints()?;
         if let Some((_, bodies)) =
             checkpoints.iter_mut().find(|(segment, _)| *segment == PruneSegment::Bodies)
         {

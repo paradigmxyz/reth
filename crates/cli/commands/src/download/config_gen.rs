@@ -54,6 +54,7 @@ pub(super) fn write_prune_checkpoints_tx<Tx>(
     manifest: &SnapshotManifest,
     is_v2: bool,
     bodies_boundary: Option<u64>,
+    source_bodies: Option<PruneCheckpoint>,
 ) -> eyre::Result<()>
 where
     Tx: DbTx + DbTxMut,
@@ -120,13 +121,12 @@ where
                 restored_checkpoint(block_number, tx_number)
             }
             PruneSegment::Bodies => {
-                let source = tx.get::<tables::PruneCheckpoints>(segment)?;
-                let source_block = source.and_then(|checkpoint| checkpoint.block_number);
+                let source_block = source_bodies.and_then(|checkpoint| checkpoint.block_number);
                 let block_number = bodies_boundary.max(source_block);
-                if block_number.is_none() && mode.is_none() && source.is_none() {
+                if block_number.is_none() && mode.is_none() && source_bodies.is_none() {
                     continue
                 }
-                let mut tx_number = source.and_then(|checkpoint| checkpoint.tx_number);
+                let mut tx_number = source_bodies.and_then(|checkpoint| checkpoint.tx_number);
                 if let Some(block) = bodies_boundary &&
                     Some(block) > source_block
                 {
@@ -138,7 +138,6 @@ where
                     tx_number =
                         tx_number.max(indices.and_then(|body| body.next_tx_num().checked_sub(1)));
                 }
-                tx.put::<tables::Metadata>(keys::VERIFIED_SNAPSHOT_BODIES.to_owned(), Vec::new())?;
                 restored_checkpoint(block_number, tx_number)
             }
             _ => {
@@ -161,6 +160,7 @@ where
         );
     }
 
+    tx.put::<tables::Metadata>(keys::VERIFIED_SNAPSHOT_BODIES.to_owned(), Vec::new())?;
     Ok(())
 }
 
@@ -429,7 +429,7 @@ mod tests {
         let selections = BTreeMap::new();
         let config =
             config_for_selections(&selections, &manifest, None, None::<&reth_chainspec::ChainSpec>);
-        write_prune_checkpoints_tx(&tx, &config, &selections, &manifest, true, Some(tip))?;
+        write_prune_checkpoints_tx(&tx, &config, &selections, &manifest, true, Some(tip), None)?;
         for segment in [
             PruneSegment::SenderRecovery,
             PruneSegment::TransactionLookup,
@@ -668,7 +668,15 @@ mod tests {
                 None::<&reth_chainspec::ChainSpec>,
             );
             let tx = db.tx_mut()?;
-            write_prune_checkpoints_tx(&tx, &config, &selections, &manifest, true, Some(tip))?;
+            write_prune_checkpoints_tx(
+                &tx,
+                &config,
+                &selections,
+                &manifest,
+                true,
+                Some(tip),
+                None,
+            )?;
             for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
                 let checkpoint = tx.get::<tables::PruneCheckpoints>(segment)?;
                 assert_eq!(checkpoint.map(|cp| cp.block_number), expected.map(Some), "{segment}");
@@ -718,7 +726,7 @@ mod tests {
                 prune_mode: PruneMode::Full,
             };
             set_history_checkpoints(&tx, source, source);
-            write_prune_checkpoints_tx(&tx, &config, &selections, &manifest, true, None)?;
+            write_prune_checkpoints_tx(&tx, &config, &selections, &manifest, true, None, None)?;
             let boundary = PruneCheckpoint::pruned_through(expected);
             assert_eq!(
                 history_checkpoints(&tx)?,
@@ -776,10 +784,15 @@ mod tests {
                 9,
                 StoredBlockBodyIndices { first_tx_num, tx_count: 0 },
             )?;
-            if let Some(source) = prior {
-                tx.put::<tables::PruneCheckpoints>(PruneSegment::Bodies, source)?;
-            }
-            write_prune_checkpoints_tx(&tx, &config, &BTreeMap::new(), &manifest, true, Some(9))?;
+            write_prune_checkpoints_tx(
+                &tx,
+                &config,
+                &BTreeMap::new(),
+                &manifest,
+                true,
+                Some(9),
+                prior,
+            )?;
             assert_eq!(
                 tx.get::<tables::PruneCheckpoints>(PruneSegment::Bodies)?,
                 Some(PruneCheckpoint {
