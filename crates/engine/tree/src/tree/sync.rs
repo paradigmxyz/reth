@@ -23,7 +23,7 @@ use reth_provider::{
     PruneCheckpointReader, StageCheckpointReader, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_stages_api::ControlFlow;
+use reth_stages_api::{ControlFlow, StageId};
 use tracing::{debug, instrument, trace, warn};
 
 impl<N, P, T, V, C> EngineApiTreeHandler<N, P, T, V, C>
@@ -94,7 +94,9 @@ where
     ///  - moving the remaining canonical in-memory blocks to the non-canonical section
     ///  - making the backfill block the canonical head
     ///
-    /// In case backfill resulted in an unwind, this will remove all in-memory blocks.
+    /// In case backfill resulted in an unwind, this will remove all in-memory blocks, use the
+    /// Finish checkpoint as the backfill height, and run backfill again if some stages are still
+    /// below the unwind target.
     ///
     /// If the header of the backfill block is not found in the database, the in-memory blocks, the
     /// canonical head and the persisted block stay as they are. An error reading it is returned
@@ -106,14 +108,22 @@ where
         debug!(target: "engine::tree", "received backfill sync finished event");
         self.backfill_sync_state = BackfillSyncState::Idle;
 
-        // Pipeline unwound, memorize the invalid block and wait for CL for next sync target.
-        let backfill_height = if let ControlFlow::Unwind { bad_block, target } = &ctrl {
+        // Pipeline unwound, memorize the invalid block.
+        let backfill_height = if let ControlFlow::Unwind { bad_block, .. } = &ctrl {
             warn!(target: "engine::tree", invalid_block=?bad_block, "Bad block detected in unwind");
             // update the `invalid_headers` cache with the new invalid header
             self.state.invalid_headers.insert(**bad_block);
 
-            // if this was an unwind then the target is the new height
-            Some(*target)
+            // A stage error unwinds only the stages above the target, so the stages after the
+            // failing one can still be below it. The Finish checkpoint is the highest block every
+            // stage reached, and an unwind never leaves it above the target.
+            Some(
+                self.provider
+                    .database_provider_ro()?
+                    .get_stage_checkpoint(StageId::Finish)?
+                    .unwrap_or_default()
+                    .block_number,
+            )
         } else {
             // backfill height is the block number that the backfill finished at
             ctrl.block_number()
@@ -168,6 +178,16 @@ where
         // supplied sync target may have been invalidated.
         if !ctrl.is_unwind() {
             self.on_canonicalized_sync_target(backfill_num_hash.hash);
+        }
+
+        // The database holds blocks up to the unwind target that not every stage has processed.
+        // Run the lagging stages up to it before the tree executes or persists on top of them.
+        if let ControlFlow::Unwind { target, .. } = &ctrl &&
+            backfill_height < *target &&
+            let Some(hash) = self.provider.block_hash(*target)?
+        {
+            self.dispatch_backfill_action(BackfillAction::Start(hash.into()));
+            return Ok(())
         }
 
         // check if we need to run backfill again by comparing the most recent backfill target
