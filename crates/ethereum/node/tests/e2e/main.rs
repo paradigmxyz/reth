@@ -19,6 +19,7 @@ mod rpc;
 mod selfdestruct;
 mod simulate;
 mod snap;
+mod trie_keys;
 mod utils;
 
 const fn main() {}

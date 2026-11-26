@@ -25,6 +25,14 @@ pub struct StorageSettings {
     ///
     /// When `false`, uses v1/legacy layout (everything in MDBX).
     pub storage_v2: bool,
+    /// Whether the trie tables use [`TrieKeyEncoding::Memcmp`] keys instead of the encoding that
+    /// `storage_v2` selects.
+    ///
+    /// Only set when a database is created: changing it would not re-encode existing trie tables.
+    /// Settings written before this field existed omit it, so it defaults to `false`, and it is
+    /// omitted when `false` so those settings serialize unchanged.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub memcmp_trie_keys: bool,
 }
 
 impl StorageSettings {
@@ -41,14 +49,22 @@ impl StorageSettings {
     ///
     /// Use this when the `--storage.v2` CLI flag is set.
     pub const fn v2() -> Self {
-        Self { storage_v2: true }
+        Self { storage_v2: true, memcmp_trie_keys: false }
     }
 
     /// Creates `StorageSettings` for v1/legacy nodes.
     ///
     /// This keeps all data in MDBX, matching the original storage layout.
     pub const fn v1() -> Self {
-        Self { storage_v2: false }
+        Self { storage_v2: false, memcmp_trie_keys: false }
+    }
+
+    /// Sets whether the trie tables use [`TrieKeyEncoding::Memcmp`] keys.
+    ///
+    /// Use this when the `--storage.memcmp-trie-keys` CLI flag is set.
+    pub const fn with_memcmp_trie_keys(mut self, memcmp_trie_keys: bool) -> Self {
+        self.memcmp_trie_keys = memcmp_trie_keys;
+        self
     }
 
     /// Returns `true` if this node uses v2 storage layout.
@@ -91,6 +107,32 @@ impl StorageSettings {
     pub const fn any_in_rocksdb(&self) -> bool {
         self.storage_v2
     }
+
+    /// Returns the key encoding of the `AccountsTrie` and `StoragesTrie` tables.
+    pub const fn trie_key_encoding(&self) -> TrieKeyEncoding {
+        if self.memcmp_trie_keys {
+            TrieKeyEncoding::Memcmp
+        } else if self.storage_v2 {
+            TrieKeyEncoding::Packed
+        } else {
+            TrieKeyEncoding::Legacy
+        }
+    }
+}
+
+/// Key encoding of the `AccountsTrie` and `StoragesTrie` tables, from
+/// [`StorageSettings::trie_key_encoding`].
+///
+/// A database keeps one encoding for its whole life, because the encodings sort differently and
+/// a table with keys in two encodings would be out of order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrieKeyEncoding {
+    /// One byte per nibble, used by v1 storage.
+    Legacy,
+    /// Fixed 33-byte packed nibbles, used by v2 storage.
+    Packed,
+    /// Variable-length memcmp group encoding, usually 5 bytes.
+    Memcmp,
 }
 
 /// Marker for an in-progress partial state trie unwind.

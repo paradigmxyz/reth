@@ -40,13 +40,14 @@ use parking_lot::RwLock;
 use rayon::slice::ParallelSliceMut;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
+use reth_db::version::{write_db_version_file, MEMCMP_TRIE_KEYS_DB_VERSION};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::{Database, ReaderTxnTracker},
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
         BlockNumberAddressRange, ShardedKey, StorageBeforeTx, StorageSettings,
-        StoredBlockBodyIndices,
+        StoredBlockBodyIndices, TrieKeyEncoding,
     },
     table::Table,
     tables,
@@ -4265,6 +4266,23 @@ impl<TX: DbTxMut, N: NodeTypes> MetadataWriter for DatabaseProvider<TX, N> {
         self.tx.put::<tables::Metadata>(key.to_string(), value).map_err(Into::into)
     }
 
+    /// Also writes [`MEMCMP_TRIE_KEYS_DB_VERSION`] to the database version file if the settings
+    /// select memcmp trie keys.
+    ///
+    /// Clients without memcmp trie keys ignore the unknown settings field and would read the trie
+    /// tables as packed keys, but they refuse to open a database with that version. The file is
+    /// written before the settings commit, so a committed memcmp database always has it.
+    fn write_storage_settings(&self, settings: StorageSettings) -> ProviderResult<()> {
+        if settings.trie_key_encoding() == TrieKeyEncoding::Memcmp {
+            write_db_version_file(&self.db_path, MEMCMP_TRIE_KEYS_DB_VERSION)
+                .map_err(ProviderError::other)?;
+        }
+        self.write_metadata(
+            keys::STORAGE_SETTINGS,
+            serde_json::to_vec(&settings).map_err(ProviderError::other)?,
+        )
+    }
+
     fn delete_metadata(&self, key: &str) -> ProviderResult<()> {
         self.tx.delete::<tables::Metadata>(key.to_string(), None)?;
         Ok(())
@@ -4307,7 +4325,10 @@ mod tests {
     use evm2::evm::AccountInfo;
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_chainspec::MAINNET;
-    use reth_db::mdbx::{DatabaseArguments, SyncMode};
+    use reth_db::{
+        mdbx::{DatabaseArguments, SyncMode},
+        version::{check_db_version_file, get_db_version, DB_VERSION},
+    };
     use reth_db_api::models::{SnapAttempt, StorageSettings};
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
@@ -4338,6 +4359,30 @@ mod tests {
             None,
             SaveBlocksMode::Full,
         )
+    }
+
+    /// Settings without memcmp trie keys serialize as before this field existed. Memcmp trie key
+    /// settings bump the database version, which older clients refuse, because they would ignore
+    /// the unknown field and read the trie tables as packed keys.
+    #[test]
+    fn write_storage_settings_bumps_version_for_memcmp_trie_keys() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        let version = || get_db_version(provider.storage_path()).unwrap();
+
+        provider.write_storage_settings(StorageSettings::v2()).unwrap();
+        let stored = provider.get_metadata(keys::STORAGE_SETTINGS).unwrap().unwrap();
+        assert_eq!(stored, br#"{"storage_v2":true}"#);
+        assert_eq!(provider.storage_settings().unwrap(), Some(StorageSettings::v2()));
+        assert_eq!(version(), DB_VERSION);
+
+        let settings = StorageSettings::v2().with_memcmp_trie_keys(true);
+        provider.write_storage_settings(settings).unwrap();
+        let stored = provider.get_metadata(keys::STORAGE_SETTINGS).unwrap().unwrap();
+        assert_eq!(stored, br#"{"storage_v2":true,"memcmp_trie_keys":true}"#);
+        assert_eq!(provider.storage_settings().unwrap(), Some(settings));
+        assert_eq!(version(), MEMCMP_TRIE_KEYS_DB_VERSION);
+        check_db_version_file(provider.storage_path()).unwrap();
     }
 
     #[test]

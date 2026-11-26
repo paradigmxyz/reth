@@ -87,7 +87,9 @@ impl Command {
             println!("No storage settings found, creating new settings.");
         }
 
-        let mut settings @ StorageSettings { storage_v2: _ } =
+        // `memcmp_trie_keys` has no setter, because changing it would not re-encode the trie
+        // tables.
+        let mut settings @ StorageSettings { storage_v2: _, memcmp_trie_keys: _ } =
             settings.unwrap_or_else(StorageSettings::v1);
 
         // Update the setting based on the key

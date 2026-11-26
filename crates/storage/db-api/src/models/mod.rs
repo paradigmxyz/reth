@@ -371,30 +371,30 @@ mod tests {
         let nibbles = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
         let packed = PackedStoredNibbles(nibbles).encode();
         let legacy = StoredNibbles(nibbles).encode();
-        let mut nine_groups = [0x09; 50];
-        nine_groups[49] = 0x01;
+        let mut nine_groups = [0x19; 50];
+        nine_groups[49] = 0x11;
         let cases: [&[u8]; 13] = [
             // Empty input.
             &[],
             // Truncated group.
             &hex!("12300000"),
             // Trailing bytes after a complete encoding.
-            &hex!("123000000300"),
+            &hex!("123000001300"),
             // Final marker says more groups follow.
-            &hex!("1230000009"),
+            &hex!("1230000019"),
             // Final marker out of range.
-            &hex!("123000000a"),
+            &hex!("123000001a"),
             // Non-final group without the more marker.
-            &hex!("12300000081230000003"),
+            &hex!("12300000181230000013"),
             // More than 8 groups.
             &nine_groups,
             // Non-zero padding.
-            &hex!("123f000003"),
-            &hex!("ffffffff00"),
+            &hex!("123f000013"),
+            &hex!("ffffffff10"),
             // Empty group after a more marker.
-            &hex!("12345678090000000000"),
-            &hex!("1234567809ab00000000"),
-            // Packed and legacy encodings of this path, which is not true of every path.
+            &hex!("12345678190000000010"),
+            &hex!("1234567819ab00000010"),
+            // Packed and legacy encodings of this path.
             &packed,
             &legacy,
         ];
@@ -411,15 +411,14 @@ mod tests {
         }
     }
 
-    /// Some legacy keys whose length is a multiple of 5 are canonical memcmp encodings, so
-    /// decoding cannot tell the formats apart.
+    /// A legacy key of 5 nibbles has the length of a one-group encoding, but its last nibble is
+    /// below every marker, so the memcmp decoder rejects it.
     #[test]
-    fn test_memcmp_nibbles_decode_accepts_legacy_key() {
+    fn test_memcmp_nibbles_decode_rejects_legacy_key() {
         let legacy = StoredNibbles(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x8])).encode();
         assert_eq!(&legacy[..], hex!("0102030408"));
 
-        let expected = Nibbles::from_nibbles([0x0, 0x1, 0x0, 0x2, 0x0, 0x3, 0x0, 0x4]);
-        assert_eq!(MemcmpStoredNibbles::decode(&legacy).unwrap().0, expected);
-        assert_eq!(MemcmpStoredNibblesSubKey::decode(&legacy).unwrap().0, expected);
+        assert!(matches!(MemcmpStoredNibbles::decode(&legacy), Err(DatabaseError::Decode)));
+        assert!(matches!(MemcmpStoredNibblesSubKey::decode(&legacy), Err(DatabaseError::Decode)));
     }
 }

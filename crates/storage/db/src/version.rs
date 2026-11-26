@@ -1,5 +1,6 @@
 //! Database version utils.
 
+use reth_fs_util::FsPathError;
 use std::{
     fs, io,
     path::{Path, PathBuf},
@@ -10,6 +11,11 @@ pub const DB_VERSION_FILE_NAME: &str = "database.version";
 /// The version of the database stored in the [`DB_VERSION_FILE_NAME`] file in the same directory as
 /// database.
 pub const DB_VERSION: u64 = 2;
+/// The version of a database whose trie tables use memcmp trie keys.
+///
+/// Clients that only support [`DB_VERSION`] refuse to open these databases, because they would read
+/// the trie tables with the wrong key encoding.
+pub const MEMCMP_TRIE_KEYS_DB_VERSION: u64 = 3;
 
 /// Error when checking a database version using [`check_db_version_file`]
 #[derive(thiserror::Error, Debug)]
@@ -25,7 +31,7 @@ pub enum DatabaseVersionError {
     /// Your database version is incompatible with the latest database version.
     #[error(
         "breaking database change detected: your database version (v{version}) \
-         is incompatible with the latest database version (v{DB_VERSION})"
+         is incompatible with the latest database version (v{MEMCMP_TRIE_KEYS_DB_VERSION})"
     )]
     VersionMismatch {
         /// The detected version in the database.
@@ -43,11 +49,12 @@ pub enum DatabaseVersionError {
 
 /// Checks the database version file with [`DB_VERSION_FILE_NAME`] name.
 ///
-/// Returns [Ok] if file is found and has one line which equals to [`DB_VERSION`].
+/// Returns [Ok] if file is found and has one line which equals to [`DB_VERSION`] or
+/// [`MEMCMP_TRIE_KEYS_DB_VERSION`].
 /// Otherwise, returns different [`DatabaseVersionError`] error variants.
 pub fn check_db_version_file<P: AsRef<Path>>(db_path: P) -> Result<(), DatabaseVersionError> {
     let version = get_db_version(db_path)?;
-    if version != DB_VERSION {
+    if !matches!(version, DB_VERSION | MEMCMP_TRIE_KEYS_DB_VERSION) {
         return Err(DatabaseVersionError::VersionMismatch { version })
     }
 
@@ -78,6 +85,12 @@ pub fn create_db_version_file<P: AsRef<Path>>(db_path: P) -> io::Result<()> {
     fs::write(db_version_file_path(db_path), DB_VERSION.to_string())
 }
 
+/// Replaces the contents of the database version file with [`DB_VERSION_FILE_NAME`] name with
+/// `version`.
+pub fn write_db_version_file<P: AsRef<Path>>(db_path: P, version: u64) -> Result<(), FsPathError> {
+    reth_fs_util::write(db_version_file_path(db_path), version.to_string())
+}
+
 /// Returns a database version file path.
 pub fn db_version_file_path<P: AsRef<Path>>(db_path: P) -> PathBuf {
     db_path.as_ref().join(DB_VERSION_FILE_NAME)
@@ -85,7 +98,10 @@ pub fn db_version_file_path<P: AsRef<Path>>(db_path: P) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_db_version_file, db_version_file_path, DatabaseVersionError};
+    use super::{
+        check_db_version_file, db_version_file_path, write_db_version_file, DatabaseVersionError,
+        DB_VERSION, MEMCMP_TRIE_KEYS_DB_VERSION,
+    };
     use assert_matches::assert_matches;
     use std::fs;
     use tempfile::tempdir;
@@ -114,5 +130,18 @@ mod tests {
 
         let result = check_db_version_file(&dir);
         assert_matches!(result, Err(DatabaseVersionError::VersionMismatch { version: 0 }));
+    }
+
+    #[test]
+    fn accepts_memcmp_trie_keys_version() {
+        let dir = tempdir().unwrap();
+        for version in [DB_VERSION, MEMCMP_TRIE_KEYS_DB_VERSION] {
+            write_db_version_file(&dir, version).unwrap();
+            check_db_version_file(&dir).unwrap();
+        }
+
+        write_db_version_file(&dir, MEMCMP_TRIE_KEYS_DB_VERSION + 1).unwrap();
+        let result = check_db_version_file(&dir);
+        assert_matches!(result, Err(DatabaseVersionError::VersionMismatch { version: 4 }));
     }
 }

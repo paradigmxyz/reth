@@ -12,8 +12,8 @@ use reth_trie::{
     DecodedMultiProofV2, HashedPostStateSorted, MultiProofTargetsV2, TrieInputSorted,
 };
 use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedKeyAdapter,
-    TrieTableAdapter,
+    DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, LegacyKeyAdapter, MemcmpKeyAdapter,
+    PackedKeyAdapter, TrieKeyEncoding, TrieTableAdapter,
 };
 use std::sync::Arc;
 
@@ -26,12 +26,14 @@ pub(crate) enum OverlayMultiProofCalculator<TX: DbTx + 'static> {
     Legacy(TableMultiProofCalculator<TX, LegacyKeyAdapter>),
     /// Calculator over packed trie tables.
     Packed(TableMultiProofCalculator<TX, PackedKeyAdapter>),
+    /// Calculator over memcmp trie tables.
+    Memcmp(TableMultiProofCalculator<TX, MemcmpKeyAdapter>),
 }
 
 impl<TX: DbTx + 'static> OverlayMultiProofCalculator<TX> {
     /// Creates a calculator over `tx` with `input` layered on top.
     ///
-    /// `is_v2` selects the packed trie tables used by v2 storage settings.
+    /// `trie_key_encoding` selects the trie table layout.
     ///
     /// # Safety
     ///
@@ -42,7 +44,7 @@ impl<TX: DbTx + 'static> OverlayMultiProofCalculator<TX> {
     pub(crate) unsafe fn new(
         tx: &TX,
         input: &TrieInputSorted,
-        is_v2: bool,
+        trie_key_encoding: TrieKeyEncoding,
         metrics: ProofCursorMetrics,
         known_storage_roots: Arc<B256Map<B256>>,
     ) -> Self {
@@ -51,24 +53,31 @@ impl<TX: DbTx + 'static> OverlayMultiProofCalculator<TX> {
             (&*(tx as *const TX), &*Arc::as_ptr(&input.nodes), &*Arc::as_ptr(&input.state))
         };
         let prefix_sets = input.prefix_sets.clone().freeze();
-        if is_v2 {
-            Self::Packed(table_multiproof_calculator(
+        match trie_key_encoding {
+            TrieKeyEncoding::Legacy => Self::Legacy(table_multiproof_calculator(
                 tx,
                 nodes,
                 state,
                 prefix_sets,
                 metrics,
                 known_storage_roots,
-            ))
-        } else {
-            Self::Legacy(table_multiproof_calculator(
+            )),
+            TrieKeyEncoding::Packed => Self::Packed(table_multiproof_calculator(
                 tx,
                 nodes,
                 state,
                 prefix_sets,
                 metrics,
                 known_storage_roots,
-            ))
+            )),
+            TrieKeyEncoding::Memcmp => Self::Memcmp(table_multiproof_calculator(
+                tx,
+                nodes,
+                state,
+                prefix_sets,
+                metrics,
+                known_storage_roots,
+            )),
         }
     }
 
@@ -80,6 +89,7 @@ impl<TX: DbTx + 'static> OverlayMultiProofCalculator<TX> {
         Ok(match self {
             Self::Legacy(calculator) => calculator.multiproof(targets)?,
             Self::Packed(calculator) => calculator.multiproof(targets)?,
+            Self::Memcmp(calculator) => calculator.multiproof(targets)?,
         })
     }
 }

@@ -313,21 +313,28 @@ const MEMCMP_GROUP_BYTES: usize = MEMCMP_GROUP_NIBBLES / 2;
 /// Size of a group plus its trailing marker byte.
 const MEMCMP_GROUP_ENCODED_LEN: usize = MEMCMP_GROUP_BYTES + 1;
 
+/// Marker byte of a final group that holds no nibbles, which only the empty path has.
+///
+/// A final group holding `n` nibbles has marker `MEMCMP_MARKER_END + n`. Markers are above every
+/// byte of a legacy [`StoredNibbles`] key (`0x00..=0x0f`), so no legacy key or subkey decodes as a
+/// memcmp encoding.
+const MEMCMP_MARKER_END: u8 = 0x10;
+
 /// Marker byte meaning more groups follow the current one.
 ///
-/// It is greater than every final-group marker (`0..=8`), so a path sorts before its extensions.
-const MEMCMP_MARKER_MORE: u8 = 9;
+/// It is greater than every final-group marker, so a path sorts before its extensions.
+const MEMCMP_MARKER_MORE: u8 = MEMCMP_MARKER_END + MEMCMP_GROUP_NIBBLES as u8 + 1;
 
 /// Memcmp-ordered, variable-length representation of nibbles for the `AccountsTrie`.
 ///
 /// Uses the memcmp group encoding (as in `MyRocks` / `TiKV` memcomparable keys):
 /// - The path is split into groups of 8 nibbles. Each group is written as 4 bytes, two nibbles per
 ///   byte, high nibble first. The last group is right-padded with zero nibbles.
-/// - Each group is followed by a marker byte: `9` if more groups follow, otherwise the number of
-///   nibbles used in this group (`0..=8`).
+/// - Each group is followed by a marker byte: `0x19` if more groups follow, otherwise `0x10` plus
+///   the number of nibbles used in this group (`0x10..=0x18`).
 ///
-/// Examples: the empty path is `00 00 00 00 00`, 8 nibbles take one group with marker `08`, and
-/// 9 nibbles take `group1 09 group2 01`. Encodings are `5 * max(1, ceil(len / 8))` bytes, at most
+/// Examples: the empty path is `00 00 00 00 10`, 8 nibbles take one group with marker `18`, and
+/// 9 nibbles take `group1 19 group2 11`. Encodings are `5 * max(1, ceil(len / 8))` bytes, at most
 /// [`MEMCMP_NIBBLES_MAX_ENCODED_LEN`] bytes for 64 nibbles. Mainnet trie paths are mostly at most
 /// 8 nibbles, so most keys take 5 bytes instead of 33 for [`PackedStoredNibbles`].
 ///
@@ -335,7 +342,10 @@ const MEMCMP_MARKER_MORE: u8 = 9;
 /// - order-preserving: `memcmp` order of encodings equals the [`Ord`] of [`Nibbles`], with a path
 ///   sorting before its extensions;
 /// - injective and prefix-free: no encoding is a proper prefix of another;
-/// - self-delimiting: the decoder finds the end from the markers, without an external length.
+/// - self-delimiting: the decoder finds the end from the markers, without an external length;
+/// - distinct from the other trie key formats: every legacy [`StoredNibbles`] byte is below the
+///   markers, and encodings are a multiple of 5 bytes long, so no legacy key or subkey and no
+///   33-byte [`PackedStoredNibbles`] key is a complete encoding.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Index)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "test-utils", derive(arbitrary::Arbitrary))]
@@ -487,7 +497,7 @@ fn encode_memcmp_nibbles(
             MEMCMP_MARKER_MORE
         } else {
             // The last group holds `1..=8` nibbles, or `0` for the empty path.
-            (nibble_len - group * MEMCMP_GROUP_NIBBLES) as u8
+            MEMCMP_MARKER_END + (nibble_len - group * MEMCMP_GROUP_NIBBLES) as u8
         };
     }
 
@@ -501,9 +511,9 @@ fn encode_memcmp_nibbles(
 ///
 /// Accepts exactly the encodings that [`MemcmpStoredNibbles`] produces, see its docs for the
 /// layout. Returns `None` if `buf` ends before the final marker, if the encoding has more than 8
-/// groups, if the final marker is greater than `8`, or `0` after another group, or if any bit
-/// after the last nibble of the final group is set. Any marker other than `9` ends the encoding,
-/// so the bytes after it are returned as the rest.
+/// groups, if the final marker is outside `0x10..=0x18`, or `0x10` after another group, or if any
+/// bit after the last nibble of the final group is set. Any marker other than `0x19` ends the
+/// encoding, so the bytes after it are returned as the rest.
 pub fn try_decode_memcmp_nibbles(buf: &[u8]) -> Option<(Nibbles, &[u8])> {
     let mut packed = [0u8; 32];
     let (groups, _) = buf.as_chunks::<MEMCMP_GROUP_ENCODED_LEN>();
@@ -514,16 +524,18 @@ pub fn try_decode_memcmp_nibbles(buf: &[u8]) -> Option<(Nibbles, &[u8])> {
             continue
         }
 
+        // Markers below `MEMCMP_MARKER_END` wrap to large counts, which the range check rejects.
+        let used = marker.wrapping_sub(MEMCMP_MARKER_END);
         // Bits after the last used nibble. The shift overflows to an empty mask for a full group.
-        let padding_mask = u32::MAX.checked_shr(4 * u32::from(marker)).unwrap_or(0);
-        if usize::from(marker) > MEMCMP_GROUP_NIBBLES ||
-            (marker == 0 && group > 0) ||
+        let padding_mask = u32::MAX.checked_shr(4 * u32::from(used)).unwrap_or(0);
+        if usize::from(used) > MEMCMP_GROUP_NIBBLES ||
+            (used == 0 && group > 0) ||
             u32::from_be_bytes(bytes) & padding_mask != 0
         {
             return None
         }
 
-        let nibble_len = group * MEMCMP_GROUP_NIBBLES + usize::from(marker);
+        let nibble_len = group * MEMCMP_GROUP_NIBBLES + usize::from(used);
         let nibbles = Nibbles::unpack(&packed[..nibble_len.div_ceil(2)]).slice(..nibble_len);
         return Some((nibbles, &buf[(group + 1) * MEMCMP_GROUP_ENCODED_LEN..]))
     }
@@ -834,22 +846,22 @@ mod tests {
         let mut full = Vec::new();
         for group in 0..8 {
             full.extend_from_slice(if group % 2 == 0 { &G1 } else { &G2 });
-            full.push(if group == 7 { 8 } else { 9 });
+            full.push(if group == 7 { 0x18 } else { 0x19 });
         }
 
         let cases: Vec<(usize, Vec<u8>)> = vec![
-            (0, vec![0x00, 0x00, 0x00, 0x00, 0x00]),
-            (1, vec![0x10, 0x00, 0x00, 0x00, 0x01]),
-            (2, vec![0x12, 0x00, 0x00, 0x00, 0x02]),
-            (7, vec![0x12, 0x34, 0x56, 0x70, 0x07]),
-            (8, vec![0x12, 0x34, 0x56, 0x78, 0x08]),
-            (9, vec![0x12, 0x34, 0x56, 0x78, 0x09, 0x90, 0x00, 0x00, 0x00, 0x01]),
-            (16, vec![0x12, 0x34, 0x56, 0x78, 0x09, 0x9A, 0xBC, 0xDE, 0xF0, 0x08]),
+            (0, vec![0x00, 0x00, 0x00, 0x00, 0x10]),
+            (1, vec![0x10, 0x00, 0x00, 0x00, 0x11]),
+            (2, vec![0x12, 0x00, 0x00, 0x00, 0x12]),
+            (7, vec![0x12, 0x34, 0x56, 0x70, 0x17]),
+            (8, vec![0x12, 0x34, 0x56, 0x78, 0x18]),
+            (9, vec![0x12, 0x34, 0x56, 0x78, 0x19, 0x90, 0x00, 0x00, 0x00, 0x11]),
+            (16, vec![0x12, 0x34, 0x56, 0x78, 0x19, 0x9A, 0xBC, 0xDE, 0xF0, 0x18]),
             (
                 17,
                 vec![
-                    0x12, 0x34, 0x56, 0x78, 0x09, 0x9A, 0xBC, 0xDE, 0xF0, 0x09, 0x10, 0x00, 0x00,
-                    0x00, 0x01,
+                    0x12, 0x34, 0x56, 0x78, 0x19, 0x9A, 0xBC, 0xDE, 0xF0, 0x19, 0x10, 0x00, 0x00,
+                    0x00, 0x11,
                 ],
             ),
             (64, full),
@@ -892,29 +904,31 @@ mod tests {
 
     #[test]
     fn test_memcmp_decode_rejects_non_canonical() {
-        let mut nine_groups = [0x00, 0x00, 0x00, 0x00, 0x09].repeat(8);
-        nine_groups.extend_from_slice(&hex!("0000000001"));
-        let cases: [&[u8]; 12] = [
+        let mut nine_groups = [0x00, 0x00, 0x00, 0x00, 0x19].repeat(8);
+        nine_groups.extend_from_slice(&hex!("0000000011"));
+        let cases: [&[u8]; 14] = [
             // Empty input.
             &[],
             // Truncated group, and truncated after a more marker.
             &hex!("12300000"),
-            &hex!("123456780990"),
+            &hex!("123456781990"),
             // More than 8 groups.
             &nine_groups,
-            // Final marker out of range.
-            &hex!("123456780a"),
+            // Final marker out of range, above and below the final markers.
+            &hex!("123456781a"),
             &hex!("12345678ff"),
+            &hex!("1234567808"),
+            &hex!("123456780f"),
             // Non-zero padding in the low nibble of a half-used byte, in a trailing byte, and in
             // the empty path.
-            &hex!("123f000003"),
-            &hex!("1230000103"),
-            &hex!("ffffffff00"),
+            &hex!("123f000013"),
+            &hex!("1230000113"),
+            &hex!("ffffffff10"),
             // Empty group after a more marker.
-            &hex!("12345678090000000000"),
-            &hex!("1234567809ab00000000"),
+            &hex!("12345678190000000010"),
+            &hex!("1234567819ab00000010"),
             // Non-zero padding in a later group.
-            &hex!("12345678091000000f01"),
+            &hex!("12345678191000000f11"),
         ];
 
         for case in cases {
@@ -925,13 +939,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "malformed memcmp nibbles encoding")]
     fn test_memcmp_key_from_compact_panics_on_non_canonical() {
-        MemcmpStoredNibbles::from_compact(&hex!("123f000003"), 5);
+        MemcmpStoredNibbles::from_compact(&hex!("123f000013"), 5);
     }
 
     #[test]
     #[should_panic(expected = "malformed memcmp nibbles encoding")]
     fn test_memcmp_subkey_from_compact_panics_on_non_canonical() {
-        MemcmpStoredNibblesSubKey::from_compact(&hex!("123f000003"), 5);
+        MemcmpStoredNibblesSubKey::from_compact(&hex!("123f000013"), 5);
     }
 
     /// Average encoded size over the mainnet path length distributions from
@@ -1016,6 +1030,24 @@ mod tests {
                     prop_assert!(!enc_a.starts_with(&enc_b));
                     prop_assert!(!enc_b.starts_with(&enc_a));
                 }
+            }
+        }
+
+        #[test]
+        fn proptest_memcmp_rejects_legacy_and_packed_keys(nibbles in arb_nibbles()) {
+            // Legacy bytes are all below the markers, so no prefix of a legacy key decodes.
+            let mut legacy = Vec::new();
+            StoredNibbles(nibbles).to_compact(&mut legacy);
+            prop_assert_eq!(try_decode_memcmp_nibbles(&legacy), None);
+            let legacy_subkey = StoredNibblesSubKey(nibbles).to_compact_array();
+            prop_assert_eq!(try_decode_memcmp_nibbles(&legacy_subkey), None);
+
+            // A 33-byte packed key can only decode up to a group boundary, leaving trailing bytes.
+            for packed in [
+                PackedStoredNibbles(nibbles).to_compact_array(),
+                PackedStoredNibblesSubKey(nibbles).to_compact_array(),
+            ] {
+                prop_assert!(!matches!(try_decode_memcmp_nibbles(&packed), Some((_, []))));
             }
         }
 

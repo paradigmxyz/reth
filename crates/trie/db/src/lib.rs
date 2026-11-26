@@ -17,8 +17,9 @@ pub use hashed_cursor::{
 };
 pub use prefix_set::load_prefix_sets_with_provider;
 pub use proof::{DatabaseProof, DatabaseStorageProof};
-pub use reth_db_api::tables::{
-    MemcmpAccountsTrie, MemcmpStoragesTrie, PackedAccountsTrie, PackedStoragesTrie,
+pub use reth_db_api::{
+    models::TrieKeyEncoding,
+    tables::{MemcmpAccountsTrie, MemcmpStoragesTrie, PackedAccountsTrie, PackedStoragesTrie},
 };
 pub use state::{DatabaseHashedPostState, DatabaseStateRoot};
 pub use storage::{hashed_storage_from_reverts_with_provider, DatabaseStorageRoot};
@@ -33,7 +34,8 @@ pub use verify::DatabaseVerifier;
 ///
 /// The first argument must implement
 /// [`StorageSettingsCache`](reth_storage_api::StorageSettingsCache). Inside the closure body, `$A`
-/// is a type alias for either [`PackedKeyAdapter`] or [`LegacyKeyAdapter`].
+/// is a type alias for [`LegacyKeyAdapter`], [`PackedKeyAdapter`] or [`MemcmpKeyAdapter`], as
+/// selected by the settings' [`TrieKeyEncoding`].
 ///
 /// # Example
 ///
@@ -46,14 +48,17 @@ pub use verify::DatabaseVerifier;
 #[macro_export]
 macro_rules! with_adapter {
     ($settings_provider:expr, |$A:ident| $body:expr) => {
-        if $settings_provider.cached_storage_settings().is_v2() {
-            {
+        match $settings_provider.cached_storage_settings().trie_key_encoding() {
+            $crate::TrieKeyEncoding::Legacy => {
+                type $A = $crate::LegacyKeyAdapter;
+                $body
+            }
+            $crate::TrieKeyEncoding::Packed => {
                 type $A = $crate::PackedKeyAdapter;
                 $body
             }
-        } else {
-            {
-                type $A = $crate::LegacyKeyAdapter;
+            $crate::TrieKeyEncoding::Memcmp => {
+                type $A = $crate::MemcmpKeyAdapter;
                 $body
             }
         }

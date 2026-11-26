@@ -9,7 +9,7 @@
 //! `BENCH_ACCOUNTS` (default 2,000,000), `BENCH_SLOT_SCALE` (default 1, multiplies every
 //! storage tier) and `BENCH_REPS` (default 5) size the run.
 
-#![allow(missing_docs, clippy::field_reassign_with_default)]
+#![allow(missing_docs, clippy::clone_on_copy, clippy::field_reassign_with_default)]
 
 use alloy_primitives::{keccak256, B256, U256};
 use reth_chainspec::MAINNET;

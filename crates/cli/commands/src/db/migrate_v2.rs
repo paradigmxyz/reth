@@ -94,7 +94,11 @@ impl Command {
         info!(target: "reth::cli", "Writing StorageSettings v2 metadata");
         {
             let provider_rw = provider_factory.database_provider_rw()?;
-            provider_rw.write_storage_settings(StorageSettings::v2())?;
+            // Keeps the trie key encoding, because the trie tables are only rebuilt later.
+            let memcmp_trie_keys = current_settings.is_some_and(|s| s.memcmp_trie_keys);
+            provider_rw.write_storage_settings(
+                StorageSettings::v2().with_memcmp_trie_keys(memcmp_trie_keys),
+            )?;
             provider_rw.commit()?;
         }
         info!(target: "reth::cli", "Storage settings updated to v2");

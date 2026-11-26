@@ -176,7 +176,7 @@ mod tests {
 
         let mut node_buf = Vec::new();
         entry.node.to_compact(&mut node_buf);
-        assert_eq!(&buf[..5], &[0xAB, 0xC0, 0x00, 0x00, 0x03]);
+        assert_eq!(&buf[..5], &[0xAB, 0xC0, 0x00, 0x00, 0x13]);
         assert_eq!(&buf[5..], &node_buf[..]);
 
         let (decoded, rest) = MemcmpStorageTrieEntry::from_compact(&buf, len);

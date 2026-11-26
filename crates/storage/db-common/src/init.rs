@@ -1414,7 +1414,10 @@ mod tests {
     };
     use alloy_genesis::Genesis;
     use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET, SEPOLIA};
-    use reth_db::DatabaseEnv;
+    use reth_db::{
+        version::{get_db_version, DB_VERSION, MEMCMP_TRIE_KEYS_DB_VERSION},
+        DatabaseEnv,
+    };
     use reth_db_api::{
         cursor::DbCursorRO,
         models::{
@@ -1427,9 +1430,12 @@ mod tests {
     };
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
-        ProviderFactory, RocksDBProviderFactory,
+        ProviderFactory, RocksDBProviderFactory, StoragePath,
     };
     use reth_storage_overlay::OverlayManager;
+    use reth_trie_db::{
+        MemcmpAccountsTrie, MemcmpStoragesTrie, PackedAccountsTrie, PackedStoragesTrie,
+    };
     use std::{collections::BTreeMap, sync::Arc};
 
     fn collect_table_entries<DB, T>(
@@ -2305,5 +2311,48 @@ mod tests {
         let result = init_genesis_with_settings(&factory, settings);
 
         assert!(result.is_ok());
+    }
+
+    /// Genesis written with memcmp trie keys matches the state root of the chain spec, stores the
+    /// same trie nodes as with packed keys, and has the database version that older clients refuse.
+    #[test]
+    fn init_genesis_with_memcmp_trie_keys() {
+        let packed = create_test_provider_factory_with_chain_spec(HOLESKY.clone());
+        let memcmp = create_test_provider_factory_with_chain_spec(HOLESKY.clone());
+        let settings = StorageSettings::v2().with_memcmp_trie_keys(true);
+        let packed_hash = init_genesis_with_settings(&packed, StorageSettings::v2()).unwrap();
+        assert_eq!(packed_hash, HOLESKY_GENESIS_HASH);
+        assert_eq!(init_genesis_with_settings(&memcmp, settings).unwrap(), HOLESKY_GENESIS_HASH);
+
+        let (packed, memcmp) = (packed.provider().unwrap(), memcmp.provider().unwrap());
+        assert_eq!(memcmp.storage_settings().unwrap(), Some(settings));
+        assert_eq!(get_db_version(packed.storage_path()).unwrap(), DB_VERSION);
+        assert_eq!(get_db_version(memcmp.storage_path()).unwrap(), MEMCMP_TRIE_KEYS_DB_VERSION);
+
+        let packed_accounts =
+            collect_table_entries::<DatabaseEnv, PackedAccountsTrie>(packed.tx_ref()).unwrap();
+        let memcmp_accounts =
+            collect_table_entries::<DatabaseEnv, MemcmpAccountsTrie>(memcmp.tx_ref()).unwrap();
+        assert!(!packed_accounts.is_empty());
+        assert_eq!(
+            packed_accounts.into_iter().map(|(path, node)| (path.0, node)).collect::<Vec<_>>(),
+            memcmp_accounts.into_iter().map(|(path, node)| (path.0, node)).collect::<Vec<_>>(),
+        );
+
+        let packed_storages =
+            collect_table_entries::<DatabaseEnv, PackedStoragesTrie>(packed.tx_ref()).unwrap();
+        let memcmp_storages =
+            collect_table_entries::<DatabaseEnv, MemcmpStoragesTrie>(memcmp.tx_ref()).unwrap();
+        assert!(!packed_storages.is_empty());
+        assert_eq!(
+            packed_storages
+                .into_iter()
+                .map(|(address, entry)| (address, entry.nibbles.0, entry.node))
+                .collect::<Vec<_>>(),
+            memcmp_storages
+                .into_iter()
+                .map(|(address, entry)| (address, entry.nibbles.0, entry.node))
+                .collect::<Vec<_>>(),
+        );
     }
 }

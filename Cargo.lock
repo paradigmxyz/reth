@@ -10141,6 +10141,7 @@ dependencies = [
  "reth-trie",
  "reth-trie-db",
  "rocksdb",
+ "serde_json",
  "smallvec",
  "strum 0.27.2",
  "tempfile",

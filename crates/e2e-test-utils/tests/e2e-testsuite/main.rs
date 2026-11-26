@@ -287,7 +287,10 @@ async fn test_setup_builder_with_storage_v2() -> Result<()> {
             .await?;
 
         let provider = node.inner.provider.database_provider_ro()?;
-        assert_eq!(provider.storage_settings()?, Some(StorageSettings { storage_v2 }));
+        assert_eq!(
+            provider.storage_settings()?,
+            Some(StorageSettings { storage_v2, ..Default::default() })
+        );
     }
 
     Ok(())

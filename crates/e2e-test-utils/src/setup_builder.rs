@@ -438,7 +438,7 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
     fn node_and_tree_config(&self) -> (NodeConfig<N::ChainSpec>, TreeConfig) {
         let node_config = self.node_config_modifiers.iter().fold(
             test_node_config(self.chain_spec.clone())
-                .with_storage(StorageArgs { v2: self.storage_v2 }),
+                .with_storage(StorageArgs { v2: self.storage_v2, ..Default::default() }),
             |config, modifier| modifier(config),
         );
         let tree_config = self
