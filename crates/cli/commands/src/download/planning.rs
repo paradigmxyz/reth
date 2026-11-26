@@ -3,7 +3,7 @@ use eyre::Result;
 use rayon::prelude::*;
 use reth_config::config::Config;
 use reth_db::static_file::{
-    read_static_file_header, CONFIG_FILE_EXTENSION, OFFSETS_FILE_EXTENSION,
+    last_missing_block, read_static_file_header, CONFIG_FILE_EXTENSION, OFFSETS_FILE_EXTENSION,
 };
 use reth_static_file_types::StaticFileSegment;
 use serde::Serialize;
@@ -150,13 +150,12 @@ impl PlannedDownloads {
             .collect();
         let mut jars = HashSet::new();
         for path in &files {
-            if let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) &&
+            let extension = path.extension().and_then(|ext| ext.to_str());
+            if matches!(extension, None | Some(CONFIG_FILE_EXTENSION | OFFSETS_FILE_EXTENSION)) &&
+                let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) &&
                 let Some((StaticFileSegment::Transactions, range)) =
                     StaticFileSegment::parse_filename(name) &&
-                StaticFileSegment::Transactions.filename(&range) == name &&
-                path.extension().is_none_or(|ext| {
-                    ext == CONFIG_FILE_EXTENSION || ext == OFFSETS_FILE_EXTENSION
-                })
+                StaticFileSegment::Transactions.filename(&range) == name
             {
                 eyre::ensure!(
                     path.parent() == Some(Path::new("static_files")),
@@ -192,11 +191,12 @@ impl PlannedDownloads {
         cleanup: bool,
     ) -> Result<PathBuf> {
         let parent = config.ancestors().find(|path| path.ends_with(".."));
+        let traversed = parent.is_some();
         // Resolve only through the final `..`. The remaining path may not exist yet.
         let resolved = if let Some(parent) = parent {
             parent.canonicalize()?.join(config.strip_prefix(parent)?)
         } else {
-            config.clone()
+            config
         };
         if !resolved.try_exists()? {
             return Ok(resolved)
@@ -205,7 +205,7 @@ impl PlannedDownloads {
             for entry in MANAGED_DATADIR_PATHS {
                 let root = managed_datadir_path(entry, target, static_files);
                 if resolved.starts_with(&root) ||
-                    (parent.is_some() &&
+                    (traversed &&
                         root.try_exists()? &&
                         !root.is_symlink() &&
                         resolved.starts_with(root.canonicalize()?))
@@ -220,7 +220,7 @@ impl PlannedDownloads {
             if output == resolved {
                 return Ok(resolved)
             }
-            if parent.is_some() &&
+            if traversed &&
                 output.file_name() == resolved.file_name() &&
                 let (Some(output_dir), Some(config_dir)) = (output.parent(), resolved.parent()) &&
                 output_dir.try_exists()? &&
@@ -323,12 +323,7 @@ pub(super) fn restored_bodies_boundary(
         }
     }
     ranges.sort_unstable_by_key(|range| std::cmp::Reverse(range.end()));
-    let mut boundary = Some(tip);
-    for range in ranges {
-        if boundary.is_some_and(|block| range.contains(block)) {
-            boundary = range.start().checked_sub(1);
-        }
-    }
+    let boundary = last_missing_block(tip, ranges.into_iter());
     eyre::ensure!(
         jars.is_empty() || boundary != Some(tip),
         "Selected transaction files do not cover snapshot block {tip}"

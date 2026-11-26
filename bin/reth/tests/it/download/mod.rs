@@ -354,18 +354,12 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
     assert!(next_block.is_empty());
     assert_eq!(expected.body().transactions.len(), 6);
     let run = |name: &str, datadir: &Path, args: &[&str]| {
-        let mut flags = vec![name, "--chain", chain, "--datadir", datadir.to_str().unwrap()];
-        flags.extend_from_slice(args);
-        reth_ok(&flags);
+        let mut command = Command::new(RETH);
+        command.args([name, "--chain", chain, "--datadir"]).arg(datadir);
+        command.args(["--db.max-size=256MB", "--db.growth-step=8MB"]);
+        success(command.args(args).output().unwrap());
     };
-    let import = |datadir: &Path, path: &Path| {
-        run(
-            "import",
-            datadir,
-            &["--db.max-size=256MB", "--db.growth-step=8MB", path.to_str().unwrap()],
-        );
-    };
-    import(source.path(), &prefix);
+    run("import", source.path(), &[prefix.to_str().unwrap()]);
     // Pre-Cancun slot preimages are auxiliary to this restore and occupy a sparse 4 GiB file.
     fs::remove_dir_all(source.path().join("db/preimage")).unwrap();
     reth_ok(&[
@@ -420,7 +414,7 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
         );
         drop(node);
 
-        import(target.path(), &suffix);
+        run("import", target.path(), &[suffix.to_str().unwrap()]);
         let (_node, rpc) = start_node();
         assert_eq!(rpc.get_block_number().await.unwrap(), tip + 1);
         let block = rpc.get_block_by_number((tip + 1).into()).await.unwrap().unwrap();

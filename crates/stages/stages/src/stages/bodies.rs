@@ -90,9 +90,10 @@ where
     // input execution was interrupted previously and we need to unwind the static file.
     let segment = StaticFileSegment::Transactions;
     let highest_file_block = static_file_provider.get_highest_static_file_block(segment);
-    let last_file_tx = static_file_provider
-        .highest_transaction_for_consistency(provider.tx_ref(), highest_file_block)?;
-    let next_static_file_tx_num = last_file_tx.map(|id| id + 1).unwrap_or_default();
+    let next_static_file_tx_num = static_file_provider
+        .highest_transaction_for_consistency(provider.tx_ref(), highest_file_block)?
+        .map(|id| id + 1)
+        .unwrap_or_default();
 
     match next_static_file_tx_num.cmp(&next_tx_num) {
         // If static files are ahead, we are currently unwinding the stage or we didn't reach

@@ -23,8 +23,8 @@ use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, NamedChain};
 use reth_db::{
     lockfile::StorageLock,
     static_file::{
-        iter_static_files, BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask,
-        StaticFileCursor, StaticFileEntry, StorageChangesetMask, TransactionMask,
+        iter_static_files, last_missing_block, BlockHashMask, HeaderMask, HeaderWithHashMask,
+        ReceiptMask, StaticFileCursor, StaticFileEntry, StorageChangesetMask, TransactionMask,
         TransactionSenderMask,
     },
 };
@@ -1300,18 +1300,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.cache_generation.fetch_add(1, Ordering::AcqRel);
         self.map.clear();
 
-        // A partial restore can leave older jars separated from the tip by a gap.
+        // A partial restore can leave older transaction jars separated from the tip by a gap.
         if let Some(files) = files_by_segment.get(StaticFileSegment::Transactions) &&
             let Some(last) = files.last()
         {
-            let mut first = last.block_range.start();
-            for file in files.iter().rev().skip(1) {
-                if file.block_range.end().saturating_add(1) < first {
-                    break
-                }
-                first = first.min(file.block_range.start());
-            }
-            self.set_earliest_history_height(first);
+            let ranges = files.iter().rev().map(|file| file.block_range);
+            let missing = last_missing_block(last.block_range.end(), ranges);
+            self.set_earliest_history_height(missing.map_or(0, |n| n.saturating_add(1)));
         }
 
         Ok(())

@@ -555,16 +555,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         let ResolvedDownload { manifest, selections, preset, planned, transaction_jars } =
             self.resolve_download(chain.id()).await?;
-        let prepared =
-            PreparedSnapshotDownload { manifest, data_dir: data_dir.data_dir().to_path_buf() };
+        let config_path = self.env.config.clone().unwrap_or_else(|| data_dir.config());
+        let data_dir = data_dir.data_dir().to_path_buf();
+        let prepared = PreparedSnapshotDownload { manifest, data_dir };
         if self.print_plan_json {
             DownloadPlan::from_planned(&prepared.manifest, &planned)
                 .write_json(std::io::stdout().lock())?;
             return Ok(Some(prepared))
         }
 
-        let config_path =
-            std::path::absolute(self.env.config.as_deref().unwrap_or(&data_dir.config()))?;
         let target_dir = prepared.data_dir.as_path();
         let cancel_token = CancellationToken::new();
         let _cancel_guard = cancel_token.drop_guard();
@@ -572,10 +571,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             let target_dir = std::path::absolute(target_dir)?;
             let static_files_dir =
                 static_files_dir.as_deref().map(std::path::absolute).transpose()?;
-            reth_tasks::spawn_blocking(move || {
+            reth_tasks::spawn_blocking(move || -> Result<_> {
                 let static_files_dir = static_files_dir.as_deref();
                 let config_path = planned.validated_config_path(
-                    config_path,
+                    std::path::absolute(config_path)?,
                     &target_dir,
                     static_files_dir,
                     self.force || self.prune_unlisted,
@@ -586,10 +585,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                     prune_unlisted_outputs(&planned.archives, &target_dir, static_files_dir)?;
                 }
                 fs::create_dir_all(&target_dir)?;
-                Ok::<_, eyre::Report>((
-                    planned.partition_reusable(&target_dir, static_files_dir)?,
-                    config_path,
-                ))
+                let downloads = planned.partition_reusable(&target_dir, static_files_dir)?;
+                Ok((downloads, config_path))
             })
             .await??
         };
@@ -661,16 +658,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         let planned = collect_planned_archives(&manifest, &selections)?;
         let transaction_jars = planned.transaction_jars()?;
-        if transaction_jars.is_empty() &&
-            selections.get(&SnapshotComponentType::Transactions).is_some_and(|selection| {
-                !matches!(selection, ComponentSelection::None | ComponentSelection::Distance(0))
-            })
-        {
-            eyre::bail!(
-                "Selected transaction files do not cover snapshot block {}",
-                manifest.block
-            );
-        }
+        let selected = selections.get(&SnapshotComponentType::Transactions);
+        eyre::ensure!(
+            !transaction_jars.is_empty() ||
+                matches!(
+                    selected,
+                    None | Some(ComponentSelection::None | ComponentSelection::Distance(0))
+                ),
+            "Selected transaction files do not cover snapshot block {}",
+            manifest.block
+        );
         Ok(ResolvedDownload { manifest, selections, preset, planned, transaction_jars })
     }
 
@@ -724,7 +721,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
     /// Writes config and checkpoint state after all modular archives complete.
     fn finalize_modular_download<N: NodeTypes>(
-        &self,
+        self,
         selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
         prepared: &PreparedSnapshotDownload,
         preset: Option<SelectionPreset>,
@@ -733,11 +730,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
     ) -> Result<()> {
         let PreparedSnapshotDownload { manifest, data_dir: target_dir } = prepared;
         let mut config = self.download_config(selections, manifest, preset);
-        let static_files = managed_datadir_path(
-            "static_files",
-            target_dir,
-            self.env.datadir.static_files_path.as_deref(),
-        );
+        let static_files = self.env.datadir.resolve_datadir(self.env.chain.chain()).static_files();
         let boundary =
             planning::restored_bodies_boundary(&static_files, transaction_jars, manifest.block)?;
         if config_path.try_exists()? {
@@ -1884,15 +1877,14 @@ mod tests {
         let manifest = generate_manifest(source.path(), output, None, tip, 1, 10, None, false)?;
         let path = output.join("manifest.json");
         fs::write(&path, serde_json::to_vec(&manifest)?)?;
-        let mut args = vec![
+        let args = [
             "reth",
             "--manifest-path",
             path.to_str().unwrap(),
             "--datadir",
             target.path().to_str().unwrap(),
         ];
-        args.extend_from_slice(flags);
-        DownloadCommand::<EthereumChainSpecParser>::parse_from(args)
+        DownloadCommand::<EthereumChainSpecParser>::parse_from(args.iter().chain(flags))
             .execute::<MockNodeTypes>()
             .await?;
         Ok(())
@@ -2108,49 +2100,37 @@ mod tests {
         let target = tempdir()?;
         fs::write(target.path().join("reth.toml"), "[invalid")?;
         let path = target.path().join("configs/custom.toml");
+        let restore = async |flags: &[&str]| restore_snapshot(&source, &target, 24, flags).await;
         let flags = ["--config", path.to_str().unwrap(), "--with-txs-since=30"];
-        restore_snapshot(&source, &target, 24, &flags).await?;
+        restore(&flags).await?;
         assert_eq!(
             Config::from_path(&path)?.prune.segments.bodies_history,
             Some(PruneMode::Before(30))
         );
 
-        fs::write(&path, "[prune.segments]\nbodies_history = { distance = 30000 }\n")?;
-        restore_snapshot(&source, &target, 24, &flags).await?;
-        assert_eq!(
-            bodies_checkpoint(&target)?,
-            Some(checkpoint(24, Some(PruneMode::Distance(30000))))
-        );
+        let retained = "[prune.segments]\nbodies_history = { distance = 30000 }\n";
+        let expected = Some(checkpoint(24, Some(PruneMode::Distance(30000))));
+        fs::write(&path, retained)?;
+        restore(&flags).await?;
+        assert_eq!(bodies_checkpoint(&target)?, expected);
 
-        // Resolve the config before force removes an intermediate directory in its path.
-        fs::create_dir_all(target.path().join("db/subdir"))?;
-        let alias = target.path().join("db/subdir/../../configs/custom.toml");
-        restore_snapshot(
-            &source,
-            &target,
-            24,
-            &["--force", "--minimal", "--config", alias.to_str().unwrap()],
-        )
-        .await?;
-        assert_eq!(
-            bodies_checkpoint(&target)?,
-            Some(checkpoint(24, Some(PruneMode::Distance(30000))))
-        );
-        assert!(!target.path().join("db/subdir").exists());
-
-        // Both cleanup modes must fail before touching the previous restore.
-        fs::write(&path, "[invalid")?;
-        let expected = Config::from_path(&path).unwrap_err().to_string();
+        // Resolve the alias before cleanup removes the intermediate directory.
+        let subdir = target.path().join("db/subdir");
+        let alias = subdir.join("../../configs/custom.toml");
         let marker = target.path().join("static_files/local");
-        fs::write(&marker, "local")?;
-        let path = target.path().join("db/../configs/custom.toml");
         for cleanup in ["--force", "--prune-unlisted"] {
-            let flags = [cleanup, "--minimal", "--config", path.to_str().unwrap()];
-            assert_eq!(
-                restore_snapshot(&source, &target, 24, &flags).await.unwrap_err().to_string(),
-                expected
-            );
+            fs::create_dir_all(&subdir)?;
+            fs::write(&marker, "local")?;
+            fs::write(&path, "[invalid")?;
+            let flags = [cleanup, "--minimal", "--config", alias.to_str().unwrap()];
+            let error = Config::from_path(&path).unwrap_err().to_string();
+            assert_eq!(restore(&flags).await.unwrap_err().to_string(), error);
             assert_eq!(fs::read_to_string(&marker)?, "local");
+
+            fs::write(&path, retained)?;
+            restore(&flags).await?;
+            assert_eq!(bodies_checkpoint(&target)?, expected);
+            assert!(!subdir.exists());
         }
         Ok(())
     }
@@ -2178,12 +2158,18 @@ mod tests {
             StaticFileProviderBuilder::read_write(target.path().join("static_files"))
                 .build::<<MockNodeTypes as NodeTypes>::Primitives>()
         };
-        for tip in [21, 24, 24] {
-            restore_snapshot(&source, &target, tip, &["--with-txs-since=30"]).await?;
+        let restore =
+            async |tip, flags: &[&str]| restore_snapshot(&source, &target, tip, flags).await;
+        let check_anchor = |tip| -> Result<()> {
             let provider = open()?;
             assert_eq!(provider.get_highest_static_file_block(segment), Some(tip));
             assert_eq!(provider.get_highest_static_file_tx(segment), None);
             assert_eq!(provider.latest_writer(segment)?.next_block_number(), tip + 1);
+            Ok(())
+        };
+        for tip in [21, 24, 24] {
+            restore(tip, &["--with-txs-since=30"]).await?;
+            check_anchor(tip)?;
         }
         {
             let provider = open()?;
@@ -2195,16 +2181,11 @@ mod tests {
             )?;
             writer.commit()?;
         }
-        let err =
-            restore_snapshot(&source, &target, 26, &["--with-txs-since=30"]).await.unwrap_err();
+        let err = restore(26, &["--with-txs-since=30"]).await.unwrap_err();
         assert_eq!(err.to_string(), "Local transaction files end before the snapshot tip; use --prune-unlisted to remove unselected files");
         assert_eq!(open()?.latest_writer(segment)?.user_header().tx_len(), Some(1));
-        restore_snapshot(&source, &target, 26, &["--with-txs-since=30", "--prune-unlisted"])
-            .await?;
-        let provider = open()?;
-        assert_eq!(provider.get_highest_static_file_block(segment), Some(26));
-        assert_eq!(provider.get_highest_static_file_tx(segment), None);
-        Ok(())
+        restore(26, &["--with-txs-since=30", "--prune-unlisted"]).await?;
+        check_anchor(26)
     }
 
     #[tokio::test]

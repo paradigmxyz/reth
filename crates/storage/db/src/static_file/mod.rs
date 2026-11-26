@@ -86,6 +86,24 @@ pub fn read_static_file_header(path: &Path) -> Result<SegmentHeader, NippyJarErr
     Ok(NippyJar::<SegmentHeader>::load(path)?.user_header().clone())
 }
 
+/// Returns the last missing block at or below `tip`, or `None` if coverage reaches genesis.
+/// Ranges must be ordered by decreasing end block. Overlapping ranges are allowed.
+pub fn last_missing_block(
+    tip: u64,
+    ranges: impl Iterator<Item = SegmentRangeInclusive>,
+) -> Option<u64> {
+    let mut missing = tip;
+    for range in ranges {
+        if range.end() < missing {
+            break
+        }
+        if range.contains(missing) {
+            missing = range.start().checked_sub(1)?;
+        }
+    }
+    Some(missing)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

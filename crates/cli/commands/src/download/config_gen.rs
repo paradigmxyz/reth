@@ -765,10 +765,8 @@ mod tests {
     fn bodies_checkpoint_preserves_transaction_progress() -> eyre::Result<()> {
         let db = create_test_rw_db();
         let manifest = SnapshotManifest { block: 24, ..empty_manifest() };
-        let selections =
-            BTreeMap::from([(SnapshotComponentType::Transactions, ComponentSelection::Since(13))]);
-        let config =
-            config_for_selections(&selections, &manifest, None, None::<&reth_chainspec::ChainSpec>);
+        let mut config = Config::default();
+        config.prune.segments.bodies_history = Some(PruneMode::Before(13));
         let source = PruneCheckpoint { tx_number: Some(16), ..PruneCheckpoint::pruned_through(15) };
         for (first_tx_num, prior, block, tx_number) in
             [(0, None, 9, None), (8, None, 9, Some(7)), (8, Some(source), 15, Some(16))]
@@ -781,7 +779,7 @@ mod tests {
             if let Some(source) = prior {
                 tx.put::<tables::PruneCheckpoints>(PruneSegment::Bodies, source)?;
             }
-            write_prune_checkpoints_tx(&tx, &config, &selections, &manifest, true, Some(9))?;
+            write_prune_checkpoints_tx(&tx, &config, &BTreeMap::new(), &manifest, true, Some(9))?;
             assert_eq!(
                 tx.get::<tables::PruneCheckpoints>(PruneSegment::Bodies)?,
                 Some(PruneCheckpoint {

@@ -1623,14 +1623,9 @@ mod tests {
         let provider = factory.provider_rw()?;
         let mut rng = generators::rng();
         for number in 0..=5 {
-            let block = random_block(
-                &mut rng,
-                number,
-                BlockParams {
-                    tx_count: Some(u8::from(matches!(number, 1 | 3))),
-                    ..Default::default()
-                },
-            );
+            let tx_count = Some(u8::from(matches!(number, 1 | 3)));
+            let block =
+                random_block(&mut rng, number, BlockParams { tx_count, ..Default::default() });
             provider.insert_block(&block.try_recover()?)?;
         }
         // The fixture imports blocks without executing transactions or writing receipts.
@@ -1644,13 +1639,9 @@ mod tests {
         files.initialize_index()?;
         assert_eq!(factory.earliest_block_number()?, 0);
         assert_eq!(factory.block(3.into())?.unwrap().body.transactions.len(), 1);
-        assert_eq!(
-            factory.get_prune_checkpoints_for_availability()?,
-            [(
-                PruneSegment::Bodies,
-                PruneCheckpoint { block_number: None, tx_number: None, ..legacy }
-            )]
-        );
+        let checkpoints = || factory.get_prune_checkpoints_for_availability();
+        let available = PruneCheckpoint { block_number: None, tx_number: None, ..legacy };
+        assert_eq!(checkpoints()?, [(PruneSegment::Bodies, available)]);
         assert_eq!(factory.get_prune_checkpoint(PruneSegment::Bodies)?, Some(legacy));
 
         // A verified source boundary inside a physically retained jar still expires its bodies.
@@ -1660,10 +1651,7 @@ mod tests {
         provider.save_prune_checkpoint(PruneSegment::Bodies, pruned)?;
         provider.commit()?;
         assert_eq!(factory.earliest_block_number()?, 4);
-        assert_eq!(
-            factory.get_prune_checkpoints_for_availability()?,
-            [(PruneSegment::Bodies, pruned)]
-        );
+        assert_eq!(checkpoints()?, [(PruneSegment::Bodies, pruned)]);
 
         // The older jar contains transaction zero; the entire suffix after the gap is empty.
         files.delete_jar(segment, 2)?;
