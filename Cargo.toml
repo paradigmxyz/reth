@@ -696,13 +696,6 @@ evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "7c9f3b6deb
 evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "7c9f3b6deb23005fc84596ba1b13a6492d942014" }
 
 [patch.crates-io]
-# Shared REST-SSZ witness containers.
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "9460a69371c1e461ebe9c1a2cf809758cd17874e" }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "9460a69371c1e461ebe9c1a2cf809758cd17874e" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "9460a69371c1e461ebe9c1a2cf809758cd17874e" }
-alloy-serde = { git = "https://github.com/alloy-rs/alloy", rev = "9460a69371c1e461ebe9c1a2cf809758cd17874e" }
-alloy-tx-macros = { git = "https://github.com/alloy-rs/alloy", rev = "9460a69371c1e461ebe9c1a2cf809758cd17874e" }
-
 # reth-core
 reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
 reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
