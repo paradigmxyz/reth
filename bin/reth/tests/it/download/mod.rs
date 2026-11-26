@@ -353,17 +353,17 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
     let expected = Block::decode_sealed(&mut next_block).unwrap();
     assert!(next_block.is_empty());
     assert_eq!(expected.body().transactions.len(), 6);
+    let run = |name: &str, datadir: &Path, args: &[&str]| {
+        let mut flags = vec![name, "--chain", chain, "--datadir", datadir.to_str().unwrap()];
+        flags.extend_from_slice(args);
+        reth_ok(&flags);
+    };
     let import = |datadir: &Path, path: &Path| {
-        reth_ok(&[
+        run(
             "import",
-            "--chain",
-            chain,
-            "--db.max-size=256MB",
-            "--db.growth-step=8MB",
-            "--datadir",
-            datadir.to_str().unwrap(),
-            path.to_str().unwrap(),
-        ]);
+            datadir,
+            &["--db.max-size=256MB", "--db.growth-step=8MB", path.to_str().unwrap()],
+        );
     };
     import(source.path(), &prefix);
     // Pre-Cancun slot preimages are auxiliary to this restore and occupy a sparse 4 GiB file.
@@ -385,13 +385,8 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
     for include_indices in [false, true] {
         let target = tempfile::tempdir().unwrap();
         let mut flags = vec![
-            "download",
             "--manifest-path",
             manifest.to_str().unwrap(),
-            "--chain",
-            chain,
-            "--datadir",
-            target.path().to_str().unwrap(),
             "--with-txs-since=100",
             "--with-state-history",
             "--with-receipts",
@@ -400,18 +395,19 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
         if include_indices {
             flags.push("--with-rocksdb");
         }
-        reth_ok(&flags);
+        run("download", target.path(), &flags);
         let start_node = || {
-            Reth::at(RETH)
+            let node = Reth::at(RETH)
                 .instance(0)
                 .chain_or_path(chain)
                 .data_dir(target.path())
                 .disable_discovery()
                 .args(["--with-unused-ports", "--max-outbound-peers=0", "--max-inbound-peers=0"])
-                .spawn()
+                .spawn();
+            let rpc = ProviderBuilder::new().connect_http(node.endpoint_url());
+            (node, rpc)
         };
-        let node = start_node();
-        let rpc = ProviderBuilder::new().connect_http(node.endpoint_url());
+        let (node, rpc) = start_node();
         assert_eq!(rpc.get_block_number().await.unwrap(), tip);
         let capabilities: Value = rpc.client().request_noparams("eth_capabilities").await.unwrap();
         assert_eq!(capabilities["blocks"]["oldestBlock"], format!("{:#x}", tip + 1));
@@ -425,8 +421,7 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
         drop(node);
 
         import(target.path(), &suffix);
-        let node = start_node();
-        let rpc = ProviderBuilder::new().connect_http(node.endpoint_url());
+        let (_node, rpc) = start_node();
         assert_eq!(rpc.get_block_number().await.unwrap(), tip + 1);
         let block = rpc.get_block_by_number((tip + 1).into()).await.unwrap().unwrap();
         assert!(block.transactions.hashes().eq(expected.body().transaction_hashes_iter().copied()));
