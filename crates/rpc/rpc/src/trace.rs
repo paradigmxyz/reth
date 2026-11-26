@@ -1017,11 +1017,13 @@ fn parity_trace_weight_mib<'a>(
     let mut recorded = gas.saturating_mul(4);
     if steps {
         let step_bytes = gas.saturating_mul(64);
-        let limit = max_trace_bytes.into_iter().chain(max_response_size).min();
-        // The recording, the response built from it and the copy sent.
-        recorded = recorded.saturating_add(
-            limit.map_or(step_bytes, |limit| step_bytes.min(limit as u64)).saturating_mul(3),
-        );
+        let cap = |limit: Option<usize>| limit.map_or(step_bytes, |l| step_bytes.min(l as u64));
+        // The recording stops at the trace byte limit, while the response built from it and the
+        // copy sent are bounded by the response size only when serialized.
+        let response = cap(max_trace_bytes.into_iter().chain(max_response_size).min());
+        recorded = recorded
+            .saturating_add(cap(max_trace_bytes))
+            .saturating_add(response.saturating_mul(2));
     }
     bytes_to_mib(traced_calls_bytes(calls).saturating_add(recorded))
 }
@@ -1897,10 +1899,10 @@ mod tests {
         };
 
         assert_eq!(weight(&[types(&[TraceType::Trace])], 10_000_000), 55);
-        // The response size bounds the steps.
-        assert_eq!(weight(&[types(&[TraceType::VmTrace])], 10_000_000), 535);
+        // The trace byte limit bounds the recording, the response size its response.
+        assert_eq!(weight(&[types(&[TraceType::VmTrace])], 10_000_000), 695);
         // The calls share both limits.
-        assert_eq!(weight(&vec![types(&[TraceType::VmTrace]); 64], 50_000_000), 939);
+        assert_eq!(weight(&vec![types(&[TraceType::VmTrace]); 64], 50_000_000), 1099);
         let calls = [types(&[TraceType::Trace]), types(&[TraceType::StateDiff])];
         assert_eq!(
             parity_trace_weight_mib(&calls, 10_000_000, Some(1 << 20), max_response_size),
