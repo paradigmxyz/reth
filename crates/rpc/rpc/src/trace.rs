@@ -1423,6 +1423,21 @@ mod tests {
                 ["error"]["code"],
             -32602
         );
+        // The mock returns no traces, so pin each tag to its block through the range check:
+        // latest is block 2 and earliest block 0.
+        let reversed = serde_json::json!({
+            "code": -32602,
+            "message": "invalid parameters: fromBlock cannot be greater than toBlock",
+        });
+        for (filter, error) in [
+            (serde_json::json!({ "fromBlock": "latest", "toBlock": "0x1" }), Some(&reversed)),
+            (serde_json::json!({ "fromBlock": "0x2", "toBlock": "latest" }), None),
+            (serde_json::json!({ "fromBlock": "0x1", "toBlock": "earliest" }), Some(&reversed)),
+            (serde_json::json!({ "fromBlock": "earliest", "toBlock": "0x0" }), None),
+        ] {
+            let response = response(filter.clone()).await;
+            assert_eq!(response.get("error"), error, "{filter}: {response}");
+        }
         // Tags are matched exactly; anything else is still parsed as a number.
         assert_eq!(
             response(serde_json::json!({ "fromBlock": "LATEST" })).await["error"]["code"],
