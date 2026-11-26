@@ -1,7 +1,7 @@
 use crate::{
     providers::{
-        ConsistentProvider, ProviderNodeTypes, RocksDBProvider, SnapshottedProvider,
-        StaticFileProvider, StaticFileProviderRWRefMut,
+        ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
+        StaticFileProviderRWRefMut,
     },
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
@@ -147,27 +147,32 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     }
 
     /// Returns a historical state provider for `block_hash` over a database snapshot and the
-    /// in-memory blocks tracked while its transaction opened, as a consistent view holds them.
+    /// in-memory blocks tracked while its transaction opened, which `provider` holds.
     ///
     /// Callers such as RPC choose the block, so the trie reverts it accumulates stay out of the
     /// changeset cache the engine shares.
     ///
     /// Returns an error if this snapshot's state tables have advanced past its finished block.
-    pub fn state_provider_from_database(
+    pub fn state_provider_from_consistent_view(
         &self,
-        provider: SnapshottedProvider<N>,
+        provider: ConsistentProvider<N>,
         block_hash: B256,
     ) -> ProviderResult<StateProviderBox> {
-        if Self::execution_ahead_of_finish(&provider, provider.best_block_number()?)? {
+        let database_provider = provider.database_provider();
+        if Self::execution_ahead_of_finish(
+            database_provider,
+            database_provider.best_block_number()?,
+        )? {
             return Err(ProviderError::StateUnavailableDuringSync)
         }
 
         Ok(Box::new(
-            self.database
-                .overlay_manager()
-                .overlay_builder(block_hash)
-                .without_trie_revert_caching()
-                .into_provider(provider),
+            provider.into_overlay_provider(
+                self.database
+                    .overlay_manager()
+                    .overlay_builder(block_hash)
+                    .without_trie_revert_caching(),
+            ),
         ))
     }
 
@@ -189,24 +194,26 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// was taken can't slip its downloads past the check.
     fn state_range_view(
         &self,
-        provider: SnapshottedProvider<N>,
+        provider: ConsistentProvider<N>,
         state_root: B256,
     ) -> ProviderResult<Option<StateRangeView>> {
-        if provider.snap_attempt()?.is_some_and(|attempt| !attempt.is_verified()) {
+        let database_provider = provider.database_provider();
+        if database_provider.snap_attempt()?.is_some_and(|attempt| !attempt.is_verified()) {
             return Ok(None)
         }
 
         // A pipeline run commits executed state before it moves `Finish`, so until then the state
         // tables are ahead of every retained block.
-        let Some(finish) = provider.get_stage_checkpoint(StageId::Finish)? else { return Ok(None) };
-        if Self::execution_ahead_of_finish(&provider, finish.block_number)? {
+        let Some(finish) = database_provider.get_stage_checkpoint(StageId::Finish)? else {
+            return Ok(None)
+        };
+        if Self::execution_ahead_of_finish(database_provider, finish.block_number)? {
             return Ok(None)
         }
 
         // The canonical chain in memory when the transaction opened holds the newest blocks.
         let in_memory_block = provider
-            .snapshot()
-            .canonical_head()
+            .head_block()
             .into_iter()
             .flat_map(|head| head.chain())
             .find(|state| state.state_root() == state_root)
@@ -215,7 +222,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             Some(block_hash) => block_hash,
             None => {
                 let Some(block_hash) =
-                    retained_block_hash::<N>(&provider, finish.block_number, state_root)?
+                    retained_block_hash::<N>(database_provider, finish.block_number, state_root)?
                 else {
                     return Ok(None)
                 };
@@ -224,12 +231,12 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         };
         // Peers choose the root, so its reverts stay out of the cache the engine shares.
         Ok(Some(Box::new(HistoricalStateRangeView {
-            provider: self
-                .database
-                .overlay_manager()
-                .overlay_builder(block_hash)
-                .without_trie_revert_caching()
-                .into_provider(provider),
+            provider: provider.into_overlay_provider(
+                self.database
+                    .overlay_manager()
+                    .overlay_builder(block_hash)
+                    .without_trie_revert_caching(),
+            ),
         })))
     }
 }
@@ -270,7 +277,7 @@ impl<N: ProviderNodeTypes> StateRangeProviderFactory for BlockchainProvider<N> {
     /// is unverified, since no root describes its partially downloaded state, or while the
     /// `Execution` checkpoint is ahead of `Finish`.
     fn state_range_provider(&self, state_root: B256) -> ProviderResult<Option<StateRangeView>> {
-        self.state_range_view(self.consistent_provider()?.snapshotted_provider(), state_root)
+        self.state_range_view(self.consistent_provider()?, state_root)
     }
 }
 
@@ -860,14 +867,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        self.state_provider_from_database(provider.snapshotted_provider(), hash)
+        self.state_provider_from_consistent_view(provider, hash)
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        self.state_provider_from_database(provider.snapshotted_provider(), block_hash)
+        self.state_provider_from_consistent_view(provider, block_hash)
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
@@ -1080,8 +1087,8 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         &self,
         block: BlockNumber,
     ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
-        let provider = self.consistent_provider()?.snapshotted_provider();
-        if let Some(head) = provider.snapshot().canonical_head() &&
+        let consistent_provider = self.consistent_provider()?;
+        if let Some(head) = consistent_provider.head_block() &&
             let Some(state) = head.block_on_chain(block.into())
         {
             return Ok(Some(ExecutionOutcome::from((
@@ -1090,17 +1097,15 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
             ))))
         }
 
+        let provider = consistent_provider.database_provider();
         let Some(block_body) = provider.block_body_indices(block)? else { return Ok(None) };
 
         let account_changeset = provider.account_changesets_range(block..=block)?;
         let storage_changeset = provider.storage_changeset(block)?;
 
         let Some(block_hash) = provider.block_hash(block)? else { return Ok(None) };
-        let state_provider = self
-            .database
-            .overlay_manager()
-            .overlay_builder(block_hash)
-            .into_provider_ref(&provider);
+        let state_provider = consistent_provider
+            .overlay_provider(self.database.overlay_manager().overlay_builder(block_hash));
         let (state, reverts) = provider.populate_bundle_state(
             account_changeset,
             storage_changeset,
@@ -3395,14 +3400,16 @@ mod tests {
     fn historical_state_checks_pipeline_progress_on_its_snapshot() -> eyre::Result<()> {
         let (factory, _) = test_provider_factory_with_genesis()?;
         let provider = BlockchainProvider::new(factory.clone())?;
-        let before_execution = provider.consistent_provider()?.snapshotted_provider();
+        let before_execution = provider.consistent_provider()?;
         let genesis_hash = before_execution.block_hash(0)?.expect("genesis exists");
 
         let provider_rw = factory.provider_rw()?;
         provider_rw.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(1))?;
         provider_rw.commit()?;
 
-        assert!(provider.state_provider_from_database(before_execution, genesis_hash).is_ok());
+        assert!(provider
+            .state_provider_from_consistent_view(before_execution, genesis_hash)
+            .is_ok());
         for result in [
             provider.history_by_block_number(0),
             provider.state_by_block_hash(genesis_hash),
@@ -3455,7 +3462,7 @@ mod tests {
         let mut attempt = SnapAttempt::start(None, BlockNumHash::default(), B256::ZERO);
 
         // A snapshot taken before the attempt starts keeps serving, without its downloads.
-        let before_attempt = provider.consistent_provider()?.snapshotted_provider();
+        let before_attempt = provider.consistent_provider()?;
         let provider_rw = factory.provider_rw()?;
         provider_rw.write_snap_attempt(&attempt)?;
         provider_rw.insert_account_for_hashing([(address, Some(account))])?;
@@ -3466,7 +3473,7 @@ mod tests {
         assert_eq!(state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?.items, []);
 
         // A snapshot taken while the attempt is unverified stays refused after verification.
-        let unverified = provider.consistent_provider()?.snapshotted_provider();
+        let unverified = provider.consistent_provider()?;
         attempt.verify();
         let provider_rw = factory.provider_rw()?;
         provider_rw.write_snap_attempt(&attempt)?;
@@ -4236,7 +4243,8 @@ mod tests {
         canonical_in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: vec![block] });
 
-        let snapshot = provider.consistent_provider()?.snapshotted_provider().into_parts().1;
+        let view = provider.consistent_provider()?;
+        let snapshot = view.in_memory();
         canonical_in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
 
         assert!(!factory.overlay_manager().in_memory_state().contains(&persisted.hash));

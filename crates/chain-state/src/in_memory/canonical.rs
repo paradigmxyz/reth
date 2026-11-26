@@ -331,6 +331,12 @@ impl<T, N: NodePrimitives> std::ops::Deref for Snapshotted<T, N> {
     }
 }
 
+impl<T, N: NodePrimitives> std::ops::DerefMut for Snapshotted<T, N> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
+}
+
 /// The numbers of blocks an [`InMemoryState`] tracks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InMemoryStateBlockCounts {

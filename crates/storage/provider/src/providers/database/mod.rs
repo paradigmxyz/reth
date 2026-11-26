@@ -17,7 +17,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use core::fmt;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
-use reth_chain_state::{ChainInfoHeaders, InMemoryState, Snapshotted};
+use reth_chain_state::{ChainInfoHeaders, InMemoryState};
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
@@ -1068,13 +1068,6 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
         }
     }
 }
-
-/// A read-only database provider with the in-memory blocks that were tracked while its transaction
-/// opened, as a [`ConsistentProvider`](crate::providers::ConsistentProvider) holds it.
-pub type SnapshottedProvider<N> = Snapshotted<
-    DatabaseProviderRO<<N as NodeTypesWithDB>::DB, N>,
-    <N as reth_node_types::NodeTypes>::Primitives,
->;
 
 #[cfg(test)]
 mod tests {

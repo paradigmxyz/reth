@@ -1,4 +1,4 @@
-use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes, SnapshottedProvider};
+use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes};
 use crate::{
     changeset_walker::changeset_block_range,
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
@@ -13,9 +13,12 @@ use alloy_consensus::{
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
-use reth_chain_state::{BlockState, CanonicalInMemoryState};
+use reth_chain_state::{BlockState, CanonicalInMemoryState, InMemoryStateSnapshot, Snapshotted};
 use reth_chainspec::ChainInfo;
-use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
+use reth_db_api::{
+    models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices},
+    transaction::DbTx,
+};
 use reth_execution_types::RecoveredBlockAndExecutionOutput;
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives_traits::{
@@ -26,6 +29,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
+use reth_storage_overlay::{OverlayBuilder, OverlayStateProvider, OwnedProvider};
 use reth_trie::bundle_state::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
@@ -43,7 +47,7 @@ use std::{
 #[doc(hidden)] // triggers ICE for `cargo docs`
 pub struct ConsistentProvider<N: ProviderNodeTypes> {
     /// Storage provider, with the in-memory blocks tracked while its transaction opened.
-    storage_provider: SnapshottedProvider<N>,
+    storage_provider: Snapshotted<DatabaseProviderRO<N::DB, N>, N::Primitives>,
     /// In-memory canonical state. This is not a snapshot, and can change! Use with caution.
     canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
 }
@@ -68,15 +72,44 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         Ok(Self { storage_provider, canonical_in_memory_state: state })
     }
 
-    /// Returns the in-memory canonical head when this view was created.
-    const fn head_block(&self) -> Option<&Arc<BlockState<N::Primitives>>> {
-        self.storage_provider.snapshot().canonical_head()
+    /// Disables the timeout and backtrace recording of the database transaction, for views held
+    /// longer than a long-read transaction is allowed to live.
+    pub fn disable_long_read_transaction_safety(mut self) -> Self {
+        self.storage_provider.tx_mut().disable_long_read_transaction_safety();
+        self
     }
 
-    /// Consumes this consistent view and returns its database provider, with the in-memory blocks
-    /// tracked while its transaction opened.
-    pub(crate) fn snapshotted_provider(self) -> SnapshottedProvider<N> {
-        self.storage_provider
+    /// Returns the in-memory canonical head when this view was created.
+    pub(crate) const fn head_block(&self) -> Option<&Arc<BlockState<N::Primitives>>> {
+        self.in_memory().canonical_head()
+    }
+
+    /// Returns the in-memory blocks tracked when this view was created.
+    pub(crate) const fn in_memory(&self) -> &InMemoryStateSnapshot<N::Primitives> {
+        self.storage_provider.snapshot()
+    }
+
+    /// Returns the database provider of this view.
+    pub(crate) fn database_provider(&self) -> &DatabaseProviderRO<N::DB, N> {
+        &self.storage_provider
+    }
+
+    /// Returns an overlay state provider over this view's database provider, resolving in-memory
+    /// blocks against this view's in-memory blocks.
+    pub(crate) fn into_overlay_provider(
+        self,
+        overlay_builder: OverlayBuilder<N::Primitives>,
+    ) -> OverlayStateProvider<OwnedProvider<DatabaseProviderRO<N::DB, N>>, N::Primitives> {
+        overlay_builder.into_provider(self.storage_provider)
+    }
+
+    /// Returns an overlay state provider borrowing this view's database provider, resolving
+    /// in-memory blocks against this view's in-memory blocks.
+    pub(crate) fn overlay_provider(
+        &self,
+        overlay_builder: OverlayBuilder<N::Primitives>,
+    ) -> OverlayStateProvider<&DatabaseProviderRO<N::DB, N>, N::Primitives> {
+        overlay_builder.into_provider_ref(&self.storage_provider)
     }
 
     // Helper function to convert range bounds
