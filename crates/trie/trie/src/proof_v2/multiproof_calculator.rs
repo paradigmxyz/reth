@@ -62,8 +62,9 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> MultiProofCalcu
 
     /// Generates account and storage proofs for `targets`.
     ///
-    /// An explicit storage address with no slot targets requests its root node. Empty targets
-    /// return an empty proof.
+    /// An explicit storage address with no slot targets requests its root and, for an extension
+    /// root, its child branch. Nodes are returned children before parents. Empty targets return an
+    /// empty proof.
     pub fn multiproof(
         &mut self,
         targets: MultiProofTargetsV2,
@@ -124,7 +125,7 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> MultiProofCalcu
             for (hashed_address, mut targets) in storage_targets {
                 let calculator = storage_calculator.calculator_for(hashed_address);
                 let nodes = if targets.is_empty() {
-                    vec![calculator.storage_root_node(hashed_address)?]
+                    calculator.storage_root_nodes(hashed_address)?
                 } else {
                     calculator.storage_proof(hashed_address, &mut targets)?
                 };
@@ -276,5 +277,89 @@ impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>> DeferredValue
         };
         account.into_trie_account(root).encode(buf);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::TrieTestHarness;
+    use reth_trie_common::{Nibbles, TrieNode};
+    use reth_trie_sparse::{RevealableSparseTrie, SparseTrie, TrieNodeEpoch};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn empty_storage_targets_retain_extension_branch() {
+        let harness = TrieTestHarness::new(BTreeMap::from([
+            (B256::right_padding_from(&[0x34, 0x30]), U256::ONE),
+            (B256::right_padding_from(&[0x34, 0x31]), U256::from(2)),
+        ]));
+        let hashed_address = harness.hashed_address();
+        let mut calculator = MultiProofCalculator::new(
+            harness.trie_cursor_factory(),
+            harness.hashed_cursor_factory(),
+            TriePrefixSets::default(),
+            Arc::default(),
+        );
+        // Repeated root-only requests must preserve the branch and its persistence masks.
+        for _ in 0..2 {
+            let mut proof = calculator
+                .multiproof(MultiProofTargetsV2 {
+                    storage_targets: std::iter::once((hashed_address, Vec::new())).collect(),
+                    ..Default::default()
+                })
+                .unwrap();
+            let nodes = proof.storage_proofs.get_mut(&hashed_address).unwrap();
+            assert_eq!(nodes, &harness.root_nodes());
+            assert_eq!(nodes.len(), 2);
+            assert_eq!(nodes[0].path, Nibbles::from_nibbles([3, 4, 3]));
+            assert!(matches!(nodes[0].node, TrieNode::Branch(_)));
+            assert!(nodes[1].path.is_empty());
+            assert!(matches!(nodes[1].node, TrieNode::Extension(_)));
+
+            let mut trie = <RevealableSparseTrie>::default();
+            trie.reveal_v2_proof_nodes(nodes, true).unwrap();
+            assert_eq!(
+                trie.as_revealed_mut().unwrap().root(TrieNodeEpoch::UNMODIFIED),
+                harness.original_root()
+            );
+        }
+    }
+
+    #[test]
+    fn empty_storage_targets_non_extension_roots() {
+        for storage in [
+            BTreeMap::new(),
+            BTreeMap::from([(B256::ZERO, U256::ONE)]),
+            BTreeMap::from([
+                (B256::ZERO, U256::ONE),
+                (B256::right_padding_from(&[0x10]), U256::from(2)),
+            ]),
+        ] {
+            let harness = TrieTestHarness::new(storage);
+            let hashed_address = harness.hashed_address();
+            let mut calculator = MultiProofCalculator::new(
+                harness.trie_cursor_factory(),
+                harness.hashed_cursor_factory(),
+                TriePrefixSets::default(),
+                Arc::default(),
+            );
+            let mut proof = calculator
+                .multiproof(MultiProofTargetsV2 {
+                    storage_targets: std::iter::once((hashed_address, Vec::new())).collect(),
+                    ..Default::default()
+                })
+                .unwrap();
+            let nodes = proof.storage_proofs.get_mut(&hashed_address).unwrap();
+            assert_eq!(nodes, &harness.root_nodes());
+            assert_eq!(nodes.len(), 1);
+
+            let mut trie = <RevealableSparseTrie>::default();
+            trie.reveal_v2_proof_nodes(nodes, true).unwrap();
+            assert_eq!(
+                trie.as_revealed_mut().unwrap().root(TrieNodeEpoch::UNMODIFIED),
+                harness.original_root()
+            );
+        }
     }
 }

@@ -185,6 +185,13 @@ impl NewPayloadError {
     pub const fn is_invalid_versioned_hashes(&self) -> bool {
         matches!(self, Self::Eth(PayloadError::InvalidVersionedHashes))
     }
+
+    /// Returns `true` if the error is caused by payload data that could not be decoded, such as an
+    /// invalid transaction.
+    #[inline]
+    pub const fn is_decode_error(&self) -> bool {
+        matches!(self, Self::Eth(PayloadError::Decode(_)))
+    }
 }
 
 impl From<NewPayloadError> for PayloadStatusEnum {
