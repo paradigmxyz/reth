@@ -1499,15 +1499,33 @@ mod tests {
     }
 
     #[test]
-    fn eth_68_rejects_types_without_room_for_sizes_and_hashes() {
-        let encoded = encoded(&EncodableNewPooledTransactionHashes68 {
+    fn eth_68_types_need_room_for_sizes_and_hashes() {
+        let too_short = encoded(&EncodableNewPooledTransactionHashes68 {
             types: Bytes::from_static(&[0x02; 4]),
             sizes: vec![],
             hashes: vec![],
         });
 
-        let result = NewPooledTransactionHashes68::decode(&mut encoded.as_slice());
+        let result = NewPooledTransactionHashes68::decode(&mut too_short.as_slice());
 
         assert_eq!(result, Err(alloy_rlp::Error::InputTooShort));
+
+        // One-byte sizes leave the smallest room per entry that a valid announcement can have.
+        let eth68 = NewPooledTransactionHashes68 {
+            types: vec![0x02; 8],
+            sizes: vec![0; 8],
+            hashes: vec![B256::ZERO; 8],
+        };
+        let decoded = NewPooledTransactionHashes68::decode(&mut encoded(&eth68).as_slice());
+        assert_eq!(decoded, Ok(eth68.clone()));
+
+        let eth72 = NewPooledTransactionHashes72 {
+            types: eth68.types,
+            sizes: eth68.sizes,
+            hashes: eth68.hashes,
+            cell_mask: None,
+        };
+        let decoded = NewPooledTransactionHashes72::decode(&mut encoded(&eth72).as_slice());
+        assert_eq!(decoded, Ok(eth72));
     }
 }
