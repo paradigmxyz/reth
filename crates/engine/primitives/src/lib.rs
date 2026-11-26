@@ -11,6 +11,7 @@
 
 extern crate alloc;
 
+use alloc::sync::Arc;
 use alloy_consensus::BlockHeader;
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
@@ -195,6 +196,22 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
         &self,
         payload: Types::ExecutionData,
     ) -> Result<SealedBlock<Self::Block>, NewPayloadError>;
+
+    /// Converts the given payload into a shared sealed block without recovering signatures.
+    ///
+    /// Same as [`Self::convert_payload_to_block`], but returns the block behind an [`Arc`]. The
+    /// engine tree uses this when it converts a payload while executing it, and takes the block
+    /// out of the [`Arc`] after execution. Implementations whose payload already holds the block
+    /// in an [`Arc`] can return that [`Arc`], so that what transactions cache during execution
+    /// (such as recovery results) stays on the block the engine keeps, without cloning the block.
+    ///
+    /// Defaults to wrapping [`Self::convert_payload_to_block`].
+    fn convert_payload_to_shared_block(
+        &self,
+        payload: Types::ExecutionData,
+    ) -> Result<Arc<SealedBlock<Self::Block>>, NewPayloadError> {
+        self.convert_payload_to_block(payload).map(Arc::new)
+    }
 
     /// Ensures that the given payload does not violate any consensus rules that concern the block's
     /// layout.
