@@ -968,22 +968,18 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
         for block_state in self.head_block.iter().flat_map(|b| b.chain()) {
-            let executed_block = block_state.block_ref();
-            let block = executed_block.recovered_block();
             let receipts = block_state.executed_block_receipts_ref();
 
             // assuming 1:1 correspondence between transactions and receipts
             debug_assert_eq!(
-                block.body().transactions().len(),
+                block_state.block_ref().recovered_block().body().transactions().len(),
                 receipts.len(),
                 "Mismatch between transaction and receipt count"
             );
 
-            if let Some(tx_index) =
-                block.body().transactions_iter().position(|tx| *tx.tx_hash() == hash)
-            {
-                // safe to use tx_index for receipts due to 1:1 correspondence
-                return Ok(receipts.get(tx_index).cloned());
+            if let Some(indexed) = block_state.find_indexed(hash) {
+                // safe to use the transaction index for receipts due to 1:1 correspondence
+                return Ok(receipts.get(indexed.index()).cloned());
             }
         }
 
