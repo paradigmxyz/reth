@@ -1098,7 +1098,7 @@ mod tests {
         let state = StateOverride::from_iter([(
             created,
             alloy_rpc_types_eth::state::AccountOverride {
-                state_diff: Some([(B256::ZERO, B256::with_last_byte(42))].into_iter().collect()),
+                state_diff: Some(std::iter::once((B256::ZERO, B256::with_last_byte(42))).collect()),
                 ..Default::default()
             },
         )]);
