@@ -19,22 +19,28 @@ use tracing::info;
 ///
 /// If the file already exists, it is not overwritten. Returns `true` if the file was written.
 pub fn write_config(config: &Config, data_dir: &Path) -> eyre::Result<bool> {
-    let config_path = data_dir.join("reth.toml");
+    write_config_to_path(config, &data_dir.join("reth.toml"))
+}
 
-    if config_path.exists() {
+/// Writes the generated config only if the selected node config does not exist.
+pub(super) fn write_config_to_path(config: &Config, config_path: &Path) -> eyre::Result<bool> {
+    if config_path.try_exists()? {
         info!(target: "reth::cli",
             path = ?config_path,
-            "reth.toml already exists, skipping config generation"
+            "Config file already exists, skipping config generation"
         );
         return Ok(false);
     }
 
     let toml_str = toml::to_string_pretty(config)?;
-    reth_fs_util::write(&config_path, toml_str)?;
+    if let Some(parent) = config_path.parent() {
+        reth_fs_util::create_dir_all(parent)?;
+    }
+    reth_fs_util::write(config_path, toml_str)?;
 
     info!(target: "reth::cli",
         path = ?config_path,
-        "Generated reth.toml based on downloaded components"
+        "Generated config based on downloaded components"
     );
 
     Ok(true)

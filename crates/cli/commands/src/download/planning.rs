@@ -207,6 +207,17 @@ fn selection_archive_distance(
     }
 }
 
+/// Returns the data filename of a transaction jar member the provider can open.
+fn transaction_jar_name(path: &Path) -> Option<&str> {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        None | Some(CONFIG_FILE_EXTENSION | OFFSETS_FILE_EXTENSION) => {}
+        _ => return None,
+    }
+    let name = path.file_stem()?.to_str()?;
+    let (segment, range) = StaticFileSegment::parse_filename(name)?;
+    (segment == StaticFileSegment::Transactions && segment.filename(&range) == name).then_some(name)
+}
+
 /// Returns the last block before the continuous range of restored bodies through the tip.
 /// A range starting at genesis has no preceding block.
 pub(super) fn restored_bodies_boundary(
@@ -224,7 +235,8 @@ pub(super) fn restored_bodies_boundary(
     let mut ranges = Vec::new();
     for output in archives.iter().flat_map(|archive| &archive.output_files) {
         if let Some(path) = static_file_relative_path(output.relative_path()?) &&
-            path.extension().is_some_and(|ext| ext == CONFIG_FILE_EXTENSION)
+            path.extension().is_some_and(|ext| ext == CONFIG_FILE_EXTENSION) &&
+            transaction_jar_name(path).is_some()
         {
             let header = read_static_file_header(&verifier.output_path(output)?)?;
             if header.segment() == StaticFileSegment::Transactions &&
@@ -298,9 +310,13 @@ pub(crate) fn collect_planned_archives(
                 .filter_map(|output| static_file_relative_path(Path::new(&output.path)))
                 .collect::<HashSet<_>>();
             for path in &files {
-                if path.extension().is_some_and(|ext| ext == CONFIG_FILE_EXTENSION) {
-                    for extension in ["", OFFSETS_FILE_EXTENSION] {
-                        let required = path.with_extension(extension);
+                if let Some(name) = transaction_jar_name(path) {
+                    eyre::ensure!(
+                        path.components().count() == 1,
+                        "Transaction static file {name} must be directly under static_files"
+                    );
+                    for extension in ["", CONFIG_FILE_EXTENSION, OFFSETS_FILE_EXTENSION] {
+                        let required = Path::new(name).with_extension(extension);
                         eyre::ensure!(
                             files.contains(required.as_path()),
                             "Incomplete transaction static file: missing static_files/{}",
@@ -826,6 +842,27 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn transaction_jar_in_subdirectory_is_rejected() {
+        let mut manifest = test_manifest_with_component_tip(9, 10);
+        let ty = SnapshotComponentType::Transactions;
+        let Some(ComponentManifest::Chunked(chunked)) = manifest.components.get_mut(ty.key())
+        else {
+            unreachable!()
+        };
+        chunked.chunk_output_files[0] = ["", ".conf", ".off"]
+            .map(|extension| OutputFileChecksum {
+                path: format!("static_files/backup/static_file_transactions_0_9{extension}"),
+                size: 0,
+                blake3: String::new(),
+            })
+            .into();
+        let err =
+            collect_planned_archives(&manifest, &BTreeMap::from([(ty, ComponentSelection::All)]))
+                .unwrap_err();
+        assert_eq!(err.to_string(), "Transaction static file static_file_transactions_0_9 must be directly under static_files");
     }
 
     #[test]
