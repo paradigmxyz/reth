@@ -187,6 +187,12 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// This function validates the payload and converts it into a [`SealedBlock`] which contains
     /// the block hash but does not perform signature recovery on transactions.
     ///
+    /// The block is returned behind an [`Arc`]. The engine tree converts a payload while it
+    /// executes it and takes the block out of the [`Arc`] after execution, so an implementation
+    /// whose payload already holds its block in an [`Arc`] can return that [`Arc`]: the block the
+    /// engine keeps is then the one execution used, with anything its transactions cached during
+    /// execution (such as recovery results), and is not cloned.
+    ///
     /// This is more efficient than [`Self::ensure_well_formed_payload`] when signature recovery
     /// is not needed immediately or will be performed later.
     ///
@@ -195,23 +201,7 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     fn convert_payload_to_block(
         &self,
         payload: Types::ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, NewPayloadError>;
-
-    /// Converts the given payload into a shared sealed block without recovering signatures.
-    ///
-    /// Same as [`Self::convert_payload_to_block`], but returns the block behind an [`Arc`]. The
-    /// engine tree uses this when it converts a payload while executing it, and takes the block
-    /// out of the [`Arc`] after execution. Implementations whose payload already holds the block
-    /// in an [`Arc`] can return that [`Arc`], so that what transactions cache during execution
-    /// (such as recovery results) stays on the block the engine keeps, without cloning the block.
-    ///
-    /// Defaults to wrapping [`Self::convert_payload_to_block`].
-    fn convert_payload_to_shared_block(
-        &self,
-        payload: Types::ExecutionData,
-    ) -> Result<Arc<SealedBlock<Self::Block>>, NewPayloadError> {
-        self.convert_payload_to_block(payload).map(Arc::new)
-    }
+    ) -> Result<Arc<SealedBlock<Self::Block>>, NewPayloadError>;
 
     /// Ensures that the given payload does not violate any consensus rules that concern the block's
     /// layout.
@@ -226,7 +216,7 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
         &self,
         payload: Types::ExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
-        let sealed_block = self.convert_payload_to_block(payload)?;
+        let sealed_block = Arc::unwrap_or_clone(self.convert_payload_to_block(payload)?);
         sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
     }
 

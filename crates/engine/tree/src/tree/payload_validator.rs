@@ -391,7 +391,9 @@ where
         V: PayloadValidator<T, Block = N::Block>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => self.validator.convert_payload_to_block(payload),
+            BlockOrPayload::Payload(payload) => {
+                self.validator.convert_payload_to_block(payload).map(Arc::unwrap_or_clone)
+            }
             BlockOrPayload::Block(block) => Ok(block.split().0),
         }
     }
@@ -941,7 +943,7 @@ where
     /// perform basic consensus validations on it.
     ///
     /// The block is returned behind an [`Arc`] so that a payload which already holds its block in
-    /// an [`Arc`] is not cloned here, see [`PayloadValidator::convert_payload_to_shared_block`].
+    /// an [`Arc`] is not cloned here, see [`PayloadValidator::convert_payload_to_block`].
     #[expect(clippy::type_complexity)]
     pub fn spawn_convert_and_validate<T>(
         &self,
@@ -966,7 +968,7 @@ where
             let block = match input {
                 BlockOrPayload::Block(block) => Arc::new(block.split().0),
                 BlockOrPayload::Payload(payload) => {
-                    validator.convert_payload_to_shared_block(payload)?
+                    validator.convert_payload_to_block(payload)?
                 }
             };
 
@@ -1855,7 +1857,7 @@ where
         payload: Types::ExecutionData,
     ) -> Result<SealedBlock<N::Block>, NewPayloadError> {
         let block = self.validator.convert_payload_to_block(payload)?;
-        Ok(block)
+        Ok(Arc::unwrap_or_clone(block))
     }
 
     fn validate_payload(
