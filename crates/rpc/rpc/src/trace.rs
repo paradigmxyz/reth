@@ -819,7 +819,12 @@ where
             )
             .into())
         }
+        // Read the head once, so latest..latest selects one block even while the head advances.
+        let latest = self.provider().best_block_number().map_err(EthApiError::from)?;
         let resolve = |tag: BlockNumberOrTag| -> Result<u64, EthApiError> {
+            if tag.is_latest() {
+                return Ok(latest)
+            }
             self.provider()
                 .convert_block_number(tag)
                 .map_err(EthApiError::from)?
