@@ -148,7 +148,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
 
     /// Returns a historical state provider for `block_hash` over a database snapshot and the
     /// in-memory blocks tracked while its transaction opened, as
-    /// [`ProviderFactory::provider_with_in_memory_snapshot`] returns them.
+    /// [`ProviderFactory::snapshotted_provider`] returns them.
     ///
     /// Callers such as RPC choose the block, so the trie reverts it accumulates stay out of the
     /// changeset cache the engine shares.
@@ -271,7 +271,7 @@ impl<N: ProviderNodeTypes> StateRangeProviderFactory for BlockchainProvider<N> {
     /// is unverified, since no root describes its partially downloaded state, or while the
     /// `Execution` checkpoint is ahead of `Finish`.
     fn state_range_provider(&self, state_root: B256) -> ProviderResult<Option<StateRangeView>> {
-        self.state_range_view(self.database.provider_with_in_memory_snapshot()?, state_root)
+        self.state_range_view(self.database.snapshotted_provider()?, state_root)
     }
 }
 
@@ -861,14 +861,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        self.state_provider_from_database(provider.into_snapshotted_provider(), hash)
+        self.state_provider_from_database(provider.snapshotted_provider(), hash)
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        self.state_provider_from_database(provider.into_snapshotted_provider(), block_hash)
+        self.state_provider_from_database(provider.snapshotted_provider(), block_hash)
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
@@ -1090,7 +1090,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
             ))))
         }
 
-        let provider = self.database.provider_with_in_memory_snapshot()?;
+        let provider = self.database.snapshotted_provider()?;
         let Some(block_body) = provider.block_body_indices(block)? else { return Ok(None) };
 
         let account_changeset = provider.account_changesets_range(block..=block)?;
@@ -3396,7 +3396,7 @@ mod tests {
     fn historical_state_checks_pipeline_progress_on_its_snapshot() -> eyre::Result<()> {
         let (factory, _) = test_provider_factory_with_genesis()?;
         let provider = BlockchainProvider::new(factory.clone())?;
-        let before_execution = factory.provider_with_in_memory_snapshot()?;
+        let before_execution = factory.snapshotted_provider()?;
         let genesis_hash = before_execution.block_hash(0)?.expect("genesis exists");
 
         let provider_rw = factory.provider_rw()?;
@@ -3456,7 +3456,7 @@ mod tests {
         let mut attempt = SnapAttempt::start(None, BlockNumHash::default(), B256::ZERO);
 
         // A snapshot taken before the attempt starts keeps serving, without its downloads.
-        let before_attempt = factory.provider_with_in_memory_snapshot()?;
+        let before_attempt = factory.snapshotted_provider()?;
         let provider_rw = factory.provider_rw()?;
         provider_rw.write_snap_attempt(&attempt)?;
         provider_rw.insert_account_for_hashing([(address, Some(account))])?;
@@ -3467,7 +3467,7 @@ mod tests {
         assert_eq!(state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?.items, []);
 
         // A snapshot taken while the attempt is unverified stays refused after verification.
-        let unverified = factory.provider_with_in_memory_snapshot()?;
+        let unverified = factory.snapshotted_provider()?;
         attempt.verify();
         let provider_rw = factory.provider_rw()?;
         provider_rw.write_snap_attempt(&attempt)?;

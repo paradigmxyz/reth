@@ -418,7 +418,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     ///
     /// Blocks are removed from memory only after their persistence committed, so every in-memory
     /// block the transaction's durable frontiers need is in the snapshot.
-    pub fn provider_with_in_memory_snapshot(&self) -> ProviderResult<SnapshottedProvider<N>> {
+    pub fn snapshotted_provider(&self) -> ProviderResult<SnapshottedProvider<N>> {
         self.overlay_manager.in_memory_state().snapshot_during(|| self.provider()).transpose()
     }
 
@@ -1079,7 +1079,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
 }
 
 /// A read-only database provider with the in-memory blocks that were tracked while its transaction
-/// opened, as [`ProviderFactory::provider_with_in_memory_snapshot`] returns it.
+/// opened, as [`ProviderFactory::snapshotted_provider`] returns it.
 pub type SnapshottedProvider<N> = Snapshotted<
     DatabaseProviderRO<<N as NodeTypesWithDB>::DB, N>,
     <N as reth_node_types::NodeTypes>::Primitives,
@@ -1124,7 +1124,7 @@ mod tests {
         let persisted = block.recovered_block().num_hash();
         in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new: vec![block] });
 
-        let in_memory = factory.provider_with_in_memory_snapshot().unwrap().into_parts().1;
+        let in_memory = factory.snapshotted_provider().unwrap().into_parts().1;
         in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
 
         assert!(!factory.overlay_manager().in_memory_state().contains(&persisted.hash));
