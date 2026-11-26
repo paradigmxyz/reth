@@ -90,7 +90,10 @@ impl ModularDownloadJob {
         let progress_handle = spawn_progress_display(Arc::clone(&shared));
         for reused in &planned_downloads.reused {
             info!(target: "reth::cli", file = %reused.archive.file_name, component = %reused.component, "Skipping already verified plain files");
-            shared.record_reused_archive(reused.archive.size, reused.archive.output_size());
+            shared.record_reused_archive(
+                reused.archive.size.unwrap_or_default(),
+                reused.archive.output_size(),
+            );
         }
         let ctx = self.ctx.clone();
         let results: Vec<Result<()>> = stream::iter(planned_downloads.pending)
@@ -263,8 +266,12 @@ impl ArchiveProcessor {
     fn run_cached_attempt(&self, format: CompressionFormat) -> Result<Option<ExtractedHashes>> {
         let cache_dir =
             self.ctx.cache_dir().ok_or_else(|| eyre::eyre!("Missing download cache directory"))?;
-        let fetcher =
-            ArchiveFetcher::new(self.archive().url.clone(), cache_dir, self.ctx.session().clone());
+        let fetcher = ArchiveFetcher::new(
+            self.archive().url.clone(),
+            cache_dir,
+            self.ctx.session().clone(),
+            self.archive().size,
+        );
 
         if self.archive.ty == super::manifest::SnapshotComponentType::State {
             debug!(target: "reth::cli", url = %self.archive().url, "Downloading state snapshot archive");
