@@ -1661,17 +1661,27 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        let mut changesets = Vec::new();
+        self.for_each_storage_changeset(range, |block_address, entry| {
+            changesets.push((block_address, entry))
+        })?;
+        Ok(changesets)
+    }
+
+    fn for_each_storage_changeset(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        mut f: impl FnMut(BlockNumberAddress, StorageEntry),
+    ) -> ProviderResult<()> {
         if self.cached_storage_settings().storage_v2 {
-            self.static_file_provider.storage_changesets_range(range)
+            self.static_file_provider.for_each_storage_changeset(range, f)
         } else {
-            self.tx
-                .cursor_dup_read::<tables::StorageChangeSets>()?
-                .walk_range(BlockNumberAddressRange::from(range))?
-                .map(|r| {
-                    let (bna, entry) = r?;
-                    Ok((bna, entry))
-                })
-                .collect()
+            let mut cursor = self.tx.cursor_dup_read::<tables::StorageChangeSets>()?;
+            for entry in cursor.walk_range(BlockNumberAddressRange::from(range))? {
+                let (block_address, storage_entry) = entry?;
+                f(block_address, storage_entry);
+            }
+            Ok(())
         }
     }
 
@@ -1730,18 +1740,31 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         &self,
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+        let mut changesets = Vec::new();
+        self.for_each_account_changeset(range, |block_number, changeset| {
+            changesets.push((block_number, changeset))
+        })?;
+        Ok(changesets)
+    }
+
+    fn for_each_account_changeset(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        mut f: impl FnMut(BlockNumber, AccountBeforeTx),
+    ) -> ProviderResult<()> {
         if self.cached_storage_settings().storage_v2 {
-            self.static_file_provider.account_changesets_range(range)
+            self.static_file_provider.for_each_account_changeset(range, f)
         } else {
             let range = changeset_block_range(range, BlockNumber::MAX);
             if range.is_empty() {
-                return Ok(Vec::new())
+                return Ok(())
             }
-            self.tx
-                .cursor_read::<tables::AccountChangeSets>()?
-                .walk_range(range)?
-                .map(|r| r.map_err(Into::into))
-                .collect()
+            let mut cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
+            for entry in cursor.walk_range(range)? {
+                let (block_number, changeset) = entry?;
+                f(block_number, changeset);
+            }
+            Ok(())
         }
     }
 

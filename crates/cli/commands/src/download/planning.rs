@@ -96,7 +96,7 @@ impl DownloadPlanArchive {
             planned.ty.key(),
             planned.archive.file_name.clone(),
             planned.archive.url.clone(),
-            planned.archive.size,
+            planned.archive.size.unwrap_or_default(),
             planned.archive.output_size(),
             planned.archive.blake3.clone(),
         )
@@ -323,7 +323,7 @@ mod tests {
                 archive: SnapshotArchive {
                     url: "https://example.com/ok.tar.zst".to_string(),
                     file_name: "ok.tar.zst".to_string(),
-                    size: 10,
+                    size: Some(10),
                     blake3: None,
                     output_files: vec![OutputFileChecksum {
                         path: "ok.bin".to_string(),
@@ -338,7 +338,7 @@ mod tests {
                 archive: SnapshotArchive {
                     url: "https://example.com/missing.tar.zst".to_string(),
                     file_name: "missing.tar.zst".to_string(),
-                    size: 10,
+                    size: Some(10),
                     blake3: None,
                     output_files: vec![OutputFileChecksum {
                         path: "missing.bin".to_string(),
@@ -353,7 +353,7 @@ mod tests {
                 archive: SnapshotArchive {
                     url: "https://example.com/bad-size.tar.zst".to_string(),
                     file_name: "bad-size.tar.zst".to_string(),
-                    size: 10,
+                    size: Some(10),
                     blake3: None,
                     output_files: vec![],
                 },
@@ -433,7 +433,7 @@ mod tests {
                 archive: SnapshotArchive {
                     url: "u3".to_string(),
                     file_name: "t.tar.zst".to_string(),
-                    size: 1,
+                    size: Some(1),
                     blake3: None,
                     output_files: vec![OutputFileChecksum {
                         path: "a".to_string(),
@@ -448,7 +448,7 @@ mod tests {
                 archive: SnapshotArchive {
                     url: "u2".to_string(),
                     file_name: "rocksdb_indices.tar.zst".to_string(),
-                    size: 1,
+                    size: Some(1),
                     blake3: None,
                     output_files: vec![OutputFileChecksum {
                         path: "b".to_string(),
@@ -463,7 +463,7 @@ mod tests {
                 archive: SnapshotArchive {
                     url: "u1".to_string(),
                     file_name: "state.tar.zst".to_string(),
-                    size: 1,
+                    size: Some(1),
                     blake3: None,
                     output_files: vec![OutputFileChecksum {
                         path: "c".to_string(),
