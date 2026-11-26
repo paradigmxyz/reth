@@ -13,7 +13,7 @@ use super::{
     PooledTransactions, Receipts, Status, StatusEth69, Transactions,
 };
 use crate::{
-    status::StatusMessage, BlockRangeUpdate, BroadcastPoolTransactions, Cells,
+    status::StatusMessage, BlockRangeUpdate, BroadcastPoolTransactions, CellMasks, Cells,
     EthNetworkPrimitives, EthVersion, GetCells, NetworkPrimitives, NewPooledTransactionHashes72,
     RawCapabilityMessage, Receipts69, Receipts70, SharedTransactions,
 };
@@ -215,26 +215,18 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 }
                 EthMessage::BlockAccessLists(RequestPair::decode(buf)?)
             }
-            EthMessageID::Cells => {
-                if version < EthVersion::Eth72 {
-                    return Err(MessageError::Invalid(version, EthMessageID::Cells))
-                }
-                let response: RequestPair<Cells> = RequestPair::decode(buf)?;
-                if response.message.cell_mask.is_indexed() && version < EthVersion::Eth73 {
-                    return Err(MessageError::Invalid(version, EthMessageID::Cells))
-                }
-                EthMessage::Cells(response)
-            }
-            EthMessageID::GetCells => {
-                if version < EthVersion::Eth72 {
-                    return Err(MessageError::Invalid(version, EthMessageID::GetCells))
-                }
-                let request: RequestPair<GetCells> = RequestPair::decode(buf)?;
-                if request.message.cell_mask.is_indexed() && version < EthVersion::Eth73 {
-                    return Err(MessageError::Invalid(version, EthMessageID::GetCells))
-                }
-                EthMessage::GetCells(request)
-            }
+            EthMessageID::Cells => EthMessage::Cells(RequestPair::<Cells>::decode_cells(
+                version,
+                message_type,
+                buf,
+                |cells| &cells.cell_mask,
+            )?),
+            EthMessageID::GetCells => EthMessage::GetCells(RequestPair::<GetCells>::decode_cells(
+                version,
+                message_type,
+                buf,
+                |request| &request.cell_mask,
+            )?),
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
                 buf.advance(raw_payload.len());
@@ -844,6 +836,25 @@ where
     fn length(&self) -> usize {
         let payload_length = self.request_id.length() + self.message.length();
         Header { list: true, payload_length }.length_with_payload()
+    }
+}
+
+impl<T: Decodable> RequestPair<T> {
+    /// Decodes a cell message using its negotiated version and mask form.
+    fn decode_cells(
+        version: EthVersion,
+        id: EthMessageID,
+        buf: &mut &[u8],
+        cell_mask: fn(&T) -> &CellMasks,
+    ) -> Result<Self, MessageError> {
+        if version < EthVersion::Eth72 {
+            return Err(MessageError::Invalid(version, id))
+        }
+        let pair = Self::decode(buf)?;
+        if version == EthVersion::Eth72 && cell_mask(&pair.message).is_indexed() {
+            return Err(MessageError::Invalid(version, id))
+        }
+        Ok(pair)
     }
 }
 

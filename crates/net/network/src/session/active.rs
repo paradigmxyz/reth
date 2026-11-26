@@ -538,7 +538,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             let Err(err) = cells.cell_mask.validate(&cells.hashes, false)
         {
             error!(target: "net", peer_id=?self.remote_peer_id, %err, "Rejected invalid local cell request");
-            request.send_err_response(RequestError::BadResponse);
+            request.send_err_response(RequestError::InvalidRequest);
             return
         }
 
@@ -2064,6 +2064,13 @@ mod tests {
                 hashes: vec![],
                 cell_mask: CellMasks::Indexed { masks: vec![], mask_ids: Default::default() },
             });
+            invalid.push(GetCells {
+                hashes: valid.hashes.clone(),
+                cell_mask: CellMasks::Indexed {
+                    masks: vec![B128::ZERO],
+                    mask_ids: vec![0, 0].into(),
+                },
+            });
             for request in invalid {
                 let (response, rx) = oneshot::channel();
                 let deadline = session.request_deadline();
@@ -2071,7 +2078,7 @@ mod tests {
                     PeerRequest::GetCells { request, response },
                     deadline,
                 );
-                assert_eq!(rx.await.unwrap(), Err(RequestError::BadResponse));
+                assert_eq!(rx.await.unwrap(), Err(RequestError::InvalidRequest));
                 assert!(session.inflight_requests.is_empty());
                 assert!(session.queued_outgoing.is_empty());
                 assert_eq!(session.next_id, 0);

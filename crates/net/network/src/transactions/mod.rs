@@ -256,7 +256,7 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 
     /// Requests cells with one little-endian mask per transaction hash.
     /// Uniform batches use shared encoding; heterogeneous batches require an eth/73 peer and
-    /// contain at most 64 unique hashes. Invalid batches return `BadResponse` without sending.
+    /// contain at most 64 unique hashes. Invalid batches return `InvalidRequest` without sending.
     /// Returns `None` if the peer disconnected. Callers must verify returned cells against the
     /// transaction commitments and proofs before using them, as with `get_cells_from`.
     pub async fn get_cells_with_masks_from(
@@ -265,7 +265,8 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
         hashes: Vec<B256>,
         masks: Vec<B128>,
     ) -> Result<Option<Cells>, RequestError> {
-        let request = GetCells::from_masks(hashes, masks).map_err(|_| RequestError::BadResponse)?;
+        let request =
+            GetCells::from_masks(hashes, masks).map_err(|_| RequestError::InvalidRequest)?;
         self.request_cells_from(peer_id, request).await
     }
 
@@ -646,6 +647,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
                 return
             }
             RequestError::BadResponse => return self.report_peer_bad_transactions(peer_id),
+            RequestError::InvalidRequest => return,
         };
         self.report_peer(peer_id, kind);
     }
@@ -2474,6 +2476,26 @@ mod tests {
         CoinbaseTipOrdering<EthPooledTransaction>,
         InMemoryBlobStore,
     >;
+
+    #[tokio::test]
+    async fn invalid_cell_batches_do_not_query_a_peer() {
+        let (manager_tx, mut manager_rx) = mpsc::unbounded_channel();
+        let handle = TransactionsHandle::<EthNetworkPrimitives> { manager_tx };
+        for (hashes, masks) in [
+            (vec![], vec![]),
+            (vec![B256::ZERO], vec![]),
+            (vec![B256::ZERO; 2], vec![B128::ZERO, B128::repeat_byte(1)]),
+        ] {
+            let result = tokio::time::timeout(
+                Duration::from_secs(1),
+                handle.get_cells_with_masks_from(PeerId::default(), hashes, masks),
+            )
+            .await
+            .expect("invalid request should be rejected before looking up a peer");
+            assert_eq!(result, Err(RequestError::InvalidRequest));
+            assert!(matches!(manager_rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)));
+        }
+    }
 
     #[tokio::test]
     async fn announcement_policy_preserves_order_and_skips_pending_and_bad_imports() {

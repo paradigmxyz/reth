@@ -4,7 +4,7 @@
 
 use alloc::vec::Vec;
 use alloy_eips::eip7594::{BlobCellMask, Cell};
-use alloy_primitives::{map::B256Set, Bytes, B128, B256};
+use alloy_primitives::{map::B256Map, Bytes, B128, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Error, Header};
 use reth_primitives_traits::InMemorySize;
 
@@ -40,7 +40,7 @@ pub enum CellMasks {
     Shared(B128),
     /// The eth/73 form. Masks must be unique, referenced, and ordered by first use.
     Indexed {
-        /// One to 64 masks, or empty for an empty indexed response.
+        /// At most 64 masks. Requests need at least two; empty responses use none.
         masks: Vec<B128>,
         /// One byte per transaction hash, indexing `masks`.
         mask_ids: Bytes,
@@ -63,7 +63,8 @@ impl CellMasks {
     }
 
     /// Validates the indexed bounds, uniqueness, and first-reference ordering.
-    /// Shared forms retain eth/72 semantics. Only responses may use an empty indexed table.
+    /// Shared forms retain eth/72 semantics. Only responses may use an empty indexed table
+    /// or an indexed table with a single mask.
     pub fn validate(&self, hashes: &[B256], response: bool) -> alloy_rlp::Result<()> {
         let Self::Indexed { masks, mask_ids } = self else { return Ok(()) };
         if hashes.len() > MAX_INDEXED_CELL_HASHES ||
@@ -97,6 +98,9 @@ impl CellMasks {
             if hashes[..index].contains(hash) {
                 return Err(Error::Custom("duplicate cell transaction hash"))
             }
+        }
+        if !response && masks.len() == 1 {
+            return Err(Error::Custom("uniform cell requests must use the shared form"))
         }
         Ok(())
     }
@@ -324,7 +328,7 @@ pub struct Cells {
 }
 
 impl Cells {
-    /// Checks form, requested hashes, mask subsets, and cell-list dimensions.
+    /// Checks form, requested hash multiplicities, mask subsets, and cell-list dimensions.
     /// Cryptographic verification requires the transaction's commitments and proofs and is
     /// performed by the caller before importing any data into the blobpool.
     pub fn validate_response(&self, request: &GetCells) -> alloy_rlp::Result<()> {
@@ -336,23 +340,45 @@ impl Cells {
         }
         // Indexed requests are bounded to 64 hashes. Large shared responses need a lookup
         // table to prevent peer-controlled repeated hashes from causing quadratic work.
-        let shared_hashes = (matches!(request.cell_mask, CellMasks::Shared(_)) &&
+        let mut shared_hashes = (matches!(request.cell_mask, CellMasks::Shared(_)) &&
             request.hashes.len() > MAX_INDEXED_CELL_HASHES &&
             self.hashes.len() > MAX_INDEXED_CELL_HASHES)
-            .then(|| request.hashes.iter().copied().collect::<B256Set>());
-        for (index, hash) in self.hashes.iter().enumerate() {
-            let request_index = if let Some(hashes) = &shared_hashes {
-                if !hashes.contains(hash) {
-                    return Err(Error::Custom("unrequested cell transaction hash"))
+            .then(|| {
+                let mut remaining = B256Map::<usize>::with_capacity_and_hasher(
+                    request.hashes.len(),
+                    Default::default(),
+                );
+                for hash in &request.hashes {
+                    *remaining.entry(*hash).or_default() += 1;
                 }
+                remaining
+            });
+        for (index, hash) in self.hashes.iter().enumerate() {
+            let request_index = if let Some(hashes) = &mut shared_hashes {
+                let remaining = hashes
+                    .get_mut(hash)
+                    .ok_or(Error::Custom("unrequested cell transaction hash"))?;
+                if *remaining == 0 {
+                    return Err(Error::Custom("duplicate cell transaction hash"))
+                }
+                *remaining -= 1;
                 // Shared masks do not depend on the transaction position.
                 0
             } else {
-                request
+                let request_index = request
                     .hashes
                     .iter()
                     .position(|requested| requested == hash)
-                    .ok_or(Error::Custom("unrequested cell transaction hash"))?
+                    .ok_or(Error::Custom("unrequested cell transaction hash"))?;
+                if !self.cell_mask.is_indexed() && self.hashes[..index].contains(hash) {
+                    let returned =
+                        self.hashes[..index].iter().filter(|entry| *entry == hash).count();
+                    let requested = request.hashes.iter().filter(|entry| *entry == hash).count();
+                    if returned >= requested {
+                        return Err(Error::Custom("duplicate cell transaction hash"))
+                    }
+                }
+                request_index
             };
             let mask = self
                 .cell_mask
@@ -518,7 +544,66 @@ mod tests {
     }
 
     #[test]
+    fn indexed_packets_match_geth_rlp_vectors() {
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!("../testdata/eip8408/vectors.json",)).unwrap();
+        let hashes = [0x11u64, 0x22, 0x33].map(|value| B256::from(U256::from(value))).to_vec();
+        let request = indexed(
+            hashes.clone(),
+            vec![
+                B128::from((1u128 | (1 << 8) | (1 << 127)).to_le_bytes()),
+                B128::from((2u128 | (1 << 9)).to_le_bytes()),
+            ],
+            &[0, 1, 0],
+        );
+        let mut first = Cell::ZERO;
+        first[0] = 1;
+        first[2047] = 2;
+        let mut second = Cell::ZERO;
+        second[0] = 3;
+        second[2047] = 4;
+        let response = Cells {
+            hashes: hashes[1..].to_vec(),
+            cells: vec![vec![first], vec![second]],
+            cell_mask: CellMasks::Indexed {
+                masks: vec![
+                    B128::from((1u128 << 9).to_le_bytes()),
+                    B128::from((1u128 << 127).to_le_bytes()),
+                ],
+                mask_ids: Bytes::from_static(&[0, 1]),
+            },
+        };
+        assert_eq!(response.validate_response(&request), Ok(()));
+        let empty = Cells {
+            cell_mask: CellMasks::Indexed { masks: vec![], mask_ids: Bytes::new() },
+            ..Default::default()
+        };
+        for (name, message) in [
+            (
+                "request",
+                EthMessage::<EthNetworkPrimitives>::GetCells(RequestPair {
+                    request_id: 42,
+                    message: request,
+                }),
+            ),
+            ("response", EthMessage::Cells(RequestPair { request_id: 42, message: response })),
+            ("empty_response", EthMessage::Cells(RequestPair { request_id: 42, message: empty })),
+        ] {
+            let expected = vectors[name].as_str().unwrap().parse::<Bytes>().unwrap();
+            let protocol = ProtocolMessage::from(message);
+            assert_eq!(alloy_rlp::encode(&protocol).as_slice(), expected.as_ref());
+            let mut buf = expected.as_ref();
+            assert_eq!(
+                ProtocolMessage::decode_message(EthVersion::Eth73, &mut buf).unwrap(),
+                protocol
+            );
+            assert!(buf.is_empty());
+        }
+    }
+
+    #[test]
     fn indexed_wire_vector_is_flat() {
+        // Local schema fixture; independent geth RLP vectors are checked above.
         let pair = RequestPair { request_id: 1, message: request() };
         let expected = hex!("f86b01f842a00000000000000000000000000000000000000000000000000000000000000000a00101010101010101010101010101010101010101010101010101010101010101e290010101010101010101010101010101019002020202020202020202020202020202820001");
         assert_eq!(alloy_rlp::encode(&pair), expected);
@@ -570,11 +655,19 @@ mod tests {
 
     #[test]
     fn indexed_bounds_and_shared_compatibility() {
-        for count in [1, 64, 65] {
+        for count in [1, 2, 64, 65] {
             let hashes = (0..count).map(|n| B256::repeat_byte(n as u8)).collect::<Vec<_>>();
-            let req = indexed(hashes.clone(), vec![B128::ZERO], &vec![0; count]);
+            let masks =
+                if count == 1 { vec![B128::ZERO] } else { vec![B128::ZERO, B128::repeat_byte(1)] };
+            let ids = (0..count).map(|index| (index % 2) as u8).collect::<Vec<_>>();
+            let req = indexed(hashes.clone(), masks, &ids);
             let decoded = GetCells::decode(&mut alloy_rlp::encode(&req).as_slice());
-            if count <= 64 {
+            if count == 1 {
+                assert_eq!(
+                    decoded,
+                    Err(Error::Custom("uniform cell requests must use the shared form"))
+                );
+            } else if count <= 64 {
                 assert_eq!(decoded, Ok(req));
             } else {
                 assert_eq!(decoded, Err(Error::Custom("invalid indexed cell counts")));
@@ -632,7 +725,11 @@ mod tests {
 
     #[test]
     fn response_correlation_and_subsets() {
-        let request = indexed(vec![B256::ZERO], vec![B128::from(3u128.to_le_bytes())], &[0]);
+        let request = indexed(
+            vec![B256::ZERO, B256::repeat_byte(1)],
+            vec![B128::from(3u128.to_le_bytes()), B128::from(4u128.to_le_bytes())],
+            &[0, 1],
+        );
         let mut response = Cells {
             hashes: vec![B256::ZERO],
             cells: vec![vec![Cell::ZERO]],
@@ -642,7 +739,7 @@ mod tests {
             },
         };
         assert_eq!(response.validate_response(&request), Ok(()));
-        response.hashes[0] = B256::repeat_byte(1);
+        response.hashes[0] = B256::repeat_byte(2);
         assert_eq!(
             response.validate_response(&request),
             Err(Error::Custom("unrequested cell transaction hash"))
@@ -683,19 +780,26 @@ mod tests {
                 hashes: (0..count).map(|index| B256::from(U256::from(index))).collect(),
                 cell_mask: B128::from(1u128.to_le_bytes()).into(),
             };
-            // Repeated last hashes with no returned cells were the quadratic-work case.
             let mut response = Cells {
-                hashes: vec![request.hashes[count - 1]; count],
+                hashes: request.hashes.clone(),
                 cells: vec![vec![]; count],
                 cell_mask: B128::ZERO.into(),
             };
             assert_eq!(response.validate_response(&request), Ok(()));
+            if count > 1 {
+                let mut repeated = response.clone();
+                repeated.hashes.fill(request.hashes[count - 1]);
+                assert_eq!(
+                    repeated.validate_response(&request),
+                    Err(Error::Custom("duplicate cell transaction hash"))
+                );
+            }
             response.hashes[count - 1] = B256::repeat_byte(0xff);
             assert_eq!(
                 response.validate_response(&request),
                 Err(Error::Custom("unrequested cell transaction hash"))
             );
-            response.hashes[count - 1] = request.hashes[0];
+            response.hashes[count - 1] = request.hashes[count - 1];
             response.cell_mask = B128::from(2u128.to_le_bytes()).into();
             assert_eq!(
                 response.validate_response(&request),
@@ -714,7 +818,7 @@ mod tests {
         };
         for count in [0, 1, MAX_INDEXED_CELL_HASHES] {
             let mut response = Cells {
-                hashes: vec![request.hashes[MAX_INDEXED_CELL_HASHES]; count],
+                hashes: request.hashes.iter().rev().take(count).copied().collect(),
                 cells: vec![vec![]; count],
                 cell_mask: B128::ZERO.into(),
             };
@@ -727,6 +831,52 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn shared_response_respects_requested_hash_multiplicity() {
+        for count in [3, MAX_INDEXED_CELL_HASHES, MAX_INDEXED_CELL_HASHES + 1, 4096] {
+            let mut hashes =
+                (0..count).map(|index| B256::from(U256::from(index))).collect::<Vec<_>>();
+            hashes[count - 1] = hashes[0];
+            let request = GetCells { hashes: hashes.clone(), cell_mask: B128::ZERO.into() };
+            let mut response =
+                Cells { hashes, cells: vec![vec![]; count], cell_mask: B128::ZERO.into() };
+            assert_eq!(response.validate_response(&request), Ok(()));
+            response.hashes[1] = response.hashes[0];
+            assert_eq!(
+                response.validate_response(&request),
+                Err(Error::Custom("duplicate cell transaction hash"))
+            );
+        }
+    }
+
+    #[test]
+    fn uniform_indexed_requests_are_rejected_but_responses_are_valid() {
+        let hashes = vec![B256::ZERO, B256::repeat_byte(1)];
+        let a = B128::from(1u128.to_le_bytes());
+        let b = B128::from(2u128.to_le_bytes());
+        let uniform = indexed(hashes.clone(), vec![a], &[0, 0]);
+        assert_eq!(
+            GetCells::decode(&mut alloy_rlp::encode(uniform).as_slice()),
+            Err(Error::Custom("uniform cell requests must use the shared form"))
+        );
+        let request = GetCells::from_masks(hashes.clone(), vec![a, b]).unwrap();
+        let response = Cells {
+            hashes: vec![hashes[0]],
+            cells: vec![vec![Cell::ZERO]],
+            cell_mask: CellMasks::Indexed { masks: vec![a], mask_ids: Bytes::from_static(&[0]) },
+        };
+        assert_eq!(response.validate_response(&request), Ok(()));
+        assert_eq!(
+            alloy_rlp::decode_exact::<RequestPair<Cells>>(&alloy_rlp::encode(RequestPair {
+                request_id: 1,
+                message: response.clone(),
+            }))
+            .unwrap()
+            .message,
+            response
+        );
     }
 
     #[test]

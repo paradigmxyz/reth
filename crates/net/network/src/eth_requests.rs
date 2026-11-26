@@ -447,7 +447,7 @@ where
     ) {
         // Incoming requests can also be supplied directly, bypassing the wire decoder.
         if request.cell_mask.validate(&request.hashes, false).is_err() {
-            let _ = response.send(Err(RequestError::BadResponse));
+            let _ = response.send(Err(RequestError::InvalidRequest));
             return
         }
         let mut cells_response = Cells {
@@ -1410,8 +1410,10 @@ mod tests {
         assert_eq!(cells.validate_response(&request), Ok(()));
     }
 
+    #[test_case(1; "invalid_identifier")]
+    #[test_case(0; "uniform_indexed_request")]
     #[tokio::test]
-    async fn invalid_indexed_request_performs_no_lookups() {
+    async fn invalid_indexed_request_performs_no_lookups(id: u8) {
         let (_incoming_tx, incoming_rx) = mpsc::channel(1);
         let calls = Arc::new(AtomicUsize::new(0));
         let blob_store =
@@ -1421,13 +1423,10 @@ mod tests {
         let (response, rx) = oneshot::channel();
         let request = GetCells {
             hashes: vec![B256::ZERO],
-            cell_mask: CellMasks::Indexed {
-                masks: vec![B128::ZERO],
-                mask_ids: Bytes::from_static(&[1]),
-            },
+            cell_mask: CellMasks::Indexed { masks: vec![B128::ZERO], mask_ids: vec![id].into() },
         };
         handler.on_cells_request(PeerId::default(), request, response);
-        assert_eq!(rx.await.unwrap(), Err(RequestError::BadResponse));
+        assert_eq!(rx.await.unwrap(), Err(RequestError::InvalidRequest));
         assert_eq!(calls.load(Ordering::Relaxed), 0);
     }
 
@@ -1454,7 +1453,10 @@ mod tests {
         let request = GetCells {
             hashes: hashes.clone(),
             cell_mask: if indexed {
-                CellMasks::Indexed { masks: vec![mask], mask_ids: Bytes::from_static(&[0, 0]) }
+                CellMasks::Indexed {
+                    masks: vec![mask, B128::from(2u128.to_le_bytes())],
+                    mask_ids: Bytes::from_static(&[0, 1]),
+                }
             } else {
                 mask.into()
             },
