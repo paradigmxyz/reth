@@ -692,8 +692,9 @@ impl DiskFileBlobStoreInner {
 
     // Writes a cell sidecar to disk, unless the transaction already has a sidecar.
     fn insert_cells(&self, tx: B256, data: BlobTxCellSidecar) -> Result<(), BlobStoreError> {
+        let path = self.blob_disk_file(tx);
         // The blob cache can outlive a deleted sidecar, so only the file counts.
-        if self.blob_disk_file(tx).is_file() {
+        if path.is_file() {
             return Ok(())
         }
         let mut buf = Vec::with_capacity(1 + data.length());
@@ -704,9 +705,9 @@ impl DiskFileBlobStoreInner {
             recoverable: data.is_recoverable(),
             versioned_hashes: data.versioned_hashes().collect(),
         };
-        let path = self.blob_disk_file(tx);
         {
-            // Recorded under the lock, so a full sidecar written next replaces this file.
+            // Recorded and counted under the lock, so a full sidecar written next replaces this
+            // file and its size.
             let _lock = self.file_lock.write();
             // A full sidecar may have been written since.
             if path.exists() {
@@ -714,9 +715,9 @@ impl DiskFileBlobStoreInner {
             }
             fs::write(&path, &buf).map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
             self.cell_sidecars.write().insert(tx, file);
+            self.size_tracker.add_size(buf.len());
+            self.size_tracker.inc_len(1);
         }
-        self.size_tracker.add_size(buf.len());
-        self.size_tracker.inc_len(1);
         Ok(())
     }
 
