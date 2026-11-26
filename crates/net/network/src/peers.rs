@@ -1104,10 +1104,11 @@ impl PeersManager {
                     peer.kind = kind;
                 }
 
-                if peer.state.is_incoming() {
+                if peer.state.is_incoming() || (kind.is_some() && peer.state.is_connected()) {
                     // now that we have an actual discovered address, for that peer and not just the
                     // ip of the incoming connection, we don't need to remove the peer after
-                    // disconnecting, See `on_incoming_session_established`
+                    // disconnecting, See `on_incoming_session_established`. A peer given a kind,
+                    // e.g. by `admin_addPeer` while it is dialed as a candidate, is kept as well.
                     peer.remove_after_disconnect = false;
                 }
             }
@@ -5423,5 +5424,32 @@ mod tests {
         );
         assert!(!peers.peers.contains_key(&candidate));
         assert_eq!(peers.candidate_cooldowns.peek(&candidate), Some(&refused_until));
+    }
+
+    #[tokio::test]
+    async fn test_candidate_requested_as_static_is_kept() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        for _ in 0..MAX_TRACKED_PEERS {
+            peers.add_peer(PeerId::random(), addr, None);
+        }
+        let candidate = PeerId::random();
+        peers.add_peer(candidate, unique_ip_addr(0), None);
+        peers.fill_outbound_slots();
+        peers.on_active_outgoing_established(candidate);
+        assert!(peers.peers[&candidate].is_temporary());
+
+        peers.add_requested_peer(candidate, Some(PeerKind::Static), unique_ip_addr(0));
+        peers.on_active_session_gracefully_closed(candidate);
+        assert!(peers.peers[&candidate].is_static());
+
+        // unless it is already being removed.
+        let removed = PeerId::random();
+        peers.add_and_connect(removed, unique_ip_addr(1), None);
+        peers.on_active_outgoing_established(removed);
+        peers.remove_peer(removed);
+        peers.add_requested_peer(removed, Some(PeerKind::Static), unique_ip_addr(1));
+        peers.on_active_session_gracefully_closed(removed);
+        assert!(!peers.peers.contains_key(&removed));
     }
 }
