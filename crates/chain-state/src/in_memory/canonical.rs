@@ -309,11 +309,6 @@ impl<T, N: NodePrimitives> Snapshotted<T, N> {
     pub fn into_parts(self) -> (T, InMemoryStateSnapshot<N>) {
         (self.value, self.snapshot)
     }
-
-    /// Returns the value, dropping its snapshot.
-    pub fn into_value(self) -> T {
-        self.value
-    }
 }
 
 impl<T, E, N: NodePrimitives> Snapshotted<Result<T, E>, N> {

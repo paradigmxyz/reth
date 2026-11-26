@@ -137,6 +137,16 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         ConsistentProvider::new_long_read(self.database.clone(), self.canonical_in_memory_state())
     }
 
+    /// Returns the state after the pending block `block_hash`, or `None` if the consistent view
+    /// opened now no longer tracks it.
+    fn pending_state_provider(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
+        let provider = self.consistent_provider()?;
+        if provider.in_memory().state_by_hash(block_hash).is_none() {
+            return Ok(None)
+        }
+        provider.state_by_hash(block_hash, true).map(Some)
+    }
+
     /// Resolves `state_root` into a range view over `provider`'s snapshot and the in-memory blocks
     /// tracked when its transaction opened, preferring a canonical block of that snapshot with that
     /// root over the persisted-history fallback.
@@ -871,18 +881,6 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
             Some(pending) => self.pending_state_provider(pending.hash()),
             None => Ok(None),
         }
-    }
-}
-
-impl<N: ProviderNodeTypes> BlockchainProvider<N> {
-    /// Returns the state after the pending block `block_hash`, or `None` if the consistent view
-    /// opened now no longer tracks it.
-    fn pending_state_provider(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
-        let provider = self.consistent_provider()?;
-        if provider.in_memory().state_by_hash(block_hash).is_none() {
-            return Ok(None)
-        }
-        provider.state_by_hash(block_hash, true).map(Some)
     }
 }
 
@@ -4232,6 +4230,35 @@ mod tests {
             .update_chain(NewCanonicalChain::Commit { new: vec![block] });
 
         assert!(other.canonical_in_memory_state.state_by_hash(hash).is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn in_memory_state_checks_pipeline_progress() -> eyre::Result<()> {
+        let (factory, in_memory_state_writer) = test_provider_factory_with_genesis()?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory.clone(),
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
+        let genesis = provider.canonical_in_memory_state.get_canonical_head();
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, genesis.hash());
+        let hash = block.recovered_block().hash();
+        canonical_in_memory_state_writer
+            .update_chain(NewCanonicalChain::Commit { new: vec![block] });
+        assert!(provider.latest().is_ok());
+
+        // A pipeline run commits executed state before it moves `Finish`.
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(2))?;
+        provider_rw.commit()?;
+
+        for result in [provider.latest(), provider.pending(), provider.state_by_block_hash(hash)] {
+            assert!(matches!(result, Err(ProviderError::StateUnavailableDuringSync)));
+        }
         Ok(())
     }
 }

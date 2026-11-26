@@ -79,6 +79,11 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
 
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     /// Create a new overlay state provider factory.
+    ///
+    /// `factory` opens each database provider inside
+    /// [`InMemoryState::snapshot_during`](reth_chain_state::InMemoryState::snapshot_during), whose
+    /// last attempt holds the in-memory read lock, so its `database_provider_ro` must not read the
+    /// overlay manager's in-memory state.
     pub fn new(factory: F, overlay_builder: OverlayBuilder<N>) -> Self {
         let manager = overlay_builder.overlay_manager();
         Self {
