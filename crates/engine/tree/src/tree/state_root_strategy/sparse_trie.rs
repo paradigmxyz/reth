@@ -2562,7 +2562,7 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn storage_jobs_reveal_separate_extensions_and_branches() {
         let runtime = Runtime::test();
         let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());

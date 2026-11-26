@@ -675,6 +675,7 @@ fn block_access_list_decode_resend_returns_null_latest_valid_hash() {
 }
 
 #[tokio::test]
+#[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
 async fn test_tree_persist_blocks() {
     let tree_config = TreeConfig::default();
     let chain_spec = MAINNET.clone();
@@ -1089,7 +1090,7 @@ fn remove_blocks_clears_pending_sparse_trie_prune_request() {
     assert!(!test_harness.tree.state.pending_sparse_trie_prune());
 }
 
-#[test]
+#[reth_concurrency::test]
 fn process_payload_attributes_shares_sparse_trie_during_validation_fallback() {
     let config = TreeConfig::default()
         .with_has_enough_parallelism(true)
@@ -1132,6 +1133,7 @@ fn process_payload_attributes_shares_sparse_trie_during_validation_fallback() {
 }
 
 #[tokio::test]
+#[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
 async fn test_in_memory_state_trait_impl() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..10).collect();
     let test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
@@ -1156,6 +1158,7 @@ async fn test_in_memory_state_trait_impl() {
 }
 
 #[tokio::test]
+#[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
 async fn test_engine_request_during_backfill() {
     let tree_config = TreeConfig::default();
     let blocks: Vec<_> = TestBlockBuilder::eth()
@@ -1274,6 +1277,7 @@ fn test_validated_payload_bal_is_inserted_into_store() {
 }
 
 #[tokio::test]
+#[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
 async fn test_holesky_payload() {
     let s = include_str!("../../test-data/holesky/1.rlp");
     let data = Bytes::from_str(s).unwrap();
@@ -1399,6 +1403,7 @@ fn test_backpressure_excludes_in_memory_buffer() {
 }
 
 #[tokio::test]
+#[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
 async fn test_tree_state_on_new_head_reorg() {
     reth_tracing::init_test_tracing();
     let chain_spec = MAINNET.clone();
@@ -1615,6 +1620,7 @@ fn test_tree_state_on_new_head_genesis() {
 }
 
 #[tokio::test]
+#[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
 async fn test_get_canonical_blocks_to_persist() {
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec);
@@ -1748,6 +1754,7 @@ fn test_threshold_persistence_with_state_masking_blocks() {
 }
 
 #[tokio::test]
+#[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
 async fn test_engine_tree_fcu_missing_head() {
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec.clone());
@@ -1776,6 +1783,7 @@ async fn test_engine_tree_fcu_missing_head() {
 }
 
 #[tokio::test]
+#[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
 async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     reth_tracing::init_test_tracing();
 
@@ -1919,6 +1927,7 @@ fn backfill_finish_drops_in_memory_blocks_below_the_backfill_height_off_the_pers
 }
 
 #[tokio::test]
+#[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
 async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
     // Test for issue where FCU with canonical ancestor doesn't update Latest block state
     // This was causing "nonce too low" errors when discard_reorged_transactions is enabled
@@ -2001,6 +2010,7 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
 }
 
 #[tokio::test]
+#[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
 async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
     reth_tracing::init_test_tracing();
     let chain_spec = MAINNET.clone();
@@ -2086,6 +2096,7 @@ async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
 }
 
 #[tokio::test]
+#[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
 async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build() {
     reth_tracing::init_test_tracing();
     let chain_spec = MAINNET.clone();
@@ -2745,6 +2756,7 @@ mod forkchoice_updated_tests {
 
     /// Test that validates the forkchoice state pre-validation logic
     #[tokio::test]
+    #[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
     async fn test_validate_forkchoice_state() {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
@@ -2791,6 +2803,7 @@ mod forkchoice_updated_tests {
 
     /// Test that verifies canonical head handling
     #[tokio::test]
+    #[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
     async fn test_handle_canonical_head() {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
@@ -2827,6 +2840,7 @@ mod forkchoice_updated_tests {
 
     /// Test that verifies chain update application
     #[tokio::test]
+    #[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
     async fn test_apply_chain_update() {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
@@ -2863,6 +2877,7 @@ mod forkchoice_updated_tests {
 
     /// Test that verifies missing block handling
     #[tokio::test]
+    #[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
     async fn test_handle_missing_block() {
         let chain_spec = MAINNET.clone();
         let test_harness = TestHarness::new(chain_spec);
@@ -2892,6 +2907,7 @@ mod forkchoice_updated_tests {
 
     /// Test the complete `on_forkchoice_updated` flow with all helper methods
     #[tokio::test]
+    #[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
     async fn test_on_forkchoice_updated_integration() {
         reth_tracing::init_test_tracing();
 
@@ -2942,6 +2958,7 @@ mod forkchoice_updated_tests {
 
     /// Test edge case: FCU with invalid ancestor
     #[tokio::test]
+    #[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
     async fn test_fcu_with_invalid_ancestor() {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
@@ -2967,6 +2984,7 @@ mod forkchoice_updated_tests {
 
     /// Test `OpStack` specific behavior with canonical head
     #[tokio::test]
+    #[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
     async fn test_opstack_canonical_head_behavior() {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
@@ -3067,6 +3085,7 @@ mod forkchoice_updated_tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
     fn test_engine_termination_catches_up_state_trie_at_database_tip() {
         let chain_spec = MAINNET.clone();
         let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
@@ -3607,6 +3626,7 @@ async fn assert_post_backfill_recheck_uses_threshold(
 }
 
 #[tokio::test]
+#[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
 async fn test_on_backfill_sync_finished_opstack_retriggers_backfill_to_buffered_head() {
     assert_post_backfill_recheck_uses_threshold(
         EngineApiKind::OpStack,
@@ -3617,6 +3637,7 @@ async fn test_on_backfill_sync_finished_opstack_retriggers_backfill_to_buffered_
 }
 
 #[tokio::test]
+#[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
 async fn test_on_backfill_sync_finished_eth_retriggers_backfill_to_buffered_finalized() {
     assert_post_backfill_recheck_uses_threshold(
         EngineApiKind::Ethereum,
@@ -3627,6 +3648,7 @@ async fn test_on_backfill_sync_finished_eth_retriggers_backfill_to_buffered_fina
 }
 
 #[tokio::test]
+#[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
 async fn test_on_backfill_sync_finished_resumes_live_sync_with_higher_threshold() {
     for engine_kind in [EngineApiKind::Ethereum, EngineApiKind::OpStack] {
         assert_post_backfill_recheck_uses_threshold(engine_kind, 100, false).await;
@@ -3754,12 +3776,14 @@ async fn assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(sibling_len
 
 /// A reorged-out head must become canonical again while its disk reorg is still pending.
 #[tokio::test]
+#[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
 async fn test_fcu_back_to_reorged_out_head_with_pending_disk_reorg() {
     assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(3).await;
 }
 
 /// Same as above, but the reorged-out head is above the tip of the shorter sibling branch.
 #[tokio::test]
+#[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
 async fn test_fcu_back_to_reorged_out_head_above_shorter_branch_with_pending_disk_reorg() {
     assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(1).await;
 }
@@ -3770,6 +3794,7 @@ proptest::proptest! {
     #![proptest_config(proptest::test_runner::Config::with_cases(32))]
 
     #[test]
+    #[cfg_attr(feature = "fuzz", ignore = "native Tokio harness")]
     fn engine_messages_keep_sender_parent_on_another_thread(
         requests in proptest::collection::vec((0..2usize, 0..3u8), 1..16),
     ) {

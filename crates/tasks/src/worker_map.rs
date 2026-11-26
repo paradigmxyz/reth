@@ -3,9 +3,8 @@
 //! Each worker is a dedicated OS thread that processes closures sent to it via a channel.
 //! This is a substitute for `spawn_blocking` that reuses the same OS thread for the same
 //! named task, like a 1-thread thread pool keyed by name. Under `fuzz`, workers
-//! use the deterministic executor, but their Tokio channels remain native for now.
-//! Native waits do not yield to Shuttle and can stall an execution when another
-//! logical task must produce the awaited message.
+//! use the deterministic executor and work queues use the selected channel backend.
+//! Task results still use Tokio oneshot channels.
 
 use crate::metrics::WorkerThreadMetrics;
 use dashmap::DashMap;
@@ -15,7 +14,13 @@ use reth_concurrency::sync::{
     time::Instant,
 };
 use std::{panic::AssertUnwindSafe, sync::Arc};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
+
+#[cfg(not(feature = "fuzz"))]
+use tokio::sync::mpsc;
+
+#[cfg(feature = "fuzz")]
+use reth_concurrency::sync::channel;
 
 type BoxedTask = Box<dyn FnOnce() + Send + 'static>;
 
@@ -25,7 +30,7 @@ struct WorkerThread {
     #[cfg(not(feature = "fuzz"))]
     tx: mpsc::UnboundedSender<BoxedTask>,
     #[cfg(feature = "fuzz")]
-    tx: Option<mpsc::UnboundedSender<BoxedTask>>,
+    tx: Option<channel::Sender<BoxedTask>>,
     /// Metrics labeled with this worker's name.
     metrics: WorkerThreadMetrics,
     /// Number of tasks currently running or queued on this worker.
@@ -37,11 +42,25 @@ struct WorkerThread {
 impl WorkerThread {
     /// Spawns a new worker thread with the given name.
     fn new(name: &'static str) -> Self {
+        #[cfg(not(feature = "fuzz"))]
         let (tx, mut rx) = mpsc::unbounded_channel::<BoxedTask>();
+        // The selected queue yields to the simulator; Tokio's blocking receive would
+        // park the simulator's only OS thread.
+        #[cfg(feature = "fuzz")]
+        let (tx, rx) = channel::unbounded::<BoxedTask>();
         let handle = thread::Builder::new()
             .name(name.to_string())
             .spawn(move || {
-                while let Some(task) = rx.blocking_recv() {
+                while let Some(task) = {
+                    #[cfg(not(feature = "fuzz"))]
+                    {
+                        rx.blocking_recv()
+                    }
+                    #[cfg(feature = "fuzz")]
+                    {
+                        rx.recv().ok()
+                    }
+                } {
                     let _ = std::panic::catch_unwind(AssertUnwindSafe(task));
                 }
             })
