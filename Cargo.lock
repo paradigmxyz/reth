@@ -8948,6 +8948,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-trie",
  "arbitrary",
+ "bincode",
  "bytes",
  "derive_more",
  "proptest",
@@ -8958,6 +8959,7 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "serde",
+ "serde_json",
  "test-case",
  "thiserror 2.0.21",
 ]
