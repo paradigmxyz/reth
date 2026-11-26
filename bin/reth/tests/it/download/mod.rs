@@ -4,6 +4,7 @@ use self::server::SnapshotServer;
 use super::{reth_ok, RETH};
 use alloy_node_bindings::Reth;
 use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_types_eth::error::EthRpcErrorCode;
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
@@ -400,5 +401,12 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
         assert_eq!(rpc.get_block_number().await.unwrap(), tip);
         let capabilities: Value = rpc.client().request_noparams("eth_capabilities").await.unwrap();
         assert_eq!(capabilities["blocks"]["oldestBlock"], format!("{:#x}", tip + 1));
+        let err = rpc.get_block_by_number(tip.into()).await.unwrap_err();
+        let error = err.as_error_resp().unwrap();
+        assert_eq!(error.code, i64::from(EthRpcErrorCode::PrunedHistory.code()));
+        assert_eq!(
+            error.message,
+            "pruned history unavailable: requested 45, earliest available 46"
+        );
     }
 }
