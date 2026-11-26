@@ -745,7 +745,7 @@ impl<N: ProviderNodeTypes> BlockNumReader for ProviderFactory<N> {
     }
 
     fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.provider()?.earliest_block_number()
+        Ok(self.caught_up_static_file_provider()?.earliest_history_height())
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
@@ -1650,7 +1650,11 @@ mod tests {
         let pruned = PruneCheckpoint { tx_number: Some(1), ..PruneCheckpoint::pruned_through(3) };
         provider.save_prune_checkpoint(PruneSegment::Bodies, pruned)?;
         provider.commit()?;
-        assert_eq!(factory.earliest_block_number()?, 4);
+        assert_eq!(factory.earliest_block_number()?, 0);
+        assert_matches!(
+            factory.block(3.into()),
+            Err(ProviderError::BlockExpired { requested: 3, earliest_available: 4 })
+        );
         assert_eq!(checkpoints()?, [(PruneSegment::Bodies, pruned)]);
 
         // The older jar contains transaction zero; the entire suffix after the gap is empty.

@@ -68,6 +68,9 @@ offsets directly under `static_files/`, and the selection must cover the snapsho
 The Bodies checkpoint is the block before the continuous range ending at the tip,
 or a later source checkpoint. A cutoff above the tip skips transaction archives,
 keeps the requested future cutoff and anchors an empty file at the tip on a fresh restore.
+After a verified restore, log queries and the `earliest` state tag follow their own
+retained history. Engine API payload-body requests return `null` for
+each pruned body and return the available bodies in request order.
 If a requested range starts within the snapshot but a lagging transaction component
 has no corresponding archives, the download fails before clearing the data directory.
 Nodes reopening older downloads use the continuous transaction files to read and

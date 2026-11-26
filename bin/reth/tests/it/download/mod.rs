@@ -2,7 +2,9 @@ mod server;
 
 use self::server::SnapshotServer;
 use super::*;
-use alloy_rpc_types_eth::error::EthRpcErrorCode;
+use alloy_provider::{transport::Authorization, ConnectionConfig};
+use alloy_rpc_types::engine::{ExecutionPayloadBodyV1, JwtSecret};
+use alloy_rpc_types_eth::{error::EthRpcErrorCode, BlockNumberOrTag, Filter};
 use reth_ethereum_primitives::Block;
 use reth_primitives_traits::{Block as _, BlockBody};
 use serde_json::{json, Value};
@@ -412,12 +414,48 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
             error.message,
             "pruned history unavailable: requested 44, earliest available 45"
         );
+        let address = Address::repeat_byte(0xfe);
+        for filter in [
+            Filter::new().from_block(tip - 1).to_block(tip),
+            Filter::new().from_block(BlockNumberOrTag::Earliest).to_block(0u64),
+            Filter::new().at_block_hash(expected.parent_hash),
+        ] {
+            assert!(rpc.get_logs(&filter.address(address)).await.unwrap().is_empty());
+        }
+        assert_eq!(rpc.get_balance(address).earliest().await.unwrap(), U256::ZERO);
+        if include_indices {
+            let genesis_balance = rpc.get_balance(Address::ZERO).number(0).await.unwrap();
+            assert_ne!(rpc.get_balance(Address::ZERO).latest().await.unwrap(), genesis_balance);
+            assert_eq!(rpc.get_balance(Address::ZERO).earliest().await.unwrap(), genesis_balance);
+        }
         drop(node);
 
         run("import", target.path(), &[suffix.to_str().unwrap()]);
-        let (_node, rpc) = start_node();
+        let (node, rpc) = start_node();
         assert_eq!(rpc.get_block_number().await.unwrap(), tip + 1);
         let block = rpc.get_block_by_number((tip + 1).into()).await.unwrap().unwrap();
         assert!(block.transactions.hashes().eq(expected.body().transaction_hashes_iter().copied()));
+
+        let secret = JwtSecret::from_file(&target.path().join("jwt.hex")).unwrap();
+        let token = secret.encode(&Default::default()).unwrap();
+        let engine = ProviderBuilder::new()
+            .connect_with_config(
+                &format!("http://{}:{}", node.host(), node.auth_port().unwrap()),
+                ConnectionConfig::default().with_auth(Authorization::bearer(token)),
+            )
+            .await
+            .unwrap();
+        let hashes = [expected.parent_hash, expected.hash()];
+        let by_hash: Vec<Option<ExecutionPayloadBodyV1>> =
+            engine.client().request("engine_getPayloadBodiesByHashV1", (hashes,)).await.unwrap();
+        let by_range: Vec<Option<ExecutionPayloadBodyV1>> = engine
+            .client()
+            .request("engine_getPayloadBodiesByRangeV1", (format!("{tip:#x}"), "0x2"))
+            .await
+            .unwrap();
+        let body = expected.body();
+        let payload = ExecutionPayloadBodyV1::new(body.withdrawals.clone(), &body.transactions);
+        assert_eq!(by_hash, [None, Some(payload)]);
+        assert_eq!(by_range, by_hash);
     }
 }

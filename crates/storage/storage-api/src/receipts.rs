@@ -90,4 +90,10 @@ pub trait ReceiptProviderIdExt: ReceiptProvider + BlockIdReader {
     ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
         self.receipts_by_block_id(number_or_tag.into())
     }
+
+    /// Returns the earliest block to scan for logs. Snapshot restores can retain receipts
+    /// independently of transaction bodies. The default uses the general history boundary.
+    fn earliest_log_block_number(&self) -> ProviderResult<BlockNumber> {
+        self.earliest_block_number()
+    }
 }
