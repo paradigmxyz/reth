@@ -11,6 +11,7 @@ use evm2_inspectors::tracing::{
     TraceLimitBehavior, TraceLimits, TracingInspector, TracingInspectorConfig,
 };
 use futures::Future;
+use parking_lot::Mutex;
 use reth_errors::RethError;
 use reth_evm::{
     execute::{BlockExecutor, BlockTransactionResult},
@@ -307,15 +308,20 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             + 'static,
         R: Send + 'static,
     {
+        // The transactions of the block share one trace byte budget, since they share one response.
+        let budget = Arc::new(Mutex::new(RequestTraceBudget::new(self.trace_limits())));
         self.trace_block_until_with_inspector(
             block_id,
             block,
             highest_index,
             {
-                let limits = self.trace_limits();
-                move || TracingInspector::new(config).with_limits(limits)
+                let budget = Arc::clone(&budget);
+                move || TracingInspector::new(config).with_limits(budget.lock().limits())
             },
-            f,
+            move |tx_info, ctx| {
+                budget.lock().charge(ctx.inspector.recorded_bytes());
+                f(tx_info, ctx)
+            },
         )
     }
 
@@ -530,5 +536,38 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             .map_err(Self::Error::from_eth_err)?;
         db.commit_source(&reth_execution_types::BundleSource(&changes));
         Ok(changes)
+    }
+}
+
+/// The trace bytes a request has left for the transactions it traces after each other.
+///
+/// The trace byte limit of [`Trace::trace_limits`] applies to each traced transaction, and a
+/// tracer starts its count over for every transaction. Requests that trace several transactions
+/// into one response take each one's limits from this budget and charge what it recorded, so that
+/// together they record at most the limit.
+#[derive(Debug, Clone, Copy)]
+pub struct RequestTraceBudget {
+    limits: TraceLimits,
+    /// Bytes left, `None` if the limits do not bound recording.
+    remaining: Option<usize>,
+}
+
+impl RequestTraceBudget {
+    /// Creates the budget of a request traced with `limits`.
+    pub const fn new(limits: TraceLimits) -> Self {
+        Self { limits, remaining: limits.max_recorded_bytes }
+    }
+
+    /// Returns the limits for the next transaction: the request's, with the byte limit lowered to
+    /// the bytes left.
+    pub const fn limits(&self) -> TraceLimits {
+        self.limits.set_max_recorded_bytes(self.remaining)
+    }
+
+    /// Takes `recorded` bytes, what a transaction traced with [`Self::limits`] recorded.
+    pub const fn charge(&mut self, recorded: usize) {
+        if let Some(remaining) = &mut self.remaining {
+            *remaining = remaining.saturating_sub(recorded);
+        }
     }
 }
