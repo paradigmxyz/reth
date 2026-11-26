@@ -2,10 +2,12 @@
 
 use crate::result::{CaseResult, Error};
 use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
+use serde::de::DeserializeOwned;
 use std::{
     fmt::Debug,
+    fs,
     path::{Path, PathBuf},
-    sync::LazyLock,
+    sync::{LazyLock, Mutex},
 };
 
 /// Stack size of the worker threads that run test cases.
@@ -56,4 +58,33 @@ impl<T: Case> Cases<T> {
                 .collect()
         })
     }
+}
+
+/// Reads the JSON test file at `path`.
+pub fn load_json<T: DeserializeOwned>(path: &Path) -> Result<T, Error> {
+    let contents =
+        fs::read_to_string(path).map_err(|error| Error::Io { path: path.into(), error })?;
+    serde_json::from_str(&contents)
+        .map_err(|error| Error::CouldNotDeserialize { path: path.into(), error })
+}
+
+/// Runs file workers with one shared queue and bounded thread stacks.
+pub(crate) fn run_workers(
+    files: Vec<PathBuf>,
+    workers: usize,
+    worker: impl Fn(&mut dyn Iterator<Item = PathBuf>) + Sync,
+) {
+    let workers = workers.max(1).min(files.len());
+    let files = Mutex::new(files.into_iter());
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            std::thread::Builder::new()
+                .stack_size(WORKER_STACK_SIZE)
+                .spawn_scoped(scope, || {
+                    let mut files = std::iter::from_fn(|| files.lock().unwrap().next());
+                    worker(&mut files);
+                })
+                .expect("failed to spawn a fixture worker");
+        }
+    });
 }

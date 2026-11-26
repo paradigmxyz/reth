@@ -7,7 +7,7 @@
 //! - **Reorg support**: Quickly access changesets to revert blocks during chain reorganizations
 //! - **Memory efficiency**: Explicit eviction releases persisted changesets
 
-use crate::{database_state_frontiers, OverlayManager, OverlayStateProvider};
+use crate::{database_state_frontiers, OverlayBuilder, OverlayManager, OverlayStateProvider};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
@@ -15,7 +15,7 @@ use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
-use reth_primitives_traits::{AlloyBlockHeader, FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, PruneCheckpointReader, StageCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
@@ -105,22 +105,19 @@ where
     let (partial_state_trie, finish) = database_state_frontiers(provider)?;
 
     // Step 1: Get the trie changesets for the target block from cache
-    let changesets = cache.get_or_compute(
-        overlay_manager,
-        provider,
-        block_number,
-        partial_state_trie,
-        finish,
-    )?;
+    let changesets =
+        cache.get_or_compute(provider, block_number, partial_state_trie, finish, || {
+            overlay_manager.overlay_builder(finish.hash)
+        })?;
 
     // Step 2: Get the trie reverts for the state after the target block using the cache
     let reverts = cache.get_or_compute_range(
-        overlay_manager,
         provider,
         (block_number + 1)..=finish.number,
         partial_state_trie,
         finish,
         true,
+        || overlay_manager.overlay_builder(finish.hash),
     )?;
 
     // Step 3: Create an InMemoryTrieCursorFactory with the reverts
@@ -213,11 +210,11 @@ impl ChangesetCache {
     /// Changesets for the block, either from cache or computed on-the-fly.
     pub(crate) fn get_or_compute<N, P>(
         &self,
-        overlay_manager: &OverlayManager<N>,
         provider: &P,
         block_number: BlockNumber,
         partial_state_trie: BlockNumHash,
         finish: BlockNumHash,
+        finish_builder: impl FnOnce() -> OverlayBuilder<N>,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         N: NodePrimitives,
@@ -230,12 +227,12 @@ impl ChangesetCache {
             + StorageSettingsCache,
     {
         self.get_or_compute_range(
-            overlay_manager,
             provider,
             block_number..=block_number,
             partial_state_trie,
             finish,
             true,
+            finish_builder,
         )
     }
 
@@ -270,12 +267,12 @@ impl ChangesetCache {
     /// - Changeset computation fails
     pub(crate) fn get_or_compute_range<N, P>(
         &self,
-        overlay_manager: &OverlayManager<N>,
         provider: &P,
         range: RangeInclusive<BlockNumber>,
         partial_state_trie: BlockNumHash,
         finish: BlockNumHash,
         write_reverts_to_cache: bool,
+        finish_builder: impl FnOnce() -> OverlayBuilder<N>,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         N: NodePrimitives,
@@ -407,17 +404,22 @@ impl ChangesetCache {
             "Changeset cache MISS in range, falling back to aggregate DB-based computation"
         );
 
-        let overlay = overlay_manager
-            .overlay_builder(finish.hash)
-            .with_no_reverts()
-            .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish, true)?;
+        let finish_builder = finish_builder();
+        let finish_state = finish_builder.parent_state().cloned();
+        let overlay = finish_builder.with_no_reverts().build_state_trie_overlay_at_frontiers(
+            provider,
+            partial_state_trie,
+            finish,
+            true,
+        )?;
 
         // Forward updates are a best-effort optimization to speed up compute_range_trie_changesets,
         // missing blocks do not affect correctness.
-        let mut forward_updates = overlay_manager
-            .parent_chain(finish.hash)
-            .take_while(|block| block.recovered_block().number() >= start_block)
-            .map(|block| (block.recovered_block().number(), block.trie_updates()))
+        let mut forward_updates = finish_state
+            .iter()
+            .flat_map(|state| state.chain())
+            .take_while(|state| state.number() >= start_block)
+            .map(|state| (state.number(), state.block_ref().trie_updates()))
             .collect::<Vec<_>>();
         forward_updates.reverse();
 
@@ -637,14 +639,14 @@ impl ChangesetCacheInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::StateTrieOverlay;
+    use crate::{test_utils::overlay_manager_with_writer, InMemoryBlockSource, StateTrieOverlay};
     use alloy_consensus::Header;
     use alloy_primitives::{
         keccak256,
         map::{B256Map, HashMap},
         Address, U256,
     };
-    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, NewCanonicalChain};
     use reth_db::{
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
@@ -760,8 +762,11 @@ mod tests {
     {
         let individual_state_revert =
             HashedPostStateSorted::from_reverts(provider, block_number..=block_number).unwrap();
-        let cumulative_state_revert =
-            HashedPostStateSorted::from_reverts(provider, (block_number + 1)..).unwrap();
+        let cumulative_state_revert = HashedPostStateSorted::from_reverts(
+            provider,
+            (block_number + 1)..=provider.last_block_number().unwrap(),
+        )
+        .unwrap();
 
         let mut cumulative_state_revert_prev = cumulative_state_revert.clone();
         cumulative_state_revert_prev.extend_ref_and_sort(&individual_state_revert);
@@ -814,7 +819,7 @@ mod tests {
         provider.write_trie_updates(trie_updates).unwrap();
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn consumers_restore_trie_values_masked_by_deferred_blocks() {
         let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
         let factory = create_test_provider_factory();
@@ -886,7 +891,7 @@ mod tests {
         assert_eq!(cached(), 7);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn calculated_reverts_preserve_deletions_across_frontiers() {
         let factory = create_test_provider_factory();
         let blocks = TestBlockBuilder::eth().get_executed_blocks(0..4).collect::<Vec<_>>();
@@ -924,13 +929,13 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
-        let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
         for (block, updates) in [
             (&blocks[1], Arc::new(storage_updates(vec![(removed, Some(node))]))),
             (&blocks[2], Arc::clone(&finish_updates)),
             (&blocks[3], Arc::default()),
         ] {
-            manager.insert_block(ExecutedBlock::new(
+            in_memory_state_writer.insert_executed(ExecutedBlock::new(
                 Arc::clone(&block.recovered_block),
                 Arc::clone(&block.execution_output),
                 SortedTrieData::new(Arc::default(), updates),
@@ -939,8 +944,11 @@ mod tests {
         let before = factory.provider().unwrap();
         let cache = manager.changeset_cache();
         let (frontier, finish) = database_state_frontiers(&before).unwrap();
-        let result =
-            cache.get_or_compute_range(&manager, &before, 1..=2, frontier, finish, true).unwrap();
+        let result = cache
+            .get_or_compute_range(&before, 1..=2, frontier, finish, true, || {
+                manager.overlay_builder(finish.hash)
+            })
+            .unwrap();
         assert_eq!(
             result.storage_tries_ref()[&hashed_address].storage_nodes_ref(),
             &[(removed, None), (replaced, None)],
@@ -952,14 +960,20 @@ mod tests {
         provider_rw.commit().unwrap();
         let after = factory.provider().unwrap();
         let (frontier, finish) = database_state_frontiers(&after).unwrap();
-        let advanced =
-            cache.get_or_compute_range(&manager, &after, 1..=2, frontier, finish, true).unwrap();
+        let advanced = cache
+            .get_or_compute_range(&after, 1..=2, frontier, finish, true, || {
+                manager.overlay_builder(finish.hash)
+            })
+            .unwrap();
         assert!(Arc::ptr_eq(&advanced, &result));
 
         // A cold calculation at the newer frontier must also serve the older reader.
         cache.evict(2);
-        let advanced =
-            cache.get_or_compute_range(&manager, &after, 1..=2, frontier, finish, true).unwrap();
+        let advanced = cache
+            .get_or_compute_range(&after, 1..=2, frontier, finish, true, || {
+                manager.overlay_builder(finish.hash)
+            })
+            .unwrap();
         assert_eq!(advanced, result);
 
         // An older reader must still receive the deletion after the frontier advances.
@@ -967,7 +981,99 @@ mod tests {
         assert!(Arc::ptr_eq(&cached, &advanced));
     }
 
-    #[test]
+    #[reth_concurrency::test]
+    fn miss_fallback_resolves_finish_from_pinned_blocks_after_persistence_removes_it() {
+        let factory = create_test_provider_factory();
+        let blocks = TestBlockBuilder::eth().get_executed_blocks(0..4).collect::<Vec<_>>();
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let removed = Nibbles::from_nibbles([1]);
+        let replaced = Nibbles::from_nibbles([2]);
+        let node = BranchNodeCompact::new(0b0001, 0, 0, vec![], None);
+        let storage_updates = |storage_nodes| {
+            TrieUpdatesSorted::new(
+                vec![],
+                B256Map::from_iter([(hashed_address, StorageTrieUpdatesSorted { storage_nodes })]),
+            )
+        };
+        let finish_updates =
+            Arc::new(storage_updates(vec![(removed, None), (replaced, Some(node.clone()))]));
+        let provider_rw = factory.provider_rw().unwrap();
+        for block in &blocks {
+            provider_rw.insert_block(block.recovered_block()).unwrap();
+        }
+        provider_rw
+            .write_trie_updates_sorted(&storage_updates(vec![(removed, Some(node.clone()))]))
+            .unwrap();
+        // Reverting the account's creation deletes every storage node visible at Finish.
+        provider_rw
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(1, AccountBeforeTx { address, info: None })
+            .unwrap();
+        provider_rw
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(2)
+                    .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(1) }),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
+        let executed = [
+            (&blocks[1], Arc::new(storage_updates(vec![(removed, Some(node))]))),
+            (&blocks[2], Arc::clone(&finish_updates)),
+            (&blocks[3], Arc::default()),
+        ]
+        .into_iter()
+        .map(|(block, updates)| {
+            ExecutedBlock::new(
+                Arc::clone(&block.recovered_block),
+                Arc::clone(&block.execution_output),
+                SortedTrieData::new(Arc::default(), updates),
+            )
+        })
+        .collect::<Vec<_>>();
+        in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new: executed });
+        let snapshot = manager.in_memory_state().snapshot_during(|| ()).into_parts().1;
+        let provider = factory.provider().unwrap();
+        let cache = manager.changeset_cache();
+        let (frontier, finish) = database_state_frontiers(&provider).unwrap();
+        let pinned = || {
+            manager.overlay_builder_from(InMemoryBlockSource::Pinned(snapshot.clone()), finish.hash)
+        };
+        // Nothing is cached, so this takes the fallback that builds the overlay at Finish.
+        let expected =
+            cache.get_or_compute_range(&provider, 1..=2, frontier, finish, false, pinned).unwrap();
+
+        // Persistence commits Finish and the engine removes it, while the provider still reads
+        // the frontiers it opened with.
+        let persisted = blocks[2].recovered_block().num_hash();
+        in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
+
+        let err = cache
+            .get_or_compute_range(&provider, 1..=2, frontier, finish, false, || {
+                manager.overlay_builder(finish.hash)
+            })
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "overlay anchor #{} ({}) is after partial state trie frontier #{} ({}); missing trie updates for blocks #{}..=#{}",
+                finish.number,
+                finish.hash,
+                frontier.number,
+                frontier.hash,
+                frontier.number + 1,
+                finish.number,
+            )
+        );
+        let from_pinned =
+            cache.get_or_compute_range(&provider, 1..=2, frontier, finish, false, pinned).unwrap();
+        assert_eq!(from_pinned, expected);
+    }
+
+    #[reth_concurrency::test]
     fn calculated_historical_range_excludes_tail_reverts() {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
@@ -1016,7 +1122,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn persisted_range_retains_transient_nodes_without_executed_blocks() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 2);
@@ -1122,7 +1228,7 @@ mod tests {
         assert_eq!(first, at_first);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn cached_range_merge_keeps_oldest_revert_values() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 2);
@@ -1160,19 +1266,14 @@ mod tests {
         let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
         let (partial_state_trie, finish) = database_state_frontiers(&*provider).unwrap();
         let accumulated = cache
-            .get_or_compute_range(
-                &overlay_manager,
-                &*provider,
-                1..=2,
-                partial_state_trie,
-                finish,
-                true,
-            )
+            .get_or_compute_range(&*provider, 1..=2, partial_state_trie, finish, true, || {
+                overlay_manager.overlay_builder(finish.hash)
+            })
             .unwrap();
         assert_eq!(accumulated.account_nodes_ref(), &[(path, Some(older_node))]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn aggregate_range_reverts_to_pre_range_state() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 3);
@@ -1262,39 +1363,31 @@ mod tests {
         let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
         let (partial_state_trie, finish) = database_state_frontiers(&*provider).unwrap();
         let uncached = cache
-            .get_or_compute_range(
-                &overlay_manager,
-                &*provider,
-                1..=3,
-                partial_state_trie,
-                finish,
-                false,
-            )
+            .get_or_compute_range(&*provider, 1..=3, partial_state_trie, finish, false, || {
+                overlay_manager.overlay_builder(finish.hash)
+            })
             .unwrap();
         assert_eq!(*uncached, actual);
         assert!(cache.inner.read().entries.is_empty());
 
         let from_cache_api = cache
-            .get_or_compute_range(
-                &overlay_manager,
-                &*provider,
-                1..=3,
-                partial_state_trie,
-                finish,
-                true,
-            )
+            .get_or_compute_range(&*provider, 1..=3, partial_state_trie, finish, true, || {
+                overlay_manager.overlay_builder(finish.hash)
+            })
             .unwrap();
         assert_eq!(*from_cache_api, actual);
         assert_eq!(cache.inner.read().entries.len(), 1);
 
         let block_changesets = cache
-            .get_or_compute(&overlay_manager, &*provider, 2, partial_state_trie, finish)
+            .get_or_compute(&*provider, 2, partial_state_trie, finish, || {
+                overlay_manager.overlay_builder(finish.hash)
+            })
             .unwrap();
         assert_eq!(*block_changesets, legacy_compute_block_trie_changesets(&*provider, 2));
         assert_eq!(cache.inner.read().entries.len(), 2);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn aggregate_range_matches_legacy_per_block_merge_with_storage_wipe() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 3);

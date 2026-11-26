@@ -106,6 +106,7 @@ arbitrary = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-ethereum-cli.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 tempfile.workspace = true

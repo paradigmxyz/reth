@@ -45,7 +45,9 @@ use reth_rpc::{
 use reth_rpc_api::servers::*;
 use reth_rpc_engine_api::RethEngineApi;
 use reth_rpc_eth_api::{
-    helpers::{pending_block::PendingEnvBuilder, Call, EthApiSpec, EthTransactions, TraceExt},
+    helpers::{
+        pending_block::PendingEnvBuilder, Call, EthApiSpec, EthBlocks, EthTransactions, TraceExt,
+    },
     node::RpcNodeCoreAdapter,
     EthApiServer, EthApiTypes, FullEthApiServer, FullEthApiTypes, RpcBlock, RpcConvert,
     RpcConverter, RpcHeader, RpcNodeCore, RpcReceipt, RpcTransaction, RpcTxReq,
@@ -689,14 +691,14 @@ where
         self
     }
 
-    /// Register Otterscan Namespace
+    /// Registers the Otterscan namespace using the eth block and receipt helpers.
     ///
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_ots(&mut self) -> &mut Self
     where
-        EthApi: TraceExt + EthTransactions<Primitives = N>,
+        EthApi: TraceExt + EthTransactions<Primitives = N> + EthBlocks,
     {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());

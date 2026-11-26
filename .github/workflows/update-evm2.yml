@@ -123,11 +123,17 @@ jobs:
             "s#(github\.com/(alloy-rs|DaniPopes)/evm2\", rev = \")[0-9a-f]+\"#\1${NEW_REV}\"#g" {} +
           echo "Updated evm2 rev: $CURRENT_REV -> $NEW_REV"
 
+      # Clippy runs on the nightly that lint.yml uses (the workspace enables nightly-only lints);
+      # stable is installed last so it stays the default for the test-compilation check, as in CI.
+      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+        if: steps.update.outputs.bumped == 'true'
+        with:
+          toolchain: nightly-2026-11-18
+          components: clippy
       - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
         if: steps.update.outputs.bumped == 'true'
         with:
           toolchain: stable
-          components: clippy
       - uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
         if: steps.update.outputs.bumped == 'true'
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -149,8 +155,38 @@ jobs:
         env:
           NEW_REV: ${{ steps.update.outputs.new_rev }}
         run: |
-          # Re-resolve Cargo.lock for the new evm2 rev only.
-          cargo metadata --format-version 1 > /dev/null
+          # Re-resolve Cargo.lock for the new evm2 rev. When the new rev's requirements conflict
+          # with a version Cargo.lock pins (such as alloy-eip7928 0.4.11 against ^0.4.12), cargo
+          # refuses to move the pin: unlock the crates it names, all in one update, and retry.
+          # `cargo update -p` may also move those crates' own dependencies; the lockfile diff lands
+          # in the PR for review. Stop on any other error, or when a crate comes up again.
+          crates=()
+          resolved=false
+          resolve=(cargo metadata --format-version 1)
+          # One metadata pass, then up to 10 targeted updates.
+          for _ in $(seq 0 10); do
+            if out=$(CARGO_TERM_COLOR=never "${resolve[@]}" 2>&1 >/dev/null); then
+              echo "$out"
+              resolved=true
+              break
+            fi
+            # Unlock the exact locked version cargo names (name@version), since the lockfile can
+            # hold several versions of one crate and a bare name is then ambiguous.
+            crate=$(grep -m1 "previously selected package \`" <<< "$out" | cut -d "\`" -f2 | sed 's/ v/@/' || true)
+            if [ -z "$crate" ] || [[ " ${crates[*]} " == *" $crate "* ]]; then
+              echo "$out"
+              exit 1
+            fi
+            echo "evm2's requirements conflict with Cargo.lock's $crate; unlocking it"
+            crates+=("$crate")
+            resolve=(cargo update)
+            for c in "${crates[@]}"; do resolve+=(-p "$c"); done
+          done
+          if [ "$resolved" != true ]; then
+            echo "$out"
+            echo "::error::Cargo.lock still doesn't resolve after unlocking: ${crates[*]}"
+            exit 1
+          fi
           git add -A
           git commit -m "deps: bump evm2 to ${NEW_REV:0:7} ($(date -u +%Y-%m-%d))"
 
@@ -174,7 +210,7 @@ jobs:
         env:
           AMP_API_KEY: ${{ secrets.AMP_API_KEY }}
           RUSTFLAGS: -D warnings
-          CHECK: cargo clippy --workspace --lib --examples --tests --benches --all-features
+          CHECK: cargo +nightly-2026-11-18 clippy --workspace --lib --examples --tests --benches --all-features
         run: |
           PROMPT="This Rust workspace just had its evm2 dependency (alloy-rs/evm2, patched with DaniPopes/evm2) \
           updated to the latest commit on evm2's main branch, and \`RUSTFLAGS=-D warnings $CHECK\` now fails.

@@ -29,6 +29,11 @@ pub struct EthApiSettings {
     pub gas_cap: u64,
     /// Maximum number of blocks for `eth_simulateV1`.
     pub max_simulate_blocks: u64,
+    /// Maximum bytes a single traced transaction may record. `None` is unlimited.
+    pub max_trace_bytes: Option<usize>,
+    /// The RPC server's response size limit in bytes, which bounds the struct logs of a debug
+    /// trace response. `None` is unlimited.
+    pub max_response_size: Option<usize>,
     /// Whether to compute state roots for `eth_simulateV1`.
     pub compute_state_root_for_eth_simulate: bool,
     /// Maximum number of blocks into the past for generating state proofs.
@@ -37,7 +42,7 @@ pub struct EthApiSettings {
     pub pending_block_kind: PendingBlockKind,
     /// Timeout duration for `send_raw_transaction_sync` RPC method.
     pub send_raw_transaction_sync_timeout: Duration,
-    /// Maximum memory the EVM can allocate per RPC request.
+    /// Maximum memory the EVM can allocate per call frame in an RPC request.
     pub evm_memory_limit: u64,
     /// Whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
     pub force_blob_sidecar_upcasting: bool,
@@ -53,11 +58,13 @@ impl Default for EthApiSettings {
             cache_computed_bals: false,
             gas_cap: RPC_DEFAULT_GAS_CAP.into(),
             max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
+            max_trace_bytes: None,
+            max_response_size: None,
             compute_state_root_for_eth_simulate: false,
             eth_proof_window: DEFAULT_ETH_PROOF_WINDOW,
             pending_block_kind: PendingBlockKind::default(),
             send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
-            evm_memory_limit: (1 << 32) - 1,
+            evm_memory_limit: 100 * 1024 * 1024,
             force_blob_sidecar_upcasting: false,
         }
     }
