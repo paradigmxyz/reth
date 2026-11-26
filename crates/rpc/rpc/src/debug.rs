@@ -1920,7 +1920,11 @@ fn geth_trace_weight_mib(
             if config.enable_memory.unwrap_or_else(|| config.disable_memory == Some(false)) {
                 bytes = bytes.saturating_add(steps.saturating_mul(memory_hex_bytes));
             }
-            if config.enable_return_data == Some(true) {
+            // An explicit enableReturnData wins over disableReturnData, as for memory.
+            if config
+                .enable_return_data
+                .unwrap_or_else(|| config.disable_return_data == Some(false))
+            {
                 bytes = bytes.saturating_add(steps.saturating_mul(memory_hex_bytes));
             }
             // Each call may record the trace byte limit, and all of them the response size.
@@ -2548,6 +2552,13 @@ mod tests {
                 300_000
             ),
             weight(serde_json::json!({ "disableStorage": true }), 300_000)
+        );
+        assert_eq!(
+            weight(
+                serde_json::json!({ "disableStorage": true, "disableReturnData": false }),
+                10_000
+            ),
+            weight(serde_json::json!({ "disableStorage": true, "enableReturnData": true }), 10_000)
         );
         // Return data adds as much as memory does.
         assert_eq!(
