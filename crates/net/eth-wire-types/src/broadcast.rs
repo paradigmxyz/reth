@@ -985,8 +985,8 @@ fn decode_pooled_transaction_hashes_payload(
     }
     let capacity = types.len().min(NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP);
 
-    // Each size takes at least one byte but eight in memory, so decoding stops at the first
-    // extra entry instead of reading a list longer than `types`.
+    // Each size takes at least one byte on the wire but a `usize` in memory, so decoding stops at
+    // the first extra entry instead of reading a list longer than `types`.
     let mut sizes = Vec::with_capacity(capacity);
     let mut sizes_payload = Header::decode_bytes(payload, true)?;
     while !sizes_payload.is_empty() {
