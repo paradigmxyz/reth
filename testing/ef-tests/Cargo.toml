@@ -21,8 +21,14 @@ asm-keccak = [
     "reth-evm/asm-keccak",
     "reth-evm-ethereum/asm-keccak",
 ]
+bn254-mcl = [
+    "reth-evm/bn254-mcl",
+    "reth-evm-ethereum/bn254-mcl",
+    "reth-node-ethereum/bn254-mcl",
+]
 
 [dependencies]
+reth-chain-state.workspace = true
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
 reth-db = { workspace = true, features = ["mdbx", "test-utils", "disable-lock"] }

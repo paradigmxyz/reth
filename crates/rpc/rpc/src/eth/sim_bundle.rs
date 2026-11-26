@@ -22,7 +22,7 @@ use reth_rpc_eth_types::{
 };
 use reth_storage_api::ProviderTx;
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
-use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{sync::Arc, time::Duration};
 use tracing::trace;
 
@@ -226,9 +226,7 @@ where
             while idx < body.len() {
                 match &body[idx] {
                     BundleItem::Tx { tx, can_revert } => {
-                        let recovered_tx = self
-                            .eth_api()
-                            .recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)?;
+                        let recovered_tx = self.eth_api().recover_raw_pooled_transaction(tx)?;
                         let tx = recovered_tx.map(
                             <Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus,
                         );

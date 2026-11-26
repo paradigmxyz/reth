@@ -141,8 +141,9 @@ impl PeersManager {
         // We use half of the interval to decrease the max duration to `150%` in worst case
         let unban_interval = ban_duration.min(backoff_durations.low) / 2;
 
+        // Persisted rows are not counted, since filtered ones would keep their space reserved.
         let mut peers: HashMap<PeerId, Peer, FbBuildHasher<64>> = HashMap::with_capacity_and_hasher(
-            trusted_nodes.len() + basic_nodes.len() + persisted_peers.len(),
+            trusted_nodes.len() + basic_nodes.len(),
             Default::default(),
         );
         let mut trusted_peer_ids: HashSet<PeerId, FbBuildHasher<64>> =
@@ -277,11 +278,13 @@ impl PeersManager {
 
     /// Returns an iterator over peers suitable for persisting to disk.
     ///
-    /// Filters out backed-off and banned peers, and includes metadata like kind, fork ID, and
-    /// reputation.
+    /// Filters out backed-off and banned peers, and untrusted peers tracked only until their
+    /// session ends, and includes metadata like kind, fork ID, and reputation.
     pub(crate) fn persistable_peers(&self) -> impl Iterator<Item = PersistedPeerInfo> + '_ {
-        self.peers.iter().filter(|(_, peer)| !peer.is_backed_off() && !peer.is_banned()).map(
-            |(peer_id, peer)| PersistedPeerInfo {
+        self.peers
+            .iter()
+            .filter(|(_, peer)| !peer.is_backed_off() && !peer.is_banned() && !peer.is_temporary())
+            .map(|(peer_id, peer)| PersistedPeerInfo {
                 record: NodeRecord::new_with_ports(
                     peer.addr.tcp().ip(),
                     peer.addr.tcp().port(),
@@ -291,8 +294,7 @@ impl PeersManager {
                 kind: peer.kind,
                 fork_id: peer.fork_id.as_deref().copied(),
                 reputation: peer.reputation,
-            },
-        )
+            })
     }
 
     /// Returns the `NodeRecord` and `PeerKind` for the given peer id
@@ -722,7 +724,7 @@ impl PeersManager {
                 trace!(target: "net::peers", ?peer_id, direction=?entry.get().state, "active session gracefully closed");
                 self.connection_info.decr_state(entry.get().state);
 
-                if entry.get().remove_after_disconnect && !entry.get().is_trusted() {
+                if entry.get().is_temporary() {
                     // this peer should be removed from the set
                     entry.remove();
                     self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
@@ -778,8 +780,8 @@ impl PeersManager {
     /// Called when an _active_ session to a peer was forcefully dropped due to an error.
     ///
     /// Depending on whether the error is fatal, the peer will be removed from the peer set
-    /// otherwise its reputation is slashed. A peer that [`Self::remove_peer`] removed while it was
-    /// connected is removed from the set as well.
+    /// otherwise its reputation is slashed. A peer tracked only until its session ends is removed
+    /// from the set as well.
     pub(crate) fn on_active_session_dropped(
         &mut self,
         remote_addr: &SocketAddr,
@@ -888,16 +890,8 @@ impl PeersManager {
                     peer.reputation = peer.reputation.saturating_add(reputation_change.as_i32());
                 };
 
-                // `Self::remove_peer` keeps a connected peer only until its session closes, like
-                // `Self::on_active_session_gracefully_closed` does. A reputation ban also
-                // disconnects the peer, but doesn't mark it for removal.
-                remove_peer = peer.remove_after_disconnect &&
-                    matches!(
-                        peer.state,
-                        PeerConnectionState::DisconnectingIn |
-                            PeerConnectionState::DisconnectingOut
-                    ) &&
-                    !peer.is_trusted();
+                // a temporary peer is removed however its session ends
+                remove_peer = peer.is_temporary();
 
                 self.connection_info.decr_state(peer.state);
                 peer.state = PeerConnectionState::Idle;
@@ -1158,6 +1152,14 @@ impl PeersManager {
                 peer.kind = kind;
                 peer.fork_id = fork_id.map(Box::new);
                 peer.addr = addr;
+                // the given address is a listening endpoint, so the peer is kept unless it is
+                // already being disconnected by `Self::remove_peer`
+                if !matches!(
+                    peer.state,
+                    PeerConnectionState::DisconnectingIn | PeerConnectionState::DisconnectingOut
+                ) {
+                    peer.remove_after_disconnect = false;
+                }
 
                 if peer.state.is_idle() {
                     // Try connecting again.
@@ -4741,5 +4743,86 @@ mod tests {
             );
             assert!(peers.queued_actions.is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn test_temporary_peer_removed_after_dropped_session() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let inbound = PeerId::random();
+        let socket_addr = "5.6.7.8:40404".parse().unwrap();
+        assert!(peers.on_incoming_pending_session(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8))).is_ok());
+        peers.on_incoming_session_established(inbound, socket_addr);
+        assert!(peers.peers[&inbound].remove_after_disconnect);
+        // its source port is not a listening endpoint, so it is not saved
+        let persisted =
+            |peers: &PeersManager, id| peers.persistable_peers().any(|peer| peer.record.id == id);
+        assert!(!persisted(&peers, inbound));
+
+        peers.on_active_session_dropped(
+            &socket_addr,
+            &inbound,
+            &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
+                DisconnectReason::TooManyPeers,
+            )),
+        );
+        assert!(!peers.peers.contains_key(&inbound));
+
+        // unless it is trusted by id, so the trust survives a restart
+        let trusted = PeerId::random();
+        assert!(peers.on_incoming_pending_session(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 9))).is_ok());
+        peers.on_incoming_session_established(trusted, "5.6.7.9:40404".parse().unwrap());
+        peers.add_trusted_peer_id(trusted);
+        assert!(persisted(&peers, trusted));
+    }
+
+    #[tokio::test]
+    async fn test_peer_added_as_static_is_kept() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = PeerAddr::from_tcp("5.6.7.8:30303".parse().unwrap());
+
+        // an inbound peer, once the operator supplies its listening endpoint
+        let inbound = PeerId::random();
+        assert!(peers.on_incoming_pending_session(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8))).is_ok());
+        peers.on_incoming_session_established(inbound, "5.6.7.8:40404".parse().unwrap());
+        peers.add_and_connect_kind(inbound, PeerKind::Static, addr, None);
+        assert!(peers.persistable_peers().any(|peer| peer.record.id == inbound));
+
+        // a peer removed while it was dialed, then added again before the dial fails
+        let dialed = PeerId::random();
+        peers.add_and_connect_kind(dialed, PeerKind::Basic, addr, None);
+        peers.remove_peer(dialed);
+        peers.add_and_connect_kind(dialed, PeerKind::Static, addr, None);
+        peers.on_outgoing_connection_failure(
+            &addr.tcp(),
+            &dialed,
+            &io::Error::new(io::ErrorKind::ConnectionRefused, ""),
+        );
+        assert!(peers.peers[&dialed].is_static());
+
+        // but not one already being disconnected, whose removal was reported
+        peers.remove_peer(inbound);
+        peers.add_and_connect_kind(inbound, PeerKind::Static, addr, None);
+        peers.on_active_session_gracefully_closed(inbound);
+        assert!(!peers.peers.contains_key(&inbound));
+    }
+
+    #[tokio::test]
+    async fn test_skipped_persisted_peers_reserve_no_capacity() {
+        let rows = 10_000;
+        let mut config = PeersConfig::test();
+        config.enforce_enr_fork_id = true;
+        // records without a fork id are skipped when the fork id is enforced
+        config.persisted_peers = (0..rows)
+            .map(|_| {
+                PersistedPeerInfo::from_node_record(NodeRecord::new(
+                    "1.2.3.4:30303".parse().unwrap(),
+                    PeerId::random(),
+                ))
+            })
+            .collect();
+
+        let peers = PeersManager::new(config);
+        assert!(peers.peers.is_empty());
+        assert!(peers.peers.capacity() < rows);
     }
 }

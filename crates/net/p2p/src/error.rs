@@ -65,6 +65,7 @@ impl<H: BlockHeader> EthResponseValidator for RequestResult<Vec<H>> {
                 RequestError::ChannelClosed |
                 RequestError::ConnectionDropped |
                 RequestError::UnsupportedCapability |
+                RequestError::InvalidRequest |
                 RequestError::BadResponse => None,
                 RequestError::Timeout => Some(ReputationChangeKind::Timeout),
             }
@@ -99,6 +100,10 @@ pub enum RequestError {
     /// Indicates a bad response was received.
     #[display("received bad response")]
     BadResponse,
+    /// The locally supplied request is invalid and was rejected before sending.
+    /// This error must not affect peer reputation and is not retryable without fixing the request.
+    #[display("invalid local request")]
+    InvalidRequest,
 }
 
 // === impl RequestError ===
@@ -220,6 +225,14 @@ mod tests {
     use alloy_consensus::Header;
 
     use super::*;
+
+    #[test]
+    fn invalid_local_requests_are_not_retryable_or_peer_faults() {
+        let result: RequestResult<Vec<Header>> = Err(RequestError::InvalidRequest);
+        assert!(!RequestError::InvalidRequest.is_retryable());
+        assert_eq!(result.reputation_change_err(), None);
+        assert_eq!(RequestError::InvalidRequest.to_string(), "invalid local request");
+    }
 
     #[test]
     fn test_is_likely_bad_headers_response() {

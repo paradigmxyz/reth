@@ -4,7 +4,9 @@
 //!
 //! [EIP-8178]: https://eips.ethereum.org/EIPS/eip-8178
 
-use crate::engine_ssz_witness::{EngineSszWitness, PayloadStatusWithWitness};
+use crate::engine_ssz_witness::{
+    BuiltPayloadWithWitness, EngineSszWitness, PayloadStatusWithWitness,
+};
 use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Bytes, B128, B256};
@@ -31,7 +33,9 @@ use http_body_util::{BodyExt, LengthLimitError, Limited};
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_engine_primitives::EngineApiValidator;
-use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_engine_primitives::{EthBuiltPayload, EthEngineTypes};
+use reth_payload_primitives::EngineApiMessageVersion;
+use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::{BalProvider, BlockReader, StateProviderFactory};
 use reth_rpc::EngineApi;
 use reth_rpc_engine_api::EngineApiError;
@@ -134,7 +138,7 @@ impl<Api: EngineSszApi> EngineSszProxyHandle<Api> {
         state.update_witness_support();
     }
 
-    /// Sets the witness generator used by `/payloads/witness`.
+    /// Sets the witness generator used by the submission and retrieval witness routes.
     pub async fn set_witness_handler(&self, witness_handler: Arc<dyn EngineSszWitness>) {
         let mut state = self.state.write().await;
         state.witness_handler = Some(witness_handler);
@@ -348,6 +352,15 @@ pub trait EngineSszApi: Clone + Send + Sync + 'static {
         async { problem_response(STATUS_NOT_FOUND, "method-not-found", None) }
     }
 
+    /// Retrieves the selected Amsterdam payload snapshot and its execution witness.
+    fn get_payload_with_witness(
+        &self,
+        _payload_id: PayloadId,
+        _witness_handler: Arc<dyn EngineSszWitness>,
+    ) -> impl Future<Output = HttpResponse> + Send {
+        async { problem_response(STATUS_NOT_FOUND, "method-not-found", None) }
+    }
+
     /// Handles a getBlobs request.
     fn get_blobs(&self, _version: u8, _body: Bytes) -> impl Future<Output = HttpResponse> + Send {
         async { problem_response(STATUS_NOT_FOUND, "method-not-found", None) }
@@ -517,6 +530,45 @@ where
             .await
     }
 
+    async fn get_payload_with_witness(
+        &self,
+        payload_id: PayloadId,
+        witness_handler: Arc<dyn EngineSszWitness>,
+    ) -> HttpResponse {
+        // Resolve only once so the witness cannot be paired with a newer build snapshot.
+        let payload = match self
+            .get_payload_inner::<EthBuiltPayload>(payload_id, EngineApiMessageVersion::V6)
+            .await
+        {
+            Ok(payload) => payload,
+            Err(error) => return engine_error_response(error),
+        };
+        let cancun_fields = CancunPayloadFields {
+            parent_beacon_block_root: payload
+                .block()
+                .parent_beacon_block_root()
+                .unwrap_or_default(),
+            versioned_hashes: payload
+                .block()
+                .body()
+                .blob_versioned_hashes_iter()
+                .copied()
+                .collect(),
+        };
+        let built_payload = match payload.try_into_v6() {
+            Ok(payload) => BuiltPayloadAmsterdam::from(payload),
+            Err(_) => return engine_error_response(EngineApiError::UnknownPayload),
+        };
+        let execution_data = ExecutionData::new(
+            ExecutionPayload::V4(built_payload.payload.clone()),
+            ExecutionPayloadSidecar::v4(
+                cancun_fields,
+                PraguePayloadFields::new(built_payload.execution_requests.clone()),
+            ),
+        );
+        built_payload_witness_response(built_payload, execution_data, witness_handler).await
+    }
+
     async fn get_blobs(&self, version: u8, body: Bytes) -> HttpResponse {
         if version == 4 {
             let request = match BlobsV4Request::from_ssz_bytes(&body) {
@@ -632,6 +684,29 @@ where
             };
             engine_api.get_payload(fork, payload_id).await
         }
+        EngineSszEndpoint::GetPayloadWithWitness(payload_id) => {
+            // Error responses from this polling endpoint must not be cached either.
+            let mut response = async move {
+                let Ok(payload_id) = payload_id else {
+                    return problem_response(STATUS_BAD_REQUEST, "invalid-request", None)
+                };
+                if request_fork(&request) != Some(EngineSszFork::Amsterdam) {
+                    return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
+                }
+                let Some(engine_api) = handle.engine_api().await else {
+                    return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
+                };
+                let Some(witness_handler) = handle.witness_handler().await else {
+                    return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
+                };
+                engine_api.get_payload_with_witness(payload_id, witness_handler).await
+            }
+            .await;
+            response
+                .headers_mut()
+                .insert(CACHE_CONTROL, "no-store".parse().expect("valid cache control"));
+            response
+        }
         EngineSszEndpoint::Forkchoice => {
             let Some(fork) = request_fork(&request) else {
                 return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
@@ -721,6 +796,11 @@ fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
             let payload_id = payload_id.parse::<PayloadId>();
             Some(EngineSszEndpoint::GetPayload(payload_id))
         }
+        (Some("engine"), Some("v1"), Some("payloads"), Some(payload_id), Some("witness"))
+            if segments.next().is_none() =>
+        {
+            Some(EngineSszEndpoint::GetPayloadWithWitness(payload_id.parse::<PayloadId>()))
+        }
         (Some("engine"), Some("v1"), Some("forkchoice"), None, None) => {
             Some(EngineSszEndpoint::Forkchoice)
         }
@@ -744,6 +824,7 @@ enum EngineSszEndpoint {
     NewPayload,
     PayloadsWithWitness,
     GetPayload(Result<PayloadId, <PayloadId as std::str::FromStr>::Err>),
+    GetPayloadWithWitness(Result<PayloadId, <PayloadId as std::str::FromStr>::Err>),
     Forkchoice,
     PayloadBodiesByHash,
     PayloadBodiesByRange,
@@ -756,6 +837,7 @@ impl EngineSszEndpoint {
             Self::Capabilities |
             Self::Identity |
             Self::GetPayload(_) |
+            Self::GetPayloadWithWitness(_) |
             Self::PayloadBodiesByRange => "GET",
             Self::NewPayload |
             Self::PayloadsWithWitness |
@@ -770,6 +852,7 @@ fn handle_capabilities(witness_enabled: bool) -> HttpResponse {
     let mut fork_scoped_endpoints = vec!["payloads", "forkchoice", "bodies"];
     if witness_enabled {
         fork_scoped_endpoints.push("payloads/witness");
+        fork_scoped_endpoints.push("payloads/{payloadId}/witness");
     }
     json_response(serde_json::json!({
         "supported_forks": ["paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"],
@@ -1240,6 +1323,20 @@ fn problem_response(
         .expect("valid response")
 }
 
+async fn built_payload_witness_response(
+    built_payload: BuiltPayloadAmsterdam,
+    execution_data: ExecutionData,
+    witness_handler: Arc<dyn EngineSszWitness>,
+) -> HttpResponse {
+    // Re-executing the selected block avoids including accesses from excluded transactions.
+    match witness_handler.generate_witness(execution_data).await {
+        Ok(witness) => ssz_response(BuiltPayloadWithWitness { built_payload, witness }),
+        Err(error) => {
+            problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", Some(error.to_string()))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1308,6 +1405,10 @@ mod tests {
             let capabilities: serde_json::Value = serde_json::from_slice(&body).unwrap();
             let endpoints = capabilities["fork_scoped_endpoints"].as_array().unwrap();
             assert_eq!(endpoints.iter().any(|endpoint| endpoint == "payloads/witness"), enabled);
+            assert_eq!(
+                endpoints.iter().any(|endpoint| endpoint == "payloads/{payloadId}/witness"),
+                enabled
+            );
         }
         assert_eq!(
             parse_engine_path("/engine/v1/payloads/witness"),
@@ -1752,5 +1853,126 @@ mod tests {
         assert!(decoded_attrs.withdrawals.as_ref().unwrap().is_empty());
         assert_eq!(decoded_attrs.parent_beacon_block_root, Some(B256::with_last_byte(3)));
         assert!(custody_columns.is_none());
+    }
+
+    #[tokio::test]
+    async fn built_payload_witness_route_validation() {
+        let handle =
+            EngineSszProxyHandle::with_engine_api(reth_node_builder::rpc::NoopEngineApi::default());
+        let path = "/engine/v1/payloads/0x0123456789abcdef/witness";
+        for (method, path, fork, status, error) in [
+            ("GET", path, Some("amsterdam"), 503, "service-unavailable"),
+            ("GET", path, Some("prague"), 400, "unsupported-fork"),
+            ("GET", path, Some("unknown"), 400, "unsupported-fork"),
+            ("GET", path, None, 400, "unsupported-fork"),
+            ("POST", path, Some("amsterdam"), 405, "method-not-allowed"),
+            ("GET", "/engine/v1/payloads/bad/witness", Some("amsterdam"), 400, "invalid-request"),
+            (
+                "GET",
+                "/engine/v1/payloads/0x0123456789abcdef/witness/extra",
+                Some("amsterdam"),
+                404,
+                "method-not-found",
+            ),
+        ] {
+            let mut request = HttpRequest::builder().method(method).uri(path);
+            if let Some(fork) = fork {
+                request = request.header(ETH_EXECUTION_VERSION, fork);
+            }
+            let response =
+                handle_engine_ssz_request(handle.clone(), request.body(HttpBody::empty()).unwrap())
+                    .await;
+            assert_eq!(response.status(), status);
+            if method == "GET" && path.ends_with("/witness") {
+                assert_eq!(response.headers()[CACHE_CONTROL], "no-store");
+            }
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+                serde_json::json!({"type": format!("/engine-api/errors/{error}")})
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn built_payload_witness_failure_returns_internal_error() {
+        struct Witness(bool);
+        impl EngineSszWitness for Witness {
+            fn generate_witness(
+                &self,
+                _: ExecutionData,
+            ) -> BoxFuture<
+                'static,
+                Result<crate::engine_ssz_witness::ExecutionWitnessV1, EngineSszWitnessError>,
+            > {
+                let error = if self.0 {
+                    EngineSszWitnessError::ParentStateUnavailable {
+                        parent: B256::ZERO,
+                        source: eyre::eyre!("test"),
+                    }
+                } else {
+                    EngineSszWitnessError::Internal(eyre::eyre!("test"))
+                };
+                Box::pin(async move { Err(error) })
+            }
+        }
+
+        #[derive(Clone)]
+        struct Api {
+            built_payload: BuiltPayloadAmsterdam,
+            execution_data: ExecutionData,
+        }
+
+        impl EngineSszApi for Api {
+            async fn get_payload_with_witness(
+                &self,
+                _: PayloadId,
+                witness_handler: Arc<dyn EngineSszWitness>,
+            ) -> HttpResponse {
+                built_payload_witness_response(
+                    self.built_payload.clone(),
+                    self.execution_data.clone(),
+                    witness_handler,
+                )
+                .await
+            }
+        }
+        let payload = EthBuiltPayload::new(
+            Arc::new(reth_primitives_traits::Block::try_into_recovered(Block::default()).unwrap()),
+            Default::default(),
+            Some(Default::default()),
+            Some(Bytes::new()),
+        );
+        let execution_data = payload.clone().into_execution_data();
+        let built_payload = BuiltPayloadAmsterdam::from(payload.try_into_v6().unwrap());
+        for missing_parent in [false, true] {
+            let handle = EngineSszProxyHandle::with_engine_api(Api {
+                built_payload: built_payload.clone(),
+                execution_data: execution_data.clone(),
+            });
+            handle.set_witness_handler_sync(Arc::new(Witness(missing_parent)));
+            let response = handle_engine_ssz_request(
+                handle,
+                HttpRequest::builder()
+                    .method("GET")
+                    .uri("/engine/v1/payloads/0x0123456789abcdef/witness")
+                    .header(ETH_EXECUTION_VERSION, "amsterdam")
+                    .body(HttpBody::empty())
+                    .unwrap(),
+            )
+            .await;
+            assert_eq!(response.status(), STATUS_INTERNAL_SERVER_ERROR);
+            assert_eq!(response.headers()[CACHE_CONTROL], "no-store");
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            let detail = if missing_parent {
+                format!("parent state {} is unavailable through the provider: test", B256::ZERO)
+            } else {
+                "test".to_string()
+            };
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+                serde_json::json!({"type": "/engine-api/errors/internal", "detail": detail})
+            );
+        }
     }
 }

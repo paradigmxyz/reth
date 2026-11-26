@@ -5,19 +5,18 @@ use crate::{
     },
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
-    CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HeaderProvider, MetadataProvider, ProviderError, ProviderFactory,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory,
-    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
+    HeaderProvider, MetadataProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
+    ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader,
+    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
+    TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256};
 use reth_chain_state::{
-    BlockState, CanonicalInMemoryState, CanonicalInMemoryStateWriter, ChainInfoHeaders,
-    ExecutedBlock, ForkChoiceNotifications, ForkChoiceSubscriptions, PersistedBlockNotifications,
-    PersistedBlockSubscriptions,
+    CanonicalInMemoryState, ExecutedBlock, ForkChoiceNotifications, ForkChoiceSubscriptions,
+    PersistedBlockNotifications, PersistedBlockSubscriptions,
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
@@ -30,12 +29,12 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderROFactory, GetBlockAccessListLimit,
-    NodePrimitivesProvider, RangeEnd, RangeResponse, RangeResult, StateRangeProvider,
-    StateRangeProviderFactory, StateRangeView, StorageChangeSetReader, StorageRangeResult,
+    BlockBodyIndicesProvider, NodePrimitivesProvider, RangeEnd, RangeResponse, RangeResult,
+    StateRangeProvider, StateRangeProviderFactory, StateRangeView, StorageChangeSetReader,
+    StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::{OverlayStateProvider, OverlayStateProviderFactory, OwnedProvider};
+use reth_storage_overlay::{OverlayStateProvider, OwnedProvider};
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,
@@ -84,65 +83,39 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockchainProvider<N> {
-    /// Creates a provider like [`Self::new_with_writer`], without the writer of its canonical
-    /// in-memory state.
+    /// Creates a provider over `storage` whose chain info never changes.
     ///
     /// Nothing can change the chain info of the returned provider or send its notifications: its
     /// canonical head and its safe and finalized blocks stay the ones read from the database, and
     /// it never has a persisted block. Its in-memory blocks are those of `storage`, and change
     /// with them.
     pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
-        Self::new_with_writer(storage).map(|(provider, _)| provider)
-    }
-
-    /// Creates a provider over `storage` and the in-memory state of `storage`, fetching the
-    /// latest, safe and finalized headers from the database to initialize the provider, and
-    /// returns it with the writer of its canonical in-memory state.
-    ///
-    /// The provider and its clones read that state, and the writer is for the engine that changes
-    /// it.
-    ///
-    /// The in-memory blocks are shared with every other handle of that in-memory state. The chain
-    /// info and the canonical state notifications belong to the returned provider and its clones.
-    pub fn new_with_writer(
-        storage: ProviderFactory<N>,
-    ) -> ProviderResult<(Self, CanonicalInMemoryStateWriter<N::Primitives>)> {
-        let provider = storage.provider()?;
-        let best = provider.chain_info()?;
-        let latest = provider
-            .header_by_number(best.best_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(best.best_number.into()))?;
-        let finalized_header = provider
-            .last_finalized_block_number()?
-            .map(|num| provider.sealed_header(num))
-            .transpose()?
-            .flatten();
-        let safe_header = provider
-            .last_safe_block_number()?
-            .or_else(|| {
-                // for the purpose of this we can also use the finalized block if we don't have the
-                // safe block
-                provider.last_finalized_block_number().ok().flatten()
-            })
-            .map(|num| provider.sealed_header(num))
-            .transpose()?
-            .flatten();
-        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
-            ChainInfoHeaders {
-                canonical_head: SealedHeader::new(latest, best.best_hash),
-                safe: safe_header,
-                finalized: finalized_header,
-            },
+        let canonical_in_memory_state = CanonicalInMemoryState::without_writer(
+            storage.chain_info_headers()?,
             storage.in_memory_state().clone(),
         );
-        let canonical_in_memory_state =
-            canonical_in_memory_state_writer.canonical_in_memory_state().clone();
-        let bal_store = storage.bal_store().clone();
+        Ok(Self::with_canonical_in_memory_state(storage, canonical_in_memory_state))
+    }
 
-        Ok((
-            Self { database: storage, canonical_in_memory_state, bal_store },
-            canonical_in_memory_state_writer,
-        ))
+    /// Creates a provider over `storage` that reads `canonical_in_memory_state`.
+    ///
+    /// `canonical_in_memory_state` has to be over the in-memory state of `storage`, and start from
+    /// the [`ProviderFactory::chain_info_headers`] of `storage`. Otherwise the canonical lookups of
+    /// the provider and its state providers read different blocks. It is the state of a
+    /// [`CanonicalInMemoryStateWriter`] created from the writer that [`InMemoryState::new`]
+    /// returned with the in-memory state of `storage`, which is then the only way to change it.
+    ///
+    /// The chain info and the canonical state notifications of the provider and its clones are
+    /// those of `canonical_in_memory_state`.
+    ///
+    /// [`CanonicalInMemoryStateWriter`]: reth_chain_state::CanonicalInMemoryStateWriter
+    /// [`InMemoryState::new`]: reth_chain_state::InMemoryState::new
+    pub fn with_canonical_in_memory_state(
+        storage: ProviderFactory<N>,
+        canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
+    ) -> Self {
+        let bal_store = storage.bal_store().clone();
+        Self { database: storage, canonical_in_memory_state, bal_store }
     }
 
     /// Gets a clone of `canonical_in_memory_state`.
@@ -158,89 +131,72 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         ConsistentProvider::new(self.database.clone(), self.canonical_in_memory_state())
     }
 
-    /// Returns a state provider for the post-state of an already resolved in-memory chain.
-    ///
-    /// This is the post-state of `state.hash()`. Because the caller already holds the in-memory
-    /// chain, the overlay manager does not have to look it up again.
-    fn state_provider_for_state(
-        &self,
-        state: Arc<BlockState<N::Primitives>>,
-    ) -> ProviderResult<StateProviderBox> {
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
-            self.database.overlay_manager().overlay_builder_for_state(state),
-        );
-        Ok(Box::new(state_provider_factory.database_provider_ro()?))
+    /// Returns a consistent provider like [`Self::consistent_provider`] whose database transaction
+    /// has no timeout, see [`ConsistentProvider::new_long_read`].
+    pub fn long_read_consistent_provider(&self) -> ProviderResult<ConsistentProvider<N>> {
+        ConsistentProvider::new_long_read(self.database.clone(), self.canonical_in_memory_state())
     }
 
-    /// Returns a historical state provider using an existing database snapshot.
-    ///
-    /// Callers such as RPC choose the block, so the trie reverts it accumulates stay out of the
-    /// changeset cache the engine shares.
-    pub fn state_provider_from_database(
-        &self,
-        provider: StateRangeDbProvider<N>,
-        block_hash: B256,
-    ) -> StateProviderBox {
-        Box::new(OverlayStateProvider::new(
-            provider,
-            self.database
-                .overlay_manager()
-                .overlay_builder(block_hash)
-                .without_trie_revert_caching(),
-        ))
+    /// Returns the state after the pending block `block_hash`, or `None` if the consistent view
+    /// opened now no longer tracks it.
+    fn pending_state_provider(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
+        let provider = self.consistent_provider()?;
+        if provider.in_memory().state_by_hash(block_hash).is_none() {
+            return Ok(None)
+        }
+        provider.state_by_hash(block_hash, true).map(Some)
     }
 
-    /// Returns the canonical in-memory block with `state_root`.
-    fn block_state_by_root(&self, state_root: B256) -> Option<Arc<BlockState<N::Primitives>>> {
-        self.canonical_in_memory_state
-            .canonical_chain()
-            .find(|state| state.state_root() == state_root)
-    }
-
-    /// Resolves `state_root` into a range view over `provider`'s snapshot, preferring
-    /// `block_state` over the persisted-history fallback.
+    /// Resolves `state_root` into a range view over `provider`'s snapshot and the in-memory blocks
+    /// tracked when its transaction opened, preferring a canonical block of that snapshot with that
+    /// root over the persisted-history fallback.
     ///
     /// The snap attempt is read from `provider` too, so a bootstrap committing after the snapshot
     /// was taken can't slip its downloads past the check.
     fn state_range_view(
         &self,
-        provider: StateRangeDbProvider<N>,
-        block_state: Option<Arc<BlockState<N::Primitives>>>,
+        provider: ConsistentProvider<N>,
         state_root: B256,
     ) -> ProviderResult<Option<StateRangeView>> {
-        if provider.snap_attempt()?.is_some_and(|attempt| !attempt.is_verified()) {
+        let database_provider = provider.database_provider();
+        if database_provider.snap_attempt()?.is_some_and(|attempt| !attempt.is_verified()) {
             return Ok(None)
         }
 
         // A pipeline run commits executed state before it moves `Finish`, so until then the state
         // tables are ahead of every retained block.
-        let Some(finish) = provider.get_stage_checkpoint(StageId::Finish)? else { return Ok(None) };
-        if provider
-            .get_stage_checkpoint(StageId::Execution)?
-            .is_some_and(|execution| execution.block_number > finish.block_number)
-        {
+        let Some(finish) = database_provider.get_stage_checkpoint(StageId::Finish)? else {
+            return Ok(None)
+        };
+        if provider.execution_ahead_of_finish()? {
             return Ok(None)
         }
 
-        let overlay_manager = self.database.overlay_manager();
-        let overlay_builder = match block_state {
-            Some(state) => overlay_manager.overlay_builder_for_state(state),
+        // The canonical chain in memory when the transaction opened holds the newest blocks.
+        let in_memory_block = provider
+            .head_block()
+            .into_iter()
+            .flat_map(|head| head.chain())
+            .find(|state| state.state_root() == state_root)
+            .map(|state| state.hash());
+        let block_hash = match in_memory_block {
+            Some(block_hash) => block_hash,
             None => {
                 let Some(block_hash) =
-                    retained_block_hash::<N>(&provider, finish.block_number, state_root)?
+                    retained_block_hash::<N>(database_provider, finish.block_number, state_root)?
                 else {
                     return Ok(None)
                 };
-                overlay_manager.overlay_builder(block_hash)
+                block_hash
             }
         };
-
         // Peers choose the root, so its reverts stay out of the cache the engine shares.
         Ok(Some(Box::new(HistoricalStateRangeView {
-            provider: OverlayStateProvider::new(
-                provider,
-                overlay_builder.without_trie_revert_caching(),
+            provider: provider.into_overlay_provider(
+                self.database
+                    .overlay_manager()
+                    .overlay_builder(block_hash)
+                    .without_trie_revert_caching(),
             ),
         })))
     }
@@ -255,34 +211,17 @@ impl<N: ProviderNodeTypes> BalProvider for BlockchainProvider<N> {
         &self.bal_store
     }
 
-    fn get_bal_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<Bytes>> {
-        Ok(self.get_bals_by_hashes(&[block_hash])?.pop().flatten())
-    }
-
+    /// Falls back to the blocks the engine tree holds in memory, because the store can evict the
+    /// BAL of a non-canonical block before the tree drops that block.
     fn get_bals_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
-        self.get_bals_by_hashes_with_limit(block_hashes, GetBlockAccessListLimit::None)
-    }
-
-    /// Falls back to the executed blocks tracked in memory, because the store only buffers side
-    /// chain BALs briefly and never persists them.
-    fn get_bals_by_hashes_with_limit(
-        &self,
-        block_hashes: &[BlockHash],
-        limit: GetBlockAccessListLimit,
-    ) -> ProviderResult<Vec<Option<Bytes>>> {
-        let mut bals = self.bal_store.get_by_hashes_with_limit(block_hashes, limit)?;
-        for (bal, hash) in bals.iter_mut().zip(block_hashes).filter(|(bal, _)| bal.is_none()) {
-            *bal = self.database.in_memory_state().state_by_hash(*hash).and_then(|state| {
-                state.block_ref().bal().map(|bal| bal.as_raw_bal().as_raw().clone())
-            });
-        }
-        // Filled BALs only grow the response, so the limit can only cut it shorter.
-        let mut size = 0;
-        if let Some(last) = bals.iter().position(|bal| {
-            size += bal.as_ref().map_or(1, |bytes| bytes.len());
-            limit.exceeds(size)
-        }) {
-            bals.truncate(last + 1);
+        let mut bals = self.bal_store.get_by_hashes(block_hashes)?;
+        let in_memory_state = self.canonical_in_memory_state.in_memory_state();
+        for (hash, bal) in block_hashes.iter().zip(&mut bals) {
+            if bal.is_none() &&
+                let Some(block_state) = in_memory_state.state_by_hash(*hash)
+            {
+                *bal = block_state.block_ref().bal().map(|bal| bal.as_raw_bal().as_raw().clone());
+            }
         }
         Ok(bals)
     }
@@ -299,10 +238,7 @@ impl<N: ProviderNodeTypes> StateRangeProviderFactory for BlockchainProvider<N> {
     /// is unverified, since no root describes its partially downloaded state, or while the
     /// `Execution` checkpoint is ahead of `Finish`.
     fn state_range_provider(&self, state_root: B256) -> ProviderResult<Option<StateRangeView>> {
-        // Persisted blocks leave memory only after their commit, so a canonical root missed here is
-        // already visible to a snapshot opened afterwards.
-        let block_state = self.block_state_by_root(state_root);
-        self.state_range_view(self.database.provider()?, block_state, state_root)
+        self.state_range_view(self.consistent_provider()?, state_root)
     }
 }
 
@@ -831,13 +767,15 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting latest block state provider");
         // use latest state provider if the head state exists
-        if let Some(state) = self.canonical_in_memory_state.head_state() {
-            trace!(target: "providers::blockchain", "Using head state for latest state provider");
-            self.state_provider_for_state(state)
-        } else {
-            trace!(target: "providers::blockchain", "Using database state for latest state provider");
-            self.database.latest()
+        if self.canonical_in_memory_state.head_state().is_some() {
+            let provider = self.consistent_provider()?;
+            if let Some(head) = provider.head_block().map(|head| head.hash()) {
+                trace!(target: "providers::blockchain", "Using head state for latest state provider");
+                return provider.state_by_hash(head, true)
+            }
         }
+        trace!(target: "providers::blockchain", "Using database state for latest state provider");
+        self.database.latest()
     }
 
     fn state_with_block_appended(
@@ -845,11 +783,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         parent_hash: BlockHash,
         block: ExecutedBlock<N::Primitives>,
     ) -> ProviderResult<StateProviderBox> {
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
-            self.database.overlay_manager().overlay_builder(parent_hash).with_appended_block(block),
-        );
-        Ok(Box::new(state_provider_factory.database_provider_ro()?))
+        self.consistent_provider()?.state_with_block_appended(parent_hash, block)
     }
 
     /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
@@ -892,30 +826,30 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), hash))
+        provider.state_by_hash(hash, false)
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
+        provider.state_by_hash(block_hash, false)
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?hash, "Getting state by block hash");
-        if let Some(state) = self.canonical_in_memory_state.state_by_hash(hash) {
-            self.state_provider_for_state(state)
-        } else if let Ok(state) = self.history_by_block_hash(hash) {
-            // This could be tracked by a historical block
-            Ok(state)
-        } else if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
-            // .. or this could be the pending state
-            Ok(pending)
-        } else {
-            // if we couldn't find it anywhere, then we should return an error
-            Err(ProviderError::StateForHashNotFound(hash))
+        // Like `history_by_block_hash`, a persisted block's reverts stay out of the shared cache;
+        // other executed blocks the in-memory state tracks have no state here.
+        let provider = self.consistent_provider()?;
+        if provider.in_memory().canonical_state_by_hash(hash).is_some() {
+            return provider.state_by_hash(hash, true)
         }
+        if provider.database_provider().block_number(hash)?.is_some() {
+            return provider.state_by_hash(hash, false)
+        }
+        drop(provider);
+
+        self.pending_state_by_hash(hash)?.ok_or(ProviderError::StateForHashNotFound(hash))
     }
 
     /// Returns the state provider for pending state.
@@ -924,31 +858,29 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     /// [`Self::latest`]
     fn pending(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting provider for pending state");
-
-        if let Some(pending) = self.canonical_in_memory_state.pending_state() {
-            // we have a pending block
-            return self.state_provider_for_state(pending);
+        match self.maybe_pending()? {
+            Some(state) => Ok(state),
+            // fallback to latest state if the pending block is not available
+            None => self.latest(),
         }
-
-        // fallback to latest state if the pending block is not available
-        self.latest()
     }
 
     fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
-        if let Some(pending) = self.canonical_in_memory_state.pending_state() &&
-            pending.hash() == block_hash
+        if self
+            .canonical_in_memory_state
+            .pending_state()
+            .is_some_and(|pending| pending.hash() == block_hash)
         {
-            return self.state_provider_for_state(pending).map(Some);
+            return self.pending_state_provider(block_hash)
         }
         Ok(None)
     }
 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
-        if let Some(pending) = self.canonical_in_memory_state.pending_state() {
-            return self.state_provider_for_state(pending).map(Some)
+        match self.canonical_in_memory_state.pending_state() {
+            Some(pending) => self.pending_state_provider(pending.hash()),
+            None => Ok(None),
         }
-
-        Ok(None)
     }
 }
 
@@ -1114,7 +1046,8 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         &self,
         block: BlockNumber,
     ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
-        if let Some(head) = self.canonical_in_memory_state.head_state() &&
+        let consistent_provider = self.consistent_provider()?;
+        if let Some(head) = consistent_provider.head_block() &&
             let Some(state) = head.block_on_chain(block.into())
         {
             return Ok(Some(ExecutionOutcome::from((
@@ -1123,17 +1056,15 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
             ))))
         }
 
-        let provider = self.database.provider()?;
+        let provider = consistent_provider.database_provider();
         let Some(block_body) = provider.block_body_indices(block)? else { return Ok(None) };
 
         let account_changeset = provider.account_changesets_range(block..=block)?;
         let storage_changeset = provider.storage_changeset(block)?;
 
         let Some(block_hash) = provider.block_hash(block)? else { return Ok(None) };
-        let state_provider = OverlayStateProvider::<&_, N::Primitives>::new_ref(
-            &provider,
-            self.database.overlay_manager().overlay_builder(block_hash),
-        );
+        let state_provider = consistent_provider
+            .overlay_provider(self.database.overlay_manager().overlay_builder(block_hash));
         let (state, reverts) = provider.populate_bundle_state(
             account_changeset,
             storage_changeset,
@@ -1161,41 +1092,43 @@ mod tests {
     use crate::{
         providers::BlockchainProvider,
         test_utils::{
-            create_test_provider_factory, create_test_provider_factory_with_chain_spec,
+            create_test_provider_factory, create_test_provider_factory_with_in_memory_state_writer,
             MockNodeTypesWithDB,
         },
-        BlockWriter, ProviderFactory, SaveBlocksInput,
+        AccountReader, BlockWriter, ProviderFactory, SaveBlocksInput, StateProvider,
+        StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     };
     use alloy_consensus::constants::EMPTY_ROOT_HASH;
-    use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
-    use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, TxNumber, B256, U256};
+    use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
+    use alloy_primitives::{keccak256, Address, BlockNumber, TxNumber, B256, U256};
     use evm2::evm::AccountInfo;
     use itertools::Itertools;
     use parking_lot::Mutex;
     use rand::Rng;
     use reth_chain_state::{
         test_utils::TestBlockBuilder, CanonStateNotification, CanonStateSubscriptions,
-        CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
+        CanonicalInMemoryState, CanonicalInMemoryStateWriter, ExecutedBlock, InMemoryStateWriter,
+        NewCanonicalChain,
     };
     use reth_chainspec::{ChainSpec, MAINNET};
     use reth_db_api::models::{AccountBeforeTx, SnapAttempt, StoredBlockBodyIndices};
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
-        BlockExecutionOutput, BlockExecutionResult, Chain, DecodedEvmBal, ExecutionOutcome,
+        BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
     };
     use reth_primitives_traits::{
         Account, Block as _, RecoveredBlock, SealedBlock, SignerRecoverable, StorageEntry,
     };
     use reth_stages_types::{StageCheckpoint, StageId};
     use reth_storage_api::{
-        BalProvider, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
-        BlockReader, BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider,
-        DatabaseProviderFactory, HashingWriter, HeaderProvider, MetadataWriter, RangeEnd,
-        ReceiptProvider, ReceiptProviderIdExt, StageCheckpointWriter, StateProviderFactory,
-        StateRangeProvider, StateRangeProviderFactory, StateRootProvider, StateWriteConfig,
-        StateWriter, StorageRootProvider, StorageSettings, StorageSettingsCache,
-        TransactionVariant, TransactionsProvider, TrieWriter,
+        BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
+        BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
+        HashingWriter, HeaderProvider, MetadataWriter, RangeEnd, ReceiptProvider,
+        ReceiptProviderIdExt, StageCheckpointWriter, StateProviderFactory, StateRangeProvider,
+        StateRangeProviderFactory, StateRootProvider, StateWriteConfig, StateWriter,
+        StorageRootProvider, StorageSettings, StorageSettingsCache, TransactionVariant,
+        TransactionsProvider, TrieWriter,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -1210,7 +1143,10 @@ mod tests {
     use std::{
         collections::{BTreeMap, HashMap},
         ops::{Bound, Range, RangeBounds},
-        sync::Arc,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
     };
 
     #[test]
@@ -1237,7 +1173,7 @@ mod tests {
         );
         let mut blocks = Vec::<ExecutedBlock>::new();
         let mut storage_roots = Vec::new();
-        for number in 0..=2 {
+        for number in 0..=3 {
             let mut output = (*ExecutedBlock::<reth_ethereum_primitives::EthPrimitives>::default()
                 .execution_output)
                 .clone();
@@ -1306,7 +1242,8 @@ mod tests {
             ));
         }
 
-        let factory = create_test_provider_factory();
+        let (factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         factory.set_storage_settings_cache(StorageSettings::v2());
         let writer = factory.provider_rw()?;
         writer.insert_block(blocks[0].recovered_block())?;
@@ -1323,14 +1260,44 @@ mod tests {
             .append_storage_changeset(vec![], 0)?;
         static_files.commit()?;
         let writer = factory.provider_rw()?;
-        writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 2, 1))?;
+        writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 3, 1))?;
         writer.commit()?;
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(factory)?;
-        canonical_in_memory_state_writer.insert_executed(blocks[2].clone());
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
+        canonical_in_memory_state_writer
+            .update_chain(NewCanonicalChain::Commit { new: blocks[2..].to_vec() });
 
-        for number in [1, 2] {
-            let state = provider.history_by_block_hash(blocks[number].recovered_block().hash())?;
+        // Persistence can remove blocks 2 and 3, which mask Finish, from the live in-memory state
+        // after the providers opened their snapshots. Block 2 is below Finish, so its by-number
+        // provider also needs block 3.
+        let states = [1, 2, 3]
+            .map(|number| {
+                (number, provider.history_by_block_hash(blocks[number].recovered_block().hash()))
+            })
+            .into_iter()
+            .chain([2, 3].map(|number| {
+                let number_or_tag = BlockNumberOrTag::Number(number as u64);
+                (number, provider.state_by_block_number_or_tag(number_or_tag))
+            }))
+            .collect::<Vec<_>>();
+        let range_view = provider
+            .state_range_provider(blocks[2].recovered_block().state_root)?
+            .expect("in-memory root must resolve");
+        canonical_in_memory_state_writer
+            .clear_state(blocks[3].recovered_block().clone_sealed_header());
+
+        // The first node of a boundary proof is the trie root.
+        let proof = range_view.account_range_proof(&[keccak256(other_address)])?;
+        assert_eq!(keccak256(&proof[0]), blocks[2].recovered_block().state_root);
+
+        for (number, state) in states {
+            let state = state?;
             let root = blocks[number].recovered_block().state_root;
             state
                 .multiproof_v2(
@@ -1424,7 +1391,8 @@ mod tests {
             .map(|tx| tx.map(|tx| random_receipt(rng, tx, Some(2), None)).collect())
             .collect();
 
-        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let (factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(chain_spec);
         let provider_rw = factory.database_provider_rw()?;
 
         // Insert blocks into the database
@@ -1449,8 +1417,14 @@ mod tests {
 
         provider_rw.commit()?;
 
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(factory)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         // Insert the rest of the blocks and receipts into the in-memory state
         let chain = NewCanonicalChain::Commit {
@@ -1573,7 +1547,8 @@ mod tests {
     fn test_block_reader_find_block_by_hash() -> eyre::Result<()> {
         // Initialize random number generator and provider factory
         let mut rng = generators::rng();
-        let factory = create_test_provider_factory();
+        let (factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
 
         // Generate 10 random blocks and split into database and in-memory blocks
         let blocks = random_block_range(
@@ -1594,8 +1569,14 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(factory)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         // Useful blocks
         let first_db_block = database_blocks.first().unwrap();
@@ -1673,7 +1654,8 @@ mod tests {
     fn test_block_reader_block() -> eyre::Result<()> {
         // Initialize random number generator and provider factory
         let mut rng = generators::rng();
-        let factory = create_test_provider_factory();
+        let (factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
 
         // Generate 10 random blocks and split into database and in-memory blocks
         let blocks = random_block_range(
@@ -1693,8 +1675,14 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(factory)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         // First in memory block
         let first_in_mem_block = in_memory_blocks.first().unwrap();
@@ -1786,7 +1774,7 @@ mod tests {
     }
 
     #[test]
-    fn test_block_reader_side_chain_block_by_hash() -> eyre::Result<()> {
+    fn test_block_reader_find_side_chain_block_by_hash() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let (provider, _, in_memory_blocks, _, mut canonical_in_memory_state_writer) =
             provider_with_random_blocks(
@@ -1804,47 +1792,33 @@ mod tests {
             BlockParams { parent: Some(canonical.parent_hash), ..Default::default() },
         );
         let fork_hash = fork.hash();
-        let recovered = RecoveredBlock::new_sealed(fork.clone(), fork.senders().unwrap());
-        let bal = Bytes::from_static(&[0xc2, 0xc0, 0xc0]);
-        canonical_in_memory_state_writer.insert_executed(
-            ExecutedBlock { recovered_block: Arc::new(recovered.clone()), ..Default::default() }
-                .with_bal(Some(Arc::new(DecodedEvmBal::new(Arc::default(), bal.clone())))),
-        );
+        let recovered = Arc::new(RecoveredBlock::new_sealed(fork.clone(), fork.senders().unwrap()));
+        canonical_in_memory_state_writer.insert_executed(ExecutedBlock {
+            recovered_block: Arc::clone(&recovered),
+            ..Default::default()
+        });
 
-        assert_eq!(provider.block(fork_hash.into())?, Some(fork.into_block()));
         assert_eq!(
-            provider.recovered_block(fork_hash.into(), TransactionVariant::WithHash)?,
-            Some(recovered.clone())
+            provider.find_block_by_hash(fork_hash, BlockSource::Any)?,
+            Some(fork.into_block())
         );
+        let block = provider
+            .find_sealed_or_recovered_block(fork_hash, BlockSource::Any)?
+            .expect("side chain block should be found");
+        assert_eq!(block, SealedOrRecoveredBlock::recovered_arc(Arc::clone(&recovered)));
+        for source in [BlockSource::Pending, BlockSource::Canonical] {
+            assert_eq!(provider.find_block_by_hash(fork_hash, source)?, None);
+            assert!(provider.find_sealed_or_recovered_block(fork_hash, source)?.is_none());
+        }
+
+        // The other lookups by hash only see the canonical chain.
+        assert_eq!(provider.block(fork_hash.into())?, None);
+        assert_eq!(provider.recovered_block(fork_hash.into(), TransactionVariant::WithHash)?, None);
         assert_eq!(
             provider.sealed_block_with_senders(fork_hash.into(), TransactionVariant::WithHash)?,
-            Some(recovered)
-        );
-        assert_eq!(provider.get_bal_by_hash(fork_hash)?, Some(bal.clone()));
-        assert_eq!(provider.get_bals_by_hashes(&[fork_hash])?, vec![Some(bal.clone())]);
-        // The store counts each missing BAL as one byte, the filled BAL exceeds the limit.
-        assert_eq!(
-            provider.get_bals_by_hashes_with_limit(
-                &[fork_hash, fork_hash],
-                GetBlockAccessListLimit::ResponseSizeSoftLimit(2)
-            )?,
-            vec![Some(bal)]
-        );
-
-        // Canonical lookups still only see the canonical chain.
-        assert_eq!(provider.block(canonical.number.into())?, Some(canonical.clone().into_block()));
-        assert_eq!(provider.block_number(fork_hash)?, None);
-        let fork_canonical_id = BlockId::hash_canonical(fork_hash);
-        assert_eq!(provider.block_by_id(fork_canonical_id)?, None);
-        assert_eq!(provider.block_hash_for_id(fork_canonical_id)?, None);
-        assert_eq!(
-            provider.block_with_senders_by_id(fork_canonical_id, TransactionVariant::WithHash)?,
             None
         );
-        assert_eq!(
-            provider.block_hash_for_id(BlockId::hash_canonical(canonical.hash()))?,
-            Some(canonical.hash())
-        );
+        assert_eq!(provider.block_number(fork_hash)?, None);
 
         // Once the canonical block at its height is persisted and finalized, the fork is dropped
         // and its hash is unknown again.
@@ -1853,8 +1827,7 @@ mod tests {
             canonical.num_hash(),
             Some(canonical.num_hash()),
         );
-        assert_eq!(provider.block(fork_hash.into())?, None);
-        assert_eq!(provider.get_bals_by_hashes(&[fork_hash])?, vec![None]);
+        assert_eq!(provider.find_block_by_hash(fork_hash, BlockSource::Any)?, None);
 
         Ok(())
     }
@@ -1973,7 +1946,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_canon_state_subscriptions() -> eyre::Result<()> {
-        let factory = create_test_provider_factory();
+        let (factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
 
         // Generate a random block to initialize the blockchain provider.
         let mut test_block_builder = TestBlockBuilder::eth();
@@ -1985,8 +1959,14 @@ mod tests {
         provider_rw.insert_block(&block_1)?;
         provider_rw.commit()?;
 
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(factory)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         // Subscribe twice for canonical state updates.
         let mut rx_1 = provider.subscribe_to_canonical_state();
@@ -2404,7 +2384,8 @@ mod tests {
             0..0,
         );
 
-        let factory = create_test_provider_factory();
+        let (factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
 
         let provider_rw = factory.provider_rw()?;
         provider_rw.append_blocks_with_state(
@@ -2431,8 +2412,14 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(factory)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         let in_memory_changesets = in_memory_changesets.into_iter().next().unwrap();
         let chain = NewCanonicalChain::Commit {
@@ -3375,9 +3362,12 @@ mod tests {
         (Address::random(), Account { nonce, balance: U256::from(nonce), ..Default::default() })
     }
 
-    /// [`BlockchainProvider::new`] needs a genesis header to initialize its chain tracker.
-    fn test_provider_factory_with_genesis() -> eyre::Result<ProviderFactory<MockNodeTypesWithDB>> {
-        let factory = create_test_provider_factory();
+    /// Creates a provider factory with a genesis header, which
+    /// [`ProviderFactory::chain_info_headers`] needs, and the writer of its in-memory state.
+    fn test_provider_factory_with_genesis(
+    ) -> eyre::Result<(ProviderFactory<MockNodeTypesWithDB>, InMemoryStateWriter)> {
+        let (factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let provider_rw = factory.provider_rw()?;
         let mut rng = generators::rng();
         let genesis =
@@ -3386,12 +3376,35 @@ mod tests {
             .insert_block(&genesis.try_recover().expect("failed to seal block with senders"))?;
         provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0))?;
         provider_rw.commit()?;
-        Ok(factory)
+        Ok((factory, in_memory_state_writer))
+    }
+
+    #[test]
+    fn historical_state_checks_pipeline_progress_on_its_snapshot() -> eyre::Result<()> {
+        let (factory, _) = test_provider_factory_with_genesis()?;
+        let provider = BlockchainProvider::new(factory.clone())?;
+        let before_execution = provider.consistent_provider()?;
+        let genesis_hash = before_execution.block_hash(0)?.expect("genesis exists");
+
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(1))?;
+        provider_rw.commit()?;
+
+        assert!(before_execution.state_by_hash(genesis_hash, false).is_ok());
+        for result in [
+            provider.history_by_block_number(0),
+            provider.state_by_block_hash(genesis_hash),
+            provider.state_by_block_number_or_tag(BlockNumberOrTag::Number(0)),
+        ] {
+            assert!(matches!(result, Err(ProviderError::StateUnavailableDuringSync)));
+        }
+
+        Ok(())
     }
 
     #[test]
     fn state_range_provider_account_range_is_sorted_and_bounded() -> eyre::Result<()> {
-        let factory = test_provider_factory_with_genesis()?;
+        let (factory, _) = test_provider_factory_with_genesis()?;
         let provider_rw = factory.provider_rw()?;
 
         let accounts: Vec<_> = (0..5u64).map(random_account).collect();
@@ -3424,37 +3437,37 @@ mod tests {
 
     #[test]
     fn state_range_view_checks_snap_attempt_on_its_snapshot() -> eyre::Result<()> {
-        let factory = test_provider_factory_with_genesis()?;
+        let (factory, _) = test_provider_factory_with_genesis()?;
         let provider = BlockchainProvider::new(factory.clone())?;
         let (address, account) = random_account(1);
         let mut attempt = SnapAttempt::start(None, BlockNumHash::default(), B256::ZERO);
 
         // A snapshot taken before the attempt starts keeps serving, without its downloads.
-        let before_attempt = factory.provider()?;
+        let before_attempt = provider.consistent_provider()?;
         let provider_rw = factory.provider_rw()?;
         provider_rw.write_snap_attempt(&attempt)?;
         provider_rw.insert_account_for_hashing([(address, Some(account))])?;
         provider_rw.commit()?;
         let state = provider
-            .state_range_view(before_attempt, None, EMPTY_ROOT_HASH)?
+            .state_range_view(before_attempt, EMPTY_ROOT_HASH)?
             .expect("snapshot holds no attempt");
         assert_eq!(state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?.items, []);
 
         // A snapshot taken while the attempt is unverified stays refused after verification.
-        let unverified = factory.provider()?;
+        let unverified = provider.consistent_provider()?;
         attempt.verify();
         let provider_rw = factory.provider_rw()?;
         provider_rw.write_snap_attempt(&attempt)?;
         provider_rw.insert_account_for_hashing([(address, None)])?;
         provider_rw.commit()?;
-        assert!(provider.state_range_view(unverified, None, EMPTY_ROOT_HASH)?.is_none());
+        assert!(provider.state_range_view(unverified, EMPTY_ROOT_HASH)?.is_none());
 
         Ok(())
     }
 
     #[test]
     fn state_range_provider_account_range_respects_response_bytes() -> eyre::Result<()> {
-        let factory = test_provider_factory_with_genesis()?;
+        let (factory, _) = test_provider_factory_with_genesis()?;
         let provider_rw = factory.provider_rw()?;
 
         let accounts: Vec<_> = (0..5u64).map(random_account).collect();
@@ -3476,7 +3489,7 @@ mod tests {
 
     #[test]
     fn state_range_provider_storage_range_and_root() -> eyre::Result<()> {
-        let factory = test_provider_factory_with_genesis()?;
+        let (factory, _) = test_provider_factory_with_genesis()?;
         let provider_rw = factory.provider_rw()?;
 
         let (address, account) = random_account(1);
@@ -3520,7 +3533,7 @@ mod tests {
 
     #[test]
     fn state_range_provider_proofs_start_at_the_real_root() -> eyre::Result<()> {
-        let factory = test_provider_factory_with_genesis()?;
+        let (factory, _) = test_provider_factory_with_genesis()?;
         let provider_rw = factory.provider_rw()?;
 
         let (address, account) = random_account(1);
@@ -3620,7 +3633,7 @@ mod tests {
         // the persisted-history fallback can resolve its root.
         let (address, account_a) = random_account(1);
         let hashed_address = keccak256(address);
-        let factory = test_provider_factory_with_genesis()?;
+        let (factory, in_memory_state_writer) = test_provider_factory_with_genesis()?;
         let provider_rw = factory.provider_rw()?;
         provider_rw.insert_account_for_hashing([(address, Some(account_a.clone()))])?;
         provider_rw.commit()?;
@@ -3684,8 +3697,14 @@ mod tests {
         provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2))?;
         provider_rw.commit()?;
 
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(factory)?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         // An in-memory block on top of the head adds another account under a root of its own.
         let (memory_address, memory_account) = random_account(3);
@@ -3748,9 +3767,15 @@ mod tests {
         use reth_storage_overlay::OverlayStateProviderFactory;
 
         let mut rng = generators::rng();
-        let factory = test_provider_factory_with_genesis()?;
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(factory)?;
+        let (factory, in_memory_state_writer) = test_provider_factory_with_genesis()?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
         let genesis = provider.canonical_in_memory_state.get_canonical_head();
 
         let (address, account) = random_account(1);
@@ -3822,12 +3847,147 @@ mod tests {
         Ok(())
     }
 
+    /// Persists the oldest in-memory block and evicts it from the in-memory state right after a
+    /// history lookup opens its database transaction. The requested block is either the evicted
+    /// block itself or a later block that stays in memory.
+    #[test]
+    fn history_reads_survive_persistence_after_db_tx_creation() -> eyre::Result<()> {
+        for in_memory_blocks in [1, 2] {
+            for by_number in [false, true] {
+                let mut rng = generators::rng();
+                let (factory, in_memory_state_writer) = test_provider_factory_with_genesis()?;
+                let static_files = factory.static_file_provider();
+                static_files.get_writer(0, StaticFileSegment::Receipts)?.increment_block(0)?;
+                static_files.commit()?;
+                let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+                    factory.chain_info_headers()?,
+                    in_memory_state_writer,
+                );
+                let provider = BlockchainProvider::with_canonical_in_memory_state(
+                    factory,
+                    canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+                );
+                let mut parent = provider.canonical_in_memory_state.get_canonical_head().num_hash();
+
+                let slot_key = B256::with_last_byte(1);
+                let mut written = Vec::new();
+                let mut blocks = Vec::new();
+                for number in 1..=in_memory_blocks {
+                    let (address, account) = random_account(number);
+                    let hashed_address = keccak256(address);
+                    let value = U256::from(number);
+
+                    let mut hashed_state = HashedPostState::default();
+                    hashed_state.accounts.insert(hashed_address, Some(account.clone()));
+                    hashed_state.storages.insert(
+                        hashed_address,
+                        HashedStorage::from_iter([(keccak256(slot_key), value)]),
+                    );
+
+                    let mut storage = HashMap::default();
+                    storage.insert(U256::from_be_bytes(slot_key.0), (U256::ZERO, value));
+
+                    let block = random_block(
+                        &mut rng,
+                        parent.number + 1,
+                        BlockParams {
+                            parent: Some(parent.hash),
+                            tx_count: Some(0),
+                            ..Default::default()
+                        },
+                    )
+                    .try_recover()
+                    .expect("failed to seal block with senders");
+                    parent = block.num_hash();
+
+                    let execution_output = BlockExecutionOutput {
+                        result: BlockExecutionResult {
+                            receipts: Default::default(),
+                            requests: Default::default(),
+                            gas_used: 0,
+                            blob_gas_used: 0,
+                        },
+                        state: BundleState::new(
+                            [(address, None, Some(account.clone().into()), storage)],
+                            [[(address, Some(None), [])]],
+                            [],
+                        ),
+                    };
+                    blocks.push(ExecutedBlock::new(
+                        Arc::new(block),
+                        Arc::new(execution_output),
+                        SortedTrieData::new(
+                            Arc::new(hashed_state.into_sorted()),
+                            Arc::new(TrieUpdates::default().into_sorted()),
+                        ),
+                    ));
+                    written.push((address, account, value));
+                }
+                canonical_in_memory_state_writer
+                    .update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+
+                let persisted = blocks[0].clone();
+                let persisted_num_hash = persisted.recovered_block().num_hash();
+                let armed = Arc::new(AtomicBool::new(true));
+                let hook_armed = Arc::clone(&armed);
+                let hook_provider = provider.clone();
+                let hook_writer = Mutex::new(canonical_in_memory_state_writer);
+                provider.database.db_ref().set_post_transaction_hook(Box::new(move || {
+                    if !hook_armed.swap(false, Ordering::SeqCst) {
+                        return
+                    }
+                    let provider_rw = hook_provider.database_provider_rw().unwrap();
+                    provider_rw
+                        .save_blocks(&SaveBlocksInput::new(vec![persisted.clone()], 0, 0, 1, 1))
+                        .unwrap();
+                    provider_rw.commit().unwrap();
+                    hook_writer.lock().on_blocks_persisted(
+                        persisted_num_hash,
+                        persisted_num_hash,
+                        None,
+                    );
+                }));
+
+                let state = if by_number {
+                    provider.history_by_block_number(parent.number)?
+                } else {
+                    provider.history_by_block_hash(parent.hash)?
+                };
+                assert!(!armed.load(Ordering::SeqCst), "handoff ran inside the history lookup");
+                assert_eq!(
+                    provider.database.provider()?.block_number(persisted_num_hash.hash)?,
+                    Some(persisted_num_hash.number)
+                );
+                assert!(provider
+                    .canonical_in_memory_state
+                    .state_by_hash(persisted_num_hash.hash)
+                    .is_none());
+
+                for (address, account, value) in written {
+                    assert_eq!(state.basic_account(&address)?, Some(account));
+                    assert_eq!(state.storage(address, slot_key)?, Some(value));
+                }
+
+                drop(state);
+                provider.database.db_ref().set_post_transaction_hook(Box::new(|| ()));
+            }
+        }
+
+        Ok(())
+    }
+
     #[test]
     fn state_range_provider_reverts_database_advancement_past_anchor() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let factory = test_provider_factory_with_genesis()?;
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(factory)?;
+        let (factory, in_memory_state_writer) = test_provider_factory_with_genesis()?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
         let genesis = provider.canonical_in_memory_state.get_canonical_head();
 
         // In-memory target block anchored on genesis, with a known account.
@@ -3916,7 +4076,7 @@ mod tests {
         let hashed_slot = keccak256(slot_key);
         let value_a = U256::ONE;
 
-        let factory = test_provider_factory_with_genesis()?;
+        let (factory, _) = test_provider_factory_with_genesis()?;
         let provider_rw = factory.provider_rw()?;
         provider_rw.insert_account_for_hashing([(address, Some(account_a.clone()))])?;
         provider_rw.insert_storage_for_hashing([(
@@ -4048,10 +4208,43 @@ mod tests {
     }
 
     #[test]
+    fn consistent_provider_keeps_the_in_memory_blocks_tracked_when_it_opened() -> eyre::Result<()> {
+        let (factory, in_memory_state_writer) = test_provider_factory_with_genesis()?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory.clone(),
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
+        let genesis = provider.canonical_in_memory_state.get_canonical_head();
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, genesis.hash());
+        let persisted = block.recovered_block().num_hash();
+        canonical_in_memory_state_writer
+            .update_chain(NewCanonicalChain::Commit { new: vec![block] });
+
+        let view = provider.consistent_provider()?;
+        let snapshot = view.in_memory();
+        canonical_in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
+
+        assert!(!factory.overlay_manager().in_memory_state().contains(&persisted.hash));
+        assert_eq!(snapshot.state_by_hash(persisted.hash).unwrap().hash(), persisted.hash);
+        assert_eq!(snapshot.canonical_head().unwrap().hash(), persisted.hash);
+        Ok(())
+    }
+
+    #[test]
     fn providers_of_one_factory_share_in_memory_blocks() -> eyre::Result<()> {
-        let factory = test_provider_factory_with_genesis()?;
-        let (provider, mut canonical_in_memory_state_writer) =
-            BlockchainProvider::new_with_writer(factory.clone())?;
+        let (factory, in_memory_state_writer) = test_provider_factory_with_genesis()?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory.clone(),
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
         let other = BlockchainProvider::new(factory)?;
         let genesis = provider.canonical_in_memory_state.get_canonical_head();
         let block = TestBlockBuilder::eth().get_executed_block_with_number(1, genesis.hash());
@@ -4061,6 +4254,35 @@ mod tests {
             .update_chain(NewCanonicalChain::Commit { new: vec![block] });
 
         assert!(other.canonical_in_memory_state.state_by_hash(hash).is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn in_memory_state_checks_pipeline_progress() -> eyre::Result<()> {
+        let (factory, in_memory_state_writer) = test_provider_factory_with_genesis()?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory.clone(),
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
+        let genesis = provider.canonical_in_memory_state.get_canonical_head();
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, genesis.hash());
+        let hash = block.recovered_block().hash();
+        canonical_in_memory_state_writer
+            .update_chain(NewCanonicalChain::Commit { new: vec![block] });
+        assert!(provider.latest().is_ok());
+
+        // A pipeline run commits executed state before it moves `Finish`.
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(2))?;
+        provider_rw.commit()?;
+
+        for result in [provider.latest(), provider.pending(), provider.state_by_block_hash(hash)] {
+            assert!(matches!(result, Err(ProviderError::StateUnavailableDuringSync)));
+        }
         Ok(())
     }
 }
