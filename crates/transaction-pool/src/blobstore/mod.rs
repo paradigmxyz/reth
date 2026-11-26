@@ -165,6 +165,9 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     fn get(&self, tx: B256) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError>;
 
     /// Checks if the given transaction hash is in the blob store.
+    ///
+    /// This is also true for a transaction stored only as cells, even if [`Self::get`] cannot
+    /// rebuild its blobs.
     fn contains(&self, tx: B256) -> Result<bool, BlobStoreError>;
 
     /// Retrieves all decoded blob data for the given transaction hashes.
@@ -230,7 +233,8 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
 
     /// Return whether each requested blob versioned hash is available.
     ///
-    /// The response is always the same length and order as the request.
+    /// A blob stored only as cells counts as available only if enough of them are kept to rebuild
+    /// it. The response is always the same length and order as the request.
     fn has_versioned_hashes(&self, versioned_hashes: &[B256]) -> Result<Vec<bool>, BlobStoreError>;
 
     /// Returns all requested cells for all blobs belonging to the transaction.
