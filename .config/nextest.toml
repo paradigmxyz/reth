@@ -325,6 +325,8 @@ not (
     test(=trace::tests::replay_block_vmtrace_includes_root_and_callcode_bytecode) or
     test(=trace::tests::replay_missing_transaction_returns_null) or
     test(=trace::tests::replay_transaction_includes_transaction_hash) or
+    test(=trace::tests::trace_call_many_applies_overrides) or
+    test(=trace::tests::trace_call_many_created_account_ignores_seeded_storage) or
     test(=trace::tests::trace_call_many_defaults_to_latest) or
     test(=trace::tests::trace_call_many_shares_byte_limit) or
     test(=trace::tests::trace_filter_defaults_to_latest) or
