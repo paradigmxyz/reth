@@ -766,6 +766,12 @@ mod tests {
             response.validate_response(&request),
             Err(Error::Custom("invalid cell response dimensions"))
         );
+        response.cell_mask =
+            CellMasks::Indexed { masks: vec![B128::ZERO], mask_ids: Bytes::from_static(&[0]) };
+        assert_eq!(
+            response.validate_response(&request),
+            Err(Error::Custom("invalid cell response dimensions"))
+        );
         response.cells.clear();
         assert_eq!(
             response.validate_response(&request),
