@@ -501,8 +501,9 @@ fn encode_memcmp_nibbles(
 ///
 /// Accepts exactly the encodings that [`MemcmpStoredNibbles`] produces, see its docs for the
 /// layout. Returns `None` if `buf` ends before the final marker, if the encoding has more than 8
-/// groups, if a non-final marker is not `9`, if the final marker is greater than `8`, or `0` after
-/// another group, or if any bit after the last nibble of the final group is set.
+/// groups, if the final marker is greater than `8`, or `0` after another group, or if any bit
+/// after the last nibble of the final group is set. Any marker other than `9` ends the encoding,
+/// so the bytes after it are returned as the rest.
 pub fn try_decode_memcmp_nibbles(buf: &[u8]) -> Option<(Nibbles, &[u8])> {
     let mut packed = [0u8; 32];
     let (groups, _) = buf.as_chunks::<MEMCMP_GROUP_ENCODED_LEN>();
@@ -968,7 +969,6 @@ mod tests {
                 .map(|&(len, count)| memcmp_encoded_len(len) as u64 * count)
                 .sum();
             let average = bytes as f64 / count as f64;
-            assert!(average < 6.0, "average encoded length {average}");
             assert!(average < 33.0 / 6.0, "must be over 6x smaller than packed: {average}");
         }
     }

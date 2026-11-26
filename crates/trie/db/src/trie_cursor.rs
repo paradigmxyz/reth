@@ -420,6 +420,7 @@ mod tests {
     use alloy_primitives::hex_literal::hex;
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_provider::test_utils::create_test_provider_factory;
+    use std::collections::BTreeMap;
 
     fn account_trie_order<A: TrieTableAdapter>() {
         let factory = create_test_provider_factory();
@@ -515,5 +516,108 @@ mod tests {
     #[test]
     fn test_storage_cursor_abstraction_memcmp() {
         storage_cursor_abstraction::<MemcmpKeyAdapter>();
+    }
+
+    // tests that storage trie updates overwrite, delete and insert nodes of each address.
+    fn storage_trie_write_path<A: TrieTableAdapter>() {
+        // A node with `hashes` hashes, so overwrites change the value size.
+        let node = |hashes: u16| {
+            BranchNodeCompact::new(
+                u16::MAX,
+                0,
+                u16::MAX >> (16 - hashes),
+                vec![B256::repeat_byte(hashes as u8); hashes as usize],
+                None,
+            )
+        };
+        let path = |nibbles: &[u8]| Nibbles::from_nibbles_unchecked(nibbles);
+        let zeros = |len: usize| path(&vec![0; len]);
+        let updates = |mut nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>| {
+            nodes.sort_unstable_by_key(|(path, _)| *path);
+            StorageTrieUpdatesSorted { storage_nodes: nodes }
+        };
+
+        // Adjacent addresses, so a seek past the last node of the first one would hit the second.
+        let first = B256::with_last_byte(1);
+        let second = B256::with_last_byte(2);
+        // Zero runs that the memcmp encoding pads with, across its 8 nibble group boundary.
+        let initial = [zeros(1), zeros(2), zeros(8), zeros(9), path(&[0, 1]), path(&[1])];
+        let mut expected = BTreeMap::new();
+        for address in [first, second] {
+            for path in &initial {
+                expected.insert((address, *path), node(1));
+            }
+        }
+
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let cursor = provider.tx_ref().cursor_dup_write::<A::StorageTrieTable>().unwrap();
+        let mut cursor = DatabaseStorageTrieCursor::<_, A>::new(cursor, first);
+        for address in [first, second] {
+            cursor.set_hashed_address(address);
+            let nodes = initial.iter().map(|path| (*path, Some(node(1)))).collect();
+            cursor.write_storage_trie_updates_sorted(&updates(nodes)).unwrap();
+        }
+
+        // Overwrite with a larger node, delete present and absent nodes, and insert after a
+        // group boundary, reusing the cursor across addresses like the provider does.
+        let mut extended = zeros(9);
+        extended.push(1);
+        cursor.set_hashed_address(first);
+        cursor
+            .write_storage_trie_updates_sorted(&updates(vec![
+                (zeros(1), None),
+                (zeros(2), Some(node(3))),
+                (zeros(3), None),
+                (extended, Some(node(2))),
+            ]))
+            .unwrap();
+        cursor.set_hashed_address(second);
+        cursor
+            .write_storage_trie_updates_sorted(&updates(vec![
+                (zeros(8), Some(node(16))),
+                (path(&[1]), None),
+            ]))
+            .unwrap();
+        expected.remove(&(first, zeros(1)));
+        expected.insert((first, zeros(2)), node(3));
+        expected.insert((first, extended), node(2));
+        expected.insert((second, zeros(8)), node(16));
+        expected.remove(&(second, path(&[1])));
+        provider.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let trie_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
+        let mut cursor = trie_factory.storage_trie_cursor(first).unwrap();
+        let mut stored = BTreeMap::new();
+        for address in [first, second] {
+            cursor.set_hashed_address(address);
+            let mut entry = cursor.seek(Nibbles::default()).unwrap();
+            while let Some((path, node)) = entry {
+                stored.insert((address, path), node);
+                entry = cursor.next().unwrap();
+            }
+        }
+        assert_eq!(stored, expected);
+
+        cursor.set_hashed_address(first);
+        assert_eq!(cursor.seek(path(&[2])).unwrap(), None);
+        assert_eq!(cursor.seek_exact(zeros(1)).unwrap(), None);
+        assert_eq!(cursor.seek(zeros(1)).unwrap().map(|(path, _)| path), Some(zeros(2)));
+    }
+
+    #[test]
+    fn test_storage_trie_write_path_legacy() {
+        storage_trie_write_path::<LegacyKeyAdapter>();
+    }
+
+    #[test]
+    fn test_storage_trie_write_path_packed() {
+        storage_trie_write_path::<PackedKeyAdapter>();
+    }
+
+    #[test]
+    fn test_storage_trie_write_path_memcmp() {
+        storage_trie_write_path::<MemcmpKeyAdapter>();
     }
 }

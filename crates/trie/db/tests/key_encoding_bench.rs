@@ -186,7 +186,10 @@ fn build<A: TrieTableAdapter>(factory: &Factory, state: &State) -> (B256, Durati
     (root, elapsed)
 }
 
-/// Writes `updates` through adapter `A`, like `TrieWriter::write_trie_updates`.
+/// Writes the trie of a full root computation through adapter `A`.
+///
+/// Like `TrieWriter::write_trie_updates`, storage tries are written in address order, so every
+/// adapter builds its tables in the same order. A full computation removes no nodes.
 fn write_trie_updates<A: TrieTableAdapter>(
     tx: &(impl DbTx + DbTxMut),
     updates: &TrieUpdatesSorted,
@@ -197,11 +200,13 @@ fn write_trie_updates<A: TrieTableAdapter>(
             cursor.upsert((*path).into(), node).unwrap();
         }
     }
-    for (address, storage_updates) in updates.storage_tries_ref() {
-        let cursor = tx.cursor_dup_write::<A::StorageTrieTable>().unwrap();
-        DatabaseStorageTrieCursor::<_, A>::new(cursor, *address)
-            .write_storage_trie_updates_sorted(storage_updates)
-            .unwrap();
+    let mut storage_tries: Vec<_> = updates.storage_tries_ref().iter().collect();
+    storage_tries.sort_unstable_by_key(|(address, _)| **address);
+    let cursor = tx.cursor_dup_write::<A::StorageTrieTable>().unwrap();
+    let mut cursor = DatabaseStorageTrieCursor::<_, A>::new(cursor, B256::ZERO);
+    for (address, storage_updates) in storage_tries {
+        cursor.set_hashed_address(*address);
+        cursor.write_storage_trie_updates_sorted(storage_updates).unwrap();
     }
 }
 
@@ -263,7 +268,7 @@ fn median_ns(reps: u64, ops: usize, mut f: impl FnMut()) -> f64 {
     runs[runs.len() / 2].as_nanos() as f64 / ops.max(1) as f64
 }
 
-/// Step 4: encode and decode cost on the real path distribution, without MDBX.
+/// Encode and decode cost on the real path distribution, without MDBX.
 fn codec_ns<A: TrieTableAdapter>(paths: &Paths, reps: u64) -> [f64; 4] {
     let account_keys: Vec<Vec<u8>> =
         paths.account.iter().map(|p| A::AccountKey::from(*p).encode().as_ref().to_vec()).collect();
@@ -340,7 +345,7 @@ impl Targets {
     }
 }
 
-/// Step 5: cursor costs through adapter `A` on a warm page cache, in ns per operation.
+/// Cursor costs through adapter `A` on a warm page cache, in ns per operation.
 fn cursor_ns<A: TrieTableAdapter>(factory: &Factory, targets: &Targets, reps: u64) -> [f64; 5] {
     let tx = factory.db_ref().tx().unwrap();
     let cursors = DatabaseTrieCursorFactory::<_, A>::new(&tx);
@@ -408,7 +413,7 @@ fn cursor_ns<A: TrieTableAdapter>(factory: &Factory, targets: &Targets, reps: u6
     [account_walk, account_exact, account_random, storage_walk, storage_exact]
 }
 
-/// Step 5: incremental state root after `post_state`, through adapter `A`. The change set is
+/// Incremental state root after `post_state`, through adapter `A`. The change set is
 /// written in a transaction that is never committed, so every repetition sees the same state.
 fn incremental_root<A: TrieTableAdapter>(
     factory: &Factory,
@@ -449,8 +454,8 @@ fn print_row(name: &str, values: [f64; 3], unit: &str) {
 #[ignore = "benchmark: run in release with --ignored --nocapture"]
 fn key_encoding_bench() {
     let accounts = env_or("BENCH_ACCOUNTS", 2_000_000);
-    let slot_scale = env_or("BENCH_SLOT_SCALE", 1);
-    let reps = env_or("BENCH_REPS", 5);
+    let slot_scale = env_or("BENCH_SLOT_SCALE", 1).max(1);
+    let reps = env_or("BENCH_REPS", 5).max(1);
 
     let state = State::new(accounts, slot_scale);
     println!(
