@@ -62,6 +62,27 @@ reth download \
     -y
 ```
 
+`--with-state-history-since N` configures the node to retain state history
+from block `N` onward. If `N` is above the snapshot height, the download skips
+changeset archives and writes that future boundary to the generated `reth.toml`.
+
+Legacy snapshots with changesets and history indices in MDBX carry that history
+in the state archive. This includes v1.10 snapshots with static-file receipts,
+and snapshots with static-file senders when the download omits senders.
+After all archives are verified, the downloader checks the storage layout
+before updating checkpoints. It reports any known legacy backend setting that
+is incompatible with the selected download.
+
+A v1 restore preserves the original changeset and index checkpoints, including
+the mode needed to resume an interrupted prune. An explicit state-history
+selection sets future retention when the downloader creates `reth.toml`.
+On a retry, the downloader preserves the existing `reth.toml` and uses the current
+download selection for any prune checkpoints it writes.
+
+When `reth db migrate-v2` moves history from an older restore, it copies surviving
+changesets even below the recorded prune checkpoint. A block can be partially
+pruned, so historical queries keep the original read boundary.
+
 ## Further reading
 
 -   [Storage V2](/run/storage) - understand the default storage layout

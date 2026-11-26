@@ -1286,7 +1286,7 @@ impl<R: Read> Read for HashingReader<R> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_primitives::B256;
@@ -1347,7 +1347,7 @@ mod tests {
         source
     }
 
-    fn write_test_static_files(source: &Path, segment: StaticFileSegment, tip: u64) {
+    pub(crate) fn write_test_static_files(source: &Path, segment: StaticFileSegment, tip: u64) {
         let static_files = source.join("static_files");
         reth_fs_util::create_dir_all(&static_files).unwrap();
 
