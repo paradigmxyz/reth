@@ -573,6 +573,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             let (target_dir, static_files_dir) =
                 (target_dir.to_path_buf(), static_files_dir.clone());
             reth_tasks::spawn_blocking(move || {
+                // Fail before downloading if the config this restore will preserve is invalid.
+                let config_path = target_dir.join("reth.toml");
+                if config_path.try_exists()? &&
+                    !planned
+                        .archives
+                        .iter()
+                        .flat_map(|planned| &planned.archive.output_files)
+                        .any(|output| target_dir.join(&output.path) == config_path)
+                {
+                    Config::from_path(config_path)?;
+                }
                 planned.partition_reusable(&target_dir, static_files_dir.as_deref())
             })
             .await??
@@ -600,8 +611,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         )
         .await?;
 
-        let config = self.download_config(&selections, &prepared.manifest, preset);
+        let mut config = self.download_config(&selections, &prepared.manifest, preset);
         reth_tasks::spawn_blocking(move || {
+            let config_path = prepared.data_dir.join("reth.toml");
+            if config_path.try_exists()? {
+                config.prune.segments.bodies_history =
+                    Config::from_path(config_path)?.prune.segments.bodies_history;
+            }
             self.finalize_modular_download(
                 &selections,
                 &prepared.manifest,
@@ -1208,7 +1224,9 @@ mod tests {
     use manifest::{generate_manifest, ComponentManifest, OutputFileChecksum, SingleArchive};
     use reth_chainspec::{HOLESKY, MAINNET};
     use reth_db::{
-        mdbx::DatabaseArguments, models::StorageSettings, static_file::iter_static_files,
+        mdbx::DatabaseArguments,
+        models::StorageSettings,
+        static_file::{iter_static_files, OFFSETS_FILE_EXTENSION},
         DatabaseEnv,
     };
     use reth_db_api::{tables, transaction::DbTxMut};
@@ -1988,6 +2006,42 @@ mod tests {
                 "{flag}"
             );
         }
+        let target = tempdir()?;
+        restore_snapshot(&source, &target, 24, "--with-txs-since=21").await?;
+        restore_snapshot(&source, &target, 24, "--with-txs-since=13").await?;
+        assert_eq!(
+            snapshot_db(&target)?.tx()?.get::<tables::PruneCheckpoints>(PruneSegment::Bodies)?,
+            Some(PruneCheckpoint {
+                prune_mode: PruneMode::Before(21),
+                ..PruneCheckpoint::pruned_through(9)
+            })
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_incomplete_transaction_jar() -> Result<()> {
+        for extension in ["", OFFSETS_FILE_EXTENSION] {
+            let source = tempdir()?;
+            snapshot_db(&source)?;
+            manifest::tests::write_test_static_files(
+                source.path(),
+                StaticFileSegment::Transactions,
+                24,
+            );
+            let missing =
+                Path::new("static_files/static_file_transactions_10_19").with_extension(extension);
+            fs::remove_file(source.path().join(&missing))?;
+
+            let target = tempdir()?;
+            let err =
+                restore_snapshot(&source, &target, 24, "--with-txs-since=13").await.unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                format!("Incomplete transaction static file: missing {}", missing.display())
+            );
+            assert!(!target.path().join("db").exists());
+        }
         Ok(())
     }
 
@@ -2031,7 +2085,7 @@ mod tests {
         let tx = db.tx()?;
         for (segment, prune_mode) in [
             (PruneSegment::SenderRecovery, PruneMode::Full),
-            (PruneSegment::Bodies, PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
+            (PruneSegment::Bodies, PruneMode::Before(SNAPSHOT_TIP + 1)),
         ] {
             assert_eq!(
                 tx.get::<tables::PruneCheckpoints>(segment)?,

@@ -1,10 +1,16 @@
 use super::{extract::static_file_relative_path, manifest::*, verify::OutputVerifier};
 use eyre::Result;
 use rayon::prelude::*;
-use reth_db::static_file::{read_static_file_header, CONFIG_FILE_EXTENSION};
+use reth_db::static_file::{
+    read_static_file_header, CONFIG_FILE_EXTENSION, OFFSETS_FILE_EXTENSION,
+};
 use reth_static_file_types::StaticFileSegment;
 use serde::Serialize;
-use std::{collections::BTreeMap, io::Write, path::Path};
+use std::{
+    collections::{BTreeMap, HashSet},
+    io::Write,
+    path::Path,
+};
 use tracing::info;
 
 /// Machine-readable description of the archives selected for a modular snapshot download.
@@ -284,6 +290,26 @@ pub(crate) fn collect_planned_archives(
         total_output_size += manifest.output_size_for_distance(*ty, distance);
 
         let snapshot_archives = manifest.snapshot_archives_for_distance(*ty, distance);
+        if *ty == SnapshotComponentType::Transactions {
+            // A jar's companions can be in separate selected archives.
+            let files = snapshot_archives
+                .iter()
+                .flat_map(|archive| &archive.output_files)
+                .filter_map(|output| static_file_relative_path(Path::new(&output.path)))
+                .collect::<HashSet<_>>();
+            for path in &files {
+                if path.extension().is_some_and(|ext| ext == CONFIG_FILE_EXTENSION) {
+                    for extension in ["", OFFSETS_FILE_EXTENSION] {
+                        let required = path.with_extension(extension);
+                        eyre::ensure!(
+                            files.contains(required.as_path()),
+                            "Incomplete transaction static file: missing static_files/{}",
+                            required.display()
+                        );
+                    }
+                }
+            }
+        }
         let component = ty.display_name().to_string();
         if !snapshot_archives.is_empty() {
             info!(target: "reth::cli",

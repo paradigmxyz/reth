@@ -7,7 +7,7 @@ use reth_static_file_types::{
 use std::path::Path;
 use tracing::warn;
 
-pub use reth_nippy_jar::CONFIG_FILE_EXTENSION;
+pub use reth_nippy_jar::{CONFIG_FILE_EXTENSION, OFFSETS_FILE_EXTENSION};
 
 mod cursor;
 pub use cursor::StaticFileCursor;
