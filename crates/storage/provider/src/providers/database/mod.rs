@@ -349,7 +349,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     }
 
     /// Returns the executed blocks that are not on disk yet, canonical or not.
-    pub fn in_memory_state(&self) -> &InMemoryState<N::Primitives> {
+    pub const fn in_memory_state(&self) -> &InMemoryState<N::Primitives> {
         &self.in_memory_state
     }
 }
