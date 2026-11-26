@@ -1,7 +1,6 @@
 //! Shared (EIP-8070) and indexed (EIP-8408) cell retrieval messages.
 //!
 //! Payload codecs are flattened: `RequestPair` supplies the outer RLP list and request id.
-//! `ProtocolMessage` preserves the extra legacy cell-payload list on eth/72 connections.
 
 use alloc::vec::Vec;
 use alloy_eips::eip7594::{BlobCellMask, Cell};
@@ -478,51 +477,43 @@ mod tests {
             }),
             EthMessage::Cells(RequestPair { request_id: 1, message: Cells::default() }),
         ];
-        // Frozen base-revision encodings, including the extra cell-payload list.
-        let legacy = [
-            hex!("14d401d2c09000000000000000000000000000000000").to_vec(),
-            hex!("15d501d3c0c09000000000000000000000000000000000").to_vec(),
-        ];
-        for (message, expected) in messages.into_iter().zip(legacy) {
+        for message in messages {
             let protocol = ProtocolMessage::from(message);
-            assert_eq!(protocol.encoded_for_version(EthVersion::Eth72), expected);
-            let mut buf = expected.as_slice();
-            assert_eq!(
-                ProtocolMessage::decode_message(EthVersion::Eth72, &mut buf).unwrap(),
-                protocol
-            );
-            assert!(buf.is_empty());
             let canonical = alloy_rlp::encode(&protocol);
-            assert_eq!(protocol.encoded_for_version(EthVersion::Eth73), canonical);
-            let mut buf = canonical.as_slice();
-            assert_eq!(
-                ProtocolMessage::decode_message(EthVersion::Eth73, &mut buf).unwrap(),
-                protocol
-            );
-            assert!(buf.is_empty());
+            for version in [EthVersion::Eth72, EthVersion::Eth73] {
+                let mut buf = canonical.as_slice();
+                assert_eq!(ProtocolMessage::decode_message(version, &mut buf).unwrap(), protocol);
+                assert!(buf.is_empty());
+            }
         }
     }
 
     #[test]
-    fn legacy_cell_payload_is_bounded() {
-        let mut wire = hex!("14d401d2c09000000000000000000000000000000000").to_vec();
-        wire.push(0x80);
-        let mut buf = wire.as_slice();
-        ProtocolMessage::<EthNetworkPrimitives>::decode_message(EthVersion::Eth72, &mut buf)
-            .unwrap();
-        assert_eq!(buf, &[0x80]);
-        // Extra fields inside either list must not be silently consumed.
-        for wire in [
-            hex!("14d501d3c0900000000000000000000000000000000080"),
-            hex!("14d501d2c0900000000000000000000000000000000080"),
+    fn cell_payload_is_bounded() {
+        for (wire, extra_field) in [
+            (
+                hex!("14d301c09000000000000000000000000000000000").to_vec(),
+                hex!("14d401c0900000000000000000000000000000000080").to_vec(),
+            ),
+            (
+                hex!("15d401c0c09000000000000000000000000000000000").to_vec(),
+                hex!("15d501c0c0900000000000000000000000000000000080").to_vec(),
+            ),
         ] {
-            assert!(matches!(
-                ProtocolMessage::<EthNetworkPrimitives>::decode_message(
-                    EthVersion::Eth72,
-                    &mut wire.as_slice()
-                ),
-                Err(crate::message::MessageError::RlpError(Error::UnexpectedLength))
-            ));
+            for version in [EthVersion::Eth72, EthVersion::Eth73] {
+                let mut appended = wire.clone();
+                appended.push(0x80);
+                let mut buf = appended.as_slice();
+                ProtocolMessage::<EthNetworkPrimitives>::decode_message(version, &mut buf).unwrap();
+                assert_eq!(buf, &[0x80]);
+                assert!(matches!(
+                    ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+                        version,
+                        &mut extra_field.as_slice()
+                    ),
+                    Err(crate::message::MessageError::RlpError(Error::UnexpectedLength))
+                ));
+            }
         }
     }
 
@@ -781,9 +772,8 @@ mod tests {
                 .unwrap(),
                 protocol
             );
-            let legacy = protocol.encoded_for_version(EthVersion::Eth72);
             assert!(
-                matches!(ProtocolMessage::<EthNetworkPrimitives>::decode_message(EthVersion::Eth72,&mut legacy.as_slice()),Err(crate::message::MessageError::Invalid(EthVersion::Eth72, id)) if id == message_type)
+                matches!(ProtocolMessage::<EthNetworkPrimitives>::decode_message(EthVersion::Eth72,&mut encoded.as_slice()),Err(crate::message::MessageError::Invalid(EthVersion::Eth72, id)) if id == message_type)
             );
         }
         assert_eq!(
@@ -879,7 +869,7 @@ mod tests {
             for message in messages {
                 let protocol = ProtocolMessage::from(message);
                 for version in [EthVersion::Eth72, EthVersion::Eth73] {
-                    let wire = protocol.encoded_for_version(version);
+                    let wire = alloy_rlp::encode(&protocol);
                     let mut buf = wire.as_slice();
                     prop_assert_eq!(&ProtocolMessage::decode_message(version, &mut buf).unwrap(),
                         &protocol);

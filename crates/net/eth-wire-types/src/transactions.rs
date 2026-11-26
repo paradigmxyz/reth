@@ -1,10 +1,15 @@
-//! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
+//! Implements the `GetPooledTransactions` and `PooledTransactions` message types, including the
+//! eth/72 check for responses without blobs, and the eth/72 `GetCells` and `Cells` message types.
 
-use crate::broadcast::decode_list_with_memory_budget;
+use crate::broadcast::{decode_list_with_memory_budget, decode_list_with_memory_budget_by};
 use alloc::vec::Vec;
-use alloy_consensus::transaction::{PooledTransaction, TxHashRef};
+use alloy_consensus::{
+    constants::EIP4844_TX_TYPE_ID,
+    transaction::{PooledTransaction, TxHashRef},
+};
+use alloy_eips::eip7594::EIP_7594_WRAPPER_VERSION;
 use alloy_primitives::B256;
-use alloy_rlp::{Decodable, RlpDecodableWrapper, RlpEncodableWrapper};
+use alloy_rlp::{Decodable, Header, RlpDecodableWrapper, RlpEncodableWrapper, EMPTY_LIST_CODE};
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
 use reth_primitives_traits::InMemorySize;
@@ -81,6 +86,28 @@ impl<T: Decodable + InMemorySize> PooledTransactions<T> {
     ) -> alloy_rlp::Result<Self> {
         decode_list_with_memory_budget(buf, memory_budget).map(Self)
     }
+
+    /// Decodes an eth/72 response like [`Self::decode_with_memory_budget`].
+    ///
+    /// eth/72 peers fetch blobs with `GetCells`, so type 3 transactions must carry an EIP-7594
+    /// sidecar with an empty blob list, see [EIP-8070]. Returns an error for any other type 3
+    /// transaction.
+    ///
+    /// [EIP-8070]: https://eips.ethereum.org/EIPS/eip-8070
+    pub fn decode_eth72_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        decode_list_with_memory_budget_by(buf, memory_budget, |buf| {
+            if !is_eth72_pooled_transaction(buf)? {
+                return Err(alloy_rlp::Error::Custom(
+                    "expected a blobless eth/72 pooled transaction",
+                ))
+            }
+            T::decode(buf)
+        })
+        .map(Self)
+    }
 }
 
 impl<T: TxHashRef> PooledTransactions<T> {
@@ -113,14 +140,37 @@ impl<T> Default for PooledTransactions<T> {
     }
 }
 
+/// Returns whether the network encoding of a pooled transaction fits eth/72.
+///
+/// Type 3 transactions are `type || rlp([tx_payload_body, wrapper_version, blobs, commitments,
+/// cell_proofs])`, so the EIP-7594 wrapper version and an empty blob list must follow the
+/// transaction body. Other transaction types always fit.
+fn is_eth72_pooled_transaction(mut buf: &[u8]) -> alloy_rlp::Result<bool> {
+    let envelope = Header::decode(&mut buf)?;
+    if envelope.list || buf.first() != Some(&EIP4844_TX_TYPE_ID) {
+        return Ok(true)
+    }
+    let mut fields = Header::decode_bytes(&mut &buf[1..], true)?;
+    // Skip the transaction body.
+    Header::decode_bytes(&mut fields, true)?;
+    Ok(fields.starts_with(&[EIP_7594_WRAPPER_VERSION, EMPTY_LIST_CODE]))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
-    use alloy_consensus::{transaction::PooledTransaction, TxEip1559, TxLegacy};
-    use alloy_primitives::{address, b256, hex, Address, Signature, TxKind, U256};
+    use alloy_consensus::{
+        transaction::PooledTransaction, SignableTransaction, TxEip1559, TxEip4844,
+        TxEip4844WithSidecar, TxLegacy,
+    };
+    use alloy_eips::{
+        eip4844::{Blob, BlobTransactionSidecar, Bytes48},
+        eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
+    };
+    use alloy_primitives::{address, b256, hex, Address, Signature, TxKind, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_chainspec::MIN_TRANSACTION_GAS;
-    use reth_ethereum_primitives::{Transaction, TransactionSigned};
+    use reth_ethereum_primitives::{PooledTransactionVariant, Transaction, TransactionSigned};
     use std::str::FromStr;
 
     #[test]
@@ -570,5 +620,66 @@ mod tests {
         let expected_str = hex::encode(expected);
         assert_eq!(encoded_str.len(), expected_str.len());
         assert_eq!(encoded_str, expected_str);
+    }
+
+    #[test]
+    fn eth72_pooled_transactions_reject_blobs() {
+        let blob_tx = |sidecar: BlobTransactionSidecarVariant| {
+            PooledTransactionVariant::Eip4844(
+                TxEip4844WithSidecar {
+                    tx: TxEip4844 { blob_versioned_hashes: vec![B256::ZERO], ..Default::default() },
+                    sidecar,
+                }
+                .into_signed(Signature::test_signature()),
+            )
+        };
+        let full = blob_tx(
+            BlobTransactionSidecarEip7594::new(
+                vec![Blob::repeat_byte(1)],
+                vec![Bytes48::repeat_byte(2)],
+                vec![Bytes48::repeat_byte(3); 128],
+            )
+            .into(),
+        );
+        let mut without_blobs = full.clone();
+        without_blobs.clear_eip7594_blobs();
+        // Legacy sidecars have no cell proofs, so eth/72 can't carry them, even without blobs.
+        let legacy = blob_tx(
+            BlobTransactionSidecar::new(Vec::new(), vec![Bytes48::repeat_byte(2)], Vec::new())
+                .into(),
+        );
+        let eip1559 = PooledTransactionVariant::Eip1559(
+            TxEip1559::default().into_signed(Signature::test_signature()),
+        );
+        let legacy_tx = PooledTransactionVariant::Legacy(
+            TxLegacy::default().into_signed(Signature::test_signature()),
+        );
+
+        for (tx, fits_eth72) in [
+            (without_blobs, true),
+            (eip1559, true),
+            (legacy_tx, true),
+            (full, false),
+            (legacy, false),
+        ] {
+            let response = PooledTransactions(vec![tx]);
+            let encoded = alloy_rlp::encode(&response);
+            let eth72 = PooledTransactions::decode_eth72_with_memory_budget(
+                &mut encoded.as_slice(),
+                usize::MAX,
+            );
+            if fits_eth72 {
+                assert_eq!(eth72, Ok(response.clone()));
+            } else {
+                assert_eq!(
+                    eth72,
+                    Err(alloy_rlp::Error::Custom("expected a blobless eth/72 pooled transaction"))
+                );
+            }
+            assert_eq!(
+                PooledTransactions::decode_with_memory_budget(&mut encoded.as_slice(), usize::MAX),
+                Ok(response)
+            );
+        }
     }
 }

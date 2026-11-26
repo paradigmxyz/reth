@@ -602,6 +602,37 @@ mod tests {
         assert!(table.is_empty());
     }
 
+    #[tokio::test]
+    async fn insert_index_with_small_etl_file_size() {
+        // init
+        let db = TestStageDB::default();
+
+        // setup
+        partial_setup(&db);
+
+        // run with an ETL file size that makes the cache flush every few dozen blocks, so the
+        // history of the account spans many collector entries
+        let input = ExecInput { target: Some(MAX_BLOCK), ..Default::default() };
+        let mut stage = IndexAccountHistoryStage {
+            etl_config: EtlConfig::new(None, 1024),
+            ..Default::default()
+        };
+        let provider = db.factory.database_provider_rw().unwrap();
+        let out = stage.execute(&provider, input).unwrap();
+        assert_eq!(out, ExecOutput::done(StageCheckpoint::new(MAX_BLOCK)));
+        provider.commit().unwrap();
+
+        // verify
+        let table = cast(db.table::<tables::AccountsHistory>().unwrap());
+        assert_eq!(
+            table,
+            BTreeMap::from([
+                (shard(LAST_BLOCK_IN_FULL_SHARD - 1), (0..LAST_BLOCK_IN_FULL_SHARD).collect()),
+                (shard(u64::MAX), (LAST_BLOCK_IN_FULL_SHARD..=MAX_BLOCK).collect()),
+            ])
+        );
+    }
+
     stage_test_suite_ext!(IndexAccountHistoryTestRunner, index_account_history);
 
     struct IndexAccountHistoryTestRunner {

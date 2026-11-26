@@ -214,7 +214,7 @@ where
             self.pending_responses.insert(request_id, response);
         }
 
-        Ok(Bytes::from(ProtocolMessage::from(item).encoded_for_version(self.version)))
+        Ok(Bytes::from(alloy_rlp::encode(ProtocolMessage::from(item))))
     }
 
     /// Consumes the pending request an encoded response answers, without decoding the response's
@@ -483,10 +483,8 @@ fn response_exceeds_items(
         EthMessageID::Receipts if version >= EthVersion::Eth70 => {
             bool::decode(&mut payload)?;
         }
+        // eth/72 places the hash and cell lists directly after the request id.
         EthMessageID::Cells => {
-            if version == EthVersion::Eth72 {
-                payload = Header::decode_bytes(&mut payload, true)?;
-            }
             return Ok(list_exceeds_items(&mut payload, max_items)? ||
                 list_exceeds_items(&mut payload, max_items)?)
         }
