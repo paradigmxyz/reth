@@ -10,7 +10,7 @@
 //! which never holds one while waiting for the other.
 
 use crate::EthApiError;
-use alloy_rpc_types_eth::TransactionRequest;
+use alloy_rpc_types_eth::{state::StateOverride, TransactionRequest};
 use std::{num::NonZeroU32, sync::Arc, time::Duration};
 use tokio::{
     sync::{OwnedSemaphorePermit, Semaphore},
@@ -36,6 +36,13 @@ const SIMULATED_BLOCK_BYTES: u64 = MIB;
 
 /// Memory, in bytes, every executed call holds besides what its gas pays for.
 const CALL_BYTES: u64 = 64 * 1024;
+
+/// Memory, in bytes, an overridden account holds besides its code and storage.
+const ACCOUNT_OVERRIDE_BYTES: u64 = 256;
+
+/// Memory, in bytes, an overridden storage slot holds in the request and in the state it is
+/// applied to.
+const SLOT_OVERRIDE_BYTES: u64 = 128;
 
 /// The memory, in MiB, that the heavy RPC requests of a node may hold at once.
 ///
@@ -175,6 +182,19 @@ pub const fn execution_weight_mib(calls: u64, gas: u64, blocks: u64) -> u64 {
     )
 }
 
+/// Returns the memory, in bytes, that applying `overrides` holds: every overridden account, its
+/// code and its storage slots.
+pub fn state_override_bytes(overrides: &StateOverride) -> u64 {
+    overrides.values().fold(0, |bytes, account| {
+        let slots = account.state.as_ref().map_or(0, |state| state.len()) +
+            account.state_diff.as_ref().map_or(0, |state| state.len());
+        bytes
+            .saturating_add(ACCOUNT_OVERRIDE_BYTES)
+            .saturating_add(account.code.as_ref().map_or(0, |code| code.len() as u64))
+            .saturating_add((slots as u64).saturating_mul(SLOT_OVERRIDE_BYTES))
+    })
+}
+
 /// Returns the most memory, in MiB, that a proof of `slots` storage slots across `targets` accounts
 /// may hold.
 ///
@@ -200,6 +220,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{Address, B256};
+    use alloy_rpc_types_eth::state::AccountOverride;
 
     fn budget(total_mib: u32) -> RpcMemoryBudget {
         RpcMemoryBudget::new(NonZeroU32::new(total_mib).unwrap())
@@ -312,6 +334,15 @@ mod tests {
         // Many calls or blocks without gas stay well below a typical budget.
         assert_eq!(execution_weight_mib(1024, 0, 0), 64);
         assert_eq!(execution_weight_mib(1, 0, 256), 257);
+        let account = AccountOverride {
+            code: Some(vec![0; 1024].into()),
+            state_diff: Some(
+                (0..8u64).map(|i| (B256::with_last_byte(i as u8), B256::ZERO)).collect(),
+            ),
+            ..Default::default()
+        };
+        let overrides = StateOverride::from_iter([(Address::ZERO, account)]);
+        assert_eq!(state_override_bytes(&overrides), 256 + 1024 + 8 * 128);
         assert_eq!(proof_weight_mib(1, 1024), 13);
         assert_eq!(traced_calls_bytes(0), 0);
         assert_eq!(traced_calls_bytes(1), 16 * MIB);

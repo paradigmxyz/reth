@@ -1936,29 +1936,32 @@ fn tracer_recorded_bytes(
     calls: u64,
 ) -> u64 {
     match tracer {
-        GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
-            GethDebugBuiltInTracerType::FourByteTracer |
-            GethDebugBuiltInTracerType::NoopTracer |
-            GethDebugBuiltInTracerType::StateGasTracer => 0,
-            GethDebugBuiltInTracerType::CallTracer | GethDebugBuiltInTracerType::FlatCallTracer => {
-                gas.saturating_mul(10)
-            }
-            GethDebugBuiltInTracerType::PreStateTracer |
-            GethDebugBuiltInTracerType::Erc7562Tracer => gas.saturating_mul(20),
-            // A config that is not a mux config fails the request before it traces.
-            GethDebugBuiltInTracerType::MuxTracer => {
-                config.clone().into_mux_config().map_or(0, |mux| {
-                    mux.0.iter().fold(0, |bytes, (tracer, config)| {
-                        bytes.saturating_add(tracer_recorded_bytes(
-                            tracer,
-                            &config.clone().unwrap_or_default(),
-                            gas,
-                            calls,
-                        ))
+        GethDebugTracerType::BuiltInTracer(tracer) => {
+            match tracer {
+                GethDebugBuiltInTracerType::NoopTracer |
+                GethDebugBuiltInTracerType::StateGasTracer => 0,
+                // Every distinct selector needs a call, at least 100 gas, and keeps an entry of
+                // under 100 bytes keyed by its string.
+                GethDebugBuiltInTracerType::FourByteTracer => gas,
+                GethDebugBuiltInTracerType::CallTracer |
+                GethDebugBuiltInTracerType::FlatCallTracer => gas.saturating_mul(10),
+                GethDebugBuiltInTracerType::PreStateTracer |
+                GethDebugBuiltInTracerType::Erc7562Tracer => gas.saturating_mul(20),
+                // A config that is not a mux config fails the request before it traces.
+                GethDebugBuiltInTracerType::MuxTracer => {
+                    config.clone().into_mux_config().map_or(0, |mux| {
+                        mux.0.iter().fold(0, |bytes, (tracer, config)| {
+                            bytes.saturating_add(tracer_recorded_bytes(
+                                tracer,
+                                &config.clone().unwrap_or_default(),
+                                gas,
+                                calls,
+                            ))
+                        })
                     })
-                })
+                }
             }
-        },
+        }
         // The keccak256 preimage tracer is looked up by name before JavaScript. Each call records
         // up to its own byte limit, and its result, the response serialized from it and the copy
         // sent hold the preimages as hex, twice their size.
@@ -2471,6 +2474,7 @@ mod tests {
 
         assert_eq!(weight(serde_json::json!({ "tracer": "callTracer" }), 10_000_000), 112);
         assert_eq!(weight(serde_json::json!({ "tracer": "noopTracer" }), 10_000_000), 16);
+        assert_eq!(weight(serde_json::json!({ "tracer": "4byteTracer" }), 10_000_000), 26);
         assert_eq!(
             weight(serde_json::json!({ "tracer": "", "disableStorage": true }), 50_000_000),
             496

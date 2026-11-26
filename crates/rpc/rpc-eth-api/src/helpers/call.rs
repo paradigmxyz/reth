@@ -35,7 +35,7 @@ use reth_rpc_eth_types::{
         attach_bal_before_tx,
     },
     error::{AsEthApiError, FromEthApiError},
-    memory_budget::{calls_gas, execution_weight_mib},
+    memory_budget::{bytes_to_mib, calls_gas, execution_weight_mib, state_override_bytes},
     simulate::{self, EthSimulateError, SimulatedState},
     utils::CallManyBudget,
     EthApiError, RpcInvalidTransactionError, StateCacheDb,
@@ -103,12 +103,16 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
 
             let blocks = simulate::simulated_block_count(&block_state_calls, parent.number())
                 .min(max_simulate_blocks);
-            let admission = self
-                .admit(
-                    self.blocking_io_task_guard(),
-                    execution_weight_mib(calls as u64, gas, blocks),
-                )
-                .await?;
+            // Each block's state overrides are parsed and copied into the simulated state.
+            let overrides = block_state_calls
+                .iter()
+                .filter_map(|block| block.state_overrides.as_ref())
+                .fold(0u64, |bytes, overrides| {
+                    bytes.saturating_add(state_override_bytes(overrides))
+                });
+            let weight = execution_weight_mib(calls as u64, gas, blocks)
+                .saturating_add(bytes_to_mib(overrides.saturating_mul(2)));
+            let admission = self.admit(self.blocking_io_task_guard(), weight).await?;
 
             self.spawn_with_state_at_block(state_at, move |this, db| {
                 let _admission = admission;
