@@ -551,7 +551,11 @@ pub struct RpcServerArgs {
     #[arg(long = "ws.port", default_value_t = DefaultRpcServerArgs::get_global().ws_port)]
     pub ws_port: u16,
 
-    /// Origins from which to accept `WebSocket` requests
+    /// Allowed `WebSocket` origins. Defaults to HTTP(S) origins on `localhost`, `127.0.0.1`, or
+    /// `[::1]` at any port. Use `*` to allow any origin.
+    ///
+    /// When HTTP and `WebSocket` share a listener, either `--http.corsdomain` or `--ws.origins`
+    /// sets the allowed origins for both. If both flags are set, their values must match.
     #[arg(id = "ws.origins", long = "ws.origins", alias = "ws.corsdomain", default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_allowed_origins.as_ref().map(|v| v.to_string().into())))]
     pub ws_allowed_origins: Option<String>,
 
