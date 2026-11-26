@@ -698,8 +698,8 @@ evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "7c9f3b6deb23005fc
 
 [patch.crates-io]
 # reth-core
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
