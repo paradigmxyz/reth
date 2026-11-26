@@ -545,7 +545,7 @@ mod tests {
     use alloy_rpc_types_eth::{
         simulate::{SimBlock, SimulatePayload},
         state::{AccountOverride, EvmOverrides, StateOverride},
-        BlockOverrides, Bundle, TransactionRequest,
+        AccessListResult, BlockOverrides, Bundle, TransactionRequest,
     };
     use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
     use evm2::{evm::CacheDB, AccountInfo};
@@ -1708,6 +1708,57 @@ mod tests {
         drop(permit);
         let estimated = EthApiServer::estimate_gas(&api, request, None, None, None).await.unwrap();
         assert_eq!(estimated, U256::from(21_000));
+    }
+
+    /// `eth_createAccessList` waits for a blocking IO permit, like `eth_call`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn create_access_list_takes_blocking_io_permit() {
+        let provider = MockEthProvider::default();
+        // Access-list transactions need a post-Berlin block.
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 13_000_000,
+                    timestamp: 1_629_000_000,
+                    base_fee_per_gas: Some(1_000_000_000),
+                    gas_limit: 30_000_000,
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .max_blocking_io_requests(1)
+        .build();
+        let request = TransactionRequest {
+            gas_price: Some(0),
+            ..TransactionRequest::default().with_to(Address::repeat_byte(0xaa))
+        };
+
+        let permit = api.acquire_owned_blocking_io().await.unwrap();
+        assert!(tokio::time::timeout(
+            Duration::from_millis(200),
+            EthApiServer::create_access_list(&api, request.clone(), None, None)
+        )
+        .await
+        .is_err());
+
+        drop(permit);
+        let result = EthApiServer::create_access_list(&api, request, None, None).await.unwrap();
+        assert_eq!(
+            result,
+            AccessListResult {
+                access_list: Default::default(),
+                gas_used: U256::from(21_000),
+                error: None
+            }
+        );
     }
 
     #[tokio::test]
