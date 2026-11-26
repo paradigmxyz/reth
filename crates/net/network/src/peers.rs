@@ -124,6 +124,8 @@ pub struct PeersManager {
     /// Whether the last dial of an untrusted peer went to a candidate, so the next one goes to a
     /// tracked peer.
     candidate_dialed_last: bool,
+    /// Candidates whose dial may still be pending, see [`Self::dial_candidate`].
+    candidate_dials: HashSet<PeerId, FbBuildHasher<64>>,
 }
 
 impl PeersManager {
@@ -265,6 +267,7 @@ impl PeersManager {
             peer_rotation_mean: peer_rotation_interval,
             candidates: LruMap::new(MAX_PEER_CANDIDATES),
             candidate_dialed_last: false,
+            candidate_dials: Default::default(),
         }
     }
 
@@ -784,11 +787,8 @@ impl PeersManager {
     /// Called when a _pending_ outbound connection is successful.
     pub(crate) fn on_active_outgoing_established(&mut self, peer_id: PeerId) {
         let at_capacity = self.connection_info.is_outbound_at_capacity();
-        // Granting trust during a dial keeps the row alive, but leaves the removal flag set.
-        let keep_candidate = self
-            .peers
-            .get(&peer_id)
-            .is_some_and(|peer| peer.state.is_pending_out() && peer.remove_after_disconnect) &&
+        // The removal flag can't tell a candidate dial from a peer removed during its dial.
+        let keep_candidate = self.candidate_dials.remove(&peer_id) &&
             self.peers
                 .iter()
                 .filter(|(id, peer)| **id != peer_id && !peer.is_temporary())
@@ -1138,6 +1138,7 @@ impl PeersManager {
         if entry.get().is_trusted() {
             return
         }
+        self.candidate_dials.remove(&peer_id);
         if matches!(
             entry.get().state,
             PeerConnectionState::DisconnectingIn | PeerConnectionState::DisconnectingOut
@@ -1445,6 +1446,11 @@ impl PeersManager {
         peer.remove_after_disconnect = true;
         peer.state = PeerConnectionState::PendingOut;
         self.peers.insert(peer_id, peer);
+        // A dial that ends without a handshake leaves its id behind, so this stays bounded by the
+        // pending dials.
+        self.candidate_dials
+            .retain(|id| self.peers.get(id).is_some_and(|peer| peer.state.is_pending_out()));
+        self.candidate_dials.insert(peer_id);
         self.connection_info.inc_pending_out();
         self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
         self.queued_actions.push_back(PeerAction::Connect { peer_id, remote_addr: addr.tcp() });
@@ -5341,5 +5347,25 @@ mod tests {
         let moved = PeerAddr::from_tcp("1.2.3.4:30305".parse().unwrap());
         peers.add_peer(first, moved, None);
         assert_eq!(peers.candidates.peek(&first).unwrap().addr, moved);
+    }
+
+    #[tokio::test]
+    async fn test_peer_removed_during_dial_stays_removed() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let [removed, banned] = [PeerId::random(), PeerId::random()];
+        peers.add_peer(removed, unique_ip_addr(0), None);
+        peers.candidates.insert(banned, PeerCandidate { addr: unique_ip_addr(1), fork_id: None });
+        peers.fill_outbound_slots();
+
+        // a tracked peer removed and a candidate banned by the admin while being dialed.
+        peers.remove_peer(removed);
+        peers.ban_peer_by_admin(banned);
+        for peer_id in [removed, banned] {
+            assert!(peers.peers[&peer_id].state.is_pending_out());
+            peers.on_active_outgoing_established(peer_id);
+            assert!(peers.peers[&peer_id].is_temporary());
+            peers.on_active_session_gracefully_closed(peer_id);
+            assert!(!peers.peers.contains_key(&peer_id));
+        }
     }
 }
