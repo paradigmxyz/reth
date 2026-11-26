@@ -1737,7 +1737,10 @@ impl Discv4Service {
         let mut failed_pings = Vec::new();
         self.pending_pings.retain(|node_id, ping_request| {
             if now.duration_since(ping_request.sent_at) > self.config.ping_expiration {
-                failed_pings.push((*node_id, ping_request.node.udp_addr()));
+                // An at-capacity ping was sent before the node had an entry, so it evicts nothing.
+                if !matches!(ping_request.reason, PingReason::AtCapacity) {
+                    failed_pings.push((*node_id, ping_request.node.udp_addr()));
+                }
                 return false
             }
             true
@@ -4144,6 +4147,34 @@ mod tests {
             updates.try_recv(),
             Ok(DiscoveryUpdate::DiscoveredAtCapacity(announced)) if announced == discovered
         ));
+    }
+
+    #[tokio::test]
+    async fn test_neighbours_at_capacity_ping_timeout_keeps_node() {
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let (mut service, record) = pending_find_node_service(node_addr).await;
+        let id = full_bucket_peer(&mut service);
+        let referral = NodeRecord::new(SocketAddr::from(([10, 0, 0, 9], 30303)), id);
+        let msg =
+            Neighbours { nodes: vec![referral], expire: service.find_node_expiration() + 1000 };
+        service.on_neighbours(msg, node_addr, record.id);
+        assert!(matches!(service.pending_pings[&id].reason, PingReason::AtCapacity));
+
+        // The node itself is inserted from another endpoint while the referral ping is pending.
+        free_farthest_bucket_slot(&mut service);
+        let node = NodeRecord::new(SocketAddr::from(([10, 0, 0, 50], 30303)), id);
+        let ping = Ping {
+            from: node.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping, node.udp_addr(), id, B256::random());
+        assert!(service.on_entry(id, |_| ()).is_some());
+
+        service.evict_expired_requests(Instant::now() + service.config.ping_expiration * 2);
+        assert!(!service.pending_pings.contains_key(&id));
+        assert!(service.on_entry(id, |_| ()).is_some());
     }
 
     #[tokio::test]
