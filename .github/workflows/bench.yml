@@ -1409,15 +1409,18 @@ jobs:
           mkdir -p "$HOME/.local/bin"
 
           # apt packages
-          # apt-get with lock wait + retries (other apt processes on the runner can hold the lock)
+          # Other apt processes on the runner can hold the apt locks. Wait up to 120s
+          # for the dpkg locks in every apt-get call, including install_llvm.sh. The
+          # lists and archives locks ignore this timeout, so apt_get also retries.
+          echo 'DPkg::Lock::Timeout "120";' | sudo tee /etc/apt/apt.conf.d/90-lock-timeout >/dev/null
           apt_get() {
             local attempt
             for attempt in 1 2 3 4; do
-              sudo apt-get -o DPkg::Lock::Timeout=120 "$@" && return 0
-              echo "::warning::apt-get $* failed (attempt $attempt/5), retrying in $((attempt * 15))s"
-              sleep $((attempt * 15))
+              sudo apt-get "$@" && return 0
+              echo "::warning::apt-get $* failed (attempt $attempt/5), retrying in $((attempt * 30))s"
+              sleep $((attempt * 30))
             done
-            sudo apt-get -o DPkg::Lock::Timeout=120 "$@"
+            sudo apt-get "$@"
           }
 
           apt_get update -qq
@@ -1425,7 +1428,7 @@ jobs:
           apt_get install -y --no-install-recommends \
             python3 make jq zstd curl dmsetup m4
           # Try the kernel-specific package once (it may not exist), then fall back.
-          sudo apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
+          sudo apt-get install -y --no-install-recommends \
             linux-tools-"$(uname -r)" || \
             apt_get install -y --no-install-recommends linux-tools-generic
 
@@ -1440,8 +1443,8 @@ jobs:
           for attempt in 1 2 3 4 5; do
             .github/scripts/install_llvm.sh ubuntu && break
             [ "$attempt" -lt 5 ] || exit 1
-            echo "::warning::install_llvm.sh failed (attempt $attempt/5), retrying in $((attempt * 15))s"
-            sleep $((attempt * 15))
+            echo "::warning::install_llvm.sh failed (attempt $attempt/5), retrying in $((attempt * 30))s"
+            sleep $((attempt * 30))
           done
 
           # uv (Python package manager)
