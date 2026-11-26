@@ -57,15 +57,14 @@ where
         skip(self, provider),
         ret(level = "trace")
     )]
-    fn prune(
-        &self,
-        provider: &Provider,
-        mut input: PruneInput,
-    ) -> Result<SegmentOutput, PrunerError> {
+    fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         // It is not possible to prune TransactionLookup data for which we don't have transaction
         // data. If the TransactionLookup checkpoint is lagging behind (which can happen e.g. when
         // pre-merge history is dropped and then later tx lookup pruning is enabled) then we can
         // only prune from the lowest static file.
+        // Only the range starts from the static file, so `input` keeps the stored checkpoint and
+        // early returns never save the static file starting point.
+        let mut range_input = input.clone();
         if let Some(lowest_range) =
             provider.static_file_provider().get_lowest_range(StaticFileSegment::Transactions) &&
             input
@@ -76,19 +75,19 @@ where
             let Some(tx_number) = body_indices.next_tx_num().checked_sub(1)
         {
             // Only skip earlier transactions if any exist.
-            input.previous_checkpoint = Some(PruneCheckpoint {
+            range_input.previous_checkpoint = Some(PruneCheckpoint {
                 block_number: Some(previous_block),
                 tx_number: Some(tx_number),
                 prune_mode: self.mode,
             });
             debug!(
                 target: "pruner",
-                static_file_checkpoint = ?input.previous_checkpoint,
+                static_file_checkpoint = ?range_input.previous_checkpoint,
                 "Using static file transaction checkpoint as TransactionLookup starting point"
             );
         }
 
-        let (start, end) = match input.get_next_tx_num_range(provider)? {
+        let (start, end) = match range_input.get_next_tx_num_range(provider)? {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No transaction lookup entries to prune");
@@ -171,6 +170,16 @@ where
                         Some(last_pruned_transaction.unwrap_or(row.1).max(row.1))
                 },
             )?;
+
+        // The iterator stopped before deleting anything, so keep the previous checkpoint to retry
+        // the batch on the next run. This must use the iterator's own `done`, because a batch
+        // that was fully scanned without deletions (missing keys) can still advance.
+        if pruned == 0 && !done {
+            return Ok(SegmentOutput::not_done(
+                limiter.interrupt_reason(),
+                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            ))
+        }
 
         let done = done && tx_range_end == end;
         trace!(target: "pruner", %pruned, %done, "Pruned transaction lookup");
@@ -279,6 +288,15 @@ impl TransactionLookup {
         let done = deleted == hashes.len() && tx_range_end == end;
         trace!(target: "pruner", %deleted, %done, "Pruned transaction lookup (RocksDB)");
 
+        // Nothing in the range was pruned, so keep the previous checkpoint to retry the range on
+        // the next run.
+        if deleted == 0 && !done {
+            return Ok(SegmentOutput::not_done(
+                limiter.interrupt_reason(),
+                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            ))
+        }
+
         let last_pruned_transaction =
             if deleted > 0 { start + deleted as u64 - 1 } else { tx_range_end };
 
@@ -316,12 +334,13 @@ mod tests {
     };
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
+        SegmentOutputCheckpoint,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_static_file_types::{StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE};
     use reth_storage_api::StorageSettingsCache;
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-    use std::ops::Sub;
+    use std::{ops::Sub, thread::sleep, time::Duration};
 
     #[test]
     fn prune_transaction_zero_after_empty_genesis() {
@@ -554,8 +573,126 @@ mod tests {
             6,
             (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 10),
         );
+        // A limit reached before the first row keeps the stored checkpoint.
+        let previous_checkpoint = db
+            .factory
+            .provider()
+            .unwrap()
+            .get_prune_checkpoint(PruneSegment::TransactionLookup)
+            .unwrap();
+        let rows = db.table::<tables::TransactionHashNumbers>().unwrap().len();
+        let limiter =
+            PruneLimiter::default().set_deleted_entries_limit(10).set_time_limit(Duration::ZERO);
+        sleep(Duration::from_millis(1));
+        let input = PruneInput { previous_checkpoint, to_block: 6, limiter };
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = TransactionLookup::new(PruneMode::Before(6)).prune(&provider, input).unwrap();
+        provider.commit().expect("commit");
+        assert_eq!(
+            result,
+            SegmentOutput::not_done(
+                PruneInterruptReason::Timeout,
+                previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
+            )
+        );
+        assert_eq!(db.table::<tables::TransactionHashNumbers>().unwrap().len(), rows);
+
         test_prune(6, (PruneProgress::Finished, 2));
         test_prune(10, (PruneProgress::Finished, 8));
+    }
+
+    #[test]
+    fn prune_empty_batch_advances_to_next_batch() {
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+        let blocks = random_block_range(
+            &mut rng,
+            1..=4,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 1..2, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
+
+        // Only the last transaction is indexed, so the first batch (txs 0 and 1) has no keys.
+        let last_hash = *blocks[3].body().transactions[0].tx_hash();
+        db.insert_tx_hash_numbers([(last_hash, 3)]).expect("insert tx hash numbers");
+
+        let prune_mode = PruneMode::Before(5);
+        let segment = TransactionLookup::new(prune_mode);
+        let input = |previous_checkpoint| PruneInput {
+            previous_checkpoint,
+            to_block: 4,
+            limiter: PruneLimiter::default().set_deleted_entries_limit(2),
+        };
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let first = segment.prune(&provider, input(None)).unwrap();
+        provider.commit().expect("commit");
+
+        assert_eq!(first.pruned, 0);
+        assert!(!first.progress.is_finished());
+        assert_eq!(
+            first.checkpoint,
+            Some(SegmentOutputCheckpoint { block_number: Some(1), tx_number: Some(1) })
+        );
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        let second = segment
+            .prune(
+                &provider,
+                input(
+                    first.checkpoint.map(|checkpoint| checkpoint.as_prune_checkpoint(prune_mode)),
+                ),
+            )
+            .unwrap();
+        provider.commit().expect("commit");
+
+        assert_eq!(second.pruned, 1);
+        assert!(second.progress.is_finished());
+        assert_eq!(
+            second.checkpoint,
+            Some(SegmentOutputCheckpoint { block_number: Some(4), tx_number: Some(3) })
+        );
+        assert!(db.table::<tables::TransactionHashNumbers>().unwrap().is_empty());
+    }
+
+    #[test]
+    fn prune_time_limit_reached_keeps_checkpoint_below_static_files() {
+        let db = TestStageDB::default();
+        let mut rng = generators::rng();
+        let first_retained_block = DEFAULT_BLOCKS_PER_STATIC_FILE;
+        let blocks = random_block_range(
+            &mut rng,
+            first_retained_block - 1..=first_retained_block + 1,
+            BlockRangeParams { tx_count: 1..2, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).unwrap();
+
+        // Transaction zero is in a block below the lowest static file.
+        let static_files = db.factory.static_file_provider();
+        {
+            let mut writer = static_files
+                .get_writer(first_retained_block, StaticFileSegment::Transactions)
+                .unwrap();
+            for (tx_number, block) in blocks.iter().enumerate().skip(1) {
+                writer.append_transaction(tx_number as u64, &block.body().transactions[0]).unwrap();
+                writer.increment_block(block.number).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+
+        let limiter =
+            PruneLimiter::default().set_deleted_entries_limit(10).set_time_limit(Duration::ZERO);
+        sleep(Duration::from_millis(1));
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = TransactionLookup::new(PruneMode::Before(first_retained_block + 1))
+            .prune(
+                &provider,
+                PruneInput { previous_checkpoint: None, to_block: first_retained_block, limiter },
+            )
+            .unwrap();
+
+        // The static file starting point is not saved as a checkpoint.
+        assert_eq!(result, SegmentOutput::not_done(PruneInterruptReason::Timeout, None));
     }
 
     #[test]
@@ -645,6 +782,26 @@ mod tests {
                 "Remaining RocksDB entries should match expected"
             );
         }
+
+        // A limit reached before the first row keeps the stored checkpoint.
+        let limiter = PruneLimiter::default().set_time_limit(Duration::ZERO);
+        sleep(Duration::from_millis(1));
+        let input = PruneInput {
+            previous_checkpoint: Some(result.checkpoint.unwrap().as_prune_checkpoint(prune_mode)),
+            to_block: 10,
+            limiter,
+        };
+        let provider = db.factory.database_provider_rw().unwrap();
+        let timed_out = segment.prune(&provider, input).unwrap();
+        provider.commit().expect("commit");
+        assert_eq!(
+            timed_out,
+            SegmentOutput::not_done(PruneInterruptReason::Timeout, result.checkpoint)
+        );
+        assert_eq!(
+            db.factory.rocksdb_provider().iter::<tables::TransactionHashNumbers>().unwrap().count(),
+            tx_hash_numbers_len - txs_up_to_block_6
+        );
     }
 
     /// Tests that when `RocksDB` prune deletes nothing (limit exhausted), checkpoint doesn't

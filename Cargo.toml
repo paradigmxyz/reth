@@ -446,9 +446,9 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "9f3af840472fa54c53ea8ae62afda645279edc18", default-features = false }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "9f3af840472fa54c53ea8ae62afda645279edc18", default-features = false }
-evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "9f3af840472fa54c53ea8ae62afda645279edc18", default-features = false }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "7c9f3b6deb23005fc84596ba1b13a6492d942014", default-features = false }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "7c9f3b6deb23005fc84596ba1b13a6492d942014", default-features = false }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "7c9f3b6deb23005fc84596ba1b13a6492d942014", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -691,9 +691,9 @@ ipnet = "2.11"
 # evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
 # rejects a patch from the same source.
 [patch."https://github.com/alloy-rs/evm2"]
-evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "9f3af840472fa54c53ea8ae62afda645279edc18" }
-evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "9f3af840472fa54c53ea8ae62afda645279edc18" }
-evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "9f3af840472fa54c53ea8ae62afda645279edc18" }
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "7c9f3b6deb23005fc84596ba1b13a6492d942014" }
+evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "7c9f3b6deb23005fc84596ba1b13a6492d942014" }
+evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "7c9f3b6deb23005fc84596ba1b13a6492d942014" }
 
 [patch.crates-io]
 # Shared REST-SSZ witness containers.
@@ -704,8 +704,8 @@ alloy-serde = { git = "https://github.com/alloy-rs/alloy", rev = "9460a69371c1e4
 alloy-tx-macros = { git = "https://github.com/alloy-rs/alloy", rev = "9460a69371c1e461ebe9c1a2cf809758cd17874e" }
 
 # reth-core
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
