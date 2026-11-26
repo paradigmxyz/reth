@@ -683,7 +683,7 @@ impl EthMessageID {
 
     /// Returns the max value for the given version.
     pub const fn max(version: EthVersion) -> u8 {
-        if version.is_eth72() {
+        if version.is_eth72_or_newer() {
             Self::Cells.to_u8()
         } else if version.is_eth71() {
             Self::BlockAccessLists.to_u8()
