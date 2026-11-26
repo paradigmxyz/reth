@@ -1227,6 +1227,7 @@ impl Discv4Service {
         // > ping should be sent in addition to pong in order to receive an endpoint proof.
         //
         let mut is_new_insert = false;
+        let mut is_at_capacity = false;
         let mut needs_bond = !self.has_bond(record.id, record.address);
         let mut is_proven = false;
 
@@ -1271,7 +1272,7 @@ impl Discv4Service {
                         // we received a ping but the corresponding bucket for the peer is already
                         // full, we can't add any additional peers to that bucket, but we still want
                         // to emit an event that we discovered the node
-                        self.on_discovered_at_capacity(record);
+                        is_at_capacity = true;
                         needs_bond = true;
                     }
                     BucketInsertResult::TooManyIncoming | BucketInsertResult::NodeExists => {
@@ -1286,8 +1287,8 @@ impl Discv4Service {
             kbucket::Entry::SelfEntry => return,
         };
 
-        // send the pong first, but the PONG and optionally PING don't need to be send in a
-        // particular order
+        // Send the pong before any ping: a peer that pinged us for a lookup sends its FindNode
+        // on our ping, but only once it has our pong.
         let pong = Message::Pong(Pong {
             // we use the actual address of the peer
             to: record.into(),
@@ -1296,6 +1297,10 @@ impl Discv4Service {
             enr_sq: self.enr_seq(),
         });
         self.send_packet(pong, remote_addr);
+
+        if is_at_capacity {
+            self.on_discovered_at_capacity(record);
+        }
 
         // if node was absent also send a ping to establish the endpoint proof from our end
         if is_new_insert {
@@ -3784,6 +3789,8 @@ mod tests {
     #[tokio::test]
     async fn test_ping_at_capacity_announced_after_pong() {
         let (_discv4, mut service) = create_discv4().await;
+        let (egress, mut packets) = mpsc::channel(16);
+        service.egress = egress;
         let mut updates = service.update_stream().into_inner();
         let record =
             NodeRecord::new("10.1.0.1:30303".parse().unwrap(), full_bucket_peer(&mut service));
@@ -3796,6 +3803,10 @@ mod tests {
 
         service.on_ping(ping.clone(), record.udp_addr(), record.id, B256::random());
         assert!(updates.try_recv().is_err());
+        let (packet, _) = packets.try_recv().unwrap();
+        assert!(matches!(Message::decode(&packet).unwrap().msg, Message::Pong(_)));
+        let (packet, _) = packets.try_recv().unwrap();
+        assert!(matches!(Message::decode(&packet).unwrap().msg, Message::Ping(_)));
         assert!(!service.pending_enr_requests.contains_key(&record.id));
         let request = &service.pending_pings[&record.id];
         assert!(matches!(request.reason, PingReason::AtCapacity));
