@@ -6,7 +6,8 @@ use alloy_node_bindings::Reth;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rlp::Decodable;
 use alloy_rpc_types_eth::error::EthRpcErrorCode;
-use reth_ethereum_primitives::Block;
+use reth_ethereum_primitives::{Block, EthPrimitives};
+use reth_provider::{StaticFileProviderBuilder, StaticFileSegment, StaticFileWriter};
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
@@ -15,8 +16,7 @@ use std::{
     process::{Command, Output},
 };
 
-/// Tiny transport fixtures: real tar/zstd archives and checksums, with distinct payloads
-/// standing in for database/static files. These test download preparation, not node sync.
+/// Tiny transport fixtures with two transaction jars and independently verifiable archives.
 struct Snapshot {
     files: BTreeMap<String, Vec<u8>>,
     manifest: Value,
@@ -25,22 +25,39 @@ struct Snapshot {
 impl Snapshot {
     fn new() -> Self {
         let mut files = BTreeMap::new();
-        let mut entry = |archive: &str, path: &str| {
-            let data = archive.as_bytes();
-            let bytes = archive_bytes(path, data);
-            let metadata = json!({
-                "file": archive, "size": bytes.len(),
-                "output_files": [{"path": path, "size": data.len(), "blake3": blake3::hash(data).to_hex().to_string()}]
-            });
+        let mut entry = |archive: &str, outputs: Vec<(String, Vec<u8>)>| {
+            let bytes =
+                archive_bytes(outputs.iter().map(|(path, data)| (path.as_str(), data.as_slice())));
+            let output_files = outputs.into_iter().map(|(path, data)| json!({
+                "path": path, "size": data.len(), "blake3": blake3::hash(&data).to_hex().to_string()
+            })).collect::<Vec<_>>();
+            let metadata =
+                json!({"file": archive, "size": bytes.len(), "output_files": output_files});
             files.insert(format!("/snapshot/{archive}"), bytes);
             metadata
         };
-        let state = entry("state.tar.zst", "db/snapshot");
-        let headers = entry("headers.tar.zst", "static_files/headers");
-        let chunks = [
-            entry("txs-0.tar.zst", "static_files/txs-0"),
-            entry("txs-1.tar.zst", "static_files/txs-1"),
-        ];
+        let state = entry("state.tar.zst", vec![("db/snapshot".into(), b"state.tar.zst".to_vec())]);
+        let headers = entry(
+            "headers.tar.zst",
+            vec![("static_files/headers".into(), b"headers.tar.zst".to_vec())],
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let provider = StaticFileProviderBuilder::read_write(dir.path())
+            .with_blocks_per_file(10)
+            .build::<EthPrimitives>()
+            .unwrap();
+        let mut writer = provider.get_writer(0, StaticFileSegment::Transactions).unwrap();
+        for block in 0..20 {
+            writer.increment_block(block).unwrap();
+        }
+        writer.commit().unwrap();
+        let chunks = [0, 10].map(|start| {
+            let outputs = ["", ".off", ".conf"].map(|ext| {
+                let name = format!("static_file_transactions_{start}_{}{ext}", start + 9);
+                (format!("static_files/{name}"), fs::read(dir.path().join(name)).unwrap())
+            });
+            entry(&format!("txs-{}.tar.zst", start / 10), outputs.into())
+        });
         let manifest = json!({
             "block": 19, "chain_id": 1, "storage_version": 2, "timestamp": 0,
             "components": {
@@ -63,13 +80,15 @@ impl Snapshot {
     }
 }
 
-fn archive_bytes(path: &str, data: &[u8]) -> Vec<u8> {
+fn archive_bytes<'a>(files: impl IntoIterator<Item = (&'a str, &'a [u8])>) -> Vec<u8> {
     let mut archive = tar::Builder::new(zstd::Encoder::new(Vec::new(), 0).unwrap());
-    let mut header = tar::Header::new_gnu();
-    header.set_size(data.len() as u64);
-    header.set_mode(0o644);
-    header.set_cksum();
-    archive.append_data(&mut header, path, data).unwrap();
+    for (path, data) in files {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(data.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        archive.append_data(&mut header, path, data).unwrap();
+    }
     archive.into_inner().unwrap().finish().unwrap()
 }
 
@@ -131,14 +150,13 @@ async fn check_manifest_selection_reuse_and_repair(custom_static_files: bool) {
     for (path, expected) in [
         (dir.path().join("db/snapshot"), "state.tar.zst"),
         (static_files.join("headers"), "headers.tar.zst"),
-        (static_files.join("txs-1"), "txs-1.tar.zst"),
     ] {
         assert_eq!(fs::read(path).unwrap(), expected.as_bytes());
     }
     assert!(server.requests().iter().any(|(path, range)| {
         path.ends_with("state.tar.zst") && range.as_deref() == Some(&format!("bytes={offset}-"))
     }));
-    assert!(!static_files.join("txs-0").exists());
+    assert!(!static_files.join("static_file_transactions_0_9").exists());
     assert!(!server.requests().iter().any(|(path, _)| path.ends_with("txs-0.tar.zst")));
     let config: toml::Value =
         toml::from_str(&fs::read_to_string(dir.path().join("reth.toml")).unwrap()).unwrap();
@@ -149,10 +167,14 @@ async fn check_manifest_selection_reuse_and_repair(custom_static_files: bool) {
     assert_eq!(server.requests(), vec![("/snapshot/manifest.json".into(), None)]);
 
     // Same-size corruption must be detected by checksum, not just the file length.
-    fs::write(static_files.join("txs-1"), b"bad-1.tar.zst").unwrap();
+    let config_file = static_files.join("static_file_transactions_10_19.conf");
+    let expected = fs::read(&config_file).unwrap();
+    let mut corrupted = expected.clone();
+    corrupted[0] ^= 1;
+    fs::write(&config_file, corrupted).unwrap();
     server.clear_requests();
     success(download(&server, dir.path(), &args));
-    assert_eq!(fs::read(static_files.join("txs-1")).unwrap(), b"txs-1.tar.zst");
+    assert_eq!(fs::read(config_file).unwrap(), expected);
     assert!(server.requests().iter().any(|(path, _)| path.ends_with("txs-1.tar.zst")));
     assert!(server
         .requests()
@@ -183,7 +205,7 @@ async fn plan_does_not_download_or_create_datadir() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn legacy_streaming_and_resume() {
     for (resumable, ranges) in [(false, false), (true, true), (true, false)] {
-        let bytes = archive_bytes("db/snapshot", b"snapshot contents");
+        let bytes = archive_bytes([("db/snapshot", b"snapshot contents".as_slice())]);
         let offset = bytes.len() / 2;
         let server = SnapshotServer::start(
             BTreeMap::from([("/state.tar.zst".into(), bytes.clone())]),
@@ -217,7 +239,8 @@ async fn legacy_streaming_and_resume() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn custom_static_files_legacy_http_and_local_archives() {
     for local in [false, true] {
-        let bytes = archive_bytes("./static_files/nested/headers", b"snapshot contents");
+        let bytes =
+            archive_bytes([("./static_files/nested/headers", b"snapshot contents".as_slice())]);
         let archive_name = "headers.tar.zst";
         let source = tempfile::tempdir().unwrap();
         let archive_path = source.path().join(archive_name);
@@ -272,7 +295,7 @@ async fn explicit_archive_source_and_datadir_allow_other_chains() {
     let dir = tempfile::tempdir().unwrap();
     success(download(&server, dir.path(), &["--archive"]));
     assert_eq!(fs::read(dir.path().join("db/snapshot")).unwrap(), b"state.tar.zst");
-    assert_eq!(fs::read(dir.path().join("static_files/txs-0")).unwrap(), b"txs-0.tar.zst");
+    assert!(dir.path().join("static_files/static_file_transactions_0_9").is_file());
     assert!(dir.path().join("reth.toml").exists());
 }
 

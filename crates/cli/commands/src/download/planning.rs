@@ -267,6 +267,10 @@ pub(super) fn restored_bodies_boundary(
             boundary = range.start().checked_sub(1);
         }
     }
+    eyre::ensure!(
+        archives.is_empty() || boundary != Some(tip),
+        "Selected transaction files do not cover snapshot block {tip}"
+    );
     Ok(boundary)
 }
 
@@ -324,8 +328,10 @@ pub(crate) fn collect_planned_archives(
                 .map(|output| Path::new(&output.path))
                 .map(|path| path.strip_prefix(".").unwrap_or(path))
                 .collect::<HashSet<_>>();
+            let mut has_transaction_jar = false;
             for path in &files {
                 if let Some(name) = transaction_jar_name(path) {
+                    has_transaction_jar = true;
                     eyre::ensure!(
                         path.parent() == Some(Path::new("static_files")),
                         "Transaction static file {name} must be directly under static_files"
@@ -341,6 +347,10 @@ pub(crate) fn collect_planned_archives(
                     }
                 }
             }
+            eyre::ensure!(
+                files.is_empty() || has_transaction_jar,
+                "Selected transaction archives contain no transaction static files"
+            );
         }
         let component = ty.display_name().to_string();
         if !snapshot_archives.is_empty() {
@@ -374,6 +384,18 @@ mod tests {
     use crate::download::manifest::tests::{snapshot_source, write_test_static_files};
     use tempfile::tempdir;
 
+    fn transaction_jar_outputs(start: u64, width: u64, size: u64) -> Vec<OutputFileChecksum> {
+        let end = start + width - 1;
+        ["", ".conf", ".off"]
+            .into_iter()
+            .map(|ext| OutputFileChecksum {
+                path: format!("static_files/static_file_transactions_{start}_{end}{ext}"),
+                size: if ext.is_empty() { size } else { 0 },
+                blake3: String::new(),
+            })
+            .collect()
+    }
+
     fn test_manifest_with_component_tip(block: u64, total_blocks: u64) -> SnapshotManifest {
         let chunk_count = total_blocks.div_ceil(10);
         SnapshotManifest {
@@ -392,13 +414,7 @@ mod tests {
                     chunk_decompressed_sizes: (1..=chunk_count).map(|i| i * 100).collect(),
                     chunk_files: vec![],
                     chunk_output_files: (0..chunk_count)
-                        .map(|i| {
-                            vec![OutputFileChecksum {
-                                path: format!("static_files/tx-{i}"),
-                                size: (i + 1) * 100,
-                                blake3: format!("h{i}"),
-                            }]
-                        })
+                        .map(|i| transaction_jar_outputs(i * 10, 10, (i + 1) * 100))
                         .collect(),
                 }),
             )]),
@@ -610,16 +626,8 @@ mod tests {
                 chunk_decompressed_sizes: vec![200, 300],
                 chunk_files: vec![],
                 chunk_output_files: vec![
-                    vec![OutputFileChecksum {
-                        path: "static_files/tx-0".to_string(),
-                        size: 200,
-                        blake3: "h1".to_string(),
-                    }],
-                    vec![OutputFileChecksum {
-                        path: "static_files/tx-1".to_string(),
-                        size: 300,
-                        blake3: "h2".to_string(),
-                    }],
+                    transaction_jar_outputs(0, 500_000, 200),
+                    transaction_jar_outputs(500_000, 500_000, 300),
                 ],
             }),
         );
@@ -913,18 +921,51 @@ mod tests {
             let target = tempdir()?;
             let static_files = files.path().join("static_files");
             let verifier = OutputVerifier::new(target.path(), Some(&static_files));
-            let boundary = |manifest: &SnapshotManifest| {
-                restored_bodies_boundary(manifest, Some(&ComponentSelection::Since(13)), &verifier)
+            let check = |manifest: &SnapshotManifest, expected| -> Result<()> {
+                let boundary = restored_bodies_boundary(
+                    manifest,
+                    Some(&ComponentSelection::Since(13)),
+                    &verifier,
+                );
+                if actual_tip == 25 {
+                    assert_eq!(boundary?, Some(expected));
+                } else {
+                    assert_eq!(
+                        boundary.unwrap_err().to_string(),
+                        "Selected transaction files do not cover snapshot block 25"
+                    );
+                }
+                Ok(())
             };
-            assert_eq!(boundary(&manifest)?, Some(if actual_tip == 25 { 9 } else { 25 }));
+            check(&manifest, 9)?;
             for component in [
                 ComponentManifest::Single(archive.clone()),
                 ComponentManifest::Files(ArchiveSet { archives: vec![archive] }),
             ] {
                 manifest.components.insert(txs.key().to_owned(), component);
-                assert_eq!(boundary(&manifest)?, Some(if actual_tip == 25 { 19 } else { 25 }));
+                check(&manifest, 19)?;
             }
         }
         Ok(())
+    }
+
+    #[test]
+    fn transaction_plan_rejects_receipt_files() {
+        let ty = SnapshotComponentType::Transactions;
+        let mut manifest = test_manifest_with_component_tip(9, 10);
+        let Some(ComponentManifest::Chunked(chunked)) = manifest.components.get_mut(ty.key())
+        else {
+            unreachable!()
+        };
+        for output in &mut chunked.chunk_output_files[0] {
+            output.path = output.path.replace("transactions", "receipts");
+        }
+        let err =
+            collect_planned_archives(&manifest, &BTreeMap::from([(ty, ComponentSelection::All)]))
+                .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Selected transaction archives contain no transaction static files"
+        );
     }
 }

@@ -771,10 +771,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             }
             let provider = builder.build::<N::Primitives>()?;
             let highest = provider.get_highest_static_file_block(segment);
-            if highest.is_none() ||
-                (highest < Some(manifest.block) &&
-                    !selections.contains_key(&SnapshotComponentType::Transactions))
-            {
+            if highest < Some(manifest.block) {
                 eyre::ensure!(provider.get_highest_static_file_tx(segment).is_none(),
                     "Local transaction files end before the snapshot tip; use --prune-unlisted to remove unselected files");
                 let mut writer = provider.get_writer(manifest.block, segment)?;

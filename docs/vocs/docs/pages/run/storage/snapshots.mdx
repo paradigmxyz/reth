@@ -65,8 +65,9 @@ reth download \
 Transaction ranges download whole static files. For example, if a selected file
 starts at block 10, `--with-txs-since 13` restores bodies from block 10. The
 Bodies checkpoint records the block before the continuous range through the
-snapshot tip, or a later boundary inherited from the source database. The download
-requires each selected transaction jar's data, header, and offsets directly under
+snapshot tip, or a later boundary inherited from the source database. If the download
+selects transaction archives, at least one jar must cover the snapshot tip. Each
+selected transaction jar must have its data, header, and offsets directly under
 `static_files/`. If `--with-txs-since N` starts above the snapshot height, it skips
 transaction archives and configures future retention from block `N`. On a fresh
 restore, it initializes an empty transaction file at the snapshot tip so the node
