@@ -147,8 +147,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     }
 
     /// Returns a historical state provider for `block_hash` over a database snapshot and the
-    /// in-memory blocks tracked while its transaction opened, as
-    /// [`ProviderFactory::snapshotted_provider`] returns them.
+    /// in-memory blocks tracked while its transaction opened, as a consistent view holds them.
     ///
     /// Callers such as RPC choose the block, so the trie reverts it accumulates stay out of the
     /// changeset cache the engine shares.
@@ -271,7 +270,7 @@ impl<N: ProviderNodeTypes> StateRangeProviderFactory for BlockchainProvider<N> {
     /// is unverified, since no root describes its partially downloaded state, or while the
     /// `Execution` checkpoint is ahead of `Finish`.
     fn state_range_provider(&self, state_root: B256) -> ProviderResult<Option<StateRangeView>> {
-        self.state_range_view(self.database.snapshotted_provider()?, state_root)
+        self.state_range_view(self.consistent_provider()?.snapshotted_provider(), state_root)
     }
 }
 
@@ -1081,7 +1080,8 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         &self,
         block: BlockNumber,
     ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
-        if let Some(head) = self.canonical_in_memory_state.head_state() &&
+        let provider = self.consistent_provider()?.snapshotted_provider();
+        if let Some(head) = provider.snapshot().canonical_head() &&
             let Some(state) = head.block_on_chain(block.into())
         {
             return Ok(Some(ExecutionOutcome::from((
@@ -1090,7 +1090,6 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
             ))))
         }
 
-        let provider = self.database.snapshotted_provider()?;
         let Some(block_body) = provider.block_body_indices(block)? else { return Ok(None) };
 
         let account_changeset = provider.account_changesets_range(block..=block)?;
@@ -3396,7 +3395,7 @@ mod tests {
     fn historical_state_checks_pipeline_progress_on_its_snapshot() -> eyre::Result<()> {
         let (factory, _) = test_provider_factory_with_genesis()?;
         let provider = BlockchainProvider::new(factory.clone())?;
-        let before_execution = factory.snapshotted_provider()?;
+        let before_execution = provider.consistent_provider()?.snapshotted_provider();
         let genesis_hash = before_execution.block_hash(0)?.expect("genesis exists");
 
         let provider_rw = factory.provider_rw()?;
@@ -3456,7 +3455,7 @@ mod tests {
         let mut attempt = SnapAttempt::start(None, BlockNumHash::default(), B256::ZERO);
 
         // A snapshot taken before the attempt starts keeps serving, without its downloads.
-        let before_attempt = factory.snapshotted_provider()?;
+        let before_attempt = provider.consistent_provider()?.snapshotted_provider();
         let provider_rw = factory.provider_rw()?;
         provider_rw.write_snap_attempt(&attempt)?;
         provider_rw.insert_account_for_hashing([(address, Some(account))])?;
@@ -3467,7 +3466,7 @@ mod tests {
         assert_eq!(state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?.items, []);
 
         // A snapshot taken while the attempt is unverified stays refused after verification.
-        let unverified = factory.snapshotted_provider()?;
+        let unverified = provider.consistent_provider()?.snapshotted_provider();
         attempt.verify();
         let provider_rw = factory.provider_rw()?;
         provider_rw.write_snap_attempt(&attempt)?;
@@ -4217,6 +4216,32 @@ mod tests {
             let outcome = provider.get_state(number as u64)?.expect("persisted block state");
             assert_eq!(outcome.receipts, vec![receipts], "block {number}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn consistent_provider_keeps_the_in_memory_blocks_tracked_when_it_opened() -> eyre::Result<()> {
+        let (factory, in_memory_state_writer) = test_provider_factory_with_genesis()?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory.clone(),
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
+        let genesis = provider.canonical_in_memory_state.get_canonical_head();
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, genesis.hash());
+        let persisted = block.recovered_block().num_hash();
+        canonical_in_memory_state_writer
+            .update_chain(NewCanonicalChain::Commit { new: vec![block] });
+
+        let snapshot = provider.consistent_provider()?.snapshotted_provider().into_parts().1;
+        canonical_in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
+
+        assert!(!factory.overlay_manager().in_memory_state().contains(&persisted.hash));
+        assert_eq!(snapshot.state_by_hash(persisted.hash).unwrap().hash(), persisted.hash);
+        assert_eq!(snapshot.canonical_head().unwrap().hash(), persisted.hash);
         Ok(())
     }
 

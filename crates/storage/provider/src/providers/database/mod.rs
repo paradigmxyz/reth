@@ -413,15 +413,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         .with_minimum_pruning_distance(self.minimum_pruning_distance))
     }
 
-    /// Returns a read-only provider like [`Self::provider`], with the in-memory blocks that were
-    /// tracked during the whole time its transaction opened.
-    ///
-    /// Blocks are removed from memory only after their persistence committed, so every in-memory
-    /// block the transaction's durable frontiers need is in the snapshot.
-    pub fn snapshotted_provider(&self) -> ProviderResult<SnapshottedProvider<N>> {
-        self.overlay_manager.in_memory_state().snapshot_during(|| self.provider()).transpose()
-    }
-
     /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
     /// data from the database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`].  This may fail if the inner read/write database transaction fails to
@@ -1079,7 +1070,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
 }
 
 /// A read-only database provider with the in-memory blocks that were tracked while its transaction
-/// opened, as [`ProviderFactory::snapshotted_provider`] returns it.
+/// opened, as a [`ConsistentProvider`](crate::providers::ConsistentProvider) holds it.
 pub type SnapshottedProvider<N> = Snapshotted<
     DatabaseProviderRO<<N as NodeTypesWithDB>::DB, N>,
     <N as reth_node_types::NodeTypes>::Primitives,
@@ -1092,8 +1083,7 @@ mod tests {
         providers::{StaticFileProvider, StaticFileProviderBuilder, StaticFileWriter},
         test_utils::{
             blocks::TEST_BLOCK, create_test_provider_factory,
-            create_test_provider_factory_with_genesis_block_number,
-            create_test_provider_factory_with_in_memory_state_writer, MockNodeTypesWithDB,
+            create_test_provider_factory_with_genesis_block_number, MockNodeTypesWithDB,
         },
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
         PruneCheckpointWriter, StageCheckpointWriter, TransactionsProvider,
@@ -1101,8 +1091,7 @@ mod tests {
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{TxNumber, B256};
     use assert_matches::assert_matches;
-    use reth_chain_state::{test_utils::TestBlockBuilder, NewCanonicalChain};
-    use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
         mdbx::DatabaseArguments,
         test_utils::{create_test_rocksdb_dir, create_test_static_files_dir, ERROR_TEMPDIR},
@@ -1115,22 +1104,6 @@ mod tests {
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
     use std::{ops::RangeInclusive, sync::Arc};
-
-    #[test]
-    fn provider_keeps_the_in_memory_blocks_tracked_when_it_opened() {
-        let (factory, mut in_memory_state_writer) =
-            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
-        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::ZERO);
-        let persisted = block.recovered_block().num_hash();
-        in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new: vec![block] });
-
-        let in_memory = factory.snapshotted_provider().unwrap().into_parts().1;
-        in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
-
-        assert!(!factory.overlay_manager().in_memory_state().contains(&persisted.hash));
-        assert_eq!(in_memory.state_by_hash(persisted.hash).unwrap().hash(), persisted.hash);
-        assert_eq!(in_memory.canonical_head().unwrap().hash(), persisted.hash);
-    }
 
     #[test]
     fn common_history_provider() {

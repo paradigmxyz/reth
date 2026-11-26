@@ -117,7 +117,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
     }
 
     /// Creates an overlay builder for `parent_hash` that resolves in-memory blocks against the live
-    /// in-memory state, see [`InMemoryBlockSource::Live`].
+    /// in-memory state, until [`OverlayBuilder::into_provider`] pins it to a provider's snapshot.
     ///
     /// This looks up the in-memory chain ending at `parent_hash`, canonical or not. Prefer
     /// [`Self::overlay_builder_for_state`] whenever the caller already holds the chain.
@@ -142,8 +142,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
     ///
     /// The chain tip is used as the parent hash, so no block lookup is performed. The builder
     /// only reads `state`, which makes it safe to share the same [`BlockState`] with other
-    /// holders. It resolves the durable frontiers against the live in-memory state, see
-    /// [`InMemoryBlockSource::Live`].
+    /// holders. It resolves the durable frontiers against the live in-memory state, until
+    /// [`OverlayBuilder::into_provider`] pins it to a provider's snapshot.
     pub fn overlay_builder_for_state(&self, state: Arc<BlockState<N>>) -> OverlayBuilder<N> {
         OverlayBuilder::new(
             state.hash(),

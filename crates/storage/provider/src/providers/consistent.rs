@@ -51,7 +51,7 @@ pub struct ConsistentProvider<N: ProviderNodeTypes> {
 impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     /// Create a new provider using [`ProviderFactory`] and [`CanonicalInMemoryState`],
     ///
-    /// Underneath it opens [`ProviderFactory::snapshotted_provider`] and takes the
+    /// Underneath it opens [`ProviderFactory::provider`] and takes the
     /// in-memory head from the blocks tracked while its transaction opened, effectively maintaining
     /// one single snapshotted view of memory and database.
     pub fn new(
@@ -61,7 +61,10 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         // Blocks leave memory only after their persistence committed, so every block is either in
         // the snapshot's in-memory chain or visible to the transaction, and there are no gaps in
         // the range.
-        let storage_provider = storage_provider_factory.snapshotted_provider()?;
+        let storage_provider = state
+            .in_memory_state()
+            .snapshot_during(|| storage_provider_factory.provider())
+            .transpose()?;
         Ok(Self { storage_provider, canonical_in_memory_state: state })
     }
 
