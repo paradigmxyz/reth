@@ -536,6 +536,8 @@ pub trait Call:
                    + From<<Self::RpcConvert as RpcConvert>::Error>
                    + From<ProviderError>,
     > + SpawnBlocking
+where
+    Self::Evm: Clone,
 {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     ///
@@ -620,7 +622,10 @@ pub trait Call:
     where
         DB: Database + fmt::Debug,
     {
-        let mut evm = self.evm_config().evm_with_env(db, evm_env);
+        // Block execution opts into the compiled runner. eth_call was left on the
+        // interpreter, so install the same runner for this EVM only.
+        let evm_config = self.evm_config().clone().with_jit_support();
+        let mut evm = evm_config.evm_with_env(db, evm_env);
         let res = evm.transact(&tx_env).map_err(Self::Error::from_evm_err)?;
 
         Ok(res)

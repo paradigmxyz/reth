@@ -19,6 +19,7 @@ where
 impl<N, Rpc> Call for EthApi<N, Rpc>
 where
     N: RpcNodeCore,
+    N::Evm: Clone,
     EthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError, Evm = N::Evm>,
 {
