@@ -347,8 +347,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-hardforks"
-version = "0.4.11"
-source = "git+https://github.com/alloy-rs/hardforks?rev=88da17edadaf1fca3eb26373a1e2b24cdf468e53#88da17edadaf1fca3eb26373a1e2b24cdf468e53"
+version = "0.4.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "936f59d346e620ac4818fece791adb0ad383a7e8aeeff92f5f81dcc88a739a03"
 dependencies = [
  "alloy-chains",
  "alloy-eip2124",
@@ -3760,7 +3761,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
  "alloy-eips",
- "alloy-hardforks 0.4.11",
+ "alloy-hardforks 0.4.12",
  "alloy-primitives",
  "ark-bls12-381",
  "ark-bn254",
@@ -8963,7 +8964,7 @@ dependencies = [
  "alloy-eip7928",
  "alloy-eips",
  "alloy-genesis",
- "alloy-hardforks 0.4.11",
+ "alloy-hardforks 0.4.12",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
@@ -9083,7 +9084,7 @@ name = "reth-ethereum-forks"
 version = "2.11.0"
 dependencies = [
  "alloy-eip2124",
- "alloy-hardforks 0.4.11",
+ "alloy-hardforks 0.4.12",
  "alloy-primitives",
  "arbitrary",
  "auto_impl",

@@ -464,7 +464,7 @@ alloy-eip7928 = { version = "0.4.10", default-features = false, features = ["rlp
 alloy-rlp = { version = "0.3.16", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.9", default-features = false }
 
-alloy-hardforks = "0.4.11"
+alloy-hardforks = "0.4.12"
 
 alloy-consensus = { version = "2.6.1", default-features = false }
 alloy-contract = { version = "2.6.1", default-features = false }
@@ -700,8 +700,6 @@ evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "e80df9c46a
 evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "e80df9c46a8240b056a076ab930b1c5ecf7f1e47" }
 
 [patch.crates-io]
-# Hoodi Amsterdam activation pending an alloy-hardforks release.
-alloy-hardforks = { git = "https://github.com/alloy-rs/hardforks", rev = "88da17edadaf1fca3eb26373a1e2b24cdf468e53" }
 # reth-core
 reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
 reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
