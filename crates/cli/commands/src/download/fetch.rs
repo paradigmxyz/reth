@@ -208,10 +208,23 @@ impl ArchiveFetcher {
                 .header(RANGE, "bytes=0-0")
                 .send()
                 .and_then(|response| response.error_for_status());
-            // A transient failure here would permanently downgrade the archive to one stream.
-            if probe.is_ok() || attempt == SEGMENT_RETRY_ATTEMPTS {
+            // A transient failure here would permanently downgrade the archive to one stream. CDNs
+            // also answer the first range request for a cold object with the whole file, so a 200
+            // for a file large enough to segment is retried as well.
+            let retry = match &probe {
+                Ok(response) => {
+                    response.status() == StatusCode::OK &&
+                        self.expected_size
+                            .or(response.content_length())
+                            .is_some_and(|size| size >= SEGMENTED_DOWNLOAD_MIN_FILE_SIZE)
+                }
+                Err(_) => true,
+            };
+            if !retry || attempt == SEGMENT_RETRY_ATTEMPTS {
                 break probe
             }
+            // Closes a full-file response before the backoff instead of leaving it open.
+            drop(probe);
             std::thread::sleep(self.session.retry_delay(piece_retry_backoff(attempt, false)));
             attempt += 1;
         };
@@ -1837,6 +1850,76 @@ mod tests {
                  Some(\"bytes 0-65535/{total}\") for piece 65536-131071"
             )
         );
+    }
+
+    #[test]
+    fn probe_retries_full_responses_for_segmentable_files() {
+        let size = SEGMENTED_DOWNLOAD_MIN_FILE_SIZE;
+        let without_length = b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n".as_slice();
+        for (full, expected_size) in
+            [(probe_full_response(size), None), (without_length, Some(size))]
+        {
+            let url = spawn_response_server(vec![full, probe_partial_response(size)]);
+            let dir = tempfile::tempdir().unwrap();
+            let fetcher = ArchiveFetcher::new(url, dir.path(), probe_session(), expected_size);
+
+            let probe = fetcher.probe(&BlockingClient::new()).unwrap();
+
+            assert!(probe.supports_ranges);
+            assert_eq!(probe.total_size, size);
+        }
+    }
+
+    #[test]
+    fn probe_accepts_full_responses_for_small_files() {
+        let size = SEGMENTED_DOWNLOAD_MIN_FILE_SIZE - 1;
+        let url =
+            spawn_response_server(vec![probe_full_response(size), probe_partial_response(size)]);
+        let dir = tempfile::tempdir().unwrap();
+        let fetcher = ArchiveFetcher::new(url, dir.path(), probe_session(), Some(size));
+
+        let probe = fetcher.probe(&BlockingClient::new()).unwrap();
+
+        assert!(!probe.supports_ranges);
+        assert_eq!(probe.total_size, size);
+    }
+
+    #[test]
+    fn probe_falls_back_after_full_responses_on_every_attempt() {
+        let size = SEGMENTED_DOWNLOAD_MIN_FILE_SIZE;
+        let url = spawn_response_server(vec![probe_full_response(size)]);
+        let dir = tempfile::tempdir().unwrap();
+        let fetcher = ArchiveFetcher::new(url, dir.path(), probe_session(), Some(size));
+
+        let probe = fetcher.probe(&BlockingClient::new()).unwrap();
+
+        assert!(!probe.supports_ranges);
+        assert_eq!(probe.total_size, size);
+    }
+
+    /// Returns a session that retries range probes without waiting.
+    fn probe_session() -> DownloadSession {
+        DownloadSession::new(None, None, CancellationToken::new())
+            .with_retry_backoff(Some(Duration::ZERO))
+    }
+
+    /// Returns the headers of a full `size`-byte response that ignores the probe's `Range`.
+    ///
+    /// The body is omitted because the probe never reads it.
+    fn probe_full_response(size: u64) -> &'static [u8] {
+        format!("HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n")
+            .leak()
+            .as_bytes()
+    }
+
+    /// Returns a `bytes=0-0` range response for a `size`-byte archive.
+    fn probe_partial_response(size: u64) -> &'static [u8] {
+        format!(
+            "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-0/{size}\r\n\
+             Content-Length: 1\r\nConnection: close\r\n\r\n0"
+        )
+        .leak()
+        .as_bytes()
     }
 
     fn test_session() -> DownloadSession {
