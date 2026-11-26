@@ -21,6 +21,11 @@ asm-keccak = [
     "reth-evm/asm-keccak",
     "reth-evm-ethereum/asm-keccak",
 ]
+bn254-mcl = [
+    "reth-evm/bn254-mcl",
+    "reth-evm-ethereum/bn254-mcl",
+    "reth-node-ethereum/bn254-mcl",
+]
 
 [dependencies]
 reth-chainspec.workspace = true
@@ -33,8 +38,8 @@ reth-engine-tree.workspace = true
 reth-eth-wire-types.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-ethereum-primitives.workspace = true
-reth-evm = { workspace = true, features = ["blst", "bn254-mcl", "c-kzg", "p256-aws-lc-rs"] }
-reth-evm-ethereum = { workspace = true, features = ["std", "blst", "bn254-mcl", "c-kzg", "p256-aws-lc-rs"] }
+reth-evm = { workspace = true, features = ["blst", "c-kzg", "p256-aws-lc-rs"] }
+reth-evm-ethereum = { workspace = true, features = ["std", "blst", "c-kzg", "p256-aws-lc-rs"] }
 reth-network-api.workspace = true
 reth-network-p2p.workspace = true
 reth-node-core.workspace = true
