@@ -494,7 +494,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                 let fees = request.as_ref();
                 if fees.gas_price.is_none() &&
                     fees.max_fee_per_gas.is_none() &&
-                    let Some(tip) = fees.max_priority_fee_per_gas.filter(|tip| *tip > 0)
+                    let Some(tip) = fees.max_priority_fee_per_gas
                 {
                     let base_fee = evm_env.block_base_fee() as u128;
                     request.as_mut().max_fee_per_gas =

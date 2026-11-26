@@ -536,7 +536,8 @@ mod tests {
     use super::*;
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::{
-        eip4844::DATA_GAS_PER_BLOB, eip7702::Authorization, BlockId, BlockNumberOrTag,
+        eip2930::AccessListItem, eip4844::DATA_GAS_PER_BLOB, eip7702::Authorization, BlockId,
+        BlockNumberOrTag,
     };
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_network::TransactionBuilder;
@@ -1905,6 +1906,51 @@ mod tests {
             .unwrap();
         assert_eq!(result.error, None);
         assert_eq!(result.gas_used, U256::from(21_000));
+    }
+
+    #[tokio::test]
+    async fn create_access_list_keeps_base_fee_for_zero_tip() {
+        let sender = Address::repeat_byte(0x11);
+        let contract = Address::repeat_byte(0xaa);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        provider.add_account(sender, ExtendedAccount::new(0, U256::from(10u128.pow(18))));
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 1,
+                    gas_limit: 30_000_000,
+                    base_fee_per_gas: Some(7),
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api(provider);
+        // Reads slot 0 only when BASEFEE is nonzero.
+        let code = AccountOverride {
+            code: Some(alloy_primitives::bytes!("4815600957600054505b00")),
+            ..Default::default()
+        };
+        let request = TransactionRequest {
+            max_priority_fee_per_gas: Some(0),
+            ..TransactionRequest::default().with_from(sender).with_to(contract)
+        };
+        let result = EthCall::create_access_list_at(
+            &api,
+            request,
+            Some(BlockId::latest()),
+            Some(StateOverride::from_iter([(contract, code)])),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.error, None);
+        assert_eq!(
+            result.access_list.0,
+            [AccessListItem { address: contract, storage_keys: vec![B256::ZERO] }]
+        );
     }
 
     #[tokio::test]
