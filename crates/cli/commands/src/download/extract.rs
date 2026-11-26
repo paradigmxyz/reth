@@ -293,10 +293,10 @@ fn unpack_archive<R: Read>(
             }
             None => false,
         };
-        // A config file or a directory does not count as restored execution data.
-        let execution_file = !directory &&
-            (entry_type.is_file() || entry_type.is_contiguous() || entry_type.is_gnu_sparse()) &&
-            path.strip_prefix(".").unwrap_or(&path) != Path::new("reth.toml");
+        // A config file or a directory does not count as restored execution data. Links are
+        // rejected above and `tar` unpacks unknown entry types as files, so anything else counts.
+        let execution_file =
+            !directory && path.strip_prefix(".").unwrap_or(&path) != Path::new("reth.toml");
         installed_execution_file |= extract_entry_with_progress(
             &mut entry,
             target_dir,
@@ -1490,6 +1490,35 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.to_string(), "Snapshot archive contains no execution files");
+    }
+
+    #[test]
+    fn legacy_restore_counts_unknown_entry_types_as_files() {
+        let mut archive = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::new(b'9'));
+        header.set_size(4);
+        header.set_mode(0o600);
+        archive.append_data(&mut header, "db/data", b"data".as_slice()).unwrap();
+
+        let snapshot = tempfile::tempdir().unwrap();
+        let path = snapshot.path().join("snapshot.tar.zst");
+        fs::write(&path, zstd::encode_all(archive.into_inner().unwrap().as_slice(), 0).unwrap())
+            .unwrap();
+        let url = Url::from_file_path(path).unwrap();
+        let target = tempfile::tempdir().unwrap();
+
+        blocking_download_and_extract(
+            url.as_str(),
+            target.path(),
+            None,
+            false,
+            None,
+            CancellationToken::new(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(fs::read(target.path().join("db/data")).unwrap(), b"data");
     }
 
     #[test]
