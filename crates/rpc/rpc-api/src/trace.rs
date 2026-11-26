@@ -175,7 +175,7 @@ impl From<TraceFilter> for TraceFilterRequest {
 
 impl<'de> Deserialize<'de> for TraceFilterRequest {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut filter = Map::<String, Value>::deserialize(deserializer)?;
+        let mut filter = deserializer.deserialize_map(UniqueKeysVisitor)?;
         let mut take_tag = |key: &str| {
             let tag = match filter.get(key)?.as_str()? {
                 "earliest" => BlockNumberOrTag::Earliest,
@@ -192,6 +192,28 @@ impl<'de> Deserialize<'de> for TraceFilterRequest {
         let to_tag = take_tag("toBlock");
         let filter = TraceFilter::deserialize(Value::Object(filter)).map_err(de::Error::custom)?;
         Ok(Self { filter, from_tag, to_tag })
+    }
+}
+
+/// Collects a JSON object, rejecting a repeated member as [`TraceFilter`]'s typed decoder does.
+struct UniqueKeysVisitor;
+
+impl<'de> de::Visitor<'de> for UniqueKeysVisitor {
+    type Value = Map<String, Value>;
+
+    fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str("a trace filter object")
+    }
+
+    fn visit_map<A: de::MapAccess<'de>>(self, mut access: A) -> Result<Self::Value, A::Error> {
+        let mut map = Map::new();
+        while let Some((key, value)) = access.next_entry::<String, Value>()? {
+            if map.contains_key(&key) {
+                return Err(de::Error::custom(format_args!("duplicate field `{key}`")))
+            }
+            map.insert(key, value);
+        }
+        Ok(map)
     }
 }
 
@@ -230,5 +252,22 @@ mod tests {
             serde_json::from_value::<TraceAddressIndex>(json!(overflow)).unwrap_err().to_string(),
             "number too large to fit in target type"
         );
+    }
+
+    #[test]
+    fn trace_filter_request_rejects_duplicate_members() {
+        for json in [
+            r#"{"blockHash":"0x0000000000000000000000000000000000000000000000000000000000000001","blockHash":null,"fromBlock":"latest"}"#,
+            r#"{"fromBlock":"latest","fromBlock":"0x1"}"#,
+            r#"{"toBlock":"0x1","toBlock":"0x2"}"#,
+        ] {
+            let err = serde_json::from_str::<TraceFilterRequest>(json).unwrap_err();
+            assert!(err.to_string().starts_with("duplicate field"), "{json}: {err}");
+        }
+        let request =
+            serde_json::from_str::<TraceFilterRequest>(r#"{"fromBlock":"safe","toBlock":"0x2"}"#)
+                .unwrap();
+        assert_eq!(request.from_tag, Some(BlockNumberOrTag::Safe));
+        assert_eq!(request.filter.to_block, Some(2));
     }
 }
