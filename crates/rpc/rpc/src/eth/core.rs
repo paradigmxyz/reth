@@ -1748,6 +1748,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn zero_priority_fee_call_runs_free() {
+        let contract = Address::repeat_byte(0xaa);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 1,
+                    gas_limit: 30_000_000,
+                    base_fee_per_gas: Some(7),
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api(provider);
+        // Return BASEFEE and GASPRICE.
+        let code = AccountOverride {
+            code: Some(alloy_primitives::bytes!("486000523a60205260406000f3")),
+            ..Default::default()
+        };
+        let result = EthCall::call(
+            &api,
+            TransactionRequest {
+                max_priority_fee_per_gas: Some(0),
+                ..TransactionRequest::default().with_to(contract).with_gas_limit(100_000)
+            },
+            Some(BlockId::latest()),
+            EvmOverrides::state(Some(StateOverride::from_iter([(contract, code)]))),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result, Bytes::from([0u8; 64]));
+    }
+
+    #[tokio::test]
     async fn call_preserves_block_number_and_saturates_fee_overrides() {
         let contract = Address::repeat_byte(0xaa);
         let sender = Address::repeat_byte(0x11);
@@ -1781,10 +1819,11 @@ mod tests {
             blob_base_fee: Some(U256::MAX),
             ..Default::default()
         }));
+        // A priced call must pay at least the overridden base fee.
         let result = EthCall::call(
             &api,
             TransactionRequest {
-                gas_price: Some(1),
+                gas_price: Some(u64::MAX as u128),
                 ..TransactionRequest::default()
                     .with_from(sender)
                     .with_to(contract)

@@ -1033,12 +1033,14 @@ pub(super) fn request_gas_price(
         return gas_price
     }
 
-    match (request.max_fee_per_gas, request.max_priority_fee_per_gas) {
-        (None, None) => 0,
-        (max_fee, priority_fee) => calc_effective_gas_price(
-            max_fee.unwrap_or(u128::MAX),
-            priority_fee.unwrap_or_default(),
-            Some(block_base_fee),
-        ),
+    // As in geth, an omitted fee field is zero and all-zero fees run free.
+    match (
+        request.max_fee_per_gas.unwrap_or_default(),
+        request.max_priority_fee_per_gas.unwrap_or_default(),
+    ) {
+        (0, 0) => 0,
+        (max_fee, priority_fee) => {
+            calc_effective_gas_price(max_fee, priority_fee, Some(block_base_fee))
+        }
     }
 }
