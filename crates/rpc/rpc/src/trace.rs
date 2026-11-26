@@ -30,7 +30,12 @@ use reth_rpc_eth_api::{
     helpers::{LoadTransaction, RequestTraceBudget, Trace, TraceExt},
     CallManyRequest, FromEthApiError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{error::EthApiError, utils::CallManyBudget, EthConfig};
+use reth_rpc_eth_types::{
+    cache::db::{apply_block_overrides, apply_state_overrides},
+    error::EthApiError,
+    utils::CallManyBudget,
+    EthConfig,
+};
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -151,14 +156,14 @@ where
     /// Performs multiple call traces on top of the same block. Defaults to the latest block when
     /// no block is specified. Each call is executed with the preceding calls applied first.
     ///
-    /// State overrides apply once, before the first call; block overrides apply to every call.
+    /// Overrides apply once, before the first call. The calls share the overridden block.
     ///
     /// Note: Allows tracing dependent transactions, hence all transactions are traced in sequence
     pub async fn trace_call_many(
         &self,
         calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
-        mut overrides: EvmOverrides,
+        overrides: EvmOverrides,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
         let mut budget = CallManyBudget::new(calls.len(), self.eth_api().call_gas_limit())?;
         let at = block_id.unwrap_or_default();
@@ -167,6 +172,14 @@ where
         // execute all transactions on top of each other and record the traces
         self.eth_api()
             .spawn_with_state_at_block(at, move |eth_api, mut db| {
+                let mut evm_env = evm_env;
+                if let Some(block_overrides) = overrides.block {
+                    apply_block_overrides(*block_overrides, &mut db, &mut evm_env);
+                }
+                if let Some(state_overrides) = overrides.state {
+                    apply_state_overrides(state_overrides, &mut db)
+                        .map_err(EthApiError::from_state_overrides_err)?;
+                }
                 // The calls share one trace byte budget, since they share one response.
                 let trace_budget = RequestTraceBudget::new(eth_api.trace_limits());
                 let mut results = Vec::with_capacity(calls.len());
@@ -180,7 +193,7 @@ where
                         evm_env.clone(),
                         call,
                         &mut db,
-                        EvmOverrides::new(overrides.state.take(), overrides.block.clone()),
+                        Default::default(),
                     )?;
                     budget.admit(&mut tx_env)?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
@@ -1020,7 +1033,7 @@ mod tests {
         let call = |to| (TransactionRequest::default().to(to), HashSet::<TraceType>::default());
         let request = serde_json::json!({
             "jsonrpc": "2.0", "id": 1, "method": "trace_callMany", "params": [
-                [call(counter), call(counter), call(number)],
+                [call(number), call(counter), call(counter), call(number)],
                 "latest",
                 {counter.to_string(): {
                     "code": "0x6000546001018060005560005260206000f3",
@@ -1035,8 +1048,10 @@ mod tests {
         let results: Vec<TraceResults> =
             serde_json::from_value(response["result"].clone()).unwrap();
         let outputs: Vec<_> = results.iter().map(|res| U256::from_be_slice(&res.output)).collect();
-        // The state override applies once, so the second call sees the first call's write.
-        assert_eq!(outputs, [U256::from(8), U256::from(9), U256::from(0x1234)]);
+        // Every call sees the block override. The state override applies once, so the second
+        // counter call sees the first one's write.
+        let number = U256::from(0x1234);
+        assert_eq!(outputs, [number, U256::from(8), U256::from(9), number]);
     }
 
     #[tokio::test]
