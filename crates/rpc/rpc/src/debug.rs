@@ -146,6 +146,7 @@ where
             block.header().gas_used(),
             block.body().transactions().len() as u64,
             self.eth_api().eth_api_settings().max_trace_bytes,
+            self.eth_api().eth_api_settings().max_response_size,
         );
         let memory =
             self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
@@ -398,6 +399,7 @@ where
             alloy_consensus::Transaction::gas_limit(tx.inner()),
             1,
             self.eth_api().eth_api_settings().max_trace_bytes,
+            self.eth_api().eth_api_settings().max_response_size,
         );
         let memory =
             self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
@@ -479,6 +481,7 @@ where
             calls_gas(self.eth_api().call_gas_limit(), [&call]),
             1,
             self.eth_api().eth_api_settings().max_trace_bytes,
+            self.eth_api().eth_api_settings().max_response_size,
         );
         let memory =
             self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
@@ -631,6 +634,7 @@ where
             gas,
             calls as u64,
             self.eth_api().eth_api_settings().max_trace_bytes,
+            self.eth_api().eth_api_settings().max_response_size,
         );
         let memory =
             self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
@@ -1844,17 +1848,20 @@ const STRUCT_LOG_STORAGE_SLOT_BYTES: u64 = 140;
 const COLD_SLOAD_GAS: u64 = 2100;
 
 /// Returns the most memory, in MiB, that geth-style traces of `calls` calls with `gas` gas in
-/// total may hold with `opts`, where each call may record `max_trace_bytes`.
+/// total may hold with `opts`, in a response of at most `max_response_size` bytes where each call
+/// may record `max_trace_bytes`.
 ///
-/// The struct logger records up to a step per gas, which the trace byte budget bounds, and copies
-/// the memory and all earlier storage slots of the contract into each step when it builds the
-/// logs, which the budget does not bound. The call, prestate and ERC-7562 tracers grow with the
-/// frames and state the execution touches, at most a few bytes per gas.
+/// The struct logger writes its logs as JSON, a step per gas at most, with the memory and all
+/// earlier storage slots of the contract in each; the trace byte and response limits bound what a
+/// response holds, and the JSON is copied once more when the response is sent. The call, prestate
+/// and ERC-7562 tracers grow with the frames and state the execution touches, at most a few bytes
+/// per gas.
 fn geth_trace_weight_mib(
     opts: &GethDebugTracingOptions,
     gas: u64,
     calls: u64,
     max_trace_bytes: Option<usize>,
+    max_response_size: Option<usize>,
 ) -> u64 {
     let recorded = match &opts.tracer {
         None => {
@@ -1869,10 +1876,6 @@ fn geth_trace_weight_mib(
                 STRUCT_LOG_STEP_BYTES
             };
             let mut bytes = steps.saturating_mul(step_bytes);
-            if let Some(max_trace_bytes) = max_trace_bytes {
-                // The recording and the logs built from it.
-                bytes = bytes.min((max_trace_bytes as u64).saturating_mul(2).saturating_mul(calls));
-            }
             if config.disable_storage != Some(true) {
                 // The n-th storage step lists n slots.
                 let slots = (gas / COLD_SLOAD_GAS).min(steps);
@@ -1885,7 +1888,9 @@ fn geth_trace_weight_mib(
                 let memory_hex_bytes = gas.saturating_mul(512).isqrt().saturating_mul(64);
                 bytes = bytes.saturating_add(steps.saturating_mul(memory_hex_bytes));
             }
-            bytes
+            // The calls of a response share both limits.
+            let limit = max_trace_bytes.into_iter().chain(max_response_size).min();
+            limit.map_or(bytes, |limit| bytes.min(limit as u64)).saturating_mul(2)
         }
         Some(GethDebugTracerType::BuiltInTracer(tracer)) => match tracer {
             GethDebugBuiltInTracerType::FourByteTracer |
@@ -2327,8 +2332,10 @@ mod tests {
     #[test]
     fn geth_trace_weights() {
         let opts = |json| serde_json::from_value::<GethDebugTracingOptions>(json).unwrap();
-        let max_trace_bytes = Some(320 << 20);
-        let weight = |json, gas| geth_trace_weight_mib(&opts(json), gas, 1, max_trace_bytes);
+        let (max_trace_bytes, max_response_size) = (Some(320 << 20), Some(160 << 20));
+        let weight = |json, gas| {
+            geth_trace_weight_mib(&opts(json), gas, 1, max_trace_bytes, max_response_size)
+        };
 
         assert_eq!(weight(serde_json::json!({ "tracer": "callTracer" }), 10_000_000), 112);
         assert_eq!(weight(serde_json::json!({ "tracer": "noopTracer" }), 10_000_000), 16);
@@ -2336,13 +2343,24 @@ mod tests {
             weight(serde_json::json!({ "disableStorage": true, "limit": 10_000 }), 10_000_000),
             17
         );
-        // The trace byte budget bounds the recorded steps.
-        assert_eq!(weight(serde_json::json!({ "disableStorage": true }), 50_000_000), 656);
-        // It does not bound the storage and memory copied into every step.
-        assert_eq!(weight(serde_json::json!({ "disableStack": true }), 20_000_000), 6710);
+        // The response limit bounds the struct logs, their storage and memory included, and the
+        // response is copied once more when sent.
+        assert_eq!(weight(serde_json::json!({ "disableStorage": true }), 50_000_000), 336);
+        assert_eq!(weight(serde_json::json!({ "disableStack": true }), 20_000_000), 336);
         assert_eq!(
             weight(serde_json::json!({ "disableStorage": true, "enableMemory": true }), 300_000),
-            227_086
+            336
+        );
+        // Without limits, the estimate stands.
+        assert_eq!(
+            geth_trace_weight_mib(
+                &opts(serde_json::json!({ "disableStack": true })),
+                20_000_000,
+                1,
+                None,
+                None
+            ),
+            17006
         );
         assert_eq!(
             weight(serde_json::json!({ "tracer": "{ result: function() {} }" }), 21_000),
