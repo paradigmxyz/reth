@@ -2,30 +2,35 @@ use alloy_primitives::B256;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     table::{DupSort, Key, Table, Value},
-    tables::{self, PackedAccountsTrie, PackedStoragesTrie},
+    tables::{
+        self, MemcmpAccountsTrie, MemcmpStoragesTrie, PackedAccountsTrie, PackedStoragesTrie,
+    },
     transaction::DbTx,
     DatabaseError,
 };
 use reth_trie::{
     trie_cursor::{TrieCursor, TrieCursorFactory, TrieStorageCursor},
     updates::StorageTrieUpdatesSorted,
-    BranchNodeCompact, Nibbles, PackedStorageTrieEntry, PackedStoredNibbles,
-    PackedStoredNibblesSubKey, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
+    BranchNodeCompact, MemcmpStorageTrieEntry, MemcmpStoredNibbles, MemcmpStoredNibblesSubKey,
+    Nibbles, PackedStorageTrieEntry, PackedStoredNibbles, PackedStoredNibblesSubKey,
+    StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
 use std::marker::PhantomData;
 
 /// Trait abstracting nibble encoding for trie keys.
 ///
-/// Allows the same cursor implementation to work with both legacy (65-byte) and
-/// packed (33-byte) nibble encodings. [`DatabaseTrieCursorFactory`] fixes the encoding through
-/// its adapter type parameter. Callers must choose an adapter matching the database's storage
-/// settings; [`crate::with_adapter!`] provides runtime dispatch between the adapter types.
+/// Allows the same cursor implementation to work with legacy (65-byte), packed (33-byte) and
+/// memcmp (5 to 40-byte) nibble encodings. [`DatabaseTrieCursorFactory`] fixes the encoding
+/// through its adapter type parameter. Callers must choose an adapter matching the database's
+/// storage settings; [`crate::with_adapter!`] provides runtime dispatch between the legacy and
+/// packed adapters. No storage setting selects [`MemcmpKeyAdapter`] yet.
 pub trait TrieKeyAdapter: Clone + Send + Sync + 'static {
-    /// The key type for account trie lookups (e.g., `StoredNibbles` or `PackedStoredNibbles`).
+    /// The key type for account trie lookups (e.g., `StoredNibbles`, `PackedStoredNibbles` or
+    /// `MemcmpStoredNibbles`).
     type AccountKey: Key + From<Nibbles>;
 
     /// The subkey type for storage trie `DupSort` lookups
-    /// (e.g., `StoredNibblesSubKey` or `PackedStoredNibblesSubKey`).
+    /// (e.g., `StoredNibblesSubKey`, `PackedStoredNibblesSubKey` or `MemcmpStoredNibblesSubKey`).
     type StorageSubKey: Key + From<Nibbles>;
 
     /// The storage trie entry type that pairs a subkey with a `BranchNodeCompact`.
@@ -135,6 +140,47 @@ impl TrieKeyAdapter for PackedKeyAdapter {
     }
 }
 
+impl StorageTrieEntryLike for MemcmpStorageTrieEntry {
+    type SubKey = MemcmpStoredNibblesSubKey;
+
+    fn nibbles(&self) -> &Self::SubKey {
+        &self.nibbles
+    }
+
+    fn node(&self) -> &BranchNodeCompact {
+        &self.node
+    }
+
+    fn into_parts(self) -> (Self::SubKey, BranchNodeCompact) {
+        (self.nibbles, self.node)
+    }
+
+    fn new(nibbles: Self::SubKey, node: BranchNodeCompact) -> Self {
+        Self { nibbles, node }
+    }
+}
+
+/// Memcmp group nibble encoding: 8 nibbles per 5-byte group, 5 to 40-byte keys and subkeys.
+///
+/// Research adapter for a variable-length trie key encoding. It is not selected by any storage
+/// setting, so it must only be used on trie tables written through it.
+#[derive(Debug, Clone)]
+pub struct MemcmpKeyAdapter;
+
+impl TrieKeyAdapter for MemcmpKeyAdapter {
+    type AccountKey = MemcmpStoredNibbles;
+    type StorageSubKey = MemcmpStoredNibblesSubKey;
+    type StorageValue = MemcmpStorageTrieEntry;
+
+    fn account_key_to_nibbles(key: &Self::AccountKey) -> Nibbles {
+        key.0
+    }
+
+    fn subkey_to_nibbles(subkey: &Self::StorageSubKey) -> Nibbles {
+        subkey.0
+    }
+}
+
 /// Maps a [`TrieKeyAdapter`] to account and storage trie tables using its key and value types.
 ///
 /// The selected table types must match the database's stored nibble encoding.
@@ -154,6 +200,11 @@ impl TrieTableAdapter for LegacyKeyAdapter {
 impl TrieTableAdapter for PackedKeyAdapter {
     type AccountTrieTable = PackedAccountsTrie;
     type StorageTrieTable = PackedStoragesTrie;
+}
+
+impl TrieTableAdapter for MemcmpKeyAdapter {
+    type AccountTrieTable = MemcmpAccountsTrie;
+    type StorageTrieTable = MemcmpStoragesTrie;
 }
 
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
@@ -369,25 +420,28 @@ mod tests {
     use alloy_primitives::hex_literal::hex;
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_provider::test_utils::create_test_provider_factory;
-    use reth_storage_api::StorageSettingsCache;
 
-    #[test]
-    fn test_account_trie_order() {
+    fn account_trie_order<A: TrieTableAdapter>() {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
-        let mut cursor = provider.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
+        let mut cursor = provider.tx_ref().cursor_write::<A::AccountTrieTable>().unwrap();
 
+        // The 8 and 9 nibble keys end in zero nibbles, which the memcmp encoding pads with, and
+        // cross its 8 nibble group boundary.
         let data = vec![
             hex!("0303040e").to_vec(),
             hex!("030305").to_vec(),
             hex!("03030500").to_vec(),
+            hex!("0303050000000000").to_vec(),
+            hex!("030305000000000000").to_vec(),
+            hex!("03030500000000000a").to_vec(),
             hex!("0303050a").to_vec(),
         ];
 
         for key in data.clone() {
             cursor
                 .upsert(
-                    key.into(),
+                    Nibbles::from_nibbles_unchecked(key).into(),
                     &BranchNodeCompact::new(
                         0b0000_0010_0000_0001,
                         0b0000_0010_0000_0001,
@@ -399,39 +453,67 @@ mod tests {
                 .unwrap();
         }
 
-        let db_data = cursor.walk_range(..).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
-        assert_eq!(db_data[0].0 .0.to_vec(), data[0]);
-        assert_eq!(db_data[1].0 .0.to_vec(), data[1]);
-        assert_eq!(db_data[2].0 .0.to_vec(), data[2]);
-        assert_eq!(db_data[3].0 .0.to_vec(), data[3]);
+        let db_data = cursor
+            .walk_range(..)
+            .unwrap()
+            .map(|entry| entry.map(|(key, _)| A::account_key_to_nibbles(&key).to_vec()))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(db_data, data);
 
         assert_eq!(
-            cursor.seek(hex!("0303040f").to_vec().into()).unwrap().map(|(k, _)| k.0.to_vec()),
+            cursor
+                .seek(Nibbles::from_nibbles_unchecked(hex!("0303040f")).into())
+                .unwrap()
+                .map(|(key, _)| A::account_key_to_nibbles(&key).to_vec()),
             Some(data[1].clone())
         );
     }
 
-    // tests that upsert and seek match on the storage trie cursor
     #[test]
-    fn test_storage_cursor_abstraction() {
-        use reth_trie::trie_cursor::{TrieCursor, TrieCursorFactory};
+    fn test_account_trie_order_legacy() {
+        account_trie_order::<LegacyKeyAdapter>();
+    }
 
+    #[test]
+    fn test_account_trie_order_packed() {
+        account_trie_order::<PackedKeyAdapter>();
+    }
+
+    #[test]
+    fn test_account_trie_order_memcmp() {
+        account_trie_order::<MemcmpKeyAdapter>();
+    }
+
+    // tests that upsert and seek match on the storage trie cursor.
+    fn storage_cursor_abstraction<A: TrieTableAdapter>() {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
-        let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+        let mut cursor = provider.tx_ref().cursor_dup_write::<A::StorageTrieTable>().unwrap();
 
         let hashed_address = B256::random();
-        let key = StoredNibblesSubKey::from(vec![0x2, 0x3]);
+        let key = Nibbles::from_nibbles([0x2, 0x3]);
         let value = BranchNodeCompact::new(1, 1, 1, vec![B256::random()], None);
 
-        cursor
-            .upsert(hashed_address, &StorageTrieEntry { nibbles: key.clone(), node: value.clone() })
-            .unwrap();
+        cursor.upsert(hashed_address, &A::StorageValue::new(key.into(), value.clone())).unwrap();
 
-        crate::with_adapter!(provider, |A| {
-            let trie_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
-            let mut cursor = trie_factory.storage_trie_cursor(hashed_address).unwrap();
-            assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
-        });
+        let trie_factory = DatabaseTrieCursorFactory::<_, A>::new(provider.tx_ref());
+        let mut cursor = trie_factory.storage_trie_cursor(hashed_address).unwrap();
+        assert_eq!(cursor.seek(key).unwrap().unwrap().1, value);
+    }
+
+    #[test]
+    fn test_storage_cursor_abstraction_legacy() {
+        storage_cursor_abstraction::<LegacyKeyAdapter>();
+    }
+
+    #[test]
+    fn test_storage_cursor_abstraction_packed() {
+        storage_cursor_abstraction::<PackedKeyAdapter>();
+    }
+
+    #[test]
+    fn test_storage_cursor_abstraction_memcmp() {
+        storage_cursor_abstraction::<MemcmpKeyAdapter>();
     }
 }

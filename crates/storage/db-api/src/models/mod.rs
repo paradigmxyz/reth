@@ -178,6 +178,47 @@ impl Decode for PackedStoredNibblesSubKey {
     }
 }
 
+impl Encode for MemcmpStoredNibbles {
+    type Encoded = arrayvec::ArrayVec<u8, MEMCMP_NIBBLES_MAX_ENCODED_LEN>;
+
+    fn encode(self) -> Self::Encoded {
+        self.to_compact_array()
+    }
+}
+
+impl Decode for MemcmpStoredNibbles {
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        decode_memcmp_nibbles(value).map(Self)
+    }
+}
+
+impl Encode for MemcmpStoredNibblesSubKey {
+    type Encoded = arrayvec::ArrayVec<u8, MEMCMP_NIBBLES_MAX_ENCODED_LEN>;
+
+    fn encode(self) -> Self::Encoded {
+        self.to_compact_array()
+    }
+}
+
+impl Decode for MemcmpStoredNibblesSubKey {
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        decode_memcmp_nibbles(value).map(Self)
+    }
+}
+
+/// Decodes a key that must be exactly one canonical memcmp group encoding, see
+/// [`try_decode_memcmp_nibbles`].
+///
+/// This cannot detect keys written in another nibble encoding: some legacy [`StoredNibbles`] keys
+/// are also canonical memcmp encodings. The memcmp table views must only be used on tables written
+/// with this encoding, and the encoding must be selected at the storage settings or table level.
+fn decode_memcmp_nibbles(value: &[u8]) -> Result<Nibbles, DatabaseError> {
+    match try_decode_memcmp_nibbles(value) {
+        Some((nibbles, [])) => Ok(nibbles),
+        _ => Err(DatabaseError::Decode),
+    }
+}
+
 impl Encode for PruneSegment {
     type Encoded = [u8; 1];
 
@@ -254,6 +295,8 @@ add_wrapper_struct!((ClientVersion, CompactClientVersion));
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use alloy_primitives::hex;
     use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};
     use reth_primitives_traits::Account;
     use reth_prune_types::{PruneCheckpoint, PruneMode};
@@ -308,5 +351,75 @@ mod tests {
         validate_bitflag_backwards_compat!(StoredBlockBodyIndices, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StoredBlockWithdrawals, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StorageHashingCheckpoint, UnusedBits::NotZero);
+    }
+
+    #[test]
+    fn test_memcmp_nibbles_encode_decode() {
+        for len in [0, 1, 7, 8, 9, 16, 17, 63, 64] {
+            let nibbles = Nibbles::from_iter_unchecked((0..len).map(|i| (i % 16) as u8));
+
+            let encoded = MemcmpStoredNibbles(nibbles).encode();
+            assert_eq!(MemcmpStoredNibbles::decode(&encoded).unwrap().0, nibbles);
+
+            let encoded = MemcmpStoredNibblesSubKey(nibbles).encode();
+            assert_eq!(MemcmpStoredNibblesSubKey::decode(&encoded).unwrap().0, nibbles);
+        }
+    }
+
+    #[test]
+    fn test_memcmp_nibbles_decode_rejects_malformed() {
+        let nibbles = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+        let packed = PackedStoredNibbles(nibbles).encode();
+        let legacy = StoredNibbles(nibbles).encode();
+        let mut nine_groups = [0x09; 50];
+        nine_groups[49] = 0x01;
+        let cases: [&[u8]; 13] = [
+            // Empty input.
+            &[],
+            // Truncated group.
+            &hex!("12300000"),
+            // Trailing bytes after a complete encoding.
+            &hex!("123000000300"),
+            // Final marker says more groups follow.
+            &hex!("1230000009"),
+            // Final marker out of range.
+            &hex!("123000000a"),
+            // Non-final group without the more marker.
+            &hex!("12300000081230000003"),
+            // More than 8 groups.
+            &nine_groups,
+            // Non-zero padding.
+            &hex!("123f000003"),
+            &hex!("ffffffff00"),
+            // Empty group after a more marker.
+            &hex!("12345678090000000000"),
+            &hex!("1234567809ab00000000"),
+            // Packed and legacy encodings of this path, which is not true of every path.
+            &packed,
+            &legacy,
+        ];
+
+        for case in cases {
+            assert!(
+                matches!(MemcmpStoredNibbles::decode(case), Err(DatabaseError::Decode)),
+                "{case:?}"
+            );
+            assert!(
+                matches!(MemcmpStoredNibblesSubKey::decode(case), Err(DatabaseError::Decode)),
+                "{case:?}"
+            );
+        }
+    }
+
+    /// Some legacy keys whose length is a multiple of 5 are canonical memcmp encodings, so
+    /// decoding cannot tell the formats apart.
+    #[test]
+    fn test_memcmp_nibbles_decode_accepts_legacy_key() {
+        let legacy = StoredNibbles(Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x8])).encode();
+        assert_eq!(&legacy[..], hex!("0102030408"));
+
+        let expected = Nibbles::from_nibbles([0x0, 0x1, 0x0, 0x2, 0x0, 0x3, 0x0, 0x4]);
+        assert_eq!(MemcmpStoredNibbles::decode(&legacy).unwrap().0, expected);
+        assert_eq!(MemcmpStoredNibblesSubKey::decode(&legacy).unwrap().0, expected);
     }
 }

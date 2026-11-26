@@ -10,8 +10,11 @@ use alloy_primitives::{
 };
 use alloy_rlp::Encodable;
 use proptest::{
+    collection, option,
     prelude::{any, ProptestConfig},
-    proptest,
+    prop_oneof, proptest,
+    sample::Index,
+    strategy::{Just, Strategy},
 };
 use proptest_arbitrary_interop::arb;
 use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
@@ -21,22 +24,25 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_provider::{
-    providers::ProviderNodeTypes, test_utils::create_test_provider_factory, DatabaseProviderRW,
-    StorageTrieWriter, TrieWriter,
+    providers::ProviderNodeTypes,
+    test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
+    DatabaseProviderRW, ProviderFactory, StateWriter, StorageTrieWriter, TrieWriter,
 };
 use reth_storage_api::StorageSettingsCache;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
     test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
     triehash::KeccakHasher,
-    updates::StorageTrieUpdates,
-    BranchNodeCompact, HashBuilder, IntermediateStateRootState, Nibbles, StateRoot,
-    StateRootProgress, StorageRoot, TrieMask,
+    updates::{StorageTrieUpdates, TrieUpdatesSorted},
+    BranchNodeCompact, HashBuilder, HashedPostState, IntermediateStateRootState, Nibbles,
+    StateRoot, StateRootProgress, StorageRoot, TrieMask,
 };
 use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieCursorFactory,
+    DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseStorageRoot, DatabaseStorageTrieCursor,
+    DatabaseTrieCursorFactory, LegacyKeyAdapter, MemcmpKeyAdapter, PackedKeyAdapter,
+    StorageTrieEntryLike, TrieTableAdapter,
 };
-use std::{collections::BTreeMap, ops::Mul, str::FromStr, sync::Arc};
+use std::{cell::Cell, collections::BTreeMap, ops::Mul, str::FromStr, sync::Arc};
 
 type DbStateRoot<'a, TX, A> =
     StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
@@ -957,4 +963,213 @@ fn assert_trie_updates(account_updates: &HashMap<Nibbles, BranchNodeCompact>) {
 
     assert_eq!(node.root_hash, None);
     assert_eq!(node.hashes.len(), 1);
+}
+
+/// Hashed state model: account and non-zero storage slots by hashed address.
+type HashedState = BTreeMap<B256, (Account, BTreeMap<B256, U256>)>;
+
+/// A slot change: an existing slot picked by index, or the fresh slot, and its new value.
+type SlotChange = (Index, bool, B256, U256);
+
+/// An account change: an existing account picked by index, or the fresh address, and its new
+/// value with slot changes, or `None` to destroy it.
+type AccountChange = (Index, bool, B256, Option<(Account, Vec<SlotChange>)>);
+
+/// Account and storage trie nodes of one adapter's tables, in table order.
+type StoredTrieNodes = (Vec<(Nibbles, BranchNodeCompact)>, Vec<(B256, Nibbles, BranchNodeCompact)>);
+
+/// Checks that the legacy, packed and memcmp trie key adapters compute the same full and
+/// incremental state roots, trie updates and stored trie nodes over several rounds of changes.
+#[test]
+fn incremental_root_matches_across_trie_key_adapters() {
+    // The adapters view the same trie tables, so each gets its own database. The cases share
+    // them: each drops its provider without committing.
+    let legacy_factory = create_test_provider_factory();
+    let packed_factory = create_test_provider_factory();
+    let memcmp_factory = create_test_provider_factory();
+    let max_path_len = Cell::new(0);
+    proptest!(ProptestConfig::with_cases(64), |(
+        initial in collection::vec(account_change(), 1..48),
+        rounds in collection::vec(collection::vec(account_change(), 0..16), 1..4),
+    )| {
+        let mut state = HashedState::default();
+        let mut post_states = Vec::new();
+        let mut expected_roots = Vec::new();
+        for changes in std::iter::once(initial).chain(rounds) {
+            post_states.push(apply_account_changes(&mut state, changes));
+            let accounts = state.iter().map(|(address, (account, storage))| {
+                (*address, (account.clone(), storage.iter().map(|(slot, value)| (*slot, *value))))
+            });
+            expected_roots.push(state_root_prehashed(accounts));
+        }
+
+        let legacy = roots_with_adapter::<LegacyKeyAdapter>(&legacy_factory, &post_states);
+        let packed = roots_with_adapter::<PackedKeyAdapter>(&packed_factory, &post_states);
+        let memcmp = roots_with_adapter::<MemcmpKeyAdapter>(&memcmp_factory, &post_states);
+
+        let roots = legacy.0.iter().map(|(root, _)| *root).collect::<Vec<_>>();
+        assert_eq!(roots, expected_roots);
+        assert_eq!(packed, legacy);
+        assert_eq!(memcmp, legacy);
+
+        let (account_nodes, storage_nodes) = &memcmp.1;
+        let path_lens = account_nodes
+            .iter()
+            .map(|(path, _)| path.len())
+            .chain(storage_nodes.iter().map(|(_, path, _)| path.len()));
+        max_path_len.set(path_lens.fold(max_path_len.get(), usize::max));
+    });
+
+    // Paths over 16 nibbles take at least three memcmp groups.
+    assert!(max_path_len.get() > 16, "deepest stored path has {} nibbles", max_path_len.get());
+}
+
+/// Returns hashed keys sharing up to 12 leading bytes with one of three fixed keys, so the tries
+/// get branch nodes deeper than one memcmp group.
+///
+/// One fixed key is all zeros, so stored paths often end in zero nibbles, which the memcmp
+/// encoding also uses as padding.
+fn clustered_hashed_key() -> impl Strategy<Value = B256> {
+    (0u8..3, 0usize..=12, any::<B256>()).prop_map(|(cluster, shared, mut key)| {
+        let base = if cluster == 0 { [0u8; 32] } else { keccak256([cluster]).0 };
+        key.0[..shared].copy_from_slice(&base[..shared]);
+        key
+    })
+}
+
+fn account_change() -> impl Strategy<Value = AccountChange> {
+    let slot_change = (
+        any::<Index>(),
+        any::<bool>(),
+        clustered_hashed_key(),
+        prop_oneof![Just(U256::ZERO), (1..=u64::MAX).prop_map(U256::from)],
+    );
+    (
+        any::<Index>(),
+        any::<bool>(),
+        clustered_hashed_key(),
+        option::weighted(0.8, (arb::<Account>(), collection::vec(slot_change, 0..12))),
+    )
+}
+
+/// Applies `changes` to `state` and returns them as a [`HashedPostState`].
+///
+/// The slots of a destroyed account are zeroed in the post state, so writing it clears them.
+fn apply_account_changes(state: &mut HashedState, changes: Vec<AccountChange>) -> HashedPostState {
+    let mut post_state = HashedPostState::default();
+    for (index, fresh, fresh_address, change) in changes {
+        let hashed_address = if fresh || state.is_empty() {
+            fresh_address
+        } else {
+            *state.keys().nth(index.index(state.len())).unwrap()
+        };
+        let hashed_storage = post_state.storages.entry(hashed_address).or_default();
+        match change {
+            Some((account, slot_changes)) => {
+                let (current, storage) = state.entry(hashed_address).or_default();
+                *current = account.clone();
+                for (index, fresh, fresh_slot, value) in slot_changes {
+                    let slot = if fresh || storage.is_empty() {
+                        fresh_slot
+                    } else {
+                        *storage.keys().nth(index.index(storage.len())).unwrap()
+                    };
+                    if value.is_zero() {
+                        storage.remove(&slot);
+                    } else {
+                        storage.insert(slot, value);
+                    }
+                    hashed_storage.storage.insert(slot, value);
+                }
+                post_state.accounts.insert(hashed_address, Some(account));
+            }
+            None => {
+                if let Some((_, storage)) = state.remove(&hashed_address) {
+                    hashed_storage
+                        .storage
+                        .extend(storage.into_keys().map(|slot| (slot, U256::ZERO)));
+                }
+                post_state.accounts.insert(hashed_address, None);
+            }
+        }
+    }
+    post_state
+}
+
+/// Writes each post state and computes the state root through adapter `A`, writing the trie
+/// updates through `A` before the next round.
+///
+/// The first root is a full computation, later roots are incremental over the stored trie.
+fn roots_with_adapter<A: TrieTableAdapter>(
+    factory: &ProviderFactory<MockNodeTypesWithDB>,
+    post_states: &[HashedPostState],
+) -> (Vec<(B256, TrieUpdatesSorted)>, StoredTrieNodes) {
+    let tx = factory.provider_rw().unwrap();
+    let mut results = Vec::new();
+    for (round, post_state) in post_states.iter().enumerate() {
+        tx.write_hashed_state(&post_state.clone_into_sorted()).unwrap();
+
+        let calculator = DbStateRoot::<_, A>::from_tx(tx.tx_ref());
+        let calculator = if round == 0 {
+            calculator
+        } else {
+            calculator.with_prefix_sets(post_state.construct_prefix_sets().freeze())
+        };
+        let (root, updates) = calculator.root_with_updates().unwrap();
+        let updates = updates.into_sorted();
+        write_trie_updates_with_adapter::<A>(tx.tx_ref(), &updates);
+        results.push((root, updates));
+    }
+    (results, stored_trie_nodes::<A>(tx.tx_ref()))
+}
+
+/// Writes `updates` to the trie tables of adapter `A`, like [`TrieWriter::write_trie_updates`].
+fn write_trie_updates_with_adapter<A: TrieTableAdapter>(
+    tx: &(impl DbTx + DbTxMut),
+    updates: &TrieUpdatesSorted,
+) {
+    let mut account_cursor = tx.cursor_write::<A::AccountTrieTable>().unwrap();
+    for (path, node) in updates.account_nodes_ref() {
+        match node {
+            Some(node) if !path.is_empty() => account_cursor.upsert((*path).into(), node).unwrap(),
+            Some(_) => {}
+            None => {
+                if account_cursor.seek_exact((*path).into()).unwrap().is_some() {
+                    account_cursor.delete_current().unwrap();
+                }
+            }
+        }
+    }
+
+    for (hashed_address, storage_updates) in updates.storage_tries_ref() {
+        let cursor = tx.cursor_dup_write::<A::StorageTrieTable>().unwrap();
+        DatabaseStorageTrieCursor::<_, A>::new(cursor, *hashed_address)
+            .write_storage_trie_updates_sorted(storage_updates)
+            .unwrap();
+    }
+}
+
+fn stored_trie_nodes<A: TrieTableAdapter>(tx: &impl DbTx) -> StoredTrieNodes {
+    let account_nodes = tx
+        .cursor_read::<A::AccountTrieTable>()
+        .unwrap()
+        .walk(None)
+        .unwrap()
+        .map(|entry| {
+            let (key, node) = entry.unwrap();
+            (A::account_key_to_nibbles(&key), node)
+        })
+        .collect();
+    let storage_nodes = tx
+        .cursor_dup_read::<A::StorageTrieTable>()
+        .unwrap()
+        .walk(None)
+        .unwrap()
+        .map(|entry| {
+            let (hashed_address, entry) = entry.unwrap();
+            let (subkey, node) = entry.into_parts();
+            (hashed_address, A::subkey_to_nibbles(&subkey), node)
+        })
+        .collect();
+    (account_nodes, storage_nodes)
 }

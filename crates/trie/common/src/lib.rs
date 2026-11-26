@@ -52,12 +52,13 @@ pub use key::{KeccakKeyHasher, KeyHasher};
 
 mod nibbles;
 pub use nibbles::{
-    depth_first_cmp, Nibbles, PackedStoredNibbles, PackedStoredNibblesSubKey, StoredNibbles,
-    StoredNibblesSubKey,
+    depth_first_cmp, try_decode_memcmp_nibbles, MemcmpStoredNibbles, MemcmpStoredNibblesSubKey,
+    Nibbles, PackedStoredNibbles, PackedStoredNibblesSubKey, StoredNibbles, StoredNibblesSubKey,
+    MEMCMP_NIBBLES_MAX_ENCODED_LEN,
 };
 
 mod storage;
-pub use storage::{PackedStorageTrieEntry, StorageTrieEntry};
+pub use storage::{MemcmpStorageTrieEntry, PackedStorageTrieEntry, StorageTrieEntry};
 
 mod subnode;
 pub use subnode::StoredSubNode;
